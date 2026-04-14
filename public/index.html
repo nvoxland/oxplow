@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>newde2</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+    <style>
+      :root {
+        --bg: #0e0e0e;
+        --bg-2: #171717;
+        --fg: #e6e6e6;
+        --muted: #888;
+        --border: #2a2a2a;
+        --accent: #4a9eff;
+      }
+      html, body, #root {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-size: 13px;
+      }
+      * { box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/dist/main.js"></script>
+  </body>
+</html>

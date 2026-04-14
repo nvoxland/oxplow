@@ -1,0 +1,31 @@
+{
+  "name": "newde2",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "newde2": "./bin/newde2"
+  },
+  "scripts": {
+    "build:daemon": "bun build src/daemon.ts --target=node --outfile=dist/daemon.js --external node-pty",
+    "build:ui": "bun build src/ui/main.tsx --outdir=public/dist --target=browser --format=esm --splitting",
+    "build": "bun run build:daemon && bun run build:ui",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.20.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "monaco-editor": "^0.55.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.0"
+  }
+}
