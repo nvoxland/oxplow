@@ -38,6 +38,10 @@ export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows
     if (msg.type === "input" && msg.bytes) {
       pty.write(Buffer.from(msg.bytes, "base64").toString("utf8"));
     } else if (msg.type === "resize" && msg.cols && msg.rows) {
+      // Reject absurdly-small resizes: a hidden xterm (display:none) can
+      // fit-down to a couple of cells, and propagating that to tmux shrinks
+      // the real window. With `window-size manual` tmux won't grow it back.
+      if (msg.cols < 20 || msg.rows < 5) return;
       try { pty.resize(msg.cols, msg.rows); } catch {}
       // window-size is manual, so we have to drive tmux's resize explicitly.
       resizeWindow(paneTarget, msg.cols, msg.rows);

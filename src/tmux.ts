@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 function tmux(args: string[]): string {
   return execFileSync("tmux", args, {
@@ -55,6 +55,12 @@ export function ensureWindow(
     return;
   }
   const [session, window] = target.split(":");
+  // Set default-size so the new window is created at the correct dimensions
+  // before the command starts rendering. tmux new-window doesn't accept -x/-y
+  // (unlike new-session), but new windows inherit the session's default-size.
+  try {
+    tmux(["set-option", "-t", session, "default-size", `${cols}x${rows}`]);
+  } catch {}
   tmux([
     "new-window",
     "-d",
@@ -63,6 +69,7 @@ export function ensureWindow(
     "-c", cwd,
     command,
   ]);
+  // Explicit resize ensures the window matches even if default-size was ignored.
   resizeWindow(target, cols, rows);
 }
 
@@ -77,6 +84,30 @@ export function killWindow(target: string) {
   try {
     tmux(["kill-window", "-t", target]);
   } catch {}
+}
+
+export function killSession(session: string) {
+  try {
+    tmux(["kill-session", "-t", session]);
+  } catch {}
+}
+
+/**
+ * Spawn a detached sentinel process that watches `daemonPid` and kills the
+ * tmux session when that pid is no longer alive. Handles daemon crashes and
+ * SIGKILL in addition to graceful shutdown.
+ *
+ * The sentinel is fully detached (unref'd) so it does not keep the daemon's
+ * event loop alive.
+ */
+export function watchSession(session: string, daemonPid: number) {
+  // Shell one-liner: poll every 2 s; when the pid is gone, kill the session.
+  const script = `while kill -0 ${daemonPid} 2>/dev/null; do sleep 2; done; tmux kill-session -t ${session} 2>/dev/null`;
+  const child = spawn("sh", ["-c", script], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
 }
 
 export function listWindows(session: string): string[] {

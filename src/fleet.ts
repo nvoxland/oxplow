@@ -16,10 +16,11 @@ export function ensureStreamPane(
   projectDir: string,
   cols: number,
   rows: number,
+  claudeCommand: string,
 ) {
   const session = target.split(":")[0];
   ensureSession(session, projectDir);
-  ensureWindow(target, projectDir, "claude", cols, rows);
+  ensureWindow(target, projectDir, claudeCommand, cols, rows);
 
   const placeholder = `${session}:__placeholder__`;
   if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {

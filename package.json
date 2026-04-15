@@ -1,10 +1,10 @@
 {
-  "name": "newde2",
+  "name": "newde",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "bin": {
-    "newde2": "./bin/newde2"
+    "newde": "./bin/newde"
   },
   "scripts": {
     "build:daemon": "bun build src/daemon.ts --target=node --outfile=dist/daemon.js --external node-pty",

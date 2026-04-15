@@ -20,7 +20,7 @@ export class StreamStore {
   private streams = new Map<string, Stream>();
 
   constructor(projectDir: string) {
-    this.dir = join(projectDir, ".newde2", "streams");
+    this.dir = join(projectDir, ".newde", "streams");
     mkdirSync(this.dir, { recursive: true });
     this.loadAll();
   }
@@ -61,8 +61,8 @@ export class StreamStore {
       created_at: now,
       updated_at: now,
       panes: {
-        working: `newde2-${input.projectBase}:working-${id}`,
-        talking: `newde2-${input.projectBase}:talking-${id}`,
+        working: `newde-${input.projectBase}:working-${id}`,
+        talking: `newde-${input.projectBase}:talking-${id}`,
       },
     };
     this.save(stream);

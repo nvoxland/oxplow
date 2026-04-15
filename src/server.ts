@@ -5,6 +5,7 @@ import { WebSocketServer } from "ws";
 import { attachPane } from "./pty-bridge.js";
 import { ensureStreamPane } from "./fleet.js";
 import type { StreamStore } from "./stream-store.js";
+import { HookEventStore, ingestHookPayload } from "./hook-ingest.js";
 
 interface Deps {
   store: StreamStore;
@@ -12,6 +13,8 @@ interface Deps {
   publicDir: string;
   projectDir: string;
   port: number;
+  claudeCommand: string;
+  hookEvents: HookEventStore;
 }
 
 const MIME: Record<string, string> = {
@@ -41,9 +44,9 @@ export function startServer(deps: Deps) {
       return;
     }
     try {
-      ensureStreamPane(pane, deps.projectDir, cols, rows);
+      ensureStreamPane(pane, deps.projectDir, cols, rows, deps.claudeCommand);
     } catch (e) {
-      console.warn(`[newde2] ensureStreamPane failed:`, e);
+      console.warn(`[newde] ensureStreamPane failed:`, e);
       socket.destroy();
       return;
     }
@@ -53,7 +56,7 @@ export function startServer(deps: Deps) {
   });
 
   http.listen(deps.port, "127.0.0.1", () => {
-    console.log(`[newde2] http://127.0.0.1:${deps.port}`);
+    console.log(`[newde] http://127.0.0.1:${deps.port}`);
   });
 }
 
@@ -79,8 +82,50 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
   if (path === "/api/streams" && req.method === "POST") {
     return json(res, 501, { error: "not implemented" });
   }
+  if (path.startsWith("/api/hook/") && req.method === "POST") {
+    const event = path.slice("/api/hook/".length);
+    return readBody(req, (body) => {
+      let payload: any = null;
+      try { payload = body ? JSON.parse(body) : {}; } catch { payload = { raw: body }; }
+      ingestHookPayload(deps.hookEvents, event, payload);
+      return json(res, 200, { ok: true });
+    });
+  }
+  if (path === "/api/hooks" && req.method === "GET") {
+    return json(res, 200, deps.hookEvents.list());
+  }
+  if (path === "/api/hooks/stream" && req.method === "GET") {
+    return handleHookStream(res, deps);
+  }
 
   return serveStatic(path, res, deps.publicDir);
+}
+
+function handleHookStream(res: ServerResponse, deps: Deps) {
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  // Replay existing buffer so a fresh client gets recent history.
+  for (const evt of deps.hookEvents.list()) {
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  }
+  const unsub = deps.hookEvents.subscribe((evt) => {
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  });
+  const keepalive = setInterval(() => res.write(": ping\n\n"), 15000);
+  res.on("close", () => {
+    clearInterval(keepalive);
+    unsub();
+  });
+}
+
+function readBody(req: IncomingMessage, cb: (body: string) => void) {
+  const chunks: Buffer[] = [];
+  req.on("data", (c) => chunks.push(c));
+  req.on("end", () => cb(Buffer.concat(chunks).toString("utf8")));
 }
 
 function serveStatic(path: string, res: ServerResponse, publicDir: string) {

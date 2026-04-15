@@ -1,0 +1,54 @@
+import { test, expect } from "bun:test";
+import { ingestHookPayload, HookEventStore } from "./hook-ingest.js";
+
+test("ingestHookPayload stores normalized events in a ring buffer", () => {
+  const store = new HookEventStore(4);
+  ingestHookPayload(store, "UserPromptSubmit", { prompt: "hi", session_id: "s1" });
+  ingestHookPayload(store, "PreToolUse", {
+    tool_name: "Read",
+    tool_input: { file_path: "/a.txt" },
+    session_id: "s1",
+  });
+  const events = store.list();
+  expect(events).toHaveLength(2);
+  expect(events[0].normalized.kind).toBe("user-prompt");
+  if (events[0].normalized.kind === "user-prompt") {
+    expect(events[0].normalized.prompt).toBe("hi");
+  }
+  expect(events[1].normalized.kind).toBe("tool-use-start");
+  if (events[1].normalized.kind === "tool-use-start") {
+    expect(events[1].normalized.toolName).toBe("Read");
+    expect(events[1].normalized.target).toBe("/a.txt");
+  }
+});
+
+test("ring buffer drops oldest when capacity is exceeded", () => {
+  const store = new HookEventStore(2);
+  ingestHookPayload(store, "Notification", { message: "1" });
+  ingestHookPayload(store, "Notification", { message: "2" });
+  ingestHookPayload(store, "Notification", { message: "3" });
+  const events = store.list();
+  expect(events).toHaveLength(2);
+  const msgs = events.map((e) => (e.normalized.kind === "notification" ? e.normalized.message : ""));
+  expect(msgs).toEqual(["2", "3"]);
+});
+
+test("each event has monotonic id and a timestamp in the normalized payload", () => {
+  const store = new HookEventStore(10);
+  ingestHookPayload(store, "Stop", {});
+  ingestHookPayload(store, "Stop", {});
+  const [a, b] = store.list();
+  expect(b.id).toBeGreaterThan(a.id);
+  expect(typeof a.normalized.t).toBe("number");
+});
+
+test("subscribers receive events as they are ingested", () => {
+  const store = new HookEventStore(10);
+  const received: string[] = [];
+  const unsub = store.subscribe((e) => received.push(e.normalized.kind));
+  ingestHookPayload(store, "UserPromptSubmit", { prompt: "a" });
+  ingestHookPayload(store, "Stop", {});
+  unsub();
+  ingestHookPayload(store, "Stop", {}); // not received
+  expect(received).toEqual(["user-prompt", "stop"]);
+});

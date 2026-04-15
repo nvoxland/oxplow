@@ -66,8 +66,15 @@ export function TerminalPane({ paneTarget }: { paneTarget: string }) {
       ro = new ResizeObserver(() => {
         if (resizeTimer !== null) clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => {
+          // Skip refits when the host is hidden (display:none) or otherwise
+          // has no layout size — FitAddon would clamp to its minimum and we
+          // would push a tiny resize at tmux, shrinking the underlying
+          // window for real. See MainTabs/PaneHost: inactive tabs are
+          // display:none'd rather than unmounted.
+          if (host.clientWidth < 2 || host.clientHeight < 2) return;
           try {
             fit.fit();
+            if (term.cols < 2 || term.rows < 2) return;
             if (ws && ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             }
