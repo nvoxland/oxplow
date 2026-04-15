@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import type { Logger } from "./logger.js";
 
 export type PaneKind = "working" | "talking";
 export type StreamBranchSource = "local" | "remote" | "new";
@@ -31,9 +32,11 @@ export class StreamStore {
   private dir: string;
   private statePath: string;
   private streams = new Map<string, Stream>();
+  private logger?: Logger;
 
-  constructor(projectDir: string) {
+  constructor(projectDir: string, logger?: Logger) {
     this.projectDir = projectDir;
+    this.logger = logger;
     this.rootDir = join(projectDir, ".newde");
     this.dir = join(this.rootDir, "streams");
     this.statePath = join(this.rootDir, "state.json");
@@ -50,7 +53,10 @@ export class StreamStore {
         const s = withDefaults(parseYaml(readFileSync(join(this.dir, f), "utf8")), this.projectDir);
         if (s.id) this.streams.set(s.id, s);
       } catch (e) {
-        console.warn(`[stream-store] failed to parse ${f}:`, e);
+        this.logger?.warn("failed to parse stream file", {
+          file: f,
+          error: errorMessage(e),
+        });
       }
     }
   }
@@ -83,6 +89,7 @@ export class StreamStore {
       throw new Error(`unknown stream: ${id}`);
     }
     writeFileSync(this.statePath, JSON.stringify({ currentStreamId: id }, null, 2) + "\n", "utf8");
+    this.logger?.info("updated current stream", { streamId: id });
   }
 
   ensureCurrentStreamId(fallbackId: string) {
@@ -224,4 +231,8 @@ function withDefaults(stream: Partial<Stream>, projectDir: string): Stream {
       talking_session_id: stream.resume?.talking_session_id ?? "",
     },
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

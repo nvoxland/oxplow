@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import type { GitFileStatus } from "./workspace-files.js";
 
 export interface BranchRef {
   kind: "local" | "remote";
@@ -10,6 +11,7 @@ export interface BranchRef {
 }
 
 export function detectCurrentBranch(projectDir: string): string | null {
+  if (!isGitRepo(projectDir)) return null;
   try {
     const out = execFileSync("git", ["-C", projectDir, "rev-parse", "--abbrev-ref", "HEAD"], {
       encoding: "utf8",
@@ -24,16 +26,18 @@ export function detectCurrentBranch(projectDir: string): string | null {
 
 export function isGitRepo(projectDir: string): boolean {
   try {
-    execFileSync("git", ["-C", projectDir, "rev-parse", "--git-dir"], {
-      stdio: "ignore",
-    });
-    return true;
+    const root = execFileSync("git", ["-C", projectDir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return !!root && canonicalPath(root) === canonicalPath(projectDir);
   } catch {
     return false;
   }
 }
 
 export function listBranches(projectDir: string): BranchRef[] {
+  if (!isGitRepo(projectDir)) return [];
   const local = gitLines(projectDir, [
     "for-each-ref",
     "--format=%(refname)|%(refname:short)",
@@ -57,6 +61,7 @@ export function listBranches(projectDir: string): BranchRef[] {
 }
 
 export function branchExists(projectDir: string, branch: string): boolean {
+  if (!isGitRepo(projectDir)) return false;
   try {
     execFileSync("git", ["-C", projectDir, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
       stdio: "ignore",
@@ -75,6 +80,9 @@ export function ensureWorktree(
     | { kind: "existing-remote"; branch: string; remoteRef: string }
     | { kind: "new"; branch: string; startPoint: string },
 ): void {
+  if (!isGitRepo(projectDir)) {
+    throw new Error(`cannot create worktree outside a git repo root: ${projectDir}`);
+  }
   if (isGitRepo(worktreePath)) return;
   if (existsSync(worktreePath)) {
     throw new Error(`worktree path already exists and is not a git repo: ${worktreePath}`);
@@ -100,6 +108,23 @@ export function ensureWorktree(
   }
 }
 
+export function listGitStatuses(projectDir: string): Map<string, GitFileStatus> {
+  const statuses = new Map<string, GitFileStatus>();
+  if (!isGitRepo(projectDir)) return statuses;
+  const out = git(projectDir, ["status", "--porcelain"]);
+  if (!out) return statuses;
+
+  for (const line of out.split("\n")) {
+    if (!line) continue;
+    const code = line.slice(0, 2);
+    const rawPath = line.slice(3).trim();
+    const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
+    statuses.set(path, parseGitFileStatus(code));
+  }
+
+  return statuses;
+}
+
 function parseBranchLine(line: string, kind: "local" | "remote"): BranchRef | null {
   if (!line) return null;
   const [ref, shortName] = line.split("|");
@@ -120,11 +145,23 @@ function git(projectDir: string, args: string[]): string {
   return execFileSync("git", ["-C", projectDir, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  }).trimEnd();
 }
 
 function gitLines(projectDir: string, args: string[]): string[] {
   const out = git(projectDir, args);
   if (!out) return [];
   return out.split("\n").filter((line) => line.length > 0);
+}
+
+function parseGitFileStatus(code: string): GitFileStatus {
+  if (code.includes("?")) return "untracked";
+  if (code.includes("R")) return "renamed";
+  if (code.includes("A")) return "added";
+  if (code.includes("D")) return "deleted";
+  return "modified";
+}
+
+function canonicalPath(path: string): string {
+  return realpathSync(path);
 }

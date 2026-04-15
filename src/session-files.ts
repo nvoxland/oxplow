@@ -53,12 +53,13 @@ function buildForwarderScript(opts: SessionFilesOptions): string {
   const query = new URLSearchParams({ stream: opts.streamId, pane: opts.pane }).toString();
   return `#!/usr/bin/env bash
 event="$1"
-exec curl -sS --max-time 2 \\
+curl -sS --max-time 2 \\
   -X POST \\
   -H "content-type: application/json" \\
   --data-binary @- \\
   "http://127.0.0.1:${opts.daemonPort}/api/hook/$event?${query}" \\
   >/dev/null 2>&1 || true
+exit 0
 `;
 }
 

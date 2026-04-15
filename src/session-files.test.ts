@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createSessionFiles, destroySessionFiles } from "./session-files.js";
 
@@ -50,4 +51,17 @@ test("destroySessionFiles is idempotent", () => {
   const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
   destroySessionFiles(s);
   expect(() => destroySessionFiles(s)).not.toThrow();
+});
+
+test("hook forwarder exits successfully when the daemon endpoint is unavailable", () => {
+  const s = createSessionFiles({ daemonPort: 1, streamId: "s-1", pane: "working" });
+  try {
+    const result = spawnSync(s.forwarderPath, ["SessionStart"], {
+      input: JSON.stringify({ session_id: "s1" }),
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+  } finally {
+    destroySessionFiles(s);
+  }
 });

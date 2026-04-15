@@ -2,11 +2,14 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
+import { createUiClientLogger, type Logger, type LogLevel } from "./logger.js";
 import { attachPane } from "./pty-bridge.js";
+import { ResumeTracker } from "./resume-tracker.js";
 import { ensureStreamPane } from "./fleet.js";
-import { ensureWorktree, listBranches } from "./git.js";
+import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "./git.js";
 import { HookEventStore, ingestHookPayload } from "./hook-ingest.js";
 import type { PaneKind, Stream, StreamStore } from "./stream-store.js";
+import { listWorkspaceEntries, listWorkspaceFiles, readWorkspaceFile, summarizeGitStatuses, writeWorkspaceFile } from "./workspace-files.js";
 
 interface Deps {
   store: StreamStore;
@@ -15,6 +18,8 @@ interface Deps {
   projectBase: string;
   port: number;
   hookEvents: HookEventStore;
+  logger: Logger;
+  resumeTracker: ResumeTracker;
   getClaudeCommand(stream: Stream, pane: PaneKind): string;
 }
 
@@ -42,29 +47,47 @@ export function startServer(deps: Deps) {
     const rows = Number(url.searchParams.get("rows") ?? "0");
     const resolvedPane = pane ? deps.store.findByPane(pane) : undefined;
     if (!pane || !resolvedPane || cols < 2 || rows < 2) {
+      deps.logger.warn("rejected websocket upgrade", {
+        paneTarget: pane ?? undefined,
+        cols,
+        rows,
+      });
       socket.destroy();
       return;
     }
+    const paneLogger = deps.logger.child({
+      streamId: resolvedPane.stream.id,
+      pane: resolvedPane.pane,
+      paneTarget: pane,
+    });
     try {
-      ensureStreamPane(
+      const created = ensureStreamPane(
         resolvedPane.stream,
         resolvedPane.pane,
         cols,
         rows,
         deps.getClaudeCommand(resolvedPane.stream, resolvedPane.pane),
+        paneLogger,
       );
+      if (created) {
+        const hasResume = resolvedPane.pane === "working"
+          ? !!resolvedPane.stream.resume.working_session_id
+          : !!resolvedPane.stream.resume.talking_session_id;
+        deps.resumeTracker.notePaneLaunch(resolvedPane.stream.id, resolvedPane.pane, hasResume);
+      }
     } catch (e) {
-      console.warn(`[newde] ensureStreamPane failed:`, e);
+      paneLogger.error("failed to ensure stream pane", { error: errorMessage(e) });
       socket.destroy();
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      attachPane(ws, pane, cols, rows);
+      paneLogger.info("accepted pane websocket", { cols, rows });
+      attachPane(ws, pane, cols, rows, paneLogger.child({ subsystem: "pty-bridge" }));
     });
   });
 
   http.listen(deps.port, "127.0.0.1", () => {
-    console.log(`[newde] http://127.0.0.1:${deps.port}`);
+    deps.logger.info("http server listening", { port: deps.port });
   });
 }
 
@@ -89,8 +112,10 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
       try {
         deps.store.setCurrentStreamId(parsed.id);
       } catch (e) {
+        deps.logger.warn("failed to switch current stream", { streamId: parsed.id, error: errorMessage(e) });
         return json(res, 404, { error: (e as Error).message });
       }
+      deps.logger.info("switched current stream", { streamId: parsed.id });
       return json(res, 200, deps.store.get(parsed.id));
     });
   }
@@ -106,11 +131,87 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
         ...stream,
         title: parsed.title.trim(),
       }));
+      deps.logger.info("renamed current stream", { streamId: updated.id, title: updated.title });
       return json(res, 200, updated);
     });
   }
   if (path === "/api/branches" && req.method === "GET") {
     return json(res, 200, listBranches(deps.projectDir));
+  }
+  if (path === "/api/workspace/context" && req.method === "GET") {
+    return json(res, 200, { gitEnabled: isGitRepo(deps.projectDir) });
+  }
+  if (path === "/api/workspace/entries" && req.method === "GET") {
+    try {
+      const stream = resolveStream(deps, url.searchParams.get("stream"));
+      const relativePath = url.searchParams.get("path") ?? "";
+      const statuses = listGitStatuses(stream.worktree_path);
+      deps.logger.debug("listed workspace entries", { streamId: stream.id, path: relativePath });
+      return json(res, 200, {
+        entries: listWorkspaceEntries(stream.worktree_path, relativePath, statuses),
+      });
+    } catch (e) {
+      deps.logger.warn("failed to list workspace entries", { error: errorMessage(e) });
+      return json(res, 400, { error: (e as Error).message });
+    }
+  }
+  if (path === "/api/workspace/files" && req.method === "GET") {
+    try {
+      const stream = resolveStream(deps, url.searchParams.get("stream"));
+      const statuses = listGitStatuses(stream.worktree_path);
+      deps.logger.debug("listed workspace files", { streamId: stream.id });
+      const files = listWorkspaceFiles(stream.worktree_path, statuses);
+      return json(res, 200, {
+        files,
+        summary: summarizeGitStatuses(statuses),
+      });
+    } catch (e) {
+      deps.logger.warn("failed to list workspace files", { error: errorMessage(e) });
+      return json(res, 400, { error: (e as Error).message });
+    }
+  }
+  if (path === "/api/workspace/file" && req.method === "GET") {
+    try {
+      const stream = resolveStream(deps, url.searchParams.get("stream"));
+      const relativePath = url.searchParams.get("path") ?? "";
+      deps.logger.debug("read workspace file", { streamId: stream.id, path: relativePath });
+      return json(res, 200, readWorkspaceFile(stream.worktree_path, relativePath));
+    } catch (e) {
+      deps.logger.warn("failed to read workspace file", { error: errorMessage(e) });
+      return json(res, 400, { error: (e as Error).message });
+    }
+  }
+  if (path === "/api/workspace/file" && req.method === "PUT") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.path !== "string" || typeof parsed.content !== "string") {
+        return json(res, 400, { error: "expected { path, content }" });
+      }
+      try {
+        const stream = resolveStream(deps, url.searchParams.get("stream"));
+        deps.logger.info("write workspace file", { streamId: stream.id, path: parsed.path });
+        return json(res, 200, writeWorkspaceFile(stream.worktree_path, parsed.path, parsed.content));
+      } catch (e) {
+        deps.logger.warn("failed to write workspace file", { error: errorMessage(e) });
+        return json(res, 400, { error: (e as Error).message });
+      }
+    });
+  }
+  if (path === "/api/logs/ui" && req.method === "POST") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.clientId !== "string" || typeof parsed.message !== "string") {
+        deps.logger.warn("rejected invalid ui log payload");
+        return json(res, 400, { error: "expected { clientId, message, level?, context?, timestamp? }" });
+      }
+      const level = parseLogLevel(parsed.level);
+      const logger = createUiClientLogger(deps.projectDir, parsed.clientId);
+      logger[level](parsed.message, {
+        ...(isRecord(parsed.context) ? parsed.context : {}),
+        ...(typeof parsed.timestamp === "string" ? { clientTime: parsed.timestamp } : {}),
+      });
+      return json(res, 200, { ok: true });
+    });
   }
   if (path === "/api/streams" && req.method === "POST") {
     return readBody(req, (body) => handleCreateStream(req, res, deps, parseJsonBody(body)));
@@ -123,13 +224,38 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
       let payload: any = null;
       try { payload = body ? JSON.parse(body) : {}; } catch { payload = { raw: body }; }
       const stored = ingestHookPayload(deps.hookEvents, event, payload, { streamId, pane });
-      if (pane && stored.normalized.sessionId && deps.store.get(streamId)) {
-        deps.store.update(streamId, (stream) => ({
-          ...stream,
-          resume: pane === "working"
-            ? { ...stream.resume, working_session_id: stored.normalized.sessionId ?? "" }
-            : { ...stream.resume, talking_session_id: stored.normalized.sessionId ?? "" },
-        }));
+      deps.logger.debug("ingested hook event", {
+        streamId,
+        pane,
+        hookEvent: event,
+        sessionId: stored.normalized.sessionId,
+      });
+      if (pane && deps.store.get(streamId)) {
+        const update = deps.resumeTracker.recordHookEvent(streamId, pane, event, stored.normalized.sessionId);
+        if (update?.type === "set") {
+          deps.store.update(streamId, (stream) => ({
+            ...stream,
+            resume: pane === "working"
+              ? { ...stream.resume, working_session_id: update.sessionId }
+              : { ...stream.resume, talking_session_id: update.sessionId },
+          }));
+          deps.logger.info("updated resume session id", {
+            streamId,
+            pane,
+            sessionId: update.sessionId,
+          });
+        } else if (update?.type === "clear") {
+          deps.store.update(streamId, (stream) => ({
+            ...stream,
+            resume: pane === "working"
+              ? { ...stream.resume, working_session_id: "" }
+              : { ...stream.resume, talking_session_id: "" },
+          }));
+          deps.logger.warn("cleared stale resume session id", {
+            streamId,
+            pane,
+          });
+        }
       }
       return json(res, 200, { ok: true });
     });
@@ -147,6 +273,9 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
 }
 
 function handleCreateStream(_req: IncomingMessage, res: ServerResponse, deps: Deps, body: any) {
+  if (!isGitRepo(deps.projectDir)) {
+    return json(res, 400, { error: "git functionality is disabled for this workspace root" });
+  }
   if (!body || typeof body.title !== "string" || !body.title.trim()) {
     return json(res, 400, { error: "title is required" });
   }
@@ -163,6 +292,7 @@ function handleCreateStream(_req: IncomingMessage, res: ServerResponse, deps: De
       const existing = deps.store.findByBranch(localBranch);
       if (existing) {
         deps.store.setCurrentStreamId(existing.id);
+        deps.logger.info("reused existing stream", { streamId: existing.id, branch: localBranch });
         return json(res, 200, existing);
       }
       const worktreePath = streamWorktreePath(deps.projectDir, localBranch);
@@ -181,6 +311,11 @@ function handleCreateStream(_req: IncomingMessage, res: ServerResponse, deps: De
         branchSource: branch.kind,
         worktreePath,
         projectBase: deps.projectBase,
+      });
+      deps.logger.info("created stream from existing branch", {
+        streamId: stream.id,
+        branch: localBranch,
+        branchRef: branch.ref,
       });
     } else if (source === "new") {
       if (typeof body.branch !== "string" || !body.branch.trim()) {
@@ -210,12 +345,18 @@ function handleCreateStream(_req: IncomingMessage, res: ServerResponse, deps: De
         worktreePath,
         projectBase: deps.projectBase,
       });
+      deps.logger.info("created stream from new branch", {
+        streamId: stream.id,
+        branch: branchName,
+        startPointRef: body.startPointRef,
+      });
     } else {
       return json(res, 400, { error: "source must be 'existing' or 'new'" });
     }
     deps.store.setCurrentStreamId(stream.id);
     return json(res, 201, stream);
   } catch (e) {
+    deps.logger.warn("failed to create stream", { error: errorMessage(e) });
     return json(res, 400, { error: (e as Error).message });
   }
 }
@@ -298,4 +439,24 @@ function parsePane(value: string | null): PaneKind | undefined {
 function resolveStreamSelector(value: string | null, fallback?: string): string | undefined {
   if (value === "all") return undefined;
   return value ?? fallback;
+}
+
+function resolveStream(deps: Deps, streamId: string | null): Stream {
+  const id = streamId ?? deps.store.getCurrentStreamId();
+  if (!id) throw new Error("no current stream");
+  const stream = deps.store.get(id);
+  if (!stream) throw new Error(`unknown stream: ${id}`);
+  return stream;
+}
+
+function parseLogLevel(value: unknown): LogLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error" ? value : "info";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

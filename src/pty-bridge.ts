@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 import { spawn } from "node-pty";
+import type { Logger } from "./logger.js";
 import { resizeWindow } from "./tmux.js";
 
 interface ClientMsg {
@@ -9,7 +10,8 @@ interface ClientMsg {
   rows?: number;
 }
 
-export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows: number) {
+export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows: number, logger?: Logger) {
+  logger?.info("attaching pane bridge", { paneTarget, cols, rows });
   const pty = spawn("tmux", ["attach-session", "-t", paneTarget], {
     name: "xterm-256color",
     cols,
@@ -23,6 +25,7 @@ export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows
   });
 
   pty.onExit(() => {
+    logger?.info("pty exited", { paneTarget });
     try {
       ws.close();
     } catch {}
@@ -33,6 +36,7 @@ export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows
     try {
       msg = JSON.parse(raw.toString());
     } catch {
+      logger?.warn("failed to parse websocket message", { paneTarget });
       return;
     }
     if (msg.type === "input" && msg.bytes) {
@@ -49,6 +53,7 @@ export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows
   });
 
   ws.on("close", () => {
+    logger?.info("pane websocket closed", { paneTarget });
     try { pty.kill(); } catch {}
   });
 }

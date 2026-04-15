@@ -1,10 +1,12 @@
 import { basename, resolve } from "node:path";
 import { StreamStore, type PaneKind, type Stream } from "./stream-store.js";
 import { detectCurrentBranch, isGitRepo } from "./git.js";
+import { createDaemonLogger } from "./logger.js";
 import { startServer } from "./server.js";
 import { createSessionFiles, destroySessionFiles, type SessionFiles } from "./session-files.js";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.js";
 import { HookEventStore } from "./hook-ingest.js";
+import { ResumeTracker } from "./resume-tracker.js";
 import { killSession } from "./tmux.js";
 
 function parseArgs(argv: string[]) {
@@ -25,49 +27,56 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-async function main() {
+export async function main() {
   const args = parseArgs(process.argv.slice(2));
   const projectDir = resolve(args.project ?? process.cwd());
   const port = Number(args.port ?? 7457);
   const projectBase = basename(projectDir).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const logger = createDaemonLogger(projectDir).child({ pid: process.pid, subsystem: "daemon" });
 
-  const store = new StreamStore(projectDir);
+  logger.info("starting daemon", { projectDir, port, projectBase });
 
-  const branch = isGitRepo(projectDir) ? detectCurrentBranch(projectDir) ?? projectBase : projectBase;
+  const store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
+
+  const gitWorkspace = isGitRepo(projectDir);
+  const branch = gitWorkspace ? detectCurrentBranch(projectDir) ?? projectBase : projectBase;
 
   let stream = store.findByBranch(branch);
   if (!stream) {
     stream = store.create({
       title: branch,
       branch,
-      branchRef: isGitRepo(projectDir) ? `refs/heads/${branch}` : branch,
+      branchRef: gitWorkspace ? `refs/heads/${branch}` : branch,
       branchSource: "local",
       worktreePath: projectDir,
       projectBase,
     });
-    console.log(`[newde] created stream ${stream.id} for branch '${branch}'`);
+    logger.info("created initial stream", { streamId: stream.id, branch });
   } else {
-    console.log(`[newde] reusing stream ${stream.id} for branch '${branch}'`);
+    logger.info("reusing initial stream", { streamId: stream.id, branch });
   }
   store.ensureCurrentStreamId(stream.id);
   cleanupSessions(store.list());
+  logger.info("initialized current stream", { streamId: store.getCurrentStreamId() });
 
   const hookEvents = new HookEventStore(1000);
+  const resumeTracker = new ResumeTracker();
   const paneSessionFiles = new Map<string, SessionFiles>();
 
   let mcp: McpServerHandle;
   try {
     mcp = await startMcpServer({
       workspaceFolders: store.list().map((s) => s.worktree_path),
+      logger: logger.child({ subsystem: "mcp" }),
     });
-    console.log(`[newde] mcp ws://127.0.0.1:${mcp.port} (lock ${mcp.lockfilePath})`);
+    logger.info("started mcp server", { port: mcp.port, lockfilePath: mcp.lockfilePath });
   } catch (e) {
-    console.warn(`[newde] failed to start mcp server:`, e);
+    logger.error("failed to start mcp server", { error: errorMessage(e) });
     process.exit(1);
   }
 
-  const shutdown = async () => {
-    console.log(`[newde] shutting down`);
+  const shutdown = async (signal?: string) => {
+    logger.info("shutting down daemon", { signal });
     cleanupSessions(store.list());
     try { await mcp.stop(); } catch {}
     for (const files of paneSessionFiles.values()) {
@@ -75,8 +84,14 @@ async function main() {
     }
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("uncaughtException", (error) => {
+    logger.error("uncaught exception", { error: errorMessage(error), stack: error instanceof Error ? error.stack : undefined });
+  });
+  process.on("unhandledRejection", (reason) => {
+    logger.error("unhandled rejection", { error: errorMessage(reason) });
+  });
 
   const publicDir = resolve(new URL("..", import.meta.url).pathname, "public");
 
@@ -87,12 +102,19 @@ async function main() {
     projectBase,
     port,
     hookEvents,
+    logger: logger.child({ subsystem: "server" }),
+    resumeTracker,
     getClaudeCommand: (targetStream, pane) => {
       const key = `${targetStream.id}:${pane}`;
       let files = paneSessionFiles.get(key);
       if (!files) {
         files = createSessionFiles({ daemonPort: port, streamId: targetStream.id, pane });
         paneSessionFiles.set(key, files);
+        logger.info("created session files", {
+          streamId: targetStream.id,
+          pane,
+          settingsPath: files.settingsPath,
+        });
       }
       return buildClaudeCommand(targetStream, pane, files.settingsPath);
     },
@@ -106,12 +128,15 @@ function cleanupSessions(streams: Stream[]) {
   }
 }
 
-function buildClaudeCommand(stream: Stream, pane: PaneKind, settingsPath: string): string {
+export function buildClaudeCommand(stream: Stream, pane: PaneKind, settingsPath: string): string {
   const resumeSessionId = pane === "working"
     ? stream.resume.working_session_id
     : stream.resume.talking_session_id;
-  const resumeFlag = resumeSessionId ? ` --resume ${shellEscape(resumeSessionId)}` : "";
-  return `claude${resumeFlag} --settings ${shellEscape(settingsPath)}`;
+  const freshClaude = `exec claude --settings ${shellEscape(settingsPath)}`;
+  const command = resumeSessionId
+    ? `claude --resume ${shellEscape(resumeSessionId)} --settings ${shellEscape(settingsPath)} || { echo '[newde] resume failed, starting fresh' >&2; ${freshClaude}; }`
+    : freshClaude;
+  return `sh -lc ${shellEscape(`cd ${shellEscape(stream.worktree_path)} && ${command}`)}`;
 }
 
 function shellEscape(s: string): string {
@@ -119,4 +144,10 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-main();
+if (import.meta.main) {
+  void main();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

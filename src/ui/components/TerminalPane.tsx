@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { logUi } from "../logger.js";
 
 export function TerminalPane({ paneTarget }: { paneTarget: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -47,7 +48,17 @@ export function TerminalPane({ paneTarget }: { paneTarget: string }) {
 
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const url = `${proto}//${location.host}/ws?pane=${encodeURIComponent(paneTarget)}&cols=${term.cols}&rows=${term.rows}`;
+      logUi("info", "opening terminal websocket", { paneTarget, cols: term.cols, rows: term.rows });
       ws = new WebSocket(url);
+      ws.onopen = () => {
+        logUi("info", "terminal websocket opened", { paneTarget });
+      };
+      ws.onclose = () => {
+        logUi("warn", "terminal websocket closed", { paneTarget });
+      };
+      ws.onerror = () => {
+        logUi("error", "terminal websocket error", { paneTarget });
+      };
 
       ws.onmessage = (ev) => {
         try {

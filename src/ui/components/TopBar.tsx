@@ -1,17 +1,19 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { createStream, listBranches, type BranchRef, type StoredEvent, type Stream } from "../api.js";
+import { logUi } from "../logger.js";
 
 interface Props {
   stream: Stream | null;
   streams: Stream[];
+  gitEnabled: boolean;
   error: string | null;
   onSwitch(id: string): void;
   onRename(title: string): Promise<void>;
   onStreamCreated(stream: Stream): void;
 }
 
-export function TopBar({ stream, streams, error, onSwitch, onRename, onStreamCreated }: Props) {
+export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename, onStreamCreated }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -44,6 +46,7 @@ export function TopBar({ stream, streams, error, onSwitch, onRename, onStreamCre
   }, []);
 
   async function openCreate() {
+    if (!gitEnabled) return;
     setShowCreate(true);
     setFormError(null);
     if (branches.length > 0) return;
@@ -54,8 +57,10 @@ export function TopBar({ stream, streams, error, onSwitch, onRename, onStreamCre
       setSelectedRef((prev) => prev || nextBranches[0]?.ref || "");
       setStartPointRef((prev) => prev || nextBranches[0]?.ref || "");
       setTitle((prev) => prev || `Stream ${streams.length + 1}`);
+      logUi("info", "loaded branch list", { branchCount: nextBranches.length });
     } catch (e) {
       setFormError(String(e));
+      logUi("error", "failed to load branch list", { error: String(e) });
     } finally {
       setLoadingBranches(false);
     }
@@ -92,8 +97,10 @@ export function TopBar({ stream, streams, error, onSwitch, onRename, onStreamCre
           });
       onStreamCreated(created);
       setShowCreate(false);
+      logUi("info", "created stream", { streamId: created.id, branch: created.branch, title: created.title });
     } catch (e) {
       setFormError(String(e));
+      logUi("error", "failed to create stream", { error: String(e), mode });
     } finally {
       setCreating(false);
     }
@@ -265,9 +272,18 @@ export function TopBar({ stream, streams, error, onSwitch, onRename, onStreamCre
       <div style={{ color: "var(--muted)", fontSize: 12, paddingTop: 8 }}>
         {stream ? `id: ${stream.id}` : ""}
       </div>
-      <button onClick={openCreate} style={buttonStyle}>
-        + New stream
-      </button>
+      <span
+        title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
+        style={{ display: "inline-flex" }}
+      >
+        <button
+          onClick={openCreate}
+          style={{ ...buttonStyle, opacity: gitEnabled ? 1 : 0.6, cursor: gitEnabled ? "pointer" : "not-allowed" }}
+          disabled={!gitEnabled}
+        >
+          + New stream
+        </button>
+      </span>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, readdirSync, readFileSync, existsSync, mkdir
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
+import type { Logger } from "./logger.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "newde";
@@ -16,6 +17,7 @@ interface StartOptions {
    *  Defaults to `~/.claude/ide` so Claude Code's normal auto-discovery
    *  finds us. Overridable for tests. */
   ideDir?: string;
+  logger?: Logger;
 }
 
 export interface McpServerHandle {
@@ -40,6 +42,7 @@ interface ToolDef {
 }
 
 export async function startMcpServer(opts: StartOptions): Promise<McpServerHandle> {
+  const logger = opts.logger;
   const ideDir = opts.ideDir ?? join(homedir(), ".claude", "ide");
   mkdirSync(ideDir, { recursive: true });
   sweepStaleLockfiles(ideDir);
@@ -50,6 +53,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   wss.on("connection", (ws, req) => {
     const presented = req.headers[AUTH_HEADER];
     if (presented !== authToken) {
+      logger?.warn("rejected unauthorized mcp websocket");
       ws.close(1008, "unauthorized");
       return;
     }
@@ -72,6 +76,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       try {
         req = JSON.parse(raw.toString());
       } catch {
+        logger?.warn("failed to parse mcp rpc request");
         return;
       }
       if (req.method === "notifications/initialized") return; // no response
@@ -150,6 +155,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     authToken,
   };
   writeFileSync(lockfilePath, JSON.stringify(lockBody), "utf8");
+  logger?.info("mcp server listening", { port: serverPort, lockfilePath, workspaceFolders: opts.workspaceFolders });
 
   async function stop() {
     try {
@@ -161,6 +167,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     await new Promise<void>((resolve) => {
       http.close(() => resolve());
     });
+    logger?.info("mcp server stopped", { port: serverPort });
   }
 
   return { port: serverPort, authToken, lockfilePath, stop };

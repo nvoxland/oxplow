@@ -49,10 +49,10 @@ export function ensureWindow(
   command: string,
   cols: number,
   rows: number,
-) {
+): boolean {
   if (hasWindow(target)) {
     resizeWindow(target, cols, rows);
-    return;
+    return false;
   }
   const [session, window] = target.split(":");
   // Set default-size so the new window is created at the correct dimensions
@@ -71,6 +71,7 @@ export function ensureWindow(
   ]);
   // Explicit resize ensures the window matches even if default-size was ignored.
   resizeWindow(target, cols, rows);
+  return true;
 }
 
 export function resizeWindow(target: string, cols: number, rows: number) {

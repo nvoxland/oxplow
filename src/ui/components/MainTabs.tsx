@@ -1,17 +1,46 @@
-import { useState } from "react";
+import type { OpenFileState } from "../../file-session.js";
 import type { Stream } from "../api.js";
 import { TerminalPane } from "./TerminalPane.js";
 import { EditorPane } from "./EditorPane.js";
 
-type TabId = "working" | "talking" | "editor";
+export type TabId = "working" | "talking" | "editor";
 
-export function MainTabs({ stream }: { stream: Stream }) {
-  const [active, setActive] = useState<TabId>("working");
+interface Props {
+  stream: Stream;
+  active: TabId;
+  onActiveChange(tab: TabId): void;
+  openFileOrder: string[];
+  openFiles: Record<string, OpenFileState>;
+  currentFilePath: string | null;
+  currentFileContent: string;
+  currentFileDirty: boolean;
+  currentFileLoading: boolean;
+  onEditorChange(value: string): void;
+  onEditorSave(): void;
+  onSelectOpenFile(path: string): void;
+  onCloseOpenFile(path: string): void;
+}
+
+export function MainTabs({
+  stream,
+  active,
+  onActiveChange,
+  openFileOrder,
+  openFiles,
+  currentFilePath,
+  currentFileContent,
+  currentFileDirty,
+  currentFileLoading,
+  onEditorChange,
+  onEditorSave,
+  onSelectOpenFile,
+  onCloseOpenFile,
+}: Props) {
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "working", label: "Working CC" },
     { id: "talking", label: "Talking CC" },
-    { id: "editor", label: "Editor" },
+    { id: "editor", label: currentFilePath ? fileLabel(currentFilePath, currentFileDirty) : "Editor" },
   ];
 
   return (
@@ -20,7 +49,7 @@ export function MainTabs({ stream }: { stream: Stream }) {
         {tabs.map((t) => (
           <button
             key={t.id}
-            onClick={() => setActive(t.id)}
+            onClick={() => onActiveChange(t.id)}
             style={{
               padding: "8px 16px",
               background: active === t.id ? "var(--bg)" : "transparent",
@@ -45,11 +74,29 @@ export function MainTabs({ stream }: { stream: Stream }) {
           <TerminalPane paneTarget={stream.panes.talking} />
         </PaneHost>
         <PaneHost visible={active === "editor"}>
-          <EditorPane stream={stream} />
+          <EditorPane
+            stream={stream}
+            filePath={currentFilePath}
+            value={currentFileContent}
+            isDirty={currentFileDirty}
+            isLoading={currentFileLoading}
+            onChange={onEditorChange}
+            onSave={onEditorSave}
+            openFileOrder={openFileOrder}
+            openFiles={openFiles}
+            onSelectOpenFile={onSelectOpenFile}
+            onCloseOpenFile={onCloseOpenFile}
+          />
         </PaneHost>
       </div>
     </div>
   );
+}
+
+function fileLabel(path: string, isDirty: boolean): string {
+  const parts = path.split("/");
+  const name = parts[parts.length - 1] ?? path;
+  return isDirty ? `${name} •` : name;
 }
 
 function PaneHost({ visible, children }: { visible: boolean; children: React.ReactNode }) {

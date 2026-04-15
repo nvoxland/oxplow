@@ -19,6 +19,39 @@ export interface BranchRef {
   remote?: string;
 }
 
+export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
+
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  gitStatus: GitFileStatus | null;
+  hasChanges: boolean;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceIndexedFile {
+  path: string;
+  gitStatus: GitFileStatus | null;
+}
+
+export interface WorkspaceStatusSummary {
+  modified: number;
+  added: number;
+  deleted: number;
+  renamed: number;
+  untracked: number;
+  total: number;
+}
+
+export interface WorkspaceContext {
+  gitEnabled: boolean;
+}
+
 export async function getCurrentStream(): Promise<Stream> {
   return fetchJson("/api/streams/current");
 }
@@ -47,6 +80,10 @@ export async function listBranches(): Promise<BranchRef[]> {
   return fetchJson("/api/branches");
 }
 
+export async function getWorkspaceContext(): Promise<WorkspaceContext> {
+  return fetchJson("/api/workspace/context");
+}
+
 export async function createStream(input:
   | { title: string; summary?: string; source: "existing"; ref: string }
   | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
@@ -55,6 +92,34 @@ export async function createStream(input:
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
+  });
+}
+
+export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
+  const params = new URLSearchParams({ stream: streamId, path });
+  const result = await fetchJson<{ entries: WorkspaceEntry[] }>(`/api/workspace/entries?${params.toString()}`);
+  return result.entries;
+}
+
+export async function listWorkspaceFiles(streamId: string): Promise<{
+  files: WorkspaceIndexedFile[];
+  summary: WorkspaceStatusSummary;
+}> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/files?${params.toString()}`);
+}
+
+export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
+  const params = new URLSearchParams({ stream: streamId, path });
+  return fetchJson(`/api/workspace/file?${params.toString()}`);
+}
+
+export async function writeWorkspaceFile(streamId: string, path: string, content: string): Promise<WorkspaceFile> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/file?${params.toString()}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, content }),
   });
 }
 
