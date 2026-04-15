@@ -1,12 +1,11 @@
 import { basename, resolve } from "node:path";
-import { StreamStore } from "./stream-store.js";
+import { StreamStore, type PaneKind, type Stream } from "./stream-store.js";
 import { detectCurrentBranch, isGitRepo } from "./git.js";
-import { ensureStreamSession } from "./fleet.js";
 import { startServer } from "./server.js";
 import { createSessionFiles, destroySessionFiles, type SessionFiles } from "./session-files.js";
 import { startMcpServer, type McpServerHandle } from "./mcp-server.js";
 import { HookEventStore } from "./hook-ingest.js";
-import { killSession, watchSession } from "./tmux.js";
+import { killSession } from "./tmux.js";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
@@ -41,69 +40,78 @@ async function main() {
     stream = store.create({
       title: branch,
       branch,
+      branchRef: isGitRepo(projectDir) ? `refs/heads/${branch}` : branch,
+      branchSource: "local",
+      worktreePath: projectDir,
       projectBase,
     });
     console.log(`[newde] created stream ${stream.id} for branch '${branch}'`);
   } else {
     console.log(`[newde] reusing stream ${stream.id} for branch '${branch}'`);
   }
-
-  const sessionFiles: SessionFiles = createSessionFiles({ daemonPort: port });
-  console.log(`[newde] session files at ${sessionFiles.dir}`);
+  store.ensureCurrentStreamId(stream.id);
+  cleanupSessions(store.list());
 
   const hookEvents = new HookEventStore(1000);
+  const paneSessionFiles = new Map<string, SessionFiles>();
 
   let mcp: McpServerHandle;
   try {
     mcp = await startMcpServer({
-      workspaceFolders: [projectDir],
+      workspaceFolders: store.list().map((s) => s.worktree_path),
     });
     console.log(`[newde] mcp ws://127.0.0.1:${mcp.port} (lock ${mcp.lockfilePath})`);
   } catch (e) {
     console.warn(`[newde] failed to start mcp server:`, e);
-    destroySessionFiles(sessionFiles);
     process.exit(1);
   }
 
-  // Build the per-spawn claude command. --settings merges our hooks on top
-  // of the user's real ~/.claude settings, so credentials/history/prefs stay
-  // intact and there's no re-login.
-  const claudeCommand = `claude --settings ${shellEscape(sessionFiles.settingsPath)}`;
-
   const shutdown = async () => {
     console.log(`[newde] shutting down`);
-    if (tmuxSession) {
-      killSession(tmuxSession);
-      console.log(`[newde] killed tmux session '${tmuxSession}'`);
-    }
+    cleanupSessions(store.list());
     try { await mcp.stop(); } catch {}
-    destroySessionFiles(sessionFiles);
+    for (const files of paneSessionFiles.values()) {
+      destroySessionFiles(files);
+    }
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  let tmuxSession: string | null = null;
-  try {
-    ensureStreamSession(stream, projectDir);
-    tmuxSession = stream.panes.working.split(":")[0];
-    watchSession(tmuxSession, process.pid);
-    console.log(`[newde] tmux session '${tmuxSession}' watched (sentinel pid monitors daemon ${process.pid})`);
-  } catch (e) {
-    console.warn(`[newde] failed to ensure tmux session:`, e);
-  }
-
   const publicDir = resolve(new URL("..", import.meta.url).pathname, "public");
 
   startServer({
     store,
-    currentStreamId: stream.id,
     publicDir,
     projectDir,
+    projectBase,
     port,
-    claudeCommand,
     hookEvents,
+    getClaudeCommand: (targetStream, pane) => {
+      const key = `${targetStream.id}:${pane}`;
+      let files = paneSessionFiles.get(key);
+      if (!files) {
+        files = createSessionFiles({ daemonPort: port, streamId: targetStream.id, pane });
+        paneSessionFiles.set(key, files);
+      }
+      return buildClaudeCommand(targetStream, pane, files.settingsPath);
+    },
   });
+}
+
+function cleanupSessions(streams: Stream[]) {
+  const sessions = new Set(streams.map((stream) => stream.panes.working.split(":")[0]));
+  for (const session of sessions) {
+    killSession(session);
+  }
+}
+
+function buildClaudeCommand(stream: Stream, pane: PaneKind, settingsPath: string): string {
+  const resumeSessionId = pane === "working"
+    ? stream.resume.working_session_id
+    : stream.resume.talking_session_id;
+  const resumeFlag = resumeSessionId ? ` --resume ${shellEscape(resumeSessionId)}` : "";
+  return `claude${resumeFlag} --settings ${shellEscape(settingsPath)}`;
 }
 
 function shellEscape(s: string): string {

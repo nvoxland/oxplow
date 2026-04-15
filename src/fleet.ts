@@ -1,9 +1,9 @@
 import { ensureSession, ensureWindow, killWindow, listWindows } from "./tmux.js";
-import type { Stream } from "./stream-store.js";
+import type { PaneKind, Stream } from "./stream-store.js";
 
-export function ensureStreamSession(stream: Stream, projectDir: string) {
+export function ensureStreamSession(stream: Stream) {
   const session = stream.panes.working.split(":")[0];
-  ensureSession(session, projectDir);
+  ensureSession(session, stream.worktree_path);
 }
 
 /**
@@ -12,15 +12,16 @@ export function ensureStreamSession(stream: Stream, projectDir: string) {
  * session's placeholder window is killed once the first real window exists.
  */
 export function ensureStreamPane(
-  target: string,
-  projectDir: string,
+  stream: Stream,
+  pane: PaneKind,
   cols: number,
   rows: number,
   claudeCommand: string,
 ) {
+  const target = stream.panes[pane];
   const session = target.split(":")[0];
-  ensureSession(session, projectDir);
-  ensureWindow(target, projectDir, claudeCommand, cols, rows);
+  ensureSession(session, stream.worktree_path);
+  ensureWindow(target, stream.worktree_path, claudeCommand, cols, rows);
 
   const placeholder = `${session}:__placeholder__`;
   if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {

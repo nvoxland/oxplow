@@ -45,7 +45,7 @@ export function MainTabs({ stream }: { stream: Stream }) {
           <TerminalPane paneTarget={stream.panes.talking} />
         </PaneHost>
         <PaneHost visible={active === "editor"}>
-          <EditorPane />
+          <EditorPane stream={stream} />
         </PaneHost>
       </div>
     </div>

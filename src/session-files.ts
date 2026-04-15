@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PaneKind } from "./stream-store.js";
 
 export interface SessionFiles {
   dir: string;
@@ -12,6 +13,8 @@ export interface SessionFiles {
 
 export interface SessionFilesOptions {
   daemonPort: number;
+  streamId: string;
+  pane: PaneKind;
 }
 
 const HOOK_EVENTS = [
@@ -28,7 +31,7 @@ export function createSessionFiles(opts: SessionFilesOptions): SessionFiles {
   const dir = mkdtempSync(join(tmpdir(), "newde-session-"));
 
   const forwarderPath = join(dir, "hook-forward.sh");
-  writeFileSync(forwarderPath, buildForwarderScript(opts.daemonPort), "utf8");
+  writeFileSync(forwarderPath, buildForwarderScript(opts), "utf8");
   chmodSync(forwarderPath, 0o755);
 
   const settingsPath = join(dir, "hooks.json");
@@ -46,14 +49,15 @@ export function destroySessionFiles(s: SessionFiles): void {
   rmSync(s.dir, { recursive: true, force: true });
 }
 
-function buildForwarderScript(daemonPort: number): string {
+function buildForwarderScript(opts: SessionFilesOptions): string {
+  const query = new URLSearchParams({ stream: opts.streamId, pane: opts.pane }).toString();
   return `#!/usr/bin/env bash
 event="$1"
 exec curl -sS --max-time 2 \\
   -X POST \\
   -H "content-type: application/json" \\
   --data-binary @- \\
-  "http://127.0.0.1:${daemonPort}/api/hook/$event" \\
+  "http://127.0.0.1:${opts.daemonPort}/api/hook/$event?${query}" \\
   >/dev/null 2>&1 || true
 `;
 }

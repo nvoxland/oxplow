@@ -3,12 +3,14 @@ import type { StoredEvent, NormalizedEvent } from "../api.js";
 
 const MAX_ROWS = 200;
 
-export function BottomPanel() {
+export function BottomPanel({ streamId }: { streamId: string | null }) {
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const es = new EventSource("/api/hooks/stream");
+    if (!streamId) return;
+    setEvents([]);
+    const es = new EventSource(`/api/hooks/stream?stream=${encodeURIComponent(streamId)}`);
     es.onmessage = (msg) => {
       try {
         const evt = JSON.parse(msg.data) as StoredEvent;
@@ -22,7 +24,7 @@ export function BottomPanel() {
       // EventSource auto-reconnects; nothing to do here.
     };
     return () => es.close();
-  }, []);
+  }, [streamId]);
 
   useEffect(() => {
     const el = scrollerRef.current;

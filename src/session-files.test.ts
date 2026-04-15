@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createSessionFiles, destroySessionFiles } from "./session-files.js";
 
 test("createSessionFiles writes hooks.json and executable forwarder", () => {
-  const s = createSessionFiles({ daemonPort: 17999 });
+  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
   try {
     expect(existsSync(s.dir)).toBe(true);
     expect(existsSync(s.settingsPath)).toBe(true);
@@ -14,6 +14,8 @@ test("createSessionFiles writes hooks.json and executable forwarder", () => {
     const forwarderBody = readFileSync(s.forwarderPath, "utf8");
     expect(forwarderBody).toContain("127.0.0.1:17999");
     expect(forwarderBody).toContain("/api/hook/");
+    expect(forwarderBody).toContain("stream=s-1");
+    expect(forwarderBody).toContain("pane=working");
 
     const settings = JSON.parse(readFileSync(s.settingsPath, "utf8"));
     expect(settings.hooks).toBeDefined();
@@ -39,13 +41,13 @@ test("createSessionFiles writes hooks.json and executable forwarder", () => {
 });
 
 test("destroySessionFiles removes the directory", () => {
-  const s = createSessionFiles({ daemonPort: 17999 });
+  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
   destroySessionFiles(s);
   expect(existsSync(s.dir)).toBe(false);
 });
 
 test("destroySessionFiles is idempotent", () => {
-  const s = createSessionFiles({ daemonPort: 17999 });
+  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
   destroySessionFiles(s);
   expect(() => destroySessionFiles(s)).not.toThrow();
 });
