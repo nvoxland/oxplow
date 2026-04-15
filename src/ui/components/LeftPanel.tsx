@@ -10,22 +10,22 @@ import {
   type WorkspaceStatusSummary,
 } from "../api.js";
 
-type SidebarTab = "files" | "stream";
+export type SidebarTab = "files" | "stream";
 
 interface Props {
   stream: Stream | null;
+  activeTab: SidebarTab;
+  onActiveTabChange(tab: SidebarTab): void;
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
 }
 
-export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
-  const [activeTab, setActiveTab] = useState<SidebarTab>("files");
+export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePath, onOpenFile }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
-  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,7 +34,6 @@ export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
     setLoadingDirs({});
     setIndexedFiles([]);
     setStatusSummary(null);
-    setQuery("");
     setError(null);
   }, [stream?.id]);
 
@@ -45,11 +44,6 @@ export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
   }, [stream?.id]);
 
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
-  const filteredFiles = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return indexedFiles.filter((file) => file.path.toLowerCase().includes(q)).slice(0, 50);
-  }, [indexedFiles, query]);
   const changedFiles = useMemo(() => indexedFiles.filter((file) => file.gitStatus !== null), [indexedFiles]);
 
   if (!stream) {
@@ -92,8 +86,8 @@ export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12 }}>
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
-        <SidebarButton active={activeTab === "files"} onClick={() => setActiveTab("files")}>Files</SidebarButton>
-        <SidebarButton active={activeTab === "stream"} onClick={() => setActiveTab("stream")}>Stream</SidebarButton>
+        <SidebarButton active={activeTab === "files"} onClick={() => onActiveTabChange("files")}>Files</SidebarButton>
+        <SidebarButton active={activeTab === "stream"} onClick={() => onActiveTabChange("stream")}>Stream</SidebarButton>
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
         {activeTab === "files" ? (
@@ -101,24 +95,10 @@ export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
             <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
               {stream.branch}
             </div>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search files…"
-              style={{
-                background: "var(--bg-2)",
-                color: "var(--fg)",
-                border: "1px solid var(--border)",
-                padding: "6px 8px",
-                borderRadius: 4,
-                fontFamily: "inherit",
-              }}
-            />
             {statusSummary ? <GitSummary summary={statusSummary} /> : null}
             {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
-            {query.trim() ? (
-              <SearchResults files={filteredFiles} selectedFilePath={selectedFilePath} onOpenFile={onOpenFile} />
-            ) : rootEntries.length === 0 && !loadingDirs[""] ? (
+            <div style={{ color: "var(--muted)", fontSize: 11 }}>Use File → Quick Open or Ctrl/Cmd+P to search by path.</div>
+            {rootEntries.length === 0 && !loadingDirs[""] ? (
               <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
             ) : (
               <>
@@ -161,33 +141,6 @@ export function LeftPanel({ stream, selectedFilePath, onOpenFile }: Props) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function SearchResults({
-  files,
-  selectedFilePath,
-  onOpenFile,
-}: {
-  files: WorkspaceIndexedFile[];
-  selectedFilePath: string | null;
-  onOpenFile(path: string): void;
-}) {
-  if (files.length === 0) {
-    return <div style={{ color: "var(--muted)" }}>No matching files.</div>;
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {files.map((file) => (
-        <FileRow
-          key={file.path}
-          path={file.path}
-          gitStatus={file.gitStatus}
-          active={selectedFilePath === file.path}
-          onClick={() => onOpenFile(file.path)}
-        />
-      ))}
     </div>
   );
 }

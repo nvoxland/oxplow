@@ -32,7 +32,7 @@ test("buildClaudeCommand launches Claude from the stream worktree", () => {
   expect(command).toContain("/tmp/session settings.json");
   expect(command).toContain("cd ");
   expect(command).toContain("exec claude");
-  expect(command).toContain("resume failed, starting fresh");
+  expect(command).toContain("[newde] saved resume id was stale; starting a fresh Claude session");
 });
 
 test("buildClaudeCommand uses the pane-specific resume id", () => {

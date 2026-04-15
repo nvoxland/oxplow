@@ -132,9 +132,10 @@ export function buildClaudeCommand(stream: Stream, pane: PaneKind, settingsPath:
   const resumeSessionId = pane === "working"
     ? stream.resume.working_session_id
     : stream.resume.talking_session_id;
-  const freshClaude = `exec claude --settings ${shellEscape(settingsPath)}`;
+  const claudeBase = `claude --settings ${shellEscape(settingsPath)}`;
+  const freshClaude = `exec ${claudeBase}`;
   const command = resumeSessionId
-    ? `claude --resume ${shellEscape(resumeSessionId)} --settings ${shellEscape(settingsPath)} || { echo '[newde] resume failed, starting fresh' >&2; ${freshClaude}; }`
+    ? `${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[newde] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
     : freshClaude;
   return `sh -lc ${shellEscape(`cd ${shellEscape(stream.worktree_path)} && ${command}`)}`;
 }

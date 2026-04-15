@@ -10,7 +10,7 @@ interface Props {
   isDirty: boolean;
   isLoading: boolean;
   onChange(value: string): void;
-  onSave(): void;
+  findRequest: number;
   openFileOrder: string[];
   openFiles: Record<string, OpenFileState>;
   onSelectOpenFile(path: string): void;
@@ -24,7 +24,7 @@ export function EditorPane({
   isDirty,
   isLoading,
   onChange,
-  onSave,
+  findRequest,
   openFileOrder,
   openFiles,
   onSelectOpenFile,
@@ -35,10 +35,8 @@ export function EditorPane({
   const monacoRef = useRef<any>(null);
   const changeDisposeRef = useRef<{ dispose(): void } | null>(null);
   const onChangeRef = useRef(onChange);
-  const onSaveRef = useRef(onSave);
 
   onChangeRef.current = onChange;
-  onSaveRef.current = onSave;
 
   useEffect(() => {
     let cancelled = false;
@@ -52,12 +50,6 @@ export function EditorPane({
         theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: false },
-      });
-      editor.addAction({
-        id: "newde-save-file",
-        label: "Save File",
-        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-        run: () => onSaveRef.current(),
       });
       editorRef.current = editor;
     })();
@@ -92,6 +84,12 @@ export function EditorPane({
     });
   }, [stream.id, filePath, value]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !filePath || findRequest === 0) return;
+    void editor.getAction("actions.find")?.run();
+  }, [filePath, findRequest]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div
@@ -106,21 +104,7 @@ export function EditorPane({
         }}
       >
         <span>{filePath ? `${filePath}${isDirty ? " • modified" : ""}` : "No file selected"}</span>
-        <button
-          onClick={onSave}
-          disabled={!filePath || isLoading || !isDirty}
-          style={{
-            background: "var(--bg-2)",
-            color: "var(--fg)",
-            border: "1px solid var(--border)",
-            padding: "4px 10px",
-            borderRadius: 4,
-            cursor: isLoading || !isDirty ? "default" : "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          {isLoading ? "Saving…" : "Save"}
-        </button>
+        <span>{isLoading ? "Saving…" : isDirty ? "Modified" : "Saved"}</span>
       </div>
       {openFileOrder.length > 0 ? (
         <div

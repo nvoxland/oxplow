@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { hasSession, killSession, watchSession } from "./tmux.js";
+import { capturePaneHistory, hasSession, killSession, watchSession } from "./tmux.js";
 
 function tmuxAvailable(): boolean {
   try {
@@ -58,3 +58,18 @@ test("watchSession kills session when watched pid exits", async () => {
   await waitFor(() => !hasSession(name), 6000);
   expect(hasSession(name)).toBe(false);
 }, 8000);
+
+test("capturePaneHistory returns recent pane output", async () => {
+  if (!tmuxAvailable()) return;
+
+  const name = `newde-test-capture-${process.pid}`;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", name, "printf 'alpha\\nbeta\\n' && sleep 1"], { stdio: "ignore" });
+    await waitFor(() => capturePaneHistory(`${name}:0`, 50).includes("alpha"), 3000, 100);
+    const history = capturePaneHistory(`${name}:0`, 50);
+    expect(history).toContain("alpha");
+    expect(history).toContain("beta");
+  } finally {
+    killSession(name);
+  }
+}, 5000);

@@ -16,7 +16,7 @@ interface Props {
   currentFileDirty: boolean;
   currentFileLoading: boolean;
   onEditorChange(value: string): void;
-  onEditorSave(): void;
+  editorFindRequest: number;
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
 }
@@ -32,7 +32,7 @@ export function MainTabs({
   currentFileDirty,
   currentFileLoading,
   onEditorChange,
-  onEditorSave,
+  editorFindRequest,
   onSelectOpenFile,
   onCloseOpenFile,
 }: Props) {
@@ -68,10 +68,10 @@ export function MainTabs({
       </div>
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
         <PaneHost visible={active === "working"}>
-          <TerminalPane paneTarget={stream.panes.working} />
+          <TerminalPane paneTarget={stream.panes.working} visible={active === "working"} />
         </PaneHost>
         <PaneHost visible={active === "talking"}>
-          <TerminalPane paneTarget={stream.panes.talking} />
+          <TerminalPane paneTarget={stream.panes.talking} visible={active === "talking"} />
         </PaneHost>
         <PaneHost visible={active === "editor"}>
           <EditorPane
@@ -81,7 +81,7 @@ export function MainTabs({
             isDirty={currentFileDirty}
             isLoading={currentFileLoading}
             onChange={onEditorChange}
-            onSave={onEditorSave}
+            findRequest={editorFindRequest}
             openFileOrder={openFileOrder}
             openFiles={openFiles}
             onSelectOpenFile={onSelectOpenFile}

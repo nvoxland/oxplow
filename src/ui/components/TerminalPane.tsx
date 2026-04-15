@@ -1,10 +1,34 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { logUi } from "../logger.js";
+import {
+  shouldHandleTerminalPageKey,
+  shouldReturnTerminalToPrompt,
+  shouldRouteWheelToTmuxHistory,
+  wheelDeltaToScrollLines,
+} from "../terminal-scroll.js";
 
-export function TerminalPane({ paneTarget }: { paneTarget: string }) {
+export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visible: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [mode, setMode] = useState<"live" | "history">("live");
+  const modeRef = useRef<"live" | "history">("live");
+
+  function setInteractionMode(next: "live" | "history") {
+    modeRef.current = next;
+    setMode(next);
+  }
+
+  useEffect(() => {
+    if (!visible) return;
+    termRef.current?.focus();
+    if (wsRef.current && wsRef.current.readyState === wsRef.current.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "history-exit" }));
+    }
+    setInteractionMode("live");
+  }, [visible, paneTarget]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -16,16 +40,98 @@ export function TerminalPane({ paneTarget }: { paneTarget: string }) {
       theme: { background: "#0e0e0e", foreground: "#e6e6e6" },
       scrollback: 5000,
       cursorBlink: true,
+      scrollSensitivity: 2,
+      fastScrollModifier: "shift",
+      fastScrollSensitivity: 4,
+      scrollOnUserInput: true,
     });
+    termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    let ws: WebSocket | null = null;
+
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") {
+        return true;
+      }
+
+      if (shouldHandleTerminalPageKey(event)) {
+        const routeToTmuxHistory = shouldRouteWheelToTmuxHistory({
+          mode: modeRef.current,
+          bufferType: term.buffer.active.type,
+          mouseTrackingMode: term.modes.mouseTrackingMode,
+        });
+
+        if (routeToTmuxHistory) {
+          if (ws && ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: "history-page",
+              direction: event.key === "PageUp" ? "up" : "down",
+            }));
+          }
+          setInteractionMode("history");
+          return false;
+        }
+
+        if (term.buffer.active.type === "normal") {
+          term.scrollPages(event.key === "PageUp" ? -1 : 1);
+          return false;
+        }
+
+        return true;
+      }
+
+      if (modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
+        if (ws && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: "history-exit" }));
+        }
+        setInteractionMode("live");
+        term.focus();
+        if (event.key === "Escape") {
+          return false;
+        }
+      }
+
+      return true;
+    });
+    term.attachCustomWheelEventHandler((event) => {
+      if (event.ctrlKey || event.metaKey) {
+        return false;
+      }
+
+      const routeToTmuxHistory = shouldRouteWheelToTmuxHistory({
+        mode: modeRef.current,
+        bufferType: term.buffer.active.type,
+        mouseTrackingMode: term.modes.mouseTrackingMode,
+      });
+
+      if (!routeToTmuxHistory) {
+        return true;
+      }
+
+      const lines = wheelDeltaToScrollLines(event);
+      if (lines === 0) {
+        return false;
+      }
+
+      if (ws && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: "history-scroll", lines }));
+      }
+      setInteractionMode("history");
+      event.preventDefault();
+      return false;
+    });
 
     let disposed = false;
-    let ws: WebSocket | null = null;
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
       if (ws && ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({ type: "input", bytes: btoa(data) }));
+      }
+    });
+    const binaryDisp = term.onBinary((data) => {
+      if (ws && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
       }
     });
 
@@ -45,15 +151,30 @@ export function TerminalPane({ paneTarget }: { paneTarget: string }) {
         requestAnimationFrame(start);
         return;
       }
+      const handleMouseDown = () => {
+        if (ws && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: "history-exit" }));
+        }
+        setInteractionMode("live");
+        term.focus();
+      };
+      host.addEventListener("mousedown", handleMouseDown);
 
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const url = `${proto}//${location.host}/ws?pane=${encodeURIComponent(paneTarget)}&cols=${term.cols}&rows=${term.rows}`;
       logUi("info", "opening terminal websocket", { paneTarget, cols: term.cols, rows: term.rows });
       ws = new WebSocket(url);
+      wsRef.current = ws;
       ws.onopen = () => {
+        term.focus();
+        ws.send(JSON.stringify({ type: "history-exit" }));
+        setInteractionMode("live");
         logUi("info", "terminal websocket opened", { paneTarget });
       };
       ws.onclose = () => {
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
         logUi("warn", "terminal websocket closed", { paneTarget });
       };
       ws.onerror = () => {
@@ -93,17 +214,58 @@ export function TerminalPane({ paneTarget }: { paneTarget: string }) {
         }, 80);
       });
       ro.observe(host);
+
+      const prevCleanup = cleanupRef.current;
+      cleanupRef.current = () => {
+        host.removeEventListener("mousedown", handleMouseDown);
+        prevCleanup?.();
+      };
     };
+    const cleanupRef: { current: (() => void) | null } = { current: null };
     start();
 
     return () => {
       disposed = true;
+      cleanupRef.current?.();
       ro?.disconnect();
       dataDisp.dispose();
+      binaryDisp.dispose();
+      wsRef.current = null;
+      termRef.current = null;
       try { ws?.close(); } catch {}
       term.dispose();
     };
   }, [paneTarget]);
 
-  return <div ref={hostRef} style={{ width: "100%", height: "100%" }} />;
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+      {mode === "history" ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 12,
+            bottom: 12,
+            padding: "6px 10px",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "rgba(14, 14, 14, 0.92)",
+            color: "var(--muted)",
+            fontSize: 11,
+            pointerEvents: "none",
+          }}
+        >
+          History mode — click or type to return to the prompt
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function binaryToBase64(data: string) {
+  let binary = "";
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data.charCodeAt(i) & 0xff);
+  }
+  return btoa(binary);
 }

@@ -81,6 +81,51 @@ export function resizeWindow(target: string, cols: number, rows: number) {
   } catch {}
 }
 
+export function capturePaneHistory(target: string, lineCount = 5000): string {
+  try {
+    return execFileSync(
+      "tmux",
+      ["capture-pane", "-p", "-e", "-J", "-S", `-${lineCount}`, "-t", target],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    return "";
+  }
+}
+
+export function copyModePage(target: string, direction: "up" | "down") {
+  try {
+    tmux(["copy-mode", "-e", "-t", target]);
+    if (direction === "up") {
+      tmux(["send-keys", "-t", target, "-X", "page-up"]);
+      return;
+    }
+    tmux(["send-keys", "-t", target, "-X", "page-down"]);
+  } catch {}
+}
+
+export function copyModeScroll(target: string, lines: number) {
+  if (lines === 0) return;
+  try {
+    tmux(["copy-mode", "-e", "-t", target]);
+    tmux([
+      "send-keys",
+      "-N",
+      String(Math.abs(lines)),
+      "-t",
+      target,
+      "-X",
+      lines < 0 ? "scroll-up" : "scroll-down",
+    ]);
+  } catch {}
+}
+
+export function exitCopyMode(target: string) {
+  try {
+    tmux(["send-keys", "-t", target, "-X", "cancel"]);
+  } catch {}
+}
+
 export function killWindow(target: string) {
   try {
     tmux(["kill-window", "-t", target]);

@@ -22,11 +22,15 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "../file-session.js";
+import { buildMenuGroups } from "./commands.js";
 import { TopBar } from "./components/TopBar.js";
-import { LeftPanel } from "./components/LeftPanel.js";
+import { LeftPanel, type SidebarTab } from "./components/LeftPanel.js";
+import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
 import { MainTabs, type TabId } from "./components/MainTabs.js";
+import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { shouldRefreshAfterDaemonRecovery } from "./daemon-recovery.js";
+import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi } from "./logger.js";
 
 export function App() {
@@ -37,6 +41,9 @@ export function App() {
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("files");
+  const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  const [editorFindRequest, setEditorFindRequest] = useState(0);
   const daemonDownLogged = useRef(false);
   const daemonWasUnavailable = useRef(false);
 
@@ -232,6 +239,66 @@ export function App() {
   const selectedFilePath = currentSession.selectedPath;
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
+  const menuGroups = useMemo(
+    () =>
+      buildMenuGroups(
+        {
+          hasStream: !!stream,
+          hasSelectedFile: !!selectedFilePath,
+          canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
+          activeTab,
+          sidebarTab,
+        },
+        {
+          save() {
+            void handleEditorSave();
+          },
+          quickOpen() {
+            if (!stream) return;
+            setQuickOpenVisible(true);
+          },
+          find() {
+            if (!selectedFilePath) return;
+            setActiveTab("editor");
+            setEditorFindRequest((current) => current + 1);
+          },
+          showFilesSidebar() {
+            setSidebarTab("files");
+          },
+          showStreamSidebar() {
+            setSidebarTab("stream");
+          },
+          showWorkingPane() {
+            setActiveTab("working");
+          },
+          showTalkingPane() {
+            setActiveTab("talking");
+          },
+          showEditorPane() {
+            setActiveTab("editor");
+          },
+        },
+      ),
+    [activeTab, currentFile, currentFileDirty, selectedFilePath, sidebarTab, stream],
+  );
+  const commandMap = useMemo(
+    () => new Map(menuGroups.flatMap((group) => group.items.map((item) => [item.id, item] as const))),
+    [menuGroups],
+  );
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const commandId = getCommandIdForShortcut(event);
+      if (!commandId) return;
+      const command = commandMap.get(commandId);
+      if (!command || !command.enabled) return;
+      event.preventDefault();
+      command.run();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [commandMap]);
 
   return (
     <div
@@ -244,6 +311,7 @@ export function App() {
       }}
     >
       <div style={{ gridColumn: "1 / 3", borderBottom: "1px solid var(--border)" }}>
+        <Menubar groups={menuGroups} />
         <TopBar
           stream={stream}
           streams={streams}
@@ -257,6 +325,8 @@ export function App() {
       <div style={{ borderRight: "1px solid var(--border)", overflow: "auto" }}>
         <LeftPanel
           stream={stream}
+          activeTab={sidebarTab}
+          onActiveTabChange={setSidebarTab}
           selectedFilePath={selectedFilePath}
           onOpenFile={handleOpenFile}
         />
@@ -275,7 +345,7 @@ export function App() {
             currentFileDirty={currentFileDirty}
             currentFileLoading={currentFile?.isLoading ?? false}
             onEditorChange={handleEditorChange}
-            onEditorSave={handleEditorSave}
+            editorFindRequest={editorFindRequest}
             onSelectOpenFile={handleSelectOpenFile}
             onCloseOpenFile={handleCloseOpenFile}
           />
@@ -284,6 +354,15 @@ export function App() {
       <div style={{ gridColumn: "1 / 3", borderTop: "1px solid var(--border)" }}>
         <BottomPanel streamId={stream?.id ?? null} />
       </div>
+      <QuickOpenOverlay
+        open={quickOpenVisible}
+        stream={stream}
+        selectedFilePath={selectedFilePath}
+        onClose={() => setQuickOpenVisible(false)}
+        onOpenFile={(path) => {
+          void handleOpenFile(path);
+        }}
+      />
       {daemonUnavailable ? <DaemonDownDialog /> : null}
     </div>
   );
