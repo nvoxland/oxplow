@@ -47,7 +47,8 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
         });
     };
     loadFiles();
-    const unsubscribe = subscribeWorkspaceEvents(stream.id, () => {
+    const unsubscribe = subscribeWorkspaceEvents(stream.id, (event) => {
+      if (event.kind === "updated") return;
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(loadFiles, 75);
     });

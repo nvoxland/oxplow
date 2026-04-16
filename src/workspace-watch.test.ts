@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Logger } from "./logger.js";
-import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
+import { WorkspaceWatcherRegistry, shouldIgnoreWorkspaceWatchPath } from "./workspace-watch.js";
 
 const tempDirs: string[] = [];
 
@@ -56,6 +56,13 @@ test("workspace watcher emits events for filesystem changes", async () => {
   await waitFor(() => events.some((event) => event.endsWith(":src/watch-me.ts")));
   registry.dispose();
   expect(events.some((event) => event.endsWith(":src/watch-me.ts"))).toBe(true);
+});
+
+test("workspace watcher ignores internal runtime paths", () => {
+  expect(shouldIgnoreWorkspaceWatchPath(".git/index")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".newde/logs/daemon.log")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".newde/worktrees/feature/src/app.ts")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
 });
 
 function noopLogger(): Logger {

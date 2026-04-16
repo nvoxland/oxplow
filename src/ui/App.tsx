@@ -32,7 +32,7 @@ import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
 import { MainTabs, type TabId } from "./components/MainTabs.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
-import { shouldRefreshAfterDaemonRecovery } from "./daemon-recovery.js";
+import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi } from "./logger.js";
 
@@ -50,7 +50,7 @@ export function App() {
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const daemonDownLogged = useRef(false);
-  const daemonWasUnavailable = useRef(false);
+  const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
 
   useEffect(() => {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
@@ -79,20 +79,21 @@ export function App() {
     async function check() {
       const alive = await probeDaemon();
       if (cancelled) return;
-      if (shouldRefreshAfterDaemonRecovery(daemonWasUnavailable.current, alive)) {
+      const decision = advanceDaemonProbeState(daemonProbeState.current, alive);
+      daemonProbeState.current = decision.next;
+      if (decision.refresh) {
         logUi("info", "daemon recovered, refreshing ui");
         window.location.reload();
         return;
       }
-      setDaemonUnavailable(!alive);
-      if (!alive && !daemonDownLogged.current) {
+      setDaemonUnavailable(decision.next.unavailable);
+      if (decision.next.unavailable && !daemonDownLogged.current) {
         logUi("warn", "daemon probe failed");
         daemonDownLogged.current = true;
       }
       if (alive) {
         daemonDownLogged.current = false;
       }
-      daemonWasUnavailable.current = !alive;
     }
 
     check();

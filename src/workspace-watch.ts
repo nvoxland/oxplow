@@ -102,6 +102,10 @@ class StreamWorkspaceWatcher {
 
   private watchDirectory(dir: string): void {
     if (this.watchers.has(dir)) return;
+    const dirRelativePath = normalizeRelativePath(relative(this.rootDir, dir));
+    if (dirRelativePath && shouldIgnoreWorkspaceWatchPath(dirRelativePath)) {
+      return;
+    }
     const watcher = watch(dir, (eventType, filename) => {
       this.handleFsEvent(dir, eventType, typeof filename === "string" ? filename : filename?.toString("utf8") ?? "");
     });
@@ -119,12 +123,12 @@ class StreamWorkspaceWatcher {
 
   private handleFsEvent(dir: string, eventType: string, filename: string): void {
     if (!filename) {
-      this.emit("updated", "");
       return;
     }
     const abs = resolve(dir, filename);
     const rel = normalizeRelativePath(relative(this.rootDir, abs));
     if (rel.startsWith("..")) return;
+    if (shouldIgnoreWorkspaceWatchPath(rel)) return;
 
     const stat = safeStat(abs);
     if (stat?.isDirectory()) {
@@ -148,6 +152,15 @@ class StreamWorkspaceWatcher {
       }
     }
   }
+}
+
+export function shouldIgnoreWorkspaceWatchPath(path: string): boolean {
+  return path === ".git"
+    || path.startsWith(".git/")
+    || path === ".newde/logs"
+    || path.startsWith(".newde/logs/")
+    || path === ".newde/worktrees"
+    || path.startsWith(".newde/worktrees/");
 }
 
 function safeStat(path: string) {

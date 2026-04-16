@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listWorkspaceEntries,
   listWorkspaceFiles,
@@ -28,9 +28,11 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadingDirsRef = useRef<Record<string, boolean>>({});
 
   const loadDir = useCallback(async (path: string) => {
-    if (!stream || loadingDirs[path]) return;
+    if (!stream || loadingDirsRef.current[path]) return;
+    loadingDirsRef.current = { ...loadingDirsRef.current, [path]: true };
     setLoadingDirs((prev) => ({ ...prev, [path]: true }));
     try {
       const entries = await listWorkspaceEntries(stream.id, path);
@@ -39,9 +41,10 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
     } catch (e) {
       setError(String(e));
     } finally {
+      loadingDirsRef.current = { ...loadingDirsRef.current, [path]: false };
       setLoadingDirs((prev) => ({ ...prev, [path]: false }));
     }
-  }, [loadingDirs, stream]);
+  }, [stream]);
 
   const loadWorkspaceIndex = useCallback(async () => {
     if (!stream) return;
@@ -58,6 +61,7 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
   useEffect(() => {
     setExpandedDirs({ "": true });
     setEntriesByDir({});
+    loadingDirsRef.current = {};
     setLoadingDirs({});
     setIndexedFiles([]);
     setStatusSummary(null);
@@ -73,23 +77,32 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
   useEffect(() => {
     if (!stream) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const refresh = () => {
+    const refreshForPath = (path: string) => {
+      const parentDir = dirname(path);
       void loadWorkspaceIndex();
-      for (const [path, expanded] of Object.entries(expandedDirs)) {
-        if (expanded) {
-          void loadDir(path);
-        }
-      }
+      void loadDir(parentDir);
     };
-    const unsubscribe = subscribeWorkspaceEvents(stream.id, () => {
+    const prunePath = (path: string) => {
+      setEntriesByDir((prev) => Object.fromEntries(
+        Object.entries(prev).filter(([candidate]) => candidate !== path && !candidate.startsWith(path + "/")),
+      ));
+      setExpandedDirs((prev) => Object.fromEntries(
+        Object.entries(prev).filter(([candidate]) => candidate !== path && !candidate.startsWith(path + "/")),
+      ));
+    };
+    const unsubscribe = subscribeWorkspaceEvents(stream.id, (event) => {
+      if (event.kind === "updated") return;
+      if (event.kind === "deleted") {
+        prunePath(event.path);
+      }
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refresh, 75);
+      refreshTimer = setTimeout(() => refreshForPath(event.path), 75);
     });
     return () => {
       unsubscribe();
       if (refreshTimer) clearTimeout(refreshTimer);
     };
-  }, [expandedDirs, loadDir, loadWorkspaceIndex, stream]);
+  }, [loadDir, loadWorkspaceIndex, stream]);
 
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
   const changedFiles = useMemo(() => indexedFiles.filter((file) => file.gitStatus !== null), [indexedFiles]);
@@ -166,6 +179,12 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
       </div>
     </div>
   );
+}
+
+function dirname(path: string): string {
+  if (!path) return "";
+  const slash = path.lastIndexOf("/");
+  return slash >= 0 ? path.slice(0, slash) : "";
 }
 
 function ChangedFilesSection({
