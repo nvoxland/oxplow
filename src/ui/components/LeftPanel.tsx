@@ -10,6 +10,8 @@ import {
   type WorkspaceIndexedFile,
   type WorkspaceStatusSummary,
 } from "../api.js";
+import type { MenuItem } from "../menu.js";
+import { ContextMenu } from "./ContextMenu.js";
 
 export type SidebarTab = "files" | "stream";
 
@@ -19,15 +21,36 @@ interface Props {
   onActiveTabChange(tab: SidebarTab): void;
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
+  onCreateFile(path: string): Promise<void>;
+  onCreateDirectory(path: string): Promise<void>;
+  onRenamePath(fromPath: string, toPath: string): Promise<void>;
+  onDeletePath(path: string): Promise<void>;
 }
 
-export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePath, onOpenFile }: Props) {
+export function LeftPanel({
+  stream,
+  activeTab,
+  onActiveTabChange,
+  selectedFilePath,
+  onOpenFile,
+  onCreateFile,
+  onCreateDirectory,
+  onRenamePath,
+  onDeletePath,
+}: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    path: string;
+    kind: "file" | "directory";
+    name: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
 
   const loadDir = useCallback(async (path: string) => {
@@ -66,6 +89,7 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
     setIndexedFiles([]);
     setStatusSummary(null);
     setError(null);
+    setContextMenu(null);
   }, [stream?.id]);
 
   useEffect(() => {
@@ -119,6 +143,92 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
     }
   }
 
+  async function handleContextAction(action: "open" | "new-file" | "new-folder" | "rename" | "delete" | "copy-path") {
+    if (!contextMenu) return;
+    try {
+      switch (action) {
+        case "open":
+          onOpenFile(contextMenu.path);
+          break;
+        case "new-file": {
+          const suggested = contextMenu.kind === "directory" ? joinChildPath(contextMenu.path, "new-file.txt") : joinChildPath(dirname(contextMenu.path), "new-file.txt");
+          const nextPath = window.prompt("New file path", suggested)?.trim();
+          if (!nextPath) return;
+          await onCreateFile(nextPath);
+          break;
+        }
+        case "new-folder": {
+          const suggested = contextMenu.kind === "directory" ? joinChildPath(contextMenu.path, "new-folder") : joinChildPath(dirname(contextMenu.path), "new-folder");
+          const nextPath = window.prompt("New folder path", suggested)?.trim();
+          if (!nextPath) return;
+          await onCreateDirectory(nextPath);
+          break;
+        }
+        case "rename": {
+          const nextPath = window.prompt("Rename path", contextMenu.path)?.trim();
+          if (!nextPath || nextPath === contextMenu.path) return;
+          await onRenamePath(contextMenu.path, nextPath);
+          break;
+        }
+        case "delete":
+          if (!window.confirm(`Delete ${contextMenu.path}?`)) return;
+          await onDeletePath(contextMenu.path);
+          break;
+        case "copy-path":
+          await copyText(contextMenu.path);
+          break;
+      }
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setContextMenu(null);
+    }
+  }
+
+  const contextMenuItems: MenuItem[] = contextMenu
+    ? [
+      ...(contextMenu.kind === "file"
+        ? [{
+            id: "files.open",
+            label: "Open",
+            enabled: true,
+            run: () => handleContextAction("open"),
+          }]
+        : []),
+      {
+        id: "files.new-file",
+        label: "New File…",
+        enabled: true,
+        run: () => handleContextAction("new-file"),
+      },
+      {
+        id: "files.new-folder",
+        label: "New Folder…",
+        enabled: true,
+        run: () => handleContextAction("new-folder"),
+      },
+      {
+        id: "files.rename",
+        label: "Rename…",
+        enabled: true,
+        run: () => handleContextAction("rename"),
+      },
+      {
+        id: "files.delete",
+        label: "Delete…",
+        enabled: true,
+        run: () => handleContextAction("delete"),
+      },
+      {
+        id: "files.copy-path",
+        label: "Copy Path",
+        enabled: true,
+        run: () => handleContextAction("copy-path"),
+      },
+    ]
+    : [];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12 }}>
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
@@ -143,6 +253,7 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
                     files={changedFiles.slice(0, 12)}
                     selectedFilePath={selectedFilePath}
                     onOpenFile={onOpenFile}
+                    onContextMenu={setContextMenu}
                   />
                 ) : null}
                 <TreeEntries
@@ -154,6 +265,7 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
                   selectedFilePath={selectedFilePath}
                   onToggleDirectory={toggleDirectory}
                   onOpenFile={onOpenFile}
+                  onContextMenu={setContextMenu}
                 />
               </>
             )}
@@ -177,6 +289,14 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
           </div>
         )}
       </div>
+      {contextMenu ? (
+        <ContextMenu
+          items={contextMenuItems}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          minWidth={180}
+        />
+      ) : null}
     </div>
   );
 }
@@ -191,10 +311,12 @@ function ChangedFilesSection({
   files,
   selectedFilePath,
   onOpenFile,
+  onContextMenu,
 }: {
   files: WorkspaceIndexedFile[];
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
+  onContextMenu(target: { path: string; kind: "file" | "directory"; name: string; x: number; y: number } | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -208,6 +330,7 @@ function ChangedFilesSection({
           gitStatus={file.gitStatus}
           active={selectedFilePath === file.path}
           onClick={() => onOpenFile(file.path)}
+          onContextMenu={onContextMenu}
         />
       ))}
     </div>
@@ -222,6 +345,7 @@ function TreeEntries({
   selectedFilePath,
   onToggleDirectory,
   onOpenFile,
+  onContextMenu,
 }: {
   parentPath: string;
   entries: WorkspaceEntry[];
@@ -231,6 +355,7 @@ function TreeEntries({
   selectedFilePath: string | null;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
+  onContextMenu(target: { path: string; kind: "file" | "directory"; name: string; x: number; y: number } | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -241,6 +366,16 @@ function TreeEntries({
           <div key={entry.path}>
             <button
               onClick={() => entry.kind === "directory" ? void onToggleDirectory(entry.path) : onOpenFile(entry.path)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onContextMenu({
+                  path: entry.path,
+                  kind: entry.kind,
+                  name: entry.name,
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -277,6 +412,7 @@ function TreeEntries({
                     selectedFilePath={selectedFilePath}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
+                    onContextMenu={onContextMenu}
                   />
                 )}
               </div>
@@ -293,15 +429,27 @@ function FileRow({
   gitStatus,
   active,
   onClick,
+  onContextMenu,
 }: {
   path: string;
   gitStatus: GitFileStatus | null;
   active: boolean;
   onClick(): void;
+  onContextMenu(target: { path: string; kind: "file" | "directory"; name: string; x: number; y: number } | null): void;
 }) {
   return (
     <button
       onClick={onClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu({
+          path,
+          kind: "file",
+          name: basename(path),
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -405,4 +553,17 @@ function Row({ label, value }: { label: string; value: string }) {
       <div style={{ wordBreak: "break-word" }}>{value}</div>
     </div>
   );
+}
+
+function basename(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
+function joinChildPath(parent: string, child: string): string {
+  return parent ? `${parent}/${child}` : child;
+}
+
+async function copyText(text: string): Promise<void> {
+  await navigator.clipboard.writeText(text);
 }

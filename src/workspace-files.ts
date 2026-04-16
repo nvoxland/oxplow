@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
@@ -96,6 +96,51 @@ export function writeWorkspaceFile(rootDir: string, relativePath: string, conten
   const abs = resolveWorkspacePath(rootDir, path);
   writeFileSync(abs, content, "utf8");
   return { path, content };
+}
+
+export function createWorkspaceFile(rootDir: string, relativePath: string, content = ""): WorkspaceFile {
+  const path = cleanRelativePath(relativePath);
+  const abs = resolveWorkspacePath(rootDir, path);
+  if (existsSync(abs)) {
+    throw new Error("path already exists");
+  }
+  writeFileSync(abs, content, "utf8");
+  return { path, content };
+}
+
+export function createWorkspaceDirectory(rootDir: string, relativePath: string): { path: string } {
+  const path = cleanRelativePath(relativePath);
+  const abs = resolveWorkspacePath(rootDir, path);
+  if (existsSync(abs)) {
+    throw new Error("path already exists");
+  }
+  mkdirSync(abs, { recursive: true });
+  return { path };
+}
+
+export function renameWorkspacePath(rootDir: string, fromPath: string, toPath: string): { fromPath: string; toPath: string } {
+  const from = cleanRelativePath(fromPath);
+  const to = cleanRelativePath(toPath);
+  const fromAbs = resolveWorkspacePath(rootDir, from);
+  const toAbs = resolveWorkspacePath(rootDir, to);
+  if (!existsSync(fromAbs)) {
+    throw new Error("source path does not exist");
+  }
+  if (existsSync(toAbs)) {
+    throw new Error("destination path already exists");
+  }
+  renameSync(fromAbs, toAbs);
+  return { fromPath: from, toPath: to };
+}
+
+export function deleteWorkspacePath(rootDir: string, relativePath: string): { path: string } {
+  const path = cleanRelativePath(relativePath);
+  const abs = resolveWorkspacePath(rootDir, path);
+  if (!existsSync(abs)) {
+    throw new Error("path does not exist");
+  }
+  rmSync(abs, { recursive: true, force: false });
+  return { path };
 }
 
 export function summarizeGitStatuses(gitStatuses: Map<string, GitFileStatus>): WorkspaceStatusSummary {

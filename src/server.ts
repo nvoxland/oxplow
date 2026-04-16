@@ -10,7 +10,17 @@ import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "./git.
 import { HookEventStore, ingestHookPayload } from "./hook-ingest.js";
 import { LspSessionManager } from "./lsp.js";
 import type { PaneKind, Stream, StreamStore } from "./stream-store.js";
-import { listWorkspaceEntries, listWorkspaceFiles, readWorkspaceFile, summarizeGitStatuses, writeWorkspaceFile } from "./workspace-files.js";
+import {
+  createWorkspaceDirectory,
+  createWorkspaceFile,
+  deleteWorkspacePath,
+  listWorkspaceEntries,
+  listWorkspaceFiles,
+  readWorkspaceFile,
+  renameWorkspacePath,
+  summarizeGitStatuses,
+  writeWorkspaceFile,
+} from "./workspace-files.js";
 import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
 
 interface Deps {
@@ -226,6 +236,75 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
         return json(res, 200, saved);
       } catch (e) {
         deps.logger.warn("failed to write workspace file", { error: errorMessage(e) });
+        return json(res, 400, { error: (e as Error).message });
+      }
+    });
+  }
+  if (path === "/api/workspace/file" && req.method === "POST") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.path !== "string" || (parsed.content !== undefined && typeof parsed.content !== "string")) {
+        return json(res, 400, { error: "expected { path, content? }" });
+      }
+      try {
+        const stream = resolveStream(deps, url.searchParams.get("stream"));
+        const created = createWorkspaceFile(stream.worktree_path, parsed.path, parsed.content ?? "");
+        deps.workspaceWatchers.notify(stream.id, "created", created.path);
+        return json(res, 201, created);
+      } catch (e) {
+        deps.logger.warn("failed to create workspace file", { error: errorMessage(e) });
+        return json(res, 400, { error: (e as Error).message });
+      }
+    });
+  }
+  if (path === "/api/workspace/directory" && req.method === "POST") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.path !== "string") {
+        return json(res, 400, { error: "expected { path }" });
+      }
+      try {
+        const stream = resolveStream(deps, url.searchParams.get("stream"));
+        const created = createWorkspaceDirectory(stream.worktree_path, parsed.path);
+        deps.workspaceWatchers.notify(stream.id, "created", created.path);
+        return json(res, 201, created);
+      } catch (e) {
+        deps.logger.warn("failed to create workspace directory", { error: errorMessage(e) });
+        return json(res, 400, { error: (e as Error).message });
+      }
+    });
+  }
+  if (path === "/api/workspace/path" && req.method === "PUT") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.fromPath !== "string" || typeof parsed.toPath !== "string") {
+        return json(res, 400, { error: "expected { fromPath, toPath }" });
+      }
+      try {
+        const stream = resolveStream(deps, url.searchParams.get("stream"));
+        const renamed = renameWorkspacePath(stream.worktree_path, parsed.fromPath, parsed.toPath);
+        deps.workspaceWatchers.notify(stream.id, "deleted", renamed.fromPath);
+        deps.workspaceWatchers.notify(stream.id, "created", renamed.toPath);
+        return json(res, 200, renamed);
+      } catch (e) {
+        deps.logger.warn("failed to rename workspace path", { error: errorMessage(e) });
+        return json(res, 400, { error: (e as Error).message });
+      }
+    });
+  }
+  if (path === "/api/workspace/path" && req.method === "DELETE") {
+    return readBody(req, (body) => {
+      const parsed = parseJsonBody(body);
+      if (!parsed || typeof parsed.path !== "string") {
+        return json(res, 400, { error: "expected { path }" });
+      }
+      try {
+        const stream = resolveStream(deps, url.searchParams.get("stream"));
+        const deleted = deleteWorkspacePath(stream.worktree_path, parsed.path);
+        deps.workspaceWatchers.notify(stream.id, "deleted", deleted.path);
+        return json(res, 200, deleted);
+      } catch (e) {
+        deps.logger.warn("failed to delete workspace path", { error: errorMessage(e) });
         return json(res, 400, { error: (e as Error).message });
       }
     });

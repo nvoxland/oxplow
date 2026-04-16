@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createWorkspaceDirectory,
+  createWorkspaceFile,
+  deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
   listStreams,
   probeDaemon,
   readWorkspaceFile,
+  renameWorkspacePath,
   renameCurrentStream,
   subscribeWorkspaceEvents,
   switchStream,
@@ -17,6 +21,8 @@ import {
   createEmptyFileSession,
   markFileSaved,
   openFileInSession,
+  removeOpenFiles,
+  renameOpenFilePaths,
   selectOpenFile,
   setLoadedFileContent,
   setOpenFileLoading,
@@ -245,6 +251,63 @@ export function App() {
     setEditorNavigationTarget((current) => (current?.path === path ? null : current));
   }
 
+  async function handleCreateFile(path: string) {
+    if (!stream) return;
+    const created = await createWorkspaceFile(stream.id, path, "");
+    setError(null);
+    await handleOpenFile(created.path);
+  }
+
+  async function handleCreateDirectory(path: string) {
+    if (!stream) return;
+    await createWorkspaceDirectory(stream.id, path);
+    setError(null);
+  }
+
+  async function handleRenamePath(fromPath: string, toPath: string) {
+    if (!stream) return;
+    const renamed = await renameWorkspacePath(stream.id, fromPath, toPath);
+    setError(null);
+    setFileSessions((prev) => ({
+      ...prev,
+      [stream.id]: renameOpenFilePaths(prev[stream.id] ?? createEmptyFileSession(), (path) => {
+        if (path === renamed.fromPath) return renamed.toPath;
+        if (path.startsWith(renamed.fromPath + "/")) {
+          return `${renamed.toPath}${path.slice(renamed.fromPath.length)}`;
+        }
+        return path;
+      }),
+    }));
+    setEditorNavigationTarget((current) => {
+      if (!current) return current;
+      if (current.path === renamed.fromPath) {
+        return { ...current, path: renamed.toPath };
+      }
+      if (current.path.startsWith(renamed.fromPath + "/")) {
+        return { ...current, path: `${renamed.toPath}${current.path.slice(renamed.fromPath.length)}` };
+      }
+      return current;
+    });
+  }
+
+  async function handleDeletePath(path: string) {
+    if (!stream) return;
+    await deleteWorkspacePath(stream.id, path);
+    setError(null);
+    setFileSessions((prev) => {
+      const current = prev[stream.id] ?? createEmptyFileSession();
+      const toRemove = current.openOrder.filter((candidate) => candidate === path || candidate.startsWith(path + "/"));
+      return {
+        ...prev,
+        [stream.id]: removeOpenFiles(current, toRemove),
+      };
+    });
+    setEditorNavigationTarget((current) => {
+      if (!current) return current;
+      return current.path === path || current.path.startsWith(path + "/") ? null : current;
+    });
+  }
+
   const currentSession = useMemo(
     () => (stream ? fileSessions[stream.id] ?? createEmptyFileSession() : createEmptyFileSession()),
     [fileSessions, stream],
@@ -406,6 +469,10 @@ export function App() {
           onActiveTabChange={setSidebarTab}
           selectedFilePath={selectedFilePath}
           onOpenFile={handleOpenFile}
+          onCreateFile={handleCreateFile}
+          onCreateDirectory={handleCreateDirectory}
+          onRenamePath={handleRenamePath}
+          onDeletePath={handleDeletePath}
         />
       </div>
       <div style={{ overflow: "hidden", minHeight: 0 }}>
@@ -419,7 +486,11 @@ export function App() {
             openFiles={currentSession.files}
             currentFilePath={selectedFilePath}
             currentFileContent={currentFile?.draftContent ?? ""}
+            currentFileDirty={currentFileDirty}
             onEditorChange={handleEditorChange}
+            onEditorSave={() => {
+              void handleEditorSave();
+            }}
             editorFindRequest={editorFindRequest}
             editorNavigationTarget={editorNavigationTarget}
             onNavigateToLocation={handleNavigateToLocation}

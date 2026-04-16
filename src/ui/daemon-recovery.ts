@@ -1,5 +1,4 @@
 export interface DaemonProbeState {
-  consecutiveFailures: number;
   unavailable: boolean;
 }
 
@@ -9,11 +8,8 @@ export interface DaemonProbeDecision {
 }
 
 export const INITIAL_DAEMON_PROBE_STATE: DaemonProbeState = {
-  consecutiveFailures: 0,
   unavailable: false,
 };
-
-const FAILURE_THRESHOLD = 3;
 
 export function advanceDaemonProbeState(
   state: DaemonProbeState,
@@ -21,19 +17,14 @@ export function advanceDaemonProbeState(
 ): DaemonProbeDecision {
   if (daemonAlive) {
     return {
-      next: {
-        consecutiveFailures: 0,
-        unavailable: false,
-      },
+      next: INITIAL_DAEMON_PROBE_STATE,
       refresh: state.unavailable,
     };
   }
 
-  const consecutiveFailures = state.consecutiveFailures + 1;
   return {
     next: {
-      consecutiveFailures,
-      unavailable: consecutiveFailures >= FAILURE_THRESHOLD,
+      unavailable: true,
     },
     refresh: false,
   };

@@ -1,3 +1,5 @@
+import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
+
 export type CommandId =
   | "file.save"
   | "file.quickOpen"
@@ -12,16 +14,11 @@ export type MenuId = "file" | "edit" | "view";
 export type MainViewId = "working" | "talking" | "editor";
 export type SidebarViewId = "files" | "stream";
 
-export interface MenuCommand {
+export interface MenuCommand extends MenuItem {
   id: CommandId;
-  label: string;
-  enabled: boolean;
-  checked?: boolean;
-  shortcut?: string;
-  run(): void;
 }
 
-export interface MenuGroup {
+export interface MenuGroup extends SharedMenuGroup {
   id: MenuId;
   label: string;
   items: MenuCommand[];

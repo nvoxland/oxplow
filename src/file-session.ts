@@ -114,3 +114,35 @@ export function markFileSaved(state: FileSessionState, path: string, content: st
     },
   };
 }
+
+export function removeOpenFiles(state: FileSessionState, paths: string[]): FileSessionState {
+  let next = state;
+  for (const path of paths) {
+    next = closeOpenFile(next, path);
+  }
+  return next;
+}
+
+export function renameOpenFilePaths(
+  state: FileSessionState,
+  renamePath: (path: string) => string | null,
+): FileSessionState {
+  const renamedEntries = Object.entries(state.files)
+    .map(([path, file]) => {
+      const nextPath = renamePath(path);
+      return nextPath ? [nextPath, { ...file, path: nextPath }] as const : null;
+    })
+    .filter((entry): entry is readonly [string, OpenFileState] => !!entry);
+
+  const nextFiles = Object.fromEntries(renamedEntries);
+  const nextOpenOrder = state.openOrder
+    .map((path) => renamePath(path))
+    .filter((path): path is string => !!path);
+  const nextSelectedPath = state.selectedPath ? renamePath(state.selectedPath) : null;
+
+  return {
+    selectedPath: nextSelectedPath,
+    openOrder: nextOpenOrder,
+    files: nextFiles,
+  };
+}

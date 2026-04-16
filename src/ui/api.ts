@@ -34,6 +34,15 @@ export interface WorkspaceFile {
   content: string;
 }
 
+export interface WorkspacePathChange {
+  path: string;
+}
+
+export interface WorkspaceRenameResult {
+  fromPath: string;
+  toPath: string;
+}
+
 export interface WorkspaceIndexedFile {
   path: string;
   gitStatus: GitFileStatus | null;
@@ -128,6 +137,46 @@ export async function writeWorkspaceFile(streamId: string, path: string, content
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, content }),
+  });
+}
+
+export async function createWorkspaceFile(streamId: string, path: string, content = ""): Promise<WorkspaceFile> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/file?${params.toString()}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, content }),
+  });
+}
+
+export async function createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/directory?${params.toString()}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function renameWorkspacePath(
+  streamId: string,
+  fromPath: string,
+  toPath: string,
+): Promise<WorkspaceRenameResult> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/path?${params.toString()}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fromPath, toPath }),
+  });
+}
+
+export async function deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange> {
+  const params = new URLSearchParams({ stream: streamId });
+  return fetchJson(`/api/workspace/path?${params.toString()}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
   });
 }
 

@@ -5,12 +5,16 @@ import type { OpenFileState } from "../../file-session.js";
 import type { Stream } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri } from "../lsp.js";
+import type { MenuItem } from "../menu.js";
+import { ContextMenu } from "./ContextMenu.js";
 
 interface Props {
   stream: Stream;
   filePath: string | null;
   value: string;
+  isDirty: boolean;
   onChange(value: string): void;
+  onSave(): void | Promise<void>;
   findRequest: number;
   navigationTarget: EditorNavigationTarget | null;
   openFileOrder: string[];
@@ -24,7 +28,9 @@ export function EditorPane({
   stream,
   filePath,
   value,
+  isDirty,
   onChange,
+  onSave,
   findRequest,
   navigationTarget,
   openFileOrder,
@@ -47,6 +53,7 @@ export function EditorPane({
   const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
   const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   onChangeRef.current = onChange;
   onNavigateRef.current = onNavigateToLocation;
@@ -65,10 +72,24 @@ export function EditorPane({
         theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: false },
+        contextmenu: false,
       });
       editorRef.current = editor;
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
       registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
+      editor.onContextMenu((event: any) => {
+        if (!filePathRef.current) return;
+        const position = event.target?.position ?? editor.getPosition();
+        if (position) {
+          editor.setPosition(position);
+        }
+        editor.focus();
+        const browserEvent = event.event?.browserEvent as MouseEvent | undefined;
+        setContextMenu({
+          x: browserEvent?.clientX ?? 8,
+          y: browserEvent?.clientY ?? 8,
+        });
+      });
     })();
     return () => {
       cancelled = true;
@@ -82,6 +103,10 @@ export function EditorPane({
       editorRef.current?.dispose();
     };
   }, []);
+
+  useEffect(() => {
+    setContextMenu(null);
+  }, [filePath, stream.id]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -259,6 +284,42 @@ export function EditorPane({
     return client;
   }
 
+  const contextMenuItems: MenuItem[] = [
+    {
+      id: "editor.save",
+      label: "Save",
+      shortcut: "Ctrl/Cmd+S",
+      enabled: !!filePath && isDirty,
+      run: () => onSave(),
+    },
+    {
+      id: "editor.find",
+      label: "Find",
+      shortcut: "Ctrl/Cmd+F",
+      enabled: !!filePath,
+      run: () => editorRef.current?.getAction("actions.find")?.run(),
+    },
+    {
+      id: "editor.go-to-definition",
+      label: "Go to Definition",
+      shortcut: "F12",
+      enabled: !!filePath && isLspCandidateLanguage(languageForPath(filePath)),
+      run: () => goToDefinition(),
+    },
+    {
+      id: "editor.format-document",
+      label: "Format Document",
+      enabled: !!filePath,
+      run: () => editorRef.current?.getAction("editor.action.formatDocument")?.run(),
+    },
+    {
+      id: "editor.copy-path",
+      label: "Copy Path",
+      enabled: !!filePath,
+      run: () => (filePath ? navigator.clipboard.writeText(filePath) : undefined),
+    },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {openFileOrder.length > 1 ? (
@@ -329,6 +390,13 @@ export function EditorPane({
           <div style={emptyStyle}>
             <div>Select a file from the sidebar to open it here.</div>
           </div>
+        ) : null}
+        {contextMenu ? (
+          <ContextMenu
+            items={contextMenuItems}
+            position={contextMenu}
+            onClose={() => setContextMenu(null)}
+          />
         ) : null}
       </div>
     </div>

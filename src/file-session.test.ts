@@ -4,6 +4,8 @@ import {
   createEmptyFileSession,
   markFileSaved,
   openFileInSession,
+  removeOpenFiles,
+  renameOpenFilePaths,
   selectOpenFile,
   setLoadedFileContent,
   updateFileDraft,
@@ -54,4 +56,31 @@ test("setLoadedFileContent preserves a dirty draft while updating saved content"
 
   expect(state.files["a.ts"]?.savedContent).toBe("theirs");
   expect(state.files["a.ts"]?.draftContent).toBe("mine");
+});
+
+test("renameOpenFilePaths renames matching open files and preserves selection", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "src/a.ts", "a");
+  state = openFileInSession(state, "src/nested/b.ts", "b");
+  state = selectOpenFile(state, "src/nested/b.ts");
+
+  state = renameOpenFilePaths(state, (path) => path.startsWith("src/")
+    ? `app/${path.slice("src/".length)}`
+    : path);
+
+  expect(state.openOrder).toEqual(["app/a.ts", "app/nested/b.ts"]);
+  expect(state.selectedPath).toBe("app/nested/b.ts");
+  expect(Object.keys(state.files)).toEqual(["app/a.ts", "app/nested/b.ts"]);
+});
+
+test("removeOpenFiles closes a batch of paths", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "a.ts", "a");
+  state = openFileInSession(state, "b.ts", "b");
+  state = openFileInSession(state, "c.ts", "c");
+
+  state = removeOpenFiles(state, ["a.ts", "c.ts"]);
+
+  expect(state.openOrder).toEqual(["b.ts"]);
+  expect(state.selectedPath).toBe("b.ts");
 });

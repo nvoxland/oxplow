@@ -8,22 +8,19 @@ test("healthy probe keeps the daemon marked available", () => {
   });
 });
 
-test("single failed probe does not mark the daemon unavailable yet", () => {
+test("single failed probe marks the daemon unavailable immediately", () => {
   expect(advanceDaemonProbeState(INITIAL_DAEMON_PROBE_STATE, false)).toEqual({
     next: {
-      consecutiveFailures: 1,
-      unavailable: false,
+      unavailable: true,
     },
     refresh: false,
   });
 });
 
-test("daemon becomes unavailable only after repeated failed probes", () => {
-  const once = advanceDaemonProbeState(INITIAL_DAEMON_PROBE_STATE, false).next;
-  const twice = advanceDaemonProbeState(once, false).next;
-  expect(advanceDaemonProbeState(twice, false)).toEqual({
+test("additional failed probes keep the daemon unavailable without extra transitions", () => {
+  const downState = advanceDaemonProbeState(INITIAL_DAEMON_PROBE_STATE, false).next;
+  expect(advanceDaemonProbeState(downState, false)).toEqual({
     next: {
-      consecutiveFailures: 3,
       unavailable: true,
     },
     refresh: false,
@@ -31,7 +28,7 @@ test("daemon becomes unavailable only after repeated failed probes", () => {
 });
 
 test("recovery refresh only happens after the daemon was marked unavailable", () => {
-  const downState = { consecutiveFailures: 3, unavailable: true };
+  const downState = { unavailable: true };
   expect(advanceDaemonProbeState(downState, true)).toEqual({
     next: INITIAL_DAEMON_PROBE_STATE,
     refresh: true,

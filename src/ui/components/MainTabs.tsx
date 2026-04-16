@@ -14,7 +14,9 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   currentFilePath: string | null;
   currentFileContent: string;
+  currentFileDirty: boolean;
   onEditorChange(value: string): void;
+  onEditorSave(): void;
   editorFindRequest: number;
   editorNavigationTarget: EditorNavigationTarget | null;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
@@ -30,7 +32,9 @@ export function MainTabs({
   openFiles,
   currentFilePath,
   currentFileContent,
+  currentFileDirty,
   onEditorChange,
+  onEditorSave,
   editorFindRequest,
   editorNavigationTarget,
   onNavigateToLocation,
@@ -79,7 +83,9 @@ export function MainTabs({
             stream={stream}
             filePath={currentFilePath}
             value={currentFileContent}
+            isDirty={currentFileDirty}
             onChange={onEditorChange}
+            onSave={onEditorSave}
             findRequest={editorFindRequest}
             navigationTarget={editorNavigationTarget}
             onNavigateToLocation={onNavigateToLocation}
