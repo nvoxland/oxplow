@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../core/logger.js";
 import { WorkspaceWatcherRegistry, shouldIgnoreWorkspaceWatchPath } from "./workspace-watch.js";
 
 const tempDirs: string[] = [];

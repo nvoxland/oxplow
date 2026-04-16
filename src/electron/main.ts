@@ -100,11 +100,11 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:selectBatch", (_event, streamId: string, batchId: string) => currentRuntime.selectBatch(streamId, batchId));
   ipcMain.handle("newde:promoteBatch", (_event, streamId: string, batchId: string) => currentRuntime.promoteBatch(streamId, batchId));
   ipcMain.handle("newde:completeBatch", (_event, streamId: string, batchId: string) => currentRuntime.completeBatch(streamId, batchId));
-  ipcMain.handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.getBatchWorkState(streamId, batchId));
-  ipcMain.handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.createWorkItem(streamId, batchId, input));
-  ipcMain.handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.updateWorkItem(streamId, batchId, itemId, changes));
-  ipcMain.handle("newde:addWorkItemNote", (_event, streamId: string, batchId: string, itemId: string, note: string) => currentRuntime.addWorkItemNote(streamId, batchId, itemId, note));
-  ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.listWorkItemEvents(streamId, batchId, itemId));
+  ipcMain.handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.workItemApi.getBatchWorkState(streamId, batchId));
+  ipcMain.handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, batchId, input));
+  ipcMain.handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));
+  ipcMain.handle("newde:addWorkItemNote", (_event, streamId: string, batchId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, batchId, itemId, note));
+  ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
   ipcMain.handle("newde:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
   ipcMain.handle("newde:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));

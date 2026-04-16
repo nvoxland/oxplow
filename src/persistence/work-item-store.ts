@@ -1,5 +1,5 @@
-import type { Logger } from "./logger.js";
-import { createId } from "./ids.js";
+import type { Logger } from "../core/logger.js";
+import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";

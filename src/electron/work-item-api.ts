@@ -1,0 +1,91 @@
+import type { Batch } from "../persistence/batch-store.js";
+import type {
+  BatchWorkState,
+  WorkItemEvent,
+  WorkItemKind,
+  WorkItemPriority,
+  WorkItemStatus,
+  WorkItemStore,
+} from "../persistence/work-item-store.js";
+
+export interface WorkItemApiDeps {
+  resolveBatch(streamId: string, batchId: string): Batch;
+  workItemStore: WorkItemStore;
+}
+
+export interface CreateWorkItemInput {
+  kind: WorkItemKind;
+  title: string;
+  description?: string;
+  parentId?: string | null;
+  status?: WorkItemStatus;
+  priority?: WorkItemPriority;
+}
+
+export interface UpdateWorkItemChanges {
+  title?: string;
+  description?: string;
+  parentId?: string | null;
+  status?: WorkItemStatus;
+  priority?: WorkItemPriority;
+}
+
+export interface WorkItemApi {
+  getBatchWorkState(streamId: string, batchId: string): BatchWorkState;
+  createWorkItem(streamId: string, batchId: string, input: CreateWorkItemInput): BatchWorkState;
+  updateWorkItem(streamId: string, batchId: string, itemId: string, changes: UpdateWorkItemChanges): BatchWorkState;
+  addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[];
+  listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
+}
+
+export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDeps): WorkItemApi {
+  return {
+    getBatchWorkState(streamId, batchId) {
+      resolveBatch(streamId, batchId);
+      return workItemStore.getState(batchId);
+    },
+
+    createWorkItem(streamId, batchId, input) {
+      resolveBatch(streamId, batchId);
+      workItemStore.createItem({
+        batchId,
+        parentId: input.parentId,
+        kind: input.kind,
+        title: input.title,
+        description: input.description,
+        status: input.status,
+        priority: input.priority,
+        createdBy: "user",
+        actorId: "ui",
+      });
+      return workItemStore.getState(batchId);
+    },
+
+    updateWorkItem(streamId, batchId, itemId, changes) {
+      resolveBatch(streamId, batchId);
+      workItemStore.updateItem({
+        batchId,
+        itemId,
+        title: changes.title,
+        description: changes.description,
+        parentId: changes.parentId,
+        status: changes.status,
+        priority: changes.priority,
+        actorKind: "user",
+        actorId: "ui",
+      });
+      return workItemStore.getState(batchId);
+    },
+
+    addWorkItemNote(streamId, batchId, itemId, note) {
+      resolveBatch(streamId, batchId);
+      workItemStore.addNote(batchId, itemId, note, "user", "ui");
+      return workItemStore.listEvents(batchId, itemId);
+    },
+
+    listWorkItemEvents(streamId, batchId, itemId) {
+      resolveBatch(streamId, batchId);
+      return workItemStore.listEvents(batchId, itemId);
+    },
+  };
+}

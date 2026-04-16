@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 import { spawn } from "node-pty";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../core/logger.js";
 import { capturePaneHistory, copyModePage, copyModeScroll, exitCopyMode, resizeWindow } from "./tmux.js";
 
 interface ClientMsg {

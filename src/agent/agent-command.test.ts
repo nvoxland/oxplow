@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { buildAgentCommand } from "./daemon.js";
-import type { Stream } from "./stream-store.js";
+import { buildAgentCommand } from "./agent-command.js";
+import type { Stream } from "../persistence/stream-store.js";
 
 function makeStream(overrides: Partial<Stream> = {}): Stream {
   return {

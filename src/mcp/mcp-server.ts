@@ -4,7 +4,7 @@ import { writeFileSync, unlinkSync, readdirSync, readFileSync, existsSync, mkdir
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../core/logger.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "newde";

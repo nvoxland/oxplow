@@ -1,4 +1,4 @@
-import type { PaneKind } from "./stream-store.js";
+import type { PaneKind } from "../persistence/stream-store.js";
 
 type ResumeUpdate =
   | { type: "set"; sessionId: string }

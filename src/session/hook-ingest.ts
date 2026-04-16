@@ -1,5 +1,5 @@
-import { normalize, type NormalizedEvent } from "./events.js";
-import type { PaneKind } from "./stream-store.js";
+import { normalize, type NormalizedEvent } from "../core/events.js";
+import type { PaneKind } from "../persistence/stream-store.js";
 
 export interface StoredEvent {
   id: number;

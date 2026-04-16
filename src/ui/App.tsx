@@ -39,12 +39,12 @@ import {
   setOpenFileLoading,
   updateFileDraft,
   type FileSessionState,
-} from "../file-session.js";
+} from "../session/file-session.js";
 import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { TopBar } from "./components/TopBar.js";
-import { LeftPanel, type SidebarTab } from "./components/LeftPanel.js";
+import { LeftPanel, type SidebarTab } from "./components/LeftPanel/index.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
 import { MainTabs, type TabId } from "./components/MainTabs.js";

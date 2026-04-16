@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../core/logger.js";
 
 const dbCache = new Map<string, StateDatabase>();
 const require = createRequire(import.meta.url);

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../core/logger.js";
 
 export const NEWDE_CONFIG_FILE = "newde.yaml";
 

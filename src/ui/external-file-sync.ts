@@ -1,4 +1,4 @@
-import type { OpenFileState } from "../file-session.js";
+import type { OpenFileState } from "../session/file-session.js";
 
 export type ExternalFileSyncAction = "noop" | "update-saved" | "replace-draft" | "prompt";
 

@@ -2,8 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type WebSocket from "ws";
-import type { Logger } from "./logger.js";
-import type { Stream } from "./stream-store.js";
+import type { Logger } from "../core/logger.js";
+import type { Stream } from "../persistence/stream-store.js";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";

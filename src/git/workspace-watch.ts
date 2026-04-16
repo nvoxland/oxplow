@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { relative, resolve, sep } from "node:path";
-import type { Logger } from "./logger.js";
-import type { Stream } from "./stream-store.js";
+import type { Logger } from "../core/logger.js";
+import type { Stream } from "../persistence/stream-store.js";
 
 export type WorkspaceWatchKind = "created" | "updated" | "deleted";
 

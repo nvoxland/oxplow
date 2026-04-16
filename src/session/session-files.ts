@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PaneKind } from "./stream-store.js";
+import type { PaneKind } from "../persistence/stream-store.js";
 
 export interface SessionFiles {
   dir: string;

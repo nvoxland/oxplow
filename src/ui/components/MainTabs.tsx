@@ -9,7 +9,7 @@ import type {
   WorkItemPriority,
   WorkItemStatus,
 } from "../api.js";
-import type { OpenFileState } from "../../file-session.js";
+import type { OpenFileState } from "../../session/file-session.js";
 import type { EditorNavigationTarget } from "../lsp.js";
 import { TerminalPane } from "./TerminalPane.js";
 import { EditorPane } from "./EditorPane.js";

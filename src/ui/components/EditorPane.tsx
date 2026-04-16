@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { OpenFileState } from "../../file-session.js";
+import type { OpenFileState } from "../../session/file-session.js";
 import type { Stream } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";

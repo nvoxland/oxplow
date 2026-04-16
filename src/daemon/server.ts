@@ -2,14 +2,14 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
-import { createUiClientLogger, type Logger, type LogLevel } from "./logger.js";
-import { attachPane } from "./pty-bridge.js";
-import { ResumeTracker } from "./resume-tracker.js";
-import { ensureStreamPane } from "./fleet.js";
-import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "./git.js";
-import { HookEventStore, ingestHookPayload } from "./hook-ingest.js";
-import { LspSessionManager } from "./lsp.js";
-import type { PaneKind, Stream, StreamStore } from "./stream-store.js";
+import { createUiClientLogger, type Logger, type LogLevel } from "../core/logger.js";
+import { attachPane } from "../terminal/pty-bridge.js";
+import { ResumeTracker } from "../session/resume-tracker.js";
+import { ensureStreamPane } from "../terminal/fleet.js";
+import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "../git/git.js";
+import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
+import { LspSessionManager } from "../lsp/lsp.js";
+import type { PaneKind, Stream, StreamStore } from "../persistence/stream-store.js";
 import {
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -20,8 +20,8 @@ import {
   renameWorkspacePath,
   summarizeGitStatuses,
   writeWorkspaceFile,
-} from "./workspace-files.js";
-import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
+} from "../git/workspace-files.js";
+import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 
 interface Deps {
   store: StreamStore;

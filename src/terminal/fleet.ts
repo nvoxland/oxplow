@@ -1,6 +1,6 @@
 import { ensureSession, ensureWindow, killWindow, listWindows } from "./tmux.js";
-import type { Logger } from "./logger.js";
-import type { PaneKind, Stream } from "./stream-store.js";
+import type { Logger } from "../core/logger.js";
+import type { PaneKind, Stream } from "../persistence/stream-store.js";
 import { createHash } from "node:crypto";
 
 export function ensureStreamSession(stream: Stream) {

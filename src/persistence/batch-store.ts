@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { createId } from "./ids.js";
-import type { Logger } from "./logger.js";
+import { createId } from "../core/ids.js";
+import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
 import type { Stream } from "./stream-store.js";
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { buildBatchMcpConfig } from "./runtime.js";
-import type { McpServerHandle } from "../mcp-server.js";
+import type { McpServerHandle } from "../mcp/mcp-server.js";
 
 function fakeMcp(overrides: Partial<McpServerHandle> = {}): McpServerHandle {
   return {

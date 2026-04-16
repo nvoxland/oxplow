@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { createId } from "./ids.js";
-import type { Logger } from "./logger.js";
+import { createId } from "../core/ids.js";
+import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
 
 export type PaneKind = "working" | "talking";

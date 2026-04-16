@@ -1,16 +1,17 @@
 import { basename, resolve } from "node:path";
-import { loadProjectConfig, type AgentKind, type NewdeConfig } from "./config.js";
-import { StreamStore, type PaneKind, type Stream } from "./stream-store.js";
-import { detectCurrentBranch, isGitRepo } from "./git.js";
-import { createDaemonLogger } from "./logger.js";
+import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
+import { StreamStore, type Stream } from "../persistence/stream-store.js";
+import { detectCurrentBranch, isGitRepo } from "../git/git.js";
+import { createDaemonLogger } from "../core/logger.js";
 import { startServer } from "./server.js";
-import { createSessionFiles, destroySessionFiles, type SessionFiles } from "./session-files.js";
-import { startMcpServer, type McpServerHandle } from "./mcp-server.js";
-import { HookEventStore } from "./hook-ingest.js";
-import { ResumeTracker } from "./resume-tracker.js";
-import { LspSessionManager } from "./lsp.js";
-import { killSession } from "./tmux.js";
-import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
+import { createSessionFiles, destroySessionFiles, type SessionFiles } from "../session/session-files.js";
+import { startMcpServer, type McpServerHandle } from "../mcp/mcp-server.js";
+import { HookEventStore } from "../session/hook-ingest.js";
+import { ResumeTracker } from "../session/resume-tracker.js";
+import { LspSessionManager } from "../lsp/lsp.js";
+import { killSession } from "../terminal/tmux.js";
+import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
+import { buildAgentCommand } from "../agent/agent-command.js";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
@@ -148,53 +149,6 @@ function cleanupSessions(streams: Stream[]) {
   for (const session of sessions) {
     killSession(session);
   }
-}
-
-export function buildAgentCommand(
-  agent: AgentKind,
-  stream: Stream,
-  pane: PaneKind,
-  settingsPath?: string,
-  appendSystemPrompt?: string,
-  mcpConfig?: string,
-): string {
-  const resumeSessionId = pane === "working"
-    ? stream.resume.working_session_id
-    : stream.resume.talking_session_id;
-  return buildAgentCommandForSession(agent, stream.worktree_path, resumeSessionId, settingsPath, appendSystemPrompt, mcpConfig);
-}
-
-export function buildAgentCommandForSession(
-  agent: AgentKind,
-  cwd: string,
-  resumeSessionId: string,
-  settingsPath?: string,
-  appendSystemPrompt?: string,
-  mcpConfig?: string,
-): string {
-  if (agent === "copilot") {
-    return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && exec copilot`)}`;
-  }
-
-  if (!settingsPath) {
-    throw new Error("Claude agent requires a settingsPath");
-  }
-  const promptArg = appendSystemPrompt
-    ? ` --append-system-prompt ${shellEscape(appendSystemPrompt)}`
-    : "";
-  const mcpArg = mcpConfig
-    ? ` --mcp-config ${shellEscape(mcpConfig)} --strict-mcp-config`
-    : "";
-  const claudeBase = `claude --settings ${shellEscape(settingsPath)}${promptArg}${mcpArg}`;
-  const freshClaude = `exec ${claudeBase}`;
-  const command = resumeSessionId
-    ? `${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[newde] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
-    : freshClaude;
-  return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && ${command}`)}`;
-}
-
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 if ((import.meta as { main?: boolean }).main) {
