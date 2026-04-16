@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type Batch,
   listWorkspaceEntries,
   listWorkspaceFiles,
   subscribeWorkspaceEvents,
@@ -13,10 +14,13 @@ import {
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 
-export type SidebarTab = "files" | "stream";
+export type SidebarTab = "batches" | "files" | "stream";
 
 interface Props {
   stream: Stream | null;
+  batches: Batch[];
+  selectedBatchId: string | null;
+  activeBatchId: string | null;
   activeTab: SidebarTab;
   onActiveTabChange(tab: SidebarTab): void;
   selectedFilePath: string | null;
@@ -25,10 +29,18 @@ interface Props {
   onCreateDirectory(path: string): Promise<void>;
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
+  onSelectBatch(batchId: string): Promise<void>;
+  onCreateBatch(title: string): Promise<void>;
+  onReorderBatch(batchId: string, targetIndex: number): Promise<void>;
+  onPromoteBatch(batchId: string): Promise<void>;
+  onCompleteBatch(batchId: string): Promise<void>;
 }
 
 export function LeftPanel({
   stream,
+  batches,
+  selectedBatchId,
+  activeBatchId,
   activeTab,
   onActiveTabChange,
   selectedFilePath,
@@ -37,6 +49,11 @@ export function LeftPanel({
   onCreateDirectory,
   onRenamePath,
   onDeletePath,
+  onSelectBatch,
+  onCreateBatch,
+  onReorderBatch,
+  onPromoteBatch,
+  onCompleteBatch,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
@@ -232,11 +249,23 @@ export function LeftPanel({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12 }}>
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
+        <SidebarButton active={activeTab === "batches"} onClick={() => onActiveTabChange("batches")}>Batches</SidebarButton>
         <SidebarButton active={activeTab === "files"} onClick={() => onActiveTabChange("files")}>Files</SidebarButton>
         <SidebarButton active={activeTab === "stream"} onClick={() => onActiveTabChange("stream")}>Stream</SidebarButton>
       </div>
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12 }}>
-        {activeTab === "files" ? (
+        {activeTab === "batches" ? (
+          <BatchQueueSection
+            batches={batches}
+            selectedBatchId={selectedBatchId}
+            activeBatchId={activeBatchId}
+            onSelectBatch={onSelectBatch}
+            onCreateBatch={onCreateBatch}
+            onReorderBatch={onReorderBatch}
+            onPromoteBatch={onPromoteBatch}
+            onCompleteBatch={onCompleteBatch}
+          />
+        ) : activeTab === "files" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
             <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
               {stream.branch}
@@ -278,13 +307,10 @@ export function LeftPanel({
               <Row label="Source" value={stream.branch_source} />
               <Row label="Worktree" value={stream.worktree_path} />
             </Section>
-            <Section title="Claude resume">
-              <Row label="Working" value={stream.resume.working_session_id || "not started yet"} />
-              <Row label="Talking" value={stream.resume.talking_session_id || "not started yet"} />
-            </Section>
-            <Section title="Panes">
-              <Row label="Working" value={stream.panes.working} />
-              <Row label="Talking" value={stream.panes.talking} />
+            <Section title="Batches">
+              <Row label="Count" value={String(batches.length)} />
+              <Row label="Active" value={batches.find((batch) => batch.id === activeBatchId)?.title ?? "none"} />
+              <Row label="Selected" value={batches.find((batch) => batch.id === selectedBatchId)?.title ?? "none"} />
             </Section>
           </div>
         )}
@@ -333,6 +359,182 @@ function ChangedFilesSection({
           onContextMenu={onContextMenu}
         />
       ))}
+    </div>
+  );
+}
+
+function BatchQueueSection({
+  batches,
+  selectedBatchId,
+  activeBatchId,
+  onSelectBatch,
+  onCreateBatch,
+  onReorderBatch,
+  onPromoteBatch,
+  onCompleteBatch,
+}: {
+  batches: Batch[];
+  selectedBatchId: string | null;
+  activeBatchId: string | null;
+  onSelectBatch(batchId: string): Promise<void>;
+  onCreateBatch(title: string): Promise<void>;
+  onReorderBatch(batchId: string, targetIndex: number): Promise<void>;
+  onPromoteBatch(batchId: string): Promise<void>;
+  onCompleteBatch(batchId: string): Promise<void>;
+}) {
+  const selected = batches.find((batch) => batch.id === selectedBatchId) ?? null;
+  const hasQueued = batches.some((batch) => batch.status === "queued");
+  const [showCreate, setShowCreate] = useState(false);
+  const [title, setTitle] = useState(`Batch ${batches.length + 1}`);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 260 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {batches.map((batch) => {
+          const active = batch.id === activeBatchId;
+          const selectedRow = batch.id === selectedBatchId;
+          return (
+            <button
+              key={batch.id}
+              onClick={() => void onSelectBatch(batch.id)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "stretch",
+                gap: 4,
+                padding: "8px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: selectedRow ? "rgba(74, 158, 255, 0.12)" : "var(--bg-2)",
+                color: "inherit",
+                cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "inherit",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontWeight: 600 }}>{batch.title}</span>
+                <span style={{ color: batchStatusColor(batch.status) }}>{active ? "active" : batch.status}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <button
+          onClick={() => {
+            setShowCreate((current) => !current);
+            setTitle((current) => current || `Batch ${batches.length + 1}`);
+            setFormError(null);
+          }}
+          style={smallButtonStyle}
+        >
+          {showCreate ? "Cancel" : "+ Batch"}
+        </button>
+        {showCreate ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              padding: 10,
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg-2)",
+            }}
+          >
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ color: "var(--muted)", fontSize: 11 }}>Title</span>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                style={batchInputStyle}
+                placeholder="Batch title"
+              />
+            </label>
+            {formError ? <div style={{ color: "#ff6b6b", fontSize: 11 }}>{formError}</div> : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={() => {
+                  setShowCreate(false);
+                  setFormError(null);
+                }}
+                style={smallButtonStyle}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const nextTitle = title.trim();
+                  if (!nextTitle) {
+                    setFormError("Title is required");
+                    return;
+                  }
+                  setSubmitting(true);
+                  setFormError(null);
+                  void onCreateBatch(nextTitle)
+                    .then(() => {
+                      setShowCreate(false);
+                      setTitle(`Batch ${batches.length + 2}`);
+                    })
+                    .catch((error) => {
+                      setFormError(String(error));
+                    })
+                    .finally(() => {
+                      setSubmitting(false);
+                    });
+                }}
+                style={smallButtonStyle}
+                disabled={submitting}
+              >
+                {submitting ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {selected ? (
+        <Section title="Selected batch">
+          <Row label="Title" value={selected.title} />
+          <Row label="Status" value={selected.id === activeBatchId ? "active" : selected.status} />
+          <Row label="Order" value={String(selected.sort_index + 1)} />
+          <Row label="Resume" value={selected.resume_session_id || "not started yet"} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => void onReorderBatch(selected.id, selected.sort_index - 1)}
+              style={smallButtonStyle}
+              disabled={selected.sort_index === 0}
+            >
+              Move up
+            </button>
+            <button
+              onClick={() => void onReorderBatch(selected.id, selected.sort_index + 1)}
+              style={smallButtonStyle}
+              disabled={selected.sort_index >= batches.length - 1}
+            >
+              Move down
+            </button>
+            {selected.id !== activeBatchId && selected.status !== "completed" ? (
+              <button onClick={() => void onPromoteBatch(selected.id)} style={smallButtonStyle}>
+                Move to top
+              </button>
+            ) : null}
+            {selected.id === activeBatchId ? (
+              <button onClick={() => void onCompleteBatch(selected.id)} style={smallButtonStyle} disabled={!hasQueued}>
+                Complete batch
+              </button>
+            ) : null}
+          </div>
+          {selected.id !== activeBatchId && selected.status !== "completed" ? (
+            <div style={{ color: "var(--muted)", fontSize: 11 }}>
+              Queued batches are for questions and planning until promoted.
+            </div>
+          ) : null}
+        </Section>
+      ) : null}
     </div>
   );
 }
@@ -519,6 +721,27 @@ function GitSummary({ summary }: { summary: WorkspaceStatusSummary }) {
   );
 }
 
+const smallButtonStyle = {
+  border: "1px solid var(--border)",
+  background: "var(--bg-2)",
+  color: "inherit",
+  borderRadius: 6,
+  padding: "6px 10px",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+} satisfies CSSProperties;
+
+const batchInputStyle = {
+  border: "1px solid var(--border)",
+  background: "var(--bg)",
+  color: "inherit",
+  borderRadius: 6,
+  padding: "8px 10px",
+  fontFamily: "inherit",
+  fontSize: 12,
+} satisfies CSSProperties;
+
 function SidebarButton({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
   return (
     <button
@@ -557,6 +780,14 @@ function Row({ label, value }: { label: string; value: string }) {
       <div style={{ wordBreak: "break-word" }}>{value}</div>
     </div>
   );
+}
+
+function batchStatusColor(status: Batch["status"]) {
+  switch (status) {
+    case "active": return "#86efac";
+    case "queued": return "#7dd3fc";
+    case "completed": return "#c4b5fd";
+  }
 }
 
 function basename(path: string): string {

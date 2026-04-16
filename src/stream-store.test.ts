@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StreamStore } from "./stream-store.js";
@@ -32,32 +32,28 @@ test("create persists extended stream metadata and current stream selection", ()
   expect(current?.id).toBe(stream.id);
   expect(current?.branch_ref).toBe("refs/heads/main");
   expect(current?.worktree_path).toBe(projectDir);
-  expect(current?.resume.working_session_id).toBe("");
+  expect(current?.panes.working).toContain(`working-${stream.id}`);
 });
 
-test("loadAll backfills defaults for legacy stream files", () => {
+test("list persists multiple streams in creation order", () => {
   const projectDir = mkProjectDir();
-  const streamsDir = join(projectDir, ".newde", "streams");
-  const legacyBody = [
-    `id: "s-legacy"`,
-    `title: "Legacy"`,
-    `summary: ""`,
-    `branch: "main"`,
-    `created_at: "2024-01-01T00:00:00.000Z"`,
-    `updated_at: "2024-01-01T00:00:00.000Z"`,
-    `panes:`,
-    `  working: "session:working"`,
-    `  talking: "session:talking"`,
-    ``,
-  ].join("\n");
-  writeFileSync(join(streamsDir, "s-legacy.yml"), legacyBody, "utf8");
-
   const store = new StreamStore(projectDir);
-  const stream = store.get("s-legacy");
-  expect(stream?.branch_ref).toBe("refs/heads/main");
-  expect(stream?.branch_source).toBe("local");
-  expect(stream?.worktree_path).toBe(projectDir);
-  expect(stream?.resume.talking_session_id).toBe("");
+  const first = store.create({
+    title: "First",
+    branch: "main",
+    worktreePath: projectDir,
+    projectBase: "proj",
+  });
+  const second = store.create({
+    title: "Second",
+    branch: "feature",
+    worktreePath: join(projectDir, "feature"),
+    projectBase: "proj",
+  });
+
+  const reloaded = new StreamStore(projectDir);
+  expect(reloaded.list().map((stream) => stream.id)).toEqual([first.id, second.id]);
+  expect(reloaded.findByBranch("feature")?.id).toBe(second.id);
 });
 
 test("update persists renamed title", () => {
@@ -79,7 +75,5 @@ test("update persists renamed title", () => {
 function mkProjectDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "newde-stream-store-"));
   tempDirs.push(dir);
-  const streamsDir = join(dir, ".newde", "streams");
-  mkdirSync(streamsDir, { recursive: true });
   return dir;
 }

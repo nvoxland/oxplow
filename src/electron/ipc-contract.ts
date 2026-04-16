@@ -1,5 +1,7 @@
 import type {
   BranchRef,
+  Batch,
+  BatchState,
   GitFileStatus,
   Stream,
   WorkspaceContext,
@@ -16,6 +18,8 @@ import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
   BranchRef,
+  Batch,
+  BatchState,
   CommandId,
   GitFileStatus,
   MenuGroupSnapshot,
@@ -60,6 +64,12 @@ export interface DesktopApi {
     | { title: string; summary?: string; source: "existing"; ref: string }
     | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
   ): Promise<Stream>;
+  getBatchState(streamId: string): Promise<BatchState>;
+  createBatch(streamId: string, title: string): Promise<BatchState>;
+  reorderBatch(streamId: string, batchId: string, targetIndex: number): Promise<BatchState>;
+  selectBatch(streamId: string, batchId: string): Promise<BatchState>;
+  promoteBatch(streamId: string, batchId: string): Promise<BatchState>;
+  completeBatch(streamId: string, batchId: string): Promise<BatchState>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
   listWorkspaceFiles(streamId: string): Promise<{ files: WorkspaceIndexedFile[]; summary: WorkspaceStatusSummary }>;
   readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile>;

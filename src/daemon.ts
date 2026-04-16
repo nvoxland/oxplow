@@ -151,26 +151,34 @@ function cleanupSessions(streams: Stream[]) {
 }
 
 export function buildAgentCommand(agent: AgentKind, stream: Stream, pane: PaneKind, settingsPath?: string): string {
+  const resumeSessionId = pane === "working"
+    ? stream.resume.working_session_id
+    : stream.resume.talking_session_id;
+  return buildAgentCommandForSession(agent, stream.worktree_path, resumeSessionId, settingsPath);
+}
+
+export function buildAgentCommandForSession(
+  agent: AgentKind,
+  cwd: string,
+  resumeSessionId: string,
+  settingsPath?: string,
+): string {
   if (agent === "copilot") {
-    return `sh -lc ${shellEscape(`cd ${shellEscape(stream.worktree_path)} && exec copilot`)}`;
+    return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && exec copilot`)}`;
   }
 
   if (!settingsPath) {
     throw new Error("Claude agent requires a settingsPath");
   }
-  const resumeSessionId = pane === "working"
-    ? stream.resume.working_session_id
-    : stream.resume.talking_session_id;
   const claudeBase = `claude --settings ${shellEscape(settingsPath)}`;
   const freshClaude = `exec ${claudeBase}`;
   const command = resumeSessionId
     ? `${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[newde] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
     : freshClaude;
-  return `sh -lc ${shellEscape(`cd ${shellEscape(stream.worktree_path)} && ${command}`)}`;
+  return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && ${command}`)}`;
 }
 
 function shellEscape(s: string): string {
-  // Wrap in single quotes, escaping any embedded single quotes.
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 

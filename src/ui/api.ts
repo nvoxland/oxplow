@@ -14,6 +14,24 @@ export interface Stream {
   resume: { working_session_id: string; talking_session_id: string };
 }
 
+export interface Batch {
+  id: string;
+  stream_id: string;
+  title: string;
+  status: "active" | "queued" | "completed";
+  sort_index: number;
+  created_at: string;
+  updated_at: string;
+  pane_target: string;
+  resume_session_id: string;
+}
+
+export interface BatchState {
+  selectedBatchId: string | null;
+  activeBatchId: string | null;
+  batches: Batch[];
+}
+
 export interface BranchRef {
   kind: "local" | "remote";
   name: string;
@@ -102,6 +120,30 @@ export async function createStream(input:
   return desktopApi().createStream(input);
 }
 
+export async function getBatchState(streamId: string): Promise<BatchState> {
+  return desktopApi().getBatchState(streamId);
+}
+
+export async function createBatch(streamId: string, title: string): Promise<BatchState> {
+  return desktopApi().createBatch(streamId, title);
+}
+
+export async function reorderBatch(streamId: string, batchId: string, targetIndex: number): Promise<BatchState> {
+  return desktopApi().reorderBatch(streamId, batchId, targetIndex);
+}
+
+export async function selectBatch(streamId: string, batchId: string): Promise<BatchState> {
+  return desktopApi().selectBatch(streamId, batchId);
+}
+
+export async function promoteBatch(streamId: string, batchId: string): Promise<BatchState> {
+  return desktopApi().promoteBatch(streamId, batchId);
+}
+
+export async function completeBatch(streamId: string, batchId: string): Promise<BatchState> {
+  return desktopApi().completeBatch(streamId, batchId);
+}
+
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
   return desktopApi().listWorkspaceEntries(streamId, path);
 }
@@ -186,6 +228,7 @@ export type NormalizedEvent =
 export interface StoredEvent {
   id: number;
   streamId: string;
+  batchId?: string;
   pane?: "working" | "talking";
   normalized: NormalizedEvent;
 }

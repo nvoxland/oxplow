@@ -4,7 +4,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createSessionFiles, destroySessionFiles } from "./session-files.js";
 
 test("createSessionFiles writes hooks.json and executable forwarder", () => {
-  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
+  const s = createSessionFiles({
+    daemonPort: 17999,
+    streamId: "s-1",
+    pane: "working",
+  });
   try {
     expect(existsSync(s.dir)).toBe(true);
     expect(existsSync(s.settingsPath)).toBe(true);
@@ -42,19 +46,31 @@ test("createSessionFiles writes hooks.json and executable forwarder", () => {
 });
 
 test("destroySessionFiles removes the directory", () => {
-  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
+  const s = createSessionFiles({
+    daemonPort: 17999,
+    streamId: "s-1",
+    pane: "working",
+  });
   destroySessionFiles(s);
   expect(existsSync(s.dir)).toBe(false);
 });
 
 test("destroySessionFiles is idempotent", () => {
-  const s = createSessionFiles({ daemonPort: 17999, streamId: "s-1", pane: "working" });
+  const s = createSessionFiles({
+    daemonPort: 17999,
+    streamId: "s-1",
+    pane: "working",
+  });
   destroySessionFiles(s);
   expect(() => destroySessionFiles(s)).not.toThrow();
 });
 
 test("hook forwarder exits successfully when the daemon endpoint is unavailable", () => {
-  const s = createSessionFiles({ daemonPort: 1, streamId: "s-1", pane: "working" });
+  const s = createSessionFiles({
+    daemonPort: 1,
+    streamId: "s-1",
+    pane: "working",
+  });
   try {
     const result = spawnSync(s.forwarderPath, ["SessionStart"], {
       input: JSON.stringify({ session_id: "s1" }),

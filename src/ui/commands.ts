@@ -5,14 +5,14 @@ export type CommandId =
   | "file.quickOpen"
   | "edit.find"
   | "view.files-sidebar"
+  | "view.batches-sidebar"
   | "view.stream-sidebar"
-  | "view.working"
-  | "view.talking"
+  | "view.agent"
   | "view.editor";
 
 export type MenuId = "file" | "edit" | "view";
-export type MainViewId = "working" | "talking" | "editor";
-export type SidebarViewId = "files" | "stream";
+export type MainViewId = "agent" | "editor";
+export type SidebarViewId = "files" | "batches" | "stream";
 
 export interface MenuCommand extends MenuItem {
   id: CommandId;
@@ -51,9 +51,9 @@ export interface CommandHandlers {
   quickOpen(): void;
   find(): void;
   showFilesSidebar(): void;
+  showBatchesSidebar(): void;
   showStreamSidebar(): void;
-  showWorkingPane(): void;
-  showTalkingPane(): void;
+  showAgentPane(): void;
   showEditorPane(): void;
 }
 
@@ -100,22 +100,22 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
           checked: state.sidebarTab === "files",
         },
         {
+          id: "view.batches-sidebar",
+          label: "Batch Queue",
+          enabled: state.hasStream,
+          checked: state.sidebarTab === "batches",
+        },
+        {
           id: "view.stream-sidebar",
           label: "Stream Sidebar",
           enabled: state.hasStream,
           checked: state.sidebarTab === "stream",
         },
         {
-          id: "view.working",
-          label: "Working CC",
+          id: "view.agent",
+          label: "Agent",
           enabled: state.hasStream,
-          checked: state.activeTab === "working",
-        },
-        {
-          id: "view.talking",
-          label: "Talking CC",
-          enabled: state.hasStream,
-          checked: state.activeTab === "talking",
+          checked: state.activeTab === "agent",
         },
         {
           id: "view.editor",
@@ -134,9 +134,9 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "file.quickOpen": handlers.quickOpen,
     "edit.find": handlers.find,
     "view.files-sidebar": handlers.showFilesSidebar,
+    "view.batches-sidebar": handlers.showBatchesSidebar,
     "view.stream-sidebar": handlers.showStreamSidebar,
-    "view.working": handlers.showWorkingPane,
-    "view.talking": handlers.showTalkingPane,
+    "view.agent": handlers.showAgentPane,
     "view.editor": handlers.showEditorPane,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({

@@ -1,13 +1,16 @@
+import type { ReactNode } from "react";
+import type { Stream, Batch } from "../api.js";
 import type { OpenFileState } from "../../file-session.js";
-import type { Stream } from "../api.js";
 import type { EditorNavigationTarget } from "../lsp.js";
 import { TerminalPane } from "./TerminalPane.js";
 import { EditorPane } from "./EditorPane.js";
 
-export type TabId = "working" | "talking" | "editor";
+export type TabId = "agent" | "editor";
 
 interface Props {
   stream: Stream;
+  batch: Batch | null;
+  activeBatchId: string | null;
   active: TabId;
   onActiveChange(tab: TabId): void;
   openFileOrder: string[];
@@ -26,6 +29,8 @@ interface Props {
 
 export function MainTabs({
   stream,
+  batch,
+  activeBatchId,
   active,
   onActiveChange,
   openFileOrder,
@@ -41,10 +46,8 @@ export function MainTabs({
   onSelectOpenFile,
   onCloseOpenFile,
 }: Props) {
-
   const tabs: { id: TabId; label: string }[] = [
-    { id: "working", label: "Working CC" },
-    { id: "talking", label: "Talking CC" },
+    { id: "agent", label: batch ? batch.title : "Agent" },
     { id: "editor", label: "Editor" },
   ];
 
@@ -72,11 +75,21 @@ export function MainTabs({
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        <PaneHost visible={active === "working"}>
-          <TerminalPane paneTarget={stream.panes.working} visible={active === "working"} />
-        </PaneHost>
-        <PaneHost visible={active === "talking"}>
-          <TerminalPane paneTarget={stream.panes.talking} visible={active === "talking"} />
+        <PaneHost visible={active === "agent"}>
+          {batch ? (
+            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+                {batch.id === activeBatchId
+                  ? "Active batch — edits in this session affect the stream worktree."
+                  : "Queued batch — use this session for planning and questions before promotion."}
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <TerminalPane paneTarget={batch.pane_target} visible={active === "agent"} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: 12, color: "var(--muted)" }}>No batch selected.</div>
+          )}
         </PaneHost>
         <PaneHost visible={active === "editor"}>
           <EditorPane
@@ -100,7 +113,7 @@ export function MainTabs({
   );
 }
 
-function PaneHost({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+function PaneHost({ visible, children }: { visible: boolean; children: ReactNode }) {
   return (
     <div
       style={{

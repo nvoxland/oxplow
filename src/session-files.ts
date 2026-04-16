@@ -20,7 +20,8 @@ export interface SessionFilesOptions {
 export interface ElectronSessionFilesOptions {
   hookInboxDir: string;
   streamId: string;
-  pane: PaneKind;
+  batchId: string;
+  pane?: PaneKind;
 }
 
 const HOOK_EVENTS = [
@@ -89,12 +90,12 @@ exit 0
 function buildElectronForwarderScript(opts: ElectronSessionFilesOptions): string {
   return `#!/usr/bin/env bash
 event="$1"
-node - "$event" "${escapeShellArg(opts.streamId)}" "${escapeShellArg(opts.pane)}" "${escapeShellArg(opts.hookInboxDir)}" <<'NODE'
+node - "$event" "${escapeShellArg(opts.streamId)}" "${escapeShellArg(opts.batchId)}" "${escapeShellArg(opts.pane ?? "")}" "${escapeShellArg(opts.hookInboxDir)}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
-const [event, streamId, pane, dir] = process.argv.slice(2);
+const [event, streamId, batchId, pane, dir] = process.argv.slice(2);
 let body = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -110,7 +111,7 @@ process.stdin.on("end", () => {
   const file = path.join(dir, \`\${Date.now()}-\${process.pid}-\${crypto.randomBytes(4).toString("hex")}.json\`);
   try {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ event, streamId, pane, payload }));
+    fs.writeFileSync(file, JSON.stringify({ event, streamId, batchId, pane: pane || undefined, payload }));
   } catch {}
   process.exit(0);
 });

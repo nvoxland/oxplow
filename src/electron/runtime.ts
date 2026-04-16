@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync, readdirSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { buildAgentCommand } from "../daemon.js";
-import { ensureStreamPane } from "../fleet.js";
+import { buildAgentCommandForSession } from "../daemon.js";
+import { ensureAgentPane } from "../fleet.js";
+import { BatchStore, type BatchState } from "../batch-store.js";
 import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "../git.js";
 import { HookEventStore, ingestHookPayload, type StoredEvent } from "../hook-ingest.js";
 import { LspSessionManager } from "../lsp.js";
@@ -35,6 +36,7 @@ export class ElectronRuntime {
   readonly projectBase: string;
   readonly logger: Logger;
   readonly store: StreamStore;
+  readonly batchStore: BatchStore;
   readonly hookEvents: HookEventStore;
   readonly resumeTracker: ResumeTracker;
   readonly lspManager: LspSessionManager;
@@ -56,6 +58,7 @@ export class ElectronRuntime {
     this.logger = logger;
     this.config = config;
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
+    this.batchStore = new BatchStore(projectDir, logger.child({ subsystem: "batch-store" }));
     this.hookEvents = new HookEventStore(1000);
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
@@ -97,6 +100,7 @@ export class ElectronRuntime {
     this.logger.info("initialized current stream", { streamId: this.store.getCurrentStreamId() });
 
     for (const existingStream of this.store.list()) {
+      this.batchStore.ensureStream(existingStream);
       this.workspaceWatchers.ensureWatching(existingStream);
     }
 
@@ -240,8 +244,40 @@ export class ElectronRuntime {
       });
     }
     this.workspaceWatchers.ensureWatching(stream);
+    this.batchStore.ensureStream(stream);
     this.store.setCurrentStreamId(stream.id);
     return stream;
+  }
+
+  getBatchState(streamId: string): BatchState {
+    const stream = this.resolveStream(streamId);
+    return this.batchStore.ensureStream(stream);
+  }
+
+  createBatch(streamId: string, title: string): BatchState {
+    const stream = this.resolveStream(streamId);
+    if (!title.trim()) throw new Error("batch title is required");
+    return this.batchStore.create(stream, { title });
+  }
+
+  reorderBatch(streamId: string, batchId: string, targetIndex: number): BatchState {
+    this.resolveStream(streamId);
+    return this.batchStore.reorder(streamId, batchId, targetIndex);
+  }
+
+  selectBatch(streamId: string, batchId: string): BatchState {
+    this.resolveStream(streamId);
+    return this.batchStore.select(streamId, batchId);
+  }
+
+  promoteBatch(streamId: string, batchId: string): BatchState {
+    this.resolveStream(streamId);
+    return this.batchStore.promote(streamId, batchId);
+  }
+
+  completeBatch(streamId: string, batchId: string): BatchState {
+    this.resolveStream(streamId);
+    return this.batchStore.complete(streamId, batchId);
   }
 
   listWorkspaceEntries(streamId: string, path = "") {
@@ -316,28 +352,26 @@ export class ElectronRuntime {
   }
 
   openTerminalSession(paneTarget: string, cols: number, rows: number, onSend: (sessionId: string, message: string) => void): string {
-    const resolvedPane = this.store.findByPane(paneTarget);
-    if (!resolvedPane) {
+    const batch = this.batchStore.findByPane(paneTarget);
+    if (!batch) {
       throw new Error(`unknown pane target: ${paneTarget}`);
     }
+    const stream = this.resolveStream(batch.stream_id);
     const paneLogger = this.logger.child({
-      streamId: resolvedPane.stream.id,
-      pane: resolvedPane.pane,
+      streamId: stream.id,
+      batchId: batch.id,
       paneTarget,
     });
-    const created = ensureStreamPane(
-      resolvedPane.stream,
-      resolvedPane.pane,
+    const created = ensureAgentPane(
+      batch.pane_target,
+      stream.worktree_path,
       cols,
       rows,
-      this.getAgentCommand(resolvedPane.stream, resolvedPane.pane),
+      this.getAgentCommand(stream, batch),
       paneLogger,
     );
     if (created) {
-      const hasResume = resolvedPane.pane === "working"
-        ? !!resolvedPane.stream.resume.working_session_id
-        : !!resolvedPane.stream.resume.talking_session_id;
-      this.resumeTracker.notePaneLaunch(resolvedPane.stream.id, resolvedPane.pane, hasResume);
+      this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
     }
 
     const sessionId = randomUUID();
@@ -345,7 +379,7 @@ export class ElectronRuntime {
     socket.on("close", () => {
       this.terminalSessions.delete(sessionId);
     });
-    attachPane(socket as any, paneTarget, cols, rows, paneLogger.child({ subsystem: "pty-bridge" }));
+      attachPane(socket as any, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge" }));
     this.terminalSessions.set(sessionId, socket);
     return sessionId;
   }
@@ -396,49 +430,53 @@ export class ElectronRuntime {
     return stream;
   }
 
-  private getAgentCommand(stream: Stream, pane: PaneKind): string {
+  private getAgentCommand(stream: Stream, batch: Batch): string {
     if (this.config.agent === "claude") {
-      const key = `${stream.id}:${pane}`;
+      const key = `${stream.id}:${batch.id}`;
       let files = this.paneSessionFiles.get(key);
       if (!files) {
         files = createElectronSessionFiles({
           hookInboxDir: this.hookInboxDir,
           streamId: stream.id,
-          pane,
+          batchId: batch.id,
         });
         this.paneSessionFiles.set(key, files);
         this.logger.info("created session files", {
           streamId: stream.id,
-          pane,
+          batchId: batch.id,
           settingsPath: files.settingsPath,
         });
       }
-      return buildAgentCommand(this.config.agent, stream, pane, files.settingsPath);
+      return buildAgentCommandForSession(
+        this.config.agent,
+        stream.worktree_path,
+        batch.resume_session_id,
+        files.settingsPath,
+      );
     }
-    return buildAgentCommand(this.config.agent, stream, pane);
+    return buildAgentCommandForSession(
+      this.config.agent,
+      stream.worktree_path,
+      batch.resume_session_id,
+    );
   }
 
   private handleHookEnvelope(envelope: HookEnvelope): void {
     const stored = ingestHookPayload(this.hookEvents, envelope.event, envelope.payload, {
       streamId: envelope.streamId,
+      batchId: envelope.batchId,
       pane: envelope.pane,
     });
-    if (envelope.pane && this.store.get(envelope.streamId)) {
-      const update = this.resumeTracker.recordHookEvent(envelope.streamId, envelope.pane, envelope.event, stored.normalized.sessionId);
+    if (envelope.batchId && this.store.get(envelope.streamId)) {
+      const update = this.resumeTracker.recordSessionHookEvent(
+        `${envelope.streamId}:${envelope.batchId}`,
+        envelope.event,
+        stored.normalized.sessionId,
+      );
       if (update?.type === "set") {
-        this.store.update(envelope.streamId, (stream) => ({
-          ...stream,
-          resume: envelope.pane === "working"
-            ? { ...stream.resume, working_session_id: update.sessionId }
-            : { ...stream.resume, talking_session_id: update.sessionId },
-        }));
+        this.batchStore.updateResume(envelope.streamId, envelope.batchId, update.sessionId);
       } else if (update?.type === "clear") {
-        this.store.update(envelope.streamId, (stream) => ({
-          ...stream,
-          resume: envelope.pane === "working"
-            ? { ...stream.resume, working_session_id: "" }
-            : { ...stream.resume, talking_session_id: "" },
-        }));
+        this.batchStore.updateResume(envelope.streamId, envelope.batchId, "");
       }
     }
   }
@@ -468,6 +506,7 @@ class RuntimeSocket extends EventEmitter {
 interface HookEnvelope {
   event: string;
   streamId: string;
+  batchId?: string;
   pane?: PaneKind;
   payload: unknown;
 }

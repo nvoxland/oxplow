@@ -94,6 +94,12 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:listBranches", () => currentRuntime.listBranches());
   ipcMain.handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   ipcMain.handle("newde:createStream", (_event, input) => currentRuntime.createStream(input));
+  ipcMain.handle("newde:getBatchState", (_event, streamId: string) => currentRuntime.getBatchState(streamId));
+  ipcMain.handle("newde:createBatch", (_event, streamId: string, title: string) => currentRuntime.createBatch(streamId, title));
+  ipcMain.handle("newde:reorderBatch", (_event, streamId: string, batchId: string, targetIndex: number) => currentRuntime.reorderBatch(streamId, batchId, targetIndex));
+  ipcMain.handle("newde:selectBatch", (_event, streamId: string, batchId: string) => currentRuntime.selectBatch(streamId, batchId));
+  ipcMain.handle("newde:promoteBatch", (_event, streamId: string, batchId: string) => currentRuntime.promoteBatch(streamId, batchId));
+  ipcMain.handle("newde:completeBatch", (_event, streamId: string, batchId: string) => currentRuntime.completeBatch(streamId, batchId));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
   ipcMain.handle("newde:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
   ipcMain.handle("newde:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));

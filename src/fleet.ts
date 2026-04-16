@@ -7,6 +7,27 @@ export function ensureStreamSession(stream: Stream) {
   ensureSession(session, stream.worktree_path);
 }
 
+export function ensureAgentPane(
+  target: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  agentCommand: string,
+  logger?: Logger,
+): boolean {
+  const session = target.split(":")[0];
+  logger?.debug("ensuring agent pane", { session, target, cwd, cols, rows });
+  ensureSession(session, cwd);
+  const created = ensureWindow(target, cwd, agentCommand, cols, rows);
+
+  const placeholder = `${session}:__placeholder__`;
+  if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {
+    killWindow(placeholder);
+    logger?.debug("removed placeholder window", { session });
+  }
+  return created;
+}
+
 /**
  * Create (or resize-to-match) a tmux window for a pane, sized to the client's
  * reported dimensions. The window runs `claude` in the project dir. The
@@ -21,15 +42,5 @@ export function ensureStreamPane(
   logger?: Logger,
 ): boolean {
   const target = stream.panes[pane];
-  const session = target.split(":")[0];
-  logger?.debug("ensuring stream pane", { session, target, cwd: stream.worktree_path, cols, rows });
-  ensureSession(session, stream.worktree_path);
-  const created = ensureWindow(target, stream.worktree_path, claudeCommand, cols, rows);
-
-  const placeholder = `${session}:__placeholder__`;
-  if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {
-    killWindow(placeholder);
-    logger?.debug("removed placeholder window", { session });
-  }
-  return created;
+  return ensureAgentPane(target, stream.worktree_path, cols, rows, claudeCommand, logger);
 }

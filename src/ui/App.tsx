@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  completeBatch,
+  createBatch,
+  getBatchState,
   createWorkspaceDirectory,
   createWorkspaceFile,
   deleteWorkspacePath,
@@ -11,8 +14,12 @@ import {
   renameWorkspacePath,
   renameCurrentStream,
   subscribeWorkspaceEvents,
+  selectBatch,
+  promoteBatch,
+  reorderBatch,
   switchStream,
   writeWorkspaceFile,
+  type BatchState,
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
@@ -44,13 +51,14 @@ import { logUi } from "./logger.js";
 
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
   const [stream, setStream] = useState<Stream | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("working");
+  const [activeTab, setActiveTab] = useState<TabId>("agent");
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("files");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("batches");
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
@@ -63,9 +71,11 @@ export function App() {
 
   useEffect(() => {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
-      .then(([allStreams, current, context]) => {
+      .then(async ([allStreams, current, context]) => {
+        const initialBatchState = await getBatchState(current.id);
         setStreams(allStreams);
         setStream(current);
+        setBatchStates((prev) => ({ ...prev, [current.id]: initialBatchState }));
         setWorkspaceContext(context);
         setError(null);
         setDaemonUnavailable(false);
@@ -117,9 +127,11 @@ export function App() {
     try {
       logUi("info", "switching stream", { streamId: id });
       const next = await switchStream(id);
+      const nextBatchState = batchStates[next.id] ?? await getBatchState(next.id);
+      setBatchStates((prev) => ({ ...prev, [next.id]: nextBatchState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-      setActiveTab(nextSession.selectedPath ? "editor" : "working");
+      setActiveTab(nextSession.selectedPath ? "editor" : "agent");
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -149,13 +161,18 @@ export function App() {
   }
 
   function handleStreamCreated(next: Stream) {
+    void getBatchState(next.id).then((state) => {
+      setBatchStates((prev) => ({ ...prev, [next.id]: state }));
+    }).catch((e) => {
+      setError(String(e));
+    });
     setStreams((prev) => {
       const others = prev.filter((stream) => stream.id !== next.id);
       return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
     });
     setStream(next);
     const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-    setActiveTab(nextSession.selectedPath ? "editor" : "working");
+    setActiveTab(nextSession.selectedPath ? "editor" : "agent");
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
@@ -311,6 +328,66 @@ export function App() {
     });
   }
 
+  async function handleSelectBatch(batchId: string) {
+    if (!stream) return;
+    try {
+      const next = await selectBatch(stream.id, batchId);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCreateBatch(title: string) {
+    if (!stream) return;
+    try {
+      const next = await createBatch(stream.id, title);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      setSidebarTab("batches");
+      setActiveTab("agent");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleReorderBatch(batchId: string, targetIndex: number) {
+    if (!stream) return;
+    try {
+      const next = await reorderBatch(stream.id, batchId, targetIndex);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handlePromoteBatch(batchId: string) {
+    if (!stream) return;
+    try {
+      const next = await promoteBatch(stream.id, batchId);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      setActiveTab("agent");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCompleteBatch(batchId: string) {
+    if (!stream) return;
+    try {
+      const next = await completeBatch(stream.id, batchId);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      setActiveTab("agent");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   const currentSession = useMemo(
     () => (stream ? fileSessions[stream.id] ?? createEmptyFileSession() : createEmptyFileSession()),
     [fileSessions, stream],
@@ -318,6 +395,11 @@ export function App() {
   const selectedFilePath = currentSession.selectedPath;
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
+  const currentBatchState = useMemo(
+    () => (stream ? batchStates[stream.id] ?? { selectedBatchId: null, activeBatchId: null, batches: [] } : { selectedBatchId: null, activeBatchId: null, batches: [] }),
+    [batchStates, stream],
+  );
+  const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
 
@@ -408,14 +490,14 @@ export function App() {
     showFilesSidebar() {
       setSidebarTab("files");
     },
+    showBatchesSidebar() {
+      setSidebarTab("batches");
+    },
     showStreamSidebar() {
       setSidebarTab("stream");
     },
-    showWorkingPane() {
-      setActiveTab("working");
-    },
-    showTalkingPane() {
-      setActiveTab("talking");
+    showAgentPane() {
+      setActiveTab("agent");
     },
     showEditorPane() {
       setActiveTab("editor");
@@ -525,6 +607,9 @@ export function App() {
       <div style={{ overflow: "auto", minWidth: 0 }}>
         <LeftPanel
           stream={stream}
+          batches={currentBatchState.batches}
+          selectedBatchId={currentBatchState.selectedBatchId}
+          activeBatchId={currentBatchState.activeBatchId}
           activeTab={sidebarTab}
           onActiveTabChange={setSidebarTab}
           selectedFilePath={selectedFilePath}
@@ -533,6 +618,11 @@ export function App() {
           onCreateDirectory={handleCreateDirectory}
           onRenamePath={handleRenamePath}
           onDeletePath={handleDeletePath}
+          onSelectBatch={handleSelectBatch}
+          onCreateBatch={handleCreateBatch}
+          onReorderBatch={handleReorderBatch}
+          onPromoteBatch={handlePromoteBatch}
+          onCompleteBatch={handleCompleteBatch}
         />
       </div>
       <div
@@ -555,6 +645,8 @@ export function App() {
           <MainTabs
             key={stream.id}
             stream={stream}
+            batch={selectedBatch}
+            activeBatchId={currentBatchState.activeBatchId}
             active={activeTab}
             onActiveChange={setActiveTab}
             openFileOrder={currentSession.openOrder}
