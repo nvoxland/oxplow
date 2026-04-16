@@ -1,0 +1,62 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { CommandId, DesktopApi, LspEvent, StoredEvent, TerminalEvent, WorkspaceWatchEvent } from "./ipc-contract.js";
+
+const api: DesktopApi = {
+  getCurrentStream: () => ipcRenderer.invoke("newde:getCurrentStream"),
+  listStreams: () => ipcRenderer.invoke("newde:listStreams"),
+  switchStream: (id) => ipcRenderer.invoke("newde:switchStream", id),
+  renameCurrentStream: (title) => ipcRenderer.invoke("newde:renameCurrentStream", title),
+  listBranches: () => ipcRenderer.invoke("newde:listBranches"),
+  getWorkspaceContext: () => ipcRenderer.invoke("newde:getWorkspaceContext"),
+  createStream: (input) => ipcRenderer.invoke("newde:createStream", input),
+  listWorkspaceEntries: (streamId, path = "") => ipcRenderer.invoke("newde:listWorkspaceEntries", streamId, path),
+  listWorkspaceFiles: (streamId) => ipcRenderer.invoke("newde:listWorkspaceFiles", streamId),
+  readWorkspaceFile: (streamId, path) => ipcRenderer.invoke("newde:readWorkspaceFile", streamId, path),
+  writeWorkspaceFile: (streamId, path, content) => ipcRenderer.invoke("newde:writeWorkspaceFile", streamId, path, content),
+  createWorkspaceFile: (streamId, path, content = "") => ipcRenderer.invoke("newde:createWorkspaceFile", streamId, path, content),
+  createWorkspaceDirectory: (streamId, path) => ipcRenderer.invoke("newde:createWorkspaceDirectory", streamId, path),
+  renameWorkspacePath: (streamId, fromPath, toPath) => ipcRenderer.invoke("newde:renameWorkspacePath", streamId, fromPath, toPath),
+  deleteWorkspacePath: (streamId, path) => ipcRenderer.invoke("newde:deleteWorkspacePath", streamId, path),
+  listHookEvents: (streamId) => ipcRenderer.invoke("newde:listHookEvents", streamId),
+  ping: () => ipcRenderer.invoke("newde:ping"),
+  logUi: (payload) => ipcRenderer.invoke("newde:logUi", payload),
+  setNativeMenu: (groups) => ipcRenderer.invoke("newde:setNativeMenu", groups),
+  openTerminalSession: (paneTarget, cols, rows) => ipcRenderer.invoke("newde:openTerminalSession", paneTarget, cols, rows),
+  sendTerminalMessage: (sessionId, message) => ipcRenderer.invoke("newde:sendTerminalMessage", sessionId, message),
+  closeTerminalSession: (sessionId) => ipcRenderer.invoke("newde:closeTerminalSession", sessionId),
+  openLspClient: (streamId, languageId) => ipcRenderer.invoke("newde:openLspClient", streamId, languageId),
+  sendLspMessage: (clientId, message) => ipcRenderer.invoke("newde:sendLspMessage", clientId, message),
+  closeLspClient: (clientId) => ipcRenderer.invoke("newde:closeLspClient", clientId),
+  onWorkspaceEvent: (listener) => subscribe("newde:workspace-event", listener),
+  onHookEvent: (listener) => subscribe("newde:hook-event", listener),
+  onTerminalEvent: (listener) => subscribe("newde:terminal-event", listener),
+  onLspEvent: (listener) => subscribe("newde:lsp-event", listener),
+  onMenuCommand: (listener) => subscribe("newde:menu-command", listener),
+};
+
+contextBridge.exposeInMainWorld("newdeApi", api);
+contextBridge.exposeInMainWorld("newdeDesktop", {
+  isElectron: true,
+  platform: process.platform,
+});
+
+declare global {
+  interface Window {
+    newdeApi: DesktopApi;
+    newdeDesktop?: {
+      isElectron: boolean;
+      platform: NodeJS.Platform;
+    };
+  }
+}
+
+function subscribe<T extends WorkspaceWatchEvent | StoredEvent | TerminalEvent | LspEvent | CommandId>(
+  channel: "newde:workspace-event" | "newde:hook-event" | "newde:terminal-event" | "newde:lsp-event" | "newde:menu-command",
+  listener: (payload: T) => void,
+) {
+  const wrapped = (_event: unknown, payload: T) => listener(payload);
+  ipcRenderer.on(channel, wrapped);
+  return () => {
+    ipcRenderer.removeListener(channel, wrapped);
+  };
+}

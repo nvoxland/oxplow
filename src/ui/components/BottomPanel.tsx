@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { StoredEvent, NormalizedEvent } from "../api.js";
+import { listHookEvents, subscribeHookEvents, type StoredEvent, type NormalizedEvent } from "../api.js";
 
 const MAX_ROWS = 200;
 
@@ -10,20 +10,15 @@ export function BottomPanel({ streamId }: { streamId: string | null }) {
   useEffect(() => {
     if (!streamId) return;
     setEvents([]);
-    const es = new EventSource(`/api/hooks/stream?stream=${encodeURIComponent(streamId)}`);
-    es.onmessage = (msg) => {
-      try {
-        const evt = JSON.parse(msg.data) as StoredEvent;
-        setEvents((prev) => {
-          const next = [...prev, evt];
-          return next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
-        });
-      } catch {}
-    };
-    es.onerror = () => {
-      // EventSource auto-reconnects; nothing to do here.
-    };
-    return () => es.close();
+    void listHookEvents(streamId).then((initial) => {
+      setEvents(initial.slice(-MAX_ROWS));
+    }).catch(() => {});
+    return subscribeHookEvents(streamId, (evt) => {
+      setEvents((prev) => {
+        const next = [...prev, evt];
+        return next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
+      });
+    });
   }, [streamId]);
 
   useEffect(() => {

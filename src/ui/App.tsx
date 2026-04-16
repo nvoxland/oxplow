@@ -29,7 +29,7 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "../file-session.js";
-import { buildMenuGroups } from "./commands.js";
+import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { TopBar } from "./components/TopBar.js";
@@ -55,8 +55,11 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(() => readInitialSidebarWidth());
+  const [sidebarDragging, setSidebarDragging] = useState(false);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
+  const isElectron = !!window.newdeDesktop?.isElectron;
 
   useEffect(() => {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
@@ -379,54 +382,54 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  const menuGroups = useMemo(
-    () =>
-      buildMenuGroups(
-        {
-          hasStream: !!stream,
-          hasSelectedFile: !!selectedFilePath,
-          canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
-          activeTab,
-          sidebarTab,
-        },
-        {
-          save() {
-            void handleEditorSave();
-          },
-          quickOpen() {
-            if (!stream) return;
-            setQuickOpenVisible(true);
-          },
-          find() {
-            if (!selectedFilePath) return;
-            setActiveTab("editor");
-            setEditorFindRequest((current) => current + 1);
-          },
-          showFilesSidebar() {
-            setSidebarTab("files");
-          },
-          showStreamSidebar() {
-            setSidebarTab("stream");
-          },
-          showWorkingPane() {
-            setActiveTab("working");
-          },
-          showTalkingPane() {
-            setActiveTab("talking");
-          },
-          showEditorPane() {
-            setActiveTab("editor");
-          },
-        },
-      ),
+  const commandState = useMemo(
+    () => ({
+      hasStream: !!stream,
+      hasSelectedFile: !!selectedFilePath,
+      canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
+      activeTab,
+      sidebarTab,
+    }),
     [activeTab, currentFile, currentFileDirty, selectedFilePath, sidebarTab, stream],
   );
+  const commandHandlers = {
+    save() {
+      void handleEditorSave();
+    },
+    quickOpen() {
+      if (!stream) return;
+      setQuickOpenVisible(true);
+    },
+    find() {
+      if (!selectedFilePath) return;
+      setActiveTab("editor");
+      setEditorFindRequest((current) => current + 1);
+    },
+    showFilesSidebar() {
+      setSidebarTab("files");
+    },
+    showStreamSidebar() {
+      setSidebarTab("stream");
+    },
+    showWorkingPane() {
+      setActiveTab("working");
+    },
+    showTalkingPane() {
+      setActiveTab("talking");
+    },
+    showEditorPane() {
+      setActiveTab("editor");
+    },
+  };
+  const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
+  const menuGroups = buildMenuGroups(commandState, commandHandlers);
   const commandMap = useMemo(
     () => new Map(menuGroups.flatMap((group) => group.items.map((item) => [item.id, item] as const))),
     [menuGroups],
   );
 
   useEffect(() => {
+    if (isElectron) return;
     function handleKeyDown(event: KeyboardEvent) {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
@@ -438,20 +441,77 @@ export function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commandMap]);
+  }, [commandMap, isElectron]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    void window.newdeApi.setNativeMenu(menuGroupSnapshots).catch((error) => {
+      logUi("error", "failed to update native menu", { error: String(error) });
+    });
+  }, [isElectron, menuGroupSnapshots]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    return window.newdeApi.onMenuCommand((commandId) => {
+      const command = commandMap.get(commandId);
+      if (!command || !command.enabled) return;
+      command.run();
+    });
+  }, [commandMap, isElectron]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    function handleResize() {
+      setSidebarWidth((current) => clampSidebarWidth(current));
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarDragging) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      setSidebarWidth(clampSidebarWidth(event.clientX));
+    }
+
+    function stopDragging() {
+      setSidebarDragging(false);
+    }
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [sidebarDragging]);
 
   return (
     <div
       style={{
         display: "grid",
         gridTemplateRows: "auto 1fr auto",
-        gridTemplateColumns: "240px 1fr",
+        gridTemplateColumns: `${sidebarWidth}px 6px minmax(0, 1fr)`,
         height: "100vh",
         gap: 0,
       }}
     >
-      <div style={{ gridColumn: "1 / 3", borderBottom: "1px solid var(--border)" }}>
-        <Menubar groups={menuGroups} />
+      <div style={{ gridColumn: "1 / 4", borderBottom: "1px solid var(--border)" }}>
+        {!isElectron ? <Menubar groups={menuGroups} /> : null}
         <TopBar
           stream={stream}
           streams={streams}
@@ -462,7 +522,7 @@ export function App() {
           onStreamCreated={handleStreamCreated}
         />
       </div>
-      <div style={{ borderRight: "1px solid var(--border)", overflow: "auto" }}>
+      <div style={{ overflow: "auto", minWidth: 0 }}>
         <LeftPanel
           stream={stream}
           activeTab={sidebarTab}
@@ -475,7 +535,22 @@ export function App() {
           onDeletePath={handleDeletePath}
         />
       </div>
-      <div style={{ overflow: "hidden", minHeight: 0 }}>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          setSidebarDragging(true);
+          setSidebarWidth(clampSidebarWidth(event.clientX));
+        }}
+        style={{
+          cursor: "col-resize",
+          background: sidebarDragging ? "var(--accent)" : "var(--border)",
+          transition: sidebarDragging ? "none" : "background 120ms ease",
+        }}
+      />
+      <div style={{ overflow: "hidden", minHeight: 0, minWidth: 0 }}>
         {stream ? (
           <MainTabs
             key={stream.id}
@@ -499,9 +574,19 @@ export function App() {
           />
         ) : <div style={{ padding: 12 }}>loading…</div>}
       </div>
-      <div style={{ gridColumn: "1 / 3", borderTop: "1px solid var(--border)" }}>
+      <div style={{ gridColumn: "1 / 4", borderTop: "1px solid var(--border)" }}>
         <BottomPanel streamId={stream?.id ?? null} />
       </div>
+      {sidebarDragging ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            cursor: "col-resize",
+            zIndex: 100,
+          }}
+        />
+      ) : null}
       <QuickOpenOverlay
         open={quickOpenVisible}
         stream={stream}
@@ -585,6 +670,26 @@ function DaemonDownDialog() {
       </div>
     </div>
   );
+}
+
+const SIDEBAR_WIDTH_STORAGE_KEY = "newde.sidebarWidth";
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const MIN_SIDEBAR_WIDTH = 180;
+const MAX_SIDEBAR_WIDTH = 560;
+const MIN_MAIN_CONTENT_WIDTH = 320;
+
+function readInitialSidebarWidth() {
+  const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+  if (!Number.isFinite(stored)) return DEFAULT_SIDEBAR_WIDTH;
+  return clampSidebarWidth(stored);
+}
+
+function clampSidebarWidth(width: number) {
+  const maxAllowed = Math.max(
+    MIN_SIDEBAR_WIDTH,
+    Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_MAIN_CONTENT_WIDTH),
+  );
+  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), maxAllowed);
 }
 
 function ExternalFileChangedDialog({

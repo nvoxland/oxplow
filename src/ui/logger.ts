@@ -71,17 +71,12 @@ export function getUiClientId(): string {
 
 async function sendUiLog(level: UiLogLevel, message: string, context?: Record<string, unknown>): Promise<void> {
   try {
-    await fetch("/api/logs/ui", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        clientId: getUiClientId(),
-        level,
-        message,
-        context,
-        timestamp: new Date().toISOString(),
-      }),
-      keepalive: true,
+    await window.newdeApi.logUi({
+      clientId: getUiClientId(),
+      level,
+      message,
+      context,
+      timestamp: new Date().toISOString(),
     });
   } catch {}
 }

@@ -235,9 +235,9 @@ export function LeftPanel({
         <SidebarButton active={activeTab === "files"} onClick={() => onActiveTabChange("files")}>Files</SidebarButton>
         <SidebarButton active={activeTab === "stream"} onClick={() => onActiveTabChange("stream")}>Stream</SidebarButton>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+      <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12 }}>
         {activeTab === "files" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
             <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
               {stream.branch}
             </div>
@@ -319,7 +319,7 @@ function ChangedFilesSection({
   onContextMenu(target: { path: string; kind: "file" | "directory"; name: string; x: number; y: number } | null): void;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%" }}>
       <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
         Changed
       </div>
@@ -358,7 +358,7 @@ function TreeEntries({
   onContextMenu(target: { path: string; kind: "file" | "directory"; name: string; x: number; y: number } | null): void;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
       {entries.map((entry) => {
         const expanded = !!expandedDirs[entry.path];
         const children = entriesByDir[entry.path] ?? [];
@@ -381,6 +381,7 @@ function TreeEntries({
                 alignItems: "center",
                 gap: 6,
                 width: "100%",
+                minWidth: "100%",
                 padding: "4px 6px",
                 border: "none",
                 borderRadius: 4,
@@ -389,13 +390,14 @@ function TreeEntries({
                 cursor: "pointer",
                 fontFamily: "inherit",
                 textAlign: "left",
+                whiteSpace: "nowrap",
               }}
             >
               <span style={{ width: 12, color: "var(--muted)" }}>
                 {entry.kind === "directory" ? (expanded ? "▾" : "▸") : ""}
               </span>
               <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{entry.name}</span>
+              <span style={{ flex: 1, whiteSpace: "nowrap" }}>{entry.name}</span>
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
             </button>
             {entry.kind === "directory" && expanded ? (
@@ -455,6 +457,7 @@ function FileRow({
         alignItems: "center",
         gap: 6,
         width: "100%",
+        minWidth: "100%",
         padding: "4px 6px",
         border: "none",
         borderRadius: 4,
@@ -463,10 +466,11 @@ function FileRow({
         cursor: "pointer",
         fontFamily: "inherit",
         textAlign: "left",
+        whiteSpace: "nowrap",
       }}
     >
       <span>📄</span>
-      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{path}</span>
+      <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
     </button>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildMenuGroups, findCommandById } from "./commands.js";
+import { buildMenuGroupSnapshots, buildMenuGroups, findCommandById } from "./commands.js";
 
 describe("buildMenuGroups", () => {
   test("disables save and find when no file is open", () => {
@@ -52,6 +52,23 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "file.quickOpen")?.enabled).toBe(false);
     expect(findCommandById(groups, "view.editor")?.enabled).toBe(false);
     expect(findCommandById(groups, "view.stream-sidebar")?.enabled).toBe(false);
+  });
+});
+
+describe("buildMenuGroupSnapshots", () => {
+  test("preserves enabled and checked state without handlers", () => {
+    const groups = buildMenuGroupSnapshots({
+      hasStream: true,
+      hasSelectedFile: true,
+      canSave: true,
+      activeTab: "editor",
+      sidebarTab: "stream",
+    });
+
+    const viewGroup = groups.find((group) => group.id === "view");
+    expect(viewGroup?.items.find((item) => item.id === "view.stream-sidebar")?.checked).toBe(true);
+    expect(viewGroup?.items.find((item) => item.id === "view.editor")?.checked).toBe(true);
+    expect(groups.find((group) => group.id === "file")?.items.find((item) => item.id === "file.save")?.enabled).toBe(true);
   });
 });
 

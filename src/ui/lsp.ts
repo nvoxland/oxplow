@@ -47,13 +47,14 @@ type DiagnosticsListener = (uri: string, diagnostics: LspDiagnostic[]) => void;
 type StatusListener = (message: string | null) => void;
 
 export class LspClient {
-  private ws: WebSocket | null = null;
+  private clientId: string | null = null;
   private nextId = 1;
   private openPromise: Promise<void> | null = null;
   private pending = new Map<number, { resolve(value: unknown): void; reject(reason?: unknown): void }>();
   private queued: string[] = [];
   private diagnosticsListeners = new Set<DiagnosticsListener>();
   private statusListeners = new Set<StatusListener>();
+  private unsubscribeMessages: (() => void) | null = null;
 
   constructor(
     private readonly streamId: string,
@@ -92,45 +93,45 @@ export class LspClient {
 
   dispose(): void {
     this.openPromise = null;
-    const ws = this.ws;
-    this.ws = null;
+    const clientId = this.clientId;
+    this.clientId = null;
     for (const pending of this.pending.values()) {
       pending.reject(new Error("lsp client disposed"));
     }
     this.pending.clear();
     this.queued = [];
-    ws?.close();
+    this.unsubscribeMessages?.();
+    this.unsubscribeMessages = null;
+    if (clientId) {
+      void window.newdeApi.closeLspClient(clientId);
+    }
   }
 
   private ensureOpen(): Promise<void> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.clientId) return Promise.resolve();
     if (this.openPromise) return this.openPromise;
     this.openPromise = new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(lspWebSocketUrl(this.streamId, this.languageId));
-      this.ws = ws;
       let opened = false;
-      ws.addEventListener("open", () => {
-        opened = true;
-        this.emitStatus(null);
-        for (const message of this.queued) {
-          ws.send(message);
-        }
-        this.queued = [];
-        resolve();
-      });
-      ws.addEventListener("message", (event) => {
-        const parsed = parseJsonRpc(event.data);
+      this.unsubscribeMessages = window.newdeApi.onLspEvent((event) => {
+        if (event.clientId !== this.clientId) return;
+        const parsed = parseJsonRpc(event.message);
         if (!parsed) return;
         this.handleMessage(parsed);
       });
-      ws.addEventListener("error", () => {
+      void window.newdeApi.openLspClient(this.streamId, this.languageId).then((clientId) => {
+        this.clientId = clientId;
+        opened = true;
+        this.emitStatus(null);
+        for (const message of this.queued) this.send(message);
+        this.queued = [];
+        resolve();
+      }).catch((error) => {
         this.emitStatus(`LSP unavailable for ${this.languageId}`);
-        if (!opened) reject(new Error(`failed to connect LSP for ${this.languageId}`));
-      });
-      ws.addEventListener("close", () => {
         this.openPromise = null;
-        this.ws = null;
-        if (!opened) reject(new Error(`failed to open LSP for ${this.languageId}`));
+        this.clientId = null;
+        this.unsubscribeMessages?.();
+        this.unsubscribeMessages = null;
+        if (!opened) reject(new Error(`failed to open LSP for ${this.languageId}: ${errorMessage(error)}`));
         for (const pending of this.pending.values()) {
           pending.reject(new Error("lsp connection closed"));
         }
@@ -145,11 +146,13 @@ export class LspClient {
   }
 
   private send(payload: string): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.clientId) {
       this.queued.push(payload);
       return;
     }
-    this.ws.send(payload);
+    void window.newdeApi.sendLspMessage(this.clientId, payload).catch((error) => {
+      this.emitStatus(`LSP unavailable: ${errorMessage(error)}`);
+    });
   }
 
   private handleMessage(message: JsonRpcMessage): void {
@@ -211,14 +214,6 @@ export function toEditorNavigationTarget(stream: Stream, uri: string, range?: {
     line: (range?.start?.line ?? 0) + 1,
     column: (range?.start?.character ?? 0) + 1,
   };
-}
-
-function lspWebSocketUrl(streamId: string, languageId: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = new URL(`${protocol}//${window.location.host}/lsp`);
-  url.searchParams.set("stream", streamId);
-  url.searchParams.set("language", languageId);
-  return url.toString();
 }
 
 function parseJsonRpc(raw: unknown): JsonRpcMessage | null {

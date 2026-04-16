@@ -1,3 +1,5 @@
+import type { DesktopApi } from "../electron/ipc-contract.js";
+
 export interface Stream {
   id: string;
   title: string;
@@ -70,92 +72,61 @@ export interface WorkspaceWatchEvent {
 }
 
 export async function getCurrentStream(): Promise<Stream> {
-  return fetchJson("/api/streams/current");
+  return desktopApi().getCurrentStream();
 }
 
 export async function listStreams(): Promise<Stream[]> {
-  return fetchJson("/api/streams");
+  return desktopApi().listStreams();
 }
 
 export async function switchStream(id: string): Promise<Stream> {
-  return fetchJson("/api/streams/current", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id }),
-  });
+  return desktopApi().switchStream(id);
 }
 
 export async function renameCurrentStream(title: string): Promise<Stream> {
-  return fetchJson("/api/streams/current", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
+  return desktopApi().renameCurrentStream(title);
 }
 
 export async function listBranches(): Promise<BranchRef[]> {
-  return fetchJson("/api/branches");
+  return desktopApi().listBranches();
 }
 
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
-  return fetchJson("/api/workspace/context");
+  return desktopApi().getWorkspaceContext();
 }
 
 export async function createStream(input:
   | { title: string; summary?: string; source: "existing"; ref: string }
   | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
 ): Promise<Stream> {
-  return fetchJson("/api/streams", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
+  return desktopApi().createStream(input);
 }
 
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
-  const params = new URLSearchParams({ stream: streamId, path });
-  const result = await fetchJson<{ entries: WorkspaceEntry[] }>(`/api/workspace/entries?${params.toString()}`);
-  return result.entries;
+  return desktopApi().listWorkspaceEntries(streamId, path);
 }
 
 export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: WorkspaceStatusSummary;
 }> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/files?${params.toString()}`);
+  return desktopApi().listWorkspaceFiles(streamId);
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
-  const params = new URLSearchParams({ stream: streamId, path });
-  return fetchJson(`/api/workspace/file?${params.toString()}`);
+  return desktopApi().readWorkspaceFile(streamId, path);
 }
 
 export async function writeWorkspaceFile(streamId: string, path: string, content: string): Promise<WorkspaceFile> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/file?${params.toString()}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, content }),
-  });
+  return desktopApi().writeWorkspaceFile(streamId, path, content);
 }
 
 export async function createWorkspaceFile(streamId: string, path: string, content = ""): Promise<WorkspaceFile> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/file?${params.toString()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, content }),
-  });
+  return desktopApi().createWorkspaceFile(streamId, path, content);
 }
 
 export async function createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/directory?${params.toString()}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path }),
-  });
+  return desktopApi().createWorkspaceDirectory(streamId, path);
 }
 
 export async function renameWorkspacePath(
@@ -163,50 +134,32 @@ export async function renameWorkspacePath(
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/path?${params.toString()}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fromPath, toPath }),
-  });
+  return desktopApi().renameWorkspacePath(streamId, fromPath, toPath);
 }
 
 export async function deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange> {
-  const params = new URLSearchParams({ stream: streamId });
-  return fetchJson(`/api/workspace/path?${params.toString()}`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path }),
-  });
+  return desktopApi().deleteWorkspacePath(streamId, path);
 }
 
 export function subscribeWorkspaceEvents(
   streamId: string,
   onEvent: (event: WorkspaceWatchEvent) => void,
 ): () => void {
-  const params = new URLSearchParams({ stream: streamId });
-  const es = new EventSource(`/api/workspace/watch?${params.toString()}`);
-  es.onmessage = (message) => {
-    try {
-      onEvent(JSON.parse(message.data) as WorkspaceWatchEvent);
-    } catch {}
-  };
-  es.onerror = () => {
-    // EventSource auto-reconnects.
-  };
-  return () => es.close();
+  return desktopApi().onWorkspaceEvent((event) => {
+    if (event.streamId === streamId) {
+      onEvent(event);
+    }
+  });
 }
 
 export async function probeDaemon(): Promise<boolean> {
   try {
-    const r = await fetch("/api/streams", { cache: "no-store" });
-    return r.ok;
+    return await desktopApi().ping();
   } catch {
     return false;
   }
 }
 
-// Mirror of src/events.ts NormalizedEvent — UI side.
 export type NormalizedEvent =
   | { kind: "session-start"; t: number; sessionId?: string; cwd?: string }
   | { kind: "session-end"; t: number; sessionId?: string; reason?: string }
@@ -237,15 +190,24 @@ export interface StoredEvent {
   normalized: NormalizedEvent;
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
-  if (!r.ok) {
-    let message = `failed: ${r.status}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {}
-    throw new Error(message);
+export async function listHookEvents(streamId?: string): Promise<StoredEvent[]> {
+  return desktopApi().listHookEvents(streamId);
+}
+
+export function subscribeHookEvents(
+  streamId: string | "all",
+  onEvent: (event: StoredEvent) => void,
+): () => void {
+  return desktopApi().onHookEvent((event) => {
+    if (streamId === "all" || event.streamId === streamId) {
+      onEvent(event);
+    }
+  });
+}
+
+function desktopApi(): DesktopApi {
+  if (!window.newdeApi) {
+    throw new Error("newde Electron API is unavailable");
   }
-  return r.json();
+  return window.newdeApi;
 }

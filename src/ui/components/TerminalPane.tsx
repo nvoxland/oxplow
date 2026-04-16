@@ -12,7 +12,7 @@ import {
 export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visible: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
 
@@ -24,8 +24,8 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
   useEffect(() => {
     if (!visible) return;
     termRef.current?.focus();
-    if (wsRef.current && wsRef.current.readyState === wsRef.current.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "history-exit" }));
+    if (sessionIdRef.current) {
+      void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
     }
     setInteractionMode("live");
   }, [visible, paneTarget]);
@@ -48,8 +48,6 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
-    let ws: WebSocket | null = null;
-
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {
         return true;
@@ -63,8 +61,8 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         });
 
         if (routeToTmuxHistory) {
-          if (ws && ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
+          if (sessionIdRef.current) {
+            void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({
               type: "history-page",
               direction: event.key === "PageUp" ? "up" : "down",
             }));
@@ -82,8 +80,8 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       }
 
       if (modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
-        if (ws && ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: "history-exit" }));
+        if (sessionIdRef.current) {
+          void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
@@ -114,8 +112,8 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return false;
       }
 
-      if (ws && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: "history-scroll", lines }));
+      if (sessionIdRef.current) {
+        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
       }
       setInteractionMode("history");
       event.preventDefault();
@@ -125,13 +123,13 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
     let disposed = false;
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
-      if (ws && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: "input", bytes: btoa(data) }));
+      if (sessionIdRef.current) {
+        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: btoa(data) }));
       }
     });
     const binaryDisp = term.onBinary((data) => {
-      if (ws && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
+      if (sessionIdRef.current) {
+        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
       }
     });
 
@@ -152,38 +150,18 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return;
       }
       const handleMouseDown = () => {
-        if (ws && ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: "history-exit" }));
+        if (sessionIdRef.current) {
+          void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
       };
       host.addEventListener("mousedown", handleMouseDown);
 
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${location.host}/ws?pane=${encodeURIComponent(paneTarget)}&cols=${term.cols}&rows=${term.rows}`;
-      logUi("info", "opening terminal websocket", { paneTarget, cols: term.cols, rows: term.rows });
-      ws = new WebSocket(url);
-      wsRef.current = ws;
-      ws.onopen = () => {
-        term.focus();
-        ws.send(JSON.stringify({ type: "history-exit" }));
-        setInteractionMode("live");
-        logUi("info", "terminal websocket opened", { paneTarget });
-      };
-      ws.onclose = () => {
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
-        logUi("warn", "terminal websocket closed", { paneTarget });
-      };
-      ws.onerror = () => {
-        logUi("error", "terminal websocket error", { paneTarget });
-      };
-
-      ws.onmessage = (ev) => {
+      const unsubscribe = window.newdeApi.onTerminalEvent((event) => {
+        if (event.sessionId !== sessionIdRef.current) return;
         try {
-          const msg = JSON.parse(ev.data);
+          const msg = JSON.parse(event.message);
           if (msg.type === "data" && typeof msg.bytes === "string") {
             const bin = atob(msg.bytes);
             const bytes = new Uint8Array(bin.length);
@@ -191,7 +169,22 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
             term.write(bytes);
           }
         } catch {}
-      };
+      });
+
+      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows });
+      void window.newdeApi.openTerminalSession(paneTarget, term.cols, term.rows).then((sessionId) => {
+        if (disposed) {
+          void window.newdeApi.closeTerminalSession(sessionId);
+          return;
+        }
+        sessionIdRef.current = sessionId;
+        term.focus();
+        void window.newdeApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
+        setInteractionMode("live");
+        logUi("info", "terminal session opened", { paneTarget, sessionId });
+      }).catch((error) => {
+        logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
+      });
 
       // Debounce resizes so we don't spam tmux during a drag.
       let resizeTimer: number | null = null;
@@ -207,8 +200,11 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
           try {
             fit.fit();
             if (term.cols < 2 || term.rows < 2) return;
-            if (ws && ws.readyState === ws.OPEN) {
-              ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            if (sessionIdRef.current) {
+              void window.newdeApi.sendTerminalMessage(
+                sessionIdRef.current,
+                JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
+              );
             }
           } catch {}
         }, 80);
@@ -218,6 +214,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       const prevCleanup = cleanupRef.current;
       cleanupRef.current = () => {
         host.removeEventListener("mousedown", handleMouseDown);
+        unsubscribe();
         prevCleanup?.();
       };
     };
@@ -230,9 +227,12 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       ro?.disconnect();
       dataDisp.dispose();
       binaryDisp.dispose();
-      wsRef.current = null;
+      const sessionId = sessionIdRef.current;
+      sessionIdRef.current = null;
       termRef.current = null;
-      try { ws?.close(); } catch {}
+      if (sessionId) {
+        void window.newdeApi.closeTerminalSession(sessionId);
+      }
       term.dispose();
     };
   }, [paneTarget]);

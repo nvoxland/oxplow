@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { createStream, listBranches, type BranchRef, type StoredEvent, type Stream } from "../api.js";
+import { createStream, listBranches, listHookEvents, subscribeHookEvents, type BranchRef, type StoredEvent, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 
 interface Props {
@@ -35,14 +35,12 @@ export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename,
   );
 
   useEffect(() => {
-    const es = new EventSource("/api/hooks/stream?stream=all");
-    es.onmessage = (msg) => {
-      try {
-        const evt = JSON.parse(msg.data) as StoredEvent;
-        setStreamStatuses((prev) => ({ ...prev, [evt.streamId]: evt.normalized }));
-      } catch {}
-    };
-    return () => es.close();
+    void listHookEvents().then((events) => {
+      setStreamStatuses(Object.fromEntries(events.map((event) => [event.streamId, event.normalized])));
+    }).catch(() => {});
+    return subscribeHookEvents("all", (evt) => {
+      setStreamStatuses((prev) => ({ ...prev, [evt.streamId]: evt.normalized }));
+    });
   }, []);
 
   async function openCreate() {

@@ -17,6 +17,12 @@ export interface SessionFilesOptions {
   pane: PaneKind;
 }
 
+export interface ElectronSessionFilesOptions {
+  hookInboxDir: string;
+  streamId: string;
+  pane: PaneKind;
+}
+
 const HOOK_EVENTS = [
   "PreToolUse",
   "PostToolUse",
@@ -32,6 +38,23 @@ export function createSessionFiles(opts: SessionFilesOptions): SessionFiles {
 
   const forwarderPath = join(dir, "hook-forward.sh");
   writeFileSync(forwarderPath, buildForwarderScript(opts), "utf8");
+  chmodSync(forwarderPath, 0o755);
+
+  const settingsPath = join(dir, "hooks.json");
+  writeFileSync(
+    settingsPath,
+    JSON.stringify(buildHookSettings(forwarderPath), null, 2) + "\n",
+    "utf8",
+  );
+
+  return { dir, settingsPath, forwarderPath };
+}
+
+export function createElectronSessionFiles(opts: ElectronSessionFilesOptions): SessionFiles {
+  const dir = mkdtempSync(join(tmpdir(), "newde-session-"));
+
+  const forwarderPath = join(dir, "hook-forward.sh");
+  writeFileSync(forwarderPath, buildElectronForwarderScript(opts), "utf8");
   chmodSync(forwarderPath, 0o755);
 
   const settingsPath = join(dir, "hooks.json");
@@ -63,6 +86,40 @@ exit 0
 `;
 }
 
+function buildElectronForwarderScript(opts: ElectronSessionFilesOptions): string {
+  return `#!/usr/bin/env bash
+event="$1"
+node - "$event" "${escapeShellArg(opts.streamId)}" "${escapeShellArg(opts.pane)}" "${escapeShellArg(opts.hookInboxDir)}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+
+const [event, streamId, pane, dir] = process.argv.slice(2);
+let body = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  body += chunk;
+});
+process.stdin.on("end", () => {
+  let payload;
+  try {
+    payload = body ? JSON.parse(body) : {};
+  } catch {
+    payload = { raw: body };
+  }
+  const file = path.join(dir, \`\${Date.now()}-\${process.pid}-\${crypto.randomBytes(4).toString("hex")}.json\`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ event, streamId, pane, payload }));
+  } catch {}
+  process.exit(0);
+});
+process.stdin.resume();
+NODE
+exit 0
+`;
+}
+
 function buildHookSettings(forwarderPath: string) {
   const hooks: Record<string, unknown> = {};
   for (const event of HOOK_EVENTS) {
@@ -74,4 +131,8 @@ function buildHookSettings(forwarderPath: string) {
     }
   }
   return { hooks };
+}
+
+function escapeShellArg(value: string): string {
+  return value.replace(/'/g, `'\\''`);
 }

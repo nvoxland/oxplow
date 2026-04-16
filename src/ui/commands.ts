@@ -18,10 +18,24 @@ export interface MenuCommand extends MenuItem {
   id: CommandId;
 }
 
+export interface MenuCommandSnapshot {
+  id: CommandId;
+  label: string;
+  shortcut?: string;
+  enabled?: boolean;
+  checked?: boolean;
+}
+
 export interface MenuGroup extends SharedMenuGroup {
   id: MenuId;
   label: string;
   items: MenuCommand[];
+}
+
+export interface MenuGroupSnapshot {
+  id: MenuId;
+  label: string;
+  items: MenuCommandSnapshot[];
 }
 
 export interface CommandState {
@@ -43,7 +57,7 @@ export interface CommandHandlers {
   showEditorPane(): void;
 }
 
-export function buildMenuGroups(state: CommandState, handlers: CommandHandlers): MenuGroup[] {
+export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
   return [
     {
       id: "file",
@@ -54,14 +68,12 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
           label: "Save",
           shortcut: "Ctrl/Cmd+S",
           enabled: state.canSave,
-          run: handlers.save,
         },
         {
           id: "file.quickOpen",
           label: "Quick Open…",
           shortcut: "Ctrl/Cmd+P",
           enabled: state.hasStream,
-          run: handlers.quickOpen,
         },
       ],
     },
@@ -74,7 +86,6 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
           label: "Find",
           shortcut: "Ctrl/Cmd+F",
           enabled: state.hasSelectedFile,
-          run: handlers.find,
         },
       ],
     },
@@ -87,39 +98,54 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
           label: "Files Sidebar",
           enabled: state.hasStream,
           checked: state.sidebarTab === "files",
-          run: handlers.showFilesSidebar,
         },
         {
           id: "view.stream-sidebar",
           label: "Stream Sidebar",
           enabled: state.hasStream,
           checked: state.sidebarTab === "stream",
-          run: handlers.showStreamSidebar,
         },
         {
           id: "view.working",
           label: "Working CC",
           enabled: state.hasStream,
           checked: state.activeTab === "working",
-          run: handlers.showWorkingPane,
         },
         {
           id: "view.talking",
           label: "Talking CC",
           enabled: state.hasStream,
           checked: state.activeTab === "talking",
-          run: handlers.showTalkingPane,
         },
         {
           id: "view.editor",
           label: "Editor",
           enabled: state.hasStream,
           checked: state.activeTab === "editor",
-          run: handlers.showEditorPane,
         },
       ],
     },
   ];
+}
+
+export function buildMenuGroups(state: CommandState, handlers: CommandHandlers): MenuGroup[] {
+  const handlersById: Record<CommandId, () => void> = {
+    "file.save": handlers.save,
+    "file.quickOpen": handlers.quickOpen,
+    "edit.find": handlers.find,
+    "view.files-sidebar": handlers.showFilesSidebar,
+    "view.stream-sidebar": handlers.showStreamSidebar,
+    "view.working": handlers.showWorkingPane,
+    "view.talking": handlers.showTalkingPane,
+    "view.editor": handlers.showEditorPane,
+  };
+  return buildMenuGroupSnapshots(state).map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      run: handlersById[item.id],
+    })),
+  }));
 }
 
 export function findCommandById(groups: MenuGroup[], id: CommandId): MenuCommand | undefined {
