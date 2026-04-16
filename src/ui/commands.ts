@@ -8,10 +8,11 @@ export type CommandId =
   | "view.batches-sidebar"
   | "view.stream-sidebar"
   | "view.agent"
+  | "view.plan"
   | "view.editor";
 
 export type MenuId = "file" | "edit" | "view";
-export type MainViewId = "agent" | "editor";
+export type MainViewId = "agent" | "plan" | "editor";
 export type SidebarViewId = "files" | "batches" | "stream";
 
 export interface MenuCommand extends MenuItem {
@@ -22,7 +23,7 @@ export interface MenuCommandSnapshot {
   id: CommandId;
   label: string;
   shortcut?: string;
-  enabled?: boolean;
+  enabled: boolean;
   checked?: boolean;
 }
 
@@ -54,6 +55,7 @@ export interface CommandHandlers {
   showBatchesSidebar(): void;
   showStreamSidebar(): void;
   showAgentPane(): void;
+  showPlanPane(): void;
   showEditorPane(): void;
 }
 
@@ -118,6 +120,12 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
           checked: state.activeTab === "agent",
         },
         {
+          id: "view.plan",
+          label: "Plan",
+          enabled: state.hasStream,
+          checked: state.activeTab === "plan",
+        },
+        {
           id: "view.editor",
           label: "Editor",
           enabled: state.hasStream,
@@ -137,6 +145,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "view.batches-sidebar": handlers.showBatchesSidebar,
     "view.stream-sidebar": handlers.showStreamSidebar,
     "view.agent": handlers.showAgentPane,
+    "view.plan": handlers.showPlanPane,
     "view.editor": handlers.showEditorPane,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({

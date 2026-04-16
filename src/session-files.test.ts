@@ -23,6 +23,9 @@ test("createSessionFiles writes hooks.json and executable forwarder", () => {
     expect(forwarderBody).toContain("pane=working");
 
     const settings = JSON.parse(readFileSync(s.settingsPath, "utf8"));
+    expect(settings.permissions).toEqual({
+      allow: ["mcp__newde__*"],
+    });
     expect(settings.hooks).toBeDefined();
     for (const event of [
       "PreToolUse",

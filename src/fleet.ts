@@ -1,6 +1,7 @@
 import { ensureSession, ensureWindow, killWindow, listWindows } from "./tmux.js";
 import type { Logger } from "./logger.js";
 import type { PaneKind, Stream } from "./stream-store.js";
+import { createHash } from "node:crypto";
 
 export function ensureStreamSession(stream: Stream) {
   const session = stream.panes.working.split(":")[0];
@@ -18,7 +19,7 @@ export function ensureAgentPane(
   const session = target.split(":")[0];
   logger?.debug("ensuring agent pane", { session, target, cwd, cols, rows });
   ensureSession(session, cwd);
-  const created = ensureWindow(target, cwd, agentCommand, cols, rows);
+  const created = ensureWindow(target, cwd, agentCommand, cols, rows, launcherSignature(agentCommand));
 
   const placeholder = `${session}:__placeholder__`;
   if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {
@@ -26,6 +27,10 @@ export function ensureAgentPane(
     logger?.debug("removed placeholder window", { session });
   }
   return created;
+}
+
+function launcherSignature(agentCommand: string): string {
+  return createHash("sha256").update(agentCommand).digest("hex");
 }
 
 /**

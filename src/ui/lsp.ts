@@ -140,7 +140,7 @@ export class LspClient {
     });
     return this.openPromise.catch((error) => {
       this.openPromise = null;
-      this.ws = null;
+      this.clientId = null;
       throw error;
     });
   }

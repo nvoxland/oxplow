@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createWorkItem,
   completeBatch,
   createBatch,
+  getBatchWorkState,
   getBatchState,
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -18,7 +20,9 @@ import {
   promoteBatch,
   reorderBatch,
   switchStream,
+  updateWorkItem,
   writeWorkspaceFile,
+  type BatchWorkState,
   type BatchState,
   type Stream,
   type WorkspaceContext,
@@ -52,6 +56,7 @@ import { logUi } from "./logger.js";
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
+  const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("agent");
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +78,11 @@ export function App() {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
       .then(async ([allStreams, current, context]) => {
         const initialBatchState = await getBatchState(current.id);
+        const initialBatch = initialBatchState.batches.find((batch) => batch.id === initialBatchState.selectedBatchId);
+        if (initialBatch) {
+          const initialWork = await getBatchWorkState(current.id, initialBatch.id);
+          setBatchWorkStates((prev) => ({ ...prev, [initialBatch.id]: initialWork }));
+        }
         setStreams(allStreams);
         setStream(current);
         setBatchStates((prev) => ({ ...prev, [current.id]: initialBatchState }));
@@ -128,6 +138,11 @@ export function App() {
       logUi("info", "switching stream", { streamId: id });
       const next = await switchStream(id);
       const nextBatchState = batchStates[next.id] ?? await getBatchState(next.id);
+      const nextBatch = nextBatchState.batches.find((batch) => batch.id === nextBatchState.selectedBatchId);
+      if (nextBatch && !batchWorkStates[nextBatch.id]) {
+        const nextWork = await getBatchWorkState(next.id, nextBatch.id);
+        setBatchWorkStates((prev) => ({ ...prev, [nextBatch.id]: nextWork }));
+      }
       setBatchStates((prev) => ({ ...prev, [next.id]: nextBatchState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
@@ -163,6 +178,12 @@ export function App() {
   function handleStreamCreated(next: Stream) {
     void getBatchState(next.id).then((state) => {
       setBatchStates((prev) => ({ ...prev, [next.id]: state }));
+      const batch = state.batches.find((candidate) => candidate.id === state.selectedBatchId);
+      if (batch) {
+        void getBatchWorkState(next.id, batch.id).then((work) => {
+          setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+        });
+      }
     }).catch((e) => {
       setError(String(e));
     });
@@ -333,6 +354,11 @@ export function App() {
     try {
       const next = await selectBatch(stream.id, batchId);
       setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      const batch = next.batches.find((candidate) => candidate.id === batchId);
+      if (batch) {
+        const work = await getBatchWorkState(stream.id, batch.id);
+        setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+      }
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -344,8 +370,13 @@ export function App() {
     try {
       const next = await createBatch(stream.id, title);
       setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      const batch = next.batches.find((candidate) => candidate.id === next.selectedBatchId);
+      if (batch) {
+        const work = await getBatchWorkState(stream.id, batch.id);
+        setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+      }
       setSidebarTab("batches");
-      setActiveTab("agent");
+      setActiveTab("plan");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -388,6 +419,47 @@ export function App() {
     }
   }
 
+  async function handleCreateWorkItem(input: {
+    kind: "epic" | "task" | "subtask" | "bug" | "note";
+    title: string;
+    description?: string;
+    parentId?: string | null;
+    status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+    priority?: "low" | "medium" | "high" | "urgent";
+  }) {
+    if (!stream || !selectedBatch) return;
+    try {
+      const next = await createWorkItem(stream.id, selectedBatch.id, input);
+      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      setActiveTab("plan");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleUpdateWorkItem(
+    itemId: string,
+    changes: {
+      title?: string;
+      description?: string;
+      parentId?: string | null;
+      status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+      priority?: "low" | "medium" | "high" | "urgent";
+    },
+  ) {
+    if (!stream || !selectedBatch) return;
+    try {
+      const next = await updateWorkItem(stream.id, selectedBatch.id, itemId, changes);
+      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
   const currentSession = useMemo(
     () => (stream ? fileSessions[stream.id] ?? createEmptyFileSession() : createEmptyFileSession()),
     [fileSessions, stream],
@@ -400,6 +472,7 @@ export function App() {
     [batchStates, stream],
   );
   const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
+  const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
 
@@ -408,9 +481,44 @@ export function App() {
   }, [stream?.id, selectedFilePath]);
 
   useEffect(() => {
+    if (!stream || !selectedBatch || batchWorkStates[selectedBatch.id]) return;
+    void getBatchWorkState(stream.id, selectedBatch.id)
+      .then((next) => {
+        setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      })
+      .catch((e) => {
+        setError(String(e));
+      });
+  }, [batchWorkStates, selectedBatch, stream]);
+
+  useEffect(() => {
+    if (!stream) return;
+    const missing = currentBatchState.batches.filter((batch) => !batchWorkStates[batch.id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      missing.map(async (batch) => [batch.id, await getBatchWorkState(stream.id, batch.id)] as const),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setBatchWorkStates((prev) => {
+          const next = { ...prev };
+          for (const [batchId, work] of results) next[batchId] = work;
+          return next;
+        });
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [batchWorkStates, currentBatchState.batches, stream]);
+
+  useEffect(() => {
     if (!stream || !selectedFilePath) return;
     let cancelled = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshTimer: number | null = null;
     let requestId = 0;
 
     const refreshSelectedFile = async () => {
@@ -498,6 +606,9 @@ export function App() {
     },
     showAgentPane() {
       setActiveTab("agent");
+    },
+    showPlanPane() {
+      setActiveTab("plan");
     },
     showEditorPane() {
       setActiveTab("editor");
@@ -608,6 +719,7 @@ export function App() {
         <LeftPanel
           stream={stream}
           batches={currentBatchState.batches}
+          batchWorkStates={batchWorkStates}
           selectedBatchId={currentBatchState.selectedBatchId}
           activeBatchId={currentBatchState.activeBatchId}
           activeTab={sidebarTab}
@@ -647,8 +759,11 @@ export function App() {
             stream={stream}
             batch={selectedBatch}
             activeBatchId={currentBatchState.activeBatchId}
+            batchWork={selectedBatchWork}
             active={activeTab}
             onActiveChange={setActiveTab}
+            onCreateWorkItem={handleCreateWorkItem}
+            onUpdateWorkItem={handleUpdateWorkItem}
             openFileOrder={currentSession.openOrder}
             openFiles={currentSession.files}
             currentFilePath={selectedFilePath}

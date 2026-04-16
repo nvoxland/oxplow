@@ -72,3 +72,49 @@ export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows
     try { pty.kill(); } catch {}
   });
 }
+
+export function attachCommand(ws: WebSocket, command: string, cwd: string, cols: number, rows: number, logger?: Logger) {
+  logger?.info("attaching direct command bridge", { cwd, cols, rows });
+  const pty = spawn("sh", ["-lc", command], {
+    name: "xterm-256color",
+    cwd,
+    cols,
+    rows,
+    env: process.env as Record<string, string>,
+  });
+
+  pty.onData((data) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ type: "data", bytes: Buffer.from(data).toString("base64") }));
+  });
+
+  pty.onExit(() => {
+    logger?.info("direct command pty exited", { cwd });
+    try {
+      ws.close();
+    } catch {}
+  });
+
+  ws.on("message", (raw) => {
+    let msg: ClientMsg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      logger?.warn("failed to parse websocket message", { cwd });
+      return;
+    }
+    if (msg.type === "input" && msg.bytes) {
+      pty.write(Buffer.from(msg.bytes, "base64").toString("utf8"));
+    } else if (msg.type === "input-binary" && msg.bytes) {
+      pty.write(Buffer.from(msg.bytes, "base64").toString("binary"));
+    } else if (msg.type === "resize" && msg.cols && msg.rows) {
+      if (msg.cols < 20 || msg.rows < 5) return;
+      try { pty.resize(msg.cols, msg.rows); } catch {}
+    }
+  });
+
+  ws.on("close", () => {
+    logger?.info("direct command websocket closed", { cwd });
+    try { pty.kill(); } catch {}
+  });
+}

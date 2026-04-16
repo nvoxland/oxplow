@@ -49,10 +49,15 @@ export function ensureWindow(
   command: string,
   cols: number,
   rows: number,
+  launcherSignature?: string,
 ): boolean {
   if (hasWindow(target)) {
-    resizeWindow(target, cols, rows);
-    return false;
+    if (launcherSignature && readWindowSignature(target) !== launcherSignature) {
+      killWindow(target);
+    } else {
+      resizeWindow(target, cols, rows);
+      return false;
+    }
   }
   const [session, window] = target.split(":");
   // Set default-size so the new window is created at the correct dimensions
@@ -69,9 +74,32 @@ export function ensureWindow(
     "-c", cwd,
     command,
   ]);
+  if (launcherSignature) {
+    writeWindowSignature(target, launcherSignature);
+  }
   // Explicit resize ensures the window matches even if default-size was ignored.
   resizeWindow(target, cols, rows);
   return true;
+}
+
+function readWindowSignature(target: string): string | null {
+  try {
+    const out = execFileSync(
+      "tmux",
+      ["show-options", "-w", "-v", "-t", target, "@newde_launcher_signature"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const value = out.trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWindowSignature(target: string, launcherSignature: string): void {
+  try {
+    tmux(["set-option", "-w", "-t", target, "@newde_launcher_signature", launcherSignature]);
+  } catch {}
 }
 
 export function resizeWindow(target: string, cols: number, rows: number) {

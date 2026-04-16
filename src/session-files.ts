@@ -131,7 +131,12 @@ function buildHookSettings(forwarderPath: string) {
       hooks[event] = [{ hooks: [{ type: "command", command }] }];
     }
   }
-  return { hooks };
+  return {
+    permissions: {
+      allow: ["mcp__newde__*"],
+    },
+    hooks,
+  };
 }
 
 function escapeShellArg(value: string): string {

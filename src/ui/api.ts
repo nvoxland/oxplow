@@ -32,6 +32,46 @@ export interface BatchState {
   batches: Batch[];
 }
 
+export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
+export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
+
+export interface WorkItem {
+  id: string;
+  batch_id: string;
+  parent_id: string | null;
+  kind: WorkItemKind;
+  title: string;
+  description: string;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  sort_index: number;
+  created_by: "user" | "agent" | "system";
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface WorkItemEvent {
+  id: string;
+  batch_id: string;
+  item_id: string | null;
+  event_type: string;
+  actor_kind: "user" | "agent" | "system";
+  actor_id: string;
+  payload_json: string;
+  created_at: string;
+}
+
+export interface BatchWorkState {
+  batchId: string;
+  waiting: WorkItem[];
+  inProgress: WorkItem[];
+  done: WorkItem[];
+  epics: WorkItem[];
+  items: WorkItem[];
+}
+
 export interface BranchRef {
   kind: "local" | "remote";
   name: string;
@@ -142,6 +182,57 @@ export async function promoteBatch(streamId: string, batchId: string): Promise<B
 
 export async function completeBatch(streamId: string, batchId: string): Promise<BatchState> {
   return desktopApi().completeBatch(streamId, batchId);
+}
+
+export async function getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState> {
+  return desktopApi().getBatchWorkState(streamId, batchId);
+}
+
+export async function createWorkItem(
+  streamId: string,
+  batchId: string,
+  input: {
+    kind: WorkItemKind;
+    title: string;
+    description?: string;
+    parentId?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+  },
+): Promise<BatchWorkState> {
+  return desktopApi().createWorkItem(streamId, batchId, input);
+}
+
+export async function updateWorkItem(
+  streamId: string,
+  batchId: string,
+  itemId: string,
+  changes: {
+    title?: string;
+    description?: string;
+    parentId?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+  },
+): Promise<BatchWorkState> {
+  return desktopApi().updateWorkItem(streamId, batchId, itemId, changes);
+}
+
+export async function addWorkItemNote(
+  streamId: string,
+  batchId: string,
+  itemId: string,
+  note: string,
+): Promise<WorkItemEvent[]> {
+  return desktopApi().addWorkItemNote(streamId, batchId, itemId, note);
+}
+
+export async function listWorkItemEvents(
+  streamId: string,
+  batchId: string,
+  itemId?: string,
+): Promise<WorkItemEvent[]> {
+  return desktopApi().listWorkItemEvents(streamId, batchId, itemId);
 }
 
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {

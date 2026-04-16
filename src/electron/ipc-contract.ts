@@ -3,7 +3,12 @@ import type {
   Batch,
   BatchState,
   GitFileStatus,
+  BatchWorkState,
   Stream,
+  WorkItemEvent,
+  WorkItemKind,
+  WorkItemPriority,
+  WorkItemStatus,
   WorkspaceContext,
   WorkspaceEntry,
   WorkspaceFile,
@@ -20,10 +25,15 @@ export type {
   BranchRef,
   Batch,
   BatchState,
+  BatchWorkState,
   CommandId,
   GitFileStatus,
   MenuGroupSnapshot,
   Stream,
+  WorkItemEvent,
+  WorkItemKind,
+  WorkItemPriority,
+  WorkItemStatus,
   WorkspaceContext,
   WorkspaceEntry,
   WorkspaceFile,
@@ -70,6 +80,33 @@ export interface DesktopApi {
   selectBatch(streamId: string, batchId: string): Promise<BatchState>;
   promoteBatch(streamId: string, batchId: string): Promise<BatchState>;
   completeBatch(streamId: string, batchId: string): Promise<BatchState>;
+  getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState>;
+  createWorkItem(
+    streamId: string,
+    batchId: string,
+    input: {
+      kind: WorkItemKind;
+      title: string;
+      description?: string;
+      parentId?: string | null;
+      status?: WorkItemStatus;
+      priority?: WorkItemPriority;
+    },
+  ): Promise<BatchWorkState>;
+  updateWorkItem(
+    streamId: string,
+    batchId: string,
+    itemId: string,
+    changes: {
+      title?: string;
+      description?: string;
+      parentId?: string | null;
+      status?: WorkItemStatus;
+      priority?: WorkItemPriority;
+    },
+  ): Promise<BatchWorkState>;
+  addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
+  listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
   listWorkspaceFiles(streamId: string): Promise<{ files: WorkspaceIndexedFile[]; summary: WorkspaceStatusSummary }>;
   readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile>;
@@ -82,7 +119,7 @@ export interface DesktopApi {
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   setNativeMenu(groups: MenuGroupSnapshot[]): Promise<void>;
-  openTerminalSession(paneTarget: string, cols: number, rows: number): Promise<string>;
+  openTerminalSession(paneTarget: string, cols: number, rows: number, mode?: "direct" | "tmux"): Promise<string>;
   sendTerminalMessage(sessionId: string, message: string): Promise<void>;
   closeTerminalSession(sessionId: string): Promise<void>;
   openLspClient(streamId: string, languageId: string): Promise<string>;

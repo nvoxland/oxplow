@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../file-session.js";
 import type { Stream } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
-import { LspClient, type EditorNavigationTarget, streamFileUri } from "../lsp.js";
+import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 

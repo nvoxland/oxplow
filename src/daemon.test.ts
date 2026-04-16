@@ -35,6 +35,32 @@ test("buildAgentCommand launches Claude from the stream worktree", () => {
   expect(command).toContain("[newde] saved resume id was stale; starting a fresh Claude session");
 });
 
+test("buildAgentCommand can append a batch-specific system prompt for Claude", () => {
+  const command = buildAgentCommand(
+    "claude",
+    makeStream(),
+    "working",
+    "/tmp/session settings.json",
+    "You are working in batch b-123. Always pass batchId: b-123.",
+  );
+  expect(command).toContain("--append-system-prompt");
+  expect(command).toContain("batch b-123");
+});
+
+test("buildAgentCommand can include session-specific mcp config for Claude", () => {
+  const command = buildAgentCommand(
+    "claude",
+    makeStream(),
+    "working",
+    "/tmp/settings.json",
+    undefined,
+    "{\"mcpServers\":{\"newde\":{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"/tmp/mcp.cjs\"]}}}",
+  );
+  expect(command).toContain("--mcp-config");
+  expect(command).toContain("--strict-mcp-config");
+  expect(command).toContain("/tmp/mcp.cjs");
+});
+
 test("buildAgentCommand uses the pane-specific resume id", () => {
   const command = buildAgentCommand("claude", makeStream(), "talking", "/tmp/settings.json");
   expect(command).toContain("resume-talking");

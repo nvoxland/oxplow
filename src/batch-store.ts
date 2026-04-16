@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { createId } from "./ids.js";
 import type { Logger } from "./logger.js";
+import { getStateDatabase } from "./state-db.js";
 import type { Stream } from "./stream-store.js";
 
 export type BatchStatus = "active" | "queued" | "completed";
@@ -30,28 +32,30 @@ interface PersistedBatchState {
 }
 
 export class BatchStore {
-  private readonly rootDir: string;
-  private readonly dir: string;
+  private readonly legacyDir: string;
+  private readonly stateDb;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
-    this.rootDir = join(projectDir, ".newde");
-    this.dir = join(this.rootDir, "batches");
-    mkdirSync(this.rootDir, { recursive: true });
-    mkdirSync(this.dir, { recursive: true });
+    this.legacyDir = join(projectDir, ".newde", "batches");
+    this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
   }
 
   ensureStream(stream: Stream): BatchState {
-    const existing = this.readState(stream.id);
-    if (existing.batches.length > 0) {
-      const selected = existing.selectedBatchId ?? existing.batches[0]?.id ?? null;
-      if (selected !== existing.selectedBatchId) {
-        this.writeState(stream.id, { ...existing, selectedBatchId: selected });
-      }
-      return toBatchState({ ...existing, selectedBatchId: selected });
+    this.ensureStreamRow(stream);
+    this.migrateLegacyIfNeeded(stream.id);
+    const existing = this.fetchBatches(stream.id);
+    if (existing.length > 0) {
+      const selected = this.fetchSelectedBatchId(stream.id) ?? existing[0]?.id ?? null;
+      if (selected) this.setSelected(stream.id, selected);
+      return {
+        selectedBatchId: selected,
+        activeBatchId: existing.find((batch) => batch.status === "active")?.id ?? null,
+        batches: existing,
+      };
     }
 
     const now = new Date().toISOString();
-    const initial: Batch = {
+    const batch: Batch = {
       id: createBatchId(),
       stream_id: stream.id,
       title: "Current Batch",
@@ -62,197 +66,260 @@ export class BatchStore {
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
     };
-    const state = { selectedBatchId: initial.id, batches: [initial] };
-    this.writeState(stream.id, state);
-    return toBatchState(state);
+    this.insertBatch(batch);
+    this.setSelected(stream.id, batch.id);
+    return this.list(stream.id);
   }
 
   list(streamId: string): BatchState {
-    return toBatchState(this.readState(streamId));
+    const batches = this.fetchBatches(streamId);
+    return {
+      selectedBatchId: this.fetchSelectedBatchId(streamId) ?? batches[0]?.id ?? null,
+      activeBatchId: batches.find((batch) => batch.status === "active")?.id ?? null,
+      batches,
+    };
   }
 
   findByPane(paneTarget: string): Batch | undefined {
-    for (const fileName of readdirSync(this.dir)) {
-      if (!fileName.endsWith(".json")) continue;
-      const state = readPersistedState(join(this.dir, fileName));
-      const batch = state.batches.find((candidate) => candidate.pane_target === paneTarget);
-      if (batch) return batch;
-    }
-    return undefined;
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM batches WHERE pane_target = ? LIMIT 1",
+      paneTarget,
+    );
+    return row ? rowToBatch(row) : undefined;
+  }
+
+  getBatch(streamId: string, batchId: string): Batch | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM batches WHERE stream_id = ? AND id = ? LIMIT 1",
+      streamId,
+      batchId,
+    );
+    return row ? rowToBatch(row) : null;
   }
 
   create(stream: Stream, input: { title: string }): BatchState {
+    this.ensureStreamRow(stream);
     const title = input.title.trim();
     if (!title) throw new Error("batch title is required");
-    const state = this.readState(stream.id);
     const now = new Date().toISOString();
+    const existing = this.fetchBatches(stream.id);
     const batch: Batch = {
       id: createBatchId(),
       stream_id: stream.id,
       title,
       status: "queued",
-      sort_index: state.batches.length,
+      sort_index: existing.length,
       created_at: now,
       updated_at: now,
       pane_target: `${paneSessionName(stream)}:batch-${createWindowName()}`,
       resume_session_id: "",
     };
-    const next = {
-      selectedBatchId: batch.id,
-      batches: [...state.batches, batch],
-    };
-    this.writeState(stream.id, next);
-    return toBatchState(next);
+    this.insertBatch(batch);
+    this.setSelected(stream.id, batch.id);
+    return this.list(stream.id);
   }
 
   select(streamId: string, batchId: string): BatchState {
-    const state = this.readState(streamId);
-    this.ensureBatchExists(state, batchId);
-    const next = { ...state, selectedBatchId: batchId };
-    this.writeState(streamId, next);
-    return toBatchState(next);
+    this.ensureBatchExists(streamId, batchId);
+    this.setSelected(streamId, batchId);
+    return this.list(streamId);
   }
 
   reorder(streamId: string, batchId: string, targetIndex: number): BatchState {
-    const state = this.readState(streamId);
-    const currentIndex = state.batches.findIndex((batch) => batch.id === batchId);
+    const batches = this.fetchBatches(streamId);
+    const currentIndex = batches.findIndex((batch) => batch.id === batchId);
     if (currentIndex < 0) throw new Error(`unknown batch: ${batchId}`);
-    const clampedIndex = Math.max(0, Math.min(targetIndex, state.batches.length - 1));
-    if (clampedIndex === currentIndex) return toBatchState(state);
-    const reordered = state.batches.slice();
+    const clampedIndex = Math.max(0, Math.min(targetIndex, batches.length - 1));
+    if (clampedIndex === currentIndex) return this.list(streamId);
+    const reordered = batches.slice();
     const [moved] = reordered.splice(currentIndex, 1);
     reordered.splice(clampedIndex, 0, moved);
-    const now = new Date().toISOString();
-    const next = {
-      selectedBatchId: state.selectedBatchId,
-      batches: reordered.map((batch, index) => ({
-        ...batch,
-        sort_index: index,
-        updated_at: now,
-      })),
-    };
-    this.writeState(streamId, next);
-    return toBatchState(next);
+    this.stateDb.transaction(() => {
+      for (const [index, batch] of reordered.entries()) {
+        this.stateDb.run(
+          "UPDATE batches SET sort_index = ?, updated_at = ? WHERE id = ?",
+          index,
+          new Date().toISOString(),
+          batch.id,
+        );
+      }
+    });
+    return this.list(streamId);
   }
 
   promote(streamId: string, batchId: string): BatchState {
-    const state = this.readState(streamId);
-    const target = state.batches.find((batch) => batch.id === batchId);
+    const batches = this.fetchBatches(streamId);
+    const target = batches.find((batch) => batch.id === batchId);
     if (!target) throw new Error(`unknown batch: ${batchId}`);
     if (target.status === "completed") throw new Error("cannot activate a completed batch");
     const now = new Date().toISOString();
-    const next = {
-      selectedBatchId: batchId,
-      batches: state.batches.map((batch) => ({
-        ...batch,
-        status: batch.id === batchId ? "active" : batch.status === "active" ? "queued" : batch.status,
-        updated_at: now,
-      })),
-    };
-    this.writeState(streamId, next);
+    this.stateDb.transaction(() => {
+      for (const batch of batches) {
+        const status = batch.id === batchId ? "active" : batch.status === "active" ? "queued" : batch.status;
+        this.stateDb.run("UPDATE batches SET status = ?, updated_at = ? WHERE id = ?", status, now, batch.id);
+      }
+      this.setSelected(streamId, batchId);
+    });
     return this.reorder(streamId, batchId, 0);
   }
 
   complete(streamId: string, batchId: string): BatchState {
-    const state = this.readState(streamId);
-    const target = state.batches.find((batch) => batch.id === batchId);
+    const batches = this.fetchBatches(streamId);
+    const target = batches.find((batch) => batch.id === batchId);
     if (!target) throw new Error(`unknown batch: ${batchId}`);
     if (target.status !== "active") throw new Error("only the active batch can be completed");
-    const nextQueued = state.batches.find((batch) => batch.status === "queued" && batch.id !== batchId);
-    if (!nextQueued) {
-      throw new Error("create another queued batch before completing the active batch");
-    }
+    const nextQueued = batches.find((batch) => batch.status === "queued" && batch.id !== batchId);
+    if (!nextQueued) throw new Error("create another queued batch before completing the active batch");
     const now = new Date().toISOString();
-    const next = {
-      selectedBatchId: nextQueued.id,
-      batches: state.batches.map((batch) => ({
-        ...batch,
-        status: batch.id === batchId ? "completed" : batch.id === nextQueued.id ? "active" : batch.status,
-        updated_at: now,
-      })),
-    };
-    this.writeState(streamId, next);
+    this.stateDb.transaction(() => {
+      this.stateDb.run("UPDATE batches SET status = 'completed', updated_at = ? WHERE id = ?", now, batchId);
+      this.stateDb.run("UPDATE batches SET status = 'active', updated_at = ? WHERE id = ?", now, nextQueued.id);
+      this.setSelected(streamId, nextQueued.id);
+    });
     return this.reorder(streamId, nextQueued.id, 0);
   }
 
   updateResume(streamId: string, batchId: string, sessionId: string): void {
-    const state = this.readState(streamId);
-    this.ensureBatchExists(state, batchId);
-    const now = new Date().toISOString();
-    const next = {
-      ...state,
-      batches: state.batches.map((batch) =>
-        batch.id === batchId
-          ? { ...batch, resume_session_id: sessionId, updated_at: now }
-          : batch,
-      ),
-    };
-    this.writeState(streamId, next);
-  }
-
-  private ensureBatchExists(state: PersistedBatchState, batchId: string): void {
-    if (!state.batches.some((batch) => batch.id === batchId)) {
-      throw new Error(`unknown batch: ${batchId}`);
-    }
-  }
-
-  private readState(streamId: string): PersistedBatchState {
-    const path = this.pathFor(streamId);
-    if (!existsSync(path)) return { selectedBatchId: null, batches: [] };
-    return normalizeState(readPersistedState(path), streamId);
-  }
-
-  private writeState(streamId: string, state: PersistedBatchState): void {
-    const normalized = normalizeState(state, streamId);
-    writeFileSync(this.pathFor(streamId), JSON.stringify(normalized, null, 2) + "\n", "utf8");
-    this.logger?.info("saved batch state", {
+    this.ensureBatchExists(streamId, batchId);
+    this.stateDb.run(
+      "UPDATE batches SET resume_session_id = ?, updated_at = ? WHERE stream_id = ? AND id = ?",
+      sessionId,
+      new Date().toISOString(),
       streamId,
-      count: normalized.batches.length,
-      selectedBatchId: normalized.selectedBatchId,
-    });
+      batchId,
+    );
   }
 
-  private pathFor(streamId: string): string {
-    return join(this.dir, `${streamId}.json`);
+  private fetchBatches(streamId: string): Batch[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        "SELECT * FROM batches WHERE stream_id = ? ORDER BY sort_index, created_at, id",
+        streamId,
+      )
+      .map(rowToBatch);
+  }
+
+  private ensureStreamRow(stream: Stream): void {
+    this.stateDb.run(
+      `INSERT INTO streams (
+        id, title, summary, branch, branch_ref, branch_source, worktree_path,
+        working_pane, talking_pane, working_session_id, talking_session_id,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING`,
+      stream.id,
+      stream.title,
+      stream.summary,
+      stream.branch,
+      stream.branch_ref,
+      stream.branch_source,
+      stream.worktree_path,
+      stream.panes.working,
+      stream.panes.talking,
+      stream.resume.working_session_id,
+      stream.resume.talking_session_id,
+      stream.created_at,
+      stream.updated_at,
+    );
+  }
+
+  private fetchSelectedBatchId(streamId: string): string | null {
+    const row = this.stateDb.get<{ selected_batch_id: string | null }>(
+      "SELECT selected_batch_id FROM batch_selection WHERE stream_id = ? LIMIT 1",
+      streamId,
+    );
+    return row?.selected_batch_id ?? null;
+  }
+
+  private insertBatch(batch: Batch): void {
+    this.stateDb.run(
+      `INSERT INTO batches (
+        id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      batch.id,
+      batch.stream_id,
+      batch.title,
+      batch.status,
+      batch.sort_index,
+      batch.pane_target,
+      batch.resume_session_id,
+      batch.created_at,
+      batch.updated_at,
+    );
+  }
+
+  private setSelected(streamId: string, batchId: string): void {
+    this.stateDb.run(
+      `INSERT INTO batch_selection (stream_id, selected_batch_id)
+       VALUES (?, ?)
+       ON CONFLICT(stream_id) DO UPDATE SET selected_batch_id = excluded.selected_batch_id`,
+      streamId,
+      batchId,
+    );
+  }
+
+  private ensureBatchExists(streamId: string, batchId: string): void {
+    const row = this.stateDb.get<{ id: string }>(
+      "SELECT id FROM batches WHERE stream_id = ? AND id = ? LIMIT 1",
+      streamId,
+      batchId,
+    );
+    if (!row) throw new Error(`unknown batch: ${batchId}`);
+  }
+
+  private migrateLegacyIfNeeded(streamId: string): void {
+    const existing = this.stateDb.get<{ c: number }>("SELECT COUNT(*) AS c FROM batches WHERE stream_id = ?", streamId);
+    if ((existing?.c ?? 0) > 0) return;
+    const path = join(this.legacyDir, `${streamId}.json`);
+    if (!existsSync(path)) return;
+    try {
+      const legacy = normalizeState(JSON.parse(readFileSync(path, "utf8")) as PersistedBatchState, streamId);
+      this.stateDb.transaction(() => {
+        for (const batch of legacy.batches) this.insertBatch(batch);
+        if (legacy.selectedBatchId) this.setSelected(streamId, legacy.selectedBatchId);
+      });
+      this.logger?.info("imported legacy batch state into sqlite", {
+        streamId,
+        count: legacy.batches.length,
+      });
+    } catch (error) {
+      this.logger?.warn("failed to import legacy batch state", {
+        streamId,
+        error: errorMessage(error),
+      });
+    }
   }
 }
 
-function readPersistedState(path: string): PersistedBatchState {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as PersistedBatchState;
+function rowToBatch(row: Record<string, unknown>): Batch {
   return {
-    selectedBatchId: parsed.selectedBatchId ?? null,
-    batches: Array.isArray(parsed.batches) ? parsed.batches : [],
+    id: String(row.id ?? ""),
+    stream_id: String(row.stream_id ?? ""),
+    title: String(row.title ?? ""),
+    status: String(row.status ?? "queued") as BatchStatus,
+    sort_index: Number(row.sort_index ?? 0),
+    created_at: String(row.created_at ?? new Date(0).toISOString()),
+    updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
+    pane_target: String(row.pane_target ?? ""),
+    resume_session_id: String(row.resume_session_id ?? ""),
   };
 }
 
 function normalizeState(state: PersistedBatchState, streamId: string): PersistedBatchState {
-  const batches = state.batches
+  const batches = (Array.isArray(state.batches) ? state.batches : [])
     .map((batch, index) => ({
       ...batch,
       stream_id: batch.stream_id || streamId,
       sort_index: Number.isFinite(batch.sort_index) ? batch.sort_index : index,
       resume_session_id: batch.resume_session_id ?? "",
     }))
-    .sort((a, b) => a.sort_index - b.sort_index || a.created_at.localeCompare(b.created_at));
-
-  const selectedBatchId = state.selectedBatchId && batches.some((batch) => batch.id === state.selectedBatchId)
-    ? state.selectedBatchId
-    : batches[0]?.id ?? null;
-
+    .sort((a, b) => a.sort_index - b.sort_index || a.created_at.localeCompare(b.created_at))
+    .map((batch, index) => ({ ...batch, sort_index: index }));
   return {
-    selectedBatchId,
-    batches: batches.map((batch, index) => ({
-      ...batch,
-      sort_index: index,
-    })),
-  };
-}
-
-function toBatchState(state: PersistedBatchState): BatchState {
-  return {
-    selectedBatchId: state.selectedBatchId,
-    activeBatchId: state.batches.find((batch) => batch.status === "active")?.id ?? null,
-    batches: state.batches,
+    selectedBatchId: state.selectedBatchId && batches.some((batch) => batch.id === state.selectedBatchId)
+      ? state.selectedBatchId
+      : batches[0]?.id ?? null,
+    batches,
   };
 }
 
@@ -261,9 +328,13 @@ function paneSessionName(stream: Stream) {
 }
 
 function createBatchId() {
-  return "b-" + randomBytes(4).toString("hex");
+  return createId("b");
 }
 
 function createWindowName() {
   return randomBytes(3).toString("hex");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

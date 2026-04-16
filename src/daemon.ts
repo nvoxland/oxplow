@@ -150,11 +150,18 @@ function cleanupSessions(streams: Stream[]) {
   }
 }
 
-export function buildAgentCommand(agent: AgentKind, stream: Stream, pane: PaneKind, settingsPath?: string): string {
+export function buildAgentCommand(
+  agent: AgentKind,
+  stream: Stream,
+  pane: PaneKind,
+  settingsPath?: string,
+  appendSystemPrompt?: string,
+  mcpConfig?: string,
+): string {
   const resumeSessionId = pane === "working"
     ? stream.resume.working_session_id
     : stream.resume.talking_session_id;
-  return buildAgentCommandForSession(agent, stream.worktree_path, resumeSessionId, settingsPath);
+  return buildAgentCommandForSession(agent, stream.worktree_path, resumeSessionId, settingsPath, appendSystemPrompt, mcpConfig);
 }
 
 export function buildAgentCommandForSession(
@@ -162,6 +169,8 @@ export function buildAgentCommandForSession(
   cwd: string,
   resumeSessionId: string,
   settingsPath?: string,
+  appendSystemPrompt?: string,
+  mcpConfig?: string,
 ): string {
   if (agent === "copilot") {
     return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && exec copilot`)}`;
@@ -170,7 +179,13 @@ export function buildAgentCommandForSession(
   if (!settingsPath) {
     throw new Error("Claude agent requires a settingsPath");
   }
-  const claudeBase = `claude --settings ${shellEscape(settingsPath)}`;
+  const promptArg = appendSystemPrompt
+    ? ` --append-system-prompt ${shellEscape(appendSystemPrompt)}`
+    : "";
+  const mcpArg = mcpConfig
+    ? ` --mcp-config ${shellEscape(mcpConfig)} --strict-mcp-config`
+    : "";
+  const claudeBase = `claude --settings ${shellEscape(settingsPath)}${promptArg}${mcpArg}`;
   const freshClaude = `exec ${claudeBase}`;
   const command = resumeSessionId
     ? `${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[newde] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
@@ -182,7 +197,7 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-if (import.meta.main) {
+if ((import.meta as { main?: boolean }).main) {
   void main();
 }
 

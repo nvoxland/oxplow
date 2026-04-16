@@ -14,6 +14,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
   const termRef = useRef<Terminal | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
+  const [transportMode, setTransportMode] = useState<"direct" | "tmux">("direct");
   const modeRef = useRef<"live" | "history">("live");
 
   function setInteractionMode(next: "live" | "history") {
@@ -22,13 +23,17 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
   }
 
   useEffect(() => {
+    setTransportMode("direct");
+  }, [paneTarget]);
+
+  useEffect(() => {
     if (!visible) return;
     termRef.current?.focus();
-    if (sessionIdRef.current) {
+    if (transportMode === "tmux" && sessionIdRef.current) {
       void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
     }
     setInteractionMode("live");
-  }, [visible, paneTarget]);
+  }, [paneTarget, transportMode, visible]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -54,7 +59,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       }
 
       if (shouldHandleTerminalPageKey(event)) {
-        const routeToTmuxHistory = shouldRouteWheelToTmuxHistory({
+        const routeToTmuxHistory = transportMode === "tmux" && shouldRouteWheelToTmuxHistory({
           mode: modeRef.current,
           bufferType: term.buffer.active.type,
           mouseTrackingMode: term.modes.mouseTrackingMode,
@@ -79,7 +84,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return true;
       }
 
-      if (modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
+        if (transportMode === "tmux" && modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
         if (sessionIdRef.current) {
           void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
@@ -97,7 +102,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return false;
       }
 
-      const routeToTmuxHistory = shouldRouteWheelToTmuxHistory({
+      const routeToTmuxHistory = transportMode === "tmux" && shouldRouteWheelToTmuxHistory({
         mode: modeRef.current,
         bufferType: term.buffer.active.type,
         mouseTrackingMode: term.modes.mouseTrackingMode,
@@ -171,17 +176,19 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         } catch {}
       });
 
-      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows });
-      void window.newdeApi.openTerminalSession(paneTarget, term.cols, term.rows).then((sessionId) => {
+      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, transportMode });
+      void window.newdeApi.openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then((sessionId) => {
         if (disposed) {
           void window.newdeApi.closeTerminalSession(sessionId);
           return;
         }
         sessionIdRef.current = sessionId;
         term.focus();
-        void window.newdeApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
+        if (transportMode === "tmux") {
+          void window.newdeApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
+        }
         setInteractionMode("live");
-        logUi("info", "terminal session opened", { paneTarget, sessionId });
+        logUi("info", "terminal session opened", { paneTarget, sessionId, transportMode });
       }).catch((error) => {
         logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
       });
@@ -235,11 +242,28 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       }
       term.dispose();
     };
-  }, [paneTarget]);
+  }, [paneTarget, transportMode]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+      <div style={{ position: "absolute", top: 10, right: 10, zIndex: 2, display: "flex", gap: 8 }}>
+        {transportMode === "direct" ? (
+          <button
+            onClick={() => setTransportMode("tmux")}
+            style={modeButtonStyle}
+          >
+            Open in tmux
+          </button>
+        ) : (
+          <button
+            onClick={() => setTransportMode("direct")}
+            style={modeButtonStyle}
+          >
+            Use direct mode
+          </button>
+        )}
+      </div>
       {mode === "history" ? (
         <div
           style={{
@@ -261,6 +285,17 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
     </div>
   );
 }
+
+const modeButtonStyle = {
+  padding: "6px 10px",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  background: "rgba(14, 14, 14, 0.92)",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+} satisfies React.CSSProperties;
 
 function binaryToBase64(data: string) {
   let binary = "";

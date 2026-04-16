@@ -1,4 +1,4 @@
-import { createServer, IncomingMessage } from "node:http";
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import { writeFileSync, unlinkSync, readdirSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +9,9 @@ import type { Logger } from "./logger.js";
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "newde";
 const SERVER_VERSION = "0.0.1";
-const AUTH_HEADER = "x-claude-code-ide-authorization";
+const IDE_AUTH_HEADER = "x-claude-code-ide-authorization";
+const HTTP_AUTH_HEADER = "authorization";
+const MAX_HTTP_BODY_BYTES = 1_000_000;
 
 interface StartOptions {
   workspaceFolders: string[];
@@ -18,11 +20,13 @@ interface StartOptions {
    *  finds us. Overridable for tests. */
   ideDir?: string;
   logger?: Logger;
+  extraTools?: ToolDef[];
 }
 
 export interface McpServerHandle {
   port: number;
   authToken: string;
+  httpUrl: string;
   lockfilePath: string;
   stop(): Promise<void>;
 }
@@ -34,7 +38,7 @@ interface RpcRequest {
   params?: any;
 }
 
-interface ToolDef {
+export interface ToolDef {
   name: string;
   description: string;
   inputSchema: { type: "object"; properties: Record<string, any>; required?: string[] };
@@ -48,10 +52,12 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   sweepStaleLockfiles(ideDir);
 
   const authToken = randomBytes(32).toString("base64url");
-  const http = createServer();
+  const http = createServer((req, res) => {
+    void handleHttpRequest(req, res);
+  });
   const wss = new WebSocketServer({ server: http });
   wss.on("connection", (ws, req) => {
-    const presented = req.headers[AUTH_HEADER];
+    const presented = req.headers[IDE_AUTH_HEADER];
     if (presented !== authToken) {
       logger?.warn("rejected unauthorized mcp websocket");
       ws.close(1008, "unauthorized");
@@ -69,6 +75,84 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     inputSchema: { type: "object", properties: {} },
     handler: () => ({ ok: true, daemonPort: serverPort, timestamp: Date.now() }),
   });
+  if (opts.extraTools?.length) {
+    tools.push(...opts.extraTools);
+  }
+
+  async function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/mcp") {
+      res.statusCode = 404;
+      res.end("not found");
+      return;
+    }
+    if (!isAuthorizedHttpRequest(req, authToken)) {
+      logger?.warn("rejected unauthorized mcp http request");
+      res.statusCode = 401;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.setHeader("access-control-allow-origin", "*");
+      res.setHeader("access-control-allow-headers", "content-type, authorization");
+      res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+      res.end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.setHeader("allow", "POST, OPTIONS");
+      res.end("method not allowed");
+      return;
+    }
+
+    let body: string;
+    try {
+      body = await readRequestBody(req, MAX_HTTP_BODY_BYTES);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        res.statusCode = 413;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ error: "payload too large" }));
+        return;
+      }
+      throw error;
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      res.statusCode = 400;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "invalid json" }));
+      return;
+    }
+
+    const rawBatch = Array.isArray(payload) ? payload : [payload];
+    const candidates = rawBatch
+      .map((entry) => entry as RpcRequest)
+      .filter((entry): entry is RpcRequest => !!entry && typeof entry === "object");
+    const responses: Array<Record<string, unknown>> = [];
+    for (const candidate of candidates) {
+      const result = dispatch(candidate);
+      const isNotification = candidate.method === "notifications/initialized" || candidate.id === undefined;
+      if (isNotification) continue;
+      responses.push({ jsonrpc: "2.0", id: candidate.id, ...result });
+    }
+
+    if (responses.length === 0) {
+      res.statusCode = 202;
+      res.end();
+      return;
+    }
+
+    res.statusCode = 200;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(Array.isArray(payload) ? responses : responses[0]));
+  }
 
   function handleConnection(ws: WebSocket) {
     ws.on("message", (raw) => {
@@ -143,6 +227,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     throw new Error("mcp server: unexpected listen address");
   }
   serverPort = addr.port;
+  const httpUrl = `http://127.0.0.1:${serverPort}/mcp`;
 
   const lockfilePath = join(ideDir, `${serverPort}.lock`);
   const lockBody = {
@@ -155,7 +240,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     authToken,
   };
   writeFileSync(lockfilePath, JSON.stringify(lockBody), "utf8");
-  logger?.info("mcp server listening", { port: serverPort, lockfilePath, workspaceFolders: opts.workspaceFolders });
+  logger?.info("mcp server listening", { port: serverPort, httpUrl, lockfilePath, workspaceFolders: opts.workspaceFolders });
 
   async function stop() {
     try {
@@ -170,7 +255,42 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     logger?.info("mcp server stopped", { port: serverPort });
   }
 
-  return { port: serverPort, authToken, lockfilePath, stop };
+  return { port: serverPort, authToken, httpUrl, lockfilePath, stop };
+}
+
+function isAuthorizedHttpRequest(req: IncomingMessage, authToken: string): boolean {
+  const authorization = req.headers[HTTP_AUTH_HEADER];
+  if (typeof authorization === "string" && authorization === `Bearer ${authToken}`) {
+    return true;
+  }
+  const legacy = req.headers[IDE_AUTH_HEADER];
+  return legacy === authToken;
+}
+
+class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`request body exceeds ${limit} bytes`);
+    this.name = "BodyTooLargeError";
+  }
+}
+
+function readRequestBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    req.on("data", (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > maxBytes) {
+        req.destroy();
+        reject(new BodyTooLargeError(maxBytes));
+        return;
+      }
+      chunks.push(buf);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
 }
 
 function sweepStaleLockfiles(ideDir: string): void {

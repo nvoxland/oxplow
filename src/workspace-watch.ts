@@ -107,7 +107,12 @@ class StreamWorkspaceWatcher {
       return;
     }
     const watcher = watch(dir, (eventType, filename) => {
-      this.handleFsEvent(dir, eventType, typeof filename === "string" ? filename : filename?.toString("utf8") ?? "");
+      const name = typeof filename === "string"
+        ? filename
+        : filename != null
+          ? (filename as Buffer).toString("utf8")
+          : "";
+      this.handleFsEvent(dir, eventType, name);
     });
     watcher.on("error", (error) => {
       this.logger.warn("workspace watcher error", { dir, error: errorMessage(error) });

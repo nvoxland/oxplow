@@ -1,7 +1,8 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createId } from "./ids.js";
 import type { Logger } from "./logger.js";
+import { getStateDatabase } from "./state-db.js";
 
 export type PaneKind = "working" | "talking";
 export type StreamBranchSource = "local" | "remote" | "new";
@@ -27,56 +28,38 @@ export interface Stream {
 }
 
 export class StreamStore {
-  private projectDir: string;
-  private rootDir: string;
-  private dir: string;
-  private statePath: string;
-  private streams = new Map<string, Stream>();
-  private logger?: Logger;
+  private readonly rootDir: string;
+  private readonly legacyDir: string;
+  private readonly legacyStatePath: string;
+  private readonly stateDb;
 
-  constructor(projectDir: string, logger?: Logger) {
-    this.projectDir = projectDir;
-    this.logger = logger;
+  constructor(
+    private readonly projectDir: string,
+    private readonly logger?: Logger,
+  ) {
     this.rootDir = join(projectDir, ".newde");
-    this.dir = join(this.rootDir, "streams");
-    this.statePath = join(this.rootDir, "state.json");
-    mkdirSync(this.rootDir, { recursive: true });
-    mkdirSync(this.dir, { recursive: true });
-    this.loadAll();
-  }
-
-  private loadAll() {
-    if (!existsSync(this.dir)) return;
-    for (const f of readdirSync(this.dir)) {
-      if (!f.endsWith(".yml")) continue;
-      try {
-        const s = withDefaults(parseYaml(readFileSync(join(this.dir, f), "utf8")), this.projectDir);
-        if (s.id) this.streams.set(s.id, s);
-      } catch (e) {
-        this.logger?.warn("failed to parse stream file", {
-          file: f,
-          error: errorMessage(e),
-        });
-      }
-    }
+    this.legacyDir = join(this.rootDir, "streams");
+    this.legacyStatePath = join(this.rootDir, "state.json");
+    this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.migrateLegacyIfNeeded();
   }
 
   list(): Stream[] {
-    return [...this.streams.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return this.stateDb
+      .all<Record<string, unknown>>("SELECT * FROM streams ORDER BY created_at, rowid")
+      .map(rowToStream);
   }
 
   get(id: string): Stream | undefined {
-    return this.streams.get(id);
+    const row = this.stateDb.get<Record<string, unknown>>("SELECT * FROM streams WHERE id = ? LIMIT 1", id);
+    return row ? rowToStream(row) : undefined;
   }
 
   getCurrentStreamId(): string | null {
-    if (!existsSync(this.statePath)) return null;
-    try {
-      const state = JSON.parse(readFileSync(this.statePath, "utf8"));
-      return typeof state.currentStreamId === "string" ? state.currentStreamId : null;
-    } catch {
-      return null;
-    }
+    const row = this.stateDb.get<{ current_stream_id: string | null }>(
+      "SELECT current_stream_id FROM runtime_state WHERE id = 1 LIMIT 1",
+    );
+    return row?.current_stream_id ?? null;
   }
 
   getCurrent(): Stream | undefined {
@@ -85,30 +68,35 @@ export class StreamStore {
   }
 
   setCurrentStreamId(id: string) {
-    if (!this.streams.has(id)) {
-      throw new Error(`unknown stream: ${id}`);
-    }
-    writeFileSync(this.statePath, JSON.stringify({ currentStreamId: id }, null, 2) + "\n", "utf8");
+    if (!this.get(id)) throw new Error(`unknown stream: ${id}`);
+    this.stateDb.run("UPDATE runtime_state SET current_stream_id = ? WHERE id = 1", id);
     this.logger?.info("updated current stream", { streamId: id });
   }
 
   ensureCurrentStreamId(fallbackId: string) {
     const existing = this.getCurrentStreamId();
-    if (existing && this.streams.has(existing)) return existing;
+    if (existing && this.get(existing)) return existing;
     this.setCurrentStreamId(fallbackId);
     return fallbackId;
   }
 
   findByBranch(branch: string): Stream | undefined {
-    return this.list().find((s) => s.branch === branch);
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM streams WHERE branch = ? ORDER BY created_at LIMIT 1",
+      branch,
+    );
+    return row ? rowToStream(row) : undefined;
   }
 
   findByPane(target: string): { stream: Stream; pane: PaneKind } | undefined {
-    for (const stream of this.list()) {
-      if (stream.panes.working === target) return { stream, pane: "working" };
-      if (stream.panes.talking === target) return { stream, pane: "talking" };
-    }
-    return undefined;
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM streams WHERE working_pane = ? OR talking_pane = ? LIMIT 1",
+      target,
+      target,
+    );
+    if (!row) return undefined;
+    const stream = rowToStream(row);
+    return { stream, pane: stream.panes.working === target ? "working" : "talking" };
   }
 
   create(input: {
@@ -120,7 +108,7 @@ export class StreamStore {
     worktreePath: string;
     projectBase: string;
   }): Stream {
-    const id = "s-" + randomBytes(4).toString("hex");
+    const id = createId("s");
     const now = new Date().toISOString();
     const stream: Stream = {
       id,
@@ -146,9 +134,39 @@ export class StreamStore {
   }
 
   save(stream: Stream) {
-    const normalized = withDefaults(stream, this.projectDir);
-    this.streams.set(normalized.id, normalized);
-    writeFileSync(join(this.dir, `${normalized.id}.yml`), formatYaml(normalized));
+    this.stateDb.run(
+      `INSERT INTO streams (
+        id, title, summary, branch, branch_ref, branch_source, worktree_path,
+        working_pane, talking_pane, working_session_id, talking_session_id,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        summary = excluded.summary,
+        branch = excluded.branch,
+        branch_ref = excluded.branch_ref,
+        branch_source = excluded.branch_source,
+        worktree_path = excluded.worktree_path,
+        working_pane = excluded.working_pane,
+        talking_pane = excluded.talking_pane,
+        working_session_id = excluded.working_session_id,
+        talking_session_id = excluded.talking_session_id,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at`,
+      stream.id,
+      stream.title,
+      stream.summary,
+      stream.branch,
+      stream.branch_ref,
+      stream.branch_source,
+      stream.worktree_path,
+      stream.panes.working,
+      stream.panes.talking,
+      stream.resume.working_session_id,
+      stream.resume.talking_session_id,
+      stream.created_at,
+      stream.updated_at,
+    );
   }
 
   update(streamId: string, mutate: (stream: Stream) => Stream): Stream {
@@ -159,56 +177,95 @@ export class StreamStore {
     this.save(updated);
     return updated;
   }
+
+  private migrateLegacyIfNeeded(): void {
+    const row = this.stateDb.get<{ c: number }>("SELECT COUNT(*) AS c FROM streams");
+    if ((row?.c ?? 0) > 0) return;
+    if (!existsSync(this.legacyDir)) return;
+
+    const imported: Stream[] = [];
+    for (const name of readdirSync(this.legacyDir)) {
+      if (!name.endsWith(".yml")) continue;
+      try {
+        const parsed = withDefaults(parseYaml(readFileSync(join(this.legacyDir, name), "utf8")), this.projectDir);
+        if (!parsed.id) continue;
+        imported.push(parsed);
+      } catch (error) {
+        this.logger?.warn("failed to import legacy stream file", {
+          file: name,
+          error: errorMessage(error),
+        });
+      }
+    }
+    if (imported.length === 0) return;
+    this.stateDb.transaction(() => {
+      for (const stream of imported) this.save(stream);
+      const currentId = this.readLegacyCurrentStreamId();
+      const fallback = currentId && imported.some((stream) => stream.id === currentId) ? currentId : imported[0]!.id;
+      this.stateDb.run("UPDATE runtime_state SET current_stream_id = ? WHERE id = 1", fallback);
+    });
+    this.logger?.info("imported legacy streams into sqlite", { count: imported.length });
+  }
+
+  private readLegacyCurrentStreamId(): string | null {
+    if (!existsSync(this.legacyStatePath)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(this.legacyStatePath, "utf8"));
+      return typeof parsed.currentStreamId === "string" ? parsed.currentStreamId : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
-function formatYaml(s: Stream): string {
-  const esc = (v: string) => JSON.stringify(v);
-  return [
-    `id: ${esc(s.id)}`,
-    `title: ${esc(s.title)}`,
-    `summary: ${esc(s.summary)}`,
-    `branch: ${esc(s.branch)}`,
-    `branch_ref: ${esc(s.branch_ref)}`,
-    `branch_source: ${esc(s.branch_source)}`,
-    `worktree_path: ${esc(s.worktree_path)}`,
-    `created_at: ${esc(s.created_at)}`,
-    `updated_at: ${esc(s.updated_at)}`,
-    `panes:`,
-    `  working: ${esc(s.panes.working)}`,
-    `  talking: ${esc(s.panes.talking)}`,
-    `resume:`,
-    `  working_session_id: ${esc(s.resume.working_session_id)}`,
-    `  talking_session_id: ${esc(s.resume.talking_session_id)}`,
-    ``,
-  ].join("\n");
+function rowToStream(row: Record<string, unknown>): Stream {
+  return {
+    id: String(row.id ?? ""),
+    title: String(row.title ?? ""),
+    summary: String(row.summary ?? ""),
+    branch: String(row.branch ?? ""),
+    branch_ref: String(row.branch_ref ?? ""),
+    branch_source: String(row.branch_source ?? "local") as StreamBranchSource,
+    worktree_path: String(row.worktree_path ?? ""),
+    created_at: String(row.created_at ?? new Date(0).toISOString()),
+    updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
+    panes: {
+      working: String(row.working_pane ?? ""),
+      talking: String(row.talking_pane ?? ""),
+    },
+    resume: {
+      working_session_id: String(row.working_session_id ?? ""),
+      talking_session_id: String(row.talking_session_id ?? ""),
+    },
+  };
 }
 
 function parseYaml(text: string): Stream {
-  const out: any = { panes: {}, resume: {} };
+  const out: Record<string, any> = { panes: {}, resume: {} };
   const lines = text.split("\n");
   let section: "panes" | "resume" | null = null;
   for (const line of lines) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
     const sectionMatch = /^([a-z_]+):\s*$/.exec(line);
     if (sectionMatch) {
-      const [, key] = sectionMatch;
+      const key = sectionMatch[1];
       section = key === "panes" || key === "resume" ? key : null;
       if (section) out[section] = out[section] ?? {};
       continue;
     }
-    const m = /^(\s*)([a-z_]+):\s*(.*)$/.exec(line);
-    if (!m) continue;
-    const [, indent, key, rawVal] = m;
-    const val = rawVal.trim();
-    if (!val) continue;
-    const parsed = val.startsWith('"') ? JSON.parse(val) : val;
+    const match = /^(\s*)([a-z_]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const [, indent, key, rawVal] = match;
+    const value = rawVal.trim();
+    if (!value) continue;
+    const parsed = value.startsWith('"') ? JSON.parse(value) : value;
     if (indent.length > 0) {
       if (section) out[section][key] = parsed;
     } else {
       out[key] = parsed;
     }
   }
-  return out as Stream;
+  return out as unknown as Stream;
 }
 
 function withDefaults(stream: Partial<Stream>, projectDir: string): Stream {

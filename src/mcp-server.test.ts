@@ -117,6 +117,66 @@ test("MCP handshake: initialize, tools/list, tools/call newde__ping", async () =
   }
 });
 
+test("HTTP MCP handshake: initialize, tools/list, tools/call newde__ping", async () => {
+  const ideDir = tempIdeDir();
+  const server = await startMcpServer({ ideDir, workspaceFolders: [] });
+  try {
+    const headers = {
+      Authorization: `Bearer ${server.authToken}`,
+      "Content-Type": "application/json",
+    };
+
+    const initRes = await fetch(server.httpUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0" },
+        },
+      }),
+    });
+    expect(initRes.status).toBe(200);
+    const init = await initRes.json();
+    expect(init.error).toBeUndefined();
+    expect(init.result.serverInfo.name).toBe("newde");
+
+    const listRes = await fetch(server.httpUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+    });
+    expect(listRes.status).toBe(200);
+    const list = await listRes.json();
+    expect(list.error).toBeUndefined();
+    expect((list.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toContain("newde__ping");
+
+    const callRes = await fetch(server.httpUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "newde__ping", arguments: {} },
+      }),
+    });
+    expect(callRes.status).toBe(200);
+    const call = await callRes.json();
+    expect(call.error).toBeUndefined();
+    const payload = JSON.parse(call.result.content[0].text);
+    expect(payload.ok).toBe(true);
+    expect(payload.daemonPort).toBe(server.port);
+  } finally {
+    await server.stop();
+    rmSync(ideDir, { recursive: true, force: true });
+  }
+});
+
 // Auth rejection is exercised via manual/e2e verification — bun's test runner
 // and the `ws` client don't cooperate well when the server closes immediately
 // after upgrade, even though the standalone behavior is correct.

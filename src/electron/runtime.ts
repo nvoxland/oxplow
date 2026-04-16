@@ -4,15 +4,24 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../daemon.js";
 import { ensureAgentPane } from "../fleet.js";
-import { BatchStore, type BatchState } from "../batch-store.js";
+import { BatchStore, type Batch, type BatchState } from "../batch-store.js";
 import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "../git.js";
 import { HookEventStore, ingestHookPayload, type StoredEvent } from "../hook-ingest.js";
 import { LspSessionManager } from "../lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../logger.js";
 import { ResumeTracker } from "../resume-tracker.js";
 import { createElectronSessionFiles, destroySessionFiles, type SessionFiles } from "../session-files.js";
-import { startMcpServer, type McpServerHandle } from "../mcp-server.js";
+import { startMcpServer, type McpServerHandle, type ToolDef } from "../mcp-server.js";
+import { getStateDatabase } from "../state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../stream-store.js";
+import {
+  WorkItemStore,
+  type BatchWorkState,
+  type WorkItemEvent,
+  type WorkItemKind,
+  type WorkItemPriority,
+  type WorkItemStatus,
+} from "../work-item-store.js";
 import {
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -28,7 +37,7 @@ import { WorkspaceWatcherRegistry, type WorkspaceWatchEvent } from "../workspace
 import { detectCurrentBranch } from "../git.js";
 import { loadProjectConfig, type NewdeConfig } from "../config.js";
 import { killSession } from "../tmux.js";
-import { attachPane } from "../pty-bridge.js";
+import { attachCommand, attachPane } from "../pty-bridge.js";
 import type { UiLogPayload } from "./ipc-contract.js";
 
 export class ElectronRuntime {
@@ -37,6 +46,7 @@ export class ElectronRuntime {
   readonly logger: Logger;
   readonly store: StreamStore;
   readonly batchStore: BatchStore;
+  private readonly workItemStore: WorkItemStore;
   readonly hookEvents: HookEventStore;
   readonly resumeTracker: ResumeTracker;
   readonly lspManager: LspSessionManager;
@@ -59,6 +69,7 @@ export class ElectronRuntime {
     this.config = config;
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
     this.batchStore = new BatchStore(projectDir, logger.child({ subsystem: "batch-store" }));
+    this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.hookEvents = new HookEventStore(1000);
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
@@ -114,6 +125,7 @@ export class ElectronRuntime {
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
       logger: this.logger.child({ subsystem: "mcp" }),
+      extraTools: this.buildMcpTools(),
     });
     this.logger.info("started mcp server", { port: this.mcp.port, lockfilePath: this.mcp.lockfilePath });
 
@@ -137,6 +149,7 @@ export class ElectronRuntime {
       destroySessionFiles(files);
     }
     this.paneSessionFiles.clear();
+    getStateDatabase(this.projectDir).close();
   }
 
   onWorkspaceEvent(listener: (event: WorkspaceWatchEvent) => void): () => void {
@@ -280,6 +293,76 @@ export class ElectronRuntime {
     return this.batchStore.complete(streamId, batchId);
   }
 
+  getBatchWorkState(streamId: string, batchId: string): BatchWorkState {
+    this.resolveBatch(streamId, batchId);
+    return this.workItemStore.getState(batchId);
+  }
+
+  createWorkItem(
+    streamId: string,
+    batchId: string,
+    input: {
+      kind: WorkItemKind;
+      title: string;
+      description?: string;
+      parentId?: string | null;
+      status?: WorkItemStatus;
+      priority?: WorkItemPriority;
+    },
+  ): BatchWorkState {
+    this.resolveBatch(streamId, batchId);
+    this.workItemStore.createItem({
+      batchId,
+      parentId: input.parentId,
+      kind: input.kind,
+      title: input.title,
+      description: input.description,
+      status: input.status,
+      priority: input.priority,
+      createdBy: "user",
+      actorId: "ui",
+    });
+    return this.workItemStore.getState(batchId);
+  }
+
+  updateWorkItem(
+    streamId: string,
+    batchId: string,
+    itemId: string,
+    changes: {
+      title?: string;
+      description?: string;
+      parentId?: string | null;
+      status?: WorkItemStatus;
+      priority?: WorkItemPriority;
+    },
+  ): BatchWorkState {
+    this.resolveBatch(streamId, batchId);
+    this.workItemStore.updateItem({
+      batchId,
+      itemId,
+      title: changes.title,
+      description: changes.description,
+      parentId: changes.parentId,
+      status: changes.status,
+      priority: changes.priority,
+      actorKind: "user",
+      actorId: "ui",
+    });
+    return this.workItemStore.getState(batchId);
+  }
+
+  addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[] {
+    this.resolveBatch(streamId, batchId);
+    this.workItemStore.addNote(batchId, itemId, note, "user", "ui");
+    return this.workItemStore.listEvents(batchId, itemId);
+  }
+
+  listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[] {
+    this.resolveBatch(streamId, batchId);
+    return this.workItemStore.listEvents(batchId, itemId);
+  }
+
   listWorkspaceEntries(streamId: string, path = "") {
     const stream = this.resolveStream(streamId);
     const statuses = listGitStatuses(stream.worktree_path);
@@ -351,7 +434,13 @@ export class ElectronRuntime {
     return true;
   }
 
-  openTerminalSession(paneTarget: string, cols: number, rows: number, onSend: (sessionId: string, message: string) => void): string {
+  openTerminalSession(
+    paneTarget: string,
+    cols: number,
+    rows: number,
+    mode: "direct" | "tmux",
+    onSend: (sessionId: string, message: string) => void,
+  ): string {
     const batch = this.batchStore.findByPane(paneTarget);
     if (!batch) {
       throw new Error(`unknown pane target: ${paneTarget}`);
@@ -362,16 +451,19 @@ export class ElectronRuntime {
       batchId: batch.id,
       paneTarget,
     });
-    const created = ensureAgentPane(
-      batch.pane_target,
-      stream.worktree_path,
-      cols,
-      rows,
-      this.getAgentCommand(stream, batch),
-      paneLogger,
-    );
-    if (created) {
-      this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
+    const agentCommand = this.getAgentCommand(stream, batch);
+    if (mode === "tmux") {
+      const created = ensureAgentPane(
+        batch.pane_target,
+        stream.worktree_path,
+        cols,
+        rows,
+        agentCommand,
+        paneLogger,
+      );
+      if (created) {
+        this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
+      }
     }
 
     const sessionId = randomUUID();
@@ -379,7 +471,12 @@ export class ElectronRuntime {
     socket.on("close", () => {
       this.terminalSessions.delete(sessionId);
     });
-      attachPane(socket as any, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge" }));
+    if (mode === "tmux") {
+      attachPane(socket as any, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
+    } else {
+      this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
+      attachCommand(socket as any, agentCommand, stream.worktree_path, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
+    }
     this.terminalSessions.set(sessionId, socket);
     return sessionId;
   }
@@ -430,6 +527,13 @@ export class ElectronRuntime {
     return stream;
   }
 
+  private resolveBatch(streamId: string, batchId: string): Batch {
+    this.resolveStream(streamId);
+    const batch = this.batchStore.getBatch(streamId, batchId);
+    if (!batch) throw new Error(`unknown batch: ${batchId}`);
+    return batch;
+  }
+
   private getAgentCommand(stream: Stream, batch: Batch): string {
     if (this.config.agent === "claude") {
       const key = `${stream.id}:${batch.id}`;
@@ -452,6 +556,8 @@ export class ElectronRuntime {
         stream.worktree_path,
         batch.resume_session_id,
         files.settingsPath,
+        buildBatchAgentPrompt(stream, batch),
+        buildBatchMcpConfig(this.mcp),
       );
     }
     return buildAgentCommandForSession(
@@ -459,6 +565,207 @@ export class ElectronRuntime {
       stream.worktree_path,
       batch.resume_session_id,
     );
+  }
+
+  private buildMcpTools(): ToolDef[] {
+    return [
+      {
+        name: "newde__get_batch_context",
+        description: "Return stream and batch context. Use this to confirm the active batch id before calling work-item tools.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Optional batch id to resolve within the stream." },
+          },
+        },
+        handler: (args: { streamId?: string; batchId?: string }) => {
+          const stream = this.resolveStream(args.streamId);
+          const batchState = this.batchStore.list(stream.id);
+          const batch = args.batchId
+            ? this.resolveBatch(stream.id, args.batchId)
+            : batchState.batches.find((candidate) => candidate.id === batchState.selectedBatchId) ?? batchState.batches[0] ?? null;
+          return {
+            streamId: stream.id,
+            streamTitle: stream.title,
+            batchId: batch?.id ?? null,
+            batchTitle: batch?.title ?? null,
+            activeBatchId: batchState.activeBatchId,
+            selectedBatchId: batchState.selectedBatchId,
+          };
+        },
+      },
+      {
+        name: "newde__list_batch_work",
+        description: "List all tracked work items for one batch, grouped by waiting/in progress/done. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          },
+          required: ["batchId"],
+        },
+        handler: (args: { streamId?: string; batchId: string }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          return this.workItemStore.getState(args.batchId);
+        },
+      },
+      {
+        name: "newde__list_ready_work",
+        description: "List actionable work items in one batch that are not blocked by unfinished dependencies. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          },
+          required: ["batchId"],
+        },
+        handler: (args: { streamId?: string; batchId: string }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          return this.workItemStore.listReady(args.batchId);
+        },
+      },
+      {
+        name: "newde__create_work_item",
+        description: "Create a new epic/task/subtask/bug/note within one batch. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+            parentId: { type: "string", description: "Optional parent epic/task id in the same batch." },
+            kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
+            title: { type: "string", description: "Short title for the work item." },
+            description: { type: "string", description: "Optional longer description." },
+            status: { type: "string", description: "Optional initial status." },
+            priority: { type: "string", description: "Optional priority: low, medium, high, or urgent." },
+          },
+          required: ["batchId", "kind", "title"],
+        },
+        handler: (args: {
+          streamId?: string;
+          batchId: string;
+          parentId?: string;
+          kind: WorkItemKind;
+          title: string;
+          description?: string;
+          status?: WorkItemStatus;
+          priority?: WorkItemPriority;
+        }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          const item = this.workItemStore.createItem({
+            batchId: args.batchId,
+            parentId: args.parentId,
+            kind: args.kind,
+            title: args.title,
+            description: args.description,
+            status: args.status,
+            priority: args.priority,
+            createdBy: "agent",
+            actorId: "mcp",
+          });
+          return { item, state: this.workItemStore.getState(args.batchId) };
+        },
+      },
+      {
+        name: "newde__update_work_item",
+        description: "Update the title, description, status, priority, or parent of an existing work item in one batch. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+            itemId: { type: "string", description: "Required id of the work item to update." },
+            parentId: { type: "string", description: "Optional new parent epic/task id." },
+            title: { type: "string", description: "Optional replacement title." },
+            description: { type: "string", description: "Optional replacement description." },
+            status: { type: "string", description: "Optional replacement status." },
+            priority: { type: "string", description: "Optional replacement priority." },
+          },
+          required: ["batchId", "itemId"],
+        },
+        handler: (args: {
+          streamId?: string;
+          batchId: string;
+          itemId: string;
+          parentId?: string | null;
+          title?: string;
+          description?: string;
+          status?: WorkItemStatus;
+          priority?: WorkItemPriority;
+        }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          const item = this.workItemStore.updateItem({
+            batchId: args.batchId,
+            itemId: args.itemId,
+            parentId: args.parentId,
+            title: args.title,
+            description: args.description,
+            status: args.status,
+            priority: args.priority,
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+          return { item, state: this.workItemStore.getState(args.batchId) };
+        },
+      },
+      {
+        name: "newde__link_work_items",
+        description: "Create a relationship like blocks/relates_to/discovered_from between two work items in one batch. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+            fromItemId: { type: "string", description: "Source work item id." },
+            toItemId: { type: "string", description: "Target work item id." },
+            linkType: { type: "string", description: "One of blocks, relates_to, or discovered_from." },
+          },
+          required: ["batchId", "fromItemId", "toItemId", "linkType"],
+        },
+        handler: (args: {
+          streamId?: string;
+          batchId: string;
+          fromItemId: string;
+          toItemId: string;
+          linkType: "blocks" | "relates_to" | "discovered_from";
+        }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          this.workItemStore.linkItems(args.batchId, args.fromItemId, args.toItemId, args.linkType);
+          return { ok: true };
+        },
+      },
+      {
+        name: "newde__add_work_note",
+        description: "Append a note/history entry to a work item in one batch. Always pass the batchId from your session context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+            batchId: { type: "string", description: "Required batch id for the work you are managing." },
+            itemId: { type: "string", description: "Optional work item id if the note belongs to one specific item." },
+            note: { type: "string", description: "Required note content." },
+          },
+          required: ["batchId", "note"],
+        },
+        handler: (args: { streamId?: string; batchId: string; itemId?: string; note: string }) => {
+          const stream = this.resolveStream(args.streamId);
+          this.resolveBatch(stream.id, args.batchId);
+          this.workItemStore.addNote(args.batchId, args.itemId ?? null, args.note, "agent", "mcp");
+          return {
+            ok: true,
+            events: this.workItemStore.listEvents(args.batchId, args.itemId),
+          };
+        },
+      },
+    ];
   }
 
   private handleHookEnvelope(envelope: HookEnvelope): void {
@@ -547,6 +854,32 @@ class HookInbox {
       }
     }
   }
+}
+
+function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
+  return [
+    `You are working in stream "${stream.title}" (id: ${stream.id}) and batch "${batch.title}" (id: ${batch.id}).`,
+    "Use the newde MCP work-item tools to track planning and progress for this batch.",
+    `When calling any newde work-item MCP tool, always pass batchId="${batch.id}".`,
+    "Use newde__get_batch_context if you need to re-check the stream or batch ids before updating work.",
+  ].join(" ");
+}
+
+export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {
+  if (!mcp) {
+    throw new Error("mcp server not started");
+  }
+  return JSON.stringify({
+    mcpServers: {
+      newde: {
+        type: "http",
+        url: mcp.httpUrl,
+        headers: {
+          Authorization: `Bearer ${mcp.authToken}`,
+        },
+      },
+    },
+  });
 }
 
 function sanitizeProjectBase(projectDir: string): string {
