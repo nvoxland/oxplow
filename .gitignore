@@ -6,4 +6,4 @@ public/dist/
 .idea
 *.iml
 .newde
-
+.playwright-mcp

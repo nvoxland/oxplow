@@ -7,8 +7,6 @@ interface Props {
   stream: Stream;
   filePath: string | null;
   value: string;
-  isDirty: boolean;
-  isLoading: boolean;
   onChange(value: string): void;
   findRequest: number;
   openFileOrder: string[];
@@ -21,8 +19,6 @@ export function EditorPane({
   stream,
   filePath,
   value,
-  isDirty,
-  isLoading,
   onChange,
   findRequest,
   openFileOrder,
@@ -76,6 +72,7 @@ export function EditorPane({
       model.setValue(value);
     }
     monaco.editor.setModelLanguage(model, languageForPath(filePath));
+    closeFindWidget(editor);
     editor.setModel(model);
     changeDisposeRef.current?.dispose();
     changeDisposeRef.current = editor.onDidChangeModelContent(() => {
@@ -92,21 +89,7 @@ export function EditorPane({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "8px 12px",
-          borderBottom: "1px solid var(--border)",
-          fontSize: 12,
-          color: "var(--muted)",
-        }}
-      >
-        <span>{filePath ? `${filePath}${isDirty ? " • modified" : ""}` : "No file selected"}</span>
-        <span>{isLoading ? "Saving…" : isDirty ? "Modified" : "Saved"}</span>
-      </div>
-      {openFileOrder.length > 0 ? (
+      {openFileOrder.length > 1 ? (
         <div
           style={{
             display: "flex",
@@ -167,8 +150,8 @@ export function EditorPane({
           })}
         </div>
       ) : null}
-      <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+      <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
+        <div ref={hostRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
         {!filePath ? (
           <div style={emptyStyle}>
             <div>Select a file from the sidebar to open it here.</div>
@@ -207,4 +190,8 @@ function languageForPath(path: string | null): string {
   if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
   if (path.endsWith(".sh")) return "shell";
   return "plaintext";
+}
+
+function closeFindWidget(editor: any) {
+  editor.getContribution("editor.contrib.findController")?.closeFindWidget?.();
 }

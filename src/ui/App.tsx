@@ -342,8 +342,6 @@ export function App() {
             openFiles={currentSession.files}
             currentFilePath={selectedFilePath}
             currentFileContent={currentFile?.draftContent ?? ""}
-            currentFileDirty={currentFileDirty}
-            currentFileLoading={currentFile?.isLoading ?? false}
             onEditorChange={handleEditorChange}
             editorFindRequest={editorFindRequest}
             onSelectOpenFile={handleSelectOpenFile}

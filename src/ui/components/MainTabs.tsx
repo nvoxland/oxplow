@@ -13,8 +13,6 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   currentFilePath: string | null;
   currentFileContent: string;
-  currentFileDirty: boolean;
-  currentFileLoading: boolean;
   onEditorChange(value: string): void;
   editorFindRequest: number;
   onSelectOpenFile(path: string): void;
@@ -29,8 +27,6 @@ export function MainTabs({
   openFiles,
   currentFilePath,
   currentFileContent,
-  currentFileDirty,
-  currentFileLoading,
   onEditorChange,
   editorFindRequest,
   onSelectOpenFile,
@@ -40,7 +36,7 @@ export function MainTabs({
   const tabs: { id: TabId; label: string }[] = [
     { id: "working", label: "Working CC" },
     { id: "talking", label: "Talking CC" },
-    { id: "editor", label: currentFilePath ? fileLabel(currentFilePath, currentFileDirty) : "Editor" },
+    { id: "editor", label: "Editor" },
   ];
 
   return (
@@ -78,8 +74,6 @@ export function MainTabs({
             stream={stream}
             filePath={currentFilePath}
             value={currentFileContent}
-            isDirty={currentFileDirty}
-            isLoading={currentFileLoading}
             onChange={onEditorChange}
             findRequest={editorFindRequest}
             openFileOrder={openFileOrder}
@@ -91,12 +85,6 @@ export function MainTabs({
       </div>
     </div>
   );
-}
-
-function fileLabel(path: string, isDirty: boolean): string {
-  const parts = path.split("/");
-  const name = parts[parts.length - 1] ?? path;
-  return isDirty ? `${name} •` : name;
 }
 
 function PaneHost({ visible, children }: { visible: boolean; children: React.ReactNode }) {
