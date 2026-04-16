@@ -6,6 +6,7 @@ import {
   probeDaemon,
   readWorkspaceFile,
   renameCurrentStream,
+  subscribeWorkspaceEvents,
   switchStream,
   writeWorkspaceFile,
   type Stream,
@@ -23,6 +24,8 @@ import {
   type FileSessionState,
 } from "../file-session.js";
 import { buildMenuGroups } from "./commands.js";
+import { externalFileSyncAction } from "./external-file-sync.js";
+import type { EditorNavigationTarget } from "./lsp.js";
 import { TopBar } from "./components/TopBar.js";
 import { LeftPanel, type SidebarTab } from "./components/LeftPanel.js";
 import { Menubar } from "./components/Menubar.js";
@@ -44,6 +47,8 @@ export function App() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("files");
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
+  const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
+  const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const daemonDownLogged = useRef(false);
   const daemonWasUnavailable = useRef(false);
 
@@ -176,6 +181,12 @@ export function App() {
     }
   }
 
+  async function handleNavigateToLocation(target: EditorNavigationTarget) {
+    await handleOpenFile(target.path);
+    setEditorNavigationTarget(target);
+    setActiveTab("editor");
+  }
+
   function handleEditorChange(value: string) {
     if (!stream) return;
     const session = fileSessions[stream.id] ?? createEmptyFileSession();
@@ -230,6 +241,7 @@ export function App() {
       ...prev,
       [stream.id]: closeOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
     }));
+    setEditorNavigationTarget((current) => (current?.path === path ? null : current));
   }
 
   const currentSession = useMemo(
@@ -239,6 +251,70 @@ export function App() {
   const selectedFilePath = currentSession.selectedPath;
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
+  const currentFileRef = useRef(currentFile);
+  currentFileRef.current = currentFile;
+
+  useEffect(() => {
+    setExternalFilePrompt(null);
+  }, [stream?.id, selectedFilePath]);
+
+  useEffect(() => {
+    if (!stream || !selectedFilePath) return;
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let requestId = 0;
+
+    const refreshSelectedFile = async () => {
+      const currentRequestId = ++requestId;
+      try {
+        const file = await readWorkspaceFile(stream.id, selectedFilePath);
+        if (cancelled || currentRequestId !== requestId || file.path !== selectedFilePath) return;
+        const openFile = currentFileRef.current;
+        switch (externalFileSyncAction(openFile, file.content)) {
+          case "noop":
+            return;
+          case "update-saved":
+            setFileSessions((prev) => ({
+              ...prev,
+              [stream.id]: setLoadedFileContent(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
+            }));
+            return;
+          case "replace-draft":
+            setFileSessions((prev) => ({
+              ...prev,
+              [stream.id]: markFileSaved(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
+            }));
+            setExternalFilePrompt((current) => (current?.path === file.path ? null : current));
+            return;
+          case "prompt":
+            setExternalFilePrompt({ path: file.path, content: file.content });
+            return;
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setError(String(e));
+        logUi("error", "failed to refresh file after filesystem change", {
+          streamId: stream.id,
+          path: selectedFilePath,
+          error: String(e),
+        });
+      }
+    };
+
+    const unsubscribe = subscribeWorkspaceEvents(stream.id, (event) => {
+      if (event.path !== selectedFilePath || event.kind === "deleted") return;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void refreshSelectedFile();
+      }, 75);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
+  }, [selectedFilePath, stream]);
   const menuGroups = useMemo(
     () =>
       buildMenuGroups(
@@ -344,6 +420,8 @@ export function App() {
             currentFileContent={currentFile?.draftContent ?? ""}
             onEditorChange={handleEditorChange}
             editorFindRequest={editorFindRequest}
+            editorNavigationTarget={editorNavigationTarget}
+            onNavigateToLocation={handleNavigateToLocation}
             onSelectOpenFile={handleSelectOpenFile}
             onCloseOpenFile={handleCloseOpenFile}
           />
@@ -361,6 +439,29 @@ export function App() {
           void handleOpenFile(path);
         }}
       />
+      {stream && externalFilePrompt ? (
+        <ExternalFileChangedDialog
+          path={externalFilePrompt.path}
+          onReload={() => {
+            setFileSessions((prev) => ({
+              ...prev,
+              [stream.id]: markFileSaved(prev[stream.id] ?? createEmptyFileSession(), externalFilePrompt.path, externalFilePrompt.content),
+            }));
+            setExternalFilePrompt(null);
+          }}
+          onKeepMine={() => {
+            setFileSessions((prev) => ({
+              ...prev,
+              [stream.id]: setLoadedFileContent(
+                prev[stream.id] ?? createEmptyFileSession(),
+                externalFilePrompt.path,
+                externalFilePrompt.content,
+              ),
+            }));
+            setExternalFilePrompt(null);
+          }}
+        />
+      ) : null}
       {daemonUnavailable ? <DaemonDownDialog /> : null}
     </div>
   );
@@ -409,6 +510,83 @@ function DaemonDownDialog() {
         >
           Reload after restart
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ExternalFileChangedDialog({
+  path,
+  onReload,
+  onKeepMine,
+}: {
+  path: string;
+  onReload(): void;
+  onKeepMine(): void;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0, 0, 0, 0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "min(520px, 100%)",
+          background: "var(--bg-2)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: 20,
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.4)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>File changed on disk</div>
+          <div style={{ color: "var(--muted)", lineHeight: 1.5 }}>
+            <code>{path}</code> changed on disk while you had unsaved edits. Reload the file from disk or keep your
+            draft and treat the new disk content as the latest saved version.
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            onClick={onKeepMine}
+            style={{
+              background: "transparent",
+              color: "var(--fg)",
+              border: "1px solid var(--border)",
+              padding: "8px 14px",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Keep my changes
+          </button>
+          <button
+            onClick={onReload}
+            style={{
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              padding: "8px 14px",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Reload from disk
+          </button>
+        </div>
       </div>
     </div>
   );

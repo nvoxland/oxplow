@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildClaudeCommand } from "./daemon.js";
+import { buildAgentCommand } from "./daemon.js";
 import type { Stream } from "./stream-store.js";
 
 function makeStream(overrides: Partial<Stream> = {}): Stream {
@@ -25,8 +25,8 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
   };
 }
 
-test("buildClaudeCommand launches Claude from the stream worktree", () => {
-  const command = buildClaudeCommand(makeStream(), "working", "/tmp/session settings.json");
+test("buildAgentCommand launches Claude from the stream worktree", () => {
+  const command = buildAgentCommand("claude", makeStream(), "working", "/tmp/session settings.json");
   expect(command).toContain("/tmp/stream one");
   expect(command).toContain("resume-working");
   expect(command).toContain("/tmp/session settings.json");
@@ -35,14 +35,15 @@ test("buildClaudeCommand launches Claude from the stream worktree", () => {
   expect(command).toContain("[newde] saved resume id was stale; starting a fresh Claude session");
 });
 
-test("buildClaudeCommand uses the pane-specific resume id", () => {
-  const command = buildClaudeCommand(makeStream(), "talking", "/tmp/settings.json");
+test("buildAgentCommand uses the pane-specific resume id", () => {
+  const command = buildAgentCommand("claude", makeStream(), "talking", "/tmp/settings.json");
   expect(command).toContain("resume-talking");
   expect(command).not.toContain("resume-working");
 });
 
-test("buildClaudeCommand omits resume when none is saved", () => {
-  const command = buildClaudeCommand(
+test("buildAgentCommand omits resume when none is saved", () => {
+  const command = buildAgentCommand(
+    "claude",
     makeStream({
       resume: {
         working_session_id: "",
@@ -55,4 +56,12 @@ test("buildClaudeCommand omits resume when none is saved", () => {
   expect(command).toContain("exec claude --settings");
   expect(command).toContain("/tmp/settings.json");
   expect(command).not.toContain("--resume");
+});
+
+test("buildAgentCommand launches Copilot from the stream worktree", () => {
+  const command = buildAgentCommand("copilot", makeStream(), "working");
+  expect(command).toContain("/tmp/stream one");
+  expect(command).toContain("exec copilot");
+  expect(command).not.toContain("--resume");
+  expect(command).not.toContain("--settings");
 });

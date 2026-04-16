@@ -52,6 +52,14 @@ export interface WorkspaceContext {
   gitEnabled: boolean;
 }
 
+export interface WorkspaceWatchEvent {
+  id: number;
+  streamId: string;
+  path: string;
+  kind: "created" | "updated" | "deleted";
+  t: number;
+}
+
 export async function getCurrentStream(): Promise<Stream> {
   return fetchJson("/api/streams/current");
 }
@@ -121,6 +129,23 @@ export async function writeWorkspaceFile(streamId: string, path: string, content
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, content }),
   });
+}
+
+export function subscribeWorkspaceEvents(
+  streamId: string,
+  onEvent: (event: WorkspaceWatchEvent) => void,
+): () => void {
+  const params = new URLSearchParams({ stream: streamId });
+  const es = new EventSource(`/api/workspace/watch?${params.toString()}`);
+  es.onmessage = (message) => {
+    try {
+      onEvent(JSON.parse(message.data) as WorkspaceWatchEvent);
+    } catch {}
+  };
+  es.onerror = () => {
+    // EventSource auto-reconnects.
+  };
+  return () => es.close();
 }
 
 export async function probeDaemon(): Promise<boolean> {

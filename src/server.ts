@@ -8,8 +8,10 @@ import { ResumeTracker } from "./resume-tracker.js";
 import { ensureStreamPane } from "./fleet.js";
 import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "./git.js";
 import { HookEventStore, ingestHookPayload } from "./hook-ingest.js";
+import { LspSessionManager } from "./lsp.js";
 import type { PaneKind, Stream, StreamStore } from "./stream-store.js";
 import { listWorkspaceEntries, listWorkspaceFiles, readWorkspaceFile, summarizeGitStatuses, writeWorkspaceFile } from "./workspace-files.js";
+import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
 
 interface Deps {
   store: StreamStore;
@@ -18,9 +20,11 @@ interface Deps {
   projectBase: string;
   port: number;
   hookEvents: HookEventStore;
+  workspaceWatchers: WorkspaceWatcherRegistry;
   logger: Logger;
   resumeTracker: ResumeTracker;
-  getClaudeCommand(stream: Stream, pane: PaneKind): string;
+  lspManager: LspSessionManager;
+  getAgentCommand(stream: Stream, pane: PaneKind): string;
 }
 
 const MIME: Record<string, string> = {
@@ -38,6 +42,33 @@ export function startServer(deps: Deps) {
 
   http.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "", "http://localhost");
+    if (url.pathname === "/lsp") {
+      const streamId = url.searchParams.get("stream");
+      const languageId = url.searchParams.get("language");
+      if (!streamId || !languageId) {
+        socket.destroy();
+        return;
+      }
+      let stream: Stream;
+      try {
+        stream = resolveStream(deps, streamId);
+      } catch {
+        socket.destroy();
+        return;
+      }
+      const lspLogger = deps.logger.child({ subsystem: "lsp", streamId: stream.id, languageId });
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        void deps.lspManager.attachClient(ws, stream, languageId)
+          .then(() => {
+            lspLogger.info("accepted lsp websocket");
+          })
+          .catch((error) => {
+            lspLogger.warn("rejected lsp websocket", { error: errorMessage(error) });
+            ws.close(1011, errorMessage(error));
+          });
+      });
+      return;
+    }
     if (url.pathname !== "/ws") {
       socket.destroy();
       return;
@@ -66,7 +97,7 @@ export function startServer(deps: Deps) {
         resolvedPane.pane,
         cols,
         rows,
-        deps.getClaudeCommand(resolvedPane.stream, resolvedPane.pane),
+        deps.getAgentCommand(resolvedPane.stream, resolvedPane.pane),
         paneLogger,
       );
       if (created) {
@@ -190,12 +221,18 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, deps: Deps) {
       try {
         const stream = resolveStream(deps, url.searchParams.get("stream"));
         deps.logger.info("write workspace file", { streamId: stream.id, path: parsed.path });
-        return json(res, 200, writeWorkspaceFile(stream.worktree_path, parsed.path, parsed.content));
+        const saved = writeWorkspaceFile(stream.worktree_path, parsed.path, parsed.content);
+        deps.workspaceWatchers.notify(stream.id, "updated", saved.path);
+        return json(res, 200, saved);
       } catch (e) {
         deps.logger.warn("failed to write workspace file", { error: errorMessage(e) });
         return json(res, 400, { error: (e as Error).message });
       }
     });
+  }
+  if (path === "/api/workspace/watch" && req.method === "GET") {
+    const streamId = resolveStreamSelector(url.searchParams.get("stream"), deps.store.getCurrentStreamId() ?? undefined);
+    return handleWorkspaceWatchStream(res, deps, streamId);
   }
   if (path === "/api/logs/ui" && req.method === "POST") {
     return readBody(req, (body) => {
@@ -353,12 +390,30 @@ function handleCreateStream(_req: IncomingMessage, res: ServerResponse, deps: De
     } else {
       return json(res, 400, { error: "source must be 'existing' or 'new'" });
     }
+    deps.workspaceWatchers.ensureWatching(stream);
     deps.store.setCurrentStreamId(stream.id);
     return json(res, 201, stream);
   } catch (e) {
     deps.logger.warn("failed to create stream", { error: errorMessage(e) });
     return json(res, 400, { error: (e as Error).message });
   }
+}
+
+function handleWorkspaceWatchStream(res: ServerResponse, deps: Deps, streamId?: string) {
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  const unsub = deps.workspaceWatchers.subscribe((evt) => {
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  }, streamId);
+  const keepalive = setInterval(() => res.write(": ping\n\n"), 15000);
+  res.on("close", () => {
+    clearInterval(keepalive);
+    unsub();
+  });
 }
 
 function handleHookStream(res: ServerResponse, deps: Deps, streamId?: string) {

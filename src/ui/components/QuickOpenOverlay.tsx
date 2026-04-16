@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listWorkspaceFiles, type Stream, type WorkspaceIndexedFile } from "../api.js";
+import { listWorkspaceFiles, subscribeWorkspaceEvents, type Stream, type WorkspaceIndexedFile } from "../api.js";
 
 interface Props {
   open: boolean;
@@ -28,23 +28,33 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
   useEffect(() => {
     if (!open || !stream) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    listWorkspaceFiles(stream.id)
-      .then((result) => {
-        if (cancelled) return;
-        setFiles(result.files);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(String(e));
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const loadFiles = () => {
+      setLoading(true);
+      setError(null);
+      listWorkspaceFiles(stream.id)
+        .then((result) => {
+          if (cancelled) return;
+          setFiles(result.files);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setError(String(e));
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+        });
+    };
+    loadFiles();
+    const unsubscribe = subscribeWorkspaceEvents(stream.id, () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(loadFiles, 75);
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [open, stream?.id]);
 

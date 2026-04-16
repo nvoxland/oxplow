@@ -1,4 +1,5 @@
 import { basename, resolve } from "node:path";
+import { loadProjectConfig, type AgentKind, type NewdeConfig } from "./config.js";
 import { StreamStore, type PaneKind, type Stream } from "./stream-store.js";
 import { detectCurrentBranch, isGitRepo } from "./git.js";
 import { createDaemonLogger } from "./logger.js";
@@ -7,7 +8,9 @@ import { createSessionFiles, destroySessionFiles, type SessionFiles } from "./se
 import { startMcpServer, type McpServerHandle } from "./mcp-server.js";
 import { HookEventStore } from "./hook-ingest.js";
 import { ResumeTracker } from "./resume-tracker.js";
+import { LspSessionManager } from "./lsp.js";
 import { killSession } from "./tmux.js";
+import { WorkspaceWatcherRegistry } from "./workspace-watch.js";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
@@ -33,8 +36,15 @@ export async function main() {
   const port = Number(args.port ?? 7457);
   const projectBase = basename(projectDir).replace(/[^a-zA-Z0-9_-]/g, "_");
   const logger = createDaemonLogger(projectDir).child({ pid: process.pid, subsystem: "daemon" });
+  let config: NewdeConfig;
+  try {
+    config = loadProjectConfig(projectDir, logger.child({ subsystem: "config" }));
+  } catch (e) {
+    logger.error("failed to load project config", { error: errorMessage(e), configPath: `${projectDir}/newde.yaml` });
+    process.exit(1);
+  }
 
-  logger.info("starting daemon", { projectDir, port, projectBase });
+  logger.info("starting daemon", { projectDir, port, projectBase, agent: config.agent });
 
   const store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
 
@@ -61,7 +71,12 @@ export async function main() {
 
   const hookEvents = new HookEventStore(1000);
   const resumeTracker = new ResumeTracker();
+  const lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
+  const workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
   const paneSessionFiles = new Map<string, SessionFiles>();
+  for (const existingStream of store.list()) {
+    workspaceWatchers.ensureWatching(existingStream);
+  }
 
   let mcp: McpServerHandle;
   try {
@@ -78,6 +93,8 @@ export async function main() {
   const shutdown = async (signal?: string) => {
     logger.info("shutting down daemon", { signal });
     cleanupSessions(store.list());
+    try { workspaceWatchers.dispose(); } catch {}
+    try { await lspManager.dispose(); } catch {}
     try { await mcp.stop(); } catch {}
     for (const files of paneSessionFiles.values()) {
       destroySessionFiles(files);
@@ -102,21 +119,26 @@ export async function main() {
     projectBase,
     port,
     hookEvents,
+    workspaceWatchers,
     logger: logger.child({ subsystem: "server" }),
     resumeTracker,
-    getClaudeCommand: (targetStream, pane) => {
-      const key = `${targetStream.id}:${pane}`;
-      let files = paneSessionFiles.get(key);
-      if (!files) {
-        files = createSessionFiles({ daemonPort: port, streamId: targetStream.id, pane });
-        paneSessionFiles.set(key, files);
-        logger.info("created session files", {
-          streamId: targetStream.id,
-          pane,
-          settingsPath: files.settingsPath,
-        });
+    lspManager,
+    getAgentCommand: (targetStream, pane) => {
+      if (config.agent === "claude") {
+        const key = `${targetStream.id}:${pane}`;
+        let files = paneSessionFiles.get(key);
+        if (!files) {
+          files = createSessionFiles({ daemonPort: port, streamId: targetStream.id, pane });
+          paneSessionFiles.set(key, files);
+          logger.info("created session files", {
+            streamId: targetStream.id,
+            pane,
+            settingsPath: files.settingsPath,
+          });
+        }
+        return buildAgentCommand(config.agent, targetStream, pane, files.settingsPath);
       }
-      return buildClaudeCommand(targetStream, pane, files.settingsPath);
+      return buildAgentCommand(config.agent, targetStream, pane);
     },
   });
 }
@@ -128,7 +150,14 @@ function cleanupSessions(streams: Stream[]) {
   }
 }
 
-export function buildClaudeCommand(stream: Stream, pane: PaneKind, settingsPath: string): string {
+export function buildAgentCommand(agent: AgentKind, stream: Stream, pane: PaneKind, settingsPath?: string): string {
+  if (agent === "copilot") {
+    return `sh -lc ${shellEscape(`cd ${shellEscape(stream.worktree_path)} && exec copilot`)}`;
+  }
+
+  if (!settingsPath) {
+    throw new Error("Claude agent requires a settingsPath");
+  }
   const resumeSessionId = pane === "working"
     ? stream.resume.working_session_id
     : stream.resume.talking_session_id;

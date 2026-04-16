@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
-import { useEffect, useRef } from "react";
+import type { MutableRefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../file-session.js";
 import type { Stream } from "../api.js";
+import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
+import { LspClient, type EditorNavigationTarget, streamFileUri } from "../lsp.js";
 
 interface Props {
   stream: Stream;
@@ -9,8 +12,10 @@ interface Props {
   value: string;
   onChange(value: string): void;
   findRequest: number;
+  navigationTarget: EditorNavigationTarget | null;
   openFileOrder: string[];
   openFiles: Record<string, OpenFileState>;
+  onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
 }
@@ -21,8 +26,10 @@ export function EditorPane({
   value,
   onChange,
   findRequest,
+  navigationTarget,
   openFileOrder,
   openFiles,
+  onNavigateToLocation,
   onSelectOpenFile,
   onCloseOpenFile,
 }: Props) {
@@ -31,8 +38,20 @@ export function EditorPane({
   const monacoRef = useRef<any>(null);
   const changeDisposeRef = useRef<{ dispose(): void } | null>(null);
   const onChangeRef = useRef(onChange);
+  const onNavigateRef = useRef(onNavigateToLocation);
+  const streamRef = useRef(stream);
+  const filePathRef = useRef(filePath);
+  const lspClientsRef = useRef(new Map<string, LspClient>());
+  const trackedOpenDocsRef = useRef(new Map<string, string>());
+  const trackedSavedContentRef = useRef(new Map<string, string>());
+  const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
+  const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
+  const [lspStatus, setLspStatus] = useState<string | null>(null);
 
   onChangeRef.current = onChange;
+  onNavigateRef.current = onNavigateToLocation;
+  streamRef.current = stream;
+  filePathRef.current = filePath;
 
   useEffect(() => {
     let cancelled = false;
@@ -48,10 +67,18 @@ export function EditorPane({
         minimap: { enabled: false },
       });
       editorRef.current = editor;
+      registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
+      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
     })();
     return () => {
       cancelled = true;
       changeDisposeRef.current?.dispose();
+      diagnosticsDisposersRef.current.forEach((dispose) => dispose());
+      diagnosticsDisposersRef.current = [];
+      for (const client of lspClientsRef.current.values()) {
+        client.dispose();
+      }
+      lspClientsRef.current.clear();
       editorRef.current?.dispose();
     };
   }, []);
@@ -62,7 +89,7 @@ export function EditorPane({
     if (!monaco || !editor) return;
 
     const uri = filePath
-      ? monaco.Uri.from({ scheme: "file", path: `/${stream.id}/${filePath}` })
+      ? monaco.Uri.parse(streamFileUri(stream, filePath))
       : monaco.Uri.from({ scheme: "inmemory", path: `/stream/${stream.id}/placeholder` });
     let model = monaco.editor.getModel(uri);
     if (!model) {
@@ -78,6 +105,17 @@ export function EditorPane({
     changeDisposeRef.current = editor.onDidChangeModelContent(() => {
       const next = editor.getValue();
       if (next !== value) onChangeRef.current(next);
+      const currentModel = editor.getModel();
+      if (!currentModel || !filePathRef.current) return;
+      const currentLanguage = currentModel.getLanguageId();
+      if (!isLspCandidateLanguage(currentLanguage)) return;
+      ensureLspClient(streamRef.current, currentLanguage).notify("textDocument/didChange", {
+        textDocument: {
+          uri: currentModel.uri.toString(),
+          version: currentModel.getVersionId(),
+        },
+        contentChanges: [{ text: next }],
+      });
     });
   }, [stream.id, filePath, value]);
 
@@ -86,6 +124,140 @@ export function EditorPane({
     if (!editor || !filePath || findRequest === 0) return;
     void editor.getAction("actions.find")?.run();
   }, [filePath, findRequest]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+    const nextOpenDocs = new Map<string, string>();
+    for (const path of openFileOrder) {
+      const openFile = openFiles[path];
+      if (!openFile || openFile.isLoading) continue;
+      const languageId = languageForPath(path);
+      if (!isLspCandidateLanguage(languageId)) continue;
+      const uri = streamFileUri(stream, path);
+      nextOpenDocs.set(path, languageId);
+      if (!trackedOpenDocsRef.current.has(path)) {
+        ensureLspClient(stream, languageId).notify("textDocument/didOpen", {
+          textDocument: {
+            uri,
+            languageId,
+            version: 1,
+            text: openFile.draftContent,
+          },
+        });
+      }
+      trackedSavedContentRef.current.set(path, openFile.savedContent);
+    }
+
+    for (const [path, languageId] of trackedOpenDocsRef.current) {
+      if (nextOpenDocs.has(path)) continue;
+      ensureLspClient(stream, languageId).notify("textDocument/didClose", {
+        textDocument: { uri: streamFileUri(stream, path) },
+      });
+      const model = monaco.editor.getModel(monaco.Uri.parse(streamFileUri(stream, path)));
+      if (model) {
+        monaco.editor.setModelMarkers(model, markerOwnerRef.current, []);
+      }
+      trackedSavedContentRef.current.delete(path);
+    }
+
+    trackedOpenDocsRef.current = nextOpenDocs;
+  }, [openFileOrder, openFiles, stream]);
+
+  useEffect(() => {
+    for (const [path, languageId] of trackedOpenDocsRef.current) {
+      const openFile = openFiles[path];
+      const previousSaved = trackedSavedContentRef.current.get(path);
+      if (!openFile || previousSaved === undefined || previousSaved === openFile.savedContent) continue;
+      trackedSavedContentRef.current.set(path, openFile.savedContent);
+      if (openFile.savedContent !== openFile.draftContent) continue;
+      ensureLspClient(stream, languageId).notify("textDocument/didSave", {
+        textDocument: { uri: streamFileUri(stream, path) },
+        text: openFile.savedContent,
+      });
+    }
+  }, [openFiles, stream]);
+
+  useEffect(() => {
+    markerOwnerRef.current = `newde-lsp-${stream.id}`;
+    setLspStatus(null);
+    for (const client of lspClientsRef.current.values()) {
+      client.dispose();
+    }
+    lspClientsRef.current.clear();
+    trackedOpenDocsRef.current.clear();
+    trackedSavedContentRef.current.clear();
+    diagnosticsDisposersRef.current.forEach((dispose) => dispose());
+    diagnosticsDisposersRef.current = [];
+  }, [stream.id]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !navigationTarget || navigationTarget.path !== filePath) return;
+    editor.focus();
+    const position = { lineNumber: navigationTarget.line, column: navigationTarget.column };
+    editor.setPosition(position);
+    editor.revealPositionInCenter(position);
+  }, [filePath, navigationTarget]);
+
+  async function goToDefinition() {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    const position = editor.getPosition();
+    if (!position) return;
+    const languageId = model.getLanguageId();
+    if (!isLspCandidateLanguage(languageId)) {
+      setLspStatus(`LSP not configured for ${languageId}`);
+      return;
+    }
+    const client = ensureLspClient(streamRef.current, languageId);
+    const result = await client.request<unknown>("textDocument/definition", {
+      textDocument: { uri: model.uri.toString() },
+      position: {
+        line: position.lineNumber - 1,
+        character: position.column - 1,
+      },
+    });
+    const target = normalizeDefinitionTarget(streamRef.current, result);
+    if (!target) return;
+    if (target.path === filePathRef.current) {
+      editor.focus();
+      editor.setPosition({ lineNumber: target.line, column: target.column });
+      editor.revealPositionInCenter({ lineNumber: target.line, column: target.column });
+      return;
+    }
+    await onNavigateRef.current(target);
+  }
+
+  function ensureLspClient(currentStream: Stream, languageId: string): LspClient {
+    let client = lspClientsRef.current.get(languageId);
+    if (!client) {
+      client = new LspClient(currentStream.id, languageId);
+      diagnosticsDisposersRef.current.push(client.onDiagnostics((uri, diagnostics) => {
+        const monaco = monacoRef.current;
+        if (!monaco) return;
+        const model = monaco.editor.getModel(monaco.Uri.parse(uri));
+        if (!model) return;
+        monaco.editor.setModelMarkers(model, markerOwnerRef.current, diagnostics.map((diagnostic) => ({
+          severity: diagnosticSeverity(monaco, diagnostic.severity),
+          message: diagnostic.message,
+          source: diagnostic.source,
+          startLineNumber: diagnostic.range.start.line + 1,
+          startColumn: diagnostic.range.start.character + 1,
+          endLineNumber: diagnostic.range.end.line + 1,
+          endColumn: diagnostic.range.end.character + 1,
+        })));
+      }));
+      diagnosticsDisposersRef.current.push(client.onStatus((message) => {
+        const currentLanguage = languageForPath(filePathRef.current);
+        if (!isLspCandidateLanguage(currentLanguage) || currentLanguage !== languageId) return;
+        setLspStatus(message);
+      }));
+      lspClientsRef.current.set(languageId, client);
+    }
+    return client;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -152,6 +324,7 @@ export function EditorPane({
       ) : null}
       <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
         <div ref={hostRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
+        {filePath && lspStatus ? <div style={lspStatusStyle}>{lspStatus}</div> : null}
         {!filePath ? (
           <div style={emptyStyle}>
             <div>Select a file from the sidebar to open it here.</div>
@@ -178,20 +351,179 @@ const emptyStyle: CSSProperties = {
   background: "rgba(14, 14, 14, 0.85)",
 };
 
-function languageForPath(path: string | null): string {
-  if (!path) return "plaintext";
-  if (path.endsWith(".ts")) return "typescript";
-  if (path.endsWith(".tsx")) return "typescript";
-  if (path.endsWith(".js") || path.endsWith(".jsx")) return "javascript";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".md")) return "markdown";
-  if (path.endsWith(".css")) return "css";
-  if (path.endsWith(".html")) return "html";
-  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
-  if (path.endsWith(".sh")) return "shell";
-  return "plaintext";
-}
-
 function closeFindWidget(editor: any) {
   editor.getContribution("editor.contrib.findController")?.closeFindWidget?.();
+}
+
+const lspStatusStyle: CSSProperties = {
+  position: "absolute",
+  right: 12,
+  bottom: 12,
+  padding: "4px 8px",
+  borderRadius: 4,
+  border: "1px solid var(--border)",
+  background: "rgba(23, 23, 23, 0.92)",
+  color: "var(--muted)",
+  fontSize: 12,
+  pointerEvents: "none",
+  zIndex: 5,
+};
+
+function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promise<void>) {
+  editor.addAction({
+    id: "newde.goToDefinition",
+    label: "Go to Definition",
+    keybindings: [monaco.KeyCode.F12],
+    contextMenuGroupId: "navigation",
+    run,
+  });
+}
+
+function registerLspProviders(
+  monaco: any,
+  getClient: (languageId: string) => LspClient,
+  streamRef: MutableRefObject<Stream>,
+) {
+  for (const languageId of ["typescript", "javascript"]) {
+    monaco.languages.registerDefinitionProvider(languageId, {
+      provideDefinition: async (model: any, position: any) => {
+        const client = getClient(languageId);
+        const result = await client.request<unknown>("textDocument/definition", {
+          textDocument: { uri: model.uri.toString() },
+          position: {
+            line: position.lineNumber - 1,
+            character: position.column - 1,
+          },
+        });
+        return definitionResultToMonacoLocations(monaco, streamRef.current, result);
+      },
+    });
+    monaco.languages.registerHoverProvider(languageId, {
+      provideHover: async (model: any, position: any) => {
+        const client = getClient(languageId);
+        const result = await client.request<any>("textDocument/hover", {
+          textDocument: { uri: model.uri.toString() },
+          position: {
+            line: position.lineNumber - 1,
+            character: position.column - 1,
+          },
+        });
+        if (!result?.contents) return null;
+        return {
+          contents: normalizeHoverContents(result.contents),
+          range: result.range ? toMonacoRange(monaco, result.range) : undefined,
+        };
+      },
+    });
+    monaco.languages.registerReferenceProvider(languageId, {
+      provideReferences: async (model: any, position: any) => {
+        const client = getClient(languageId);
+        const result = await client.request<unknown[]>("textDocument/references", {
+          textDocument: { uri: model.uri.toString() },
+          position: {
+            line: position.lineNumber - 1,
+            character: position.column - 1,
+          },
+          context: { includeDeclaration: true },
+        });
+        return Array.isArray(result)
+          ? result
+            .map((item) => referenceToMonacoLocation(monaco, item))
+            .filter(Boolean)
+          : [];
+      },
+    });
+  }
+}
+
+function normalizeDefinitionTarget(stream: Stream, result: unknown): EditorNavigationTarget | null {
+  const locations = Array.isArray(result) ? result : result ? [result] : [];
+  for (const location of locations) {
+    if (!location || typeof location !== "object") continue;
+    const candidate = location as {
+      uri?: string;
+      targetUri?: string;
+      range?: { start?: { line?: number; character?: number } };
+      targetSelectionRange?: { start?: { line?: number; character?: number } };
+      targetRange?: { start?: { line?: number; character?: number } };
+    };
+    if (candidate.targetUri) {
+      const target = toEditorNavigationTarget(stream, candidate.targetUri, candidate.targetSelectionRange ?? candidate.targetRange);
+      if (target) return target;
+    }
+    if (candidate.uri) {
+      const target = toEditorNavigationTarget(stream, candidate.uri, candidate.range);
+      if (target) return target;
+    }
+  }
+  return null;
+}
+
+function definitionResultToMonacoLocations(monaco: any, stream: Stream, result: unknown): any[] {
+  const locations = Array.isArray(result) ? result : result ? [result] : [];
+  return locations
+    .map((item) => referenceToMonacoLocation(monaco, item))
+    .filter(Boolean);
+}
+
+function referenceToMonacoLocation(monaco: any, item: unknown): any | null {
+  if (!item || typeof item !== "object") return null;
+  const candidate = item as {
+    uri?: string;
+    targetUri?: string;
+    range?: unknown;
+    targetSelectionRange?: unknown;
+    targetRange?: unknown;
+  };
+  const uri = candidate.targetUri ?? candidate.uri;
+  const range = candidate.targetSelectionRange ?? candidate.targetRange ?? candidate.range;
+  if (!uri || !range) return null;
+  return {
+    uri: monaco.Uri.parse(uri),
+    range: toMonacoRange(monaco, range),
+  };
+}
+
+function toMonacoRange(monaco: any, range: unknown): any {
+  const candidate = range as {
+    start?: { line?: number; character?: number };
+    end?: { line?: number; character?: number };
+  };
+  return new monaco.Range(
+    (candidate.start?.line ?? 0) + 1,
+    (candidate.start?.character ?? 0) + 1,
+    (candidate.end?.line ?? candidate.start?.line ?? 0) + 1,
+    (candidate.end?.character ?? candidate.start?.character ?? 0) + 1,
+  );
+}
+
+function normalizeHoverContents(contents: unknown): { value: string }[] {
+  const values = Array.isArray(contents) ? contents : [contents];
+  return values.flatMap((item) => {
+    if (!item) return [];
+    if (typeof item === "string") return [{ value: item }];
+    if (typeof item === "object" && "value" in item && typeof (item as { value?: unknown }).value === "string") {
+      return [{ value: (item as { value: string }).value }];
+    }
+    if (typeof item === "object" && "language" in item && "value" in item) {
+      const markup = item as { language?: unknown; value?: unknown };
+      if (typeof markup.value === "string") {
+        return [{ value: `\`\`\`${typeof markup.language === "string" ? markup.language : ""}\n${markup.value}\n\`\`\`` }];
+      }
+    }
+    return [];
+  });
+}
+
+function diagnosticSeverity(monaco: any, severity?: number): number {
+  switch (severity) {
+    case 1:
+      return monaco.MarkerSeverity.Error;
+    case 2:
+      return monaco.MarkerSeverity.Warning;
+    case 3:
+      return monaco.MarkerSeverity.Info;
+    default:
+      return monaco.MarkerSeverity.Hint;
+  }
 }

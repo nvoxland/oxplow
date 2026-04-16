@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   listWorkspaceEntries,
   listWorkspaceFiles,
+  subscribeWorkspaceEvents,
   type GitFileStatus,
   type Stream,
   type WorkspaceEntry,
@@ -28,6 +29,32 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const loadDir = useCallback(async (path: string) => {
+    if (!stream || loadingDirs[path]) return;
+    setLoadingDirs((prev) => ({ ...prev, [path]: true }));
+    try {
+      const entries = await listWorkspaceEntries(stream.id, path);
+      setEntriesByDir((prev) => ({ ...prev, [path]: entries }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoadingDirs((prev) => ({ ...prev, [path]: false }));
+    }
+  }, [loadingDirs, stream]);
+
+  const loadWorkspaceIndex = useCallback(async () => {
+    if (!stream) return;
+    try {
+      const result = await listWorkspaceFiles(stream.id);
+      setIndexedFiles(result.files);
+      setStatusSummary(result.summary);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [stream]);
+
   useEffect(() => {
     setExpandedDirs({ "": true });
     setEntriesByDir({});
@@ -41,38 +68,34 @@ export function LeftPanel({ stream, activeTab, onActiveTabChange, selectedFilePa
     if (!stream) return;
     void loadDir("");
     void loadWorkspaceIndex();
-  }, [stream?.id]);
+  }, [stream?.id, loadDir, loadWorkspaceIndex]);
+
+  useEffect(() => {
+    if (!stream) return;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
+      void loadWorkspaceIndex();
+      for (const [path, expanded] of Object.entries(expandedDirs)) {
+        if (expanded) {
+          void loadDir(path);
+        }
+      }
+    };
+    const unsubscribe = subscribeWorkspaceEvents(stream.id, () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, 75);
+    });
+    return () => {
+      unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [expandedDirs, loadDir, loadWorkspaceIndex, stream]);
 
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
   const changedFiles = useMemo(() => indexedFiles.filter((file) => file.gitStatus !== null), [indexedFiles]);
 
   if (!stream) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>loading stream…</div>;
-  }
-
-  async function loadDir(path: string) {
-    if (loadingDirs[path]) return;
-    setLoadingDirs((prev) => ({ ...prev, [path]: true }));
-    try {
-      const entries = await listWorkspaceEntries(stream.id, path);
-      setEntriesByDir((prev) => ({ ...prev, [path]: entries }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoadingDirs((prev) => ({ ...prev, [path]: false }));
-    }
-  }
-
-  async function loadWorkspaceIndex() {
-    try {
-      const result = await listWorkspaceFiles(stream.id);
-      setIndexedFiles(result.files);
-      setStatusSummary(result.summary);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
   }
 
   async function toggleDirectory(path: string) {

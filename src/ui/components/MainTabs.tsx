@@ -1,5 +1,6 @@
 import type { OpenFileState } from "../../file-session.js";
 import type { Stream } from "../api.js";
+import type { EditorNavigationTarget } from "../lsp.js";
 import { TerminalPane } from "./TerminalPane.js";
 import { EditorPane } from "./EditorPane.js";
 
@@ -15,6 +16,8 @@ interface Props {
   currentFileContent: string;
   onEditorChange(value: string): void;
   editorFindRequest: number;
+  editorNavigationTarget: EditorNavigationTarget | null;
+  onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
 }
@@ -29,6 +32,8 @@ export function MainTabs({
   currentFileContent,
   onEditorChange,
   editorFindRequest,
+  editorNavigationTarget,
+  onNavigateToLocation,
   onSelectOpenFile,
   onCloseOpenFile,
 }: Props) {
@@ -76,6 +81,8 @@ export function MainTabs({
             value={currentFileContent}
             onChange={onEditorChange}
             findRequest={editorFindRequest}
+            navigationTarget={editorNavigationTarget}
+            onNavigateToLocation={onNavigateToLocation}
             openFileOrder={openFileOrder}
             openFiles={openFiles}
             onSelectOpenFile={onSelectOpenFile}

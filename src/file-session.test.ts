@@ -5,6 +5,7 @@ import {
   markFileSaved,
   openFileInSession,
   selectOpenFile,
+  setLoadedFileContent,
   updateFileDraft,
 } from "./file-session.js";
 
@@ -42,4 +43,15 @@ test("updateFileDraft and markFileSaved track dirty state per file", () => {
   state = markFileSaved(state, "a.ts", "changed");
   expect(state.files["a.ts"]?.draftContent).toBe("changed");
   expect(state.files["a.ts"]?.savedContent).toBe("changed");
+});
+
+test("setLoadedFileContent preserves a dirty draft while updating saved content", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "a.ts", "original");
+  state = updateFileDraft(state, "a.ts", "mine");
+
+  state = setLoadedFileContent(state, "a.ts", "theirs");
+
+  expect(state.files["a.ts"]?.savedContent).toBe("theirs");
+  expect(state.files["a.ts"]?.draftContent).toBe("mine");
 });
