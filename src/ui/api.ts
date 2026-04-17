@@ -26,6 +26,8 @@ export interface Batch {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
+  summary: string;
+  summary_updated_at: string | null;
 }
 
 export interface BatchState {

@@ -97,6 +97,8 @@ export class StateDatabase {
         sort_index INTEGER NOT NULL,
         pane_target TEXT NOT NULL,
         resume_session_id TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        summary_updated_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );

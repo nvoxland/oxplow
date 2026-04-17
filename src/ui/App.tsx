@@ -20,6 +20,7 @@ import {
   readWorkspaceFile,
   renameWorkspacePath,
   renameCurrentStream,
+  subscribeNewdeEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceEvents,
   selectBatch,
@@ -564,6 +565,25 @@ export function App() {
         })
         .catch((error) => {
           logUi("warn", "failed to refresh batch work state after change event", {
+            streamId: event.streamId,
+            batchId: event.batchId,
+            kind: event.kind,
+            error: String(error),
+          });
+        });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNewdeEvents((event) => {
+      if (event.type !== "batch.changed") return;
+      void getBatchState(event.streamId)
+        .then((state) => {
+          setBatchStates((prev) => ({ ...prev, [event.streamId]: state }));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh batch state after change event", {
             streamId: event.streamId,
             batchId: event.batchId,
             kind: event.kind,

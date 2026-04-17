@@ -42,7 +42,29 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           batchTitle: batch?.title ?? null,
           activeBatchId: batchState.activeBatchId,
           selectedBatchId: batchState.selectedBatchId,
+          summary: batch?.summary ?? "",
+          summaryUpdatedAt: batch?.summary_updated_at ?? null,
         };
+      },
+    },
+    {
+      name: "newde__record_batch_summary",
+      description:
+        "Record a 2-3 sentence rolling summary of what has been happening in this batch. Call this near the end of each turn. Replace the prior summary with one that reflects the overall state plus the latest round's activity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id for the batch you are summarising." },
+          summary: { type: "string", description: "Required 2-3 sentence rolling summary." },
+        },
+        required: ["batchId", "summary"],
+      },
+      handler: (args: { streamId?: string; batchId: string; summary: string }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        const updated = batchStore.recordSummary(stream.id, args.batchId, args.summary);
+        return { ok: true, summary: updated.summary, summaryUpdatedAt: updated.summary_updated_at };
       },
     },
     {

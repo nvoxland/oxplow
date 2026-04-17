@@ -149,6 +149,14 @@ export class ElectronRuntime {
         itemId: change.itemId,
       });
     });
+    this.batchStore.subscribe((change) => {
+      this.events.publish({
+        type: "batch.changed",
+        streamId: change.streamId,
+        batchId: change.batchId,
+        kind: change.kind,
+      });
+    });
 
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
@@ -600,7 +608,8 @@ function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
     `You are working in stream "${stream.title}" (id: ${stream.id}) and batch "${batch.title}" (id: ${batch.id}).`,
     "Use the newde MCP work-item tools to track planning and progress for this batch.",
     `When calling any newde work-item MCP tool, always pass batchId="${batch.id}".`,
-    "Use newde__get_batch_context if you need to re-check the stream or batch ids before updating work.",
+    "Use newde__get_batch_context if you need to re-check the stream or batch ids before updating work; its response includes the current batch summary.",
+    "Before ending each turn, call newde__record_batch_summary with a 2-3 sentence description of what has been happening in this batch overall and what changed in the latest round. Rewrite the summary from scratch each time so it reflects the latest state.",
   ].join(" ");
 }
 

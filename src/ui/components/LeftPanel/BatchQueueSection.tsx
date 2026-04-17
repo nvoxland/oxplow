@@ -127,6 +127,15 @@ export function BatchQueueSection({
                     <InlineBadge>{`${progressCount} in progress`}</InlineBadge>
                     <InlineBadge>{`${doneCount} done`}</InlineBadge>
                   </div>
+                  {batch.summary ? (
+                    <div style={{ fontSize: 12, color: "var(--fg)", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                      {batch.summary}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                      No summary yet — the agent records one at the end of each turn.
+                    </div>
+                  )}
                   <Row label="Resume" value={batch.resume_session_id || "not started yet"} />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button

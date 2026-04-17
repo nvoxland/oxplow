@@ -8,6 +8,8 @@ import type { Stream } from "./stream-store.js";
 
 export type BatchStatus = "active" | "queued" | "completed";
 
+const SUMMARY_MAX_LEN = 800;
+
 export interface Batch {
   id: string;
   stream_id: string;
@@ -18,12 +20,22 @@ export interface Batch {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
+  summary: string;
+  summary_updated_at: string | null;
 }
 
 export interface BatchState {
   selectedBatchId: string | null;
   activeBatchId: string | null;
   batches: Batch[];
+}
+
+export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated";
+
+export interface BatchChange {
+  streamId: string;
+  batchId: string;
+  kind: BatchChangeKind;
 }
 
 interface PersistedBatchState {
@@ -34,10 +46,30 @@ interface PersistedBatchState {
 export class BatchStore {
   private readonly legacyDir: string;
   private readonly stateDb;
+  private readonly listeners = new Set<(change: BatchChange) => void>();
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.legacyDir = join(projectDir, ".newde", "batches");
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+  }
+
+  subscribe(listener: (change: BatchChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emitChange(change: BatchChange): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        this.logger?.warn("batch change listener threw", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   ensureStream(stream: Stream): BatchState {
@@ -65,6 +97,8 @@ export class BatchStore {
       updated_at: now,
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
+      summary: "",
+      summary_updated_at: null,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
@@ -121,9 +155,12 @@ export class BatchStore {
       updated_at: now,
       pane_target: `${paneSessionName(stream)}:batch-${createWindowName()}`,
       resume_session_id: "",
+      summary: "",
+      summary_updated_at: null,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
+    this.emitChange({ streamId: stream.id, batchId: batch.id, kind: "created" });
     return this.list(stream.id);
   }
 
@@ -196,6 +233,30 @@ export class BatchStore {
       streamId,
       batchId,
     );
+    this.emitChange({ streamId, batchId, kind: "resume-updated" });
+  }
+
+  recordSummary(streamId: string, batchId: string, summary: string): Batch {
+    this.ensureBatchExists(streamId, batchId);
+    const trimmed = summary.trim();
+    if (!trimmed) throw new Error("batch summary is required");
+    if (trimmed.length > SUMMARY_MAX_LEN) {
+      throw new Error(`batch summary too long: max ${SUMMARY_MAX_LEN} chars`);
+    }
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      "UPDATE batches SET summary = ?, summary_updated_at = ?, updated_at = ? WHERE stream_id = ? AND id = ?",
+      trimmed,
+      now,
+      now,
+      streamId,
+      batchId,
+    );
+    const updated = this.getBatch(streamId, batchId);
+    if (!updated) throw new Error(`unknown batch after summary update: ${batchId}`);
+    this.logger?.info("recorded batch summary", { streamId, batchId, length: trimmed.length });
+    this.emitChange({ streamId, batchId, kind: "summary-updated" });
+    return updated;
   }
 
   private fetchBatches(streamId: string): Batch[] {
@@ -242,8 +303,9 @@ export class BatchStore {
   private insertBatch(batch: Batch): void {
     this.stateDb.run(
       `INSERT INTO batches (
-        id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, stream_id, title, status, sort_index, pane_target, resume_session_id,
+        summary, summary_updated_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       batch.id,
       batch.stream_id,
       batch.title,
@@ -251,6 +313,8 @@ export class BatchStore {
       batch.sort_index,
       batch.pane_target,
       batch.resume_session_id,
+      batch.summary,
+      batch.summary_updated_at,
       batch.created_at,
       batch.updated_at,
     );
@@ -310,6 +374,8 @@ function rowToBatch(row: Record<string, unknown>): Batch {
     updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
     pane_target: String(row.pane_target ?? ""),
     resume_session_id: String(row.resume_session_id ?? ""),
+    summary: String(row.summary ?? ""),
+    summary_updated_at: row.summary_updated_at == null ? null : String(row.summary_updated_at),
   };
 }
 
@@ -320,6 +386,8 @@ function normalizeState(state: PersistedBatchState, streamId: string): Persisted
       stream_id: batch.stream_id || streamId,
       sort_index: Number.isFinite(batch.sort_index) ? batch.sort_index : index,
       resume_session_id: batch.resume_session_id ?? "",
+      summary: batch.summary ?? "",
+      summary_updated_at: batch.summary_updated_at ?? null,
     }))
     .sort((a, b) => a.sort_index - b.sort_index || a.created_at.localeCompare(b.created_at))
     .map((batch, index) => ({ ...batch, sort_index: index }));
