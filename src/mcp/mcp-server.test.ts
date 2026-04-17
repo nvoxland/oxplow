@@ -228,3 +228,57 @@ test("does not sweep lockfiles that belong to live pids", async () => {
     rmSync(ideDir, { recursive: true, force: true });
   }
 });
+
+test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", async () => {
+  const ideDir = tempIdeDir();
+  const received: any[] = [];
+  const server = await startMcpServer({
+    ideDir,
+    workspaceFolders: [],
+    onHook: (envelope) => received.push(envelope),
+  });
+  try {
+    const res = await fetch(`${server.hookUrl}/SessionStart`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${server.authToken}`,
+        "content-type": "application/json",
+        "X-Newde-Stream": "s-1",
+        "X-Newde-Batch": "b-42",
+        "X-Newde-Pane": "working",
+      },
+      body: JSON.stringify({ session_id: "s1", cwd: "/tmp/demo" }),
+    });
+    expect(res.status).toBe(202);
+    expect(received).toHaveLength(1);
+    expect(received[0].event).toBe("SessionStart");
+    expect(received[0].streamId).toBe("s-1");
+    expect(received[0].batchId).toBe("b-42");
+    expect(received[0].pane).toBe("working");
+    expect(received[0].payload).toEqual({ session_id: "s1", cwd: "/tmp/demo" });
+  } finally {
+    await server.stop();
+    rmSync(ideDir, { recursive: true, force: true });
+  }
+});
+
+test("hook endpoint rejects unauthenticated requests", async () => {
+  const ideDir = tempIdeDir();
+  const received: any[] = [];
+  const server = await startMcpServer({
+    ideDir,
+    workspaceFolders: [],
+    onHook: (envelope) => received.push(envelope),
+  });
+  try {
+    const res = await fetch(`${server.hookUrl}/SessionStart`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(res.status).toBe(401);
+    expect(received).toHaveLength(0);
+  } finally {
+    await server.stop();
+    rmSync(ideDir, { recursive: true, force: true });
+  }
+});

@@ -13,6 +13,14 @@ const IDE_AUTH_HEADER = "x-claude-code-ide-authorization";
 const HTTP_AUTH_HEADER = "authorization";
 const MAX_HTTP_BODY_BYTES = 1_000_000;
 
+export interface HookEnvelope {
+  event: string;
+  streamId?: string;
+  batchId?: string;
+  pane?: string;
+  payload: unknown;
+}
+
 interface StartOptions {
   workspaceFolders: string[];
   /** Directory where the `<port>.lock` IDE discovery file is written.
@@ -21,12 +29,19 @@ interface StartOptions {
   ideDir?: string;
   logger?: Logger;
   extraTools?: ToolDef[];
+  /** Optional hook-forwarder handler. Called for each POST to
+   *  `/hook/:event` with a parsed envelope; the agent shim is wired
+   *  to this endpoint so hook events reach the runtime without a
+   *  filesystem inbox. */
+  onHook?: (envelope: HookEnvelope) => void;
 }
 
 export interface McpServerHandle {
   port: number;
   authToken: string;
   httpUrl: string;
+  /** Base URL hook forwarders POST to; event name goes on the path. */
+  hookUrl: string;
   lockfilePath: string;
   stop(): Promise<void>;
 }
@@ -81,6 +96,9 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
 
   async function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname.startsWith("/hook/")) {
+      return handleHookRequest(req, res, url);
+    }
     if (url.pathname !== "/mcp") {
       res.statusCode = 404;
       res.end("not found");
@@ -152,6 +170,66 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     res.statusCode = 200;
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(Array.isArray(payload) ? responses : responses[0]));
+  }
+
+  async function handleHookRequest(req: IncomingMessage, res: ServerResponse, url: URL) {
+    if (!isAuthorizedHttpRequest(req, authToken)) {
+      logger?.warn("rejected unauthorized hook http request");
+      res.statusCode = 401;
+      res.end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.setHeader("allow", "POST");
+      res.end();
+      return;
+    }
+    const event = url.pathname.slice("/hook/".length);
+    if (!event) {
+      res.statusCode = 400;
+      res.end("missing event name");
+      return;
+    }
+
+    let body: string;
+    try {
+      body = await readRequestBody(req, MAX_HTTP_BODY_BYTES);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        res.statusCode = 413;
+        res.end();
+        return;
+      }
+      throw error;
+    }
+
+    let payload: unknown = null;
+    if (body) {
+      try { payload = JSON.parse(body); } catch { payload = { raw: body }; }
+    }
+
+    // Identity rides X-Newde-* request headers (Claude's http hooks support
+    // env-var interpolation in header values).
+    const envelope: HookEnvelope = {
+      event,
+      streamId: readHeader(req, "x-newde-stream"),
+      batchId: readHeader(req, "x-newde-batch"),
+      pane: readHeader(req, "x-newde-pane"),
+      payload,
+    };
+
+    try {
+      opts.onHook?.(envelope);
+    } catch (error) {
+      logger?.warn("hook handler threw", {
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    res.statusCode = 202;
+    res.end();
   }
 
   function handleConnection(ws: WebSocket) {
@@ -228,6 +306,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   }
   serverPort = addr.port;
   const httpUrl = `http://127.0.0.1:${serverPort}/mcp`;
+  const hookUrl = `http://127.0.0.1:${serverPort}/hook`;
 
   const lockfilePath = join(ideDir, `${serverPort}.lock`);
   const lockBody = {
@@ -255,7 +334,14 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     logger?.info("mcp server stopped", { port: serverPort });
   }
 
-  return { port: serverPort, authToken, httpUrl, lockfilePath, stop };
+  return { port: serverPort, authToken, httpUrl, hookUrl, lockfilePath, stop };
+}
+
+function readHeader(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name];
+  if (typeof value === "string" && value.length > 0) return value;
+  if (Array.isArray(value) && value.length > 0 && value[0]) return value[0];
+  return undefined;
 }
 
 function isAuthorizedHttpRequest(req: IncomingMessage, authToken: string): boolean {

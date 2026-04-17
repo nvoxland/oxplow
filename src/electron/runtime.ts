@@ -10,15 +10,14 @@ import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-statu
 import { LspSessionManager } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
 import { ResumeTracker } from "../session/resume-tracker.js";
-import { createElectronSessionFiles, destroySessionFiles, type SessionFiles } from "../session/session-files.js";
-import { startMcpServer, type McpServerHandle } from "../mcp/mcp-server.js";
+import { createElectronPlugin, type ElectronPlugin } from "../session/claude-plugin.js";
+import { startMcpServer, type HookEnvelope, type McpServerHandle } from "../mcp/mcp-server.js";
 import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
-import { StreamStore, type Stream } from "../persistence/stream-store.js";
+import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
 import { EventBus, type NewdeEvent } from "../core/event-bus.js";
-import { HookInbox, type HookEnvelope } from "./hook-inbox.js";
 import {
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -52,11 +51,9 @@ export class ElectronRuntime {
   readonly config: NewdeConfig;
   readonly events: EventBus;
 
-  private readonly paneSessionFiles = new Map<string, SessionFiles>();
+  private electronPlugin: ElectronPlugin | null = null;
   private readonly terminalSessions = new Map<string, RuntimeSocket>();
   private readonly lspClients = new Map<string, RuntimeSocket>();
-  private readonly hookInbox: HookInbox;
-  private readonly hookInboxDir: string;
   private readonly agentStatusByBatch = new Map<string, AgentStatus>();
   private mcp: McpServerHandle | null = null;
 
@@ -77,8 +74,6 @@ export class ElectronRuntime {
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
-    this.hookInboxDir = join(projectDir, ".newde", "runtime", "hook-inbox");
-    this.hookInbox = new HookInbox(this.hookInboxDir, (envelope) => this.handleHookEnvelope(envelope), logger.child({ subsystem: "hook-inbox" }));
   }
 
   static async create(projectDir: string): Promise<ElectronRuntime> {
@@ -167,15 +162,13 @@ export class ElectronRuntime {
         batchStore: this.batchStore,
         workItemStore: this.workItemStore,
       }),
+      onHook: (envelope) => this.handleHookEnvelope(envelope),
     });
     this.logger.info("started mcp server", { port: this.mcp.port, lockfilePath: this.mcp.lockfilePath });
-
-    this.hookInbox.start();
   }
 
   async dispose(): Promise<void> {
     cleanupSessions(this.store.list());
-    this.hookInbox.dispose();
     for (const socket of this.terminalSessions.values()) socket.close();
     this.terminalSessions.clear();
     for (const socket of this.lspClients.values()) socket.close();
@@ -186,10 +179,6 @@ export class ElectronRuntime {
       await this.mcp.stop();
       this.mcp = null;
     }
-    for (const files of this.paneSessionFiles.values()) {
-      destroySessionFiles(files);
-    }
-    this.paneSessionFiles.clear();
     getStateDatabase(this.projectDir).close();
   }
 
@@ -530,28 +519,34 @@ export class ElectronRuntime {
 
   private getAgentCommand(stream: Stream, batch: Batch): string {
     if (this.config.agent === "claude") {
-      const key = `${stream.id}:${batch.id}`;
-      let files = this.paneSessionFiles.get(key);
-      if (!files) {
-        files = createElectronSessionFiles({
-          hookInboxDir: this.hookInboxDir,
-          streamId: stream.id,
-          batchId: batch.id,
+      if (!this.mcp) throw new Error("mcp server not started");
+      // One Claude plugin per runtime (the MCP port + hook URL are stable for
+      // the process's lifetime). Plugin hook JSON references env vars, so
+      // per-batch identity flows in at exec time without re-writing files.
+      if (!this.electronPlugin) {
+        this.electronPlugin = createElectronPlugin({
+          projectDir: this.projectDir,
+          hookUrl: this.mcp.hookUrl,
         });
-        this.paneSessionFiles.set(key, files);
-        this.logger.info("created session files", {
-          streamId: stream.id,
-          batchId: batch.id,
-          settingsPath: files.settingsPath,
+        this.logger.info("wrote claude plugin", {
+          pluginDir: this.electronPlugin.pluginDir,
         });
       }
       return buildAgentCommandForSession(
         this.config.agent,
         stream.worktree_path,
         batch.resume_session_id,
-        files.settingsPath,
-        buildBatchAgentPrompt(stream, batch),
-        buildBatchMcpConfig(this.mcp),
+        {
+          pluginDir: this.electronPlugin.pluginDir,
+          allowedTools: ["mcp__newde__*"],
+          appendSystemPrompt: buildBatchAgentPrompt(stream, batch),
+          mcpConfig: buildBatchMcpConfig(this.mcp),
+          env: {
+            NEWDE_STREAM_ID: stream.id,
+            NEWDE_BATCH_ID: batch.id,
+            NEWDE_HOOK_TOKEN: this.mcp.authToken,
+          },
+        },
       );
     }
     return buildAgentCommandForSession(
@@ -562,21 +557,26 @@ export class ElectronRuntime {
   }
 
   private handleHookEnvelope(envelope: HookEnvelope): void {
+    const streamId = envelope.streamId;
+    if (!streamId) return;
+    const pane: PaneKind | undefined = envelope.pane === "working" || envelope.pane === "talking"
+      ? envelope.pane
+      : undefined;
     const stored = ingestHookPayload(this.hookEvents, envelope.event, envelope.payload, {
-      streamId: envelope.streamId,
+      streamId,
       batchId: envelope.batchId,
-      pane: envelope.pane,
+      pane,
     });
-    if (envelope.batchId && this.store.get(envelope.streamId)) {
+    if (envelope.batchId && this.store.get(streamId)) {
       const update = this.resumeTracker.recordSessionHookEvent(
-        `${envelope.streamId}:${envelope.batchId}`,
+        `${streamId}:${envelope.batchId}`,
         envelope.event,
         stored.normalized.sessionId,
       );
       if (update?.type === "set") {
-        this.batchStore.updateResume(envelope.streamId, envelope.batchId, update.sessionId);
+        this.batchStore.updateResume(streamId, envelope.batchId, update.sessionId);
       } else if (update?.type === "clear") {
-        this.batchStore.updateResume(envelope.streamId, envelope.batchId, "");
+        this.batchStore.updateResume(streamId, envelope.batchId, "");
       }
     }
   }

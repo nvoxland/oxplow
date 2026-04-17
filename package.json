@@ -8,11 +8,10 @@
     "newde": "./bin/newde"
   },
   "scripts": {
-    "build:daemon": "bun build src/daemon/daemon.ts --target=node --outfile=dist/daemon.js --external node-pty",
     "build:ui": "bun build src/ui/main.tsx --outdir=public/dist --target=browser --format=esm --splitting",
     "build:electron-main": "bun build src/electron/main.ts --target=node --format=cjs --outfile=dist/electron-main.cjs --external electron --external node-pty",
     "build:electron-preload": "bun build src/electron/preload.ts --target=node --format=cjs --outfile=dist/electron-preload.cjs --external electron",
-    "build": "bun run build:daemon && bun run build:ui && bun run build:electron-main && bun run build:electron-preload",
+    "build": "bun run build:ui && bun run build:electron-main && bun run build:electron-preload",
     "dev:electron": "bun run build && electron .",
     "start": "electron .",
     "test": "bun test"
