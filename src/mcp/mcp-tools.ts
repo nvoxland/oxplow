@@ -166,6 +166,48 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
+      name: "newde__delete_work_item",
+      description: "Soft-delete a work item. Hidden from lists but preserved in the audit log.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          itemId: { type: "string", description: "Required id of the work item to delete." },
+        },
+        required: ["batchId", "itemId"],
+      },
+      handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        workItemStore.deleteItem(args.batchId, args.itemId, "agent", "mcp");
+        return { ok: true, state: workItemStore.getState(args.batchId) };
+      },
+    },
+    {
+      name: "newde__reorder_work_items",
+      description: "Reorder sibling work items within a batch. All ids must share the same parent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          orderedItemIds: {
+            type: "array",
+            description: "Full list of sibling work item ids in the desired new order.",
+            items: { type: "string" },
+          },
+        },
+        required: ["batchId", "orderedItemIds"],
+      },
+      handler: (args: { streamId?: string; batchId: string; orderedItemIds: string[] }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        workItemStore.reorderItems(args.batchId, args.orderedItemIds, "agent", "mcp");
+        return { ok: true, state: workItemStore.getState(args.batchId) };
+      },
+    },
+    {
       name: "newde__link_work_items",
       description: "Create a relationship like blocks/relates_to/discovered_from between two work items in one batch. Always pass the batchId from your session context.",
       inputSchema: {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Batch, BatchWorkState, WorkItem } from "../../api.js";
+import type { AgentStatus, Batch, BatchWorkState, WorkItem } from "../../api.js";
+import { AgentStatusDot } from "../AgentStatusDot.js";
 import {
   batchInputStyle,
   batchStatusColor,
@@ -12,6 +13,7 @@ import {
 export function BatchQueueSection({
   batches,
   batchWorkStates,
+  agentStatuses,
   selectedBatchId,
   activeBatchId,
   onSelectBatch,
@@ -22,6 +24,7 @@ export function BatchQueueSection({
 }: {
   batches: Batch[];
   batchWorkStates: Record<string, BatchWorkState>;
+  agentStatuses: Record<string, AgentStatus>;
   selectedBatchId: string | null;
   activeBatchId: string | null;
   onSelectBatch(batchId: string): Promise<void>;
@@ -99,7 +102,10 @@ export function BatchQueueSection({
                     font: "inherit",
                   }}
                 >
-                  <span style={{ fontWeight: 600 }}>{batch.title}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                    <AgentStatusDot status={agentStatuses[batch.id] ?? "idle"} />
+                    {batch.title}
+                  </span>
                   <span style={{ color: batchStatusColor(batch.status) }}>{active ? "active" : batch.status}</span>
                 </button>
                 <button

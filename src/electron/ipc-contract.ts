@@ -19,6 +19,7 @@ import type {
   WorkspaceWatchEvent,
   StoredEvent,
 } from "../ui/api.js";
+import type { AgentStatus, NewdeEvent } from "../core/event-bus.js";
 import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
@@ -28,7 +29,9 @@ export type {
   BatchWorkState,
   CommandId,
   GitFileStatus,
+  AgentStatus,
   MenuGroupSnapshot,
+  NewdeEvent,
   Stream,
   WorkItemEvent,
   WorkItemKind,
@@ -105,6 +108,8 @@ export interface DesktopApi {
       priority?: WorkItemPriority;
     },
   ): Promise<BatchWorkState>;
+  deleteWorkItem(streamId: string, batchId: string, itemId: string): Promise<BatchWorkState>;
+  reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): Promise<BatchWorkState>;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
@@ -116,6 +121,7 @@ export interface DesktopApi {
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string): Promise<WorkspaceRenameResult>;
   deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
+  listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; batchId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   setNativeMenu(groups: MenuGroupSnapshot[]): Promise<void>;
@@ -125,8 +131,7 @@ export interface DesktopApi {
   openLspClient(streamId: string, languageId: string): Promise<string>;
   sendLspMessage(clientId: string, message: string): Promise<void>;
   closeLspClient(clientId: string): Promise<void>;
-  onWorkspaceEvent(listener: (event: WorkspaceWatchEvent) => void): () => void;
-  onHookEvent(listener: (event: StoredEvent) => void): () => void;
+  onNewdeEvent(listener: (event: NewdeEvent) => void): () => void;
   onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
   onLspEvent(listener: (event: LspEvent) => void): () => void;
   onMenuCommand(listener: (commandId: CommandId) => void): () => void;

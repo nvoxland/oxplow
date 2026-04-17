@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CommandId, DesktopApi, LspEvent, StoredEvent, TerminalEvent, WorkspaceWatchEvent } from "./ipc-contract.js";
+import type { CommandId, DesktopApi, LspEvent, NewdeEvent, TerminalEvent } from "./ipc-contract.js";
 
 const api: DesktopApi = {
   getCurrentStream: () => ipcRenderer.invoke("newde:getCurrentStream"),
@@ -18,6 +18,8 @@ const api: DesktopApi = {
   getBatchWorkState: (streamId, batchId) => ipcRenderer.invoke("newde:getBatchWorkState", streamId, batchId),
   createWorkItem: (streamId, batchId, input) => ipcRenderer.invoke("newde:createWorkItem", streamId, batchId, input),
   updateWorkItem: (streamId, batchId, itemId, changes) => ipcRenderer.invoke("newde:updateWorkItem", streamId, batchId, itemId, changes),
+  deleteWorkItem: (streamId, batchId, itemId) => ipcRenderer.invoke("newde:deleteWorkItem", streamId, batchId, itemId),
+  reorderWorkItems: (streamId, batchId, orderedItemIds) => ipcRenderer.invoke("newde:reorderWorkItems", streamId, batchId, orderedItemIds),
   addWorkItemNote: (streamId, batchId, itemId, note) => ipcRenderer.invoke("newde:addWorkItemNote", streamId, batchId, itemId, note),
   listWorkItemEvents: (streamId, batchId, itemId) => ipcRenderer.invoke("newde:listWorkItemEvents", streamId, batchId, itemId),
   listWorkspaceEntries: (streamId, path = "") => ipcRenderer.invoke("newde:listWorkspaceEntries", streamId, path),
@@ -29,6 +31,7 @@ const api: DesktopApi = {
   renameWorkspacePath: (streamId, fromPath, toPath) => ipcRenderer.invoke("newde:renameWorkspacePath", streamId, fromPath, toPath),
   deleteWorkspacePath: (streamId, path) => ipcRenderer.invoke("newde:deleteWorkspacePath", streamId, path),
   listHookEvents: (streamId) => ipcRenderer.invoke("newde:listHookEvents", streamId),
+  listAgentStatuses: (streamId) => ipcRenderer.invoke("newde:listAgentStatuses", streamId),
   ping: () => ipcRenderer.invoke("newde:ping"),
   logUi: (payload) => ipcRenderer.invoke("newde:logUi", payload),
   setNativeMenu: (groups) => ipcRenderer.invoke("newde:setNativeMenu", groups),
@@ -38,8 +41,7 @@ const api: DesktopApi = {
   openLspClient: (streamId, languageId) => ipcRenderer.invoke("newde:openLspClient", streamId, languageId),
   sendLspMessage: (clientId, message) => ipcRenderer.invoke("newde:sendLspMessage", clientId, message),
   closeLspClient: (clientId) => ipcRenderer.invoke("newde:closeLspClient", clientId),
-  onWorkspaceEvent: (listener) => subscribe("newde:workspace-event", listener),
-  onHookEvent: (listener) => subscribe("newde:hook-event", listener),
+  onNewdeEvent: (listener) => subscribe("newde:event", listener),
   onTerminalEvent: (listener) => subscribe("newde:terminal-event", listener),
   onLspEvent: (listener) => subscribe("newde:lsp-event", listener),
   onMenuCommand: (listener) => subscribe("newde:menu-command", listener),
@@ -61,8 +63,8 @@ declare global {
   }
 }
 
-function subscribe<T extends WorkspaceWatchEvent | StoredEvent | TerminalEvent | LspEvent | CommandId>(
-  channel: "newde:workspace-event" | "newde:hook-event" | "newde:terminal-event" | "newde:lsp-event" | "newde:menu-command",
+function subscribe<T extends NewdeEvent | TerminalEvent | LspEvent | CommandId>(
+  channel: "newde:event" | "newde:terminal-event" | "newde:lsp-event" | "newde:menu-command",
   listener: (payload: T) => void,
 ) {
   const wrapped = (_event: unknown, payload: T) => listener(payload);

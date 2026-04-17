@@ -97,6 +97,14 @@ export class BatchStore {
     return row ? rowToBatch(row) : null;
   }
 
+  findById(batchId: string): Batch | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM batches WHERE id = ? LIMIT 1",
+      batchId,
+    );
+    return row ? rowToBatch(row) : null;
+  }
+
   create(stream: Stream, input: { title: string }): BatchState {
     this.ensureStreamRow(stream);
     const title = input.title.trim();

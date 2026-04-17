@@ -44,6 +44,7 @@ export interface WorkItem {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  deleted_at: string | null;
 }
 
 export interface WorkItemEvent {
@@ -55,6 +56,14 @@ export interface WorkItemEvent {
   actor_id: string;
   payload_json: string;
   created_at: string;
+}
+
+export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered";
+
+export interface WorkItemChange {
+  batchId: string;
+  kind: WorkItemChangeKind;
+  itemId: string | null;
 }
 
 export interface BatchWorkState {
@@ -92,9 +101,29 @@ interface UpdateWorkItemInput {
 
 export class WorkItemStore {
   private readonly stateDb;
+  private readonly listeners = new Set<(change: WorkItemChange) => void>();
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+  }
+
+  subscribe(listener: (change: WorkItemChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emitChange(change: WorkItemChange): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        this.logger?.warn("work item change listener threw", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   getState(batchId: string): BatchWorkState {
@@ -112,7 +141,9 @@ export class WorkItemStore {
   listItems(batchId: string): WorkItem[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM work_items WHERE batch_id = ? ORDER BY sort_index, created_at, id`,
+        `SELECT * FROM work_items
+         WHERE batch_id = ? AND deleted_at IS NULL
+         ORDER BY sort_index, created_at, id`,
         batchId,
       )
       .map(toWorkItem);
@@ -120,7 +151,9 @@ export class WorkItemStore {
 
   getItem(batchId: string, itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
-      `SELECT * FROM work_items WHERE batch_id = ? AND id = ? LIMIT 1`,
+      `SELECT * FROM work_items
+       WHERE batch_id = ? AND id = ? AND deleted_at IS NULL
+       LIMIT 1`,
       batchId,
       itemId,
     );
@@ -152,6 +185,7 @@ export class WorkItemStore {
       created_at: now,
       updated_at: now,
       completed_at: status === "done" ? now : null,
+      deleted_at: null,
     };
 
     this.stateDb.transaction(() => {
@@ -202,6 +236,7 @@ export class WorkItemStore {
       kind: item.kind,
       status: item.status,
     });
+    this.emitChange({ batchId: item.batch_id, kind: "created", itemId: item.id });
     return item;
   }
 
@@ -261,6 +296,7 @@ export class WorkItemStore {
         payload: snapshotWorkItem(existing, updated),
       });
     });
+    this.emitChange({ batchId: input.batchId, kind: "updated", itemId: input.itemId });
     return updated;
   }
 
@@ -288,6 +324,84 @@ export class WorkItemStore {
         payload: { note: trimmed },
       });
     });
+    this.emitChange({ batchId, kind: "note", itemId });
+  }
+
+  deleteItem(batchId: string, itemId: string, actorKind: WorkItemActorKind, actorId: string): void {
+    const kind = requireWorkItemActorKind(actorKind);
+    const now = new Date().toISOString();
+    let deleted = false;
+    this.stateDb.transaction(() => {
+      const existing = this.getItem(batchId, itemId);
+      if (!existing) return;
+      this.stateDb.run(
+        `UPDATE work_items SET deleted_at = ?, updated_at = ? WHERE batch_id = ? AND id = ?`,
+        now,
+        now,
+        batchId,
+        itemId,
+      );
+      this.recordEvent({
+        batchId,
+        itemId,
+        eventType: "deleted",
+        actorKind: kind,
+        actorId,
+        payload: { before: existing },
+      });
+      deleted = true;
+    });
+    if (deleted) {
+      this.logger?.info("deleted work item", { batchId, itemId });
+      this.emitChange({ batchId, kind: "deleted", itemId });
+    }
+  }
+
+  reorderItems(
+    batchId: string,
+    orderedItemIds: string[],
+    actorKind: WorkItemActorKind,
+    actorId: string,
+  ): void {
+    if (orderedItemIds.length === 0) return;
+    if (new Set(orderedItemIds).size !== orderedItemIds.length) {
+      throw new Error("reorder request contained duplicate ids");
+    }
+    const kind = requireWorkItemActorKind(actorKind);
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      const rows = this.stateDb.all<{ id: string; parent_id: string | null }>(
+        `SELECT id, parent_id FROM work_items
+         WHERE batch_id = ? AND id IN (${orderedItemIds.map(() => "?").join(",")}) AND deleted_at IS NULL`,
+        batchId,
+        ...orderedItemIds,
+      );
+      if (rows.length !== orderedItemIds.length) {
+        throw new Error("reorder request referenced unknown or deleted work items");
+      }
+      const parent = rows[0]!.parent_id;
+      if (rows.some((row) => row.parent_id !== parent)) {
+        throw new Error("reorder request mixed items with different parents");
+      }
+      for (let index = 0; index < orderedItemIds.length; index++) {
+        this.stateDb.run(
+          `UPDATE work_items SET sort_index = ?, updated_at = ? WHERE batch_id = ? AND id = ?`,
+          index,
+          now,
+          batchId,
+          orderedItemIds[index]!,
+        );
+      }
+      this.recordEvent({
+        batchId,
+        itemId: null,
+        eventType: "reordered",
+        actorKind: kind,
+        actorId,
+        payload: { orderedItemIds },
+      });
+    });
+    this.emitChange({ batchId, kind: "reordered", itemId: null });
   }
 
   linkItems(batchId: string, fromItemId: string, toItemId: string, linkType: WorkItemLinkType): void {
@@ -316,6 +430,7 @@ export class WorkItemStore {
         payload: { fromItemId, toItemId, linkType: kind },
       });
     });
+    this.emitChange({ batchId, kind: "linked", itemId: fromItemId });
   }
 
   listReady(batchId: string): WorkItem[] {
@@ -323,6 +438,7 @@ export class WorkItemStore {
       `SELECT wi.*
        FROM work_items wi
        WHERE wi.batch_id = ?
+         AND wi.deleted_at IS NULL
          AND wi.status IN ('waiting', 'ready')
          AND NOT EXISTS (
            SELECT 1
@@ -332,6 +448,7 @@ export class WorkItemStore {
              AND l.to_item_id = wi.id
              AND l.link_type = 'blocks'
              AND blocker.status NOT IN ('done', 'canceled')
+             AND blocker.deleted_at IS NULL
          )
        ORDER BY wi.priority DESC, wi.sort_index, wi.created_at`,
       batchId,
@@ -400,6 +517,7 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     created_at: requireString(row, "created_at"),
     updated_at: requireString(row, "updated_at"),
     completed_at: row.completed_at == null ? null : String(row.completed_at),
+    deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
   };
 }
 

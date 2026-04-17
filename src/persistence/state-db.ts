@@ -155,6 +155,17 @@ export class StateDatabase {
       SELECT 1, NULL
       WHERE NOT EXISTS (SELECT 1 FROM runtime_state WHERE id = 1);
     `);
+    this.ensureColumn("work_items", "deleted_at", "TEXT");
+    this.driver.exec(
+      `CREATE INDEX IF NOT EXISTS idx_work_items_batch_deleted ON work_items(batch_id, deleted_at, sort_index);`,
+    );
+  }
+
+  private ensureColumn(table: string, column: string, type: string): void {
+    const rows = this.driver.all<{ name: string }>(`PRAGMA table_info(${table})`);
+    if (rows.some((row) => row.name === column)) return;
+    this.driver.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    this.logger?.info("added missing column", { table, column, type });
   }
 }
 

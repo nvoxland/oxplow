@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from "electron";
 import { resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
-import type { CommandId, LspEvent, MenuGroupSnapshot, TerminalEvent, UiLogPayload, WorkspaceWatchEvent, StoredEvent } from "./ipc-contract.js";
+import type { CommandId, LspEvent, MenuGroupSnapshot, NewdeEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
 
 let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -51,8 +51,7 @@ async function main() {
   }
 
   registerIpc(runtime);
-  runtime.onWorkspaceEvent((event) => broadcast("newde:workspace-event", event));
-  runtime.onHookEvent((event) => broadcast("newde:hook-event", event));
+  runtime.onEvent((event) => broadcast("newde:event", event));
 
   mainWindow = createWindow(openDevTools);
 }
@@ -103,6 +102,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.workItemApi.getBatchWorkState(streamId, batchId));
   ipcMain.handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, batchId, input));
   ipcMain.handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));
+  ipcMain.handle("newde:deleteWorkItem", (_event, streamId: string, batchId: string, itemId: string) => currentRuntime.workItemApi.deleteWorkItem(streamId, batchId, itemId));
+  ipcMain.handle("newde:reorderWorkItems", (_event, streamId: string, batchId: string, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderWorkItems(streamId, batchId, orderedItemIds));
   ipcMain.handle("newde:addWorkItemNote", (_event, streamId: string, batchId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, batchId, itemId, note));
   ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
@@ -114,6 +115,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
   ipcMain.handle("newde:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
   ipcMain.handle("newde:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
+  ipcMain.handle("newde:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   ipcMain.handle("newde:ping", () => currentRuntime.ping());
   ipcMain.handle("newde:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
   ipcMain.handle("newde:setNativeMenu", (_event, groups: MenuGroupSnapshot[]) => {
@@ -145,7 +147,10 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   );
 }
 
-function broadcast(channel: "newde:workspace-event" | "newde:hook-event" | "newde:terminal-event" | "newde:lsp-event", payload: WorkspaceWatchEvent | StoredEvent | TerminalEvent | LspEvent) {
+function broadcast(
+  channel: "newde:event" | "newde:terminal-event" | "newde:lsp-event",
+  payload: NewdeEvent | TerminalEvent | LspEvent,
+) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send(channel, payload);

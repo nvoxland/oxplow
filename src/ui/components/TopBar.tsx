@@ -1,11 +1,13 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { createStream, listBranches, listHookEvents, subscribeHookEvents, type BranchRef, type StoredEvent, type Stream } from "../api.js";
+import { useMemo, useState } from "react";
+import { createStream, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
+import { AgentStatusDot } from "./AgentStatusDot.js";
 
 interface Props {
   stream: Stream | null;
   streams: Stream[];
+  streamStatuses: Record<string, AgentStatus>;
   gitEnabled: boolean;
   error: string | null;
   onSwitch(id: string): void;
@@ -13,7 +15,7 @@ interface Props {
   onStreamCreated(stream: Stream): void;
 }
 
-export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename, onStreamCreated }: Props) {
+export function TopBar({ stream, streams, streamStatuses, gitEnabled, error, onSwitch, onRename, onStreamCreated }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -21,7 +23,6 @@ export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename,
   const [creating, setCreating] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
-  const [streamStatuses, setStreamStatuses] = useState<Record<string, StoredEvent["normalized"]>>({});
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [mode, setMode] = useState<"existing" | "new">("existing");
@@ -33,15 +34,6 @@ export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename,
     () => branches.filter((branch) => branch.kind === "local" || !branch.name.endsWith("/HEAD")),
     [branches],
   );
-
-  useEffect(() => {
-    void listHookEvents().then((events) => {
-      setStreamStatuses(Object.fromEntries(events.map((event) => [event.streamId, event.normalized])));
-    }).catch(() => {});
-    return subscribeHookEvents("all", (evt) => {
-      setStreamStatuses((prev) => ({ ...prev, [evt.streamId]: evt.normalized }));
-    });
-  }, []);
 
   async function openCreate() {
     if (!gitEnabled) return;
@@ -129,7 +121,7 @@ export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename,
         <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
           {streams.map((candidate) => {
             const active = candidate.id === stream?.id;
-            const status = statusForEvent(streamStatuses[candidate.id]);
+            const status = streamStatuses[candidate.id] ?? "idle";
             return (
               <button
                 key={candidate.id}
@@ -140,9 +132,8 @@ export function TopBar({ stream, streams, gitEnabled, error, onSwitch, onRename,
                   borderBottomColor: active ? "var(--accent)" : "transparent",
                   color: active ? "var(--fg)" : "var(--muted)",
                 }}
-                title={status.label}
               >
-                <span aria-hidden="true">{status.icon}</span>
+                <AgentStatusDot status={status} />
                 <span>{candidate.title}</span>
               </button>
             );
@@ -337,23 +328,3 @@ const labelStyle: CSSProperties = {
   fontSize: 12,
 };
 
-function statusForEvent(event: StoredEvent["normalized"] | undefined): { icon: string; label: string } {
-  if (!event) return { icon: "○", label: "No recent activity" };
-  switch (event.kind) {
-    case "user-prompt":
-    case "tool-use-start":
-      return { icon: "◔", label: "Thinking" };
-    case "tool-use-end":
-      return { icon: event.status === "error" ? "⚠" : "●", label: event.status === "error" ? "Tool error" : "Active" };
-    case "session-start":
-      return { icon: "▶", label: "Session started" };
-    case "session-end":
-      return { icon: "■", label: "Session ended" };
-    case "stop":
-      return { icon: "■", label: "Stopped" };
-    case "notification":
-      return { icon: "✦", label: "Notification" };
-    case "meta":
-      return { icon: "○", label: event.hookEventName };
-  }
-}

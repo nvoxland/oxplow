@@ -34,6 +34,8 @@ export interface WorkItemApi {
   getBatchWorkState(streamId: string, batchId: string): BatchWorkState;
   createWorkItem(streamId: string, batchId: string, input: CreateWorkItemInput): BatchWorkState;
   updateWorkItem(streamId: string, batchId: string, itemId: string, changes: UpdateWorkItemChanges): BatchWorkState;
+  deleteWorkItem(streamId: string, batchId: string, itemId: string): BatchWorkState;
+  reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): BatchWorkState;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[];
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
 }
@@ -74,6 +76,18 @@ export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDe
         actorKind: "user",
         actorId: "ui",
       });
+      return workItemStore.getState(batchId);
+    },
+
+    deleteWorkItem(streamId, batchId, itemId) {
+      resolveBatch(streamId, batchId);
+      workItemStore.deleteItem(batchId, itemId, "user", "ui");
+      return workItemStore.getState(batchId);
+    },
+
+    reorderWorkItems(streamId, batchId, orderedItemIds) {
+      resolveBatch(streamId, batchId);
+      workItemStore.reorderItems(batchId, orderedItemIds, "user", "ui");
       return workItemStore.getState(batchId);
     },
 

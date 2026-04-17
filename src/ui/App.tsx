@@ -3,9 +3,14 @@ import {
   createWorkItem,
   completeBatch,
   createBatch,
+  deleteWorkItem,
   getBatchWorkState,
   getBatchState,
   createWorkspaceDirectory,
+  listAgentStatuses,
+  reorderWorkItems,
+  subscribeAgentStatus,
+  type AgentStatus,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -15,6 +20,7 @@ import {
   readWorkspaceFile,
   renameWorkspacePath,
   renameCurrentStream,
+  subscribeWorkItemEvents,
   subscribeWorkspaceEvents,
   selectBatch,
   promoteBatch,
@@ -57,6 +63,7 @@ export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
   const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("agent");
   const [error, setError] = useState<string | null>(null);
@@ -460,6 +467,30 @@ export function App() {
     }
   }
 
+  async function handleDeleteWorkItem(itemId: string) {
+    if (!stream || !selectedBatch) return;
+    try {
+      const next = await deleteWorkItem(stream.id, selectedBatch.id, itemId);
+      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleReorderWorkItems(orderedItemIds: string[]) {
+    if (!stream || !selectedBatch) return;
+    try {
+      const next = await reorderWorkItems(stream.id, selectedBatch.id, orderedItemIds);
+      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
   const currentSession = useMemo(
     () => (stream ? fileSessions[stream.id] ?? createEmptyFileSession() : createEmptyFileSession()),
     [fileSessions, stream],
@@ -473,6 +504,16 @@ export function App() {
   );
   const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
   const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
+
+  const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
+    const out: Record<string, AgentStatus> = {};
+    for (const s of streams) {
+      const activeBatchId = batchStates[s.id]?.activeBatchId;
+      if (activeBatchId) out[s.id] = agentStatuses[activeBatchId] ?? "idle";
+      else out[s.id] = "idle";
+    }
+    return out;
+  }, [streams, batchStates, agentStatuses]);
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
 
@@ -514,6 +555,45 @@ export function App() {
       cancelled = true;
     };
   }, [batchWorkStates, currentBatchState.batches, stream]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeWorkItemEvents("all", (event) => {
+      void getBatchWorkState(event.streamId, event.batchId)
+        .then((workState) => {
+          setBatchWorkStates((prev) => ({ ...prev, [event.batchId]: workState }));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh batch work state after change event", {
+            streamId: event.streamId,
+            batchId: event.batchId,
+            kind: event.kind,
+            error: String(error),
+          });
+        });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAgentStatuses()
+      .then((entries) => {
+        if (cancelled) return;
+        const next: Record<string, AgentStatus> = {};
+        for (const entry of entries) next[entry.batchId] = entry.status;
+        setAgentStatuses(next);
+      })
+      .catch((error) => {
+        logUi("warn", "failed to seed agent statuses", { error: String(error) });
+      });
+    const unsubscribe = subscribeAgentStatus("all", (entry) => {
+      setAgentStatuses((prev) => ({ ...prev, [entry.batchId]: entry.status }));
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (!stream || !selectedFilePath) return;
@@ -708,6 +788,7 @@ export function App() {
         <TopBar
           stream={stream}
           streams={streams}
+          streamStatuses={streamStatuses}
           gitEnabled={workspaceContext.gitEnabled}
           error={error}
           onSwitch={handleSwitch}
@@ -720,6 +801,7 @@ export function App() {
           stream={stream}
           batches={currentBatchState.batches}
           batchWorkStates={batchWorkStates}
+          agentStatuses={agentStatuses}
           selectedBatchId={currentBatchState.selectedBatchId}
           activeBatchId={currentBatchState.activeBatchId}
           activeTab={sidebarTab}
@@ -764,6 +846,8 @@ export function App() {
             onActiveChange={setActiveTab}
             onCreateWorkItem={handleCreateWorkItem}
             onUpdateWorkItem={handleUpdateWorkItem}
+            onDeleteWorkItem={handleDeleteWorkItem}
+            onReorderWorkItems={handleReorderWorkItems}
             openFileOrder={currentSession.openOrder}
             openFiles={currentSession.files}
             currentFilePath={selectedFilePath}

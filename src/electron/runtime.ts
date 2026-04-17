@@ -5,7 +5,8 @@ import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
 import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "../git/git.js";
-import { HookEventStore, ingestHookPayload, type StoredEvent } from "../session/hook-ingest.js";
+import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
+import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
 import { LspSessionManager } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
 import { ResumeTracker } from "../session/resume-tracker.js";
@@ -16,6 +17,7 @@ import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type Stream } from "../persistence/stream-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
+import { EventBus, type NewdeEvent } from "../core/event-bus.js";
 import { HookInbox, type HookEnvelope } from "./hook-inbox.js";
 import {
   createWorkspaceDirectory,
@@ -28,7 +30,7 @@ import {
   summarizeGitStatuses,
   writeWorkspaceFile,
 } from "../git/workspace-files.js";
-import { WorkspaceWatcherRegistry, type WorkspaceWatchEvent } from "../git/workspace-watch.js";
+import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 import { detectCurrentBranch } from "../git/git.js";
 import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
@@ -48,14 +50,14 @@ export class ElectronRuntime {
   readonly lspManager: LspSessionManager;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
   readonly config: NewdeConfig;
+  readonly events: EventBus;
 
   private readonly paneSessionFiles = new Map<string, SessionFiles>();
   private readonly terminalSessions = new Map<string, RuntimeSocket>();
   private readonly lspClients = new Map<string, RuntimeSocket>();
   private readonly hookInbox: HookInbox;
   private readonly hookInboxDir: string;
-  private readonly workspaceSubs = new Set<(event: WorkspaceWatchEvent) => void>();
-  private readonly hookSubs = new Set<(event: StoredEvent) => void>();
+  private readonly agentStatusByBatch = new Map<string, AgentStatus>();
   private mcp: McpServerHandle | null = null;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
@@ -70,6 +72,7 @@ export class ElectronRuntime {
       resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
       workItemStore: this.workItemStore,
     });
+    this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
@@ -116,10 +119,35 @@ export class ElectronRuntime {
     }
 
     this.workspaceWatchers.subscribe((event) => {
-      for (const subscriber of this.workspaceSubs) subscriber(event);
+      this.events.publish({
+        type: "workspace.changed",
+        id: event.id,
+        streamId: event.streamId,
+        kind: event.kind,
+        path: event.path,
+        t: event.t,
+      });
     });
     this.hookEvents.subscribe((event) => {
-      for (const subscriber of this.hookSubs) subscriber(event);
+      this.events.publish({
+        type: "hook.recorded",
+        streamId: event.streamId,
+        batchId: event.batchId,
+        pane: event.pane,
+        event,
+      });
+      if (event.batchId) this.recomputeAgentStatus(event.streamId, event.batchId);
+    });
+    this.workItemStore.subscribe((change) => {
+      const batch = this.batchStore.findById(change.batchId);
+      if (!batch) return;
+      this.events.publish({
+        type: "work-item.changed",
+        streamId: batch.stream_id,
+        batchId: change.batchId,
+        kind: change.kind,
+        itemId: change.itemId,
+      });
     });
 
     this.mcp = await startMcpServer({
@@ -157,14 +185,37 @@ export class ElectronRuntime {
     getStateDatabase(this.projectDir).close();
   }
 
-  onWorkspaceEvent(listener: (event: WorkspaceWatchEvent) => void): () => void {
-    this.workspaceSubs.add(listener);
-    return () => this.workspaceSubs.delete(listener);
+  onEvent(listener: (event: NewdeEvent) => void): () => void {
+    return this.events.subscribe(listener);
   }
 
-  onHookEvent(listener: (event: StoredEvent) => void): () => void {
-    this.hookSubs.add(listener);
-    return () => this.hookSubs.delete(listener);
+  getBatchAgentStatus(batchId: string): AgentStatus {
+    return this.agentStatusByBatch.get(batchId) ?? "idle";
+  }
+
+  listAgentStatuses(streamId?: string): Array<{ streamId: string; batchId: string; status: AgentStatus }> {
+    const out: Array<{ streamId: string; batchId: string; status: AgentStatus }> = [];
+    for (const [batchId, status] of this.agentStatusByBatch) {
+      const batch = this.batchStore.findById(batchId);
+      if (!batch) continue;
+      if (streamId && batch.stream_id !== streamId) continue;
+      out.push({ streamId: batch.stream_id, batchId, status });
+    }
+    return out;
+  }
+
+  private recomputeAgentStatus(streamId: string, batchId: string): void {
+    const events = this.hookEvents.list(streamId).filter((candidate) => candidate.batchId === batchId);
+    const next = deriveBatchAgentStatus(events);
+    const prev = this.agentStatusByBatch.get(batchId);
+    if (prev === next) return;
+    this.agentStatusByBatch.set(batchId, next);
+    this.events.publish({
+      type: "agent-status.changed",
+      streamId,
+      batchId,
+      status: next,
+    });
   }
 
   listStreams(): Stream[] {

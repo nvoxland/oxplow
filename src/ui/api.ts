@@ -1,4 +1,6 @@
-import type { DesktopApi } from "../electron/ipc-contract.js";
+import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
+
+export type { NewdeEvent } from "../electron/ipc-contract.js";
 
 export interface Stream {
   id: string;
@@ -218,6 +220,22 @@ export async function updateWorkItem(
   return desktopApi().updateWorkItem(streamId, batchId, itemId, changes);
 }
 
+export async function deleteWorkItem(
+  streamId: string,
+  batchId: string,
+  itemId: string,
+): Promise<BatchWorkState> {
+  return desktopApi().deleteWorkItem(streamId, batchId, itemId);
+}
+
+export async function reorderWorkItems(
+  streamId: string,
+  batchId: string,
+  orderedItemIds: string[],
+): Promise<BatchWorkState> {
+  return desktopApi().reorderWorkItems(streamId, batchId, orderedItemIds);
+}
+
 export async function addWorkItemNote(
   streamId: string,
   batchId: string,
@@ -274,14 +292,74 @@ export async function deleteWorkspacePath(streamId: string, path: string): Promi
   return desktopApi().deleteWorkspacePath(streamId, path);
 }
 
+export function subscribeNewdeEvents(
+  listener: (event: NewdeEvent) => void,
+): () => void {
+  return desktopApi().onNewdeEvent(listener);
+}
+
 export function subscribeWorkspaceEvents(
   streamId: string,
   onEvent: (event: WorkspaceWatchEvent) => void,
 ): () => void {
-  return desktopApi().onWorkspaceEvent((event) => {
-    if (event.streamId === streamId) {
-      onEvent(event);
+  return subscribeNewdeEvents((event) => {
+    if (event.type === "workspace.changed" && event.streamId === streamId) {
+      onEvent({
+        id: event.id,
+        streamId: event.streamId,
+        kind: event.kind,
+        path: event.path,
+        t: event.t,
+      });
     }
+  });
+}
+
+export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered";
+
+export interface WorkItemChangeEvent {
+  streamId: string;
+  batchId: string;
+  kind: WorkItemChangeKind;
+  itemId: string | null;
+}
+
+export type AgentStatus = "idle" | "working" | "waiting" | "done";
+
+export interface AgentStatusEntry {
+  streamId: string;
+  batchId: string;
+  status: AgentStatus;
+}
+
+export async function listAgentStatuses(streamId?: string): Promise<AgentStatusEntry[]> {
+  return desktopApi().listAgentStatuses(streamId);
+}
+
+export function subscribeAgentStatus(
+  streamId: string | "all",
+  onEvent: (entry: AgentStatusEntry) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "agent-status.changed") return;
+    if (streamId !== "all" && event.streamId !== streamId) return;
+    onEvent({ streamId: event.streamId, batchId: event.batchId, status: event.status });
+  });
+}
+
+export function subscribeWorkItemEvents(
+  streamId: string | "all",
+  onEvent: (event: WorkItemChangeEvent) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "work-item.changed") return;
+    if (streamId !== "all" && event.streamId !== streamId) return;
+    onEvent({
+      streamId: event.streamId,
+      batchId: event.batchId,
+      kind: event.kind,
+      itemId: event.itemId,
+    });
   });
 }
 
@@ -332,10 +410,10 @@ export function subscribeHookEvents(
   streamId: string | "all",
   onEvent: (event: StoredEvent) => void,
 ): () => void {
-  return desktopApi().onHookEvent((event) => {
-    if (streamId === "all" || event.streamId === streamId) {
-      onEvent(event);
-    }
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "hook.recorded") return;
+    if (streamId !== "all" && event.streamId !== streamId) return;
+    onEvent(event.event as StoredEvent);
   });
 }
 

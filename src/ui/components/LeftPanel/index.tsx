@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AgentStatus,
   type Batch,
   type BatchWorkState,
   listWorkspaceEntries,
@@ -31,6 +32,7 @@ interface Props {
   stream: Stream | null;
   batches: Batch[];
   batchWorkStates: Record<string, BatchWorkState>;
+  agentStatuses: Record<string, AgentStatus>;
   selectedBatchId: string | null;
   activeBatchId: string | null;
   activeTab: SidebarTab;
@@ -52,6 +54,7 @@ export function LeftPanel({
   stream,
   batches,
   batchWorkStates,
+  agentStatuses,
   selectedBatchId,
   activeBatchId,
   activeTab,
@@ -265,6 +268,7 @@ export function LeftPanel({
           <BatchQueueSection
             batches={batches}
             batchWorkStates={batchWorkStates}
+            agentStatuses={agentStatuses}
             selectedBatchId={selectedBatchId}
             activeBatchId={activeBatchId}
             onSelectBatch={onSelectBatch}
