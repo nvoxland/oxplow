@@ -27,6 +27,7 @@ interface Props {
     kind: WorkItemKind;
     title: string;
     description?: string;
+    acceptanceCriteria?: string | null;
     parentId?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
@@ -176,6 +177,7 @@ function PlanPane({
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [acceptance, setAcceptance] = useState("");
   const [kind, setKind] = useState<WorkItemKind>("task");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
   const [parentId, setParentId] = useState<string>("");
@@ -247,12 +249,14 @@ function PlanPane({
                 kind,
                 title: nextTitle,
                 description,
+                acceptanceCriteria: acceptance || null,
                 parentId: parentId || undefined,
                 priority,
                 status: kind === "epic" ? "in_progress" : "waiting",
               }).then(() => {
                 setTitle("");
                 setDescription("");
+                setAcceptance("");
                 setParentId("");
                 setKind("task");
                 setPriority("medium");
@@ -265,7 +269,13 @@ function PlanPane({
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Optional description"
+          placeholder="Optional description (the approach)"
+          style={{ ...inputStyle, minHeight: 56, resize: "vertical" }}
+        />
+        <textarea
+          value={acceptance}
+          onChange={(event) => setAcceptance(event.target.value)}
+          placeholder="Acceptance criteria, one per line (observable conditions for 'done')"
           style={{ ...inputStyle, minHeight: 56, resize: "vertical" }}
         />
       </div>
@@ -480,6 +490,12 @@ function WorkGroup({
               {item.kind} · {item.status}
             </div>
             {item.description ? <div style={{ fontSize: 12, color: "var(--muted)" }}>{item.description}</div> : null}
+            {item.acceptance_criteria ? (
+              <div style={{ fontSize: 11, color: "var(--muted)", borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
+                <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, marginBottom: 2 }}>Acceptance</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{item.acceptance_criteria}</div>
+              </div>
+            ) : null}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {item.status !== "waiting" ? (
                 <button style={miniButtonStyle} onClick={() => void onUpdateWorkItem(item.id, { status: "waiting" })}>Waiting</button>

@@ -605,12 +605,31 @@ class RuntimeSocket extends EventEmitter {
 
 function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
   return [
-    `You are working in stream "${stream.title}" (id: ${stream.id}) and batch "${batch.title}" (id: ${batch.id}).`,
-    "Use the newde MCP work-item tools to track planning and progress for this batch.",
-    `When calling any newde work-item MCP tool, always pass batchId="${batch.id}".`,
-    "Use newde__get_batch_context if you need to re-check the stream or batch ids before updating work; its response includes the current batch summary.",
-    "Before ending each turn, call newde__record_batch_summary with a 2-3 sentence description of what has been happening in this batch overall and what changed in the latest round. Rewrite the summary from scratch each time so it reflects the latest state.",
-  ].join(" ");
+    `You manage this batch's work through the newde work-item MCP tools.`,
+    `Treat them as your durable working memory between turns and sessions; the human watches progress through them.`,
+    ``,
+    `PLAN BEFORE CODING. For anything that will take more than about two minutes, call newde__create_work_item before starting.`,
+    `Use the title for intent, description for the approach, and acceptanceCriteria for a checklist of observable conditions that define "done" (plain text, one per line).`,
+    `Set parentId when the item rolls up under a larger epic or task.`,
+    ``,
+    `DECOMPOSE DELIBERATELY: epic = multi-step feature, task = concrete unit of work, subtask = small step inside a task, bug = defect to fix, note = observation that doesn't need execution.`,
+    ``,
+    `WORK THE READY QUEUE. Start each turn with newde__list_ready_work to pick the highest-priority unblocked item.`,
+    `Set its status to "in_progress" via newde__update_work_item before touching code.`,
+    `Post newde__add_work_note at meaningful milestones.`,
+    `The moment every acceptance criterion is met, set status to "done".`,
+    `Use newde__get_work_item when resuming a specific item — its response includes links and recent audit events so you can pick up where you left off.`,
+    ``,
+    `LINK DEPENDENCIES with newde__link_work_items. linkType is one of: "blocks" (from-item must finish before to-item can start), "discovered_from" (file newly-uncovered work as its own item linked back to the item you were on — do NOT scope-creep the original), "relates_to" (general association), "duplicates" (same work as an existing item; delete or supersede the duplicate), "supersedes" (replaces a stale older item), "replies_to" (threaded response to another item).`,
+    ``,
+    `STAY HONEST. Rewrite description / acceptanceCriteria when your understanding shifts. newde__delete_work_item anything you've decided against instead of letting it rot in "waiting".`,
+    ``,
+    `BEFORE ENDING EACH TURN, call newde__record_batch_summary with a 2-3 sentence description of what has been happening in this batch overall and what changed in the latest round. Rewrite from scratch so it reflects the current state of the work-item log.`,
+    ``,
+    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}).`,
+    `Always pass batchId="${batch.id}" to every work-item tool.`,
+    `Call newde__get_batch_context whenever you need to re-check stream/batch ids or read the current batch summary.`,
+  ].join("\n");
 }
 
 export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {

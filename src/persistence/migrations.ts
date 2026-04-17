@@ -104,6 +104,13 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "work_items.acceptance_criteria",
+    up: (db) => {
+      db.exec(`ALTER TABLE work_items ADD COLUMN acceptance_criteria TEXT;`);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

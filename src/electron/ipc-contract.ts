@@ -91,6 +91,7 @@ export interface DesktopApi {
       kind: WorkItemKind;
       title: string;
       description?: string;
+      acceptanceCriteria?: string | null;
       parentId?: string | null;
       status?: WorkItemStatus;
       priority?: WorkItemPriority;
@@ -103,6 +104,7 @@ export interface DesktopApi {
     changes: {
       title?: string;
       description?: string;
+      acceptanceCriteria?: string | null;
       parentId?: string | null;
       status?: WorkItemStatus;
       priority?: WorkItemPriority;

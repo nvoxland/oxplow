@@ -47,6 +47,7 @@ export interface WorkItem {
   kind: WorkItemKind;
   title: string;
   description: string;
+  acceptance_criteria: string | null;
   status: WorkItemStatus;
   priority: WorkItemPriority;
   sort_index: number;
@@ -199,6 +200,7 @@ export async function createWorkItem(
     kind: WorkItemKind;
     title: string;
     description?: string;
+    acceptanceCriteria?: string | null;
     parentId?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
@@ -214,6 +216,7 @@ export async function updateWorkItem(
   changes: {
     title?: string;
     description?: string;
+    acceptanceCriteria?: string | null;
     parentId?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;

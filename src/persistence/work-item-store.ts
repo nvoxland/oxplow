@@ -5,7 +5,13 @@ import { getStateDatabase } from "./state-db.js";
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
 export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
-export type WorkItemLinkType = "blocks" | "relates_to" | "discovered_from";
+export type WorkItemLinkType =
+  | "blocks"
+  | "relates_to"
+  | "discovered_from"
+  | "duplicates"
+  | "supersedes"
+  | "replies_to";
 export type WorkItemActorKind = "user" | "agent" | "system";
 
 const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
@@ -18,7 +24,7 @@ const WORK_ITEM_PRIORITIES: ReadonlySet<WorkItemPriority> = new Set([
   "low", "medium", "high", "urgent",
 ]);
 const WORK_ITEM_LINK_TYPES: ReadonlySet<WorkItemLinkType> = new Set([
-  "blocks", "relates_to", "discovered_from",
+  "blocks", "relates_to", "discovered_from", "duplicates", "supersedes", "replies_to",
 ]);
 const WORK_ITEM_ACTOR_KINDS: ReadonlySet<WorkItemActorKind> = new Set([
   "user", "agent", "system",
@@ -28,6 +34,7 @@ const WORK_ITEM_ACTOR_KINDS: ReadonlySet<WorkItemActorKind> = new Set([
 // blowing up memory when reached from MCP/IPC. Not internal limits.
 const TITLE_MAX_LEN = 500;
 const DESCRIPTION_MAX_LEN = 20_000;
+const ACCEPTANCE_CRITERIA_MAX_LEN = 20_000;
 const NOTE_MAX_LEN = 20_000;
 
 export interface WorkItem {
@@ -37,6 +44,7 @@ export interface WorkItem {
   kind: WorkItemKind;
   title: string;
   description: string;
+  acceptance_criteria: string | null;
   status: WorkItemStatus;
   priority: WorkItemPriority;
   sort_index: number;
@@ -45,6 +53,22 @@ export interface WorkItem {
   updated_at: string;
   completed_at: string | null;
   deleted_at: string | null;
+}
+
+export interface WorkItemLink {
+  id: string;
+  batch_id: string;
+  from_item_id: string;
+  to_item_id: string;
+  link_type: WorkItemLinkType;
+  created_at: string;
+}
+
+export interface WorkItemDetail {
+  item: WorkItem;
+  outgoing: WorkItemLink[];
+  incoming: WorkItemLink[];
+  recentEvents: WorkItemEvent[];
 }
 
 export interface WorkItemEvent {
@@ -81,6 +105,7 @@ interface CreateWorkItemInput {
   kind: WorkItemKind;
   title: string;
   description?: string;
+  acceptanceCriteria?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
   createdBy: WorkItemActorKind;
@@ -92,6 +117,7 @@ interface UpdateWorkItemInput {
   itemId: string;
   title?: string;
   description?: string;
+  acceptanceCriteria?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
   parentId?: string | null;
@@ -163,6 +189,7 @@ export class WorkItemStore {
   createItem(input: CreateWorkItemInput): WorkItem {
     const title = requireTitle(input.title);
     const description = clampDescription(input.description);
+    const acceptance = clampAcceptanceCriteria(input.acceptanceCriteria);
     const kind = requireWorkItemKind(input.kind);
     const status = input.status ? requireWorkItemStatus(input.status) : "waiting";
     const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
@@ -178,6 +205,7 @@ export class WorkItemStore {
       kind,
       title,
       description,
+      acceptance_criteria: acceptance,
       status,
       priority,
       sort_index: 0, // filled in by the INSERT subquery
@@ -197,10 +225,10 @@ export class WorkItemStore {
       const sortParams: [string, ...(string[])] = parentId ? [input.batchId, parentId] : [input.batchId];
       this.stateDb.run(
         `INSERT INTO work_items (
-          id, batch_id, parent_id, kind, title, description, status, priority,
+          id, batch_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
           sort_index, created_by, created_at, updated_at, completed_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
           (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE batch_id = ? AND ${parentClause}),
           ?, ?, ?, ?
         )`,
@@ -210,6 +238,7 @@ export class WorkItemStore {
         item.kind,
         item.title,
         item.description,
+        item.acceptance_criteria,
         item.status,
         item.priority,
         ...sortParams,
@@ -250,12 +279,16 @@ export class WorkItemStore {
     const nextPriority = input.priority ? requireWorkItemPriority(input.priority) : existing.priority;
     const nextTitle = input.title !== undefined ? requireTitle(input.title) : existing.title;
     const nextDescription = input.description !== undefined ? clampDescription(input.description) : existing.description;
+    const nextAcceptance = input.acceptanceCriteria !== undefined
+      ? clampAcceptanceCriteria(input.acceptanceCriteria)
+      : existing.acceptance_criteria;
 
     const updated: WorkItem = {
       ...existing,
       parent_id: nextParentId,
       title: nextTitle,
       description: nextDescription,
+      acceptance_criteria: nextAcceptance,
       status: nextStatus,
       priority: nextPriority,
       updated_at: now,
@@ -275,11 +308,12 @@ export class WorkItemStore {
       }
       this.stateDb.run(
         `UPDATE work_items
-         SET parent_id = ?, title = ?, description = ?, status = ?, priority = ?, updated_at = ?, completed_at = ?
+         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, updated_at = ?, completed_at = ?
          WHERE batch_id = ? AND id = ?`,
         updated.parent_id,
         updated.title,
         updated.description,
+        updated.acceptance_criteria,
         updated.status,
         updated.priority,
         updated.updated_at,
@@ -470,6 +504,35 @@ export class WorkItemStore {
     return rows.map(toWorkItemEvent);
   }
 
+  getItemDetail(batchId: string, itemId: string, recentEventLimit = 20): WorkItemDetail | null {
+    const item = this.getItem(batchId, itemId);
+    if (!item) return null;
+    const outgoing = this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_item_links WHERE batch_id = ? AND from_item_id = ? ORDER BY created_at`,
+        batchId,
+        itemId,
+      )
+      .map(toWorkItemLink);
+    const incoming = this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_item_links WHERE batch_id = ? AND to_item_id = ? ORDER BY created_at`,
+        batchId,
+        itemId,
+      )
+      .map(toWorkItemLink);
+    const recentEvents = this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_item_events WHERE batch_id = ? AND item_id = ?
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
+        batchId,
+        itemId,
+        recentEventLimit,
+      )
+      .map(toWorkItemEvent);
+    return { item, outgoing, incoming, recentEvents };
+  }
+
   private requireItemInBatch(batchId: string, itemId: string, label: string): void {
     const row = this.stateDb.get<{ id: string }>(
       `SELECT id FROM work_items WHERE batch_id = ? AND id = ? LIMIT 1`,
@@ -518,6 +581,18 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     updated_at: requireString(row, "updated_at"),
     completed_at: row.completed_at == null ? null : String(row.completed_at),
     deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
+    acceptance_criteria: row.acceptance_criteria == null ? null : String(row.acceptance_criteria),
+  };
+}
+
+function toWorkItemLink(row: Record<string, unknown>): WorkItemLink {
+  return {
+    id: requireString(row, "id"),
+    batch_id: requireString(row, "batch_id"),
+    from_item_id: requireString(row, "from_item_id"),
+    to_item_id: requireString(row, "to_item_id"),
+    link_type: requireWorkItemLinkType(requireString(row, "link_type")),
+    created_at: requireString(row, "created_at"),
   };
 }
 
@@ -559,6 +634,16 @@ function clampDescription(raw: string | undefined): string {
   const trimmed = raw?.trim() ?? "";
   if (trimmed.length > DESCRIPTION_MAX_LEN) {
     throw new Error(`work item description too long: max ${DESCRIPTION_MAX_LEN} chars`);
+  }
+  return trimmed;
+}
+
+function clampAcceptanceCriteria(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > ACCEPTANCE_CRITERIA_MAX_LEN) {
+    throw new Error(`work item acceptance criteria too long: max ${ACCEPTANCE_CRITERIA_MAX_LEN} chars`);
   }
   return trimmed;
 }

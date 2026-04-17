@@ -431,6 +431,7 @@ export function App() {
     kind: "epic" | "task" | "subtask" | "bug" | "note";
     title: string;
     description?: string;
+    acceptanceCriteria?: string | null;
     parentId?: string | null;
     status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
     priority?: "low" | "medium" | "high" | "urgent";
@@ -452,6 +453,7 @@ export function App() {
     changes: {
       title?: string;
       description?: string;
+      acceptanceCriteria?: string | null;
       parentId?: string | null;
       status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
       priority?: "low" | "medium" | "high" | "urgent";

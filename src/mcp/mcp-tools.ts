@@ -112,7 +112,8 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           parentId: { type: "string", description: "Optional parent epic/task id in the same batch." },
           kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
           title: { type: "string", description: "Short title for the work item." },
-          description: { type: "string", description: "Optional longer description." },
+          description: { type: "string", description: "Optional longer description of the approach." },
+          acceptanceCriteria: { type: "string", description: "Optional plain-text checklist (one criterion per line) defining observable conditions for 'done'." },
           status: { type: "string", description: "Optional initial status." },
           priority: { type: "string", description: "Optional priority: low, medium, high, or urgent." },
         },
@@ -125,6 +126,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         kind: WorkItemKind;
         title: string;
         description?: string;
+        acceptanceCriteria?: string | null;
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
       }) => {
@@ -136,6 +138,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           kind: args.kind,
           title: args.title,
           description: args.description,
+          acceptanceCriteria: args.acceptanceCriteria,
           status: args.status,
           priority: args.priority,
           createdBy: "agent",
@@ -146,7 +149,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__update_work_item",
-      description: "Update the title, description, status, priority, or parent of an existing work item in one batch. Always pass the batchId from your session context.",
+      description: "Update title, description, acceptance criteria, status, priority, or parent of an existing work item in one batch. Always pass the batchId from your session context.",
       inputSchema: {
         type: "object",
         properties: {
@@ -156,6 +159,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           parentId: { type: "string", description: "Optional new parent epic/task id." },
           title: { type: "string", description: "Optional replacement title." },
           description: { type: "string", description: "Optional replacement description." },
+          acceptanceCriteria: { type: "string", description: "Optional replacement acceptance criteria (checklist). Pass empty string to clear." },
           status: { type: "string", description: "Optional replacement status." },
           priority: { type: "string", description: "Optional replacement priority." },
         },
@@ -168,6 +172,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         parentId?: string | null;
         title?: string;
         description?: string;
+        acceptanceCriteria?: string | null;
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
       }) => {
@@ -179,12 +184,33 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           parentId: args.parentId,
           title: args.title,
           description: args.description,
+          acceptanceCriteria: args.acceptanceCriteria,
           status: args.status,
           priority: args.priority,
           actorKind: "agent",
           actorId: "mcp",
         });
         return { item, state: workItemStore.getState(args.batchId) };
+      },
+    },
+    {
+      name: "newde__get_work_item",
+      description: "Fetch one work item plus its links (incoming + outgoing) and recent audit events. Use when resuming work on an item and you need the full context without pulling the whole batch.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id." },
+          itemId: { type: "string", description: "Required id of the work item to fetch." },
+        },
+        required: ["batchId", "itemId"],
+      },
+      handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        const detail = workItemStore.getItemDetail(args.batchId, args.itemId);
+        if (!detail) throw new Error(`unknown work item: ${args.itemId}`);
+        return detail;
       },
     },
     {
@@ -231,7 +257,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__link_work_items",
-      description: "Create a relationship like blocks/relates_to/discovered_from between two work items in one batch. Always pass the batchId from your session context.",
+      description:
+        "Create a relationship between two work items in one batch. linkType is one of: " +
+        "`blocks` (from-item must finish before to-item starts), " +
+        "`relates_to` (general association), " +
+        "`discovered_from` (from-item was uncovered while working on to-item; preferred for scope-creep escape), " +
+        "`duplicates` (from-item is the same work as to-item — close the dupe), " +
+        "`supersedes` (from-item replaces to-item — the older one is stale), " +
+        "`replies_to` (from-item is a threaded note/response to to-item).",
       inputSchema: {
         type: "object",
         properties: {
@@ -239,7 +272,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           fromItemId: { type: "string", description: "Source work item id." },
           toItemId: { type: "string", description: "Target work item id." },
-          linkType: { type: "string", description: "One of blocks, relates_to, or discovered_from." },
+          linkType: { type: "string", description: "One of blocks, relates_to, discovered_from, duplicates, supersedes, replies_to." },
         },
         required: ["batchId", "fromItemId", "toItemId", "linkType"],
       },
@@ -248,7 +281,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         batchId: string;
         fromItemId: string;
         toItemId: string;
-        linkType: "blocks" | "relates_to" | "discovered_from";
+        linkType: "blocks" | "relates_to" | "discovered_from" | "duplicates" | "supersedes" | "replies_to";
       }) => {
         const stream = resolveStream(args.streamId);
         resolveBatch(stream.id, args.batchId);

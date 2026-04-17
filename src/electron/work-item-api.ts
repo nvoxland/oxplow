@@ -1,6 +1,7 @@
 import type { Batch } from "../persistence/batch-store.js";
 import type {
   BatchWorkState,
+  WorkItemDetail,
   WorkItemEvent,
   WorkItemKind,
   WorkItemPriority,
@@ -17,6 +18,7 @@ export interface CreateWorkItemInput {
   kind: WorkItemKind;
   title: string;
   description?: string;
+  acceptanceCriteria?: string | null;
   parentId?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
@@ -25,6 +27,7 @@ export interface CreateWorkItemInput {
 export interface UpdateWorkItemChanges {
   title?: string;
   description?: string;
+  acceptanceCriteria?: string | null;
   parentId?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
@@ -32,6 +35,7 @@ export interface UpdateWorkItemChanges {
 
 export interface WorkItemApi {
   getBatchWorkState(streamId: string, batchId: string): BatchWorkState;
+  getWorkItem(streamId: string, batchId: string, itemId: string): WorkItemDetail | null;
   createWorkItem(streamId: string, batchId: string, input: CreateWorkItemInput): BatchWorkState;
   updateWorkItem(streamId: string, batchId: string, itemId: string, changes: UpdateWorkItemChanges): BatchWorkState;
   deleteWorkItem(streamId: string, batchId: string, itemId: string): BatchWorkState;
@@ -47,6 +51,11 @@ export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDe
       return workItemStore.getState(batchId);
     },
 
+    getWorkItem(streamId, batchId, itemId) {
+      resolveBatch(streamId, batchId);
+      return workItemStore.getItemDetail(batchId, itemId);
+    },
+
     createWorkItem(streamId, batchId, input) {
       resolveBatch(streamId, batchId);
       workItemStore.createItem({
@@ -55,6 +64,7 @@ export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDe
         kind: input.kind,
         title: input.title,
         description: input.description,
+        acceptanceCriteria: input.acceptanceCriteria,
         status: input.status,
         priority: input.priority,
         createdBy: "user",
@@ -70,6 +80,7 @@ export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDe
         itemId,
         title: changes.title,
         description: changes.description,
+        acceptanceCriteria: changes.acceptanceCriteria,
         parentId: changes.parentId,
         status: changes.status,
         priority: changes.priority,
