@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
@@ -16,6 +17,13 @@ import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
+import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
+import {
+  FileChangeStore,
+  type BatchFileChange,
+  type FileChangeKind,
+  type FileChangeSource,
+} from "../persistence/file-change-store.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
 import { EventBus, type NewdeEvent } from "../core/event-bus.js";
 import {
@@ -43,6 +51,8 @@ export class ElectronRuntime {
   readonly store: StreamStore;
   readonly batchStore: BatchStore;
   private readonly workItemStore: WorkItemStore;
+  readonly turnStore: TurnStore;
+  readonly fileChangeStore: FileChangeStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
   readonly resumeTracker: ResumeTracker;
@@ -55,6 +65,7 @@ export class ElectronRuntime {
   private readonly terminalSessions = new Map<string, RuntimeSocket>();
   private readonly lspClients = new Map<string, RuntimeSocket>();
   private readonly agentStatusByBatch = new Map<string, AgentStatus>();
+  private readonly recentUiWrites = new Map<string, number>();
   private mcp: McpServerHandle | null = null;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
@@ -65,9 +76,13 @@ export class ElectronRuntime {
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
     this.batchStore = new BatchStore(projectDir, logger.child({ subsystem: "batch-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
+    this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
+    this.fileChangeStore = new FileChangeStore(projectDir, logger.child({ subsystem: "file-change-store" }));
     this.workItemApi = createWorkItemApi({
       resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
       workItemStore: this.workItemStore,
+      turnStore: this.turnStore,
+      fileChangeStore: this.fileChangeStore,
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
@@ -130,6 +145,7 @@ export class ElectronRuntime {
         path: event.path,
         t: event.t,
       });
+      this.recordFsWatchChange(event.streamId, event.path, event.kind, event.t);
     });
     this.hookEvents.subscribe((event) => {
       this.events.publish({
@@ -160,6 +176,31 @@ export class ElectronRuntime {
         kind: change.kind,
       });
     });
+    this.fileChangeStore.subscribe((change) => {
+      const batch = this.batchStore.findById(change.batch_id);
+      if (!batch) return;
+      this.events.publish({
+        type: "file-change.recorded",
+        streamId: batch.stream_id,
+        batchId: change.batch_id,
+        turnId: change.turn_id,
+        changeId: change.id,
+        path: change.path,
+        kind: change.change_kind,
+        source: change.source,
+      });
+    });
+    this.turnStore.subscribe((change) => {
+      const batch = this.batchStore.findById(change.batchId);
+      if (!batch) return;
+      this.events.publish({
+        type: "turn.changed",
+        streamId: batch.stream_id,
+        batchId: change.batchId,
+        turnId: change.turnId,
+        kind: change.kind,
+      });
+    });
 
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
@@ -169,6 +210,8 @@ export class ElectronRuntime {
         resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
         batchStore: this.batchStore,
         workItemStore: this.workItemStore,
+        turnStore: this.turnStore,
+        fileChangeStore: this.fileChangeStore,
       }),
       onHook: (envelope) => this.handleHookEnvelope(envelope),
     });
@@ -375,28 +418,38 @@ export class ElectronRuntime {
 
   writeWorkspaceFile(streamId: string, path: string, content: string) {
     const stream = this.resolveStream(streamId);
+    this.stampUiWrite(path);
     const saved = writeWorkspaceFile(stream.worktree_path, path, content);
+    this.stampUiWrite(saved.path);
     this.workspaceWatchers.notify(stream.id, "updated", saved.path);
     return saved;
   }
 
   createWorkspaceFile(streamId: string, path: string, content = "") {
     const stream = this.resolveStream(streamId);
+    this.stampUiWrite(path);
     const created = createWorkspaceFile(stream.worktree_path, path, content);
+    this.stampUiWrite(created.path);
     this.workspaceWatchers.notify(stream.id, "created", created.path);
     return created;
   }
 
   createWorkspaceDirectory(streamId: string, path: string) {
     const stream = this.resolveStream(streamId);
+    this.stampUiWrite(path);
     const created = createWorkspaceDirectory(stream.worktree_path, path);
+    this.stampUiWrite(created.path);
     this.workspaceWatchers.notify(stream.id, "created", created.path);
     return created;
   }
 
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string) {
     const stream = this.resolveStream(streamId);
+    this.stampUiWrite(fromPath);
+    this.stampUiWrite(toPath);
     const renamed = renameWorkspacePath(stream.worktree_path, fromPath, toPath);
+    this.stampUiWrite(renamed.fromPath);
+    this.stampUiWrite(renamed.toPath);
     this.workspaceWatchers.notify(stream.id, "deleted", renamed.fromPath);
     this.workspaceWatchers.notify(stream.id, "created", renamed.toPath);
     return renamed;
@@ -404,7 +457,9 @@ export class ElectronRuntime {
 
   deleteWorkspacePath(streamId: string, path: string) {
     const stream = this.resolveStream(streamId);
+    this.stampUiWrite(path);
     const deleted = deleteWorkspacePath(stream.worktree_path, path);
+    this.stampUiWrite(deleted.path);
     this.workspaceWatchers.notify(stream.id, "deleted", deleted.path);
     return deleted;
   }
@@ -586,7 +641,153 @@ export class ElectronRuntime {
       } else if (update?.type === "clear") {
         this.batchStore.updateResume(streamId, envelope.batchId, "");
       }
+      this.applyTurnTracking(envelope, stored.normalized.sessionId);
     }
+  }
+
+  private applyTurnTracking(envelope: HookEnvelope, sessionId: string | undefined): void {
+    const batchId = envelope.batchId;
+    if (!batchId) return;
+    switch (envelope.event) {
+      case "UserPromptSubmit": {
+        const payload = (envelope.payload ?? {}) as { prompt?: unknown };
+        const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
+        if (!prompt.trim()) return;
+        // Defensive: if a prior turn never saw Stop, close it out with no answer
+        // so every open turn corresponds to the latest prompt.
+        const stillOpen = this.turnStore.currentOpenTurn(batchId);
+        if (stillOpen) {
+          this.turnStore.closeTurn(stillOpen.id, { workItemId: null, answer: null });
+        }
+        this.turnStore.openTurn({ batchId, prompt, sessionId });
+        return;
+      }
+      case "Stop": {
+        const open = this.turnStore.currentOpenTurn(batchId);
+        if (!open) return;
+        const batch = this.batchStore.findById(batchId);
+        const answer = batch?.summary?.trim() ? batch.summary : null;
+        const workItemId = this.soleInProgressWorkItem(batchId);
+        this.turnStore.closeTurn(open.id, { workItemId, answer });
+        return;
+      }
+      case "SessionEnd": {
+        const open = this.turnStore.currentOpenTurn(batchId);
+        if (!open) return;
+        this.turnStore.closeTurn(open.id, { workItemId: null, answer: null });
+        return;
+      }
+      case "PostToolUse": {
+        const payload = (envelope.payload ?? {}) as {
+          tool_name?: unknown;
+          tool_input?: unknown;
+          tool_response?: unknown;
+        };
+        const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+        if (!FILE_EDIT_TOOLS.has(toolName)) return;
+        const status = derivePostToolStatus(payload.tool_response);
+        if (status === "error") return;
+        const extractedPath = extractEditedFilePath(payload.tool_input);
+        if (!extractedPath) return;
+        const batch = this.batchStore.findById(batchId);
+        const stream = batch ? this.store.get(batch.stream_id) ?? null : null;
+        const normalizedPath = stream
+          ? toWorktreeRelativePath(extractedPath, stream.worktree_path)
+          : extractedPath;
+        const kind = this.classifyHookChangeKind(batchId, stream, normalizedPath, toolName);
+        this.recordHookFileChange(batchId, normalizedPath, kind, toolName);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private recordFsWatchChange(streamId: string, path: string, kind: FileChangeKind, t: number): void {
+    const stamp = this.recentUiWrites.get(path);
+    if (stamp !== undefined && t - stamp < UI_WRITE_ECHO_WINDOW_MS) {
+      return;
+    }
+    const activeBatchId = this.batchStore.list(streamId).activeBatchId;
+    if (!activeBatchId) return;
+    if (this.agentStatusByBatch.get(activeBatchId) !== "working") return;
+    this.persistFileChange(activeBatchId, path, kind, "fs-watch", null);
+  }
+
+  private classifyHookChangeKind(
+    batchId: string,
+    stream: Stream | null,
+    path: string,
+    toolName: string,
+  ): FileChangeKind {
+    // Edit/MultiEdit/NotebookEdit require a pre-existing file by contract, so
+    // the post-hook state is always "updated". Only Write can introduce a
+    // brand-new file.
+    if (toolName !== "Write") return "updated";
+    // If we've already recorded a change for this path in this batch, it's no
+    // longer the first write — classify as an update regardless of file state.
+    if (this.fileChangeStore.hasChangeForPath(batchId, path)) return "updated";
+    const worktreePath = stream?.worktree_path;
+    if (!worktreePath) return "updated";
+    // On PostToolUse the write has already landed, so a non-existent file here
+    // would be unusual; default to "updated" in that case rather than lying
+    // about a create.
+    const exists = existsSync(resolve(worktreePath, path));
+    return exists ? "created" : "updated";
+  }
+
+  private recordHookFileChange(
+    batchId: string,
+    path: string,
+    kind: FileChangeKind,
+    toolName: string,
+  ): void {
+    this.persistFileChange(batchId, path, kind, "hook", toolName);
+  }
+
+  private persistFileChange(
+    batchId: string,
+    path: string,
+    kind: FileChangeKind,
+    source: FileChangeSource,
+    toolName: string | null,
+  ): void {
+    const turn = this.turnStore.currentOpenTurn(batchId);
+    const workItemId = this.soleInProgressWorkItem(batchId);
+    this.fileChangeStore.record({
+      batchId,
+      turnId: turn?.id ?? null,
+      workItemId,
+      path,
+      changeKind: kind,
+      source,
+      toolName,
+    });
+  }
+
+  private stampUiWrite(path: string): void {
+    this.recentUiWrites.set(path, Date.now());
+    if (this.recentUiWrites.size > 500) {
+      const cutoff = Date.now() - UI_WRITE_ECHO_WINDOW_MS;
+      for (const [key, stamp] of this.recentUiWrites) {
+        if (stamp < cutoff) this.recentUiWrites.delete(key);
+      }
+    }
+  }
+
+  private soleInProgressWorkItem(batchId: string): string | null {
+    const inProgress = this.workItemStore
+      .listItems(batchId)
+      .filter((item) => item.status === "in_progress");
+    return inProgress.length === 1 ? inProgress[0]!.id : null;
+  }
+
+  listAgentTurns(batchId: string, limit?: number): AgentTurn[] {
+    return this.turnStore.listForBatch(batchId, limit);
+  }
+
+  listFileChanges(batchId: string, limit?: number): BatchFileChange[] {
+    return this.fileChangeStore.listForBatch(batchId, limit);
   }
 }
 
@@ -683,4 +884,34 @@ function localBranchName(remoteName: string): string {
 
 function parseLogLevel(value: unknown): LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error" ? value : "info";
+}
+
+const UI_WRITE_ECHO_WINDOW_MS = 1000;
+const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+function extractEditedFilePath(input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  if (typeof obj.file_path === "string") return obj.file_path;
+  if (typeof obj.notebook_path === "string") return obj.notebook_path;
+  if (typeof obj.path === "string") return obj.path;
+  return null;
+}
+
+function toWorktreeRelativePath(absOrRel: string, worktreePath: string): string {
+  const normalizedRoot = resolve(worktreePath);
+  const candidate = resolve(normalizedRoot, absOrRel);
+  if (candidate === normalizedRoot) return "";
+  if (candidate.startsWith(normalizedRoot + "/")) {
+    return candidate.slice(normalizedRoot.length + 1);
+  }
+  return absOrRel;
+}
+
+function derivePostToolStatus(resp: unknown): "ok" | "error" {
+  if (!resp || typeof resp !== "object") return "ok";
+  const obj = resp as Record<string, unknown>;
+  if (obj.error != null && obj.error !== "") return "error";
+  if (obj.is_error === true) return "error";
+  return "ok";
 }

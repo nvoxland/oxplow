@@ -1,6 +1,8 @@
 import type { ToolDef } from "./mcp-server.js";
 import type { BatchStore, Batch } from "../persistence/batch-store.js";
 import type { Stream } from "../persistence/stream-store.js";
+import type { TurnStore } from "../persistence/turn-store.js";
+import type { FileChangeStore } from "../persistence/file-change-store.js";
 import type {
   WorkItemKind,
   WorkItemPriority,
@@ -13,10 +15,12 @@ export interface McpToolDeps {
   resolveBatch(streamId: string, batchId: string): Batch;
   batchStore: BatchStore;
   workItemStore: WorkItemStore;
+  turnStore: TurnStore;
+  fileChangeStore: FileChangeStore;
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatch, batchStore, workItemStore } = deps;
+  const { resolveStream, resolveBatch, batchStore, workItemStore, turnStore, fileChangeStore } = deps;
 
   return [
     {
@@ -287,6 +291,44 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         resolveBatch(stream.id, args.batchId);
         workItemStore.linkItems(args.batchId, args.fromItemId, args.toItemId, args.linkType);
         return { ok: true };
+      },
+    },
+    {
+      name: "newde__list_agent_turn",
+      description:
+        "List recent agent turns for a batch (newest first). Each turn represents one user prompt and the agent's Stop-terminated response, with the snapshot summary and optionally a single in-progress work item it was attributed to.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id." },
+          limit: { type: "number", description: "Optional cap on the number of turns returned (default 50)." },
+        },
+        required: ["batchId"],
+      },
+      handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        return turnStore.listForBatch(args.batchId, args.limit);
+      },
+    },
+    {
+      name: "newde__list_batch_file_change",
+      description:
+        "List recent file changes recorded for a batch (newest first). Each row shows path, change_kind (created/updated/deleted), source (hook or fs-watch), and optional turn_id / work_item_id attribution.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id." },
+          limit: { type: "number", description: "Optional cap (default 200)." },
+        },
+        required: ["batchId"],
+      },
+      handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        return fileChangeStore.listForBatch(args.batchId, args.limit);
       },
     },
     {

@@ -8,9 +8,15 @@ import {
   getBatchState,
   createWorkspaceDirectory,
   listAgentStatuses,
+  listAgentTurns,
+  listBatchFileChanges,
   reorderWorkItems,
   subscribeAgentStatus,
+  subscribeFileChangeEvents,
+  subscribeTurnEvents,
   type AgentStatus,
+  type AgentTurn,
+  type BatchFileChange,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -64,6 +70,8 @@ export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
   const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
+  const [agentTurns, setAgentTurns] = useState<Record<string, AgentTurn[]>>({});
+  const [fileChanges, setFileChanges] = useState<Record<string, BatchFileChange[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("agent");
@@ -507,6 +515,8 @@ export function App() {
   );
   const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
   const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
+  const selectedBatchTurns = selectedBatch ? agentTurns[selectedBatch.id] ?? null : null;
+  const selectedBatchFileChanges = selectedBatch ? fileChanges[selectedBatch.id] ?? null : null;
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -558,6 +568,71 @@ export function App() {
       cancelled = true;
     };
   }, [batchWorkStates, currentBatchState.batches, stream]);
+
+  useEffect(() => {
+    if (!stream || !selectedBatch || agentTurns[selectedBatch.id]) return;
+    void listAgentTurns(stream.id, selectedBatch.id)
+      .then((turns) => {
+        setAgentTurns((prev) => ({ ...prev, [selectedBatch.id]: turns }));
+      })
+      .catch((e) => {
+        logUi("warn", "failed to load agent turns", {
+          streamId: stream.id,
+          batchId: selectedBatch.id,
+          error: String(e),
+        });
+      });
+  }, [agentTurns, selectedBatch, stream]);
+
+  useEffect(() => {
+    if (!stream || !selectedBatch || fileChanges[selectedBatch.id]) return;
+    void listBatchFileChanges(stream.id, selectedBatch.id)
+      .then((changes) => {
+        setFileChanges((prev) => ({ ...prev, [selectedBatch.id]: changes }));
+      })
+      .catch((e) => {
+        logUi("warn", "failed to load batch file changes", {
+          streamId: stream.id,
+          batchId: selectedBatch.id,
+          error: String(e),
+        });
+      });
+  }, [fileChanges, selectedBatch, stream]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeFileChangeEvents("all", (event) => {
+      void listBatchFileChanges(event.streamId, event.batchId)
+        .then((changes) => {
+          setFileChanges((prev) => ({ ...prev, [event.batchId]: changes }));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh batch file changes", {
+            streamId: event.streamId,
+            batchId: event.batchId,
+            error: String(error),
+          });
+        });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeTurnEvents("all", (event) => {
+      void listAgentTurns(event.streamId, event.batchId)
+        .then((turns) => {
+          setAgentTurns((prev) => ({ ...prev, [event.batchId]: turns }));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh agent turns after change event", {
+            streamId: event.streamId,
+            batchId: event.batchId,
+            kind: event.kind,
+            error: String(error),
+          });
+        });
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeWorkItemEvents("all", (event) => {
@@ -864,6 +939,8 @@ export function App() {
             batch={selectedBatch}
             activeBatchId={currentBatchState.activeBatchId}
             batchWork={selectedBatchWork}
+            agentTurns={selectedBatchTurns}
+            batchFileChanges={selectedBatchFileChanges}
             active={activeTab}
             onActiveChange={setActiveTab}
             onCreateWorkItem={handleCreateWorkItem}

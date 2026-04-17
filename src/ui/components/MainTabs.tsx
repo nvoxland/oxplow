@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import type {
+  AgentTurn,
+  BatchFileChange,
   Stream,
   Batch,
   BatchWorkState,
@@ -21,6 +23,8 @@ interface Props {
   batch: Batch | null;
   activeBatchId: string | null;
   batchWork: BatchWorkState | null;
+  agentTurns: AgentTurn[] | null;
+  batchFileChanges: BatchFileChange[] | null;
   active: TabId;
   onActiveChange(tab: TabId): void;
   onCreateWorkItem(input: {
@@ -63,6 +67,8 @@ export function MainTabs({
   batch,
   activeBatchId,
   batchWork,
+  agentTurns,
+  batchFileChanges,
   active,
   onActiveChange,
   onCreateWorkItem,
@@ -132,6 +138,9 @@ export function MainTabs({
           <PlanPane
             batch={batch}
             batchWork={batchWork}
+            agentTurns={agentTurns}
+            batchFileChanges={batchFileChanges}
+            workItems={batchWork?.items ?? []}
             onCreateWorkItem={onCreateWorkItem}
             onUpdateWorkItem={onUpdateWorkItem}
             onDeleteWorkItem={onDeleteWorkItem}
@@ -163,6 +172,9 @@ export function MainTabs({
 function PlanPane({
   batch,
   batchWork,
+  agentTurns,
+  batchFileChanges,
+  workItems,
   onCreateWorkItem,
   onUpdateWorkItem,
   onDeleteWorkItem,
@@ -170,6 +182,9 @@ function PlanPane({
 }: {
   batch: Batch | null;
   batchWork: BatchWorkState | null;
+  agentTurns: AgentTurn[] | null;
+  batchFileChanges: BatchFileChange[] | null;
+  workItems: WorkItem[];
   onCreateWorkItem: Props["onCreateWorkItem"];
   onUpdateWorkItem: Props["onUpdateWorkItem"];
   onDeleteWorkItem: Props["onDeleteWorkItem"];
@@ -280,6 +295,7 @@ function PlanPane({
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+        <TurnHistory turns={agentTurns} workItems={workItems} fileChanges={batchFileChanges} />
         <div
           style={{
             display: "grid",
@@ -314,6 +330,221 @@ function PlanPane({
       </div>
     </div>
   );
+}
+
+function TurnHistory({
+  turns,
+  workItems,
+  fileChanges,
+}: {
+  turns: AgentTurn[] | null;
+  workItems: WorkItem[];
+  fileChanges: BatchFileChange[] | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (turns === null) {
+    return null;
+  }
+  if (turns.length === 0) {
+    return (
+      <div style={{ marginBottom: 16, color: "var(--muted)", fontSize: 12 }}>
+        No agent turns recorded yet.
+      </div>
+    );
+  }
+  const visible = expanded ? turns : turns.slice(0, 10);
+  const itemById = new Map(workItems.map((item) => [item.id, item] as const));
+  const changesByTurn = new Map<string, BatchFileChange[]>();
+  for (const change of fileChanges ?? []) {
+    if (!change.turn_id) continue;
+    const list = changesByTurn.get(change.turn_id) ?? [];
+    list.push(change);
+    changesByTurn.set(change.turn_id, list);
+  }
+  return (
+    <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
+        Turn history
+      </div>
+      {visible.map((turn) => (
+        <TurnCard
+          key={turn.id}
+          turn={turn}
+          linkedItem={turn.work_item_id ? itemById.get(turn.work_item_id) ?? null : null}
+          fileChanges={changesByTurn.get(turn.id) ?? []}
+        />
+      ))}
+      {turns.length > 10 ? (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{ ...buttonStyle, alignSelf: "flex-start" }}
+        >
+          {expanded ? "Show fewer" : `Show ${turns.length - 10} more`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function TurnCard({
+  turn,
+  linkedItem,
+  fileChanges,
+}: {
+  turn: AgentTurn;
+  linkedItem: WorkItem | null;
+  fileChanges: BatchFileChange[];
+}) {
+  const open = turn.ended_at == null;
+  const [filesOpen, setFilesOpen] = useState(false);
+  const deduped = netFileChanges(fileChanges);
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        background: "var(--bg-2)",
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11, color: "var(--muted)" }}>
+        <span>{new Date(turn.started_at).toLocaleString()}</span>
+        {open ? <span style={{ color: "var(--accent)" }}>· in progress</span> : null}
+        {linkedItem ? (
+          <span
+            style={{
+              marginLeft: "auto",
+              padding: "1px 6px",
+              border: "1px solid var(--border)",
+              borderRadius: 999,
+            }}
+          >
+            {linkedItem.title}
+          </span>
+        ) : null}
+      </div>
+      <div style={{ fontSize: 13, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+        {turn.prompt}
+      </div>
+      {turn.answer ? (
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--muted)",
+            whiteSpace: "pre-wrap",
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+          }}
+        >
+          ↳ {turn.answer}
+        </div>
+      ) : null}
+      {deduped.length > 0 ? (
+        <div style={{ marginTop: 4 }}>
+          <button
+            onClick={() => setFilesOpen((v) => !v)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--muted)",
+              cursor: "pointer",
+              padding: 0,
+              fontSize: 11,
+              fontFamily: "inherit",
+            }}
+          >
+            {filesOpen ? "▾" : "▸"} {deduped.length} file{deduped.length === 1 ? "" : "s"} touched
+          </button>
+          {filesOpen ? (
+            <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+              {deduped.map((change) => (
+                <div key={change.id} style={{ fontSize: 11, display: "flex", gap: 6, alignItems: "baseline" }}>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      textTransform: "uppercase",
+                      padding: "0 4px",
+                      borderRadius: 3,
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      color: fileChangeKindColor(change.change_kind),
+                      minWidth: 52,
+                      textAlign: "center",
+                    }}
+                  >
+                    {change.change_kind}
+                  </span>
+                  <span style={{ fontFamily: "ui-monospace, monospace" }}>{change.path}</span>
+                  <span style={{ color: "var(--muted)", marginLeft: "auto" }}>
+                    {change.source}
+                    {change.tool_name ? ` · ${change.tool_name}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Collapse a list of raw file-change rows (any order) into one row per path
+ * representing the net effect:
+ *   - any "created" then "deleted" with no later "created" → drop (transient)
+ *   - any "deleted" then "created" → "updated" (replaced in place)
+ *   - ends on "created" with no prior "deleted" → "created"
+ *   - ends on "deleted" with no prior "created" → "deleted"
+ *   - otherwise → "updated"
+ *
+ * The most recent row is kept as the returned change (so source/tool_name on
+ * the card reflects the final operation).
+ */
+function netFileChanges(changes: BatchFileChange[]): BatchFileChange[] {
+  const byPath = new Map<string, BatchFileChange[]>();
+  for (const change of changes) {
+    const list = byPath.get(change.path) ?? [];
+    list.push(change);
+    byPath.set(change.path, list);
+  }
+  const out: BatchFileChange[] = [];
+  for (const list of byPath.values()) {
+    list.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const first = list[0]!;
+    const last = list[list.length - 1]!;
+    const hasCreated = list.some((c) => c.change_kind === "created");
+    const hasDeleted = list.some((c) => c.change_kind === "deleted");
+    if (first.change_kind === "created" && last.change_kind === "deleted") {
+      // transient: created and then removed within the turn
+      continue;
+    }
+    let netKind: BatchFileChange["change_kind"];
+    if (last.change_kind === "created") {
+      netKind = "created";
+    } else if (last.change_kind === "deleted" && !hasCreated) {
+      netKind = "deleted";
+    } else if (hasDeleted && hasCreated) {
+      netKind = "updated";
+    } else {
+      netKind = last.change_kind;
+    }
+    out.push({ ...last, change_kind: netKind });
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+function fileChangeKindColor(kind: BatchFileChange["change_kind"]): string {
+  switch (kind) {
+    case "created": return "var(--accent)";
+    case "deleted": return "#d66";
+    default: return "var(--fg)";
+  }
 }
 
 function ProgressBadge({ completed, total, percent }: { completed: number; total: number; percent: number }) {

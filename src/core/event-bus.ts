@@ -48,12 +48,33 @@ export interface AgentStatusChangedEvent {
   status: AgentStatus;
 }
 
+export interface TurnChangedEvent {
+  type: "turn.changed";
+  streamId: string;
+  batchId: string;
+  turnId: string;
+  kind: "opened" | "closed";
+}
+
+export interface FileChangeRecordedEvent {
+  type: "file-change.recorded";
+  streamId: string;
+  batchId: string;
+  turnId: string | null;
+  changeId: string;
+  path: string;
+  kind: "created" | "updated" | "deleted";
+  source: "hook" | "fs-watch";
+}
+
 export type NewdeEvent =
   | WorkspaceChangedEvent
   | HookRecordedEvent
   | WorkItemChangedEvent
   | BatchChangedEvent
-  | AgentStatusChangedEvent;
+  | AgentStatusChangedEvent
+  | TurnChangedEvent
+  | FileChangeRecordedEvent;
 
 export type NewdeEventType = NewdeEvent["type"];
 

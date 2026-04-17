@@ -68,6 +68,32 @@ export interface WorkItemEvent {
   created_at: string;
 }
 
+export type FileChangeKind = "created" | "updated" | "deleted";
+export type FileChangeSource = "hook" | "fs-watch";
+
+export interface BatchFileChange {
+  id: string;
+  batch_id: string;
+  turn_id: string | null;
+  work_item_id: string | null;
+  path: string;
+  change_kind: FileChangeKind;
+  source: FileChangeSource;
+  tool_name: string | null;
+  created_at: string;
+}
+
+export interface AgentTurn {
+  id: string;
+  batch_id: string;
+  work_item_id: string | null;
+  prompt: string;
+  answer: string | null;
+  session_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
 export interface BatchWorkState {
   batchId: string;
   waiting: WorkItem[];
@@ -256,6 +282,74 @@ export async function listWorkItemEvents(
   itemId?: string,
 ): Promise<WorkItemEvent[]> {
   return desktopApi().listWorkItemEvents(streamId, batchId, itemId);
+}
+
+export async function listAgentTurns(
+  streamId: string,
+  batchId: string,
+  limit?: number,
+): Promise<AgentTurn[]> {
+  return desktopApi().listAgentTurns(streamId, batchId, limit);
+}
+
+export async function listBatchFileChanges(
+  streamId: string,
+  batchId: string,
+  limit?: number,
+): Promise<BatchFileChange[]> {
+  return desktopApi().listBatchFileChanges(streamId, batchId, limit);
+}
+
+export interface FileChangeRecordedEventPayload {
+  streamId: string;
+  batchId: string;
+  turnId: string | null;
+  changeId: string;
+  path: string;
+  kind: FileChangeKind;
+  source: FileChangeSource;
+}
+
+export function subscribeFileChangeEvents(
+  streamId: string | "all",
+  onEvent: (event: FileChangeRecordedEventPayload) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "file-change.recorded") return;
+    if (streamId !== "all" && event.streamId !== streamId) return;
+    onEvent({
+      streamId: event.streamId,
+      batchId: event.batchId,
+      turnId: event.turnId,
+      changeId: event.changeId,
+      path: event.path,
+      kind: event.kind,
+      source: event.source,
+    });
+  });
+}
+
+export interface TurnChangeEvent {
+  streamId: string;
+  batchId: string;
+  turnId: string;
+  kind: "opened" | "closed";
+}
+
+export function subscribeTurnEvents(
+  streamId: string | "all",
+  onEvent: (event: TurnChangeEvent) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "turn.changed") return;
+    if (streamId !== "all" && event.streamId !== streamId) return;
+    onEvent({
+      streamId: event.streamId,
+      batchId: event.batchId,
+      turnId: event.turnId,
+      kind: event.kind,
+    });
+  });
 }
 
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {

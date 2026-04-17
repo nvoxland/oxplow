@@ -22,6 +22,8 @@ const api: DesktopApi = {
   reorderWorkItems: (streamId, batchId, orderedItemIds) => ipcRenderer.invoke("newde:reorderWorkItems", streamId, batchId, orderedItemIds),
   addWorkItemNote: (streamId, batchId, itemId, note) => ipcRenderer.invoke("newde:addWorkItemNote", streamId, batchId, itemId, note),
   listWorkItemEvents: (streamId, batchId, itemId) => ipcRenderer.invoke("newde:listWorkItemEvents", streamId, batchId, itemId),
+  listAgentTurns: (streamId, batchId, limit) => ipcRenderer.invoke("newde:listAgentTurns", streamId, batchId, limit),
+  listBatchFileChanges: (streamId, batchId, limit) => ipcRenderer.invoke("newde:listBatchFileChanges", streamId, batchId, limit),
   listWorkspaceEntries: (streamId, path = "") => ipcRenderer.invoke("newde:listWorkspaceEntries", streamId, path),
   listWorkspaceFiles: (streamId) => ipcRenderer.invoke("newde:listWorkspaceFiles", streamId),
   readWorkspaceFile: (streamId, path) => ipcRenderer.invoke("newde:readWorkspaceFile", streamId, path),

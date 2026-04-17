@@ -106,6 +106,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:reorderWorkItems", (_event, streamId: string, batchId: string, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderWorkItems(streamId, batchId, orderedItemIds));
   ipcMain.handle("newde:addWorkItemNote", (_event, streamId: string, batchId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, batchId, itemId, note));
   ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
+  ipcMain.handle("newde:listAgentTurns", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, batchId, limit));
+  ipcMain.handle("newde:listBatchFileChanges", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listFileChanges(streamId, batchId, limit));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
   ipcMain.handle("newde:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
   ipcMain.handle("newde:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));

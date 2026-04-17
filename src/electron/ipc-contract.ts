@@ -1,4 +1,6 @@
 import type {
+  AgentTurn,
+  BatchFileChange,
   BranchRef,
   Batch,
   BatchState,
@@ -23,6 +25,8 @@ import type { AgentStatus, NewdeEvent } from "../core/event-bus.js";
 import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
+  AgentTurn,
+  BatchFileChange,
   BranchRef,
   Batch,
   BatchState,
@@ -114,6 +118,8 @@ export interface DesktopApi {
   reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): Promise<BatchWorkState>;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
+  listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
+  listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
   listWorkspaceFiles(streamId: string): Promise<{ files: WorkspaceIndexedFile[]; summary: WorkspaceStatusSummary }>;
   readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile>;

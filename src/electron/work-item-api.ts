@@ -1,4 +1,6 @@
 import type { Batch } from "../persistence/batch-store.js";
+import type { AgentTurn, TurnStore } from "../persistence/turn-store.js";
+import type { BatchFileChange, FileChangeStore } from "../persistence/file-change-store.js";
 import type {
   BatchWorkState,
   WorkItemDetail,
@@ -12,6 +14,8 @@ import type {
 export interface WorkItemApiDeps {
   resolveBatch(streamId: string, batchId: string): Batch;
   workItemStore: WorkItemStore;
+  turnStore: TurnStore;
+  fileChangeStore: FileChangeStore;
 }
 
 export interface CreateWorkItemInput {
@@ -42,9 +46,11 @@ export interface WorkItemApi {
   reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): BatchWorkState;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[];
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
+  listAgentTurns(streamId: string, batchId: string, limit?: number): AgentTurn[];
+  listFileChanges(streamId: string, batchId: string, limit?: number): BatchFileChange[];
 }
 
-export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDeps): WorkItemApi {
+export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, fileChangeStore }: WorkItemApiDeps): WorkItemApi {
   return {
     getBatchWorkState(streamId, batchId) {
       resolveBatch(streamId, batchId);
@@ -111,6 +117,16 @@ export function createWorkItemApi({ resolveBatch, workItemStore }: WorkItemApiDe
     listWorkItemEvents(streamId, batchId, itemId) {
       resolveBatch(streamId, batchId);
       return workItemStore.listEvents(batchId, itemId);
+    },
+
+    listAgentTurns(streamId, batchId, limit) {
+      resolveBatch(streamId, batchId);
+      return turnStore.listForBatch(batchId, limit);
+    },
+
+    listFileChanges(streamId, batchId, limit) {
+      resolveBatch(streamId, batchId);
+      return fileChangeStore.listForBatch(batchId, limit);
     },
   };
 }

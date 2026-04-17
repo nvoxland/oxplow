@@ -111,6 +111,49 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE work_items ADD COLUMN acceptance_criteria TEXT;`);
     },
   },
+  {
+    version: 3,
+    name: "agent_turn",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE agent_turn (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+          work_item_id TEXT REFERENCES work_items(id) ON DELETE SET NULL,
+          prompt TEXT NOT NULL,
+          answer TEXT,
+          session_id TEXT,
+          started_at TEXT NOT NULL,
+          ended_at TEXT
+        );
+
+        CREATE INDEX idx_agent_turn_batch ON agent_turn(batch_id, started_at DESC);
+        CREATE INDEX idx_agent_turn_item ON agent_turn(work_item_id, started_at DESC);
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: "batch_file_change",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE batch_file_change (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+          turn_id TEXT REFERENCES agent_turn(id) ON DELETE SET NULL,
+          work_item_id TEXT REFERENCES work_items(id) ON DELETE SET NULL,
+          path TEXT NOT NULL,
+          change_kind TEXT NOT NULL,
+          source TEXT NOT NULL,
+          tool_name TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_batch_file_change_batch ON batch_file_change(batch_id, created_at DESC);
+        CREATE INDEX idx_batch_file_change_turn ON batch_file_change(turn_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {
