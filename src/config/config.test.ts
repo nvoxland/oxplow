@@ -12,17 +12,33 @@ afterEach(() => {
   }
 });
 
-test("loadProjectConfig defaults to Claude when newde.yaml is absent", () => {
+test("loadProjectConfig defaults agent=claude and projectName=basename when newde.yaml is absent", () => {
   const dir = mkdtempSync(join(tmpdir(), "newde-config-"));
   tempDirs.push(dir);
-  expect(loadProjectConfig(dir)).toEqual({ agent: "claude" });
+  const config = loadProjectConfig(dir);
+  expect(config.agent).toBe("claude");
+  expect(config.projectName).toBe(dir.split("/").pop());
 });
 
 test("loadProjectConfig reads the configured agent from newde.yaml", () => {
   const dir = mkdtempSync(join(tmpdir(), "newde-config-"));
   tempDirs.push(dir);
   writeFileSync(join(dir, NEWDE_CONFIG_FILE), "agent: copilot\n", "utf8");
-  expect(loadProjectConfig(dir)).toEqual({ agent: "copilot" });
+  expect(loadProjectConfig(dir).agent).toBe("copilot");
+});
+
+test("loadProjectConfig reads an explicit projectName from newde.yaml", () => {
+  const dir = mkdtempSync(join(tmpdir(), "newde-config-"));
+  tempDirs.push(dir);
+  writeFileSync(join(dir, NEWDE_CONFIG_FILE), "projectName: My Fancy Project\n", "utf8");
+  expect(loadProjectConfig(dir).projectName).toBe("My Fancy Project");
+});
+
+test("loadProjectConfig falls back to basename when projectName is absent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "newde-config-"));
+  tempDirs.push(dir);
+  writeFileSync(join(dir, NEWDE_CONFIG_FILE), "agent: claude\n", "utf8");
+  expect(loadProjectConfig(dir).projectName).toBe(dir.split("/").pop());
 });
 
 test("parseNewdeConfig rejects invalid agent values", () => {
@@ -34,5 +50,11 @@ test("parseNewdeConfig rejects invalid agent values", () => {
 test("parseNewdeConfig rejects unknown keys", () => {
   expect(() => parseNewdeConfig({ agent: "claude", theme: "dark" })).toThrow(
     "newde.yaml contains unknown key: theme",
+  );
+});
+
+test("parseNewdeConfig rejects empty projectName", () => {
+  expect(() => parseNewdeConfig({ projectName: "   " })).toThrow(
+    "newde.yaml projectName must be a non-empty string",
   );
 });

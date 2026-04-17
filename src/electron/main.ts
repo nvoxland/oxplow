@@ -32,8 +32,8 @@ async function main() {
   });
 
   app.on("activate", () => {
-    if (!mainWindow) {
-      mainWindow = createWindow(openDevTools);
+    if (!mainWindow && runtime) {
+      mainWindow = createWindow(openDevTools, `NewDE: ${runtime.config.projectName}`);
     }
   });
 
@@ -53,17 +53,17 @@ async function main() {
   registerIpc(runtime);
   runtime.onEvent((event) => broadcast("newde:event", event));
 
-  mainWindow = createWindow(openDevTools);
+  mainWindow = createWindow(openDevTools, `NewDE: ${runtime.config.projectName}`);
 }
 
-function createWindow(openDevTools: boolean) {
+function createWindow(openDevTools: boolean, title: string) {
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
     minWidth: 1000,
     minHeight: 700,
     backgroundColor: "#0e0e0e",
-    title: "newde",
+    title,
     webPreferences: {
       preload: resolve(app.getAppPath(), "dist", "electron-preload.cjs"),
       contextIsolation: true,

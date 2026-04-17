@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { GitFileStatus } from "./workspace-files.js";
 
 export interface BranchRef {
@@ -31,6 +31,23 @@ export function isGitRepo(projectDir: string): boolean {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return !!root && canonicalPath(root) === canonicalPath(projectDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True if `projectDir` is a secondary git worktree (its `.git` is a file
+ * pointing at the main repo's worktrees/ dir, not a regular `.git` directory).
+ * We refuse to start newde in a worktree because newde manages its own
+ * worktrees under `.newde/worktrees/` and nesting one inside a user-created
+ * worktree makes pane/stream accounting incoherent.
+ */
+export function isGitWorktree(projectDir: string): boolean {
+  try {
+    const dotGit = join(projectDir, ".git");
+    const stats = statSync(dotGit);
+    return stats.isFile();
   } catch {
     return false;
   }

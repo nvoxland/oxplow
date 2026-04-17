@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
-import { ensureWorktree, isGitRepo, listBranches, listGitStatuses } from "../git/git.js";
+import { ensureWorktree, isGitRepo, isGitWorktree, listBranches, listGitStatuses } from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
 import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
 import { LspSessionManager } from "../lsp/lsp.js";
@@ -77,6 +77,14 @@ export class ElectronRuntime {
   }
 
   static async create(projectDir: string): Promise<ElectronRuntime> {
+    // newde manages its own worktrees under .newde/worktrees/; refusing to
+    // boot inside someone else's worktree keeps the stream/pane accounting
+    // from getting tangled with a foreign git checkout.
+    if (isGitWorktree(projectDir)) {
+      throw new Error(
+        `newde cannot run inside a git worktree (${projectDir}). Open it from the main repository checkout or from a directory that isn't under git.`,
+      );
+    }
     const logger = createDaemonLogger(projectDir).child({ pid: process.pid, subsystem: "electron-runtime" });
     const config = loadProjectConfig(projectDir, logger.child({ subsystem: "config" }));
     const projectBase = sanitizeProjectBase(projectDir);

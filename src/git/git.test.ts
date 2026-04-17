@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectCurrentBranch, isGitRepo, listBranches } from "./git.js";
+import { detectCurrentBranch, isGitRepo, isGitWorktree, listBranches } from "./git.js";
 
 const tempDirs: string[] = [];
 
@@ -30,6 +30,24 @@ test("detectCurrentBranch returns null outside the repo root", () => {
 
   expect(detectCurrentBranch(repoDir)).toBe("main");
   expect(detectCurrentBranch(nestedDir)).toBeNull();
+});
+
+test("isGitWorktree distinguishes secondary worktrees (.git is a file) from the main checkout", () => {
+  const repoDir = mkRepo();
+  expect(isGitWorktree(repoDir)).toBe(false);
+
+  const worktreeDir = mkdtempSync(join(tmpdir(), "newde-git-worktree-"));
+  tempDirs.push(worktreeDir);
+  rmSync(worktreeDir, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", worktreeDir, "-b", "feature"], { stdio: "ignore" });
+  expect(isGitWorktree(worktreeDir)).toBe(true);
+  expect(isGitWorktree(repoDir)).toBe(false);
+});
+
+test("isGitWorktree returns false for directories without a .git entry", () => {
+  const dir = mkdtempSync(join(tmpdir(), "newde-plain-"));
+  tempDirs.push(dir);
+  expect(isGitWorktree(dir)).toBe(false);
 });
 
 test("listBranches is empty outside the repo root", () => {
