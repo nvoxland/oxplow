@@ -78,6 +78,13 @@ function createWindow(openDevTools: boolean, title: string) {
     }
   });
 
+  // Electron otherwise lets the page's <title> tag overwrite the window title
+  // every time it fires `page-title-updated`, clobbering the per-project title
+  // we set on the BrowserWindow.
+  window.on("page-title-updated", (event) => {
+    event.preventDefault();
+  });
+
   void window.loadFile(resolve(app.getAppPath(), "public", "index.html"));
   if (openDevTools) {
     window.webContents.openDevTools({ mode: "detach" });
