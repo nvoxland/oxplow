@@ -262,6 +262,43 @@ test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", 
   }
 });
 
+test("hook endpoint returns handler's JSON body as a 200 response", async () => {
+  const ideDir = tempIdeDir();
+  const server = await startMcpServer({
+    ideDir,
+    workspaceFolders: [],
+    onHook: (envelope) => {
+      if (envelope.event === "UserPromptSubmit") {
+        return {
+          body: {
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: "hello from test",
+            },
+          },
+        };
+      }
+    },
+  });
+  try {
+    const res = await fetch(`${server.hookUrl}/UserPromptSubmit`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${server.authToken}`,
+        "content-type": "application/json",
+        "X-Newde-Stream": "s-1",
+      },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.hookSpecificOutput.additionalContext).toBe("hello from test");
+  } finally {
+    await server.stop();
+    rmSync(ideDir, { recursive: true, force: true });
+  }
+});
+
 test("hook endpoint rejects unauthenticated requests", async () => {
   const ideDir = tempIdeDir();
   const received: any[] = [];

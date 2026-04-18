@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
 import type WebSocket from "ws";
 import type { Logger } from "../core/logger.js";
 import type { Stream } from "../persistence/stream-store.js";
@@ -21,11 +21,22 @@ interface JsonRpcResponse {
 
 type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse;
 
-interface LanguageServerRegistration {
+export interface LanguageServerRegistration {
   languageId: string;
   extensions: string[];
   command: string;
   args: string[];
+}
+
+export interface LspDiagnostic {
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+  severity?: number;
+  message: string;
+  source?: string;
+  code?: string | number;
 }
 
 interface PendingRequest {
@@ -33,22 +44,50 @@ interface PendingRequest {
   clientId: number | string;
 }
 
-const TYPESCRIPT_LANGUAGE_SERVER = resolve(new URL("..", import.meta.url).pathname, "node_modules", ".bin", "typescript-language-server");
+const requireFromHere = createRequire(import.meta.url);
+const TYPESCRIPT_LANGUAGE_SERVER_CLI = requireFromHere.resolve("typescript-language-server/lib/cli.mjs");
 
-const REGISTRY: LanguageServerRegistration[] = [
+const BUILT_IN_REGISTRATIONS: LanguageServerRegistration[] = [
   {
     languageId: "typescript",
     extensions: [".ts", ".tsx"],
-    command: TYPESCRIPT_LANGUAGE_SERVER,
-    args: ["--stdio"],
+    command: process.execPath,
+    args: [TYPESCRIPT_LANGUAGE_SERVER_CLI, "--stdio"],
   },
   {
     languageId: "javascript",
     extensions: [".js", ".jsx", ".mjs", ".cjs"],
-    command: TYPESCRIPT_LANGUAGE_SERVER,
-    args: ["--stdio"],
+    command: process.execPath,
+    args: [TYPESCRIPT_LANGUAGE_SERVER_CLI, "--stdio"],
   },
 ];
+
+const REGISTRY: LanguageServerRegistration[] = BUILT_IN_REGISTRATIONS.map((entry) => ({
+  ...entry,
+  extensions: entry.extensions.map((extension) => extension.toLowerCase()),
+}));
+
+export function registerLanguageServer(registration: LanguageServerRegistration): void {
+  const normalized: LanguageServerRegistration = {
+    ...registration,
+    extensions: registration.extensions.map((extension) => extension.toLowerCase()),
+  };
+  const existing = REGISTRY.findIndex((entry) => entry.languageId === normalized.languageId);
+  if (existing >= 0) {
+    REGISTRY[existing] = normalized;
+  } else {
+    REGISTRY.push(normalized);
+  }
+}
+
+export function unregisterLanguageServer(languageId: string): void {
+  const index = REGISTRY.findIndex((entry) => entry.languageId === languageId);
+  if (index >= 0) REGISTRY.splice(index, 1);
+}
+
+export function listRegisteredLanguageServers(): LanguageServerRegistration[] {
+  return REGISTRY.map((entry) => ({ ...entry, extensions: [...entry.extensions], args: [...entry.args] }));
+}
 
 export class LspSessionManager {
   private sessions = new Map<string, LspSession>();
@@ -58,6 +97,10 @@ export class LspSessionManager {
   async attachClient(ws: WebSocket, stream: Stream, languageId: string): Promise<void> {
     const session = await this.ensureSession(stream, languageId);
     session.attachClient(ws);
+  }
+
+  async getSession(stream: Stream, languageId: string): Promise<LspSession> {
+    return this.ensureSession(stream, languageId);
   }
 
   async dispose(): Promise<void> {
@@ -91,7 +134,7 @@ export function lspLanguageIdForPath(path: string): string | null {
   return registration?.languageId ?? null;
 }
 
-class LspSession {
+export class LspSession {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buffer = "";
   private contentLength: number | null = null;
@@ -99,6 +142,9 @@ class LspSession {
   private initialized = false;
   private clients = new Set<WebSocket>();
   private pending = new Map<number | string, PendingRequest>();
+  private openDocuments = new Map<string, { version: number; text: string }>();
+  private diagnosticsByUri = new Map<string, LspDiagnostic[]>();
+  private diagnosticsWaiters = new Map<string, ((diagnostics: LspDiagnostic[]) => void)[]>();
 
   constructor(
     private readonly stream: Stream,
@@ -108,13 +154,16 @@ class LspSession {
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    if (!existsSync(this.registration.command)) {
+    // If the command looks like an absolute path, verify it exists up-front
+    // for a friendlier error. Otherwise defer to spawn + PATH resolution.
+    if ((this.registration.command.startsWith("/") || this.registration.command.match(/^[a-zA-Z]:[\\/]/)) &&
+        !existsSync(this.registration.command)) {
       throw new Error(`missing language server executable: ${this.registration.command}`);
     }
     const proc = spawn(this.registration.command, this.registration.args, {
       cwd: this.stream.worktree_path,
       stdio: "pipe",
-      env: process.env,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     });
     this.proc = proc;
     proc.stdout.setEncoding("utf8");
@@ -199,6 +248,72 @@ class LspSession {
       method: "$/newde/status",
       params: { message: null },
     }));
+  }
+
+  get languageId(): string {
+    return this.registration.languageId;
+  }
+
+  /** Ensure the given document is open in the server, syncing text if the
+   *  tracked copy is stale. Safe to call repeatedly for the same URI. */
+  syncDocument(uri: string, text: string): void {
+    const existing = this.openDocuments.get(uri);
+    if (!existing) {
+      this.openDocuments.set(uri, { version: 1, text });
+      this.notifyServer("textDocument/didOpen", {
+        textDocument: {
+          uri,
+          languageId: this.registration.languageId,
+          version: 1,
+          text,
+        },
+      });
+      return;
+    }
+    if (existing.text === text) return;
+    const nextVersion = existing.version + 1;
+    this.openDocuments.set(uri, { version: nextVersion, text });
+    this.notifyServer("textDocument/didChange", {
+      textDocument: { uri, version: nextVersion },
+      contentChanges: [{ text }],
+    });
+  }
+
+  closeDocument(uri: string): void {
+    if (!this.openDocuments.has(uri)) return;
+    this.openDocuments.delete(uri);
+    this.diagnosticsByUri.delete(uri);
+    this.notifyServer("textDocument/didClose", { textDocument: { uri } });
+  }
+
+  request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    return this.requestToServer(method, params) as Promise<T>;
+  }
+
+  getDiagnostics(uri: string): LspDiagnostic[] | undefined {
+    return this.diagnosticsByUri.get(uri);
+  }
+
+  /** Wait until the server has published diagnostics for `uri`, or until
+   *  `timeoutMs` elapses. Returns whatever is cached at that point (possibly
+   *  an empty array). */
+  async waitForDiagnostics(uri: string, timeoutMs: number): Promise<LspDiagnostic[]> {
+    const cached = this.diagnosticsByUri.get(uri);
+    if (cached) return cached;
+    return new Promise<LspDiagnostic[]>((resolve) => {
+      const waiters = this.diagnosticsWaiters.get(uri) ?? [];
+      const timer = setTimeout(() => {
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) waiters.splice(index, 1);
+        resolve(this.diagnosticsByUri.get(uri) ?? []);
+      }, timeoutMs);
+      const waiter = (diagnostics: LspDiagnostic[]) => {
+        clearTimeout(timer);
+        resolve(diagnostics);
+      };
+      waiters.push(waiter);
+      this.diagnosticsWaiters.set(uri, waiters);
+    });
   }
 
   async dispose(): Promise<void> {
@@ -293,6 +408,9 @@ class LspSession {
       if (message.id !== undefined) {
         this.handleServerRequest(message);
       } else {
+        if (message.method === "textDocument/publishDiagnostics") {
+          this.recordPublishedDiagnostics(message.params);
+        }
         this.broadcast(message);
       }
       return;
@@ -329,6 +447,19 @@ class LspSession {
     }
   }
 
+  private recordPublishedDiagnostics(params: unknown): void {
+    if (!params || typeof params !== "object") return;
+    const payload = params as { uri?: unknown; diagnostics?: unknown };
+    if (typeof payload.uri !== "string" || !Array.isArray(payload.diagnostics)) return;
+    const diagnostics = payload.diagnostics as LspDiagnostic[];
+    this.diagnosticsByUri.set(payload.uri, diagnostics);
+    const waiters = this.diagnosticsWaiters.get(payload.uri);
+    if (waiters && waiters.length > 0) {
+      this.diagnosticsWaiters.delete(payload.uri);
+      for (const waiter of waiters) waiter(diagnostics);
+    }
+  }
+
   private respondToServer(id: number | string, result: unknown): void {
     this.sendToServer({
       jsonrpc: "2.0",
@@ -357,6 +488,6 @@ function parseJsonRpc(raw: string): JsonRpcMessage | null {
   }
 }
 
-function fileUri(path: string): string {
+export function fileUri(path: string): string {
   return `file://${encodeURI(path.replace(/\\/g, "/"))}`;
 }

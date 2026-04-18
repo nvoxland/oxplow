@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOpti
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
-import type { CommandId, LspEvent, MenuGroupSnapshot, NewdeEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
+import type { CommandId, EditorFocusPayload, LspEvent, MenuGroupSnapshot, NewdeEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
 
 let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -144,6 +144,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   ipcMain.handle("newde:ping", () => currentRuntime.ping());
   ipcMain.handle("newde:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
+  ipcMain.handle("newde:updateEditorFocus", (_event, payload: EditorFocusPayload) => currentRuntime.updateEditorFocus(payload));
   ipcMain.handle("newde:setNativeMenu", (_event, groups: MenuGroupSnapshot[]) => {
     Menu.setApplicationMenu(buildNativeMenu(groups));
   });

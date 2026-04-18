@@ -58,3 +58,44 @@ test("parseNewdeConfig rejects empty projectName", () => {
     "newde.yaml projectName must be a non-empty string",
   );
 });
+
+test("parseNewdeConfig parses lsp.servers entries", () => {
+  const parsed = parseNewdeConfig({
+    lsp: {
+      servers: [
+        { languageId: "python", extensions: [".py"], command: "pyright-langserver", args: ["--stdio"] },
+        { languageId: "rust", extensions: [".rs"], command: "rust-analyzer" },
+      ],
+    },
+  });
+  expect(parsed.lspServers).toEqual([
+    { languageId: "python", extensions: [".py"], command: "pyright-langserver", args: ["--stdio"] },
+    { languageId: "rust", extensions: [".rs"], command: "rust-analyzer", args: [] },
+  ]);
+});
+
+test("parseNewdeConfig rejects lsp entries missing required fields", () => {
+  expect(() =>
+    parseNewdeConfig({
+      lsp: { servers: [{ languageId: "python", extensions: [".py"] }] },
+    }),
+  ).toThrow(/command/);
+  expect(() =>
+    parseNewdeConfig({
+      lsp: { servers: [{ languageId: "python", command: "pyls" }] },
+    }),
+  ).toThrow(/extensions/);
+  expect(() =>
+    parseNewdeConfig({
+      lsp: { servers: [{ extensions: [".py"], command: "pyls" }] },
+    }),
+  ).toThrow(/languageId/);
+});
+
+test("parseNewdeConfig rejects lsp extensions that don't start with a dot", () => {
+  expect(() =>
+    parseNewdeConfig({
+      lsp: { servers: [{ languageId: "python", extensions: ["py"], command: "pyls" }] },
+    }),
+  ).toThrow(/extension/);
+});

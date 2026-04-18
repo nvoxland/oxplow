@@ -17,13 +17,15 @@ import {
   type BranchChanges,
 } from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
+import { EditorFocusStore, formatEditorFocusForAgent, type EditorFocusState } from "../session/editor-focus.js";
 import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
-import { LspSessionManager } from "../lsp/lsp.js";
+import { LspSessionManager, registerLanguageServer } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
 import { ResumeTracker } from "../session/resume-tracker.js";
 import { createElectronPlugin, type ElectronPlugin } from "../session/claude-plugin.js";
 import { startMcpServer, type HookEnvelope, type McpServerHandle } from "../mcp/mcp-server.js";
 import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
+import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
@@ -52,7 +54,7 @@ import { detectCurrentBranch } from "../git/git.js";
 import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
 import { attachCommand, attachPane } from "../terminal/pty-bridge.js";
-import type { UiLogPayload } from "./ipc-contract.js";
+import type { EditorFocusPayload, UiLogPayload } from "./ipc-contract.js";
 
 export class ElectronRuntime {
   readonly projectDir: string;
@@ -67,6 +69,7 @@ export class ElectronRuntime {
   readonly hookEvents: HookEventStore;
   readonly resumeTracker: ResumeTracker;
   readonly lspManager: LspSessionManager;
+  readonly editorFocusStore: EditorFocusStore;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
   readonly config: NewdeConfig;
   readonly events: EventBus;
@@ -100,6 +103,7 @@ export class ElectronRuntime {
     this.hookEvents = new HookEventStore(1000);
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
+    this.editorFocusStore = new EditorFocusStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
   }
 
@@ -114,6 +118,13 @@ export class ElectronRuntime {
     }
     const logger = createDaemonLogger(projectDir).child({ pid: process.pid, subsystem: "electron-runtime" });
     const config = loadProjectConfig(projectDir, logger.child({ subsystem: "config" }));
+    for (const server of config.lspServers) {
+      registerLanguageServer(server);
+      logger.info("registered lsp server from config", {
+        languageId: server.languageId,
+        extensions: server.extensions,
+      });
+    }
     const projectBase = sanitizeProjectBase(projectDir);
     const runtime = new ElectronRuntime(projectDir, projectBase, logger, config);
     await runtime.initialize();
@@ -247,14 +258,20 @@ export class ElectronRuntime {
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
       logger: this.logger.child({ subsystem: "mcp" }),
-      extraTools: buildWorkItemMcpTools({
-        resolveStream: (streamId) => this.resolveStream(streamId),
-        resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
-        batchStore: this.batchStore,
-        workItemStore: this.workItemStore,
-        turnStore: this.turnStore,
-        fileChangeStore: this.fileChangeStore,
-      }),
+      extraTools: [
+        ...buildWorkItemMcpTools({
+          resolveStream: (streamId) => this.resolveStream(streamId),
+          resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
+          batchStore: this.batchStore,
+          workItemStore: this.workItemStore,
+          turnStore: this.turnStore,
+          fileChangeStore: this.fileChangeStore,
+        }),
+        ...buildLspMcpTools({
+          resolveStream: (streamId) => this.resolveStream(streamId),
+          lspManager: this.lspManager,
+        }),
+      ],
       onHook: (envelope) => this.handleHookEnvelope(envelope),
     });
     this.logger.info("started mcp server", { port: this.mcp.port, lockfilePath: this.mcp.lockfilePath });
@@ -531,6 +548,19 @@ export class ElectronRuntime {
     return this.hookEvents.list(streamId);
   }
 
+  async updateEditorFocus(payload: EditorFocusPayload): Promise<void> {
+    const { streamId, ...rest } = payload;
+    if (!streamId) return;
+    const state: EditorFocusState = {
+      activeFile: rest.activeFile,
+      caret: rest.caret,
+      selection: rest.selection,
+      openFiles: rest.openFiles ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+    this.editorFocusStore.set(streamId, state);
+  }
+
   async logUi(payload: UiLogPayload): Promise<void> {
     const logger = createUiClientLogger(this.projectDir, payload.clientId);
     logger[parseLogLevel(payload.level)](payload.message, {
@@ -682,7 +712,7 @@ export class ElectronRuntime {
     );
   }
 
-  private handleHookEnvelope(envelope: HookEnvelope): void {
+  private handleHookEnvelope(envelope: HookEnvelope): { body?: unknown } | void {
     const streamId = envelope.streamId;
     if (!streamId) return;
     const pane: PaneKind | undefined = envelope.pane === "working" || envelope.pane === "talking"
@@ -705,6 +735,19 @@ export class ElectronRuntime {
         this.batchStore.updateResume(streamId, envelope.batchId, "");
       }
       this.applyTurnTracking(envelope, stored.normalized.sessionId);
+    }
+    if (envelope.event === "UserPromptSubmit") {
+      const additionalContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
+      if (additionalContext) {
+        return {
+          body: {
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext,
+            },
+          },
+        };
+      }
     }
   }
 

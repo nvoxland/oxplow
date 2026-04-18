@@ -43,6 +43,9 @@ export function EditorPane({
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const changeDisposeRef = useRef<{ dispose(): void } | null>(null);
+  const focusDisposersRef = useRef<{ dispose(): void }[]>([]);
+  const focusDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openFilesRef = useRef({ order: openFileOrder, files: openFiles });
   const onChangeRef = useRef(onChange);
   const onNavigateRef = useRef(onNavigateToLocation);
   const streamRef = useRef(stream);
@@ -59,6 +62,7 @@ export function EditorPane({
   onNavigateRef.current = onNavigateToLocation;
   streamRef.current = stream;
   filePathRef.current = filePath;
+  openFilesRef.current = { order: openFileOrder, files: openFiles };
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +81,8 @@ export function EditorPane({
       editorRef.current = editor;
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
       registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
+      focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
+      focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
         if (!filePathRef.current) return;
         const position = event.target?.position ?? editor.getPosition();
@@ -96,6 +102,9 @@ export function EditorPane({
       changeDisposeRef.current?.dispose();
       diagnosticsDisposersRef.current.forEach((dispose) => dispose());
       diagnosticsDisposersRef.current = [];
+      focusDisposersRef.current.forEach((d) => d.dispose());
+      focusDisposersRef.current = [];
+      if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
       for (const client of lspClientsRef.current.values()) {
         client.dispose();
       }
@@ -104,9 +113,69 @@ export function EditorPane({
     };
   }, []);
 
+  function scheduleFocusPush() {
+    if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
+    focusDebounceRef.current = setTimeout(() => {
+      focusDebounceRef.current = null;
+      pushEditorFocus();
+    }, 150);
+  }
+
+  function pushEditorFocus() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const currentStream = streamRef.current;
+    const currentPath = filePathRef.current;
+    const { order, files } = openFilesRef.current;
+    const selectionObj = editor.getSelection?.();
+    const hasSelection = !!selectionObj && !selectionObj.isEmpty();
+    let selection: {
+      startLine: number;
+      startColumn: number;
+      endLine: number;
+      endColumn: number;
+      text: string;
+    } | null = null;
+    let caret: { line: number; column: number } | null = null;
+    if (hasSelection) {
+      const model = editor.getModel?.();
+      const text: string = model ? model.getValueInRange(selectionObj) : "";
+      selection = {
+        startLine: selectionObj.startLineNumber,
+        startColumn: selectionObj.startColumn,
+        endLine: selectionObj.endLineNumber,
+        endColumn: selectionObj.endColumn,
+        text: text.length > 20_000 ? `${text.slice(0, 20_000)}…` : text,
+      };
+    } else {
+      const position = editor.getPosition?.();
+      if (position) caret = { line: position.lineNumber, column: position.column };
+    }
+    const openFilesPayload = order
+      .map((path) => {
+        const entry = files[path];
+        if (!entry) return null;
+        return { path, dirty: entry.draftContent !== entry.savedContent };
+      })
+      .filter((entry): entry is { path: string; dirty: boolean } => !!entry);
+    const api = (window as any).newdeApi as { updateEditorFocus?: (payload: unknown) => unknown } | undefined;
+    if (!api?.updateEditorFocus) return;
+    void api.updateEditorFocus({
+      streamId: currentStream.id,
+      activeFile: currentPath,
+      caret,
+      selection,
+      openFiles: openFilesPayload,
+    });
+  }
+
   useEffect(() => {
     setContextMenu(null);
   }, [filePath, stream.id]);
+
+  useEffect(() => {
+    pushEditorFocus();
+  }, [stream.id, filePath, openFileOrder, openFiles]);
 
   useEffect(() => {
     const monaco = monacoRef.current;

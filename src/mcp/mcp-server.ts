@@ -21,6 +21,13 @@ export interface HookEnvelope {
   payload: unknown;
 }
 
+export interface HookHandlerResponse {
+  /** Optional HTTP status override. Defaults to 200 when a body is returned, 202 otherwise. */
+  status?: number;
+  /** JSON body to send back to Claude Code (e.g. hookSpecificOutput.additionalContext). */
+  body?: unknown;
+}
+
 interface StartOptions {
   workspaceFolders: string[];
   /** Directory where the `<port>.lock` IDE discovery file is written.
@@ -33,7 +40,7 @@ interface StartOptions {
    *  `/hook/:event` with a parsed envelope; the agent shim is wired
    *  to this endpoint so hook events reach the runtime without a
    *  filesystem inbox. */
-  onHook?: (envelope: HookEnvelope) => void;
+  onHook?: (envelope: HookEnvelope) => void | HookHandlerResponse | Promise<void | HookHandlerResponse>;
 }
 
 export interface McpServerHandle {
@@ -219,8 +226,9 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       payload,
     };
 
+    let response: HookHandlerResponse | void;
     try {
-      opts.onHook?.(envelope);
+      response = await opts.onHook?.(envelope);
     } catch (error) {
       logger?.warn("hook handler threw", {
         event,
@@ -228,7 +236,13 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       });
     }
 
-    res.statusCode = 202;
+    if (response && response.body !== undefined) {
+      res.statusCode = response.status ?? 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(response.body));
+      return;
+    }
+    res.statusCode = response?.status ?? 202;
     res.end();
   }
 

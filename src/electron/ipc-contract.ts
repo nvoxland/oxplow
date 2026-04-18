@@ -72,6 +72,20 @@ export interface LspEvent {
   message: string;
 }
 
+export interface EditorFocusPayload {
+  streamId: string;
+  activeFile: string | null;
+  caret: { line: number; column: number } | null;
+  selection: {
+    startLine: number;
+    startColumn: number;
+    endLine: number;
+    endColumn: number;
+    text: string;
+  } | null;
+  openFiles: { path: string; dirty: boolean }[];
+}
+
 export interface DesktopApi {
   getCurrentStream(): Promise<Stream>;
   listStreams(): Promise<Stream[]>;
@@ -136,6 +150,7 @@ export interface DesktopApi {
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; batchId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
+  updateEditorFocus(payload: EditorFocusPayload): Promise<void>;
   setNativeMenu(groups: MenuGroupSnapshot[]): Promise<void>;
   openTerminalSession(paneTarget: string, cols: number, rows: number, mode?: "direct" | "tmux"): Promise<string>;
   sendTerminalMessage(sessionId: string, message: string): Promise<void>;

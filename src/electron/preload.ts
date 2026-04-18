@@ -38,6 +38,7 @@ const api: DesktopApi = {
   listAgentStatuses: (streamId) => ipcRenderer.invoke("newde:listAgentStatuses", streamId),
   ping: () => ipcRenderer.invoke("newde:ping"),
   logUi: (payload) => ipcRenderer.invoke("newde:logUi", payload),
+  updateEditorFocus: (payload) => ipcRenderer.invoke("newde:updateEditorFocus", payload),
   setNativeMenu: (groups) => ipcRenderer.invoke("newde:setNativeMenu", groups),
   openTerminalSession: (paneTarget, cols, rows, mode = "direct") => ipcRenderer.invoke("newde:openTerminalSession", paneTarget, cols, rows, mode),
   sendTerminalMessage: (sessionId, message) => ipcRenderer.invoke("newde:sendTerminalMessage", sessionId, message),
