@@ -60,9 +60,27 @@ test("workspace watcher emits events for filesystem changes", async () => {
 
 test("workspace watcher ignores internal runtime paths", () => {
   expect(shouldIgnoreWorkspaceWatchPath(".git/index")).toBe(true);
-  expect(shouldIgnoreWorkspaceWatchPath(".newde/logs/daemon.log")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".newde/logs/system.log")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath(".newde/worktrees/feature/src/app.ts")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
+});
+
+test("workspace watcher ignores heavy build/cache directories", () => {
+  expect(shouldIgnoreWorkspaceWatchPath("node_modules")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("node_modules/react/index.js")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("packages/a/node_modules/foo")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("dist")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("build/out.js")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("target/debug/app")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".next/cache")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".turbo")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".cache")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("coverage/lcov.info")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("__pycache__")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".venv/bin/python")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".idea/workspace.xml")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
+  expect(shouldIgnoreWorkspaceWatchPath("src/__pycache_not__")).toBe(false);
 });
 
 function noopLogger(): Logger {

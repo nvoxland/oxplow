@@ -1,6 +1,7 @@
 import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
 
 export type { NewdeEvent } from "../electron/ipc-contract.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption } from "../git/git.js";
 
 export interface Stream {
   id: string;
@@ -37,12 +38,12 @@ export interface BatchState {
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "to_check" | "blocked" | "done" | "canceled";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface WorkItem {
   id: string;
-  batch_id: string;
+  batch_id: string | null;
   parent_id: string | null;
   kind: WorkItemKind;
   title: string;
@@ -102,6 +103,15 @@ export interface BatchWorkState {
   epics: WorkItem[];
   items: WorkItem[];
 }
+
+export interface BacklogState {
+  items: WorkItem[];
+  waiting: WorkItem[];
+  inProgress: WorkItem[];
+  done: WorkItem[];
+}
+
+export const BACKLOG_SCOPE = "__backlog__";
 
 export interface BranchRef {
   kind: "local" | "remote";
@@ -280,6 +290,133 @@ export async function reorderWorkItems(
   return desktopApi().reorderWorkItems(streamId, batchId, orderedItemIds);
 }
 
+export async function moveWorkItemToBatch(
+  streamId: string,
+  fromBatchId: string,
+  itemId: string,
+  toBatchId: string,
+): Promise<{ from: BatchWorkState; to: BatchWorkState }> {
+  return desktopApi().moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId);
+}
+
+export async function getBacklogState(): Promise<BacklogState> {
+  return desktopApi().getBacklogState();
+}
+
+export async function createBacklogItem(input: {
+  kind: WorkItemKind;
+  title: string;
+  description?: string;
+  acceptanceCriteria?: string | null;
+  status?: WorkItemStatus;
+  priority?: WorkItemPriority;
+}): Promise<BacklogState> {
+  return desktopApi().createBacklogItem(input);
+}
+
+export async function updateBacklogItem(
+  itemId: string,
+  changes: {
+    title?: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+  },
+): Promise<BacklogState> {
+  return desktopApi().updateBacklogItem(itemId, changes);
+}
+
+export async function deleteBacklogItem(itemId: string): Promise<BacklogState> {
+  return desktopApi().deleteBacklogItem(itemId);
+}
+
+export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogState> {
+  return desktopApi().reorderBacklog(orderedItemIds);
+}
+
+export async function moveWorkItemToBacklog(
+  streamId: string,
+  fromBatchId: string,
+  itemId: string,
+): Promise<{ from: BatchWorkState; backlog: BacklogState }> {
+  return desktopApi().moveWorkItemToBacklog(streamId, fromBatchId, itemId);
+}
+
+export async function moveBacklogItemToBatch(
+  streamId: string,
+  itemId: string,
+  toBatchId: string,
+): Promise<{ backlog: BacklogState; to: BatchWorkState }> {
+  return desktopApi().moveBacklogItemToBatch(streamId, itemId, toBatchId);
+}
+
+export async function getGitLog(
+  streamId: string,
+  options?: { limit?: number },
+): Promise<import("../git/git.js").GitLogResult> {
+  return desktopApi().getGitLog(streamId, options);
+}
+
+export async function getCommitDetail(
+  streamId: string,
+  sha: string,
+): Promise<import("../git/git.js").CommitDetail | null> {
+  return desktopApi().getCommitDetail(streamId, sha);
+}
+
+export async function getChangeScopes(
+  streamId: string,
+): Promise<import("../git/git.js").ChangeScopes> {
+  return desktopApi().getChangeScopes(streamId);
+}
+
+export async function searchWorkspaceText(
+  streamId: string,
+  query: string,
+  options?: { limit?: number },
+): Promise<import("../git/git.js").TextSearchHit[]> {
+  return desktopApi().searchWorkspaceText(streamId, query, options);
+}
+
+export async function gitRestorePath(streamId: string, path: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitRestorePath(streamId, path);
+}
+
+export async function gitAddPath(streamId: string, path: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitAddPath(streamId, path);
+}
+
+export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitAppendToGitignore(streamId, path);
+}
+
+export async function gitPush(
+  streamId: string,
+  options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string },
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPush(streamId, options);
+}
+
+export async function gitPull(
+  streamId: string,
+  options?: { rebase?: boolean; remote?: string; branch?: string },
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPull(streamId, options);
+}
+
+export async function listFileCommits(
+  streamId: string,
+  path: string,
+  limit?: number,
+): Promise<import("../git/git.js").GitLogCommit[]> {
+  return desktopApi().listFileCommits(streamId, path, limit);
+}
+
+export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {
+  return desktopApi().listAllRefs(streamId);
+}
+
 export async function addWorkItemNote(
   streamId: string,
   batchId: string,
@@ -451,7 +588,7 @@ export function subscribeWorkspaceEvents(
   });
 }
 
-export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered";
+export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
 
 export interface WorkItemChangeEvent {
   streamId: string;
@@ -480,6 +617,18 @@ export function subscribeAgentStatus(
     if (event.type !== "agent-status.changed") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({ streamId: event.streamId, batchId: event.batchId, status: event.status });
+  });
+}
+
+export interface BacklogChangeEvent {
+  kind: WorkItemChangeKind;
+  itemId: string | null;
+}
+
+export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "backlog.changed") return;
+    onEvent({ kind: event.kind, itemId: event.itemId });
   });
 }
 

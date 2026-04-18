@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
 import type { MenuItem, MenuPosition } from "../menu.js";
 
 interface ContextMenuProps {
@@ -73,31 +74,62 @@ export function ContextMenu({ items, position, onClose, minWidth = 220 }: Contex
 }
 
 export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
+  const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
+  const submenuRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
   return (
     <div style={{ ...menuStyle, position: "relative", minWidth }}>
-      {items.map((item) => (
-        <button
-          key={item.id}
-          onClick={async () => {
-            if (!item.enabled) return;
-            try {
-              await Promise.resolve(item.run());
-            } finally {
-              onAction?.();
-            }
-          }}
-          disabled={!item.enabled}
-          style={{
-            ...menuItemStyle,
-            opacity: item.enabled ? 1 : 0.45,
-            cursor: item.enabled ? "pointer" : "default",
-          }}
-        >
-          <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
-          <span style={{ flex: 1 }}>{item.label}</span>
-          <span style={shortcutStyle}>{item.shortcut ?? ""}</span>
-        </button>
-      ))}
+      {items.map((item) => {
+        const hasSubmenu = !!item.submenu && item.submenu.length > 0;
+        return (
+          <div
+            key={item.id}
+            style={{ position: "relative" }}
+            onMouseEnter={() => hasSubmenu && item.enabled && setOpenSubmenuId(item.id)}
+            onMouseLeave={() => openSubmenuId === item.id && setOpenSubmenuId(null)}
+          >
+            <button
+              ref={(el) => { submenuRefs.current.set(item.id, el); }}
+              onClick={async () => {
+                if (!item.enabled) return;
+                if (hasSubmenu) {
+                  setOpenSubmenuId((prev) => (prev === item.id ? null : item.id));
+                  return;
+                }
+                try {
+                  await Promise.resolve(item.run?.());
+                } finally {
+                  onAction?.();
+                }
+              }}
+              disabled={!item.enabled}
+              style={{
+                ...menuItemStyle,
+                opacity: item.enabled ? 1 : 0.45,
+                cursor: item.enabled ? "pointer" : "default",
+                background: openSubmenuId === item.id ? "var(--bg-2)" : undefined,
+              }}
+            >
+              <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
+              <span style={{ flex: 1 }}>{item.label}</span>
+              <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ?? ""}</span>
+            </button>
+            {hasSubmenu && openSubmenuId === item.id ? (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: "100%",
+                  marginLeft: 2,
+                  zIndex: 2,
+                }}
+              >
+                <MenuList items={item.submenu!} onAction={onAction} minWidth={minWidth} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -80,7 +80,7 @@ class FileLogger implements Logger {
 }
 
 export function createDaemonLogger(projectDir: string): Logger {
-  return new FileLogger(join(projectDir, ".newde", "logs", "daemon.log"), {}, { minLevel: "info" });
+  return new FileLogger(join(projectDir, ".newde", "logs", "system.log"), {}, { minLevel: "info" });
 }
 
 export function createUiClientLogger(projectDir: string, clientId: string): Logger {

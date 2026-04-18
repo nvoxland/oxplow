@@ -3,7 +3,7 @@ import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "to_check" | "blocked" | "done" | "canceled";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 export type WorkItemLinkType =
   | "blocks"
@@ -18,7 +18,7 @@ const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
   "epic", "task", "subtask", "bug", "note",
 ]);
 const WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
-  "waiting", "ready", "in_progress", "blocked", "done", "canceled",
+  "waiting", "ready", "in_progress", "to_check", "blocked", "done", "canceled",
 ]);
 const WORK_ITEM_PRIORITIES: ReadonlySet<WorkItemPriority> = new Set([
   "low", "medium", "high", "urgent",
@@ -37,9 +37,11 @@ const DESCRIPTION_MAX_LEN = 20_000;
 const ACCEPTANCE_CRITERIA_MAX_LEN = 20_000;
 const NOTE_MAX_LEN = 20_000;
 
+export const BACKLOG_SCOPE = "__backlog__";
+
 export interface WorkItem {
   id: string;
-  batch_id: string;
+  batch_id: string | null;
   parent_id: string | null;
   kind: WorkItemKind;
   title: string;
@@ -73,7 +75,7 @@ export interface WorkItemDetail {
 
 export interface WorkItemEvent {
   id: string;
-  batch_id: string;
+  batch_id: string | null;
   item_id: string | null;
   event_type: string;
   actor_kind: WorkItemActorKind;
@@ -82,7 +84,7 @@ export interface WorkItemEvent {
   created_at: string;
 }
 
-export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered";
+export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
 
 export interface WorkItemChange {
   batchId: string;
@@ -157,7 +159,7 @@ export class WorkItemStore {
     return {
       batchId,
       waiting: items.filter((item) => item.status === "waiting" || item.status === "ready" || item.status === "blocked"),
-      inProgress: items.filter((item) => item.status === "in_progress"),
+      inProgress: items.filter((item) => item.status === "in_progress" || item.status === "to_check"),
       done: items.filter((item) => item.status === "done" || item.status === "canceled"),
       epics: items.filter((item) => item.kind === "epic"),
       items,
@@ -265,7 +267,7 @@ export class WorkItemStore {
       kind: item.kind,
       status: item.status,
     });
-    this.emitChange({ batchId: item.batch_id, kind: "created", itemId: item.id });
+    this.emitChange({ batchId: item.batch_id ?? BACKLOG_SCOPE, kind: "created", itemId: item.id });
     return item;
   }
 
@@ -438,6 +440,325 @@ export class WorkItemStore {
     this.emitChange({ batchId, kind: "reordered", itemId: null });
   }
 
+  moveItemToScope(
+    fromScope: string | null,
+    itemId: string,
+    toScope: string | null,
+    actorKind: WorkItemActorKind,
+    actorId: string,
+  ): void {
+    if (fromScope === toScope) return;
+    const kind = requireWorkItemActorKind(actorKind);
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      const root = this.getItemInScope(fromScope, itemId);
+      if (!root) throw new Error("work item not found in source scope");
+      if (toScope !== null) {
+        const targetExists = this.stateDb.get<{ id: string }>(
+          `SELECT id FROM batches WHERE id = ? LIMIT 1`,
+          toScope,
+        );
+        if (!targetExists) throw new Error("target batch not found");
+      }
+
+      const descendantIds: string[] = [];
+      const queue: string[] = [itemId];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const children = fromScope === null
+          ? this.stateDb.all<{ id: string }>(
+              `SELECT id FROM work_items WHERE batch_id IS NULL AND parent_id = ? AND deleted_at IS NULL`,
+              current,
+            )
+          : this.stateDb.all<{ id: string }>(
+              `SELECT id FROM work_items WHERE batch_id = ? AND parent_id = ? AND deleted_at IS NULL`,
+              fromScope,
+              current,
+            );
+        for (const child of children) {
+          descendantIds.push(child.id);
+          queue.push(child.id);
+        }
+      }
+
+      const nextSortIndex = (toScope === null
+        ? this.stateDb.get<{ next_index: number }>(
+            `SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index
+             FROM work_items WHERE batch_id IS NULL AND parent_id IS NULL AND deleted_at IS NULL`,
+          )
+        : this.stateDb.get<{ next_index: number }>(
+            `SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index
+             FROM work_items WHERE batch_id = ? AND parent_id IS NULL AND deleted_at IS NULL`,
+            toScope,
+          ))?.next_index ?? 0;
+
+      if (fromScope === null) {
+        this.stateDb.run(
+          `UPDATE work_items SET batch_id = ?, parent_id = NULL, sort_index = ?, updated_at = ?
+           WHERE batch_id IS NULL AND id = ?`,
+          toScope,
+          nextSortIndex,
+          now,
+          itemId,
+        );
+        for (const descendantId of descendantIds) {
+          this.stateDb.run(
+            `UPDATE work_items SET batch_id = ?, updated_at = ? WHERE batch_id IS NULL AND id = ?`,
+            toScope,
+            now,
+            descendantId,
+          );
+        }
+      } else {
+        this.stateDb.run(
+          `UPDATE work_items SET batch_id = ?, parent_id = NULL, sort_index = ?, updated_at = ?
+           WHERE batch_id = ? AND id = ?`,
+          toScope,
+          nextSortIndex,
+          now,
+          fromScope,
+          itemId,
+        );
+        for (const descendantId of descendantIds) {
+          this.stateDb.run(
+            `UPDATE work_items SET batch_id = ?, updated_at = ? WHERE batch_id = ? AND id = ?`,
+            toScope,
+            now,
+            fromScope,
+            descendantId,
+          );
+        }
+      }
+
+      this.recordEvent({
+        batchId: fromScope,
+        itemId,
+        eventType: "moved_out",
+        actorKind: kind,
+        actorId,
+        payload: { toScope, movedItemIds: [itemId, ...descendantIds] },
+      });
+      this.recordEvent({
+        batchId: toScope,
+        itemId,
+        eventType: "moved_in",
+        actorKind: kind,
+        actorId,
+        payload: { fromScope, movedItemIds: [itemId, ...descendantIds] },
+      });
+    });
+    this.logger?.info("moved work item between scopes", { fromScope, toScope, itemId });
+    this.emitChange({ batchId: fromScope ?? BACKLOG_SCOPE, kind: "moved", itemId });
+    this.emitChange({ batchId: toScope ?? BACKLOG_SCOPE, kind: "moved", itemId });
+  }
+
+  /** Backwards-compatible alias for batch-to-batch moves. */
+  moveItemToBatch(
+    fromBatchId: string,
+    itemId: string,
+    toBatchId: string,
+    actorKind: WorkItemActorKind,
+    actorId: string,
+  ): void {
+    this.moveItemToScope(fromBatchId, itemId, toBatchId, actorKind, actorId);
+  }
+
+  listBacklog(): WorkItem[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_items
+         WHERE batch_id IS NULL AND deleted_at IS NULL
+         ORDER BY sort_index, created_at, id`,
+      )
+      .map(toWorkItem);
+  }
+
+  getBacklogItem(itemId: string): WorkItem | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT * FROM work_items
+       WHERE batch_id IS NULL AND id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      itemId,
+    );
+    return row ? toWorkItem(row) : null;
+  }
+
+  private getItemInScope(scope: string | null, itemId: string): WorkItem | null {
+    if (scope === null) return this.getBacklogItem(itemId);
+    return this.getItem(scope, itemId);
+  }
+
+  createBacklogItem(input: {
+    kind: WorkItemKind;
+    title: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+    createdBy: WorkItemActorKind;
+    actorId: string;
+  }): WorkItem {
+    const title = requireTitle(input.title);
+    const description = clampDescription(input.description);
+    const acceptance = clampAcceptanceCriteria(input.acceptanceCriteria);
+    const kind = requireWorkItemKind(input.kind);
+    const status = input.status ? requireWorkItemStatus(input.status) : "waiting";
+    const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
+    const createdBy = requireWorkItemActorKind(input.createdBy);
+    const now = new Date().toISOString();
+    const id = createId("wi");
+
+    this.stateDb.transaction(() => {
+      this.stateDb.run(
+        `INSERT INTO work_items (
+          id, batch_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
+          sort_index, created_by, created_at, updated_at, completed_at
+        ) VALUES (
+          ?, NULL, NULL, ?, ?, ?, ?, ?, ?,
+          (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE batch_id IS NULL AND parent_id IS NULL),
+          ?, ?, ?, ?
+        )`,
+        id,
+        kind,
+        title,
+        description,
+        acceptance,
+        status,
+        priority,
+        createdBy,
+        now,
+        now,
+        status === "done" ? now : null,
+      );
+      this.recordEvent({
+        batchId: null,
+        itemId: id,
+        eventType: "created",
+        actorKind: createdBy,
+        actorId: input.actorId,
+        payload: { title, kind, status, priority },
+      });
+    });
+    const created = this.getBacklogItem(id);
+    if (!created) throw new Error("failed to read back created backlog item");
+    this.emitChange({ batchId: BACKLOG_SCOPE, kind: "created", itemId: id });
+    return created;
+  }
+
+  updateBacklogItem(input: {
+    itemId: string;
+    title?: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+    actorKind: WorkItemActorKind;
+    actorId: string;
+  }): void {
+    const kind = requireWorkItemActorKind(input.actorKind);
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      const existing = this.getBacklogItem(input.itemId);
+      if (!existing) throw new Error(`backlog item ${input.itemId} not found`);
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      if (input.title !== undefined) { fields.push("title = ?"); values.push(requireTitle(input.title)); }
+      if (input.description !== undefined) { fields.push("description = ?"); values.push(clampDescription(input.description)); }
+      if (input.acceptanceCriteria !== undefined) { fields.push("acceptance_criteria = ?"); values.push(clampAcceptanceCriteria(input.acceptanceCriteria)); }
+      if (input.status !== undefined) {
+        const status = requireWorkItemStatus(input.status);
+        fields.push("status = ?"); values.push(status);
+        if (status === "done" || status === "canceled") { fields.push("completed_at = ?"); values.push(now); }
+        else { fields.push("completed_at = NULL"); }
+      }
+      if (input.priority !== undefined) { fields.push("priority = ?"); values.push(requireWorkItemPriority(input.priority)); }
+      if (fields.length === 0) return;
+      fields.push("updated_at = ?"); values.push(now);
+      values.push(input.itemId);
+      this.stateDb.run(
+        `UPDATE work_items SET ${fields.join(", ")} WHERE batch_id IS NULL AND id = ?`,
+        ...(values as Array<string | number | null>),
+      );
+      const after = this.getBacklogItem(input.itemId);
+      this.recordEvent({
+        batchId: null,
+        itemId: input.itemId,
+        eventType: "updated",
+        actorKind: kind,
+        actorId: input.actorId,
+        payload: { before: existing, after },
+      });
+    });
+    this.emitChange({ batchId: BACKLOG_SCOPE, kind: "updated", itemId: input.itemId });
+  }
+
+  deleteBacklogItem(itemId: string, actorKind: WorkItemActorKind, actorId: string): void {
+    const kind = requireWorkItemActorKind(actorKind);
+    const now = new Date().toISOString();
+    let deleted = false;
+    this.stateDb.transaction(() => {
+      const existing = this.getBacklogItem(itemId);
+      if (!existing) return;
+      this.stateDb.run(
+        `UPDATE work_items SET deleted_at = ?, updated_at = ? WHERE batch_id IS NULL AND id = ?`,
+        now,
+        now,
+        itemId,
+      );
+      this.recordEvent({
+        batchId: null,
+        itemId,
+        eventType: "deleted",
+        actorKind: kind,
+        actorId,
+        payload: { before: existing },
+      });
+      deleted = true;
+    });
+    if (deleted) {
+      this.emitChange({ batchId: BACKLOG_SCOPE, kind: "deleted", itemId });
+    }
+  }
+
+  reorderBacklog(orderedItemIds: string[], actorKind: WorkItemActorKind, actorId: string): void {
+    if (orderedItemIds.length === 0) return;
+    if (new Set(orderedItemIds).size !== orderedItemIds.length) {
+      throw new Error("reorder request contained duplicate ids");
+    }
+    const kind = requireWorkItemActorKind(actorKind);
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      const rows = this.stateDb.all<{ id: string; parent_id: string | null }>(
+        `SELECT id, parent_id FROM work_items
+         WHERE batch_id IS NULL AND id IN (${orderedItemIds.map(() => "?").join(",")}) AND deleted_at IS NULL`,
+        ...orderedItemIds,
+      );
+      if (rows.length !== orderedItemIds.length) {
+        throw new Error("reorder request referenced unknown or deleted backlog items");
+      }
+      if (rows.some((row) => row.parent_id !== null)) {
+        throw new Error("backlog reorder requires root-level items only");
+      }
+      for (let index = 0; index < orderedItemIds.length; index++) {
+        this.stateDb.run(
+          `UPDATE work_items SET sort_index = ?, updated_at = ? WHERE batch_id IS NULL AND id = ?`,
+          index,
+          now,
+          orderedItemIds[index]!,
+        );
+      }
+      this.recordEvent({
+        batchId: null,
+        itemId: null,
+        eventType: "reordered",
+        actorKind: kind,
+        actorId,
+        payload: { orderedItemIds },
+      });
+    });
+    this.emitChange({ batchId: BACKLOG_SCOPE, kind: "reordered", itemId: null });
+  }
+
   linkItems(batchId: string, fromItemId: string, toItemId: string, linkType: WorkItemLinkType): void {
     if (fromItemId === toItemId) throw new Error("cannot link a work item to itself");
     const kind = requireWorkItemLinkType(linkType);
@@ -543,7 +864,7 @@ export class WorkItemStore {
   }
 
   private recordEvent(input: {
-    batchId: string;
+    batchId: string | null;
     itemId: string | null;
     eventType: string;
     actorKind: WorkItemActorKind;
@@ -568,7 +889,7 @@ export class WorkItemStore {
 function toWorkItem(row: Record<string, unknown>): WorkItem {
   return {
     id: requireString(row, "id"),
-    batch_id: requireString(row, "batch_id"),
+    batch_id: row.batch_id == null ? null : String(row.batch_id),
     parent_id: row.parent_id == null ? null : String(row.parent_id),
     kind: requireWorkItemKind(requireString(row, "kind")),
     title: requireString(row, "title"),
@@ -599,7 +920,7 @@ function toWorkItemLink(row: Record<string, unknown>): WorkItemLink {
 function toWorkItemEvent(row: Record<string, unknown>): WorkItemEvent {
   return {
     id: requireString(row, "id"),
-    batch_id: requireString(row, "batch_id"),
+    batch_id: row.batch_id == null ? null : String(row.batch_id),
     item_id: row.item_id == null ? null : String(row.item_id),
     event_type: requireString(row, "event_type"),
     actor_kind: requireWorkItemActorKind(requireString(row, "actor_kind")),

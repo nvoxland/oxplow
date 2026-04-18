@@ -59,7 +59,15 @@ export function TreeEntries({
         return (
           <div key={entry.path}>
             <button
-              onClick={() => entry.kind === "directory" ? void onToggleDirectory(entry.path) : onOpenFile(entry.path)}
+              onClick={() => {
+                if (entry.kind === "directory") {
+                  void onToggleDirectory(entry.path);
+                } else if (entry.gitStatus === "deleted") {
+                  // Deleted files no longer exist on disk; opening would 404.
+                } else {
+                  onOpenFile(entry.path);
+                }
+              }}
               onContextMenu={(event) => {
                 event.preventDefault();
                 onContextMenu({
@@ -91,7 +99,14 @@ export function TreeEntries({
                 {entry.kind === "directory" ? (expanded ? "▾" : "▸") : ""}
               </span>
               <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
-              <span style={{ flex: 1, whiteSpace: "nowrap" }}>{entry.name}</span>
+              <span
+                style={{
+                  flex: 1,
+                  whiteSpace: "nowrap",
+                  textDecoration: entry.gitStatus === "deleted" ? "line-through" : undefined,
+                  color: entry.gitStatus === "deleted" ? "var(--muted)" : undefined,
+                }}
+              >{entry.name}</span>
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
             </button>
             {entry.kind === "directory" && expanded ? (

@@ -92,8 +92,10 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
                 style={{
                   ...tabStyle,
                   background: active ? "var(--bg)" : "var(--bg-2)",
-                  borderBottomColor: active ? "var(--accent)" : "transparent",
+                  borderBottom: active ? "2px solid var(--bg)" : "2px solid transparent",
+                  marginBottom: active ? -1 : 0,
                   color: active ? "var(--fg)" : "var(--muted)",
+                  fontWeight: active ? 600 : 400,
                 }}
                 title={candidate.title}
               >
@@ -117,7 +119,8 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
         </span>
       </div>
       {showCreate ? (
-        <div
+        <form
+          onSubmit={(e) => { e.preventDefault(); void handleCreate(); }}
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
@@ -173,12 +176,12 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
             {formError ?? "Each stream gets its own worktree and Claude resume metadata."}
           </div>
           <div style={{ gridColumn: "1 / 3", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button onClick={() => setShowCreate(false)} style={buttonStyle}>Cancel</button>
-            <button onClick={handleCreate} style={buttonStyle} disabled={creating || loadingBranches}>
+            <button type="button" onClick={() => setShowCreate(false)} style={buttonStyle}>Cancel</button>
+            <button type="submit" style={buttonStyle} disabled={creating || loadingBranches}>
               {creating ? "Creating…" : "Create stream"}
             </button>
           </div>
-        </div>
+        </form>
       ) : null}
     </div>
   );

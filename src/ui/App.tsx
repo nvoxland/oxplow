@@ -11,6 +11,15 @@ import {
   listAgentTurns,
   listBatchFileChanges,
   reorderWorkItems,
+  moveWorkItemToBatch,
+  getBacklogState,
+  createBacklogItem,
+  updateBacklogItem,
+  deleteBacklogItem,
+  reorderBacklog,
+  moveWorkItemToBacklog,
+  moveBacklogItemToBatch,
+  subscribeBacklogEvents,
   subscribeAgentStatus,
   subscribeFileChangeEvents,
   subscribeTurnEvents,
@@ -32,10 +41,10 @@ import {
   subscribeWorkspaceEvents,
   selectBatch,
   promoteBatch,
-  reorderBatch,
   switchStream,
   updateWorkItem,
   writeWorkspaceFile,
+  type BacklogState,
   type BatchWorkState,
   type BatchState,
   type Stream,
@@ -64,14 +73,14 @@ import { BottomPanel } from "./components/BottomPanel.js";
 import { DockShell } from "./components/Dock/DockShell.js";
 import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
-import { BatchStatusBar } from "./components/BatchStatusBar.js";
-import { BatchesPanel } from "./components/Panels/BatchesPanel.js";
+import { BatchRail } from "./components/BatchRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { GitChangesPanel, type DiffRequest } from "./components/Panels/GitChangesPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { Activity } from "./components/Activity/Activity.js";
 import { BatchChanges } from "./components/Changes/BatchChanges.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
+import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -83,6 +92,7 @@ export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
   const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
+  const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentTurns, setAgentTurns] = useState<Record<string, AgentTurn[]>>({});
   const [fileChanges, setFileChanges] = useState<Record<string, BatchFileChange[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
@@ -409,17 +419,6 @@ export function App() {
     }
   }
 
-  async function handleReorderBatch(batchId: string, targetIndex: number) {
-    if (!stream) return;
-    try {
-      const next = await reorderBatch(stream.id, batchId, targetIndex);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
   async function handlePromoteBatch(batchId: string) {
     if (!stream) return;
     try {
@@ -503,6 +502,88 @@ export function App() {
     try {
       const next = await reorderWorkItems(stream.id, selectedBatch.id, orderedItemIds);
       setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleMoveWorkItemToBatch(itemId: string, fromBatchId: string, toBatchId: string) {
+    if (!stream || fromBatchId === toBatchId) return;
+    try {
+      const { from, to } = await moveWorkItemToBatch(stream.id, fromBatchId, itemId, toBatchId);
+      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from, [toBatchId]: to }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleMoveItemToBacklog(itemId: string, fromBatchId: string) {
+    if (!stream) return;
+    try {
+      const { from, backlog } = await moveWorkItemToBacklog(stream.id, fromBatchId, itemId);
+      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from }));
+      setBacklogState(backlog);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleMoveBacklogItemToBatch(itemId: string, toBatchId: string) {
+    if (!stream) return;
+    try {
+      const { backlog, to } = await moveBacklogItemToBatch(stream.id, itemId, toBatchId);
+      setBacklogState(backlog);
+      setBatchWorkStates((prev) => ({ ...prev, [toBatchId]: to }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleCreateBacklogItem(input: Parameters<typeof createBacklogItem>[0]) {
+    try {
+      const next = await createBacklogItem(input);
+      setBacklogState(next);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
+    try {
+      const next = await updateBacklogItem(itemId, changes);
+      setBacklogState(next);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleDeleteBacklogItem(itemId: string) {
+    try {
+      const next = await deleteBacklogItem(itemId);
+      setBacklogState(next);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
+  async function handleReorderBacklog(orderedItemIds: string[]) {
+    try {
+      const next = await reorderBacklog(orderedItemIds);
+      setBacklogState(next);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -647,6 +728,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void getBacklogState()
+      .then((state) => { if (!cancelled) setBacklogState(state); })
+      .catch((error) => logUi("warn", "failed to load backlog state", { error: String(error) }));
+    const unsubscribe = subscribeBacklogEvents(() => {
+      void getBacklogState()
+        .then((state) => setBacklogState(state))
+        .catch((error) => logUi("warn", "failed to refresh backlog state", { error: String(error) }));
+    });
+    return () => { cancelled = true; unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = subscribeWorkItemEvents("all", (event) => {
       void getBatchWorkState(event.streamId, event.batchId)
         .then((workState) => {
@@ -761,14 +855,17 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
+  const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
+  const [planNewRequest, setPlanNewRequest] = useState(0);
   const commandState = useMemo(
     () => ({
       hasStream: !!stream,
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
+      hasBatch: !!selectedBatch,
       activeTab: centerActive === "editor" ? "editor" : "agent",
     } as const),
-    [centerActive, currentFile, currentFileDirty, selectedFilePath, stream],
+    [centerActive, currentFile, currentFileDirty, selectedBatch, selectedFilePath, stream],
   );
   const commandHandlers = useMemo(() => ({
     save() {
@@ -789,6 +886,10 @@ export function App() {
     showEditorPane() {
       setCenterActive("editor");
     },
+    newWorkItem() {
+      setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
+      setPlanNewRequest((prev) => prev + 1);
+    },
   }), [stream, selectedFilePath]);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
   const menuGroups = useMemo(
@@ -806,7 +907,7 @@ export function App() {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
       const command = commandMap.get(commandId);
-      if (!command || !command.enabled) return;
+      if (!command || !command.enabled || !command.run) return;
       event.preventDefault();
       command.run();
     }
@@ -826,7 +927,7 @@ export function App() {
     if (!isElectron) return;
     return window.newdeApi.onMenuCommand((commandId) => {
       const command = commandMap.get(commandId);
-      if (!command || !command.enabled) return;
+      if (!command || !command.enabled || !command.run) return;
       command.run();
     });
   }, [commandMap, isElectron]);
@@ -941,32 +1042,17 @@ export function App() {
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
     {
-      id: "batches",
-      label: "Batches",
-      render: () => (
-        <BatchesPanel
-          batches={currentBatchState.batches}
-          batchWorkStates={batchWorkStates}
-          agentStatuses={agentStatuses}
-          selectedBatchId={currentBatchState.selectedBatchId}
-          activeBatchId={currentBatchState.activeBatchId}
-          onSelectBatch={handleSelectBatch}
-          onCreateBatch={handleCreateBatch}
-          onReorderBatch={handleReorderBatch}
-          onPromoteBatch={handlePromoteBatch}
-          onCompleteBatch={handleCompleteBatch}
-        />
-      ),
-    },
-    {
       id: "project",
-      label: "Project",
+      label: "Files",
       render: () => (
         <ProjectPanel
           stream={stream}
           gitEnabled={workspaceContext.gitEnabled}
           selectedFilePath={selectedFilePath}
+          currentBatchTurns={selectedBatchTurns}
+          currentBatchFileChanges={selectedBatchFileChanges}
           onOpenFile={handleOpenFile}
+          onOpenDiff={handleOpenDiff}
           onCreateFile={handleCreateFile}
           onCreateDirectory={handleCreateDirectory}
           onRenamePath={handleRenamePath}
@@ -983,18 +1069,27 @@ export function App() {
           ),
         }]
       : []),
-  ], [
-    currentBatchState.batches,
-    currentBatchState.selectedBatchId,
-    currentBatchState.activeBatchId,
-    batchWorkStates,
-    agentStatuses,
-    stream,
-    selectedFilePath,
-    workspaceContext.gitEnabled,
-  ]);
-
-  const rightToolWindows: ToolWindow[] = useMemo(() => [
+    {
+      id: "plan",
+      label: "Plan",
+      render: () => (
+        <PlanPane
+          batch={selectedBatch}
+          batchWork={selectedBatchWork}
+          backlog={backlogState}
+          onCreateWorkItem={handleCreateWorkItem}
+          onUpdateWorkItem={handleUpdateWorkItem}
+          onDeleteWorkItem={handleDeleteWorkItem}
+          onReorderWorkItems={handleReorderWorkItems}
+          onCreateBacklogItem={handleCreateBacklogItem}
+          onUpdateBacklogItem={handleUpdateBacklogItem}
+          onDeleteBacklogItem={handleDeleteBacklogItem}
+          onReorderBacklog={handleReorderBacklog}
+          onMoveItemToBacklog={handleMoveItemToBacklog}
+          openNewRequest={planNewRequest}
+        />
+      ),
+    },
     {
       id: "activity",
       label: "Activity",
@@ -1004,20 +1099,6 @@ export function App() {
           batchFileChanges={selectedBatchFileChanges}
           workItems={selectedBatchWork?.items ?? []}
           onOpenFile={handleOpenFile}
-        />
-      ),
-    },
-    {
-      id: "plan",
-      label: "Plan",
-      render: () => (
-        <PlanPane
-          batch={selectedBatch}
-          batchWork={selectedBatchWork}
-          onCreateWorkItem={handleCreateWorkItem}
-          onUpdateWorkItem={handleUpdateWorkItem}
-          onDeleteWorkItem={handleDeleteWorkItem}
-          onReorderWorkItems={handleReorderWorkItems}
         />
       ),
     },
@@ -1032,10 +1113,13 @@ export function App() {
       ),
     },
   ], [
+    stream,
+    selectedFilePath,
+    workspaceContext.gitEnabled,
+    selectedBatch,
+    selectedBatchWork,
     selectedBatchTurns,
     selectedBatchFileChanges,
-    selectedBatchWork,
-    selectedBatch,
   ]);
 
   const bottomToolWindows: ToolWindow[] = [
@@ -1043,6 +1127,11 @@ export function App() {
       id: "hook-events",
       label: "Hook events",
       render: () => <BottomPanel streamId={stream?.id ?? null} />,
+    },
+    {
+      id: "history",
+      label: "History",
+      render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} />,
     },
   ];
 
@@ -1058,6 +1147,23 @@ export function App() {
           onSwitch={handleSwitch}
           onStreamCreated={handleStreamCreated}
         />
+        {stream ? (
+          <BatchRail
+            batches={currentBatchState.batches}
+            activeBatchId={currentBatchState.activeBatchId}
+            selectedBatchId={currentBatchState.selectedBatchId}
+            agentStatuses={agentStatuses}
+            batchWorkStates={batchWorkStates}
+            agentTurns={agentTurns}
+            fileChanges={fileChanges}
+            onSelectBatch={handleSelectBatch}
+            onCreateBatch={handleCreateBatch}
+            onPromoteBatch={handlePromoteBatch}
+            onCompleteBatch={handleCompleteBatch}
+            onMoveWorkItem={handleMoveWorkItemToBatch}
+            onMoveBacklogItemToBatch={handleMoveBacklogItemToBatch}
+          />
+        ) : null}
         <StreamHeader stream={stream} error={error} onRename={handleRename} />
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
@@ -1069,6 +1175,7 @@ export function App() {
           minSize={220}
           maxSize={640}
           railMode="always"
+          activateRequest={leftDockActivate}
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
           {stream ? (
@@ -1080,29 +1187,9 @@ export function App() {
                 if (id === "editor") closeEditorTab();
                 else if (id.startsWith("diff:")) closeDiffTab(id);
               }}
-              header={
-                <BatchStatusBar
-                  batch={selectedBatch}
-                  activeBatchId={currentBatchState.activeBatchId}
-                  agentStatus={agentBatchStatus}
-                  batchWork={selectedBatchWork}
-                  turnCount={selectedBatchTurns?.length ?? null}
-                  onPromote={() => selectedBatch && void handlePromoteBatch(selectedBatch.id)}
-                  onComplete={() => selectedBatch && void handleCompleteBatch(selectedBatch.id)}
-                />
-              }
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
         </div>
-        <DockShell
-          side="right"
-          toolWindows={rightToolWindows}
-          storageKey="right"
-          defaultSize={400}
-          minSize={260}
-          maxSize={720}
-          railMode="always"
-        />
       </div>
       <DockShell
         side="bottom"

@@ -19,6 +19,8 @@ export interface DockShellProps {
   maxSize?: number;
   /** Rail behaviour: auto hides the rail when only one tool window is present. */
   railMode?: "auto" | "always" | "never";
+  /** Programmatically open and activate a tool window. Token changes retrigger. */
+  activateRequest?: { id: string; token: number };
 }
 
 const STORAGE_PREFIX = "newde.layout.v1.dock.";
@@ -32,6 +34,7 @@ export function DockShell({
   minSize = 180,
   maxSize = 900,
   railMode = "auto",
+  activateRequest,
 }: DockShellProps) {
   const initialSize = defaultSize ?? (side === "bottom" ? 180 : 280);
   const initialActiveId = toolWindows[0]?.id ?? null;
@@ -52,6 +55,12 @@ export function DockShell({
     if (state.activeId && toolWindows.some((tw) => tw.id === state.activeId)) return;
     setState((prev) => ({ ...prev, activeId: toolWindows[0]!.id }));
   }, [toolWindows, state.activeId]);
+
+  useEffect(() => {
+    if (!activateRequest) return;
+    if (!toolWindows.some((tw) => tw.id === activateRequest.id)) return;
+    setState((prev) => ({ ...prev, open: true, activeId: activateRequest.id }));
+  }, [activateRequest, toolWindows]);
 
   const activeTool = useMemo(
     () => toolWindows.find((tw) => tw.id === state.activeId) ?? toolWindows[0] ?? null,

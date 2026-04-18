@@ -5,9 +5,10 @@ export type CommandId =
   | "file.quickOpen"
   | "edit.find"
   | "view.agent"
-  | "view.editor";
+  | "view.editor"
+  | "plan.newWorkItem";
 
-export type MenuId = "file" | "edit" | "view";
+export type MenuId = "file" | "edit" | "view" | "plan";
 export type MainViewId = "agent" | "editor";
 
 export interface MenuCommand extends MenuItem {
@@ -38,6 +39,7 @@ export interface CommandState {
   hasStream: boolean;
   hasSelectedFile: boolean;
   canSave: boolean;
+  hasBatch: boolean;
   activeTab: MainViewId;
 }
 
@@ -47,6 +49,7 @@ export interface CommandHandlers {
   find(): void;
   showAgentPane(): void;
   showEditorPane(): void;
+  newWorkItem(): void;
 }
 
 export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
@@ -74,6 +77,13 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         { id: "view.editor", label: "Editor", enabled: state.hasStream, checked: state.activeTab === "editor" },
       ],
     },
+    {
+      id: "plan",
+      label: "Plan",
+      items: [
+        { id: "plan.newWorkItem", label: "New Work Item…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasBatch },
+      ],
+    },
   ];
 }
 
@@ -84,6 +94,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "edit.find": handlers.find,
     "view.agent": handlers.showAgentPane,
     "view.editor": handlers.showEditorPane,
+    "plan.newWorkItem": handlers.newWorkItem,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({
     ...group,

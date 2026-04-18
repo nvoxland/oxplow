@@ -1,11 +1,19 @@
 import type {
   AgentTurn,
+  BacklogState,
   BatchFileChange,
   BranchChanges,
   BranchRef,
   Batch,
   BatchState,
   GitFileStatus,
+  GitLogResult,
+  CommitDetail,
+  ChangeScopes,
+  TextSearchHit,
+  GitOpResult,
+  GitLogCommit,
+  RefOption,
   BatchWorkState,
   Stream,
   WorkItemEvent,
@@ -27,6 +35,7 @@ import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
   AgentTurn,
+  BacklogState,
   BatchFileChange,
   BranchChanges,
   BranchRef,
@@ -35,6 +44,13 @@ export type {
   BatchWorkState,
   CommandId,
   GitFileStatus,
+  GitLogResult,
+  CommitDetail,
+  ChangeScopes,
+  TextSearchHit,
+  GitOpResult,
+  GitLogCommit,
+  RefOption,
   AgentStatus,
   MenuGroupSnapshot,
   NewdeEvent,
@@ -132,11 +148,46 @@ export interface DesktopApi {
   ): Promise<BatchWorkState>;
   deleteWorkItem(streamId: string, batchId: string, itemId: string): Promise<BatchWorkState>;
   reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): Promise<BatchWorkState>;
+  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string): Promise<{ from: BatchWorkState; to: BatchWorkState }>;
+  getBacklogState(): Promise<BacklogState>;
+  createBacklogItem(input: {
+    kind: WorkItemKind;
+    title: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+  }): Promise<BacklogState>;
+  updateBacklogItem(
+    itemId: string,
+    changes: {
+      title?: string;
+      description?: string;
+      acceptanceCriteria?: string | null;
+      status?: WorkItemStatus;
+      priority?: WorkItemPriority;
+    },
+  ): Promise<BacklogState>;
+  deleteBacklogItem(itemId: string): Promise<BacklogState>;
+  reorderBacklog(orderedItemIds: string[]): Promise<BacklogState>;
+  moveWorkItemToBacklog(streamId: string, fromBatchId: string, itemId: string): Promise<{ from: BatchWorkState; backlog: BacklogState }>;
+  moveBacklogItemToBatch(streamId: string, itemId: string, toBatchId: string): Promise<{ backlog: BacklogState; to: BatchWorkState }>;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
+  getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;
+  getCommitDetail(streamId: string, sha: string): Promise<CommitDetail | null>;
+  getChangeScopes(streamId: string): Promise<ChangeScopes>;
+  searchWorkspaceText(streamId: string, query: string, options?: { limit?: number }): Promise<TextSearchHit[]>;
+  gitRestorePath(streamId: string, path: string): Promise<GitOpResult>;
+  gitAddPath(streamId: string, path: string): Promise<GitOpResult>;
+  gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
+  gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
+  listAllRefs(streamId: string): Promise<RefOption[]>;
   readFileAtRef(streamId: string, ref: string, path: string): Promise<{ content: string | null }>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
   listWorkspaceFiles(streamId: string): Promise<{ files: WorkspaceIndexedFile[]; summary: WorkspaceStatusSummary }>;

@@ -11,7 +11,13 @@ export function getCommandIdForShortcut(event: {
     return null;
   }
 
-  switch (event.key.toLowerCase()) {
+  const key = event.key.toLowerCase();
+  if (event.shiftKey) {
+    if (key === "n") return "plan.newWorkItem";
+    return null;
+  }
+
+  switch (key) {
     case "s":
       return "file.save";
     case "p":

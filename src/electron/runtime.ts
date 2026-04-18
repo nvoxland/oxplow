@@ -14,7 +14,25 @@ import {
   listBranchChanges,
   listGitStatuses,
   readFileAtRef,
+  getGitLog,
+  getCommitDetail,
+  getChangeScopes,
+  searchWorkspaceText,
+  restorePath,
+  addPath,
+  appendToGitignore,
+  gitPush,
+  gitPull,
+  listFileCommits,
+  listAllRefs,
   type BranchChanges,
+  type ChangeScopes,
+  type CommitDetail,
+  type GitLogResult,
+  type GitLogCommit,
+  type GitOpResult,
+  type RefOption,
+  type TextSearchHit,
 } from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
 import { EditorFocusStore, formatEditorFocusForAgent, type EditorFocusState } from "../session/editor-focus.js";
@@ -28,7 +46,7 @@ import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
 import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
-import { WorkItemStore } from "../persistence/work-item-store.js";
+import { BACKLOG_SCOPE, WorkItemStore } from "../persistence/work-item-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import {
   FileChangeStore,
@@ -184,6 +202,14 @@ export class ElectronRuntime {
       if (event.batchId) this.recomputeAgentStatus(event.streamId, event.batchId);
     });
     this.workItemStore.subscribe((change) => {
+      if (change.batchId === BACKLOG_SCOPE) {
+        this.events.publish({
+          type: "backlog.changed",
+          kind: change.kind,
+          itemId: change.itemId,
+        });
+        return;
+      }
       const batch = this.batchStore.findById(change.batchId);
       if (!batch) return;
       this.events.publish({
@@ -373,6 +399,61 @@ export class ElectronRuntime {
   readFileAtRef(streamId: string, ref: string, path: string): { content: string | null } {
     const stream = this.resolveStream(streamId);
     return { content: readFileAtRef(stream.worktree_path, ref, path) };
+  }
+
+  getGitLog(streamId: string, options?: { limit?: number }) {
+    const stream = this.resolveStream(streamId);
+    return getGitLog(stream.worktree_path, options);
+  }
+
+  getCommitDetail(streamId: string, sha: string): CommitDetail | null {
+    const stream = this.resolveStream(streamId);
+    return getCommitDetail(stream.worktree_path, sha);
+  }
+
+  getChangeScopes(streamId: string): ChangeScopes {
+    const stream = this.resolveStream(streamId);
+    return getChangeScopes(stream.worktree_path);
+  }
+
+  searchWorkspaceText(streamId: string, query: string, options?: { limit?: number }): TextSearchHit[] {
+    const stream = this.resolveStream(streamId);
+    return searchWorkspaceText(stream.worktree_path, query, options);
+  }
+
+  gitRestorePath(streamId: string, path: string): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return restorePath(stream.worktree_path, path);
+  }
+
+  gitAddPath(streamId: string, path: string): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return addPath(stream.worktree_path, path);
+  }
+
+  gitAppendToGitignore(streamId: string, path: string): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return appendToGitignore(stream.worktree_path, path);
+  }
+
+  gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return gitPush(stream.worktree_path, options);
+  }
+
+  gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return gitPull(stream.worktree_path, options);
+  }
+
+  listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {
+    const stream = this.resolveStream(streamId);
+    return listFileCommits(stream.worktree_path, path, limit);
+  }
+
+  listAllRefs(streamId: string): RefOption[] {
+    const stream = this.resolveStream(streamId);
+    return listAllRefs(stream.worktree_path);
   }
 
   getWorkspaceContext() {

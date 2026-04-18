@@ -154,6 +154,74 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "work_items.batch_id nullable (backlog)",
+    up: (db) => {
+      // SQLite can't drop NOT NULL in place; rebuild the table and event table.
+      // defer_foreign_keys lets us drop/recreate referenced tables inside the
+      // transaction without tripping FK enforcement until commit.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        CREATE TABLE work_items_new (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT REFERENCES batches(id) ON DELETE CASCADE,
+          parent_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          acceptance_criteria TEXT,
+          status TEXT NOT NULL,
+          priority TEXT NOT NULL,
+          sort_index INTEGER NOT NULL DEFAULT 0,
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT,
+          deleted_at TEXT
+        );
+
+        INSERT INTO work_items_new (
+          id, batch_id, parent_id, kind, title, description, acceptance_criteria,
+          status, priority, sort_index, created_by, created_at, updated_at, completed_at, deleted_at
+        )
+        SELECT
+          id, batch_id, parent_id, kind, title, description, acceptance_criteria,
+          status, priority, sort_index, created_by, created_at, updated_at, completed_at, deleted_at
+        FROM work_items;
+
+        DROP TABLE work_items;
+        ALTER TABLE work_items_new RENAME TO work_items;
+
+        CREATE INDEX idx_work_items_batch_parent ON work_items(batch_id, parent_id, sort_index);
+        CREATE INDEX idx_work_items_batch_status ON work_items(batch_id, status, sort_index);
+        CREATE INDEX idx_work_items_batch_deleted ON work_items(batch_id, deleted_at, sort_index);
+        CREATE INDEX idx_work_items_backlog ON work_items(deleted_at, sort_index) WHERE batch_id IS NULL;
+
+        CREATE TABLE work_item_events_new (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT REFERENCES batches(id) ON DELETE CASCADE,
+          item_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          actor_kind TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        INSERT INTO work_item_events_new
+          SELECT id, batch_id, item_id, event_type, actor_kind, actor_id, payload_json, created_at
+          FROM work_item_events;
+
+        DROP TABLE work_item_events;
+        ALTER TABLE work_item_events_new RENAME TO work_item_events;
+
+        CREATE INDEX idx_work_events_batch_item ON work_item_events(batch_id, item_id, created_at);
+        CREATE INDEX idx_work_events_item ON work_item_events(item_id, created_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

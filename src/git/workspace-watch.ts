@@ -76,6 +76,7 @@ export class WorkspaceWatcherRegistry {
 class StreamWorkspaceWatcher {
   readonly rootDir: string;
   private readonly watchers = new Map<string, FSWatcher>();
+  private recursive = false;
 
   constructor(
     stream: Stream,
@@ -90,6 +91,7 @@ class StreamWorkspaceWatcher {
       this.logger.warn("workspace root missing for watcher", { rootDir: this.rootDir });
       return;
     }
+    if (this.tryRecursive()) return;
     this.watchDirectory(this.rootDir);
   }
 
@@ -98,6 +100,44 @@ class StreamWorkspaceWatcher {
       watcher.close();
     }
     this.watchers.clear();
+  }
+
+  private tryRecursive(): boolean {
+    try {
+      const watcher = watch(this.rootDir, { recursive: true }, (eventType, filename) => {
+        const name = typeof filename === "string"
+          ? filename
+          : filename != null
+            ? (filename as Buffer).toString("utf8")
+            : "";
+        this.handleRecursiveEvent(eventType, name);
+      });
+      watcher.on("error", (error) => {
+        this.logger.warn("workspace watcher error", { error: errorMessage(error) });
+      });
+      this.watchers.set(this.rootDir, watcher);
+      this.recursive = true;
+      return true;
+    } catch (error) {
+      this.logger.info("recursive fs.watch unavailable, falling back to per-directory", {
+        error: errorMessage(error),
+      });
+      return false;
+    }
+  }
+
+  private handleRecursiveEvent(eventType: string, filename: string): void {
+    if (!filename) return;
+    const rel = normalizeRelativePath(filename);
+    if (!rel || rel.startsWith("..")) return;
+    if (shouldIgnoreWorkspaceWatchPath(rel)) return;
+    const abs = resolve(this.rootDir, rel);
+    const stat = safeStat(abs);
+    if (eventType === "change") {
+      this.emit("updated", rel);
+      return;
+    }
+    this.emit(stat ? "created" : "deleted", rel);
   }
 
   private watchDirectory(dir: string): void {
@@ -150,6 +190,7 @@ class StreamWorkspaceWatcher {
   }
 
   private unwatchDescendants(absPath: string): void {
+    if (this.recursive) return;
     for (const [dir, watcher] of this.watchers) {
       if (dir === absPath || dir.startsWith(absPath + sep)) {
         watcher.close();
@@ -159,13 +200,37 @@ class StreamWorkspaceWatcher {
   }
 }
 
+const IGNORED_DIR_NAMES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "coverage",
+  "__pycache__",
+  ".venv",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".turbo",
+  ".cache",
+  ".parcel-cache",
+  ".idea",
+  ".vscode",
+  ".gradle",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".tox",
+]);
+
 export function shouldIgnoreWorkspaceWatchPath(path: string): boolean {
-  return path === ".git"
-    || path.startsWith(".git/")
-    || path === ".newde/logs"
-    || path.startsWith(".newde/logs/")
-    || path === ".newde/worktrees"
-    || path.startsWith(".newde/worktrees/");
+  if (path === ".newde/logs" || path.startsWith(".newde/logs/")) return true;
+  if (path === ".newde/worktrees" || path.startsWith(".newde/worktrees/")) return true;
+  for (const segment of path.split("/")) {
+    if (IGNORED_DIR_NAMES.has(segment)) return true;
+  }
+  return false;
 }
 
 function safeStat(path: string) {

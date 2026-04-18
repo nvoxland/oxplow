@@ -4,7 +4,8 @@ export interface MenuItem {
   enabled: boolean;
   checked?: boolean;
   shortcut?: string;
-  run(): void | Promise<void>;
+  submenu?: MenuItem[];
+  run?(): void | Promise<void>;
 }
 
 export interface MenuGroup {

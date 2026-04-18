@@ -13,7 +13,7 @@ interface CenterTabsProps {
   activeId: string;
   onActivate(id: string): void;
   onClose?(id: string): void;
-  /** Rendered above the active tab's content (e.g. BatchStatusBar). */
+  /** Rendered above the active tab's content. */
   header?: ReactNode;
 }
 

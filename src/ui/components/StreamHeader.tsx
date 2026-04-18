@@ -36,12 +36,13 @@ export function StreamHeader({ stream, error, onRename }: Props) {
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 12,
-        padding: "4px 12px 6px",
+        gap: 10,
+        padding: "2px 12px",
         borderBottom: "1px solid var(--border)",
-        fontSize: 12,
+        fontSize: 11,
         color: "var(--muted)",
-        minHeight: 28,
+        minHeight: 22,
+        background: "var(--bg-2)",
       }}
     >
       {editing ? (
@@ -62,11 +63,16 @@ export function StreamHeader({ stream, error, onRename }: Props) {
         </>
       ) : (
         <>
-          <strong style={{ color: "var(--fg)" }}>{stream?.title ?? "…"}</strong>
+          {stream ? <span>{stream.branch}</span> : null}
+          {stream ? (
+            <span
+              title={stream.worktree_path}
+              style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
+            >
+              · {stream.worktree_path}
+            </span>
+          ) : null}
           {stream ? <button onClick={start} style={buttonStyle}>Rename</button> : null}
-          {stream ? <span>branch: {stream.branch}</span> : null}
-          {stream ? <span title={stream.worktree_path} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{stream.worktree_path}</span> : null}
-          {stream ? <span style={{ flexShrink: 0 }}>id: {stream.id}</span> : null}
           {error ? <span style={{ color: "#ff6b6b", flexShrink: 0 }}>{error}</span> : null}
         </>
       )}

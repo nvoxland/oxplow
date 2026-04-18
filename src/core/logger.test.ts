@@ -18,7 +18,7 @@ test("createDaemonLogger writes structured logs to the project daemon log", () =
 
   logger.info("daemon started", { port: 7457 });
 
-  expect(logger.path).toBe(join(projectDir, ".newde", "logs", "daemon.log"));
+  expect(logger.path).toBe(join(projectDir, ".newde", "logs", "system.log"));
   const lines = readJsonLines(logger.path);
   expect(lines).toHaveLength(1);
   expect(lines[0].level).toBe("info");

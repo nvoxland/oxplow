@@ -8,6 +8,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: false,
         canSave: false,
+        hasBatch: false,
         activeTab: "agent",
       },
       noopHandlers(),
@@ -24,6 +25,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: true,
         canSave: true,
+        hasBatch: true,
         activeTab: "editor",
       },
       noopHandlers(),
@@ -39,6 +41,7 @@ describe("buildMenuGroups", () => {
         hasStream: false,
         hasSelectedFile: false,
         canSave: false,
+        hasBatch: false,
         activeTab: "agent",
       },
       noopHandlers(),
@@ -56,6 +59,7 @@ describe("buildMenuGroupSnapshots", () => {
       hasStream: true,
       hasSelectedFile: true,
       canSave: true,
+      hasBatch: true,
       activeTab: "editor",
     });
 
@@ -72,5 +76,6 @@ function noopHandlers() {
     find() {},
     showAgentPane() {},
     showEditorPane() {},
+    newWorkItem() {},
   };
 }
