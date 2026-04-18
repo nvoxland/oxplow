@@ -222,6 +222,60 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "commit_point",
+    up: (db) => {
+      // Commit points sit in the batch's work queue (ordered by sort_index in
+      // the same space as work_items). When the agent reaches one, the Stop
+      // hook directs it to propose a commit message; the runtime performs the
+      // commit either immediately (auto) or after user approval (approval).
+      db.exec(`
+        CREATE TABLE commit_point (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+          sort_index INTEGER NOT NULL,
+          mode TEXT NOT NULL,
+          status TEXT NOT NULL,
+          proposed_message TEXT,
+          approved_message TEXT,
+          commit_sha TEXT,
+          rejection_note TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE INDEX idx_commit_point_batch_sort ON commit_point(batch_id, sort_index);
+        CREATE INDEX idx_commit_point_batch_status ON commit_point(batch_id, status);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "wait_point",
+    up: (db) => {
+      // Wait points interrupt the Stop-hook auto-progression pipeline. When
+      // the agent reaches a pending wait point the runtime flips it to
+      // `triggered` and lets the agent stop; the user clicks Continue (which
+      // marks it `done`) before the next prompt resumes auto-progression.
+      db.exec(`
+        CREATE TABLE wait_point (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+          sort_index INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          note TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE INDEX idx_wait_point_batch_sort ON wait_point(batch_id, sort_index);
+        CREATE INDEX idx_wait_point_batch_status ON wait_point(batch_id, status);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

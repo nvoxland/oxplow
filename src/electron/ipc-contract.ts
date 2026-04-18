@@ -14,6 +14,9 @@ import type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
+  CommitPoint,
+  CommitPointMode,
+  WaitPoint,
   RefOption,
   BatchWorkState,
   Stream,
@@ -52,6 +55,9 @@ export type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
+  CommitPoint,
+  CommitPointMode,
+  WaitPoint,
   RefOption,
   AgentStatus,
   MenuGroupSnapshot,
@@ -200,6 +206,17 @@ export interface DesktopApi {
   createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange>;
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string): Promise<WorkspaceRenameResult>;
   deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange>;
+  listCommitPoints(batchId: string): Promise<CommitPoint[]>;
+  createCommitPoint(streamId: string, batchId: string, mode: CommitPointMode): Promise<CommitPoint>;
+  setCommitPointMode(id: string, mode: CommitPointMode): Promise<CommitPoint>;
+  approveCommitPoint(id: string, editedMessage?: string): Promise<CommitPoint>;
+  rejectCommitPoint(id: string, note: string): Promise<CommitPoint>;
+  resetCommitPoint(id: string): Promise<CommitPoint>;
+  deleteCommitPoint(id: string): Promise<void>;
+  listWaitPoints(batchId: string): Promise<WaitPoint[]>;
+  createWaitPoint(streamId: string, batchId: string, note?: string | null): Promise<WaitPoint>;
+  setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;
+  deleteWaitPoint(id: string): Promise<void>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; batchId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;

@@ -160,6 +160,17 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:createWorkspaceDirectory", (_event, streamId: string, path: string) => currentRuntime.createWorkspaceDirectory(streamId, path));
   ipcMain.handle("newde:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
   ipcMain.handle("newde:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
+  ipcMain.handle("newde:listCommitPoints", (_event, batchId: string) => currentRuntime.listCommitPoints(batchId));
+  ipcMain.handle("newde:createCommitPoint", (_event, streamId: string, batchId: string, mode: "auto" | "approval") => currentRuntime.createCommitPoint(streamId, batchId, mode));
+  ipcMain.handle("newde:setCommitPointMode", (_event, id: string, mode: "auto" | "approval") => currentRuntime.setCommitPointMode(id, mode));
+  ipcMain.handle("newde:approveCommitPoint", (_event, id: string, editedMessage?: string) => currentRuntime.approveCommitPoint(id, editedMessage));
+  ipcMain.handle("newde:rejectCommitPoint", (_event, id: string, note: string) => currentRuntime.rejectCommitPoint(id, note));
+  ipcMain.handle("newde:resetCommitPoint", (_event, id: string) => currentRuntime.resetCommitPoint(id));
+  ipcMain.handle("newde:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
+  ipcMain.handle("newde:listWaitPoints", (_event, batchId: string) => currentRuntime.listWaitPoints(batchId));
+  ipcMain.handle("newde:createWaitPoint", (_event, streamId: string, batchId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, batchId, note));
+  ipcMain.handle("newde:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));
+  ipcMain.handle("newde:deleteWaitPoint", (_event, id: string) => currentRuntime.deleteWaitPoint(id));
   ipcMain.handle("newde:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
   ipcMain.handle("newde:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   ipcMain.handle("newde:ping", () => currentRuntime.ping());

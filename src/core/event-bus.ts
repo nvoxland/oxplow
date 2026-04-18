@@ -67,6 +67,22 @@ export interface WorkspaceContextChangedEvent {
   gitEnabled: boolean;
 }
 
+export interface CommitPointChangedEvent {
+  type: "commit-point.changed";
+  streamId: string | null;
+  batchId: string;
+  id: string | null;
+  kind: "created" | "updated" | "deleted" | "reordered";
+}
+
+export interface WaitPointChangedEvent {
+  type: "wait-point.changed";
+  streamId: string | null;
+  batchId: string;
+  id: string | null;
+  kind: "created" | "updated" | "deleted";
+}
+
 export interface FileChangeRecordedEvent {
   type: "file-change.recorded";
   streamId: string;
@@ -87,7 +103,9 @@ export type NewdeEvent =
   | AgentStatusChangedEvent
   | TurnChangedEvent
   | FileChangeRecordedEvent
-  | WorkspaceContextChangedEvent;
+  | WorkspaceContextChangedEvent
+  | CommitPointChangedEvent
+  | WaitPointChangedEvent;
 
 export type NewdeEventType = NewdeEvent["type"];
 

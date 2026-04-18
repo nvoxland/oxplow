@@ -9,18 +9,20 @@ import type {
   WorkItemStatus,
   WorkItemStore,
 } from "../persistence/work-item-store.js";
+import type { CommitPointStore } from "../persistence/commit-point-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
   resolveBatch(streamId: string, batchId: string): Batch;
   batchStore: BatchStore;
   workItemStore: WorkItemStore;
+  commitPointStore: CommitPointStore;
   turnStore: TurnStore;
   fileChangeStore: FileChangeStore;
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatch, batchStore, workItemStore, turnStore, fileChangeStore } = deps;
+  const { resolveStream, resolveBatch, batchStore, workItemStore, commitPointStore, turnStore, fileChangeStore } = deps;
 
   return [
     {
@@ -352,6 +354,44 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           ok: true,
           events: workItemStore.listEvents(args.batchId, args.itemId),
         };
+      },
+    },
+    {
+      name: "newde__propose_commit",
+      description:
+        "Propose a git commit message for an active commit point. The runtime will either commit immediately (auto mode) or park the proposal for user approval (approval mode). Do NOT run `git add` or `git commit` yourself — the runtime handles the commit once this tool returns. The caller should NOT call this without having been instructed to by a Stop-hook commit directive; call `newde__list_commit_points` first if unsure which point is active.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          commit_point_id: { type: "string", description: "Required id of the commit_point to propose for." },
+          message: { type: "string", description: "Required commit message. Conventional-Commits style recommended." },
+        },
+        required: ["commit_point_id", "message"],
+      },
+      handler: (args: { commit_point_id: string; message: string }) => {
+        const updated = commitPointStore.propose(args.commit_point_id, args.message);
+        return {
+          ok: true,
+          commitPoint: updated,
+          awaiting: updated.status === "proposed" ? "user-approval" : null,
+        };
+      },
+    },
+    {
+      name: "newde__list_commit_points",
+      description: "List commit points for a batch, ordered by their position in the work queue.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          batchId: { type: "string", description: "Required batch id." },
+        },
+        required: ["batchId"],
+      },
+      handler: (args: { streamId?: string; batchId: string }) => {
+        const stream = resolveStream(args.streamId);
+        resolveBatch(stream.id, args.batchId);
+        return { commitPoints: commitPointStore.listForBatch(args.batchId) };
       },
     },
   ];

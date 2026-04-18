@@ -4,10 +4,27 @@ import type {
   BacklogState,
   Batch,
   BatchWorkState,
+  CommitPoint,
+  CommitPointMode,
+  WaitPoint,
   WorkItem,
   WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
+} from "../../api.js";
+import {
+  approveCommitPoint,
+  createCommitPoint,
+  createWaitPoint,
+  deleteCommitPoint,
+  deleteWaitPoint,
+  listCommitPoints,
+  listWaitPoints,
+  rejectCommitPoint,
+  resetCommitPoint,
+  setCommitPointMode,
+  setWaitPointNote,
+  subscribeNewdeEvents,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 
@@ -79,6 +96,30 @@ export function PlanPane({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mode, setMode] = useState<"batch" | "backlog">("batch");
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
+  const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
+  const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
+  const [commitMode, setCommitMode] = useState<CommitPointMode>("approval");
+
+  const batchId = batch?.id ?? null;
+  const streamId = batch?.stream_id ?? null;
+
+  useEffect(() => {
+    if (!batchId) { setCommitPoints([]); setWaitPoints([]); return; }
+    let cancelled = false;
+    const refreshCommits = () => void listCommitPoints(batchId)
+      .then((points) => { if (!cancelled) setCommitPoints(points); })
+      .catch(() => {});
+    const refreshWaits = () => void listWaitPoints(batchId)
+      .then((points) => { if (!cancelled) setWaitPoints(points); })
+      .catch(() => {});
+    refreshCommits();
+    refreshWaits();
+    const off = subscribeNewdeEvents((event) => {
+      if (event.type === "commit-point.changed" && event.batchId === batchId) refreshCommits();
+      if (event.type === "wait-point.changed" && event.batchId === batchId) refreshWaits();
+    });
+    return () => { cancelled = true; off(); };
+  }, [batchId]);
 
   const epics = batchWork?.epics ?? [];
 
@@ -219,6 +260,27 @@ export function PlanPane({
             />
           ))
         )}
+        {mode === "batch" && batch ? (
+          <>
+            <CommitPointsSection
+              commitPoints={commitPoints}
+              commitMode={commitMode}
+              setCommitMode={setCommitMode}
+              onAdd={() => {
+                if (!streamId || !batchId) return;
+                void createCommitPoint(streamId, batchId, commitMode).catch(() => {});
+              }}
+            />
+            <WaitPointsSection
+              waitPoints={waitPoints}
+              onAdd={() => {
+                if (!streamId || !batchId) return;
+                const note = window.prompt("Optional note for this wait point:", "") ?? "";
+                void createWaitPoint(streamId, batchId, note || null).catch(() => {});
+              }}
+            />
+          </>
+        ) : null}
       </div>
       <div style={bottomBarStyle}>
         <button
@@ -847,3 +909,246 @@ const groupHeaderStyle: CSSProperties = {
   letterSpacing: 0.4,
   color: "var(--muted)",
 };
+
+function CommitPointsSection({
+  commitPoints,
+  commitMode,
+  setCommitMode,
+  onAdd,
+}: {
+  commitPoints: CommitPoint[];
+  commitMode: CommitPointMode;
+  setCommitMode(mode: CommitPointMode): void;
+  onAdd(): void;
+}) {
+  return (
+    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8 }}>
+      <div style={{ ...groupHeaderStyle, justifyContent: "space-between" }}>
+        <span>Commit points</span>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", textTransform: "none", letterSpacing: 0 }}>
+          <select
+            value={commitMode}
+            onChange={(e) => setCommitMode(e.target.value as CommitPointMode)}
+            title="Default mode for new commit points"
+            style={{ fontSize: 11, padding: "2px 4px" }}
+          >
+            <option value="approval">Approval</option>
+            <option value="auto">Auto-commit</option>
+          </select>
+          <button onClick={onAdd} style={{ ...miniButtonStyle, padding: "2px 8px" }} title="Add a commit point at the end of this batch's queue">
+            + Commit when done
+          </button>
+        </span>
+      </div>
+      {commitPoints.length === 0 ? (
+        <div style={{ padding: 8, color: "var(--muted)", fontSize: 11 }}>No commit points.</div>
+      ) : (
+        commitPoints.map((cp, i) => <CommitPointRow key={cp.id} cp={cp} index={i + 1} />)
+      )}
+    </div>
+  );
+}
+
+function CommitPointRow({ cp, index }: { cp: CommitPoint; index: number }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(cp.proposed_message ?? "");
+  useEffect(() => { setDraft(cp.proposed_message ?? ""); }, [cp.proposed_message]);
+
+  return (
+    <div style={commitRowStyle}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={commitBadgeStyle(cp.status)}>#{index} {cp.status}</span>
+        <select
+          value={cp.mode}
+          disabled={cp.status !== "pending"}
+          onChange={(e) => void setCommitPointMode(cp.id, e.target.value as CommitPointMode).catch(() => {})}
+          style={{ fontSize: 11, padding: "2px 4px" }}
+        >
+          <option value="approval">Approval</option>
+          <option value="auto">Auto-commit</option>
+        </select>
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+          {cp.status === "rejected" ? (
+            <button style={miniButtonStyle} onClick={() => void resetCommitPoint(cp.id).catch(() => {})}>Retry</button>
+          ) : null}
+          {cp.status !== "done" ? (
+            <button style={miniButtonStyle} onClick={() => {
+              if (window.confirm("Delete this commit point?")) void deleteCommitPoint(cp.id).catch(() => {});
+            }}>Delete</button>
+          ) : null}
+        </span>
+      </div>
+      {cp.commit_sha ? (
+        <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          committed {cp.commit_sha.slice(0, 8)}
+        </div>
+      ) : null}
+      {cp.status === "proposed" ? (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Proposed message (awaiting approval):</div>
+          {editing ? (
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={Math.min(6, Math.max(2, draft.split("\n").length))}
+              style={commitMessageEditStyle}
+            />
+          ) : (
+            <pre style={commitMessagePreStyle}>{cp.proposed_message}</pre>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            {editing ? (
+              <>
+                <button style={miniButtonStyle} onClick={() => { void approveCommitPoint(cp.id, draft).catch(() => {}); }}>Save & approve</button>
+                <button style={miniButtonStyle} onClick={() => { setEditing(false); setDraft(cp.proposed_message ?? ""); }}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <button style={miniButtonStyle} onClick={() => void approveCommitPoint(cp.id).catch(() => {})}>Approve</button>
+                <button style={miniButtonStyle} onClick={() => setEditing(true)}>Edit</button>
+                <button style={miniButtonStyle} onClick={() => {
+                  const note = window.prompt("Rejection note (sent to agent on retry):", "");
+                  if (note != null) void rejectCommitPoint(cp.id, note).catch(() => {});
+                }}>Reject</button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {cp.status === "rejected" && cp.rejection_note ? (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#e06b6b" }}>Rejected: {cp.rejection_note}</div>
+      ) : null}
+    </div>
+  );
+}
+
+const commitRowStyle: CSSProperties = {
+  padding: "6px 10px",
+  borderBottom: "1px solid var(--border)",
+  fontSize: 12,
+};
+
+const commitMessagePreStyle: CSSProperties = {
+  margin: 0,
+  padding: 6,
+  background: "var(--bg-2)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 11,
+  whiteSpace: "pre-wrap",
+};
+
+const commitMessageEditStyle: CSSProperties = {
+  width: "100%",
+  padding: 6,
+  background: "var(--bg-2)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 11,
+  color: "var(--fg)",
+  resize: "vertical",
+};
+
+function WaitPointsSection({
+  waitPoints,
+  onAdd,
+}: {
+  waitPoints: WaitPoint[];
+  onAdd(): void;
+}) {
+  return (
+    <div style={{ borderTop: "1px solid var(--border)" }}>
+      <div style={{ ...groupHeaderStyle, justifyContent: "space-between" }}>
+        <span>Wait points</span>
+        <button onClick={onAdd} style={{ ...miniButtonStyle, padding: "2px 8px" }} title="Stop auto-progression here until you click Continue">
+          + Wait here
+        </button>
+      </div>
+      {waitPoints.length === 0 ? (
+        <div style={{ padding: 8, color: "var(--muted)", fontSize: 11 }}>
+          No wait points. Active batch auto-advances through its work queue.
+        </div>
+      ) : (
+        waitPoints.map((wp, i) => <WaitPointRow key={wp.id} wp={wp} index={i + 1} />)
+      )}
+    </div>
+  );
+}
+
+function WaitPointRow({ wp, index }: { wp: WaitPoint; index: number }) {
+  return (
+    <div style={commitRowStyle}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={waitBadgeStyle(wp.status)}>#{index} {wp.status}</span>
+        {wp.note ? <span style={{ color: "var(--muted)", fontSize: 11 }}>{wp.note}</span> : null}
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+          {wp.status === "pending" ? (
+            <button
+              style={miniButtonStyle}
+              onClick={() => {
+                const next = window.prompt("Wait point note:", wp.note ?? "");
+                if (next != null) void setWaitPointNote(wp.id, next || null).catch(() => {});
+              }}
+            >
+              Edit
+            </button>
+          ) : null}
+          <button
+            style={miniButtonStyle}
+            onClick={() => {
+              if (window.confirm("Delete this wait point?")) void deleteWaitPoint(wp.id).catch(() => {});
+            }}
+          >
+            Delete
+          </button>
+        </span>
+      </div>
+      {wp.status === "triggered" ? (
+        <div style={{ marginTop: 4, fontSize: 11, color: "#d97706" }}>
+          Agent stopped here. Prompt the agent directly to resume.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function waitBadgeStyle(status: WaitPoint["status"]): CSSProperties {
+  const colors: Record<WaitPoint["status"], string> = {
+    pending: "#6b7280",
+    triggered: "#d97706",
+  };
+  return {
+    fontSize: 10,
+    fontFamily: "ui-monospace, monospace",
+    padding: "1px 6px",
+    borderRadius: 8,
+    background: colors[status] + "22",
+    color: colors[status],
+    border: `1px solid ${colors[status]}55`,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  };
+}
+
+function commitBadgeStyle(status: CommitPoint["status"]): CSSProperties {
+  const colors: Record<CommitPoint["status"], string> = {
+    pending: "#6b7280",
+    proposed: "#d97706",
+    approved: "#0ea5e9",
+    done: "#10b981",
+    rejected: "#e06b6b",
+  };
+  return {
+    fontSize: 10,
+    fontFamily: "ui-monospace, monospace",
+    padding: "1px 6px",
+    borderRadius: 8,
+    background: colors[status] + "22",
+    color: colors[status],
+    border: `1px solid ${colors[status]}55`,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  };
+}

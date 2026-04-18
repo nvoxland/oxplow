@@ -538,6 +538,27 @@ export function gitPush(projectDir: string, options?: { force?: boolean; setUpst
   return runGit(projectDir, args);
 }
 
+/**
+ * Stage all tracked/untracked changes and create a commit with the given
+ * message. Returns the new commit sha on success, or a GitOpResult-shaped
+ * error if either `git add` or `git commit` fails.
+ */
+export function gitCommitAll(projectDir: string, message: string): GitOpResult & { sha?: string } {
+  const add = runGit(projectDir, ["add", "-A"]);
+  if (!add.ok) return add;
+  const commit = runGit(projectDir, ["commit", "-m", message]);
+  if (!commit.ok) return commit;
+  try {
+    const sha = execFileSync("git", ["-C", projectDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return { ok: true, stdout: commit.stdout, stderr: "", exitCode: 0, sha };
+  } catch (err) {
+    return { ok: false, stdout: commit.stdout, stderr: (err as Error).message, exitCode: null };
+  }
+}
+
 export function gitPull(projectDir: string, options?: { rebase?: boolean; remote?: string; branch?: string }): GitOpResult {
   const args = ["pull"];
   if (options?.rebase) args.push("--rebase");

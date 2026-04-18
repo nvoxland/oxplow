@@ -2,6 +2,8 @@ import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
 
 export type { NewdeEvent } from "../electron/ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
+export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
+export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
 export interface Stream {
   id: string;
@@ -418,6 +420,72 @@ export async function gitBlame(
   path: string,
 ): Promise<import("../git/git.js").BlameLine[]> {
   return desktopApi().gitBlame(streamId, path);
+}
+
+export async function listCommitPoints(batchId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
+  return desktopApi().listCommitPoints(batchId);
+}
+
+export async function createCommitPoint(
+  streamId: string,
+  batchId: string,
+  mode: import("../persistence/commit-point-store.js").CommitPointMode,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().createCommitPoint(streamId, batchId, mode);
+}
+
+export async function setCommitPointMode(
+  id: string,
+  mode: import("../persistence/commit-point-store.js").CommitPointMode,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().setCommitPointMode(id, mode);
+}
+
+export async function approveCommitPoint(
+  id: string,
+  editedMessage?: string,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().approveCommitPoint(id, editedMessage);
+}
+
+export async function rejectCommitPoint(
+  id: string,
+  note: string,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().rejectCommitPoint(id, note);
+}
+
+export async function resetCommitPoint(
+  id: string,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().resetCommitPoint(id);
+}
+
+export async function deleteCommitPoint(id: string): Promise<void> {
+  return desktopApi().deleteCommitPoint(id);
+}
+
+export async function listWaitPoints(batchId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
+  return desktopApi().listWaitPoints(batchId);
+}
+
+export async function createWaitPoint(
+  streamId: string,
+  batchId: string,
+  note?: string | null,
+): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
+  return desktopApi().createWaitPoint(streamId, batchId, note);
+}
+
+export async function setWaitPointNote(
+  id: string,
+  note: string | null,
+): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
+  return desktopApi().setWaitPointNote(id, note);
+}
+
+export async function deleteWaitPoint(id: string): Promise<void> {
+  return desktopApi().deleteWaitPoint(id);
 }
 
 export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {
