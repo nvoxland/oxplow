@@ -81,6 +81,10 @@ export interface GitRefsChangedEvent {
   t: number;
 }
 
+export interface ConfigChangedEvent {
+  type: "config.changed";
+}
+
 export interface WaitPointChangedEvent {
   type: "wait-point.changed";
   streamId: string | null;
@@ -112,7 +116,8 @@ export type NewdeEvent =
   | WorkspaceContextChangedEvent
   | CommitPointChangedEvent
   | WaitPointChangedEvent
-  | GitRefsChangedEvent;
+  | GitRefsChangedEvent
+  | ConfigChangedEvent;
 
 export type NewdeEventType = NewdeEvent["type"];
 

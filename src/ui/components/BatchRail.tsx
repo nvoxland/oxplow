@@ -105,7 +105,7 @@ export function BatchRail({
 
   return (
     <div style={railStyle}>
-      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "stretch", gap: 0, flex: 1, minWidth: 0, overflowX: "auto" }}>
+      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "flex-end", gap: 2, flex: 1, minWidth: 0, overflowX: "auto" }}>
         {ordered.length === 0 && completed.length === 0 ? (
           <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No batches yet.</span>
         ) : null}
@@ -282,17 +282,19 @@ function BatchChip({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
+          gap: 8,
+          padding: "8px 14px 6px 14px",
           border: "none",
-          borderRight: "1px solid var(--border)",
           borderBottom: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+          borderTopLeftRadius: 6,
+          borderTopRightRadius: 6,
           background,
           color,
           cursor: "pointer",
           fontFamily: "inherit",
           fontSize: 12,
           whiteSpace: "nowrap",
+          flexShrink: 0,
           marginBottom: -1, // overlap the rail's bottom border so the tab looks connected to the content below when selected
           boxShadow: dragOver ? "inset 0 0 0 2px var(--accent)" : undefined,
         }}
@@ -555,7 +557,7 @@ const railStyle: CSSProperties = {
 
 const smallBtn: CSSProperties = {
   border: "1px solid var(--border)",
-  background: "var(--bg-2)",
+  background: "var(--bg)",
   color: "inherit",
   borderRadius: 6,
   padding: "3px 8px",

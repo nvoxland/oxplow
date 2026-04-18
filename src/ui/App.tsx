@@ -70,7 +70,7 @@ import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
-import { StreamHeader } from "./components/StreamHeader.js";
+import { SettingsModal } from "./components/SettingsModal.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
 import { DockShell } from "./components/Dock/DockShell.js";
@@ -119,6 +119,7 @@ export function App() {
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [batchCreateRequest, setBatchCreateRequest] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
@@ -1210,6 +1211,7 @@ export function App() {
           onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => void handleRenameStreamById(id, title)}
           onRequestCreateBatch={stream ? () => setBatchCreateRequest((n) => n + 1) : undefined}
+          onOpenSettings={() => setSettingsOpen(true)}
           createRequest={streamCreateRequest}
         />
         {stream ? (
@@ -1232,7 +1234,9 @@ export function App() {
             createRequest={batchCreateRequest}
           />
         ) : null}
-        <StreamHeader stream={stream} error={error} />
+        {error ? (
+          <div style={{ padding: "2px 12px", background: "var(--bg-2)", color: "#ff6b6b", fontSize: 11, minHeight: 22, borderBottom: "1px solid var(--border)" }}>{error}</div>
+        ) : null}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <DockShell
@@ -1282,6 +1286,7 @@ export function App() {
           void handleOpenFile(path);
         }}
       />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {stream && externalFilePrompt ? (
         <ExternalFileChangedDialog
           path={externalFilePrompt.path}

@@ -75,7 +75,7 @@ import {
 import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 import { GitRefsWatcherRegistry } from "../git/git-refs-watch.js";
 import { detectCurrentBranch } from "../git/git.js";
-import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
+import { loadProjectConfig, writeProjectConfig, type NewdeConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
 import { attachPane } from "../terminal/pty-bridge.js";
 import { AgentPtyStore } from "../terminal/agent-pty-store.js";
@@ -100,7 +100,7 @@ export class ElectronRuntime {
   readonly agentPtyStore: AgentPtyStore;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
   readonly gitRefsWatchers: GitRefsWatcherRegistry;
-  readonly config: NewdeConfig;
+  config: NewdeConfig;
   readonly events: EventBus;
 
   private electronPlugin: ElectronPlugin | null = null;
@@ -439,6 +439,19 @@ export class ElectronRuntime {
   renameCurrentStream(title: string): Stream {
     const current = this.getCurrentStream();
     return this.renameStream(current.id, title);
+  }
+
+  getConfig(): NewdeConfig {
+    return this.config;
+  }
+
+  setAgentPromptAppend(text: string): NewdeConfig {
+    const next: NewdeConfig = { ...this.config, agentPromptAppend: text };
+    writeProjectConfig(this.projectDir, next);
+    this.config = next;
+    this.logger.info("updated agent prompt append", { length: text.length });
+    this.events.publish({ type: "config.changed" });
+    return next;
   }
 
   renameStream(streamId: string, title: string): Stream {
@@ -873,7 +886,7 @@ export class ElectronRuntime {
         {
           pluginDir: this.electronPlugin.pluginDir,
           allowedTools: ["mcp__newde__*"],
-          appendSystemPrompt: buildBatchAgentPrompt(stream, batch),
+          appendSystemPrompt: buildBatchAgentPrompt(stream, batch, this.config.agentPromptAppend),
           mcpConfig: buildBatchMcpConfig(this.mcp),
           env: {
             NEWDE_STREAM_ID: stream.id,
@@ -1328,7 +1341,7 @@ class RuntimeSocket extends EventEmitter {
   }
 }
 
-function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
+function buildBatchAgentPrompt(stream: Stream, batch: Batch, agentPromptAppend: string): string {
   const lines = [
     `You manage this batch's work through the newde work-item MCP tools.`,
     `Treat them as your durable working memory between turns and sessions; the human watches progress through them.`,
@@ -1357,6 +1370,10 @@ function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
+  }
+  const userAppend = agentPromptAppend.trim();
+  if (userAppend) {
+    lines.push("", "USER CUSTOM PROMPT:", userAppend);
   }
   return lines.join("\n");
 }

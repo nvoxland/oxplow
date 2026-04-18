@@ -205,6 +205,14 @@ export async function renameStream(streamId: string, title: string): Promise<Str
   return desktopApi().renameStream(streamId, title);
 }
 
+export async function getConfig(): Promise<import("../config/config.js").NewdeConfig> {
+  return desktopApi().getConfig();
+}
+
+export async function setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig> {
+  return desktopApi().setAgentPromptAppend(text);
+}
+
 export async function listBranches(): Promise<BranchRef[]> {
   return desktopApi().listBranches();
 }

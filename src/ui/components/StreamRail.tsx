@@ -15,11 +15,12 @@ interface Props {
   onStreamCreated(stream: Stream): void;
   onRenameStream?(streamId: string, currentTitle: string): void;
   onRequestCreateBatch?(): void;
+  onOpenSettings?(): void;
   /** Bumping this number opens the inline "new stream" form. */
   createRequest?: number;
 }
 
-export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, createRequest }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
   const [branches, setBranches] = useState<BranchRef[]>([]);
@@ -122,17 +123,28 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
             );
           })}
         </div>
-        <span
-          title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
-          style={{ display: "inline-flex", flexShrink: 0, padding: "6px 0 6px 8px" }}
-        >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 0 6px 8px" }}>
           <button
             onClick={openCreate}
+            title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
             style={{ ...buttonStyle, opacity: gitEnabled ? 1 : 0.6, cursor: gitEnabled ? "pointer" : "not-allowed" }}
             disabled={!gitEnabled}
           >
             + New stream
           </button>
+          {onOpenSettings ? (
+            <button
+              onClick={onOpenSettings}
+              title="Settings"
+              aria-label="Settings"
+              style={iconButtonStyle}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          ) : null}
         </span>
       </div>
       {showCreate ? (
@@ -239,6 +251,19 @@ const buttonStyle: CSSProperties = {
   borderRadius: 4,
   cursor: "pointer",
   fontFamily: "inherit",
+};
+
+const iconButtonStyle: CSSProperties = {
+  background: "var(--bg)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "4px 6px",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
 };
 
 const tabStyle: CSSProperties = {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import YAML from "yaml";
 import type { Logger } from "../core/logger.js";
@@ -21,6 +21,9 @@ export interface NewdeConfig {
   projectName: string;
   /** Extra language servers to register on top of the built-ins. */
   lspServers: NewdeLspServerConfig[];
+  /** User-supplied text appended verbatim to every agent's system prompt.
+   *  Empty string when unset. */
+  agentPromptAppend: string;
 }
 
 /** Partial shape that survives YAML parsing — loadProjectConfig fills in
@@ -29,6 +32,7 @@ export interface ParsedNewdeConfig {
   agent: AgentKind;
   projectName?: string;
   lspServers: NewdeLspServerConfig[];
+  agentPromptAppend: string;
 }
 
 const DEFAULT_AGENT: AgentKind = "claude";
@@ -38,7 +42,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
   const fallbackName = basename(resolve(projectDir));
   if (!existsSync(configPath)) {
     logger?.info("project config not found; using defaults", { configPath, agent: DEFAULT_AGENT });
-    return { agent: DEFAULT_AGENT, projectName: fallbackName, lspServers: [] };
+    return { agent: DEFAULT_AGENT, projectName: fallbackName, lspServers: [], agentPromptAppend: "" };
   }
 
   const raw = readFileSync(configPath, "utf8");
@@ -47,6 +51,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
     agent: parsed.agent,
     projectName: parsed.projectName ?? fallbackName,
     lspServers: parsed.lspServers,
+    agentPromptAppend: parsed.agentPromptAppend,
   };
   logger?.info("loaded project config", {
     configPath,
@@ -62,7 +67,7 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     throw new Error("newde.yaml must contain a YAML object");
   }
 
-  const allowedKeys = new Set(["agent", "projectName", "lsp"]);
+  const allowedKeys = new Set(["agent", "projectName", "lsp", "agentPromptAppend"]);
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) {
       throw new Error(`newde.yaml contains unknown key: ${key}`);
@@ -86,7 +91,41 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     projectName = value.projectName.trim();
   }
 
-  return { agent, projectName, lspServers: parseLspServers(value.lsp) };
+  let agentPromptAppend = "";
+  if (value.agentPromptAppend !== undefined) {
+    if (typeof value.agentPromptAppend !== "string") {
+      throw new Error("newde.yaml agentPromptAppend must be a string");
+    }
+    agentPromptAppend = value.agentPromptAppend;
+  }
+
+  return { agent, projectName, lspServers: parseLspServers(value.lsp), agentPromptAppend };
+}
+
+/**
+ * Rewrite `newde.yaml` with the given patch applied. We re-serialize from a
+ * plain object (rather than preserving the user's original formatting) — the
+ * schema is small and known, so comment loss is acceptable for now.
+ */
+export function writeProjectConfig(projectDir: string, config: NewdeConfig): void {
+  const configPath = join(projectDir, NEWDE_CONFIG_FILE);
+  const doc: Record<string, unknown> = {};
+  if (config.agent !== DEFAULT_AGENT) doc.agent = config.agent;
+  if (config.projectName && config.projectName !== basename(resolve(projectDir))) {
+    doc.projectName = config.projectName;
+  }
+  if (config.agentPromptAppend) doc.agentPromptAppend = config.agentPromptAppend;
+  if (config.lspServers.length > 0) {
+    doc.lsp = {
+      servers: config.lspServers.map((server) => ({
+        languageId: server.languageId,
+        extensions: server.extensions,
+        command: server.command,
+        args: server.args,
+      })),
+    };
+  }
+  writeFileSync(configPath, YAML.stringify(doc), "utf8");
 }
 
 function parseLspServers(rawLsp: unknown): NewdeLspServerConfig[] {

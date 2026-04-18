@@ -113,6 +113,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:switchStream", (_event, id: string) => currentRuntime.switchStream(id));
   ipcMain.handle("newde:renameCurrentStream", (_event, title: string) => currentRuntime.renameCurrentStream(title));
   ipcMain.handle("newde:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
+  ipcMain.handle("newde:getConfig", () => currentRuntime.getConfig());
+  ipcMain.handle("newde:setAgentPromptAppend", (_event, text: string) => currentRuntime.setAgentPromptAppend(text));
   ipcMain.handle("newde:listBranches", () => currentRuntime.listBranches());
   ipcMain.handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   ipcMain.handle("newde:createStream", (_event, input) => currentRuntime.createStream(input));

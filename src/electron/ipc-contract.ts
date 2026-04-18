@@ -116,6 +116,8 @@ export interface DesktopApi {
   switchStream(id: string): Promise<Stream>;
   renameCurrentStream(title: string): Promise<Stream>;
   renameStream(streamId: string, title: string): Promise<Stream>;
+  getConfig(): Promise<import("../config/config.js").NewdeConfig>;
+  setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig>;
   listBranches(): Promise<BranchRef[]>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
