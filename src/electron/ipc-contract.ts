@@ -1,6 +1,7 @@
 import type {
   AgentTurn,
   BatchFileChange,
+  BranchChanges,
   BranchRef,
   Batch,
   BatchState,
@@ -27,6 +28,7 @@ import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 export type {
   AgentTurn,
   BatchFileChange,
+  BranchChanges,
   BranchRef,
   Batch,
   BatchState,
@@ -120,6 +122,8 @@ export interface DesktopApi {
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
+  getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
+  readFileAtRef(streamId: string, ref: string, path: string): Promise<{ content: string | null }>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;
   listWorkspaceFiles(streamId: string): Promise<{ files: WorkspaceIndexedFile[]; summary: WorkspaceStatusSummary }>;
   readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile>;

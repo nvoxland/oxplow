@@ -1,11 +1,21 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
-import { ensureWorktree, isGitRepo, isGitWorktree, listBranches, listGitStatuses } from "../git/git.js";
+import {
+  detectBaseBranch,
+  ensureWorktree,
+  isGitRepo,
+  isGitWorktree,
+  listBranches,
+  listBranchChanges,
+  listGitStatuses,
+  readFileAtRef,
+  type BranchChanges,
+} from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
 import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
 import { LspSessionManager } from "../lsp/lsp.js";
@@ -67,6 +77,8 @@ export class ElectronRuntime {
   private readonly agentStatusByBatch = new Map<string, AgentStatus>();
   private readonly recentUiWrites = new Map<string, number>();
   private mcp: McpServerHandle | null = null;
+  private gitEnabledCached = false;
+  private gitRootWatcher: FSWatcher | null = null;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
     this.projectDir = projectDir;
@@ -202,6 +214,36 @@ export class ElectronRuntime {
       });
     });
 
+    this.gitEnabledCached = isGitRepo(this.projectDir);
+    // Watch the project root for the `.git` direntry appearing or
+    // disappearing so the UI reacts when the agent `git init`s the project
+    // mid-session. We can't lean on `workspaceWatchers` because it filters
+    // `.git` out by design; this is a tiny direct `fs.watch` scoped to the
+    // root dir, and we only re-check when the changed filename is `.git`.
+    try {
+      this.gitRootWatcher = watch(this.projectDir, (_event, filename) => {
+        const name = typeof filename === "string"
+          ? filename
+          : filename != null
+            ? (filename as Buffer).toString("utf8")
+            : "";
+        if (name !== ".git") return;
+        const next = isGitRepo(this.projectDir);
+        if (next === this.gitEnabledCached) return;
+        this.gitEnabledCached = next;
+        this.events.publish({ type: "workspace-context.changed", gitEnabled: next });
+      });
+      this.gitRootWatcher.on("error", (error) => {
+        this.logger.warn("git root watcher error", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    } catch (error) {
+      this.logger.warn("failed to start git root watcher", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
       logger: this.logger.child({ subsystem: "mcp" }),
@@ -219,6 +261,8 @@ export class ElectronRuntime {
   }
 
   async dispose(): Promise<void> {
+    this.gitRootWatcher?.close();
+    this.gitRootWatcher = null;
     cleanupSessions(this.store.list());
     for (const socket of this.terminalSessions.values()) socket.close();
     this.terminalSessions.clear();
@@ -295,8 +339,27 @@ export class ElectronRuntime {
     return listBranches(this.projectDir);
   }
 
+  getBranchChanges(streamId: string, baseRef?: string): BranchChanges & { resolvedBaseRef: string | null } {
+    const stream = this.resolveStream(streamId);
+    const resolvedBaseRef = baseRef?.trim() || detectBaseBranch(stream.worktree_path);
+    if (!resolvedBaseRef) {
+      return { baseRef: "", mergeBase: null, files: [], resolvedBaseRef: null };
+    }
+    const changes = listBranchChanges(stream.worktree_path, resolvedBaseRef);
+    return { ...changes, resolvedBaseRef };
+  }
+
+  readFileAtRef(streamId: string, ref: string, path: string): { content: string | null } {
+    const stream = this.resolveStream(streamId);
+    return { content: readFileAtRef(stream.worktree_path, ref, path) };
+  }
+
   getWorkspaceContext() {
-    return { gitEnabled: isGitRepo(this.projectDir) };
+    // Re-read rather than returning the cache — callers (IPC) expect a fresh
+    // answer; the cache exists only to debounce event publishing.
+    const gitEnabled = isGitRepo(this.projectDir);
+    this.gitEnabledCached = gitEnabled;
+    return { gitEnabled };
   }
 
   createStream(body: { title: string; summary?: string; source: "existing"; ref: string } | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }): Stream {

@@ -112,6 +112,19 @@ export interface BranchRef {
 
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
+export interface BranchChangeEntry {
+  path: string;
+  status: GitFileStatus;
+  additions: number | null;
+  deletions: number | null;
+}
+
+export interface BranchChanges {
+  baseRef: string;
+  mergeBase: string | null;
+  files: BranchChangeEntry[];
+}
+
 export interface WorkspaceEntry {
   name: string;
   path: string;
@@ -292,6 +305,21 @@ export async function listAgentTurns(
   return desktopApi().listAgentTurns(streamId, batchId, limit);
 }
 
+export async function getBranchChanges(
+  streamId: string,
+  baseRef?: string,
+): Promise<BranchChanges & { resolvedBaseRef: string | null }> {
+  return desktopApi().getBranchChanges(streamId, baseRef);
+}
+
+export async function readFileAtRef(
+  streamId: string,
+  ref: string,
+  path: string,
+): Promise<{ content: string | null }> {
+  return desktopApi().readFileAtRef(streamId, ref, path);
+}
+
 export async function listBatchFileChanges(
   streamId: string,
   batchId: string,
@@ -395,6 +423,15 @@ export function subscribeNewdeEvents(
   listener: (event: NewdeEvent) => void,
 ): () => void {
   return desktopApi().onNewdeEvent(listener);
+}
+
+export function subscribeWorkspaceContext(
+  onEvent: (next: WorkspaceContext) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "workspace-context.changed") return;
+    onEvent({ gitEnabled: event.gitEnabled });
+  });
 }
 
 export function subscribeWorkspaceEvents(

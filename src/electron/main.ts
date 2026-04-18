@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from "electron";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
 import type { CommandId, LspEvent, MenuGroupSnapshot, NewdeEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
 
@@ -7,6 +8,7 @@ let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
 let disposed = false;
+let instanceLockPath: string | null = null;
 
 void main();
 
@@ -26,6 +28,7 @@ async function main() {
     event.preventDefault();
     quitting = true;
     void disposeRuntime().finally(() => {
+      releaseProjectLock();
       disposed = true;
       app.exit(0);
     });
@@ -39,6 +42,17 @@ async function main() {
 
   await app.whenReady();
 
+  const lockResult = acquireProjectLock(projectDir);
+  if (!lockResult.ok) {
+    dialog.showErrorBox(
+      "newde is already running for this project",
+      `Another newde process (pid ${lockResult.pid}) is managing\n${projectDir}\n\nClose it (or kill that process) before starting a new one.`,
+    );
+    app.exit(1);
+    return;
+  }
+  instanceLockPath = lockResult.lockPath;
+
   try {
     runtime = await ElectronRuntime.create(projectDir);
   } catch (error) {
@@ -46,6 +60,7 @@ async function main() {
       "newde failed to start",
       error instanceof Error ? error.message : String(error),
     );
+    releaseProjectLock();
     app.exit(1);
     return;
   }
@@ -115,6 +130,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
   ipcMain.handle("newde:listAgentTurns", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, batchId, limit));
   ipcMain.handle("newde:listBatchFileChanges", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listFileChanges(streamId, batchId, limit));
+  ipcMain.handle("newde:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
+  ipcMain.handle("newde:readFileAtRef", (_event, streamId: string, ref: string, path: string) => currentRuntime.readFileAtRef(streamId, ref, path));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
   ipcMain.handle("newde:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
   ipcMain.handle("newde:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));
@@ -242,6 +259,64 @@ async function disposeRuntime() {
   runtime = null;
   if (currentRuntime) {
     await currentRuntime.dispose();
+  }
+}
+
+type LockResult =
+  | { ok: true; lockPath: string }
+  | { ok: false; pid: number; lockPath: string };
+
+/**
+ * Claims an exclusive per-project lock at `.newde/runtime/instance.lock`
+ * containing this process's PID. Refuses to start if another live process
+ * already holds the lock; reclaims stale locks whose PID no longer exists.
+ * Per-project means two different projects can each have their own newde.
+ */
+function acquireProjectLock(projectDir: string): LockResult {
+  const runtimeDir = join(projectDir, ".newde", "runtime");
+  mkdirSync(runtimeDir, { recursive: true });
+  const lockPath = join(runtimeDir, "instance.lock");
+  if (existsSync(lockPath)) {
+    const priorPid = readLockPid(lockPath);
+    if (priorPid != null && priorPid !== process.pid && isPidAlive(priorPid)) {
+      return { ok: false, pid: priorPid, lockPath };
+    }
+    // stale — either the writer died without cleaning up, or it's our own pid
+    try { unlinkSync(lockPath); } catch {}
+  }
+  writeFileSync(lockPath, String(process.pid), "utf8");
+  return { ok: true, lockPath };
+}
+
+function releaseProjectLock(): void {
+  if (!instanceLockPath) return;
+  try {
+    const currentPid = readLockPid(instanceLockPath);
+    if (currentPid === process.pid) unlinkSync(instanceLockPath);
+  } catch {}
+  instanceLockPath = null;
+}
+
+function readLockPid(lockPath: string): number | null {
+  try {
+    const raw = readFileSync(lockPath, "utf8").trim();
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// `process.kill(pid, 0)` probes without delivering a signal; throws ESRCH if
+// the process doesn't exist and EPERM if it does but we can't signal it.
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EPERM") return true;
+    return false;
   }
 }
 

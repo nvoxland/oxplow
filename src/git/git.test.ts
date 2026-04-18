@@ -3,7 +3,15 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectCurrentBranch, isGitRepo, isGitWorktree, listBranches } from "./git.js";
+import {
+  detectBaseBranch,
+  detectCurrentBranch,
+  isGitRepo,
+  isGitWorktree,
+  listBranchChanges,
+  listBranches,
+  readFileAtRef,
+} from "./git.js";
 
 const tempDirs: string[] = [];
 
@@ -57,6 +65,39 @@ test("listBranches is empty outside the repo root", () => {
 
   expect(listBranches(repoDir).length).toBeGreaterThan(0);
   expect(listBranches(nestedDir)).toEqual([]);
+});
+
+test("listBranchChanges returns committed and uncommitted diffs vs merge base", () => {
+  const repoDir = mkRepo();
+  // Create a feature branch at HEAD so main and feature share the same base.
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  writeFileSync(join(repoDir, "committed.txt"), "hello\n", "utf8");
+  execFileSync("git", ["-C", repoDir, "add", "committed.txt"], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "add committed"], { stdio: "ignore" });
+  writeFileSync(join(repoDir, "wip.txt"), "wip\n", "utf8");
+  writeFileSync(join(repoDir, "untracked.txt"), "nope\n", "utf8");
+
+  const result = listBranchChanges(repoDir, "main");
+  expect(result.mergeBase).not.toBeNull();
+  const paths = result.files.map((f) => f.path).sort();
+  expect(paths).toEqual(["committed.txt", "untracked.txt", "wip.txt"]);
+  const committed = result.files.find((f) => f.path === "committed.txt");
+  expect(committed?.status).toBe("added");
+  expect(committed?.additions).toBe(1);
+  const untracked = result.files.find((f) => f.path === "untracked.txt");
+  expect(untracked?.status).toBe("untracked");
+});
+
+test("readFileAtRef returns the ref content; null when the file is absent", () => {
+  const repoDir = mkRepo();
+  const initial = readFileAtRef(repoDir, "HEAD", "README.md");
+  expect(initial).toBe("# test\n");
+  expect(readFileAtRef(repoDir, "HEAD", "does-not-exist.md")).toBeNull();
+});
+
+test("detectBaseBranch prefers main when no origin is configured", () => {
+  const repoDir = mkRepo();
+  expect(detectBaseBranch(repoDir)).toBe("main");
 });
 
 function mkRepo(): string {

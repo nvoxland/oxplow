@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type AgentStatus,
-  type Batch,
-  type BatchWorkState,
   listWorkspaceEntries,
   listWorkspaceFiles,
   subscribeWorkspaceEvents,
@@ -13,63 +10,30 @@ import {
 } from "../../api.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { BatchQueueSection } from "./BatchQueueSection.js";
-import { ChangedFilesSection, TreeEntries } from "./FileTree.js";
-import { GitSummary } from "./GitSummary.js";
-import {
-  copyText,
-  dirname,
-  joinChildPath,
-  Row,
-  Section,
-  SidebarButton,
-  type ContextMenuTarget,
-} from "./shared.js";
-
-export type SidebarTab = "batches" | "files" | "stream";
+import { ChangedFilesSection, TreeEntries } from "../LeftPanel/FileTree.js";
+import { GitSummary } from "../LeftPanel/GitSummary.js";
+import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
 
 interface Props {
   stream: Stream | null;
-  batches: Batch[];
-  batchWorkStates: Record<string, BatchWorkState>;
-  agentStatuses: Record<string, AgentStatus>;
-  selectedBatchId: string | null;
-  activeBatchId: string | null;
-  activeTab: SidebarTab;
-  onActiveTabChange(tab: SidebarTab): void;
+  gitEnabled: boolean;
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
-  onSelectBatch(batchId: string): Promise<void>;
-  onCreateBatch(title: string): Promise<void>;
-  onReorderBatch(batchId: string, targetIndex: number): Promise<void>;
-  onPromoteBatch(batchId: string): Promise<void>;
-  onCompleteBatch(batchId: string): Promise<void>;
 }
 
-export function LeftPanel({
+export function ProjectPanel({
   stream,
-  batches,
-  batchWorkStates,
-  agentStatuses,
-  selectedBatchId,
-  activeBatchId,
-  activeTab,
-  onActiveTabChange,
+  gitEnabled,
   selectedFilePath,
   onOpenFile,
   onCreateFile,
   onCreateDirectory,
   onRenamePath,
   onDeletePath,
-  onSelectBatch,
-  onCreateBatch,
-  onReorderBatch,
-  onPromoteBatch,
-  onCompleteBatch,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
@@ -155,8 +119,34 @@ export function LeftPanel({
     };
   }, [loadDir, loadWorkspaceIndex, stream]);
 
+  const [changedOnly, setChangedOnly] = useState(false);
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
   const changedFiles = useMemo(() => indexedFiles.filter((file) => file.gitStatus !== null), [indexedFiles]);
+  const changedPathSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const file of changedFiles) {
+      set.add(file.path);
+      // Mark every ancestor dir as "has changes" so we can keep them visible
+      // when the user toggles the filter.
+      let dir = dirname(file.path);
+      while (dir) {
+        if (set.has(dir)) break;
+        set.add(dir);
+        dir = dirname(dir);
+      }
+    }
+    return set;
+  }, [changedFiles]);
+  const effectiveChangedOnly = gitEnabled && changedOnly;
+  const visibleEntriesByDir = useMemo(() => {
+    if (!effectiveChangedOnly) return entriesByDir;
+    const out: Record<string, typeof entriesByDir[string]> = {};
+    for (const [dir, entries] of Object.entries(entriesByDir)) {
+      out[dir] = entries.filter((entry) => changedPathSet.has(entry.path));
+    }
+    return out;
+  }, [effectiveChangedOnly, entriesByDir, changedPathSet]);
+  const visibleRootEntries = visibleEntriesByDir[""] ?? [];
 
   if (!stream) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>loading stream…</div>;
@@ -178,14 +168,18 @@ export function LeftPanel({
           onOpenFile(contextMenu.path);
           break;
         case "new-file": {
-          const suggested = contextMenu.kind === "directory" ? joinChildPath(contextMenu.path, "new-file.txt") : joinChildPath(dirname(contextMenu.path), "new-file.txt");
+          const suggested = contextMenu.kind === "directory"
+            ? joinChildPath(contextMenu.path, "new-file.txt")
+            : joinChildPath(dirname(contextMenu.path), "new-file.txt");
           const nextPath = window.prompt("New file path", suggested)?.trim();
           if (!nextPath) return;
           await onCreateFile(nextPath);
           break;
         }
         case "new-folder": {
-          const suggested = contextMenu.kind === "directory" ? joinChildPath(contextMenu.path, "new-folder") : joinChildPath(dirname(contextMenu.path), "new-folder");
+          const suggested = contextMenu.kind === "directory"
+            ? joinChildPath(contextMenu.path, "new-folder")
+            : joinChildPath(dirname(contextMenu.path), "new-folder");
           const nextPath = window.prompt("New folder path", suggested)?.trim();
           if (!nextPath) return;
           await onCreateDirectory(nextPath);
@@ -216,115 +210,58 @@ export function LeftPanel({
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
       ...(contextMenu.kind === "file"
-        ? [{
-            id: "files.open",
-            label: "Open",
-            enabled: true,
-            run: () => handleContextAction("open"),
-          }]
+        ? [{ id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") }]
         : []),
-      {
-        id: "files.new-file",
-        label: "New File…",
-        enabled: true,
-        run: () => handleContextAction("new-file"),
-      },
-      {
-        id: "files.new-folder",
-        label: "New Folder…",
-        enabled: true,
-        run: () => handleContextAction("new-folder"),
-      },
-      {
-        id: "files.rename",
-        label: "Rename…",
-        enabled: true,
-        run: () => handleContextAction("rename"),
-      },
-      {
-        id: "files.delete",
-        label: "Delete…",
-        enabled: true,
-        run: () => handleContextAction("delete"),
-      },
-      {
-        id: "files.copy-path",
-        label: "Copy Path",
-        enabled: true,
-        run: () => handleContextAction("copy-path"),
-      },
+      { id: "files.new-file", label: "New File…", enabled: true, run: () => handleContextAction("new-file") },
+      { id: "files.new-folder", label: "New Folder…", enabled: true, run: () => handleContextAction("new-folder") },
+      { id: "files.rename", label: "Rename…", enabled: true, run: () => handleContextAction("rename") },
+      { id: "files.delete", label: "Delete…", enabled: true, run: () => handleContextAction("delete") },
+      { id: "files.copy-path", label: "Copy Path", enabled: true, run: () => handleContextAction("copy-path") },
     ]
     : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
-        <SidebarButton active={activeTab === "batches"} onClick={() => onActiveTabChange("batches")}>Batches</SidebarButton>
-        <SidebarButton active={activeTab === "files"} onClick={() => onActiveTabChange("files")}>Files</SidebarButton>
-        <SidebarButton active={activeTab === "stream"} onClick={() => onActiveTabChange("stream")}>Stream</SidebarButton>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>{stream.branch}</div>
+        {gitEnabled ? (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 11, cursor: "pointer" }}>
+            <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} />
+            Changed only
+          </label>
+        ) : null}
       </div>
-      <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12 }}>
-        {activeTab === "batches" ? (
-          <BatchQueueSection
-            batches={batches}
-            batchWorkStates={batchWorkStates}
-            agentStatuses={agentStatuses}
-            selectedBatchId={selectedBatchId}
-            activeBatchId={activeBatchId}
-            onSelectBatch={onSelectBatch}
-            onCreateBatch={onCreateBatch}
-            onReorderBatch={onReorderBatch}
-            onPromoteBatch={onPromoteBatch}
-            onCompleteBatch={onCompleteBatch}
-          />
-        ) : activeTab === "files" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
-            <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
-              {stream.branch}
-            </div>
-            {statusSummary ? <GitSummary summary={statusSummary} /> : null}
-            {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
-            <div style={{ color: "var(--muted)", fontSize: 11 }}>Use File → Quick Open or Ctrl/Cmd+P to search by path.</div>
-            {rootEntries.length === 0 && !loadingDirs[""] ? (
-              <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
-            ) : (
-              <>
-                {changedFiles.length > 0 ? (
-                  <ChangedFilesSection
-                    files={changedFiles.slice(0, 12)}
-                    selectedFilePath={selectedFilePath}
-                    onOpenFile={onOpenFile}
-                    onContextMenu={setContextMenu}
-                  />
-                ) : null}
-                <TreeEntries
-                  parentPath=""
-                  entries={rootEntries}
-                  entriesByDir={entriesByDir}
-                  expandedDirs={expandedDirs}
-                  loadingDirs={loadingDirs}
-                  selectedFilePath={selectedFilePath}
-                  onToggleDirectory={toggleDirectory}
-                  onOpenFile={onOpenFile}
-                  onContextMenu={setContextMenu}
-                />
-              </>
-            )}
-          </div>
+      <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
+        {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
+        {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>Use File → Quick Open or Ctrl/Cmd+P to search by path.</div>
+        {rootEntries.length === 0 && !loadingDirs[""] ? (
+          <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Section title="Stream">
-              <Row label="Name" value={stream.title} />
-              <Row label="Branch" value={stream.branch} />
-              <Row label="Source" value={stream.branch_source} />
-              <Row label="Worktree" value={stream.worktree_path} />
-            </Section>
-            <Section title="Batches">
-              <Row label="Count" value={String(batches.length)} />
-              <Row label="Active" value={batches.find((batch) => batch.id === activeBatchId)?.title ?? "none"} />
-              <Row label="Selected" value={batches.find((batch) => batch.id === selectedBatchId)?.title ?? "none"} />
-            </Section>
-          </div>
+          <>
+            {gitEnabled && !effectiveChangedOnly && changedFiles.length > 0 ? (
+              <ChangedFilesSection
+                files={changedFiles.slice(0, 12)}
+                selectedFilePath={selectedFilePath}
+                onOpenFile={onOpenFile}
+                onContextMenu={setContextMenu}
+              />
+            ) : null}
+            {effectiveChangedOnly && changedFiles.length === 0 ? (
+              <div style={{ color: "var(--muted)" }}>No git-changed files.</div>
+            ) : null}
+            <TreeEntries
+              parentPath=""
+              entries={visibleRootEntries}
+              entriesByDir={visibleEntriesByDir}
+              expandedDirs={expandedDirs}
+              loadingDirs={loadingDirs}
+              selectedFilePath={selectedFilePath}
+              onToggleDirectory={toggleDirectory}
+              onOpenFile={onOpenFile}
+              onContextMenu={setContextMenu}
+            />
+          </>
         )}
       </div>
       {contextMenu ? (

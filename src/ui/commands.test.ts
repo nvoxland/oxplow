@@ -9,7 +9,6 @@ describe("buildMenuGroups", () => {
         hasSelectedFile: false,
         canSave: false,
         activeTab: "agent",
-        sidebarTab: "files",
       },
       noopHandlers(),
     );
@@ -25,15 +24,12 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: true,
         canSave: true,
-        activeTab: "plan",
-        sidebarTab: "batches",
+        activeTab: "editor",
       },
       noopHandlers(),
     );
 
-    expect(findCommandById(groups, "view.batches-sidebar")?.checked).toBe(true);
-    expect(findCommandById(groups, "view.files-sidebar")?.checked).toBe(false);
-    expect(findCommandById(groups, "view.plan")?.checked).toBe(true);
+    expect(findCommandById(groups, "view.editor")?.checked).toBe(true);
     expect(findCommandById(groups, "view.agent")?.checked).toBe(false);
   });
 
@@ -44,14 +40,13 @@ describe("buildMenuGroups", () => {
         hasSelectedFile: false,
         canSave: false,
         activeTab: "agent",
-        sidebarTab: "files",
       },
       noopHandlers(),
     );
 
     expect(findCommandById(groups, "file.quickOpen")?.enabled).toBe(false);
     expect(findCommandById(groups, "view.agent")?.enabled).toBe(false);
-    expect(findCommandById(groups, "view.stream-sidebar")?.enabled).toBe(false);
+    expect(findCommandById(groups, "view.editor")?.enabled).toBe(false);
   });
 });
 
@@ -61,13 +56,11 @@ describe("buildMenuGroupSnapshots", () => {
       hasStream: true,
       hasSelectedFile: true,
       canSave: true,
-      activeTab: "plan",
-      sidebarTab: "batches",
+      activeTab: "editor",
     });
 
     const viewGroup = groups.find((group) => group.id === "view");
-    expect(viewGroup?.items.find((item) => item.id === "view.batches-sidebar")?.checked).toBe(true);
-    expect(viewGroup?.items.find((item) => item.id === "view.plan")?.checked).toBe(true);
+    expect(viewGroup?.items.find((item) => item.id === "view.editor")?.checked).toBe(true);
     expect(groups.find((group) => group.id === "file")?.items.find((item) => item.id === "file.save")?.enabled).toBe(true);
   });
 });
@@ -77,11 +70,7 @@ function noopHandlers() {
     save() {},
     quickOpen() {},
     find() {},
-    showFilesSidebar() {},
-    showBatchesSidebar() {},
-    showStreamSidebar() {},
     showAgentPane() {},
-    showPlanPane() {},
     showEditorPane() {},
   };
 }

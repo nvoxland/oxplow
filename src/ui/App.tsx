@@ -28,6 +28,7 @@ import {
   renameCurrentStream,
   subscribeNewdeEvents,
   subscribeWorkItemEvents,
+  subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   selectBatch,
   promoteBatch,
@@ -56,11 +57,23 @@ import {
 import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
-import { TopBar } from "./components/TopBar.js";
-import { LeftPanel, type SidebarTab } from "./components/LeftPanel/index.js";
+import { StreamRail } from "./components/StreamRail.js";
+import { StreamHeader } from "./components/StreamHeader.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
-import { MainTabs, type TabId } from "./components/MainTabs.js";
+import { DockShell } from "./components/Dock/DockShell.js";
+import type { ToolWindow } from "./components/Dock/ToolWindow.js";
+import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
+import { BatchStatusBar } from "./components/BatchStatusBar.js";
+import { BatchesPanel } from "./components/Panels/BatchesPanel.js";
+import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
+import { GitChangesPanel, type DiffRequest } from "./components/Panels/GitChangesPanel.js";
+import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
+import { Activity } from "./components/Activity/Activity.js";
+import { BatchChanges } from "./components/Changes/BatchChanges.js";
+import { PlanPane } from "./components/Plan/PlanPane.js";
+import { TerminalPane } from "./components/TerminalPane.js";
+import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -74,18 +87,16 @@ export function App() {
   const [fileChanges, setFileChanges] = useState<Record<string, BatchFileChange[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("agent");
+  const [centerActive, setCenterActive] = useState<string>("agent");
+  const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("batches");
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(() => readInitialSidebarWidth());
-  const [sidebarDragging, setSidebarDragging] = useState(false);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
@@ -162,7 +173,7 @@ export function App() {
       setBatchStates((prev) => ({ ...prev, [next.id]: nextBatchState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-      setActiveTab(nextSession.selectedPath ? "editor" : "agent");
+      setCenterActive(nextSession.selectedPath ? "editor" : "agent");
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -209,7 +220,7 @@ export function App() {
     });
     setStream(next);
     const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-    setActiveTab(nextSession.selectedPath ? "editor" : "agent");
+    setCenterActive(nextSession.selectedPath ? "editor" : "agent");
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
@@ -225,7 +236,7 @@ export function App() {
         ? selectOpenFile(prev[stream.id] ?? createEmptyFileSession(), path)
         : setOpenFileLoading(openFileInSession(prev[stream.id] ?? createEmptyFileSession(), path, "", true), path, true),
     }));
-    setActiveTab("editor");
+    setCenterActive("editor");
     setError(null);
     if (existing && !existing.isLoading) return;
     try {
@@ -248,7 +259,7 @@ export function App() {
   async function handleNavigateToLocation(target: EditorNavigationTarget) {
     await handleOpenFile(target.path);
     setEditorNavigationTarget(target);
-    setActiveTab("editor");
+    setCenterActive("editor");
   }
 
   function handleEditorChange(value: string) {
@@ -296,7 +307,7 @@ export function App() {
       ...prev,
       [stream.id]: selectOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
     }));
-    setActiveTab("editor");
+    setCenterActive("editor");
   }
 
   function handleCloseOpenFile(path: string) {
@@ -391,8 +402,6 @@ export function App() {
         const work = await getBatchWorkState(stream.id, batch.id);
         setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
       }
-      setSidebarTab("batches");
-      setActiveTab("plan");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -416,7 +425,7 @@ export function App() {
     try {
       const next = await promoteBatch(stream.id, batchId);
       setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
-      setActiveTab("agent");
+      setCenterActive("agent");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -428,7 +437,7 @@ export function App() {
     try {
       const next = await completeBatch(stream.id, batchId);
       setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
-      setActiveTab("agent");
+      setCenterActive("agent");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -448,7 +457,6 @@ export function App() {
     try {
       const next = await createWorkItem(stream.id, selectedBatch.id, input);
       setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
-      setActiveTab("plan");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -635,6 +643,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    return subscribeWorkspaceContext((next) => setWorkspaceContext(next));
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = subscribeWorkItemEvents("all", (event) => {
       void getBatchWorkState(event.streamId, event.batchId)
         .then((workState) => {
@@ -754,12 +766,11 @@ export function App() {
       hasStream: !!stream,
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
-      activeTab,
-      sidebarTab,
-    }),
-    [activeTab, currentFile, currentFileDirty, selectedFilePath, sidebarTab, stream],
+      activeTab: centerActive === "editor" ? "editor" : "agent",
+    } as const),
+    [centerActive, currentFile, currentFileDirty, selectedFilePath, stream],
   );
-  const commandHandlers = {
+  const commandHandlers = useMemo(() => ({
     save() {
       void handleEditorSave();
     },
@@ -769,30 +780,21 @@ export function App() {
     },
     find() {
       if (!selectedFilePath) return;
-      setActiveTab("editor");
+      setCenterActive("editor");
       setEditorFindRequest((current) => current + 1);
     },
-    showFilesSidebar() {
-      setSidebarTab("files");
-    },
-    showBatchesSidebar() {
-      setSidebarTab("batches");
-    },
-    showStreamSidebar() {
-      setSidebarTab("stream");
-    },
     showAgentPane() {
-      setActiveTab("agent");
-    },
-    showPlanPane() {
-      setActiveTab("plan");
+      setCenterActive("agent");
     },
     showEditorPane() {
-      setActiveTab("editor");
+      setCenterActive("editor");
     },
-  };
+  }), [stream, selectedFilePath]);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
-  const menuGroups = buildMenuGroups(commandState, commandHandlers);
+  const menuGroups = useMemo(
+    () => buildMenuGroups(commandState, commandHandlers),
+    [commandState, commandHandlers],
+  );
   const commandMap = useMemo(
     () => new Map(menuGroups.flatMap((group) => group.items.map((item) => [item.id, item] as const))),
     [menuGroups],
@@ -829,154 +831,289 @@ export function App() {
     });
   }, [commandMap, isElectron]);
 
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
+  const editorTabOpen = currentSession.openOrder.length > 0;
+  const availableCenterIds = useMemo(() => {
+    const ids = new Set(["agent"]);
+    if (editorTabOpen) ids.add("editor");
+    for (const tab of diffTabs) ids.add(tab.id);
+    return ids;
+  }, [editorTabOpen, diffTabs]);
+  const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
-  useEffect(() => {
-    function handleResize() {
-      setSidebarWidth((current) => clampSidebarWidth(current));
+  const closeEditorTab = () => {
+    if (stream) {
+      const dirtyCount = Object.values(currentSession.files).filter(
+        (file) => file.draftContent !== file.savedContent,
+      ).length;
+      if (dirtyCount > 0 && !window.confirm(
+        `Discard unsaved changes in ${dirtyCount} file${dirtyCount === 1 ? "" : "s"}?`,
+      )) {
+        return;
+      }
+      setFileSessions((prev) => ({ ...prev, [stream.id]: createEmptyFileSession() }));
     }
+    setCenterActive("agent");
+  };
 
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
+  const handleOpenDiff = (request: DiffRequest) => {
+    const rightKey = request.rightKind === "working" ? "working" : `ref:${request.rightKind.ref}`;
+    const id = `diff:${request.leftRef}:${rightKey}:${request.path}`;
+    setDiffTabs((prev) => {
+      if (prev.some((tab) => tab.id === id)) return prev;
+      return [...prev, { id, spec: request }];
+    });
+    setCenterActive(id);
+  };
 
-  useEffect(() => {
-    if (!sidebarDragging) return;
+  const closeDiffTab = (id: string) => {
+    setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
+    setCenterActive("agent");
+  };
 
-    function handlePointerMove(event: PointerEvent) {
-      setSidebarWidth(clampSidebarWidth(event.clientX));
+  const agentBatchStatus: AgentStatus = selectedBatch ? agentStatuses[selectedBatch.id] ?? "idle" : "idle";
+
+  const centerTabs: CenterTab[] = useMemo(() => {
+    const tabs: CenterTab[] = [
+      {
+        id: "agent",
+        label: selectedBatch ? selectedBatch.title : "Agent",
+        closable: false,
+        activeDot: agentBatchStatus === "working",
+        render: () =>
+          selectedBatch ? (
+            <TerminalPane paneTarget={selectedBatch.pane_target} visible={effectiveCenterActive === "agent"} />
+          ) : (
+            <div style={{ padding: 12, color: "var(--muted)" }}>No batch selected.</div>
+          ),
+      },
+    ];
+    if (editorTabOpen) {
+      tabs.push({
+        id: "editor",
+        label: "Editor",
+        closable: true,
+        render: () => stream ? (
+          <EditorPane
+            stream={stream}
+            filePath={selectedFilePath}
+            value={currentFile?.draftContent ?? ""}
+            isDirty={currentFileDirty}
+            onChange={handleEditorChange}
+            onSave={() => { void handleEditorSave(); }}
+            findRequest={editorFindRequest}
+            navigationTarget={editorNavigationTarget}
+            onNavigateToLocation={handleNavigateToLocation}
+            openFileOrder={currentSession.openOrder}
+            openFiles={currentSession.files}
+            onSelectOpenFile={handleSelectOpenFile}
+            onCloseOpenFile={handleCloseOpenFile}
+          />
+        ) : null,
+      });
     }
-
-    function stopDragging() {
-      setSidebarDragging(false);
+    for (const diff of diffTabs) {
+      const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
+      tabs.push({
+        id: diff.id,
+        label: `${label} (diff)`,
+        closable: true,
+        render: () => stream ? (
+          <DiffPane stream={stream} spec={diff.spec} visible={effectiveCenterActive === diff.id} />
+        ) : null,
+      });
     }
+    return tabs;
+  }, [
+    selectedBatch,
+    agentBatchStatus,
+    effectiveCenterActive,
+    editorTabOpen,
+    stream,
+    selectedFilePath,
+    currentFile,
+    currentFileDirty,
+    editorFindRequest,
+    editorNavigationTarget,
+    currentSession.openOrder,
+    currentSession.files,
+    diffTabs,
+  ]);
 
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [sidebarDragging]);
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateRows: "auto 1fr auto",
-        gridTemplateColumns: `${sidebarWidth}px 6px minmax(0, 1fr)`,
-        height: "100vh",
-        gap: 0,
-      }}
-    >
-      <div style={{ gridColumn: "1 / 4", borderBottom: "1px solid var(--border)" }}>
-        {!isElectron ? <Menubar groups={menuGroups} /> : null}
-        <TopBar
-          stream={stream}
-          streams={streams}
-          streamStatuses={streamStatuses}
-          gitEnabled={workspaceContext.gitEnabled}
-          error={error}
-          onSwitch={handleSwitch}
-          onRename={handleRename}
-          onStreamCreated={handleStreamCreated}
-        />
-      </div>
-      <div style={{ overflow: "auto", minWidth: 0 }}>
-        <LeftPanel
-          stream={stream}
+  const leftToolWindows: ToolWindow[] = useMemo(() => [
+    {
+      id: "batches",
+      label: "Batches",
+      render: () => (
+        <BatchesPanel
           batches={currentBatchState.batches}
           batchWorkStates={batchWorkStates}
           agentStatuses={agentStatuses}
           selectedBatchId={currentBatchState.selectedBatchId}
           activeBatchId={currentBatchState.activeBatchId}
-          activeTab={sidebarTab}
-          onActiveTabChange={setSidebarTab}
-          selectedFilePath={selectedFilePath}
-          onOpenFile={handleOpenFile}
-          onCreateFile={handleCreateFile}
-          onCreateDirectory={handleCreateDirectory}
-          onRenamePath={handleRenamePath}
-          onDeletePath={handleDeletePath}
           onSelectBatch={handleSelectBatch}
           onCreateBatch={handleCreateBatch}
           onReorderBatch={handleReorderBatch}
           onPromoteBatch={handlePromoteBatch}
           onCompleteBatch={handleCompleteBatch}
         />
-      </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          setSidebarDragging(true);
-          setSidebarWidth(clampSidebarWidth(event.clientX));
-        }}
-        style={{
-          cursor: "col-resize",
-          background: sidebarDragging ? "var(--accent)" : "var(--border)",
-          transition: sidebarDragging ? "none" : "background 120ms ease",
-        }}
-      />
-      <div style={{ overflow: "hidden", minHeight: 0, minWidth: 0 }}>
-        {stream ? (
-          <MainTabs
-            key={stream.id}
-            stream={stream}
-            batch={selectedBatch}
-            activeBatchId={currentBatchState.activeBatchId}
-            batchWork={selectedBatchWork}
-            agentTurns={selectedBatchTurns}
-            batchFileChanges={selectedBatchFileChanges}
-            active={activeTab}
-            onActiveChange={setActiveTab}
-            onCreateWorkItem={handleCreateWorkItem}
-            onUpdateWorkItem={handleUpdateWorkItem}
-            onDeleteWorkItem={handleDeleteWorkItem}
-            onReorderWorkItems={handleReorderWorkItems}
-            openFileOrder={currentSession.openOrder}
-            openFiles={currentSession.files}
-            currentFilePath={selectedFilePath}
-            currentFileContent={currentFile?.draftContent ?? ""}
-            currentFileDirty={currentFileDirty}
-            onEditorChange={handleEditorChange}
-            onEditorSave={() => {
-              void handleEditorSave();
-            }}
-            editorFindRequest={editorFindRequest}
-            editorNavigationTarget={editorNavigationTarget}
-            onNavigateToLocation={handleNavigateToLocation}
-            onSelectOpenFile={handleSelectOpenFile}
-            onCloseOpenFile={handleCloseOpenFile}
-          />
-        ) : <div style={{ padding: 12 }}>loading…</div>}
-      </div>
-      <div style={{ gridColumn: "1 / 4", borderTop: "1px solid var(--border)" }}>
-        <BottomPanel streamId={stream?.id ?? null} />
-      </div>
-      {sidebarDragging ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            cursor: "col-resize",
-            zIndex: 100,
-          }}
+      ),
+    },
+    {
+      id: "project",
+      label: "Project",
+      render: () => (
+        <ProjectPanel
+          stream={stream}
+          gitEnabled={workspaceContext.gitEnabled}
+          selectedFilePath={selectedFilePath}
+          onOpenFile={handleOpenFile}
+          onCreateFile={handleCreateFile}
+          onCreateDirectory={handleCreateDirectory}
+          onRenamePath={handleRenamePath}
+          onDeletePath={handleDeletePath}
         />
-      ) : null}
+      ),
+    },
+    ...(workspaceContext.gitEnabled
+      ? [{
+          id: "git",
+          label: "Git",
+          render: () => (
+            <GitChangesPanel stream={stream} onOpenDiff={handleOpenDiff} />
+          ),
+        }]
+      : []),
+  ], [
+    currentBatchState.batches,
+    currentBatchState.selectedBatchId,
+    currentBatchState.activeBatchId,
+    batchWorkStates,
+    agentStatuses,
+    stream,
+    selectedFilePath,
+    workspaceContext.gitEnabled,
+  ]);
+
+  const rightToolWindows: ToolWindow[] = useMemo(() => [
+    {
+      id: "activity",
+      label: "Activity",
+      render: () => (
+        <Activity
+          agentTurns={selectedBatchTurns}
+          batchFileChanges={selectedBatchFileChanges}
+          workItems={selectedBatchWork?.items ?? []}
+          onOpenFile={handleOpenFile}
+        />
+      ),
+    },
+    {
+      id: "plan",
+      label: "Plan",
+      render: () => (
+        <PlanPane
+          batch={selectedBatch}
+          batchWork={selectedBatchWork}
+          onCreateWorkItem={handleCreateWorkItem}
+          onUpdateWorkItem={handleUpdateWorkItem}
+          onDeleteWorkItem={handleDeleteWorkItem}
+          onReorderWorkItems={handleReorderWorkItems}
+        />
+      ),
+    },
+    {
+      id: "changes",
+      label: "Changes",
+      render: () => (
+        <BatchChanges
+          batchFileChanges={selectedBatchFileChanges}
+          onOpenFile={handleOpenFile}
+        />
+      ),
+    },
+  ], [
+    selectedBatchTurns,
+    selectedBatchFileChanges,
+    selectedBatchWork,
+    selectedBatch,
+  ]);
+
+  const bottomToolWindows: ToolWindow[] = [
+    {
+      id: "hook-events",
+      label: "Hook events",
+      render: () => <BottomPanel streamId={stream?.id ?? null} />,
+    },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+      <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        {!isElectron ? <Menubar groups={menuGroups} /> : null}
+        <StreamRail
+          stream={stream}
+          streams={streams}
+          streamStatuses={streamStatuses}
+          gitEnabled={workspaceContext.gitEnabled}
+          onSwitch={handleSwitch}
+          onStreamCreated={handleStreamCreated}
+        />
+        <StreamHeader stream={stream} error={error} onRename={handleRename} />
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
+        <DockShell
+          side="left"
+          toolWindows={leftToolWindows}
+          storageKey="left"
+          defaultSize={300}
+          minSize={220}
+          maxSize={640}
+          railMode="always"
+        />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+          {stream ? (
+            <CenterTabs
+              tabs={centerTabs}
+              activeId={effectiveCenterActive}
+              onActivate={(id) => setCenterActive(id)}
+              onClose={(id) => {
+                if (id === "editor") closeEditorTab();
+                else if (id.startsWith("diff:")) closeDiffTab(id);
+              }}
+              header={
+                <BatchStatusBar
+                  batch={selectedBatch}
+                  activeBatchId={currentBatchState.activeBatchId}
+                  agentStatus={agentBatchStatus}
+                  batchWork={selectedBatchWork}
+                  turnCount={selectedBatchTurns?.length ?? null}
+                  onPromote={() => selectedBatch && void handlePromoteBatch(selectedBatch.id)}
+                  onComplete={() => selectedBatch && void handleCompleteBatch(selectedBatch.id)}
+                />
+              }
+            />
+          ) : <div style={{ padding: 12 }}>loading…</div>}
+        </div>
+        <DockShell
+          side="right"
+          toolWindows={rightToolWindows}
+          storageKey="right"
+          defaultSize={400}
+          minSize={260}
+          maxSize={720}
+          railMode="always"
+        />
+      </div>
+      <DockShell
+        side="bottom"
+        toolWindows={bottomToolWindows}
+        storageKey="bottom"
+        defaultOpen={false}
+        defaultSize={200}
+        minSize={120}
+        maxSize={480}
+        railMode="always"
+      />
       <QuickOpenOverlay
         open={quickOpenVisible}
         stream={stream}
@@ -1060,26 +1197,6 @@ function DaemonDownDialog() {
       </div>
     </div>
   );
-}
-
-const SIDEBAR_WIDTH_STORAGE_KEY = "newde.sidebarWidth";
-const DEFAULT_SIDEBAR_WIDTH = 240;
-const MIN_SIDEBAR_WIDTH = 180;
-const MAX_SIDEBAR_WIDTH = 560;
-const MIN_MAIN_CONTENT_WIDTH = 320;
-
-function readInitialSidebarWidth() {
-  const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-  if (!Number.isFinite(stored)) return DEFAULT_SIDEBAR_WIDTH;
-  return clampSidebarWidth(stored);
-}
-
-function clampSidebarWidth(width: number) {
-  const maxAllowed = Math.max(
-    MIN_SIDEBAR_WIDTH,
-    Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_MAIN_CONTENT_WIDTH),
-  );
-  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), maxAllowed);
 }
 
 function ExternalFileChangedDialog({

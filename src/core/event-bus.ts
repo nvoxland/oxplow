@@ -56,6 +56,11 @@ export interface TurnChangedEvent {
   kind: "opened" | "closed";
 }
 
+export interface WorkspaceContextChangedEvent {
+  type: "workspace-context.changed";
+  gitEnabled: boolean;
+}
+
 export interface FileChangeRecordedEvent {
   type: "file-change.recorded";
   streamId: string;
@@ -74,7 +79,8 @@ export type NewdeEvent =
   | BatchChangedEvent
   | AgentStatusChangedEvent
   | TurnChangedEvent
-  | FileChangeRecordedEvent;
+  | FileChangeRecordedEvent
+  | WorkspaceContextChangedEvent;
 
 export type NewdeEventType = NewdeEvent["type"];
 
