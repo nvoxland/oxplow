@@ -113,6 +113,8 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
+  const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
+  const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
@@ -957,6 +959,12 @@ export function App() {
     setCenterActive(id);
   };
 
+  const handleRevealCommit = (sha: string) => {
+    const token = Date.now();
+    setHistoryReveal({ sha, token });
+    setBottomActivate({ id: "history", token });
+  };
+
   const closeDiffTab = (id: string) => {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
     setCenterActive("agent");
@@ -1006,6 +1014,7 @@ export function App() {
             openFiles={currentSession.files}
             onSelectOpenFile={handleSelectOpenFile}
             onCloseOpenFile={handleCloseOpenFile}
+            onRevealCommit={handleRevealCommit}
           />
         ) : null,
       });
@@ -1125,7 +1134,7 @@ export function App() {
     {
       id: "history",
       label: "History",
-      render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} />,
+      render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />,
     },
   ];
 
@@ -1197,6 +1206,7 @@ export function App() {
         minSize={120}
         maxSize={480}
         railMode="always"
+        activateRequest={bottomActivate}
       />
       <QuickOpenOverlay
         open={quickOpenVisible}

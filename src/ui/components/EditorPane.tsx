@@ -2,7 +2,8 @@ import type { CSSProperties } from "react";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
-import type { Stream } from "../api.js";
+import type { BlameLine, Stream } from "../api.js";
+import { gitBlame } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import type { MenuItem } from "../menu.js";
@@ -22,6 +23,7 @@ interface Props {
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
+  onRevealCommit?(sha: string): void;
 }
 
 export function EditorPane({
@@ -38,6 +40,7 @@ export function EditorPane({
   onNavigateToLocation,
   onSelectOpenFile,
   onCloseOpenFile,
+  onRevealCommit,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
@@ -57,6 +60,12 @@ export function EditorPane({
   const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [blame, setBlame] = useState<{ path: string; lines: BlameLine[] } | null>(null);
+  const [blameScrollTop, setBlameScrollTop] = useState(0);
+  const [blameLineHeight, setBlameLineHeight] = useState(19);
+  const prevDirtyRef = useRef(isDirty);
+  const onRevealCommitRef = useRef(onRevealCommit);
+  onRevealCommitRef.current = onRevealCommit;
   // Monaco loads asynchronously, so the model-binding effect below needs a
   // signal to retry once it lands — otherwise the first file opened arrives
   // before the editor instance exists and the effect's early return makes
@@ -292,6 +301,61 @@ export function EditorPane({
   }, [stream.id]);
 
   useEffect(() => {
+    if (blame && blame.path !== filePath) setBlame(null);
+  }, [filePath, blame]);
+
+  useEffect(() => {
+    const wasDirty = prevDirtyRef.current;
+    prevDirtyRef.current = isDirty;
+    if (!blame || blame.path !== filePath) return;
+    if (wasDirty && !isDirty) {
+      void refreshBlame(filePath);
+    }
+  }, [isDirty, filePath, blame]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    if (blame) {
+      editor.updateOptions({ lineNumbers: "off", lineDecorationsWidth: BLAME_WIDTH });
+      setBlameLineHeight(editor.getOption(monaco.editor.EditorOption.lineHeight));
+      setBlameScrollTop(editor.getScrollTop());
+      const d = editor.onDidScrollChange((e: any) => setBlameScrollTop(e.scrollTop));
+      return () => {
+        d.dispose();
+        editor.updateOptions({ lineNumbers: "on", lineDecorationsWidth: 10 });
+      };
+    }
+    return undefined;
+  }, [blame, monacoReady]);
+
+  async function refreshBlame(path: string) {
+    try {
+      const lines = await gitBlame(streamRef.current.id, path);
+      if (filePathRef.current !== path) return;
+      if (lines.length === 0) {
+        setBlame(null);
+        setLspStatus("No git blame available");
+        setTimeout(() => setLspStatus((s) => (s === "No git blame available" ? null : s)), 2500);
+        return;
+      }
+      setBlame({ path, lines });
+    } catch (err) {
+      setLspStatus(`Blame failed: ${String(err)}`);
+    }
+  }
+
+  function toggleBlame() {
+    if (!filePath) return;
+    if (blame && blame.path === filePath) {
+      setBlame(null);
+      return;
+    }
+    void refreshBlame(filePath);
+  }
+
+  useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !navigationTarget || navigationTarget.path !== filePath) return;
     editor.focus();
@@ -393,7 +457,15 @@ export function EditorPane({
       enabled: !!filePath,
       run: () => (filePath ? navigator.clipboard.writeText(filePath) : undefined),
     },
+    {
+      id: "editor.annotate-blame",
+      label: blame && blame.path === filePath ? "Hide Git Blame" : "Annotate with Git Blame",
+      enabled: !!filePath,
+      run: () => toggleBlame(),
+    },
   ];
+
+  const showBlame = blame && blame.path === filePath;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -401,6 +473,17 @@ export function EditorPane({
           just hosts the single Monaco editor that swaps models on filePath. */}
       <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
         <div ref={hostRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
+        {showBlame ? (
+          <BlameOverlay
+            lines={blame!.lines}
+            scrollTop={blameScrollTop}
+            lineHeight={blameLineHeight}
+            onClick={(sha) => {
+              if (sha.replace(/0/g, "") === "") return;
+              onRevealCommitRef.current?.(sha);
+            }}
+          />
+        ) : null}
         {filePath && lspStatus ? <div style={lspStatusStyle}>{lspStatus}</div> : null}
         {!filePath ? (
           <div style={emptyStyle}>
@@ -417,6 +500,93 @@ export function EditorPane({
       </div>
     </div>
   );
+}
+
+const BLAME_WIDTH = 150;
+
+function BlameOverlay({
+  lines,
+  scrollTop,
+  lineHeight,
+  onClick,
+}: {
+  lines: BlameLine[];
+  scrollTop: number;
+  lineHeight: number;
+  onClick(sha: string): void;
+}) {
+  const now = Date.now() / 1000;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: BLAME_WIDTH,
+        height: "100%",
+        overflow: "hidden",
+        fontFamily: "var(--mono, monospace)",
+        fontSize: 11,
+        userSelect: "none",
+        zIndex: 3,
+      }}
+    >
+      <div style={{ position: "absolute", top: -scrollTop, left: 0, right: 0 }}>
+        {lines.map((line) => {
+          const uncommitted = line.sha.replace(/0/g, "") === "";
+          const ageDays = uncommitted ? 0 : Math.max(0, (now - line.authorTime) / 86400);
+          const bg = uncommitted ? "rgba(70,70,70,0.35)" : blameColor(ageDays);
+          const date = uncommitted ? "" : formatBlameDate(line.authorTime);
+          const author = uncommitted ? "" : truncateAuthor(line.author);
+          return (
+            <div
+              key={line.line}
+              title={uncommitted ? "Uncommitted" : `${line.sha.slice(0, 8)} ${line.author} <${line.authorMail}>\n${line.summary}`}
+              onClick={() => onClick(line.sha)}
+              style={{
+                height: lineHeight,
+                lineHeight: `${lineHeight}px`,
+                padding: "0 6px",
+                background: bg,
+                color: "var(--fg, #ddd)",
+                borderRight: "1px solid var(--border, #333)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                cursor: uncommitted ? "default" : "pointer",
+                boxSizing: "border-box",
+              }}
+            >
+              {uncommitted ? "" : `${date}  ${author}`}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function blameColor(ageDays: number): string {
+  // Younger commits = warmer/more saturated; older = cooler/darker.
+  if (ageDays < 7) return "rgba(96, 165, 250, 0.55)";
+  if (ageDays < 30) return "rgba(96, 165, 250, 0.40)";
+  if (ageDays < 180) return "rgba(96, 165, 250, 0.28)";
+  if (ageDays < 365) return "rgba(120, 140, 170, 0.22)";
+  if (ageDays < 1095) return "rgba(120, 140, 170, 0.14)";
+  return "rgba(120, 140, 170, 0.08)";
+}
+
+function formatBlameDate(epochSec: number): string {
+  const d = new Date(epochSec * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function truncateAuthor(author: string): string {
+  if (author.length <= 14) return author;
+  return `${author.slice(0, 13)}…`;
 }
 
 const emptyStyle: CSSProperties = {

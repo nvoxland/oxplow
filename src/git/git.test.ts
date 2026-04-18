@@ -6,10 +6,12 @@ import { join } from "node:path";
 import {
   detectBaseBranch,
   detectCurrentBranch,
+  gitBlame,
   isGitRepo,
   isGitWorktree,
   listBranchChanges,
   listBranches,
+  parseBlamePorcelain,
   readFileAtRef,
 } from "./git.js";
 
@@ -93,6 +95,65 @@ test("readFileAtRef returns the ref content; null when the file is absent", () =
   const initial = readFileAtRef(repoDir, "HEAD", "README.md");
   expect(initial).toBe("# test\n");
   expect(readFileAtRef(repoDir, "HEAD", "does-not-exist.md")).toBeNull();
+});
+
+test("parseBlamePorcelain handles repeated-sha hunks by reusing cached metadata", () => {
+  const raw = [
+    "abcd1234abcd1234abcd1234abcd1234abcd1234 1 1 2",
+    "author Alice",
+    "author-mail <alice@example.com>",
+    "author-time 1700000000",
+    "author-tz +0000",
+    "committer Alice",
+    "summary first commit",
+    "filename foo.txt",
+    "\thello",
+    "abcd1234abcd1234abcd1234abcd1234abcd1234 2 2",
+    "\tworld",
+    "0000000000000000000000000000000000000000 3 3 1",
+    "author Not Committed Yet",
+    "author-mail <not.committed.yet@example.com>",
+    "author-time 1710000000",
+    "author-tz +0000",
+    "committer Not Committed Yet",
+    "summary Version of foo.txt from foo.txt",
+    "filename foo.txt",
+    "\twip",
+    "",
+  ].join("\n");
+  const parsed = parseBlamePorcelain(raw);
+  expect(parsed.length).toBe(3);
+  expect(parsed[0]).toMatchObject({
+    line: 1,
+    sha: "abcd1234abcd1234abcd1234abcd1234abcd1234",
+    author: "Alice",
+    authorMail: "alice@example.com",
+    authorTime: 1700000000,
+    summary: "first commit",
+  });
+  expect(parsed[1]).toMatchObject({ line: 2, sha: "abcd1234abcd1234abcd1234abcd1234abcd1234", author: "Alice" });
+  expect(parsed[2]?.sha).toBe("0000000000000000000000000000000000000000");
+});
+
+test("gitBlame returns one BlameLine per final-file line with commit metadata", () => {
+  const repoDir = mkRepo();
+  writeFileSync(join(repoDir, "foo.txt"), "one\ntwo\n", "utf8");
+  execFileSync("git", ["-C", repoDir, "add", "foo.txt"], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "add foo"], { stdio: "ignore" });
+
+  const blame = gitBlame(repoDir, "foo.txt");
+  expect(blame.length).toBe(2);
+  expect(blame[0]?.line).toBe(1);
+  expect(blame[1]?.line).toBe(2);
+  expect(blame[0]?.author).toBe("Test User");
+  expect(blame[0]?.summary).toBe("add foo");
+  expect(blame[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+});
+
+test("gitBlame returns [] for non-git paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "newde-noblame-"));
+  tempDirs.push(dir);
+  expect(gitBlame(dir, "nope.txt")).toEqual([]);
 });
 
 test("detectBaseBranch prefers main when no origin is configured", () => {

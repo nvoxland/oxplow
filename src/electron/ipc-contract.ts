@@ -13,6 +13,7 @@ import type {
   TextSearchHit,
   GitOpResult,
   GitLogCommit,
+  BlameLine,
   RefOption,
   BatchWorkState,
   Stream,
@@ -50,6 +51,7 @@ export type {
   TextSearchHit,
   GitOpResult,
   GitLogCommit,
+  BlameLine,
   RefOption,
   AgentStatus,
   MenuGroupSnapshot,
@@ -187,6 +189,7 @@ export interface DesktopApi {
   gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
+  gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
   listAllRefs(streamId: string): Promise<RefOption[]>;
   readFileAtRef(streamId: string, ref: string, path: string): Promise<{ content: string | null }>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;

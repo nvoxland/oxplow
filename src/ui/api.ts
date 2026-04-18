@@ -1,7 +1,7 @@
 import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
 
 export type { NewdeEvent } from "../electron/ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption } from "../git/git.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
 
 export interface Stream {
   id: string;
@@ -411,6 +411,13 @@ export async function listFileCommits(
   limit?: number,
 ): Promise<import("../git/git.js").GitLogCommit[]> {
   return desktopApi().listFileCommits(streamId, path, limit);
+}
+
+export async function gitBlame(
+  streamId: string,
+  path: string,
+): Promise<import("../git/git.js").BlameLine[]> {
+  return desktopApi().gitBlame(streamId, path);
 }
 
 export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommitDetail, GitLogCommit, GitLogResult, Stream } from "../../api.js";
 import { getCommitDetail, getGitLog } from "../../api.js";
 import { logUi } from "../../logger.js";
@@ -9,6 +9,7 @@ import type { DiffRequest } from "../Panels/GitChangesPanel.js";
 interface Props {
   stream: Stream | null;
   onOpenDiff?(request: DiffRequest): void;
+  revealSha?: { sha: string; token: number } | null;
 }
 
 const BRANCH_COLORS = [
@@ -27,7 +28,7 @@ const LANE_WIDTH = 14;
 const NODE_RADIUS = 4;
 const GRAPH_PAD = 8;
 
-export function HistoryPanel({ stream, onOpenDiff }: Props) {
+export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
   const [log, setLog] = useState<GitLogResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export function HistoryPanel({ stream, onOpenDiff }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailWidth, setDetailWidth] = useState<number>(380);
   const [dragging, setDragging] = useState(false);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const limit = 500;
 
   useEffect(() => {
@@ -109,6 +111,16 @@ export function HistoryPanel({ stream, onOpenDiff }: Props) {
       document.body.style.cursor = prevCursor;
     };
   }, [dragging]);
+
+  useEffect(() => {
+    if (!revealSha) return;
+    setSelectedSha(revealSha.sha);
+    // Defer to let rows render before scrolling.
+    requestAnimationFrame(() => {
+      const node = rowRefs.current.get(revealSha.sha);
+      if (node) node.scrollIntoView({ block: "nearest" });
+    });
+  }, [revealSha?.token, revealSha?.sha]);
 
   const authors = useMemo(() => {
     if (!log) return [] as string[];
@@ -207,19 +219,27 @@ export function HistoryPanel({ stream, onOpenDiff }: Props) {
               layout.rows.map((row, index) => {
                 const next = layout.rows[index + 1] ?? null;
                 const matched = !matches || matches.has(row.commit.sha);
+                const sha = row.commit.sha;
                 return (
-                  <CommitRow
-                    key={row.commit.sha}
-                    row={row}
-                    nextRow={next}
-                    graphWidth={graphWidth}
-                    selected={selectedSha === row.commit.sha}
-                    matched={matched}
-                    branchHeads={branchHeadBySha.get(row.commit.sha) ?? []}
-                    tags={tagBySha.get(row.commit.sha) ?? []}
-                    currentBranch={log.currentBranch}
-                    onClick={() => setSelectedSha(row.commit.sha)}
-                  />
+                  <div
+                    key={sha}
+                    ref={(node) => {
+                      if (node) rowRefs.current.set(sha, node);
+                      else rowRefs.current.delete(sha);
+                    }}
+                  >
+                    <CommitRow
+                      row={row}
+                      nextRow={next}
+                      graphWidth={graphWidth}
+                      selected={selectedSha === sha}
+                      matched={matched}
+                      branchHeads={branchHeadBySha.get(sha) ?? []}
+                      tags={tagBySha.get(sha) ?? []}
+                      currentBranch={log.currentBranch}
+                      onClick={() => setSelectedSha(sha)}
+                    />
+                  </div>
                 );
               })
             )}

@@ -581,6 +581,78 @@ export function listFileCommits(projectDir: string, path: string, limit = 50): G
   return commits;
 }
 
+export interface BlameLine {
+  line: number;
+  sha: string;
+  author: string;
+  authorMail: string;
+  authorTime: number;
+  summary: string;
+}
+
+const BLAME_ZERO_SHA = "0000000000000000000000000000000000000000";
+
+/**
+ * Parse `git blame --porcelain` output into one entry per final-file line.
+ * Commit headers appear on the first occurrence of each sha; subsequent
+ * hunks from the same sha only include the `sha orig-line final-line count`
+ * header, so we cache commit metadata by sha.
+ */
+export function parseBlamePorcelain(raw: string): BlameLine[] {
+  const lines = raw.split("\n");
+  const meta = new Map<string, { author: string; authorMail: string; authorTime: number; summary: string }>();
+  const out: BlameLine[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const header = lines[i++];
+    if (!header) continue;
+    const headerMatch = header.match(/^([0-9a-f]{40})\s+\d+\s+(\d+)(?:\s+\d+)?$/);
+    if (!headerMatch) continue;
+    const sha = headerMatch[1]!;
+    const finalLine = Number(headerMatch[2]);
+    let entry = meta.get(sha);
+    const fresh = entry ? { ...entry } : { author: "", authorMail: "", authorTime: 0, summary: "" };
+    // Consume header lines until we hit the content line (starts with TAB).
+    while (i < lines.length && !lines[i]!.startsWith("\t")) {
+      const kv = lines[i++]!;
+      if (kv.startsWith("author ")) fresh.author = kv.slice(7);
+      else if (kv.startsWith("author-mail ")) fresh.authorMail = kv.slice(12).replace(/^<|>$/g, "");
+      else if (kv.startsWith("author-time ")) fresh.authorTime = Number(kv.slice(12));
+      else if (kv.startsWith("summary ")) fresh.summary = kv.slice(8);
+    }
+    // Skip the content line itself.
+    if (i < lines.length && lines[i]!.startsWith("\t")) i++;
+    if (!entry) meta.set(sha, fresh);
+    entry = fresh;
+    out.push({
+      line: finalLine,
+      sha,
+      author: entry.author,
+      authorMail: entry.authorMail,
+      authorTime: entry.authorTime,
+      summary: entry.summary,
+    });
+  }
+  return out;
+}
+
+export function gitBlame(projectDir: string, path: string): BlameLine[] {
+  if (!isGitRepo(projectDir)) return [];
+  let raw: string;
+  try {
+    raw = execFileSync("git", ["-C", projectDir, "blame", "--porcelain", "HEAD", "--", path], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return [];
+  }
+  return parseBlamePorcelain(raw);
+}
+
+export { BLAME_ZERO_SHA };
+
 export interface RefOption {
   kind: "branch" | "tag";
   name: string;

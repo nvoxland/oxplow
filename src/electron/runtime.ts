@@ -25,6 +25,7 @@ import {
   gitPush,
   gitPull,
   listFileCommits,
+  gitBlame,
   listAllRefs,
   type BranchChanges,
   type ChangeScopes,
@@ -450,6 +451,11 @@ export class ElectronRuntime {
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {
     const stream = this.resolveStream(streamId);
     return listFileCommits(stream.worktree_path, path, limit);
+  }
+
+  gitBlame(streamId: string, path: string) {
+    const stream = this.resolveStream(streamId);
+    return gitBlame(stream.worktree_path, path);
   }
 
   listAllRefs(streamId: string): RefOption[] {
