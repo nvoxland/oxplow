@@ -7,6 +7,12 @@ export interface DiffSpec {
   leftRef: string;
   rightKind: "working" | { ref: string };
   baseLabel: string;
+  /** When set, skip reading the left side and diff this literal text instead. */
+  leftContent?: string;
+  /** When set, skip reading the right side and diff this literal text instead. */
+  rightContent?: string;
+  /** Optional override for the tab label suffix shown next to the filename. */
+  labelOverride?: string;
 }
 
 interface Props {
@@ -54,15 +60,18 @@ export function DiffPane({ stream, spec, visible }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const [leftResult, rightResult] = await Promise.all([
-          readFileAtRef(stream.id, spec.leftRef, spec.path),
-          spec.rightKind === "working"
+        const leftPromise = spec.leftContent !== undefined
+          ? Promise.resolve({ content: spec.leftContent })
+          : readFileAtRef(stream.id, spec.leftRef, spec.path);
+        const rightPromise = spec.rightContent !== undefined
+          ? Promise.resolve({ content: spec.rightContent })
+          : spec.rightKind === "working"
             ? readWorkspaceFile(stream.id, spec.path).then(
                 (file) => ({ content: file.content as string | null }),
                 () => ({ content: null as string | null }),
               )
-            : readFileAtRef(stream.id, spec.rightKind.ref, spec.path),
-        ]);
+            : readFileAtRef(stream.id, spec.rightKind.ref, spec.path);
+        const [leftResult, rightResult] = await Promise.all([leftPromise, rightPromise]);
         if (cancelled) return;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
@@ -82,7 +91,7 @@ export function DiffPane({ stream, spec, visible }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [stream, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref]);
+  }, [stream, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>

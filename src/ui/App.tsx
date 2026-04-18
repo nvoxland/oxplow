@@ -959,6 +959,28 @@ export function App() {
     setCenterActive(id);
   };
 
+  const handleCompareWithClipboard = async (selection: string, path: string) => {
+    let clipboard = "";
+    try {
+      clipboard = await navigator.clipboard.readText();
+    } catch (err) {
+      setError(`Clipboard read failed: ${String(err)}`);
+      return;
+    }
+    const id = `diff:clipboard:${Date.now()}:${path}`;
+    const spec: DiffSpec = {
+      path,
+      leftRef: "",
+      rightKind: "working",
+      baseLabel: "clipboard",
+      leftContent: selection,
+      rightContent: clipboard,
+      labelOverride: "selection vs clipboard",
+    };
+    setDiffTabs((prev) => [...prev, { id, spec }]);
+    setCenterActive(id);
+  };
+
   const handleRevealCommit = (sha: string) => {
     const token = Date.now();
     setHistoryReveal({ sha, token });
@@ -1015,15 +1037,17 @@ export function App() {
             onSelectOpenFile={handleSelectOpenFile}
             onCloseOpenFile={handleCloseOpenFile}
             onRevealCommit={handleRevealCommit}
+            onCompareWithClipboard={handleCompareWithClipboard}
           />
         ) : null,
       });
     }
     for (const diff of diffTabs) {
       const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
+      const suffix = diff.spec.labelOverride ?? "diff";
       tabs.push({
         id: diff.id,
-        label: `${label} (diff)`,
+        label: `${label} (${suffix})`,
         closable: true,
         render: () => stream ? (
           <DiffPane stream={stream} spec={diff.spec} visible={effectiveCenterActive === diff.id} />

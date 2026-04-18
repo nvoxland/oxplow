@@ -24,6 +24,7 @@ interface Props {
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
   onRevealCommit?(sha: string): void;
+  onCompareWithClipboard?(selection: string, path: string): void;
 }
 
 export function EditorPane({
@@ -41,6 +42,7 @@ export function EditorPane({
   onSelectOpenFile,
   onCloseOpenFile,
   onRevealCommit,
+  onCompareWithClipboard,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
@@ -100,7 +102,15 @@ export function EditorPane({
       editor.onContextMenu((event: any) => {
         if (!filePathRef.current) return;
         const position = event.target?.position ?? editor.getPosition();
-        if (position) {
+        // Preserve any active selection so actions like "Compare with
+        // Clipboard" can still see it; only move the caret when the
+        // right-click landed outside the current selection.
+        const currentSelection = editor.getSelection?.();
+        const clickInsideSelection = position
+          && currentSelection
+          && !currentSelection.isEmpty()
+          && currentSelection.containsPosition(position);
+        if (position && !clickInsideSelection) {
           editor.setPosition(position);
         }
         editor.focus();
@@ -463,6 +473,19 @@ export function EditorPane({
       enabled: !!filePath,
       run: () => toggleBlame(),
     },
+    {
+      id: "editor.compare-clipboard",
+      label: "Compare with Clipboard",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => {
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        const sel = editor?.getSelection?.();
+        if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
+        const text = model.getValueInRange(sel);
+        onCompareWithClipboard?.(text, filePath);
+      },
+    },
   ];
 
   const showBlame = blame && blame.path === filePath;
@@ -500,6 +523,11 @@ export function EditorPane({
       </div>
     </div>
   );
+}
+
+function hasEditorSelection(editor: any): boolean {
+  const sel = editor?.getSelection?.();
+  return !!sel && !sel.isEmpty();
 }
 
 const BLAME_WIDTH = 150;
