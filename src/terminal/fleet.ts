@@ -14,12 +14,18 @@ export function ensureAgentPane(
   cols: number,
   rows: number,
   agentCommand: string,
-  logger?: Logger,
+  opts: { signatureSource?: string; logger?: Logger } = {},
 ): boolean {
   const session = target.split(":")[0];
+  const logger = opts.logger;
   logger?.debug("ensuring agent pane", { session, target, cwd, cols, rows });
   ensureSession(session, cwd);
-  const created = ensureWindow(target, cwd, agentCommand, cols, rows, launcherSignature(agentCommand));
+  // Signature detects "launcher config actually changed" — stuff that would
+  // warrant killing a live agent and respawning. Callers can pass a stripped
+  // form (e.g. without --resume <id>) so reconnecting to a batch whose live
+  // agent published a new resume id doesn't look like a config change.
+  const signature = launcherSignature(opts.signatureSource ?? agentCommand);
+  const created = ensureWindow(target, cwd, agentCommand, cols, rows, signature);
 
   const placeholder = `${session}:__placeholder__`;
   if (listWindows(session).includes("__placeholder__") && listWindows(session).length > 1) {
@@ -47,5 +53,5 @@ export function ensureStreamPane(
   logger?: Logger,
 ): boolean {
   const target = stream.panes[pane];
-  return ensureAgentPane(target, stream.worktree_path, cols, rows, claudeCommand, logger);
+  return ensureAgentPane(target, stream.worktree_path, cols, rows, claudeCommand, { logger });
 }

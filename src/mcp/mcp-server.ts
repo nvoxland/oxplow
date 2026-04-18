@@ -339,9 +339,16 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     try {
       if (existsSync(lockfilePath)) unlinkSync(lockfilePath);
     } catch {}
+    // Evict Claude's hook connections: wss.close / http.close would otherwise
+    // wait for idle keep-alive sockets (Node's default is 5 s) before firing
+    // their callbacks, stalling app shutdown.
+    for (const client of wss.clients) {
+      try { client.terminate(); } catch {}
+    }
     await new Promise<void>((resolve) => {
       wss.close(() => resolve());
     });
+    http.closeAllConnections?.();
     await new Promise<void>((resolve) => {
       http.close(() => resolve());
     });

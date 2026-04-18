@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildAgentCommand } from "./agent-command.js";
+import { buildAgentCommand, buildAgentCommandForSession } from "./agent-command.js";
 import type { Stream } from "../persistence/stream-store.js";
 
 function makeStream(overrides: Partial<Stream> = {}): Stream {
@@ -99,6 +99,18 @@ test("buildAgentCommand omits --resume when none is saved", () => {
   }), "working");
   expect(command).toContain("exec claude");
   expect(command).not.toContain("--resume");
+});
+
+test("buildAgentCommandForSession with empty resumeSessionId is identical regardless of which session was previously saved", () => {
+  const opts = { pluginDir: "/abs/plugin", allowedTools: ["mcp__newde__*"], appendSystemPrompt: "batch b-42" };
+  const withA = buildAgentCommandForSession("claude", "/tmp/wt", "session-a", opts);
+  const withB = buildAgentCommandForSession("claude", "/tmp/wt", "session-b", opts);
+  expect(withA).not.toBe(withB);
+  const stripped = buildAgentCommandForSession("claude", "/tmp/wt", "", opts);
+  // The stripped form is a stable "launcher identity" for the batch: same
+  // agent kind, worktree, and options, independent of the mutating --resume id.
+  expect(stripped).not.toContain("--resume");
+  expect(buildAgentCommandForSession("claude", "/tmp/wt", "", opts)).toBe(stripped);
 });
 
 test("buildAgentCommand launches Copilot from the stream worktree", () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import type { TerminalEvent } from "../../electron/ipc-contract.js";
 import { logUi } from "../logger.js";
 import {
   shouldHandleTerminalPageKey,
@@ -163,8 +164,12 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       };
       host.addEventListener("mousedown", handleMouseDown);
 
-      const unsubscribe = window.newdeApi.onTerminalEvent((event) => {
-        if (event.sessionId !== sessionIdRef.current) return;
+      // Direct-mode agents replay their scrollback synchronously from inside
+      // the openTerminalSession handler, so terminal-event messages may reach
+      // the renderer before the invoke response resolves and sessionIdRef is
+      // set. Buffer them until the sessionId is known.
+      const pendingEvents: TerminalEvent[] = [];
+      const applyEvent = (event: TerminalEvent) => {
         try {
           const msg = JSON.parse(event.message);
           if (msg.type === "data" && typeof msg.bytes === "string") {
@@ -174,6 +179,14 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
             term.write(bytes);
           }
         } catch {}
+      };
+      const unsubscribe = window.newdeApi.onTerminalEvent((event) => {
+        if (sessionIdRef.current === null) {
+          pendingEvents.push(event);
+          return;
+        }
+        if (event.sessionId !== sessionIdRef.current) return;
+        applyEvent(event);
       });
 
       logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, transportMode });
@@ -183,6 +196,10 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
           return;
         }
         sessionIdRef.current = sessionId;
+        for (const event of pendingEvents) {
+          if (event.sessionId === sessionId) applyEvent(event);
+        }
+        pendingEvents.length = 0;
         term.focus();
         if (transportMode === "tmux") {
           void window.newdeApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));

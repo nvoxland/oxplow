@@ -53,7 +53,8 @@ import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 import { detectCurrentBranch } from "../git/git.js";
 import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
-import { attachCommand, attachPane } from "../terminal/pty-bridge.js";
+import { attachPane } from "../terminal/pty-bridge.js";
+import { AgentPtyStore } from "../terminal/agent-pty-store.js";
 import type { EditorFocusPayload, UiLogPayload } from "./ipc-contract.js";
 
 export class ElectronRuntime {
@@ -70,6 +71,7 @@ export class ElectronRuntime {
   readonly resumeTracker: ResumeTracker;
   readonly lspManager: LspSessionManager;
   readonly editorFocusStore: EditorFocusStore;
+  readonly agentPtyStore: AgentPtyStore;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
   readonly config: NewdeConfig;
   readonly events: EventBus;
@@ -104,6 +106,7 @@ export class ElectronRuntime {
     this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
     this.editorFocusStore = new EditorFocusStore();
+    this.agentPtyStore = new AgentPtyStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
   }
 
@@ -283,6 +286,7 @@ export class ElectronRuntime {
     cleanupSessions(this.store.list());
     for (const socket of this.terminalSessions.values()) socket.close();
     this.terminalSessions.clear();
+    this.agentPtyStore.disposeAll();
     for (const socket of this.lspClients.values()) socket.close();
     this.lspClients.clear();
     this.workspaceWatchers.dispose();
@@ -592,13 +596,17 @@ export class ElectronRuntime {
     });
     const agentCommand = this.getAgentCommand(stream, batch);
     if (mode === "tmux") {
+      // Use a resume-less variant as the launcher identity so reconnecting to
+      // a live agent whose resume id has since changed doesn't look like a
+      // config change and trigger a respawn.
+      const signatureSource = this.getAgentCommand(stream, batch, { withoutResume: true });
       const created = ensureAgentPane(
         batch.pane_target,
         stream.worktree_path,
         cols,
         rows,
         agentCommand,
-        paneLogger,
+        { signatureSource, logger: paneLogger },
       );
       if (created) {
         this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
@@ -613,8 +621,20 @@ export class ElectronRuntime {
     if (mode === "tmux") {
       attachPane(socket as any, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
     } else {
-      this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
-      attachCommand(socket as any, agentCommand, stream.worktree_path, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
+      // Direct-mode agent PTYs live in the runtime and persist across
+      // UI attach/detach. Switching batches or streams detaches the socket
+      // but leaves the Claude process running so the user can return to an
+      // in-progress agent without killing and resuming it.
+      const alreadySpawned = this.agentPtyStore.get(batch.id) !== null;
+      const agentPty = this.agentPtyStore.ensure(
+        batch.id,
+        { command: agentCommand, cwd: stream.worktree_path, cols, rows },
+        paneLogger.child({ subsystem: "agent-pty" }),
+      );
+      if (!alreadySpawned) {
+        this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
+      }
+      agentPty.attach(socket as any, cols, rows);
     }
     this.terminalSessions.set(sessionId, socket);
     return sessionId;
@@ -673,7 +693,8 @@ export class ElectronRuntime {
     return batch;
   }
 
-  private getAgentCommand(stream: Stream, batch: Batch): string {
+  private getAgentCommand(stream: Stream, batch: Batch, opts: { withoutResume?: boolean } = {}): string {
+    const resumeSessionId = opts.withoutResume ? "" : batch.resume_session_id;
     if (this.config.agent === "claude") {
       if (!this.mcp) throw new Error("mcp server not started");
       // One Claude plugin per runtime (the MCP port + hook URL are stable for
@@ -691,7 +712,7 @@ export class ElectronRuntime {
       return buildAgentCommandForSession(
         this.config.agent,
         stream.worktree_path,
-        batch.resume_session_id,
+        resumeSessionId,
         {
           pluginDir: this.electronPlugin.pluginDir,
           allowedTools: ["mcp__newde__*"],
@@ -708,7 +729,7 @@ export class ElectronRuntime {
     return buildAgentCommandForSession(
       this.config.agent,
       stream.worktree_path,
-      batch.resume_session_id,
+      resumeSessionId,
     );
   }
 
