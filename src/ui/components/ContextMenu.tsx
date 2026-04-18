@@ -20,10 +20,10 @@ export function ContextMenu({ items, position, onClose, minWidth = 220 }: Contex
   const rootRef = useRef<HTMLDivElement>(null);
   const [resolvedPosition, setResolvedPosition] = useState(position);
 
-  useEffect(() => {
-    setResolvedPosition(position);
-  }, [position]);
-
+  // NOTE: do not reset `resolvedPosition` back to the raw `position` here —
+  // useLayoutEffect below clamps to viewport, and a separate useEffect that
+  // wrote the unclamped value would fire AFTER layout effects and undo the
+  // clamp on the very next microtask, letting menus slide off the bottom.
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -115,21 +115,56 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
               <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ?? ""}</span>
             </button>
             {hasSubmenu && openSubmenuId === item.id ? (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: "100%",
-                  marginLeft: 2,
-                  zIndex: 2,
-                }}
-              >
-                <MenuList items={item.submenu!} onAction={onAction} minWidth={minWidth} />
-              </div>
+              <Submenu items={item.submenu!} onAction={onAction} minWidth={minWidth} />
             ) : null}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Nested submenu with viewport-aware positioning. Measures its own rendered
+ * size and shifts upward when it would otherwise overflow the bottom of the
+ * window — same problem the outer ContextMenu solves for itself.
+ */
+function Submenu({
+  items,
+  onAction,
+  minWidth,
+}: {
+  items: MenuItem[];
+  onAction?(): void;
+  minWidth: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [topOffset, setTopOffset] = useState(0);
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const overflowBottom = rect.bottom - (window.innerHeight - 8);
+    if (overflowBottom > 0) {
+      setTopOffset(-overflowBottom);
+    } else {
+      setTopOffset(0);
+    }
+  }, [items, minWidth]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        top: topOffset,
+        left: "100%",
+        marginLeft: 2,
+        zIndex: 2,
+      }}
+    >
+      <MenuList items={items} onAction={onAction} minWidth={minWidth} />
     </div>
   );
 }
