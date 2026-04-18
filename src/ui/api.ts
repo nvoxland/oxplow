@@ -201,6 +201,10 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
   return desktopApi().renameCurrentStream(title);
 }
 
+export async function renameStream(streamId: string, title: string): Promise<Stream> {
+  return desktopApi().renameStream(streamId, title);
+}
+
 export async function listBranches(): Promise<BranchRef[]> {
   return desktopApi().listBranches();
 }
@@ -238,6 +242,10 @@ export async function promoteBatch(streamId: string, batchId: string): Promise<B
 
 export async function completeBatch(streamId: string, batchId: string): Promise<BatchState> {
   return desktopApi().completeBatch(streamId, batchId);
+}
+
+export async function renameBatch(streamId: string, batchId: string, title: string): Promise<Batch> {
+  return desktopApi().renameBatch(streamId, batchId, title);
 }
 
 export async function getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState> {
@@ -659,6 +667,17 @@ export function subscribeWorkspaceEvents(
         path: event.path,
         t: event.t,
       });
+    }
+  });
+}
+
+export function subscribeGitRefsEvents(
+  streamId: string,
+  onEvent: () => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type === "git-refs.changed" && event.streamId === streamId) {
+      onEvent();
     }
   });
 }

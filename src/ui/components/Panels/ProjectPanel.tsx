@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getBranchChanges,
@@ -13,6 +14,7 @@ import {
   listWorkspaceFiles,
   readWorkspaceFile,
   searchWorkspaceText,
+  subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
   type AgentTurn,
   type BatchFileChange,
@@ -138,8 +140,16 @@ export function ProjectPanel({
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => refreshForPath(event.path), 75);
     });
+    // Git ops (commit / reset / pull / push) change status markers without
+    // touching the worktree entries we already have; refresh the index so the
+    // colored status badges stay in sync.
+    const unsubscribeRefs = subscribeGitRefsEvents(stream.id, () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => { void loadWorkspaceIndex(); }, 150);
+    });
     return () => {
       unsubscribe();
+      unsubscribeRefs();
       if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [loadDir, loadWorkspaceIndex, stream]);
@@ -568,31 +578,13 @@ export function ProjectPanel({
             <button onClick={() => setPushPullDialog("push")} title="Push…" style={iconButtonStyle}>↑</button>
           </>
         ) : null}
-        <select
-          value={filterMode}
-          onChange={(e) => setFilterMode(e.target.value as FilterMode)}
-          style={filterSelectStyle}
-          title={scopes?.onDefaultBranch ? "Branch changes disabled on default branch" : undefined}
-        >
-          <option value="all">All files</option>
-          {gitEnabled ? <option value="uncommitted">Uncommitted changes</option> : null}
-          {gitEnabled ? (
-            <option
-              value="branch"
-              disabled={!scopes?.branchBase || scopes?.onDefaultBranch}
-            >
-              Branch changes{scopes?.branchBase && !scopes?.onDefaultBranch ? ` (vs ${scopes.branchBase})` : ""}
-            </option>
-          ) : null}
-          {gitEnabled ? (
-            <option value="unpushed" disabled={!scopes?.upstream}>
-              Unpushed changes{scopes?.upstream ? ` (vs ${scopes.upstream})` : " (no upstream)"}
-            </option>
-          ) : null}
-          <option value="turn" disabled={recentTurns.length === 0}>
-            Turn{recentTurns.length === 0 ? " (no turns yet)" : ""}
-          </option>
-        </select>
+        <FilterMenuButton
+          filterMode={filterMode}
+          setFilterMode={setFilterMode}
+          gitEnabled={gitEnabled}
+          scopes={scopes}
+          recentTurns={recentTurns}
+        />
         {filterMode === "turn" && recentTurns.length > 0 ? (
           <select
             value={selectedTurnId ?? ""}
@@ -611,7 +603,6 @@ export function ProjectPanel({
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
         {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
         {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>Use File → Quick Open or Ctrl/Cmd+P to search by path.</div>
         {rootEntries.length === 0 && !loadingDirs[""] ? (
           <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
         ) : (
@@ -632,6 +623,9 @@ export function ProjectPanel({
             />
           </>
         )}
+      </div>
+      <div style={filterStatusBarStyle}>
+        <span>Showing: {filterModeLabel(filterMode, scopes, selectedTurnId, recentTurns)}</span>
       </div>
       {contextMenu ? (
         <ContextMenu
@@ -1185,3 +1179,145 @@ function truncate(input: string, max: number): string {
   if (oneLine.length <= max) return oneLine || "(empty prompt)";
   return oneLine.slice(0, max - 1) + "…";
 }
+
+type FilterMode = "all" | "uncommitted" | "branch" | "unpushed" | "turn";
+
+function filterModeLabel(
+  mode: FilterMode,
+  scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null,
+  selectedTurnId: string | null,
+  recentTurns: { id: string; prompt: string }[],
+): string {
+  if (mode === "all") return "all files";
+  if (mode === "uncommitted") return "uncommitted changes";
+  if (mode === "branch") return `branch changes${scopes?.branchBase ? ` (vs ${scopes.branchBase})` : ""}`;
+  if (mode === "unpushed") return `unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : ""}`;
+  if (mode === "turn") {
+    const turn = recentTurns.find((t) => t.id === selectedTurnId);
+    return `files from turn${turn ? ` · ${truncate(turn.prompt, 40)}` : ""}`;
+  }
+  return mode;
+}
+
+function FilterMenuButton({
+  filterMode,
+  setFilterMode,
+  gitEnabled,
+  scopes,
+  recentTurns,
+}: {
+  filterMode: FilterMode;
+  setFilterMode: (mode: FilterMode) => void;
+  gitEnabled: boolean;
+  scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null;
+  recentTurns: { id: string; prompt: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(event: MouseEvent) {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const options: Array<{ value: FilterMode; label: string; disabled?: boolean }> = [
+    { value: "all", label: "All files" },
+  ];
+  if (gitEnabled) options.push({ value: "uncommitted", label: "Uncommitted changes" });
+  if (gitEnabled) options.push({
+    value: "branch",
+    label: `Branch changes${scopes?.branchBase && !scopes?.onDefaultBranch ? ` (vs ${scopes.branchBase})` : ""}`,
+    disabled: !scopes?.branchBase || !!scopes?.onDefaultBranch,
+  });
+  if (gitEnabled) options.push({
+    value: "unpushed",
+    label: `Unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : " (no upstream)"}`,
+    disabled: !scopes?.upstream,
+  });
+  options.push({ value: "turn", label: `Turn${recentTurns.length === 0 ? " (no turns yet)" : ""}`, disabled: recentTurns.length === 0 });
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={`Filter: ${filterModeLabel(filterMode, scopes, null, recentTurns)}`}
+        style={{
+          ...iconButtonStyle,
+          background: filterMode !== "all" ? "var(--accent)" : "var(--bg-2)",
+          color: filterMode !== "all" ? "#fff" : "inherit",
+        }}
+      >
+        {/* eye icon (SVG for crisp rendering) */}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+      {open ? (
+        <div style={filterMenuStyle}>
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              disabled={opt.disabled}
+              onClick={() => {
+                if (opt.disabled) return;
+                setFilterMode(opt.value);
+                setOpen(false);
+              }}
+              style={{
+                ...filterMenuItemStyle,
+                background: opt.value === filterMode ? "rgba(74,158,255,0.18)" : "transparent",
+                color: opt.disabled ? "var(--muted)" : "var(--fg)",
+                cursor: opt.disabled ? "not-allowed" : "pointer",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const filterMenuStyle: CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  right: 0,
+  zIndex: 30,
+  minWidth: 220,
+  background: "var(--bg-2)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
+  display: "flex",
+  flexDirection: "column",
+  padding: 4,
+};
+
+const filterMenuItemStyle: CSSProperties = {
+  textAlign: "left",
+  border: "none",
+  borderRadius: 4,
+  padding: "6px 10px",
+  fontFamily: "inherit",
+  fontSize: 12,
+};
+
+const filterStatusBarStyle: CSSProperties = {
+  borderTop: "1px solid var(--border)",
+  padding: "4px 10px",
+  background: "var(--bg-2)",
+  color: "var(--muted)",
+  fontSize: 11,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexShrink: 0,
+};

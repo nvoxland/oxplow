@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type BatchLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated";
+export type BatchLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed";
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 export type PaneKind = "working" | "talking";
 
@@ -75,6 +75,12 @@ export interface CommitPointChangedEvent {
   kind: "created" | "updated" | "deleted" | "reordered";
 }
 
+export interface GitRefsChangedEvent {
+  type: "git-refs.changed";
+  streamId: string;
+  t: number;
+}
+
 export interface WaitPointChangedEvent {
   type: "wait-point.changed";
   streamId: string | null;
@@ -105,7 +111,8 @@ export type NewdeEvent =
   | FileChangeRecordedEvent
   | WorkspaceContextChangedEvent
   | CommitPointChangedEvent
-  | WaitPointChangedEvent;
+  | WaitPointChangedEvent
+  | GitRefsChangedEvent;
 
 export type NewdeEventType = NewdeEvent["type"];
 

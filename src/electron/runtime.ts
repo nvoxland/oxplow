@@ -73,6 +73,7 @@ import {
   writeWorkspaceFile,
 } from "../git/workspace-files.js";
 import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
+import { GitRefsWatcherRegistry } from "../git/git-refs-watch.js";
 import { detectCurrentBranch } from "../git/git.js";
 import { loadProjectConfig, type NewdeConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
@@ -98,6 +99,7 @@ export class ElectronRuntime {
   readonly editorFocusStore: EditorFocusStore;
   readonly agentPtyStore: AgentPtyStore;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
+  readonly gitRefsWatchers: GitRefsWatcherRegistry;
   readonly config: NewdeConfig;
   readonly events: EventBus;
 
@@ -135,6 +137,7 @@ export class ElectronRuntime {
     this.editorFocusStore = new EditorFocusStore();
     this.agentPtyStore = new AgentPtyStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
+    this.gitRefsWatchers = new GitRefsWatcherRegistry(logger.child({ subsystem: "git-refs-watch" }));
   }
 
   static async create(projectDir: string): Promise<ElectronRuntime> {
@@ -187,6 +190,7 @@ export class ElectronRuntime {
     for (const existingStream of this.store.list()) {
       this.batchStore.ensureStream(existingStream);
       this.workspaceWatchers.ensureWatching(existingStream);
+      this.gitRefsWatchers.ensureWatching(existingStream);
     }
 
     this.workspaceWatchers.subscribe((event) => {
@@ -199,6 +203,13 @@ export class ElectronRuntime {
         t: event.t,
       });
       this.recordFsWatchChange(event.streamId, event.path, event.kind, event.t);
+    });
+    this.gitRefsWatchers.subscribe((change) => {
+      this.events.publish({
+        type: "git-refs.changed",
+        streamId: change.streamId,
+        t: change.t,
+      });
     });
     this.hookEvents.subscribe((event) => {
       this.events.publish({
@@ -307,6 +318,13 @@ export class ElectronRuntime {
         if (next === this.gitEnabledCached) return;
         this.gitEnabledCached = next;
         this.events.publish({ type: "workspace-context.changed", gitEnabled: next });
+        // A `.git` directory just appeared (or disappeared). Re-bind refs
+        // watchers for every stream rooted here so commits made right after
+        // `git init` start auto-refreshing the UI.
+        for (const s of this.store.list()) {
+          if (next) this.gitRefsWatchers.ensureWatching(s);
+          else this.gitRefsWatchers.stopWatching(s.id);
+        }
       });
       this.gitRootWatcher.on("error", (error) => {
         this.logger.warn("git root watcher error", {
@@ -358,6 +376,7 @@ export class ElectronRuntime {
     for (const socket of this.lspClients.values()) socket.close();
     this.lspClients.clear();
     this.workspaceWatchers.dispose();
+    this.gitRefsWatchers.dispose();
     await this.lspManager.dispose();
     if (this.mcp) {
       await this.mcp.stop();
@@ -419,8 +438,12 @@ export class ElectronRuntime {
 
   renameCurrentStream(title: string): Stream {
     const current = this.getCurrentStream();
-    const updated = this.store.update(current.id, (stream) => ({ ...stream, title }));
-    this.logger.info("renamed current stream", { streamId: updated.id, title: updated.title });
+    return this.renameStream(current.id, title);
+  }
+
+  renameStream(streamId: string, title: string): Stream {
+    const updated = this.store.update(streamId, (stream) => ({ ...stream, title }));
+    this.logger.info("renamed stream", { streamId: updated.id, title: updated.title });
     return updated;
   }
 
@@ -573,6 +596,7 @@ export class ElectronRuntime {
       });
     }
     this.workspaceWatchers.ensureWatching(stream);
+    this.gitRefsWatchers.ensureWatching(stream);
     this.batchStore.ensureStream(stream);
     this.store.setCurrentStreamId(stream.id);
     return stream;
@@ -607,6 +631,11 @@ export class ElectronRuntime {
   completeBatch(streamId: string, batchId: string): BatchState {
     this.resolveStream(streamId);
     return this.batchStore.complete(streamId, batchId);
+  }
+
+  renameBatch(streamId: string, batchId: string, title: string): Batch {
+    this.resolveStream(streamId);
+    return this.batchStore.rename(streamId, batchId, title);
   }
 
   listWorkspaceEntries(streamId: string, path = "") {

@@ -21,7 +21,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-1)" }}>
         {tabs.map((tab) => {
           const isActive = tab.id === active?.id;
           return (

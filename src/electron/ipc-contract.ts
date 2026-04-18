@@ -115,6 +115,7 @@ export interface DesktopApi {
   listStreams(): Promise<Stream[]>;
   switchStream(id: string): Promise<Stream>;
   renameCurrentStream(title: string): Promise<Stream>;
+  renameStream(streamId: string, title: string): Promise<Stream>;
   listBranches(): Promise<BranchRef[]>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
@@ -127,6 +128,7 @@ export interface DesktopApi {
   selectBatch(streamId: string, batchId: string): Promise<BatchState>;
   promoteBatch(streamId: string, batchId: string): Promise<BatchState>;
   completeBatch(streamId: string, batchId: string): Promise<BatchState>;
+  renameBatch(streamId: string, batchId: string, title: string): Promise<Batch>;
   getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState>;
   createWorkItem(
     streamId: string,

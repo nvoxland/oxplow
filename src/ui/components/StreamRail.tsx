@@ -1,8 +1,10 @@
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createStream, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
+import { ContextMenu } from "./ContextMenu.js";
+import type { MenuItem } from "../menu.js";
 
 interface Props {
   stream: Stream | null;
@@ -11,10 +13,15 @@ interface Props {
   gitEnabled: boolean;
   onSwitch(id: string): void;
   onStreamCreated(stream: Stream): void;
+  onRenameStream?(streamId: string, currentTitle: string): void;
+  onRequestCreateBatch?(): void;
+  /** Bumping this number opens the inline "new stream" form. */
+  createRequest?: number;
 }
 
-export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwitch, onStreamCreated }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, createRequest }: Props) {
   const [showCreate, setShowCreate] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -30,6 +37,11 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
     () => branches.filter((branch) => branch.kind === "local" || !branch.name.endsWith("/HEAD")),
     [branches],
   );
+
+  useEffect(() => {
+    if (createRequest === undefined || createRequest === 0) return;
+    void openCreate();
+  }, [createRequest]);
 
   async function openCreate() {
     if (!gitEnabled) return;
@@ -89,6 +101,10 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
               <button
                 key={candidate.id}
                 onClick={() => onSwitch(candidate.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenu({ x: event.clientX, y: event.clientY, stream: candidate });
+                }}
                 style={{
                   ...tabStyle,
                   background: active ? "var(--bg-2)" : "transparent",
@@ -183,6 +199,33 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
             </button>
           </div>
         </form>
+      ) : null}
+      {contextMenu ? (
+        <ContextMenu
+          items={[
+            {
+              id: "stream.rename",
+              label: "Rename…",
+              enabled: !!onRenameStream,
+              run: () => onRenameStream?.(contextMenu.stream.id, contextMenu.stream.title),
+            },
+            {
+              id: "stream.add-stream",
+              label: "Add stream",
+              enabled: gitEnabled,
+              run: () => void openCreate(),
+            },
+            {
+              id: "stream.add-batch",
+              label: "Add batch",
+              enabled: !!onRequestCreateBatch,
+              run: () => onRequestCreateBatch?.(),
+            },
+          ]}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          minWidth={180}
+        />
       ) : null}
     </div>
   );

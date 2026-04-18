@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommitDetail, GitLogCommit, GitLogResult, Stream } from "../../api.js";
-import { getCommitDetail, getGitLog } from "../../api.js";
+import { getCommitDetail, getGitLog, subscribeGitRefsEvents } from "../../api.js";
 import { logUi } from "../../logger.js";
 import { layoutCommits, type GraphRow } from "./layout.js";
 import type { DiffRequest } from "../Panels/GitChangesPanel.js";
@@ -49,22 +49,34 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void getGitLog(stream.id, { limit })
-      .then((result) => {
-        if (cancelled) return;
-        setLog(result);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        logUi("warn", "git log failed", { error: String(err) });
-        setError(String(err));
-        setLoading(false);
-      });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoading(true);
+      setError(null);
+      void getGitLog(stream.id, { limit })
+        .then((result) => {
+          if (cancelled) return;
+          setLog(result);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          logUi("warn", "git log failed", { error: String(err) });
+          setError(String(err));
+          setLoading(false);
+        });
+    };
+    load();
+    const unsubscribe = subscribeGitRefsEvents(stream.id, () => {
+      if (timer) clearTimeout(timer);
+      // Refresh silently on external git events so the list doesn't flash a
+      // loading spinner every time the agent commits.
+      timer = setTimeout(() => load({ silent: true }), 150);
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
+      if (timer) clearTimeout(timer);
     };
   }, [stream?.id]);
 

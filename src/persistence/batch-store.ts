@@ -30,7 +30,7 @@ export interface BatchState {
   batches: Batch[];
 }
 
-export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated";
+export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed";
 
 export interface BatchChange {
   streamId: string;
@@ -222,6 +222,24 @@ export class BatchStore {
       this.setSelected(streamId, nextQueued.id);
     });
     return this.reorder(streamId, nextQueued.id, 0);
+  }
+
+  rename(streamId: string, batchId: string, title: string): Batch {
+    this.ensureBatchExists(streamId, batchId);
+    const trimmed = title.trim();
+    if (!trimmed) throw new Error("batch title is required");
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      "UPDATE batches SET title = ?, updated_at = ? WHERE stream_id = ? AND id = ?",
+      trimmed,
+      now,
+      streamId,
+      batchId,
+    );
+    const updated = this.getBatch(streamId, batchId);
+    if (!updated) throw new Error(`unknown batch after rename: ${batchId}`);
+    this.emitChange({ streamId, batchId, kind: "renamed" });
+    return updated;
   }
 
   updateResume(streamId: string, batchId: string, sessionId: string): void {

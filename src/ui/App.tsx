@@ -34,7 +34,9 @@ import {
   probeDaemon,
   readWorkspaceFile,
   renameWorkspacePath,
+  renameBatch,
   renameCurrentStream,
+  renameStream,
   subscribeNewdeEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
@@ -115,6 +117,8 @@ export function App() {
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
+  const [streamCreateRequest, setStreamCreateRequest] = useState(0);
+  const [batchCreateRequest, setBatchCreateRequest] = useState(0);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
@@ -198,6 +202,37 @@ export function App() {
     } catch (e) {
       setError(String(e));
       logUi("error", "failed to switch stream", { streamId: id, error: String(e) });
+    }
+  }
+
+  async function handleRenameStreamById(streamId: string, currentTitle: string) {
+    const nextTitle = window.prompt("Rename stream", currentTitle)?.trim();
+    if (!nextTitle || nextTitle === currentTitle) return;
+    try {
+      const updated = await renameStream(streamId, nextTitle);
+      if (stream?.id === updated.id) setStream(updated);
+      setStreams((prev) =>
+        prev
+          .map((candidate) => (candidate.id === updated.id ? updated : candidate))
+          .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      );
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRenameBatchById(batchId: string, currentTitle: string) {
+    if (!stream) return;
+    const nextTitle = window.prompt("Rename batch", currentTitle)?.trim();
+    if (!nextTitle || nextTitle === currentTitle) return;
+    try {
+      await renameBatch(stream.id, batchId, nextTitle);
+      const refreshed = await getBatchState(stream.id);
+      setBatchStates((prev) => ({ ...prev, [stream.id]: refreshed }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -1173,6 +1208,9 @@ export function App() {
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
           onStreamCreated={handleStreamCreated}
+          onRenameStream={(id, title) => void handleRenameStreamById(id, title)}
+          onRequestCreateBatch={stream ? () => setBatchCreateRequest((n) => n + 1) : undefined}
+          createRequest={streamCreateRequest}
         />
         {stream ? (
           <BatchRail
@@ -1189,9 +1227,12 @@ export function App() {
             onCompleteBatch={handleCompleteBatch}
             onMoveWorkItem={handleMoveWorkItemToBatch}
             onMoveBacklogItemToBatch={handleMoveBacklogItemToBatch}
+            onRenameBatch={(id, title) => void handleRenameBatchById(id, title)}
+            onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
+            createRequest={batchCreateRequest}
           />
         ) : null}
-        <StreamHeader stream={stream} error={error} onRename={handleRename} />
+        <StreamHeader stream={stream} error={error} />
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <DockShell

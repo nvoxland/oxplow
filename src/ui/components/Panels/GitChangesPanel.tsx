@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getBranchChanges,
   listWorkspaceFiles,
+  subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
   type BranchChanges,
   type GitFileStatus,
@@ -71,15 +72,18 @@ export function GitChangesPanel({ stream, onOpenDiff }: Props) {
   useEffect(() => {
     if (!stream) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeWorkspaceEvents(stream.id, () => {
+    const schedule = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         if (scope === "working") void loadWorking();
         else void loadBranch();
       }, 150);
-    });
+    };
+    const unsubscribeWorkspace = subscribeWorkspaceEvents(stream.id, schedule);
+    const unsubscribeRefs = subscribeGitRefsEvents(stream.id, schedule);
     return () => {
-      unsubscribe();
+      unsubscribeWorkspace();
+      unsubscribeRefs();
       if (timer) clearTimeout(timer);
     };
   }, [stream, scope, loadWorking, loadBranch]);

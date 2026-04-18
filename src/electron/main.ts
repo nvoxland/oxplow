@@ -112,6 +112,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:listStreams", () => currentRuntime.listStreams());
   ipcMain.handle("newde:switchStream", (_event, id: string) => currentRuntime.switchStream(id));
   ipcMain.handle("newde:renameCurrentStream", (_event, title: string) => currentRuntime.renameCurrentStream(title));
+  ipcMain.handle("newde:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
   ipcMain.handle("newde:listBranches", () => currentRuntime.listBranches());
   ipcMain.handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   ipcMain.handle("newde:createStream", (_event, input) => currentRuntime.createStream(input));
@@ -121,6 +122,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:selectBatch", (_event, streamId: string, batchId: string) => currentRuntime.selectBatch(streamId, batchId));
   ipcMain.handle("newde:promoteBatch", (_event, streamId: string, batchId: string) => currentRuntime.promoteBatch(streamId, batchId));
   ipcMain.handle("newde:completeBatch", (_event, streamId: string, batchId: string) => currentRuntime.completeBatch(streamId, batchId));
+  ipcMain.handle("newde:renameBatch", (_event, streamId: string, batchId: string, title: string) => currentRuntime.renameBatch(streamId, batchId, title));
   ipcMain.handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.workItemApi.getBatchWorkState(streamId, batchId));
   ipcMain.handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, batchId, input));
   ipcMain.handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));

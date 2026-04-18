@@ -8,6 +8,8 @@ import type {
   BatchWorkState,
 } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
+import { ContextMenu } from "./ContextMenu.js";
+import type { MenuItem } from "../menu.js";
 
 interface Props {
   batches: Batch[];
@@ -23,6 +25,11 @@ interface Props {
   onCompleteBatch(batchId: string): void | Promise<void>;
   onMoveWorkItem?(itemId: string, fromBatchId: string, toBatchId: string): Promise<void>;
   onMoveBacklogItemToBatch?(itemId: string, toBatchId: string): Promise<void>;
+  onRenameBatch?(batchId: string, currentTitle: string): void;
+  onRequestCreateStream?(): void;
+  onRequestCreateBatch?(): void;
+  /** Bumping this number opens the inline "new batch" form. */
+  createRequest?: number;
 }
 
 export const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
@@ -41,6 +48,10 @@ export function BatchRail({
   onCompleteBatch,
   onMoveWorkItem,
   onMoveBacklogItemToBatch,
+  onRenameBatch,
+  onRequestCreateStream,
+  onRequestCreateBatch,
+  createRequest,
 }: Props) {
   const { ordered, completed } = useMemo(() => {
     const active = batches.find((b) => b.id === activeBatchId && b.status !== "completed");
@@ -62,12 +73,41 @@ export function BatchRail({
   const hasQueued = batches.some((b) => b.status === "queued");
   const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; batch: Batch } | null>(null);
+
+  useEffect(() => {
+    if (createRequest === undefined || createRequest === 0) return;
+    setShowCreate(true);
+  }, [createRequest]);
+
+  const contextMenuItems: MenuItem[] = contextMenu
+    ? [
+        {
+          id: "batch.rename",
+          label: "Rename…",
+          enabled: !!onRenameBatch,
+          run: () => onRenameBatch?.(contextMenu.batch.id, contextMenu.batch.title),
+        },
+        {
+          id: "batch.add-batch",
+          label: "Add batch",
+          enabled: !!onRequestCreateBatch,
+          run: () => (onRequestCreateBatch ? onRequestCreateBatch() : setShowCreate(true)),
+        },
+        {
+          id: "batch.add-stream",
+          label: "Add stream",
+          enabled: !!onRequestCreateStream,
+          run: () => onRequestCreateStream?.(),
+        },
+      ]
+    : [];
 
   return (
     <div style={railStyle}>
-      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflowX: "auto" }}>
+      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "stretch", gap: 0, flex: 1, minWidth: 0, overflowX: "auto" }}>
         {ordered.length === 0 && completed.length === 0 ? (
-          <span style={{ color: "var(--muted)", fontSize: 11 }}>No batches yet.</span>
+          <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No batches yet.</span>
         ) : null}
         {ordered.map((batch) => (
           <BatchChip
@@ -83,6 +123,10 @@ export function BatchRail({
             onSelect={() => void onSelectBatch(batch.id)}
             onPromote={() => void onPromoteBatch(batch.id)}
             onComplete={() => void onCompleteBatch(batch.id)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu({ x: event.clientX, y: event.clientY, batch });
+            }}
             onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToBatch) ? (payload) => {
               if (payload.fromBatchId === null) {
                 if (onMoveBacklogItemToBatch) void onMoveBacklogItemToBatch(payload.itemId, batch.id);
@@ -93,9 +137,9 @@ export function BatchRail({
           />
         ))}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
         <button style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
-          {showCreate ? "Cancel" : "+ Batch"}
+          {showCreate ? "Cancel" : "+ New batch"}
         </button>
         {completed.length > 0 ? (
           <div style={{ position: "relative" }}>
@@ -126,6 +170,14 @@ export function BatchRail({
           }}
         />
       ) : null}
+      {contextMenu ? (
+        <ContextMenu
+          items={contextMenuItems}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          minWidth={180}
+        />
+      ) : null}
     </div>
   );
 }
@@ -142,6 +194,7 @@ function BatchChip({
   onSelect,
   onPromote,
   onComplete,
+  onContextMenu,
   onDropWorkItem,
 }: {
   batch: Batch;
@@ -155,6 +208,7 @@ function BatchChip({
   onSelect(): void;
   onPromote(): void;
   onComplete(): void;
+  onContextMenu?(event: React.MouseEvent): void;
   onDropWorkItem?(payload: { itemId: string; fromBatchId: string | null }): void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -175,17 +229,15 @@ function BatchChip({
 
   const total = workState?.items.length ?? 0;
   const done = workState?.done.length ?? 0;
-  // Two orthogonal states on each chip:
-  //  - `isSelected`: what the user is viewing (loud background)
+  // Two orthogonal states on each tab:
+  //  - `isSelected`: what the user is viewing (main bg, accent underline)
   //  - `isActive`:   the designated *writer* batch (the one allowed to write
   //                  to disk). All queued batches can have agents running;
   //                  only the writer can commit changes.
-  // The writer is visualised with a pencil badge + dashed accent outline so
-  // it's obvious even when another batch is selected.
-  const background = isSelected ? "var(--accent)" : "var(--bg-2)";
-  const color = isSelected ? "#fff" : "var(--fg)";
-  const borderColor = isSelected ? "var(--accent)" : "var(--border)";
-  const borderWidth = 1;
+  // The writer is visualised with a pencil badge so it's obvious even when
+  // another batch is selected.
+  const background = isSelected ? "var(--bg)" : "transparent";
+  const color = isSelected ? "var(--fg)" : "var(--muted)";
 
   const handleDragOver = (event: React.DragEvent) => {
     if (!onDropWorkItem) return;
@@ -226,24 +278,23 @@ function BatchChip({
     >
       <button
         onClick={onSelect}
+        onContextMenu={onContextMenu}
         style={{
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          padding: "4px 10px",
-          border: `${borderWidth}px solid ${dragOver ? "var(--accent)" : borderColor}`,
-          borderRadius: 999,
+          padding: "6px 12px",
+          border: "none",
+          borderRight: "1px solid var(--border)",
+          borderBottom: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
           background,
           color,
           cursor: "pointer",
           fontFamily: "inherit",
           fontSize: 12,
           whiteSpace: "nowrap",
-          boxShadow: isActive && !isSelected
-            ? "inset 0 0 0 1px var(--accent)"
-            : dragOver
-            ? "0 0 0 2px var(--accent)"
-            : undefined,
+          marginBottom: -1, // overlap the rail's bottom border so the tab looks connected to the content below when selected
+          boxShadow: dragOver ? "inset 0 0 0 2px var(--accent)" : undefined,
         }}
         title={isActive ? `${batch.title} · writer (can commit)` : `${batch.title} (read-only)`}
       >
@@ -259,16 +310,16 @@ function BatchChip({
               width: 16,
               height: 16,
               borderRadius: 999,
-              background: isSelected ? "rgba(255,255,255,0.25)" : "var(--accent)",
+              background: "var(--accent)",
               color: "#fff",
               fontSize: 10,
               lineHeight: 1,
             }}
           >✎</span>
         ) : null}
-        <span style={{ fontWeight: isSelected ? 700 : isActive ? 600 : 500 }}>{batch.title}</span>
+        <span style={{ fontWeight: isSelected ? 600 : isActive ? 500 : 400 }}>{batch.title}</span>
         {total > 0 ? (
-          <span style={{ fontSize: 10, opacity: 0.85 }}>
+          <span style={{ fontSize: 10, opacity: 0.75 }}>
             {done}/{total}
           </span>
         ) : null}
@@ -491,12 +542,15 @@ function relativeTime(iso: string): string {
 
 const railStyle: CSSProperties = {
   display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "6px 12px",
+  alignItems: "stretch",
+  gap: 0,
+  paddingLeft: 0,
+  paddingRight: 8,
+  paddingTop: 6,
   background: "var(--bg-2)",
   borderBottom: "1px solid var(--border)",
   flexWrap: "wrap",
+  minHeight: 32,
 };
 
 const smallBtn: CSSProperties = {
