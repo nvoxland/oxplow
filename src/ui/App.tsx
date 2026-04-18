@@ -53,6 +53,7 @@ import {
 import {
   closeOpenFile,
   createEmptyFileSession,
+  enforceOpenFileLimit,
   markFileSaved,
   openFileInSession,
   removeOpenFiles,
@@ -87,6 +88,11 @@ import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi } from "./logger.js";
+
+// Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
+// when this is exceeded, the oldest-touched tab without unsaved changes is
+// closed automatically via enforceOpenFileLimit. Dirty tabs stay pinned.
+const MAX_OPEN_FILE_TABS = 10;
 
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
@@ -183,7 +189,7 @@ export function App() {
       setBatchStates((prev) => ({ ...prev, [next.id]: nextBatchState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-      setCenterActive(nextSession.selectedPath ? "editor" : "agent");
+      setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -230,7 +236,7 @@ export function App() {
     });
     setStream(next);
     const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-    setCenterActive(nextSession.selectedPath ? "editor" : "agent");
+    setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
@@ -240,13 +246,14 @@ export function App() {
     if (!stream) return;
     const currentSession = fileSessions[stream.id] ?? createEmptyFileSession();
     const existing = currentSession.files[path];
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: existing
-        ? selectOpenFile(prev[stream.id] ?? createEmptyFileSession(), path)
-        : setOpenFileLoading(openFileInSession(prev[stream.id] ?? createEmptyFileSession(), path, "", true), path, true),
-    }));
-    setCenterActive("editor");
+    setFileSessions((prev) => {
+      const base = prev[stream.id] ?? createEmptyFileSession();
+      const opened = existing
+        ? selectOpenFile(base, path)
+        : setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
+      return { ...prev, [stream.id]: enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS) };
+    });
+    setCenterActive(`file:${path}`);
     setError(null);
     if (existing && !existing.isLoading) return;
     try {
@@ -269,7 +276,7 @@ export function App() {
   async function handleNavigateToLocation(target: EditorNavigationTarget) {
     await handleOpenFile(target.path);
     setEditorNavigationTarget(target);
-    setCenterActive("editor");
+    setCenterActive(`file:${target.path}`);
   }
 
   function handleEditorChange(value: string) {
@@ -317,7 +324,7 @@ export function App() {
       ...prev,
       [stream.id]: selectOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
     }));
-    setCenterActive("editor");
+    setCenterActive(`file:${path}`);
   }
 
   function handleCloseOpenFile(path: string) {
@@ -863,7 +870,7 @@ export function App() {
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
       hasBatch: !!selectedBatch,
-      activeTab: centerActive === "editor" ? "editor" : "agent",
+      activeTab: centerActive.startsWith("file:") ? "editor" : "agent",
     } as const),
     [centerActive, currentFile, currentFileDirty, selectedBatch, selectedFilePath, stream],
   );
@@ -877,14 +884,14 @@ export function App() {
     },
     find() {
       if (!selectedFilePath) return;
-      setCenterActive("editor");
+      setCenterActive(`file:${selectedFilePath}`);
       setEditorFindRequest((current) => current + 1);
     },
     showAgentPane() {
       setCenterActive("agent");
     },
     showEditorPane() {
-      setCenterActive("editor");
+      if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
     },
     newWorkItem() {
       setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
@@ -932,29 +939,13 @@ export function App() {
     });
   }, [commandMap, isElectron]);
 
-  const editorTabOpen = currentSession.openOrder.length > 0;
   const availableCenterIds = useMemo(() => {
     const ids = new Set(["agent"]);
-    if (editorTabOpen) ids.add("editor");
+    for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
     return ids;
-  }, [editorTabOpen, diffTabs]);
+  }, [currentSession.openOrder, diffTabs]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
-
-  const closeEditorTab = () => {
-    if (stream) {
-      const dirtyCount = Object.values(currentSession.files).filter(
-        (file) => file.draftContent !== file.savedContent,
-      ).length;
-      if (dirtyCount > 0 && !window.confirm(
-        `Discard unsaved changes in ${dirtyCount} file${dirtyCount === 1 ? "" : "s"}?`,
-      )) {
-        return;
-      }
-      setFileSessions((prev) => ({ ...prev, [stream.id]: createEmptyFileSession() }));
-    }
-    setCenterActive("agent");
-  };
 
   const handleOpenDiff = (request: DiffRequest) => {
     const rightKey = request.rightKind === "working" ? "working" : `ref:${request.rightKind.ref}`;
@@ -988,21 +979,28 @@ export function App() {
           ),
       },
     ];
-    if (editorTabOpen) {
+    for (const path of currentSession.openOrder) {
+      const basename = path.split("/").pop() ?? path;
+      const file = currentSession.files[path];
+      const dirty = !!file && file.draftContent !== file.savedContent;
       tabs.push({
-        id: "editor",
-        label: "Editor",
+        id: `file:${path}`,
+        label: `${dirty ? "● " : ""}${basename}`,
         closable: true,
         render: () => stream ? (
+          // One shared EditorPane across all file tabs — React keeps the same
+          // component instance as long as the element type in the same slot
+          // is unchanged, so Monaco's editor stays alive and just swaps models
+          // when `filePath` changes.
           <EditorPane
             stream={stream}
-            filePath={selectedFilePath}
-            value={currentFile?.draftContent ?? ""}
-            isDirty={currentFileDirty}
+            filePath={path}
+            value={file?.draftContent ?? ""}
+            isDirty={dirty}
             onChange={handleEditorChange}
             onSave={() => { void handleEditorSave(); }}
             findRequest={editorFindRequest}
-            navigationTarget={editorNavigationTarget}
+            navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
             onNavigateToLocation={handleNavigateToLocation}
             openFileOrder={currentSession.openOrder}
             openFiles={currentSession.files}
@@ -1028,15 +1026,11 @@ export function App() {
     selectedBatch,
     agentBatchStatus,
     effectiveCenterActive,
-    editorTabOpen,
     stream,
-    selectedFilePath,
-    currentFile,
-    currentFileDirty,
-    editorFindRequest,
-    editorNavigationTarget,
     currentSession.openOrder,
     currentSession.files,
+    editorFindRequest,
+    editorNavigationTarget,
     diffTabs,
   ]);
 
@@ -1182,9 +1176,12 @@ export function App() {
             <CenterTabs
               tabs={centerTabs}
               activeId={effectiveCenterActive}
-              onActivate={(id) => setCenterActive(id)}
+              onActivate={(id) => {
+                if (id.startsWith("file:")) handleSelectOpenFile(id.slice("file:".length));
+                else setCenterActive(id);
+              }}
               onClose={(id) => {
-                if (id === "editor") closeEditorTab();
+                if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
                 else if (id.startsWith("diff:")) closeDiffTab(id);
               }}
             />

@@ -107,7 +107,7 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
                 ...menuItemStyle,
                 opacity: item.enabled ? 1 : 0.45,
                 cursor: item.enabled ? "pointer" : "default",
-                background: openSubmenuId === item.id ? "var(--bg-2)" : undefined,
+                background: openSubmenuId === item.id ? "var(--bg-2)" : "transparent",
               }}
             >
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>

@@ -6,11 +6,13 @@
     <link rel="stylesheet" href="./dist/main.css" />
     <style>
       :root {
-        --bg: #0e0e0e;
-        --bg-2: #171717;
+        --bg: #0e0e0e;           /* main content area — darkest */
+        --bg-2: #181818;         /* batch rail — one step lighter */
+        --bg-3: #222222;         /* stream rail — top chrome, lightest step */
         --fg: #e6e6e6;
         --muted: #888;
         --border: #2a2a2a;
+        --border-strong: #3a3a3a;
         --accent: #4a9eff;
       }
       html, body, #root {
@@ -26,6 +28,24 @@
         0%, 100% { opacity: 1; }
         50% { opacity: 0.35; }
       }
+      /* Thin, unobtrusive scrollbars. The Electron default leaves a
+         pill-shaped thumb artifact even when content fits, which was
+         showing up next to the New Stream / + Batch buttons. */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: padding-box; border: 2px solid transparent; }
+      ::-webkit-scrollbar-corner { background: transparent; }
+      /* Hide scrollbars entirely on the narrow horizontal rails — they only
+         show when many streams/batches are open and we don't want the thumb
+         floating next to the trailing "+ New" button. */
+      .newde-rail-scroll { scrollbar-width: none; }
+      .newde-rail-scroll::-webkit-scrollbar { display: none; }
     </style>
   </head>
   <body>

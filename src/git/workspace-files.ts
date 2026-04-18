@@ -37,6 +37,7 @@ export function listWorkspaceEntries(
 ): WorkspaceEntry[] {
   const dir = resolveWorkspacePath(rootDir, relativePath);
   const entries = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.name !== ".git")
     .map((entry) => {
       const path = normalizeRelativePath(relativePath, entry.name);
       const kind = entry.isDirectory() ? "directory" as const : "file" as const;
@@ -68,6 +69,7 @@ export function listWorkspaceFiles(
   const dir = resolveWorkspacePath(rootDir, relativePath);
   const files: WorkspaceIndexedFile[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === ".git") continue;
     const path = normalizeRelativePath(relativePath, entry.name);
     if (entry.isDirectory()) {
       files.push(...listWorkspaceFiles(rootDir, gitStatuses, path));

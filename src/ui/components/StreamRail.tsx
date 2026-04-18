@@ -79,9 +79,9 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", overflow: "hidden" }}>
-        <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: 1, minWidth: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-3)", borderBottom: "1px solid var(--border-strong)" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "0 10px", overflow: "hidden" }}>
+        <div className="newde-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
           {streams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "idle";
@@ -91,11 +91,12 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
                 onClick={() => onSwitch(candidate.id)}
                 style={{
                   ...tabStyle,
-                  background: active ? "var(--bg)" : "var(--bg-2)",
-                  borderBottom: active ? "2px solid var(--bg)" : "2px solid transparent",
-                  marginBottom: active ? -1 : 0,
+                  background: active ? "var(--bg-2)" : "transparent",
                   color: active ? "var(--fg)" : "var(--muted)",
                   fontWeight: active ? 600 : 400,
+                  borderBottom: active
+                    ? "2px solid var(--accent)"
+                    : "2px solid transparent",
                 }}
                 title={candidate.title}
               >
@@ -107,7 +108,7 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
         </div>
         <span
           title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
-          style={{ display: "inline-flex", flexShrink: 0 }}
+          style={{ display: "inline-flex", flexShrink: 0, padding: "6px 0 6px 8px" }}
         >
           <button
             onClick={openCreate}
@@ -201,14 +202,16 @@ const tabStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 8,
-  border: "1px solid var(--border)",
-  borderBottom: "2px solid transparent",
-  borderRadius: 6,
-  padding: "6px 12px",
+  border: "none",
+  // The bottom border is the accent underline for the active tab — set
+  // via the inline style override on the element itself.
+  padding: "8px 14px 6px 14px",
   cursor: "pointer",
   fontFamily: "inherit",
   whiteSpace: "nowrap",
   flexShrink: 0,
+  borderTopLeftRadius: 6,
+  borderTopRightRadius: 6,
 };
 
 const inputStyle: CSSProperties = {

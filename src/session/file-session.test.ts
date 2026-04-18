@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   closeOpenFile,
   createEmptyFileSession,
+  enforceOpenFileLimit,
   markFileSaved,
   openFileInSession,
   removeOpenFiles,
@@ -10,6 +11,23 @@ import {
   setLoadedFileContent,
   updateFileDraft,
 } from "./file-session.js";
+
+test("enforceOpenFileLimit closes oldest clean tabs; keeps dirty and selected", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "a.ts", "a");
+  state = openFileInSession(state, "b.ts", "b");
+  state = openFileInSession(state, "c.ts", "c");
+  state = openFileInSession(state, "d.ts", "d");
+  state = updateFileDraft(state, "a.ts", "a!"); // a is dirty
+  state = selectOpenFile(state, "d.ts");        // d is current
+
+  state = enforceOpenFileLimit(state, 2);
+
+  // Dirty `a.ts` and currently-selected `d.ts` survive; the rest were clean
+  // and get closed from the back of the access list.
+  expect(state.openOrder.sort()).toEqual(["a.ts", "d.ts"]);
+  expect(state.selectedPath).toBe("d.ts");
+});
 
 test("openFileInSession tracks multiple open files and keeps ordering stable", () => {
   let state = createEmptyFileSession();

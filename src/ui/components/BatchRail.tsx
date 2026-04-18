@@ -65,7 +65,7 @@ export function BatchRail({
 
   return (
     <div style={railStyle}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflowX: "auto" }}>
+      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflowX: "auto" }}>
         {ordered.length === 0 && completed.length === 0 ? (
           <span style={{ color: "var(--muted)", fontSize: 11 }}>No batches yet.</span>
         ) : null}
@@ -175,13 +175,17 @@ function BatchChip({
 
   const total = workState?.items.length ?? 0;
   const done = workState?.done.length ?? 0;
-  const background = isActive
-    ? "var(--accent)"
-    : isSelected
-    ? "rgba(74, 158, 255, 0.18)"
-    : "var(--bg-2)";
-  const color = isActive ? "#fff" : "var(--fg)";
-  const borderColor = isActive ? "var(--accent)" : "var(--border)";
+  // Two orthogonal states on each chip:
+  //  - `isSelected`: what the user is viewing (loud background)
+  //  - `isActive`:   the designated *writer* batch (the one allowed to write
+  //                  to disk). All queued batches can have agents running;
+  //                  only the writer can commit changes.
+  // The writer is visualised with a pencil badge + dashed accent outline so
+  // it's obvious even when another batch is selected.
+  const background = isSelected ? "var(--accent)" : "var(--bg-2)";
+  const color = isSelected ? "#fff" : "var(--fg)";
+  const borderColor = isSelected ? "var(--accent)" : "var(--border)";
+  const borderWidth = 1;
 
   const handleDragOver = (event: React.DragEvent) => {
     if (!onDropWorkItem) return;
@@ -227,7 +231,7 @@ function BatchChip({
           alignItems: "center",
           gap: 6,
           padding: "4px 10px",
-          border: `1px solid ${dragOver ? "var(--accent)" : borderColor}`,
+          border: `${borderWidth}px solid ${dragOver ? "var(--accent)" : borderColor}`,
           borderRadius: 999,
           background,
           color,
@@ -235,12 +239,34 @@ function BatchChip({
           fontFamily: "inherit",
           fontSize: 12,
           whiteSpace: "nowrap",
-          boxShadow: dragOver ? "0 0 0 2px var(--accent)" : undefined,
+          boxShadow: isActive && !isSelected
+            ? "inset 0 0 0 1px var(--accent)"
+            : dragOver
+            ? "0 0 0 2px var(--accent)"
+            : undefined,
         }}
-        title={batch.title}
+        title={isActive ? `${batch.title} · writer (can commit)` : `${batch.title} (read-only)`}
       >
         <AgentStatusDot status={agentStatus} />
-        <span style={{ fontWeight: isActive ? 600 : 500 }}>{batch.title}</span>
+        {isActive ? (
+          <span
+            aria-label="Writer batch"
+            title="Writer batch — only this one can commit changes"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 16,
+              height: 16,
+              borderRadius: 999,
+              background: isSelected ? "rgba(255,255,255,0.25)" : "var(--accent)",
+              color: "#fff",
+              fontSize: 10,
+              lineHeight: 1,
+            }}
+          >✎</span>
+        ) : null}
+        <span style={{ fontWeight: isSelected ? 700 : isActive ? 600 : 500 }}>{batch.title}</span>
         {total > 0 ? (
           <span style={{ fontSize: 10, opacity: 0.85 }}>
             {done}/{total}
@@ -291,9 +317,11 @@ function HoverCard({
   const done = workState?.done.length ?? 0;
   const turnCount = turns?.length ?? 0;
   const lastTurn = turns && turns.length > 0 ? turns[turns.length - 1] : null;
-  const statusLabel = isActive ? "active" : batch.status;
+  // "writer" means this batch is the one allowed to commit changes; every
+  // other live batch stays read-only. "completed" batches are archived.
+  const statusLabel = isActive ? "writer" : batch.status === "completed" ? "completed" : "read-only";
   const statusColor =
-    statusLabel === "active" ? "#86efac" : statusLabel === "queued" ? "#7dd3fc" : "#c4b5fd";
+    statusLabel === "writer" ? "#86efac" : statusLabel === "read-only" ? "#7dd3fc" : "#c4b5fd";
 
   return (
     <div style={hoverCardStyle}>
@@ -342,12 +370,12 @@ function HoverCard({
       ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
-          <button style={smallBtn} onClick={onComplete} disabled={!hasQueued}>
+          <button style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
             Complete batch
           </button>
         ) : batch.status !== "completed" ? (
-          <button style={smallBtn} onClick={onPromote}>
-            Promote to active
+          <button style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
+            Make writer
           </button>
         ) : null}
       </div>
@@ -465,8 +493,8 @@ const railStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  padding: "4px 12px",
-  background: "var(--bg)",
+  padding: "6px 12px",
+  background: "var(--bg-2)",
   borderBottom: "1px solid var(--border)",
   flexWrap: "wrap",
 };

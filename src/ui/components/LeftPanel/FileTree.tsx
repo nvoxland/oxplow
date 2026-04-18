@@ -95,8 +95,26 @@ export function TreeEntries({
                 whiteSpace: "nowrap",
               }}
             >
-              <span style={{ width: 12, color: "var(--muted)" }}>
-                {entry.kind === "directory" ? (expanded ? "▾" : "▸") : ""}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 16,
+                  height: 16,
+                  color: "var(--muted)",
+                  flexShrink: 0,
+                  transition: "transform 120ms ease, color 120ms ease",
+                  transform: entry.kind === "directory" && expanded ? "rotate(90deg)" : "rotate(0deg)",
+                }}
+              >
+                {entry.kind === "directory" ? (
+                  // Chevron — rotated via transform so the open/closed states
+                  // share one glyph and animate smoothly.
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                    <path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : null}
               </span>
               <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
               <span

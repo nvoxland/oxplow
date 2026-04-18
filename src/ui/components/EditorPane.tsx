@@ -57,6 +57,11 @@ export function EditorPane({
   const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  // Monaco loads asynchronously, so the model-binding effect below needs a
+  // signal to retry once it lands — otherwise the first file opened arrives
+  // before the editor instance exists and the effect's early return makes
+  // the pane stay blank until the next file change.
+  const [monacoReady, setMonacoReady] = useState(false);
 
   onChangeRef.current = onChange;
   onNavigateRef.current = onNavigateToLocation;
@@ -96,6 +101,7 @@ export function EditorPane({
           y: browserEvent?.clientY ?? 8,
         });
       });
+      setMonacoReady(true);
     })();
     return () => {
       cancelled = true;
@@ -211,7 +217,7 @@ export function EditorPane({
         contentChanges: [{ text: next }],
       });
     });
-  }, [stream.id, filePath, value]);
+  }, [stream.id, filePath, value, monacoReady]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -391,67 +397,8 @@ export function EditorPane({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {openFileOrder.length > 1 ? (
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            padding: "6px 8px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-2)",
-            overflowX: "auto",
-          }}
-        >
-          {openFileOrder.map((path) => {
-            const openFile = openFiles[path];
-            const active = path === filePath;
-            const dirty = !!openFile && openFile.draftContent !== openFile.savedContent;
-            return (
-              <div
-                key={path}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  border: "1px solid var(--border)",
-                  borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
-                  background: active ? "var(--bg)" : "transparent",
-                  borderRadius: 4,
-                  padding: "4px 8px",
-                  flexShrink: 0,
-                }}
-              >
-                <button
-                  onClick={() => onSelectOpenFile(path)}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: active ? "var(--fg)" : "var(--muted)",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {basename(path)}{dirty ? " •" : ""}
-                </button>
-                <button
-                  onClick={() => onCloseOpenFile(path)}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--muted)",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    padding: 0,
-                  }}
-                  aria-label={`Close ${path}`}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
+      {/* File tabs live in the parent CenterTabs bar now; this component
+          just hosts the single Monaco editor that swaps models on filePath. */}
       <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
         <div ref={hostRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
         {filePath && lspStatus ? <div style={lspStatusStyle}>{lspStatus}</div> : null}
@@ -470,11 +417,6 @@ export function EditorPane({
       </div>
     </div>
   );
-}
-
-function basename(path: string): string {
-  const parts = path.split("/");
-  return parts[parts.length - 1] ?? path;
 }
 
 const emptyStyle: CSSProperties = {

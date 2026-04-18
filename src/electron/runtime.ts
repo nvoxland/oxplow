@@ -3,6 +3,7 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
+import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
 import {
@@ -838,6 +839,16 @@ export class ElectronRuntime {
       }
       this.applyTurnTracking(envelope, stored.normalized.sessionId);
     }
+    if (envelope.event === "PreToolUse" && envelope.batchId) {
+      // Fresh read of batch.status — promoting another batch to writer takes
+      // effect on the next tool call without restarting any agent.
+      const batch = this.batchStore.findById(envelope.batchId);
+      const toolName = typeof (envelope.payload as { tool_name?: unknown })?.tool_name === "string"
+        ? (envelope.payload as { tool_name: string }).tool_name
+        : "";
+      const deny = buildWriteGuardResponse(batch, toolName);
+      if (deny) return { body: deny };
+    }
     if (envelope.event === "UserPromptSubmit") {
       const additionalContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       if (additionalContext) {
@@ -1021,7 +1032,7 @@ class RuntimeSocket extends EventEmitter {
 }
 
 function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
-  return [
+  const lines = [
     `You manage this batch's work through the newde work-item MCP tools.`,
     `Treat them as your durable working memory between turns and sessions; the human watches progress through them.`,
     ``,
@@ -1046,7 +1057,11 @@ function buildBatchAgentPrompt(stream: Stream, batch: Batch): string {
     `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}).`,
     `Always pass batchId="${batch.id}" to every work-item tool.`,
     `Call newde__get_batch_context whenever you need to re-check stream/batch ids or read the current batch summary.`,
-  ].join("\n");
+  ];
+  if (batch.status !== "active") {
+    lines.push(NON_WRITER_PROMPT_BLOCK);
+  }
+  return lines.join("\n");
 }
 
 export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {
