@@ -236,7 +236,7 @@ function BatchChip({
   //                  only the writer can commit changes.
   // The writer is visualised with a pencil badge so it's obvious even when
   // another batch is selected.
-  const background = isSelected ? "var(--bg)" : "transparent";
+  const background = isSelected ? "var(--bg)" : "var(--bg-tab-inactive)";
   const color = isSelected ? "var(--fg)" : "var(--muted)";
 
   const handleDragOver = (event: React.DragEvent) => {
@@ -284,7 +284,12 @@ function BatchChip({
           alignItems: "center",
           gap: 8,
           padding: "8px 14px 6px 14px",
-          border: "none",
+          // Non-selected tabs keep a visible 1px frame so they still read as
+          // tabs (vs. floating text). Selected tab drops the frame to blend
+          // with the content below and carries the 2px accent underline.
+          borderTop: isSelected ? "1px solid transparent" : "1px solid var(--border-strong)",
+          borderLeft: isSelected ? "1px solid transparent" : "1px solid var(--border-strong)",
+          borderRight: isSelected ? "1px solid transparent" : "1px solid var(--border-strong)",
           borderBottom: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
           borderTopLeftRadius: 6,
           borderTopRightRadius: 6,

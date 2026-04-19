@@ -4,7 +4,7 @@ import type { CommitDetail, GitLogCommit, GitLogResult, Stream } from "../../api
 import { getCommitDetail, getGitLog, subscribeGitRefsEvents } from "../../api.js";
 import { logUi } from "../../logger.js";
 import { layoutCommits, type GraphRow } from "./layout.js";
-import type { DiffRequest } from "../Panels/GitChangesPanel.js";
+import type { DiffRequest } from "../Diff/diff-request.js";
 
 interface Props {
   stream: Stream | null;

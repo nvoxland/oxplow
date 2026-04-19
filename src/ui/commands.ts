@@ -79,7 +79,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
     },
     {
       id: "plan",
-      label: "Plan",
+      label: "Work",
       items: [
         { id: "plan.newWorkItem", label: "New Work Item…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasBatch },
       ],

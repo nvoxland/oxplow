@@ -28,7 +28,7 @@ import {
   type WorkspaceIndexedFile,
   type WorkspaceStatusSummary,
 } from "../../api.js";
-import type { DiffRequest } from "./GitChangesPanel.js";
+import type { DiffRequest } from "../Diff/diff-request.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";

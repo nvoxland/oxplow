@@ -78,7 +78,7 @@ import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import { BatchRail } from "./components/BatchRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
-import { GitChangesPanel, type DiffRequest } from "./components/Panels/GitChangesPanel.js";
+import type { DiffRequest } from "./components/Diff/diff-request.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { Activity } from "./components/Activity/Activity.js";
 import { BatchChanges } from "./components/Changes/BatchChanges.js";
@@ -1105,36 +1105,8 @@ export function App() {
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
     {
-      id: "project",
-      label: "Files",
-      render: () => (
-        <ProjectPanel
-          stream={stream}
-          gitEnabled={workspaceContext.gitEnabled}
-          selectedFilePath={selectedFilePath}
-          currentBatchTurns={selectedBatchTurns}
-          currentBatchFileChanges={selectedBatchFileChanges}
-          onOpenFile={handleOpenFile}
-          onOpenDiff={handleOpenDiff}
-          onCreateFile={handleCreateFile}
-          onCreateDirectory={handleCreateDirectory}
-          onRenamePath={handleRenamePath}
-          onDeletePath={handleDeletePath}
-        />
-      ),
-    },
-    ...(workspaceContext.gitEnabled
-      ? [{
-          id: "git",
-          label: "Git",
-          render: () => (
-            <GitChangesPanel stream={stream} onOpenDiff={handleOpenDiff} />
-          ),
-        }]
-      : []),
-    {
       id: "plan",
-      label: "Plan",
+      label: "Work",
       render: () => (
         <PlanPane
           batch={selectedBatch}
@@ -1150,6 +1122,25 @@ export function App() {
           onReorderBacklog={handleReorderBacklog}
           onMoveItemToBacklog={handleMoveItemToBacklog}
           openNewRequest={planNewRequest}
+        />
+      ),
+    },
+    {
+      id: "project",
+      label: "Files",
+      render: () => (
+        <ProjectPanel
+          stream={stream}
+          gitEnabled={workspaceContext.gitEnabled}
+          selectedFilePath={selectedFilePath}
+          currentBatchTurns={selectedBatchTurns}
+          currentBatchFileChanges={selectedBatchFileChanges}
+          onOpenFile={handleOpenFile}
+          onOpenDiff={handleOpenDiff}
+          onCreateFile={handleCreateFile}
+          onCreateDirectory={handleCreateDirectory}
+          onRenamePath={handleRenamePath}
+          onDeletePath={handleDeletePath}
         />
       ),
     },
