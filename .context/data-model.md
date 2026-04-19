@@ -7,7 +7,7 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Storage
 
-All persistence lives in one SQLite file under `.newde/state.db`, opened
+All persistence lives in one SQLite file under `.newde/state.sqlite`, opened
 through `getStateDatabase()` (`src/persistence/state-db.ts`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 migrations (`src/persistence/migrations.ts`) gated by `PRAGMA user_version`

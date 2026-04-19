@@ -352,8 +352,14 @@ export function WorkGroupList({
           cursor: canDrop ? "copy" : headerBaseStyle.cursor,
         };
         return (
-          <div key={section.kind}>
-            <div style={headerStyle} {...headerDropHandlers}>{section.label}</div>
+          <div key={section.kind} data-testid={`plan-section-${section.kind}`}>
+            <div
+              style={headerStyle}
+              data-testid={`plan-section-header-${section.kind}`}
+              {...headerDropHandlers}
+            >
+              {section.label}
+            </div>
             {section.rows.map(renderRow)}
           </div>
         );
@@ -492,6 +498,7 @@ function InlineItemRow({
         }}
         title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
         data-key={rowKey}
+        data-testid={`work-item-row-${item.id}`}
       >
         <InlineStatusPicker
           status={item.status}
