@@ -1,6 +1,7 @@
 import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 export type FileChangeKind = "created" | "updated" | "deleted";
 export type FileChangeSource = "hook" | "fs-watch";
@@ -29,29 +30,19 @@ export interface FileChangeInput {
 
 export class FileChangeStore {
   private readonly stateDb;
-  private readonly listeners = new Set<(change: BatchFileChange) => void>();
+  private readonly emitter: StoreEmitter<BatchFileChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("file change", logger);
   }
 
   subscribe(listener: (change: BatchFileChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return this.emitter.subscribe(listener);
   }
 
   private emit(change: BatchFileChange): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(change);
-      } catch (error) {
-        this.logger?.warn("file change listener threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   record(input: FileChangeInput): BatchFileChange {

@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
-import { capturePaneHistory, hasSession, killSession, watchSession } from "./tmux.js";
+import { execFileSync } from "node:child_process";
+import { capturePaneHistory, hasSession, killSession } from "./tmux.js";
 
 function tmuxAvailable(): boolean {
   try {
@@ -40,24 +40,6 @@ test("killSession is a no-op for a non-existent session", () => {
   if (!tmuxAvailable()) return;
   expect(() => killSession("newde-test-nonexistent-999999")).not.toThrow();
 });
-
-test("watchSession kills session when watched pid exits", async () => {
-  if (!tmuxAvailable()) return;
-
-  // Spawn a short-lived process so we have a real pid that will exit.
-  const child = spawnSync("sh", ["-c", "sleep 0.1"], {});
-
-  const name = `newde-test-watch-${process.pid}`;
-  createTestSession(name);
-  expect(hasSession(name)).toBe(true);
-
-  // Watch using the now-dead pid (process already exited, kill -0 will fail immediately).
-  watchSession(name, child.pid as number);
-
-  // Sentinel polls every 2 s; since the pid is already gone it should fire quickly.
-  await waitFor(() => !hasSession(name), 6000);
-  expect(hasSession(name)).toBe(false);
-}, 8000);
 
 test("capturePaneHistory returns recent pane output", async () => {
   if (!tmuxAvailable()) return;

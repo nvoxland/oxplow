@@ -116,15 +116,23 @@ work item:    waiting ─► ready ─► in_progress ─► to_check ─► don
                    ╰─────────► canceled
 
 commit point: pending ─► proposed ─► approved ─► done
-                              ╰─► rejected ─► pending  (retry loop)
+                              ╰─► rejected ─► pending  (user reject)
+                                       approved ─► rejected (git failure;
+                                                             via failExecution)
 
 wait point:   pending ─► triggered                     (consumed)
 ```
 
 ## Change events
 
-Every store has a `subscribe(listener)` for in-process listeners. The
-runtime relays each store's changes onto the typed EventBus
+Every store has a `subscribe(listener)` for in-process listeners,
+implemented via the shared `StoreEmitter` helper
+(`src/persistence/store-emitter.ts`). The emitter snapshots its
+listener set before iterating so a listener that unsubscribes itself
+during emission doesn't skip subsequent subscribers, and a throwing
+listener is logged-and-skipped rather than killing the whole emit.
+
+The runtime relays each store's changes onto the typed EventBus
 (`src/core/event-bus.ts`) as `*.changed` events:
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`

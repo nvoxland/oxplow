@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 function tmux(args: string[]): string {
   return execFileSync("tmux", args, {
@@ -163,25 +163,10 @@ export function killWindow(target: string) {
 export function killSession(session: string) {
   try {
     tmux(["kill-session", "-t", session]);
-  } catch {}
-}
-
-/**
- * Spawn a detached sentinel process that watches `daemonPid` and kills the
- * tmux session when that pid is no longer alive. Handles daemon crashes and
- * SIGKILL in addition to graceful shutdown.
- *
- * The sentinel is fully detached (unref'd) so it does not keep the daemon's
- * event loop alive.
- */
-export function watchSession(session: string, daemonPid: number) {
-  // Shell one-liner: poll every 2 s; when the pid is gone, kill the session.
-  const script = `while kill -0 ${daemonPid} 2>/dev/null; do sleep 2; done; tmux kill-session -t ${session} 2>/dev/null`;
-  const child = spawn("sh", ["-c", script], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  } catch {
+    // tmux exits non-zero when the session is already gone — that's exactly
+    // the desired end state, so the only "error" here is the no-op case.
+  }
 }
 
 export function listWindows(session: string): string[] {

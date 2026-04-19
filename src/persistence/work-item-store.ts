@@ -1,6 +1,7 @@
 import type { Logger } from "../core/logger.js";
 import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
 export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "to_check" | "blocked" | "done" | "canceled";
@@ -129,29 +130,19 @@ interface UpdateWorkItemInput {
 
 export class WorkItemStore {
   private readonly stateDb;
-  private readonly listeners = new Set<(change: WorkItemChange) => void>();
+  private readonly emitter: StoreEmitter<WorkItemChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("work item change", logger);
   }
 
   subscribe(listener: (change: WorkItemChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return this.emitter.subscribe(listener);
   }
 
   private emitChange(change: WorkItemChange): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(change);
-      } catch (error) {
-        this.logger?.warn("work item change listener threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   getState(batchId: string): BatchWorkState {

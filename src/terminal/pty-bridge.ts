@@ -1,6 +1,6 @@
-import type { WebSocket } from "ws";
 import { spawn } from "node-pty";
 import type { Logger } from "../core/logger.js";
+import type { BridgeSocket } from "./bridge-socket.js";
 import { capturePaneHistory, copyModePage, copyModeScroll, exitCopyMode, resizeWindow } from "./tmux.js";
 
 interface ClientMsg {
@@ -12,7 +12,7 @@ interface ClientMsg {
   lines?: number;
 }
 
-export function attachPane(ws: WebSocket, paneTarget: string, cols: number, rows: number, logger?: Logger) {
+export function attachPane(ws: BridgeSocket, paneTarget: string, cols: number, rows: number, logger?: Logger) {
   logger?.info("attaching pane bridge", { paneTarget, cols, rows });
   const initialHistory = capturePaneHistory(paneTarget);
   if (initialHistory && ws.readyState === ws.OPEN) {

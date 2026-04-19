@@ -20,16 +20,11 @@ export interface AgentPtySpec {
 
 export type PtyFactory = (spec: AgentPtySpec) => IPtyLike;
 
-interface AttachedSocket {
-  readonly OPEN: number;
-  readyState: number;
-  send(message: string): void;
-  close(): void;
-  emit(event: string, ...args: unknown[]): boolean;
-  on(event: string, listener: (...args: unknown[]) => void): unknown;
-  off?(event: string, listener: (...args: unknown[]) => void): unknown;
-  removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
-}
+import type { BridgeSocket } from "./bridge-socket.js";
+
+// Backwards-compatible alias (was named AttachedSocket; the surface is now
+// shared across pty/lsp bridges as BridgeSocket).
+type AttachedSocket = BridgeSocket;
 
 interface ClientMsg {
   type: "input" | "input-binary" | "resize";

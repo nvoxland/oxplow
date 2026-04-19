@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 import type { Stream } from "./stream-store.js";
 
 export type BatchStatus = "active" | "queued" | "completed";
@@ -46,30 +47,20 @@ interface PersistedBatchState {
 export class BatchStore {
   private readonly legacyDir: string;
   private readonly stateDb;
-  private readonly listeners = new Set<(change: BatchChange) => void>();
+  private readonly emitter: StoreEmitter<BatchChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.legacyDir = join(projectDir, ".newde", "batches");
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("batch change", logger);
   }
 
   subscribe(listener: (change: BatchChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return this.emitter.subscribe(listener);
   }
 
   private emitChange(change: BatchChange): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(change);
-      } catch (error) {
-        this.logger?.warn("batch change listener threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   ensureStream(stream: Stream): BatchState {

@@ -94,6 +94,28 @@ describe("CommitPointStore", () => {
     expect(() => store.setMode(cp.id, "auto")).toThrow();
   });
 
+  test("failExecution moves an approved point to rejected (so a failed git commit doesn't loop forever)", () => {
+    const { store, batchId } = seed();
+    const cp = store.create({ batchId, mode: "auto", sortIndex: 1 });
+    store.propose(cp.id, "msg"); // auto → approved
+    expect(store.get(cp.id)?.status).toBe("approved");
+    const failed = store.failExecution(cp.id, "commit failed: nothing to commit");
+    expect(failed.status).toBe("rejected");
+    expect(failed.rejection_note).toContain("commit failed");
+    // Listed-approved is now empty so the startup recovery loop won't retry.
+    expect(store.listApproved().some((p) => p.id === cp.id)).toBe(false);
+  });
+
+  test("failExecution refuses to fire from non-approved status", () => {
+    const { store, batchId } = seed();
+    const cp = store.create({ batchId, mode: "approval", sortIndex: 1 });
+    expect(() => store.failExecution(cp.id, "x")).toThrow();
+    store.propose(cp.id, "draft");
+    // proposed (not approved) → still refused; only the runtime's executor
+    // path should reach failExecution, and only after status moved to approved.
+    expect(() => store.failExecution(cp.id, "x")).toThrow();
+  });
+
   test("listApproved only returns commit points ready for the runtime to commit", () => {
     const { store, batchId } = seed();
     const a = store.create({ batchId, mode: "auto", sortIndex: 1 });

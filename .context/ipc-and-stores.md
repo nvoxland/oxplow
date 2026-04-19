@@ -16,8 +16,11 @@ touches roughly seven files. They sit in this order:
 
 2. **Store class** — `src/persistence/<thing>-store.ts`. Wraps the SQLite
    connection (`getStateDatabase(projectDir)`). Exposes typed read/write
-   methods, fires `subscribe()` listeners on changes, validates inputs
-   (kinds, statuses, length limits) before writing.
+   methods, fires `subscribe()` listeners via the shared `StoreEmitter`
+   (`src/persistence/store-emitter.ts`) on changes, validates inputs
+   (kinds, statuses, length limits) before writing. Don't reimplement
+   the subscribe/emit pattern — instantiate `StoreEmitter<YourChange>`
+   in the constructor and delegate.
 
 3. **Runtime method** — `src/electron/runtime.ts`. Adds a method to
    `ElectronRuntime` that resolves stream/batch as needed and delegates

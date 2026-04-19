@@ -1,6 +1,7 @@
 import type { Logger } from "../core/logger.js";
 import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 export type WaitPointStatus = "pending" | "triggered";
 
@@ -27,23 +28,19 @@ export interface WaitPointChange {
 
 export class WaitPointStore {
   private readonly stateDb;
-  private readonly listeners = new Set<(change: WaitPointChange) => void>();
+  private readonly emitter: StoreEmitter<WaitPointChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("wait point", logger);
   }
 
   subscribe(listener: (change: WaitPointChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return this.emitter.subscribe(listener);
   }
 
   private emit(change: WaitPointChange): void {
-    for (const l of this.listeners) {
-      try { l(change); } catch (e) {
-        this.logger?.warn("wait point listener threw", { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   listForBatch(batchId: string): WaitPoint[] {

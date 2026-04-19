@@ -319,7 +319,9 @@ function acquireProjectLock(projectDir: string): LockResult {
       return { ok: false, pid: priorPid, lockPath };
     }
     // stale — either the writer died without cleaning up, or it's our own pid
-    try { unlinkSync(lockPath); } catch {}
+    try { unlinkSync(lockPath); } catch (err) {
+      console.warn("[newde] could not remove stale lock file", lockPath, err);
+    }
   }
   writeFileSync(lockPath, String(process.pid), "utf8");
   return { ok: true, lockPath };
@@ -330,7 +332,9 @@ function releaseProjectLock(): void {
   try {
     const currentPid = readLockPid(instanceLockPath);
     if (currentPid === process.pid) unlinkSync(instanceLockPath);
-  } catch {}
+  } catch (err) {
+    console.warn("[newde] could not release project lock", instanceLockPath, err);
+  }
   instanceLockPath = null;
 }
 

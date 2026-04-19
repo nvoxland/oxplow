@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import type WebSocket from "ws";
+import type { BridgeSocket } from "../terminal/bridge-socket.js";
 import type { Logger } from "../core/logger.js";
 import type { Stream } from "../persistence/stream-store.js";
 
@@ -40,7 +40,7 @@ export interface LspDiagnostic {
 }
 
 interface PendingRequest {
-  ws: WebSocket;
+  ws: BridgeSocket;
   clientId: number | string;
 }
 
@@ -94,7 +94,7 @@ export class LspSessionManager {
 
   constructor(private readonly logger: Logger) {}
 
-  async attachClient(ws: WebSocket, stream: Stream, languageId: string): Promise<void> {
+  async attachClient(ws: BridgeSocket, stream: Stream, languageId: string): Promise<void> {
     const session = await this.ensureSession(stream, languageId);
     session.attachClient(ws);
   }
@@ -140,7 +140,7 @@ export class LspSession {
   private contentLength: number | null = null;
   private nextServerId = 1;
   private initialized = false;
-  private clients = new Set<WebSocket>();
+  private clients = new Set<BridgeSocket>();
   private pending = new Map<number | string, PendingRequest>();
   private openDocuments = new Map<string, { version: number; text: string }>();
   private diagnosticsByUri = new Map<string, LspDiagnostic[]>();
@@ -227,7 +227,7 @@ export class LspSession {
     this.initialized = true;
   }
 
-  attachClient(ws: WebSocket): void {
+  attachClient(ws: BridgeSocket): void {
     this.clients.add(ws);
     ws.on("message", (raw) => {
       const message = parseJsonRpc(raw.toString());
@@ -331,7 +331,7 @@ export class LspSession {
     });
   }
 
-  private forwardRequest(ws: WebSocket, message: JsonRpcRequest): void {
+  private forwardRequest(ws: BridgeSocket, message: JsonRpcRequest): void {
     const id = this.nextServerId++;
     this.pending.set(id, { ws, clientId: message.id! });
     this.sendToServer({
@@ -361,7 +361,7 @@ export class LspSession {
             reject(error);
           }
         },
-      } as unknown as WebSocket;
+      } as unknown as BridgeSocket;
       this.pending.set(id, { ws: fakeWs, clientId: id });
       this.sendToServer({
         jsonrpc: "2.0",

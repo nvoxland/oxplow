@@ -19,7 +19,7 @@ function tempIdeDir(): string {
 function connect(port: number, token: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/`, {
-      headers: { "x-claude-code-ide-authorization": token },
+      headers: { Authorization: `Bearer ${token}` },
     });
     ws.once("open", () => resolve(ws));
     ws.once("error", reject);

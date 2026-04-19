@@ -1,6 +1,7 @@
 import type { Logger } from "../core/logger.js";
 import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 export type CommitPointMode = "auto" | "approval";
 export type CommitPointStatus = "pending" | "proposed" | "approved" | "done" | "rejected";
@@ -36,23 +37,19 @@ export interface CommitPointChange {
 
 export class CommitPointStore {
   private readonly stateDb;
-  private readonly listeners = new Set<(change: CommitPointChange) => void>();
+  private readonly emitter: StoreEmitter<CommitPointChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("commit point", logger);
   }
 
   subscribe(listener: (change: CommitPointChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return this.emitter.subscribe(listener);
   }
 
   private emit(change: CommitPointChange): void {
-    for (const l of this.listeners) {
-      try { l(change); } catch (e) {
-        this.logger?.warn("commit point listener threw", { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   listForBatch(batchId: string): CommitPoint[] {
@@ -168,6 +165,23 @@ export class CommitPointStore {
   reject(id: string, note: string): CommitPoint {
     const cp = this.requireCommitPoint(id);
     if (cp.status !== "proposed") throw new Error(`cannot reject commit point in status ${cp.status}`);
+    return this.transitionToRejected(id, note);
+  }
+
+  /**
+   * Move an `approved` point to `rejected` because the runtime's `git commit`
+   * itself failed. Distinct from user-initiated reject (which only fires from
+   * `proposed`) because the failure path needs to escape from `approved` —
+   * otherwise the startup-recovery loop retries the same broken commit
+   * forever.
+   */
+  failExecution(id: string, note: string): CommitPoint {
+    const cp = this.requireCommitPoint(id);
+    if (cp.status !== "approved") throw new Error(`cannot fail execution in status ${cp.status}`);
+    return this.transitionToRejected(id, note);
+  }
+
+  private transitionToRejected(id: string, note: string): CommitPoint {
     const trimmed = note.slice(0, NOTE_MAX_LEN);
     const now = new Date().toISOString();
     this.stateDb.run(

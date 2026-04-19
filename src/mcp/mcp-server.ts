@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { writeFileSync, unlinkSync, readdirSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,6 @@ import type { Logger } from "../core/logger.js";
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "newde";
 const SERVER_VERSION = "0.0.1";
-const IDE_AUTH_HEADER = "x-claude-code-ide-authorization";
 const HTTP_AUTH_HEADER = "authorization";
 const MAX_HTTP_BODY_BYTES = 1_000_000;
 
@@ -79,8 +78,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   });
   const wss = new WebSocketServer({ server: http });
   wss.on("connection", (ws, req) => {
-    const presented = req.headers[IDE_AUTH_HEADER];
-    if (presented !== authToken) {
+    if (!isAuthorizedHttpRequest(req, authToken)) {
       logger?.warn("rejected unauthorized mcp websocket");
       ws.close(1008, "unauthorized");
       return;
@@ -367,11 +365,18 @@ function readHeader(req: IncomingMessage, name: string): string | undefined {
 
 function isAuthorizedHttpRequest(req: IncomingMessage, authToken: string): boolean {
   const authorization = req.headers[HTTP_AUTH_HEADER];
-  if (typeof authorization === "string" && authorization === `Bearer ${authToken}`) {
-    return true;
-  }
-  const legacy = req.headers[IDE_AUTH_HEADER];
-  return legacy === authToken;
+  if (typeof authorization !== "string") return false;
+  return constantTimeStringEqual(authorization, `Bearer ${authToken}`);
+}
+
+function constantTimeStringEqual(a: string, b: string): boolean {
+  // Length-first short-circuit is fine — leaks length but not content. The
+  // token itself is fixed-length so the prefix and suffix lengths don't
+  // vary across legitimate calls.
+  if (a.length !== b.length) return false;
+  const aBuf = Buffer.from(a, "utf8");
+  const bBuf = Buffer.from(b, "utf8");
+  return timingSafeEqual(aBuf, bBuf);
 }
 
 class BodyTooLargeError extends Error {

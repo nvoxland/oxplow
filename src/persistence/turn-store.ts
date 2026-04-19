@@ -1,6 +1,7 @@
 import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 const PROMPT_MAX_LEN = 20_000;
 const ANSWER_MAX_LEN = 20_000;
@@ -38,29 +39,19 @@ export interface CloseTurnInput {
 
 export class TurnStore {
   private readonly stateDb;
-  private readonly listeners = new Set<(change: TurnChange) => void>();
+  private readonly emitter: StoreEmitter<TurnChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("turn change", logger);
   }
 
   subscribe(listener: (change: TurnChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return this.emitter.subscribe(listener);
   }
 
   private emit(change: TurnChange): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(change);
-      } catch (error) {
-        this.logger?.warn("turn change listener threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    this.emitter.emit(change);
   }
 
   openTurn(input: OpenTurnInput): AgentTurn {

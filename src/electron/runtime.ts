@@ -789,7 +789,7 @@ export class ElectronRuntime {
       this.terminalSessions.delete(sessionId);
     });
     if (mode === "tmux") {
-      attachPane(socket as any, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
+      attachPane(socket, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
     } else {
       // Direct-mode agent PTYs live in the runtime and persist across
       // UI attach/detach. Switching batches or streams detaches the socket
@@ -804,7 +804,7 @@ export class ElectronRuntime {
       if (!alreadySpawned) {
         this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
       }
-      agentPty.attach(socket as any, cols, rows);
+      agentPty.attach(socket, cols, rows);
     }
     this.terminalSessions.set(sessionId, socket);
     return sessionId;
@@ -831,7 +831,7 @@ export class ElectronRuntime {
       this.lspClients.delete(clientId);
     });
     this.lspClients.set(clientId, socket);
-    await this.lspManager.attachClient(socket as any, stream, languageId);
+    await this.lspManager.attachClient(socket, stream, languageId);
     return clientId;
   }
 
@@ -1305,13 +1305,10 @@ export class ElectronRuntime {
         id: cp.id,
         stderr: result.stderr,
       });
-      // Park as rejected so the user can see the error; agent will retry after
-      // user resets the point to pending.
-      try {
-        this.commitPointStore.reject(cp.id, `commit failed: ${result.stderr || "unknown"}`);
-      } catch {
-        // already not in 'proposed' — nothing we can do automatically.
-      }
+      // Move out of `approved` to `rejected` so the startup-recovery loop
+      // doesn't retry forever. The user can read the rejection_note in the
+      // UI and click Retry to send the point back through the agent.
+      this.commitPointStore.failExecution(cp.id, `commit failed: ${result.stderr || "unknown"}`);
       return;
     }
     try {
