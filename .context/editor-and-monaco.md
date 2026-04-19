@@ -40,6 +40,17 @@ keydown before it propagates to the webview. If you ever see save
 firing twice, something changed in that dispatch order — investigate
 before deleting either binding.
 
+## Closing a dirty tab prompts before discarding
+
+`handleCloseOpenFile` in `src/ui/App.tsx` checks `draftContent !==
+savedContent` before calling `closeOpenFile`, and pops a
+`window.confirm` when the tab is dirty. Cancelling the confirm leaves
+the tab and its draft intact. The other call to `closeOpenFile` in
+App.tsx is an error-path cleanup (open-file IPC failed) — that one
+intentionally skips the prompt because there's nothing worth saving
+yet. Auto-close via `enforceOpenFileLimit` already refuses to discard
+dirty tabs, so all three close paths are now consistent.
+
 ## Custom context menu
 
 Monaco's native menu is disabled (`contextmenu: false`). Right-click is

@@ -1,6 +1,9 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -12,11 +15,20 @@ export interface LaunchedNewde {
 
 // Launch the built newde Electron app, pointed at `projectDir`.
 // Mirrors what `bin/newde` does: `electron . --project <dir>`.
+//
+// Each launch gets a fresh Electron userData directory via
+// --user-data-dir. Without this, localStorage (dock open/collapsed,
+// open file tabs, etc.) persists across probe runs and one probe's
+// UI state corrupts the next — e.g. a probe that clicks the active
+// "Files" dock tab toggles the dock closed, and the next probe finds
+// file-tree rows in the DOM but display:none. Isolating userData
+// per launch is what makes probes reproducible.
 export async function launchNewde(projectDir: string, opts: { timeoutMs?: number } = {}): Promise<LaunchedNewde> {
   const repoRoot = resolve(__dirname, "..");
+  const userDataDir = mkdtempSync(join(tmpdir(), "newde-e2e-userdata-"));
 
   const app = await electron.launch({
-    args: [repoRoot, "--project", projectDir],
+    args: [repoRoot, `--user-data-dir=${userDataDir}`, "--project", projectDir],
     cwd: repoRoot,
     timeout: opts.timeoutMs ?? 60_000,
     env: {
@@ -37,6 +49,7 @@ export async function launchNewde(projectDir: string, opts: { timeoutMs?: number
     window,
     close: async () => {
       await app.close();
+      try { rmSync(userDataDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
 }

@@ -157,6 +157,27 @@ additions from the 2026-04-19 Playwright dogfood pass:
 - **B6.** Trace "rejected unauthorized mcp websocket" — legitimate
   defense or spurious noise?
 
+Additions from the 2026-04-19 file-open/save dogfood pass:
+
+- **B7. (fixed)** Closing a dirty file tab used to silently discard
+  unsaved edits. `handleCloseOpenFile` now pops a `window.confirm`
+  when `draftContent !== savedContent`; cancelling keeps the draft.
+  Verified by `tests-e2e/probe-file-edit.ts`. Documented in
+  `.context/editor-and-monaco.md`.
+- **B8.** **Harness didn't isolate Electron userData across probe
+  runs.** localStorage (dock open state, active tab, persisted
+  open files) leaked between runs. A probe that clicked the active
+  "Files" tab toggled the dock closed (DockShell.tsx's
+  active-tab-click-closes behavior), and the next probe found
+  file-tree rows in the DOM but display:none. Fixed in
+  tests-e2e/harness.ts by passing `--user-data-dir=<mkdtemp>` per
+  launch. Keep this behavior: every future probe depends on it.
+- **B9.** On first launch, the left dock's active tab is "plan"
+  (Work), not "project" (Files). Probes/users who want the file
+  tree must click `dock-tab-project`. Not a bug, but worth noting
+  for test authors — discovering it took a chain of visibility
+  probes.
+
 ## Dogfood-cycle lessons (2026-04-19)
 
 First full loop through newde-driving-newde surfaced process issues

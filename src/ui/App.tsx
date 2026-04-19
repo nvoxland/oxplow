@@ -378,6 +378,14 @@ export function App() {
 
   function handleCloseOpenFile(path: string) {
     if (!stream) return;
+    // Guard against silently dropping unsaved edits when a user closes a
+    // dirty tab via the × or Cmd+W. Mirrors IntelliJ / VS Code behavior.
+    const currentFile = fileSessions[stream.id]?.files[path];
+    if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
+      const basename = path.split("/").pop() ?? path;
+      const ok = window.confirm(`"${basename}" has unsaved changes. Close and discard them?`);
+      if (!ok) return;
+    }
     setFileSessions((prev) => ({
       ...prev,
       [stream.id]: closeOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
