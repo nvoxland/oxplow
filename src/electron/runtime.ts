@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
 import { decideStopDirective, type BatchSnapshot } from "./stop-hook-pipeline.js";
+import { BatchQueueOrchestrator } from "./batch-queue-orchestrator.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
 import {
@@ -25,7 +26,6 @@ import {
   appendToGitignore,
   gitPush,
   gitPull,
-  gitCommitAll,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -91,6 +91,7 @@ export class ElectronRuntime {
   private readonly workItemStore: WorkItemStore;
   readonly commitPointStore: CommitPointStore;
   readonly waitPointStore: WaitPointStore;
+  readonly batchQueue: BatchQueueOrchestrator;
   readonly turnStore: TurnStore;
   readonly fileChangeStore: FileChangeStore;
   readonly workItemApi: WorkItemApi;
@@ -123,6 +124,14 @@ export class ElectronRuntime {
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.waitPointStore = new WaitPointStore(projectDir, logger.child({ subsystem: "wait-points" }));
+    this.batchQueue = new BatchQueueOrchestrator(
+      this.store,
+      this.batchStore,
+      this.workItemStore,
+      this.commitPointStore,
+      this.waitPointStore,
+      logger.child({ subsystem: "batch-queue" }),
+    );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.fileChangeStore = new FileChangeStore(projectDir, logger.child({ subsystem: "file-change-store" }));
     this.workItemApi = createWorkItemApi({
@@ -286,7 +295,7 @@ export class ElectronRuntime {
       // agent sees the queue move forward without further prompting.
       if (change.kind === "updated" && change.id) {
         const cp = this.commitPointStore.get(change.id);
-        if (cp?.status === "approved") this.executeApprovedCommit(cp);
+        if (cp?.status === "approved") this.batchQueue.executeApprovedCommit(cp);
       }
     });
     this.turnStore.subscribe((change) => {
@@ -340,9 +349,7 @@ export class ElectronRuntime {
 
     // Crash recovery: any commit points left in `approved` state from a prior
     // run haven't had their `git commit` executed yet. Drain them now.
-    for (const cp of this.commitPointStore.listApproved()) {
-      this.executeApprovedCommit(cp);
-    }
+    this.batchQueue.drainPendingExecutions();
 
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
@@ -1135,145 +1142,63 @@ export class ElectronRuntime {
     return this.fileChangeStore.listForBatch(batchId, limit);
   }
 
-  // -------- commit points (IPC-exposed methods) --------
+  // -------- commit points (IPC-exposed delegations) --------
 
   listCommitPoints(batchId: string): CommitPoint[] {
-    return this.commitPointStore.listForBatch(batchId);
+    return this.batchQueue.listCommitPoints(batchId);
   }
 
   createCommitPoint(streamId: string, batchId: string, mode: CommitPointMode): CommitPoint {
     this.resolveBatch(streamId, batchId);
-    // A commit point with no preceding work items has nothing to commit; refuse
-    // to create one as the very first queue entry. The mixed reorder still
-    // lets users drag a point above all work items if they really insist.
-    const hasWork = this.workItemStore.listItems(batchId).length > 0;
-    if (!hasWork) {
-      throw new Error("cannot add a commit point before any work items exist");
-    }
-    const sortIndex = this.nextQueueSortIndex(batchId);
-    return this.commitPointStore.create({ batchId, mode, sortIndex });
+    return this.batchQueue.createCommitPoint(batchId, mode);
   }
 
   setCommitPointMode(id: string, mode: CommitPointMode): CommitPoint {
-    return this.commitPointStore.setMode(id, mode);
+    return this.batchQueue.setCommitPointMode(id, mode);
   }
 
   approveCommitPoint(id: string, editedMessage?: string): CommitPoint {
-    return this.commitPointStore.approve(id, editedMessage);
+    return this.batchQueue.approveCommitPoint(id, editedMessage);
   }
 
   rejectCommitPoint(id: string, note: string): CommitPoint {
-    return this.commitPointStore.reject(id, note);
+    return this.batchQueue.rejectCommitPoint(id, note);
   }
 
   resetCommitPoint(id: string): CommitPoint {
-    return this.commitPointStore.resetToPending(id);
+    return this.batchQueue.resetCommitPoint(id);
   }
 
   deleteCommitPoint(id: string): void {
-    this.commitPointStore.delete(id);
+    this.batchQueue.deleteCommitPoint(id);
   }
 
-  /**
-   * Reorder the mixed batch queue (work items + commit points). `entries` is
-   * the desired top-to-bottom order; sort_indexes are rewritten to match so
-   * findActiveCommitPoint and the Stop-hook pipeline see the new position.
-   */
   reorderBatchQueue(
     streamId: string,
     batchId: string,
     entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
   ): void {
     this.resolveBatch(streamId, batchId);
-    const workEntries: Array<{ id: string; sortIndex: number }> = [];
-    const commitEntries: Array<{ id: string; sortIndex: number }> = [];
-    const waitEntries: Array<{ id: string; sortIndex: number }> = [];
-    entries.forEach((entry, index) => {
-      if (entry.kind === "work") workEntries.push({ id: entry.id, sortIndex: index });
-      else if (entry.kind === "commit") commitEntries.push({ id: entry.id, sortIndex: index });
-      else waitEntries.push({ id: entry.id, sortIndex: index });
-    });
-    this.workItemStore.setItemSortIndexes(batchId, workEntries);
-    this.commitPointStore.setSortIndexes(commitEntries);
-    this.waitPointStore.setSortIndexes(waitEntries);
+    this.batchQueue.reorderBatchQueue(batchId, entries);
   }
 
-  // -------- wait points (IPC-exposed methods) --------
+  // -------- wait points (IPC-exposed delegations) --------
 
   listWaitPoints(batchId: string): WaitPoint[] {
-    return this.waitPointStore.listForBatch(batchId);
+    return this.batchQueue.listWaitPoints(batchId);
   }
 
   createWaitPoint(streamId: string, batchId: string, note?: string | null): WaitPoint {
     this.resolveBatch(streamId, batchId);
-    // Wait points have nothing to "wait after" without preceding work items;
-    // refuse to create one as the very first queue entry.
-    const hasWork = this.workItemStore.listItems(batchId).length > 0;
-    if (!hasWork) {
-      throw new Error("cannot add a wait point before any work items exist");
-    }
-    const sortIndex = this.nextQueueSortIndex(batchId);
-    return this.waitPointStore.create({ batchId, sortIndex, note: note ?? null });
+    return this.batchQueue.createWaitPoint(batchId, note ?? null);
   }
 
   setWaitPointNote(id: string, note: string | null): WaitPoint {
-    return this.waitPointStore.setNote(id, note);
+    return this.batchQueue.setWaitPointNote(id, note);
   }
 
   deleteWaitPoint(id: string): void {
-    this.waitPointStore.delete(id);
-  }
-
-  private nextQueueSortIndex(batchId: string): number {
-    const items = this.workItemStore.listItems(batchId);
-    const commits = this.commitPointStore.listForBatch(batchId);
-    const waits = this.waitPointStore.listForBatch(batchId);
-    const maxItem = items.reduce((m, item) => Math.max(m, item.sort_index), -1);
-    const maxCommit = commits.reduce((m, p) => Math.max(m, p.sort_index), -1);
-    const maxWait = waits.reduce((m, p) => Math.max(m, p.sort_index), -1);
-    return Math.max(maxItem, maxCommit, maxWait) + 1;
-  }
-
-  private executeApprovedCommit(cp: CommitPoint): void {
-    // Resolve the stream via the batch. If the batch was deleted or the
-    // worktree is gone, mark the point rejected with a note rather than
-    // looping forever.
-    const batch = this.batchStore.findById(cp.batch_id);
-    if (!batch) {
-      this.logger.warn("commit point has no batch; dropping", { id: cp.id });
-      return;
-    }
-    const stream = this.store.get(batch.stream_id);
-    if (!stream) {
-      this.logger.warn("commit point has no stream; dropping", { id: cp.id });
-      return;
-    }
-    const message = cp.approved_message ?? cp.proposed_message;
-    if (!message) {
-      this.logger.warn("commit point approved with no message; skipping", { id: cp.id });
-      return;
-    }
-    const result = gitCommitAll(stream.worktree_path, message);
-    if (!result.ok || !result.sha) {
-      this.logger.warn("git commit failed for commit point", {
-        id: cp.id,
-        stderr: result.stderr,
-      });
-      // Move out of `approved` to `rejected` so the startup-recovery loop
-      // doesn't retry forever. The user can read the rejection_note in the
-      // UI and click Retry to send the point back through the agent.
-      this.commitPointStore.failExecution(cp.id, `commit failed: ${result.stderr || "unknown"}`);
-      return;
-    }
-    try {
-      this.commitPointStore.markDone(cp.id, result.sha);
-      this.logger.info("committed for commit point", { id: cp.id, sha: result.sha });
-    } catch (err) {
-      this.logger.warn("failed to mark commit point done", {
-        id: cp.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    this.batchQueue.deleteWaitPoint(id);
   }
 }
 

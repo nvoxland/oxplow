@@ -96,6 +96,17 @@ Auto-mode commit points pass straight through: the agent proposes →
 the agent's `propose_commit` MCP call returns → agent tries to Stop again
 → pipeline picks the next thing. No human in the loop.
 
+## BatchQueueOrchestrator
+
+Cross-store queue logic (commit points + wait points + the
+`reorderBatchQueue` that rewrites all three sort_index spaces) lives
+in `src/electron/batch-queue-orchestrator.ts`. The runtime instantiates
+it as `this.batchQueue` and delegates IPC-exposed methods through.
+`executeApprovedCommit` (which runs the actual `git commit` after a
+point flips to `approved`) is also there, called both eagerly via
+the runtime's `commitPointStore.subscribe` handler and at startup
+via `drainPendingExecutions()` to cover crashes mid-commit.
+
 ## MCP tools
 
 `buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
