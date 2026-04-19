@@ -129,6 +129,34 @@ End-to-end smoke for the test harness itself:
    colocated `bun:test` where logic changed, (c) not bundle unrelated
    cleanup.
 
+## Backlog — discovered during dogfood sessions
+
+Append new friction-driven scenarios here as they come up. Current
+additions from the 2026-04-19 Playwright dogfood pass:
+
+- **B1.** Re-probe whether Cmd+K palette actually receives the
+  shortcut when Monaco has focus. Hypothesis: Monaco eats the
+  keydown before the `window` handler in App.tsx sees it. If so,
+  either register via `document` with `capture: true` or route the
+  shortcut through the native menu.
+- **B2.** Walk the "open a file from the tree and edit it in
+  Monaco" path end-to-end via Playwright. Confirm dirty indicator,
+  Cmd+S save, unsaved-close warning. The `📁src` folder did not
+  appear in the initial file-tree dump — verify tree ordering /
+  scrolling behavior when there are more siblings than fit in the
+  viewport.
+- **B3.** Verify drag-between-status-sections actually persists. The
+  outline shows the "◐" row stack for status — need a testid per
+  section and per work-item to drive a drag-drop test.
+- **B4.** Commit approval flow via newde's UI — never got this far
+  in the first dogfood pass. Set up a fresh branch and try to land
+  a tiny edit through newde's own commit UX.
+- **B5.** Investigate the `MaxListenersExceededWarning` at startup:
+  11 listeners on `newde:event` — likely one store per subscription.
+  Centralize the subscription or raise the limit at the preload.
+- **B6.** Trace "rejected unauthorized mcp websocket" — legitimate
+  defense or spurious noise?
+
 ## Out of scope (intentional)
 
 - Building a full Playwright test *suite* that runs in CI. This plan is about
