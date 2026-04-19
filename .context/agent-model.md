@@ -129,6 +129,18 @@ The pipeline runs in priority order:
    review queue and is terminal from the pipeline's perspective.
 5. **Otherwise.** Allow stop.
 
+**`propose_commit` vs. direct `git commit`.** Commit points + the
+"+ Commit when done" Work-panel button are for **automated workflows**
+where the user wants the agent to pause and commit at a specific point
+in a multi-step batch. For one-off "finish this and commit" work,
+just tell the agent to run `git commit` directly — no commit point
+needed, no approval UI. If you prompt the agent to `propose_commit`
+and there's no active commit point, the agent will skip it and the
+diff stays uncommitted until someone notices. The `+ Commit when done`
+bar renders even when the To-do section is empty (so it's
+discoverable), but the canonical path for ad-hoc commits is still
+plain `git commit` via the agent.
+
 Auto-mode commit points pass straight through: the agent proposes →
 `commitPointStore.propose` jumps the status to `approved` →
 `runtime.executeApprovedCommit` runs `gitCommitAll` and marks `done` →

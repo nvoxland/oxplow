@@ -320,8 +320,9 @@ export function PlanPane({
             const isRootBatch = group.epic === null && mode === "batch";
             const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
             const addPointsSlot = isRootBatch && batch ? (
-              <div style={queueMarkerBarStyle}>
+              <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
                 <button type="button"
+                  data-testid="plan-add-commit-point"
                   onClick={() => {
                     if (!streamId || !batchId) return;
                     runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
@@ -341,6 +342,7 @@ export function PlanPane({
                   + Commit when done
                 </button>
                 <button type="button"
+                  data-testid="plan-add-wait-point"
                   onClick={() => {
                     if (!streamId || !batchId) return;
                     runWithError("Add wait point", createWaitPoint(streamId, batchId, null));

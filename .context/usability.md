@@ -46,6 +46,7 @@ Things I keep forgetting. Read this before adding any UI.
     `work-item-description`, `work-item-acceptance`, `work-item-save`,
     `work-item-save-another`, `work-item-cancel`
   - `command-palette-input`
+  - `plan-add-points-bar`, `plan-add-commit-point`, `plan-add-wait-point`
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback

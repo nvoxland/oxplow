@@ -355,10 +355,15 @@ export function WorkGroupList({
           <div key={section.kind}>
             <div style={headerStyle} {...headerDropHandlers}>{section.label}</div>
             {section.rows.map(renderRow)}
-            {section.kind === "toDo" && addPointsSlot ? addPointsSlot : null}
           </div>
         );
       })}
+      {/* Queue-marker bar always renders after the sections when the parent
+          provides one, so users can add a commit or wait point even when the
+          To do section is empty (e.g. after the agent has pushed every item
+          to human_check). Previously this slot lived inside the toDo section
+          and disappeared whenever that section was empty. */}
+      {addPointsSlot}
     </div>
   );
 }
