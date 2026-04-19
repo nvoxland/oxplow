@@ -34,6 +34,15 @@ machines*. All state lives in `.self-ralph/` (gitignored), in
    purpose. Harness / probe / command changes ARE tracked and
    should be in the commit with the matching newde fix (or a
    separate commit if purely infra).
+6. **Never touch `.newde/state.sqlite` with `sqlite3` (or any
+   other direct writer) while a newde instance is running.** The
+   agent driving this command IS a newde instance — it has the DB
+   open and cached. Concurrent writes from the CLI can corrupt
+   state or be silently overwritten. If you need to inspect or
+   mutate the DB directly (e.g. to clean orphan probe rows), do it
+   only after confirming no newde is running against this project
+   dir, or run the query against a copy. Prefer doing state
+   changes through the UI / IPC / MCP tools whenever possible.
 
 ## Step 1 — Sync bearings (cold-start safe)
 
