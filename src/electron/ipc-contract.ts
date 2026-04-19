@@ -3,6 +3,7 @@ import type {
   BacklogState,
   BatchFileChange,
   FileSnapshot,
+  SnapshotDiffResult,
   SnapshotSummary,
   BranchChanges,
   BranchRef,
@@ -44,6 +45,7 @@ export type {
   BacklogState,
   BatchFileChange,
   FileSnapshot,
+  SnapshotDiffResult,
   SnapshotSummary,
   BranchChanges,
   BranchRef,
@@ -193,11 +195,11 @@ export interface DesktopApi {
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
-  getTurnFileDiff(turnId: string, path: string): Promise<{ before: string | null; after: string | null }>;
+  getTurnFileDiff(turnId: string, path: string): Promise<SnapshotDiffResult>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
   getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null>;
-  getSnapshotFileDiff(snapshotId: string, path: string): Promise<{ before: string | null; after: string | null }>;
-  getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<{ before: string | null; after: string | null }>;
+  getSnapshotFileDiff(snapshotId: string, path: string): Promise<SnapshotDiffResult>;
+  getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<SnapshotDiffResult>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
   getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;

@@ -32,6 +32,10 @@ export interface NewdeConfig {
    *  output. Excluded from fs-watch and snapshot tracking. Added on top of
    *  the built-in list (node_modules, dist, build, .git, etc.). */
   generatedDirs: string[];
+  /** Maximum blob size (bytes) for content-addressed snapshotting. Files
+   *  larger than this get a stat-only entry (mtime + size tracked, but no
+   *  content blob, so diffs show "oversize"). Default 5 MiB. */
+  snapshotMaxFileBytes: number;
 }
 
 /** Partial shape that survives YAML parsing — loadProjectConfig fills in
@@ -43,10 +47,12 @@ export interface ParsedNewdeConfig {
   agentPromptAppend: string;
   snapshotRetentionDays: number;
   generatedDirs: string[];
+  snapshotMaxFileBytes: number;
 }
 
 const DEFAULT_AGENT: AgentKind = "claude";
 const DEFAULT_SNAPSHOT_RETENTION_DAYS = 7;
+const DEFAULT_SNAPSHOT_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeConfig {
   const configPath = join(projectDir, NEWDE_CONFIG_FILE);
@@ -60,6 +66,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
       agentPromptAppend: "",
       snapshotRetentionDays: DEFAULT_SNAPSHOT_RETENTION_DAYS,
       generatedDirs: [],
+      snapshotMaxFileBytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
     };
   }
 
@@ -72,6 +79,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
     agentPromptAppend: parsed.agentPromptAppend,
     snapshotRetentionDays: parsed.snapshotRetentionDays,
     generatedDirs: parsed.generatedDirs,
+    snapshotMaxFileBytes: parsed.snapshotMaxFileBytes,
   };
   logger?.info("loaded project config", {
     configPath,
@@ -94,6 +102,7 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     "agentPromptAppend",
     "snapshotRetentionDays",
     "generatedDirs",
+    "snapshotMaxFileBytes",
   ]);
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) {
@@ -156,6 +165,14 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     });
   }
 
+  let snapshotMaxFileBytes = DEFAULT_SNAPSHOT_MAX_FILE_BYTES;
+  if (value.snapshotMaxFileBytes !== undefined) {
+    if (typeof value.snapshotMaxFileBytes !== "number" || !Number.isFinite(value.snapshotMaxFileBytes) || value.snapshotMaxFileBytes < 1024) {
+      throw new Error("newde.yaml snapshotMaxFileBytes must be a number >= 1024");
+    }
+    snapshotMaxFileBytes = Math.floor(value.snapshotMaxFileBytes);
+  }
+
   return {
     agent,
     projectName,
@@ -163,6 +180,7 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     agentPromptAppend,
     snapshotRetentionDays,
     generatedDirs,
+    snapshotMaxFileBytes,
   };
 }
 
@@ -184,6 +202,9 @@ export function writeProjectConfig(projectDir: string, config: NewdeConfig): voi
   }
   if (config.generatedDirs.length > 0) {
     doc.generatedDirs = config.generatedDirs;
+  }
+  if (config.snapshotMaxFileBytes !== DEFAULT_SNAPSHOT_MAX_FILE_BYTES) {
+    doc.snapshotMaxFileBytes = config.snapshotMaxFileBytes;
   }
   if (config.lspServers.length > 0) {
     doc.lsp = {

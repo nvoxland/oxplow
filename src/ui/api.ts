@@ -100,15 +100,17 @@ export interface FileSnapshot {
   created_at: string;
 }
 
-export interface ManifestEntry {
+export type SnapshotEntryState = "present" | "deleted" | "oversize";
+
+export interface SnapshotEntry {
   hash: string;
   mtime_ms: number;
   size: number;
-  deleted?: boolean;
+  state: SnapshotEntryState;
 }
 
 export interface SnapshotFileRow {
-  entry: ManifestEntry;
+  entry: SnapshotEntry;
   kind: "created" | "updated" | "deleted";
 }
 
@@ -116,6 +118,15 @@ export interface SnapshotSummary {
   snapshot: FileSnapshot;
   files: Record<string, SnapshotFileRow>;
   counts: { created: number; updated: number; deleted: number };
+}
+
+export type SnapshotDiffSide = "absent" | SnapshotEntryState;
+
+export interface SnapshotDiffResult {
+  before: string | null;
+  after: string | null;
+  beforeState: SnapshotDiffSide;
+  afterState: SnapshotDiffSide;
 }
 
 export interface AgentTurn {
@@ -603,7 +614,7 @@ export async function listBatchFileChanges(
 export async function getTurnFileDiff(
   turnId: string,
   path: string,
-): Promise<{ before: string | null; after: string | null }> {
+): Promise<SnapshotDiffResult> {
   return desktopApi().getTurnFileDiff(turnId, path);
 }
 
@@ -618,7 +629,7 @@ export async function getSnapshotSummary(snapshotId: string): Promise<SnapshotSu
 export async function getSnapshotFileDiff(
   snapshotId: string,
   path: string,
-): Promise<{ before: string | null; after: string | null }> {
+): Promise<SnapshotDiffResult> {
   return desktopApi().getSnapshotFileDiff(snapshotId, path);
 }
 
@@ -626,7 +637,7 @@ export async function getSnapshotPairDiff(
   beforeSnapshotId: string | null,
   afterSnapshotId: string,
   path: string,
-): Promise<{ before: string | null; after: string | null }> {
+): Promise<SnapshotDiffResult> {
   return desktopApi().getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
 }
 

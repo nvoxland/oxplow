@@ -169,6 +169,7 @@ export function ProjectPanel({
   const [scopedDeletions, setScopedDeletions] = useState<Set<string>>(() => new Set());
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
+  const generatedSet = useMemo(() => new Set(generatedDirs), [generatedDirs]);
   const uncommittedPaths = useMemo(
     () => indexedFiles.filter((f) => f.gitStatus !== null).map((f) => f.path),
     [indexedFiles],
@@ -647,7 +648,7 @@ export function ProjectPanel({
               expandedDirs={expandedDirs}
               loadingDirs={loadingDirs}
               selectedFilePath={selectedFilePath}
-              generatedDirs={generatedDirs}
+              generatedSet={generatedSet}
               onToggleDirectory={toggleDirectory}
               onOpenFile={onOpenFile}
               onContextMenu={setContextMenu}

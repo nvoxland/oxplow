@@ -37,7 +37,7 @@ export function TreeEntries({
   expandedDirs,
   loadingDirs,
   selectedFilePath,
-  generatedDirs,
+  generatedSet,
   onToggleDirectory,
   onOpenFile,
   onContextMenu,
@@ -48,12 +48,11 @@ export function TreeEntries({
   expandedDirs: Record<string, boolean>;
   loadingDirs: Record<string, boolean>;
   selectedFilePath: string | null;
-  generatedDirs: string[];
+  generatedSet: Set<string>;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
   onContextMenu(target: ContextMenuTarget | null): void;
 }) {
-  const generatedSet = new Set(generatedDirs);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
       {entries.map((entry) => {
@@ -170,7 +169,7 @@ export function TreeEntries({
                     expandedDirs={expandedDirs}
                     loadingDirs={loadingDirs}
                     selectedFilePath={selectedFilePath}
-                    generatedDirs={generatedDirs}
+                    generatedSet={generatedSet}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
                     onContextMenu={onContextMenu}

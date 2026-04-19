@@ -84,19 +84,25 @@ the project pane and the per-turn file filter. Each row gets a nullable
 `snapshot_id` pointing at the `file_snapshot` that absorbed the change
 (backfilled when a turn-start or turn-end snapshot flushes).
 
-### `file_snapshot` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
+### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
-Metadata rows for content-addressed file snapshots. The actual blobs
-and per-snapshot manifests live under `.newde/snapshots/` (blobs in
-`objects/xx/yyyy…` sha256-addressed, manifests in
-`manifests/<snapshot_id>.json`). Each snapshot stores only the files in
-the dirty set at flush time, plus a pointer to the parent snapshot —
-walking the chain reconstructs the full file set. `kind` is
-`turn-start` or `turn-end`; the first turn-start on a stream doubles as
-its baseline. Manifest entries carry `hash`, `mtime_ms`, and `size` so
-startup reconciliation can detect drift cheaply without rehashing
-unchanged files. Deletions are recorded as tombstone entries. Oversized
-files (> 5 MB) are recorded with a sentinel hash rather than blobbed.
+Metadata for content-addressed file snapshots. `file_snapshot` holds
+one row per flush (kind, turn/batch fk, parent pointer, timestamp).
+`snapshot_entry` holds the per-path rows for each snapshot: `path`,
+`hash`, `mtime_ms`, `size`, `state`. Cascades from `file_snapshot`
+delete entries automatically. Walking the parent chain reconstructs
+the full file set.
+
+Blobs live on disk at `.newde/snapshots/objects/xx/yyyy…` (sha256
+addressed, shared across streams for dedup). Kinds: `turn-start` or
+`turn-end`; the first turn-start on a stream doubles as its baseline.
+
+Entry states:
+- `present`: file captured, `hash` points at a real blob.
+- `deleted`: tombstone — file was gone at flush time.
+- `oversize`: file existed but exceeded `snapshotMaxFileBytes`; no
+  blob, but `mtime_ms` and `size` are tracked so diffs still report
+  "it changed (by this much)" even without content.
 
 The `streams.current_snapshot_id` column holds the stream's latest
 snapshot — it's the parent for the next flush.

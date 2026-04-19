@@ -42,6 +42,7 @@ import {
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   getConfig,
+  getTurnFileDiff,
   setGeneratedDirs,
   selectBatch,
   promoteBatch,
@@ -1067,9 +1068,8 @@ export function App() {
 
   const handleOpenTurnDiff = async (turnId: string, path: string) => {
     try {
-      const { getTurnFileDiff } = await import("./api.js");
       const diff = await getTurnFileDiff(turnId, path);
-      if (diff.before === null && diff.after === null) {
+      if (diff.beforeState === "absent" && diff.afterState === "absent") {
         setError(`No snapshot diff available for ${path} in this turn`);
         return;
       }
@@ -1078,8 +1078,8 @@ export function App() {
         leftRef: "",
         rightKind: "working",
         baseLabel: `turn ${turnId.slice(-6)}`,
-        leftContent: diff.before ?? "",
-        rightContent: diff.after ?? "",
+        leftContent: renderDiffSide(diff.before, diff.beforeState),
+        rightContent: renderDiffSide(diff.after, diff.afterState),
         labelOverride: `turn ${turnId.slice(-6)}`,
       });
     } catch (err) {
@@ -1383,6 +1383,29 @@ export function App() {
       {daemonUnavailable ? <DaemonDownDialog /> : null}
     </div>
   );
+}
+
+/**
+ * Fill empty diff sides with a readable placeholder so the Monaco diff view
+ * doesn't just show blank text with no explanation. State flags from the
+ * snapshot store tell us why content is missing.
+ */
+function renderDiffSide(
+  content: string | null,
+  state: "absent" | "present" | "deleted" | "oversize",
+): string {
+  if (content !== null) return content;
+  switch (state) {
+    case "absent":
+      return "// (file not tracked at this snapshot)";
+    case "deleted":
+      return "// (file did not exist at this snapshot)";
+    case "oversize":
+      return "// (file too large to snapshot — size/mtime tracked only)";
+    case "present":
+      // "present" with null content = blob read failed.
+      return "// (snapshot blob unreadable)";
+  }
 }
 
 function DaemonDownDialog() {

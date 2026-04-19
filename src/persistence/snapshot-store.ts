@@ -8,22 +8,32 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
 
 export type SnapshotKind = "turn-start" | "turn-end";
 
-export interface ManifestEntry {
+/**
+ * `state` discriminates how the entry was captured:
+ * - `present`: file exists and was blobbed. `hash` points at a real blob.
+ * - `deleted`: file was gone at flush time. No blob; hash is empty.
+ * - `oversize`: file existed but exceeded `snapshotMaxFileBytes`. `mtime_ms`
+ *    and `size` are recorded so diffs can still say "it changed (by this
+ *    much)" even when content isn't available. `hash` is empty.
+ */
+export type SnapshotEntryState = "present" | "deleted" | "oversize";
+
+export interface SnapshotEntry {
   hash: string;
   mtime_ms: number;
   size: number;
-  deleted?: boolean;
+  state: SnapshotEntryState;
 }
 
 export interface SnapshotFileRow {
-  entry: ManifestEntry;
+  entry: SnapshotEntry;
   kind: "created" | "updated" | "deleted";
 }
 
@@ -41,8 +51,20 @@ export interface FileSnapshot {
   turn_id: string | null;
   batch_id: string | null;
   parent_snapshot_id: string | null;
-  manifest_path: string;
   created_at: string;
+}
+
+/**
+ * "absent" means the path wasn't found in the chain at all (never tracked).
+ * Other values mirror `SnapshotEntryState`.
+ */
+export type DiffSide = "absent" | SnapshotEntryState;
+
+export interface SnapshotDiffResult {
+  before: string | null;
+  after: string | null;
+  beforeState: DiffSide;
+  afterState: DiffSide;
 }
 
 export interface FlushInput {
@@ -55,36 +77,37 @@ export interface FlushInput {
   batchId: string | null;
 }
 
-interface ManifestFile {
-  snapshot_id: string;
-  created_at: string;
-  kind: SnapshotKind;
-  worktree_path: string;
-  stream_id: string;
-  turn_id: string | null;
-  batch_id: string | null;
-  parent_snapshot_id: string | null;
-  entries: Record<string, ManifestEntry>;
-}
-
-// Files larger than this get a sentinel hash in the manifest instead of being
-// read into memory — accidental big-binary edits shouldn't balloon the store.
-const MAX_BLOB_SIZE = 5 * 1024 * 1024;
-const OVERSIZE_SENTINEL = "oversize";
+const DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export class SnapshotStore {
   private readonly stateDb;
   private readonly rootDir: string;
   private readonly objectsDir: string;
-  private readonly manifestsDir: string;
+  private maxFileBytes: number = DEFAULT_MAX_FILE_BYTES;
+  // LRU-ish cache of resolved entry maps per snapshot so repeat UI calls
+  // (summary, diff, reconcile) don't re-walk the parent chain each time.
+  // Insertion-order iteration gives us FIFO eviction; cacheGet reinserts
+  // to convert that into LRU. Cleared on cleanup.
+  private readonly resolveCache = new Map<string, Record<string, SnapshotEntry>>();
+  private static readonly RESOLVE_CACHE_MAX = 32;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
     this.rootDir = join(projectDir, ".newde", "snapshots");
     this.objectsDir = join(this.rootDir, "objects");
-    this.manifestsDir = join(this.rootDir, "manifests");
     mkdirSync(this.objectsDir, { recursive: true });
-    mkdirSync(this.manifestsDir, { recursive: true });
+  }
+
+  setMaxFileBytes(bytes: number): void {
+    // Config validates the realistic floor (>=1024); this setter accepts
+    // anything > 0 so tests can exercise the oversize branch with small
+    // fixtures. Ignore non-positive values to avoid disabling blobbing
+    // entirely by accident.
+    if (bytes > 0) this.maxFileBytes = Math.floor(bytes);
+  }
+
+  getMaxFileBytes(): number {
+    return this.maxFileBytes;
   }
 
   writeBlob(content: Buffer): string {
@@ -111,19 +134,13 @@ export class SnapshotStore {
     if (input.dirtyPaths.length === 0) return null;
     const id = createId("snap");
     const now = new Date().toISOString();
-    const manifestRelPath = join("manifests", `${id}.json`);
-    const entries: Record<string, ManifestEntry> = {};
-
     const unique = Array.from(new Set(input.dirtyPaths)).sort();
+    const entries: Array<[string, SnapshotEntry]> = [];
+
     for (const relpath of unique) {
       const abs = resolve(input.worktreePath, relpath);
       if (!existsSync(abs)) {
-        entries[relpath] = {
-          hash: "",
-          mtime_ms: 0,
-          size: 0,
-          deleted: true,
-        };
+        entries.push([relpath, { hash: "", mtime_ms: 0, size: 0, state: "deleted" }]);
         continue;
       }
       let st;
@@ -133,53 +150,51 @@ export class SnapshotStore {
         continue;
       }
       if (!st.isFile()) continue;
-      if (st.size > MAX_BLOB_SIZE) {
-        entries[relpath] = {
-          hash: OVERSIZE_SENTINEL,
-          mtime_ms: Math.floor(st.mtimeMs),
-          size: st.size,
-        };
+      if (st.size > this.maxFileBytes) {
+        entries.push([
+          relpath,
+          { hash: "", mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "oversize" },
+        ]);
         continue;
       }
       const content = readFileSync(abs);
       const hash = this.writeBlob(content);
-      entries[relpath] = {
-        hash,
-        mtime_ms: Math.floor(st.mtimeMs),
-        size: st.size,
-      };
+      entries.push([
+        relpath,
+        { hash, mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "present" },
+      ]);
     }
 
-    if (Object.keys(entries).length === 0) return null;
+    if (entries.length === 0) return null;
 
-    const manifest: ManifestFile = {
-      snapshot_id: id,
-      created_at: now,
-      kind: input.kind,
-      worktree_path: input.worktreePath,
-      stream_id: input.streamId,
-      turn_id: input.turnId,
-      batch_id: input.batchId,
-      parent_snapshot_id: input.parentSnapshotId,
-      entries,
-    };
-    writeFileSync(join(this.rootDir, manifestRelPath), JSON.stringify(manifest, null, 2));
-
-    this.stateDb.run(
-      `INSERT INTO file_snapshot (
-        id, stream_id, worktree_path, kind, turn_id, batch_id,
-        parent_snapshot_id, manifest_path, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      input.streamId,
-      input.worktreePath,
-      input.kind,
-      input.turnId,
-      input.batchId,
-      input.parentSnapshotId,
-      manifestRelPath,
-      now,
-    );
+    this.stateDb.transaction(() => {
+      this.stateDb.run(
+        `INSERT INTO file_snapshot (
+          id, stream_id, worktree_path, kind, turn_id, batch_id,
+          parent_snapshot_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        input.streamId,
+        input.worktreePath,
+        input.kind,
+        input.turnId,
+        input.batchId,
+        input.parentSnapshotId,
+        now,
+      );
+      for (const [path, entry] of entries) {
+        this.stateDb.run(
+          `INSERT INTO snapshot_entry (snapshot_id, path, hash, mtime_ms, size, state)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          id,
+          path,
+          entry.hash,
+          entry.mtime_ms,
+          entry.size,
+          entry.state,
+        );
+      }
+    });
     return id;
   }
 
@@ -191,21 +206,34 @@ export class SnapshotStore {
     return row ? rowToSnapshot(row) : null;
   }
 
-  loadManifestEntries(id: string): Record<string, ManifestEntry> {
-    const snap = this.getSnapshot(id);
-    if (!snap) return {};
-    const file = join(this.rootDir, snap.manifest_path);
-    if (!existsSync(file)) return {};
-    const manifest = JSON.parse(readFileSync(file, "utf8")) as ManifestFile;
-    return manifest.entries ?? {};
+  loadManifestEntries(id: string): Record<string, SnapshotEntry> {
+    const rows = this.stateDb.all<Record<string, unknown>>(
+      "SELECT path, hash, mtime_ms, size, state FROM snapshot_entry WHERE snapshot_id = ?",
+      id,
+    );
+    const out: Record<string, SnapshotEntry> = {};
+    for (const row of rows) {
+      out[String(row.path)] = rowToEntry(row);
+    }
+    return out;
   }
 
   /** Merge entries walking the parent chain (newest wins). Tombstones kept. */
-  resolveEntries(id: string): Record<string, ManifestEntry> {
-    const merged: Record<string, ManifestEntry> = {};
+  resolveEntries(id: string): Record<string, SnapshotEntry> {
+    const cached = this.cacheGet(id);
+    if (cached) return cached;
+    const merged: Record<string, SnapshotEntry> = {};
+    const visited = new Set<string>();
     const chain: string[] = [];
     let cursor: string | null = id;
     while (cursor) {
+      if (visited.has(cursor)) {
+        // Defensive: broken chain (shouldn't happen given FK semantics).
+        // Stop walking rather than loop forever.
+        this.logger?.warn("snapshot parent chain cycle detected", { snapshotId: cursor });
+        break;
+      }
+      visited.add(cursor);
       chain.push(cursor);
       const snap = this.getSnapshot(cursor);
       cursor = snap?.parent_snapshot_id ?? null;
@@ -217,36 +245,69 @@ export class SnapshotStore {
         merged[path] = entry;
       }
     }
+    this.cacheSet(id, merged);
     return merged;
+  }
+
+  private cacheGet(id: string): Record<string, SnapshotEntry> | undefined {
+    const hit = this.resolveCache.get(id);
+    if (hit) {
+      // Re-insert to move the key to the end (most-recent) of the
+      // insertion-order Map — cheap LRU.
+      this.resolveCache.delete(id);
+      this.resolveCache.set(id, hit);
+    }
+    return hit;
+  }
+
+  private cacheSet(id: string, value: Record<string, SnapshotEntry>): void {
+    if (this.resolveCache.size >= SnapshotStore.RESOLVE_CACHE_MAX) {
+      const first = this.resolveCache.keys().next().value;
+      if (first !== undefined) this.resolveCache.delete(first);
+    }
+    this.resolveCache.set(id, value);
   }
 
   /** Resolved hash for `relpath` at snapshot `id`, or null if deleted/absent. */
   resolvePath(id: string, relpath: string): string | null {
-    let cursor: string | null = id;
-    while (cursor) {
-      const entries = this.loadManifestEntries(cursor);
-      const entry = entries[relpath];
-      if (entry) {
-        if (entry.deleted || !entry.hash) return null;
-        return entry.hash;
-      }
-      const snap = this.getSnapshot(cursor);
-      cursor = snap?.parent_snapshot_id ?? null;
-    }
-    return null;
+    const entry = this.resolveEntries(id)[relpath];
+    if (!entry || entry.state !== "present" || !entry.hash) return null;
+    return entry.hash;
   }
 
-  diffPath(beforeId: string | null, afterId: string, relpath: string): { before: string | null; after: string | null } {
-    const beforeHash = beforeId ? this.resolvePath(beforeId, relpath) : null;
-    const afterHash = this.resolvePath(afterId, relpath);
+  /** Resolved entry (with state) for `relpath` at `id`, or null if absent. */
+  resolveEntry(id: string, relpath: string): SnapshotEntry | null {
+    return this.resolveEntries(id)[relpath] ?? null;
+  }
+
+  diffPath(beforeId: string | null, afterId: string, relpath: string): SnapshotDiffResult {
+    const beforeSide = this.resolveDiffSide(beforeId, relpath);
+    const afterSide = this.resolveDiffSide(afterId, relpath);
     return {
-      before: beforeHash ? this.readBlobAsText(beforeHash) : null,
-      after: afterHash ? this.readBlobAsText(afterHash) : null,
+      before: beforeSide.content,
+      after: afterSide.content,
+      beforeState: beforeSide.state,
+      afterState: afterSide.state,
     };
   }
 
+  private resolveDiffSide(
+    id: string | null,
+    relpath: string,
+  ): { content: string | null; state: DiffSide } {
+    if (!id) return { content: null, state: "absent" };
+    const entry = this.resolveEntry(id, relpath);
+    if (!entry) return { content: null, state: "absent" };
+    if (entry.state === "present") {
+      return { content: this.readBlobAsText(entry.hash), state: "present" };
+    }
+    // deleted / oversize: no content to show, but signal the state so the UI
+    // can render an explanation rather than a blank pane.
+    return { content: null, state: entry.state };
+  }
+
   private readBlobAsText(hash: string): string | null {
-    if (hash === OVERSIZE_SENTINEL) return null;
+    if (!hash) return null;
     try {
       return this.readBlob(hash).toString("utf8");
     } catch {
@@ -255,43 +316,10 @@ export class SnapshotStore {
   }
 
   /**
-   * Walk the worktree and compare (mtime_ms, size) against the resolved
-   * entry map for `snapshotId`. Any path whose stat differs — or that
-   * exists in the manifest but not on disk — is returned.
-   */
-  reconcileWorktree(
-    snapshotId: string,
-    worktreePath: string,
-    ignore: (relpath: string) => boolean,
-  ): string[] {
-    const entries = this.resolveEntries(snapshotId);
-    const dirty = new Set<string>();
-    const seen = new Set<string>();
-
-    walk(worktreePath, "", ignore, (rel, st) => {
-      seen.add(rel);
-      const entry = entries[rel];
-      if (!entry || entry.deleted) {
-        dirty.add(rel);
-        return;
-      }
-      if (entry.size !== st.size || entry.mtime_ms !== Math.floor(st.mtimeMs)) {
-        dirty.add(rel);
-      }
-    });
-
-    for (const [rel, entry] of Object.entries(entries)) {
-      if (entry.deleted) continue;
-      if (!seen.has(rel)) dirty.add(rel);
-    }
-    return Array.from(dirty).sort();
-  }
-
-  /**
-   * Summarize a snapshot for the UI: the row, the manifest, and A/M/D
-   * classification of each entry against the parent chain. `created` =
-   * entry present here but not in any ancestor. `deleted` = tombstone
-   * entry. `updated` = content differs from the ancestor resolution.
+   * Summary for the UI: row + per-file entries + A/M/D classification.
+   * Oversize entries stay in `files` (visible) but they don't participate
+   * in the add/update/delete counters — there's no real content churn to
+   * report, just a stat delta.
    */
   getSnapshotSummary(snapshotId: string): SnapshotSummary | null {
     const snap = this.getSnapshot(snapshotId);
@@ -306,20 +334,23 @@ export class SnapshotStore {
     let deleted = 0;
     for (const [path, entry] of Object.entries(entries)) {
       let kind: "created" | "updated" | "deleted";
-      if (entry.deleted) {
+      if (entry.state === "deleted") {
         kind = "deleted";
         deleted++;
-      } else if (!parentEntries[path] || parentEntries[path].deleted) {
+      } else if (!parentEntries[path] || parentEntries[path].state === "deleted") {
         kind = "created";
-        created++;
-      } else if (parentEntries[path].hash !== entry.hash) {
-        kind = "updated";
-        updated++;
+        if (entry.state !== "oversize") created++;
       } else {
-        // Stat-only change (mtime bumped but content identical). Record as
-        // updated so the UI still surfaces it, but don't bump the update
-        // count so the header stays accurate.
         kind = "updated";
+        const parent = parentEntries[path];
+        // Only count as "updated" if something actually changed. For present
+        // entries that's hash inequality; for oversize it's mtime or size.
+        const parentIsPresent = parent.state === "present";
+        const entryIsPresent = entry.state === "present";
+        const hashChanged = entryIsPresent && parentIsPresent && parent.hash !== entry.hash;
+        const statChanged = parent.mtime_ms !== entry.mtime_ms || parent.size !== entry.size;
+        const stateChanged = parent.state !== entry.state;
+        if (hashChanged || statChanged || stateChanged) updated++;
       }
       files[path] = { entry, kind };
     }
@@ -330,51 +361,71 @@ export class SnapshotStore {
     };
   }
 
-  /**
-   * Resolved before/after contents for `path` between this snapshot's
-   * parent chain and this snapshot itself.
-   */
-  getSnapshotFileDiff(snapshotId: string, path: string): { before: string | null; after: string | null } {
+  getSnapshotFileDiff(snapshotId: string, path: string): SnapshotDiffResult {
     const snap = this.getSnapshot(snapshotId);
-    if (!snap) return { before: null, after: null };
-    const beforeHash = snap.parent_snapshot_id
-      ? this.resolvePath(snap.parent_snapshot_id, path)
-      : null;
-    const afterHash = this.resolvePath(snapshotId, path);
-    return {
-      before: beforeHash ? this.readBlobAsText(beforeHash) : null,
-      after: afterHash ? this.readBlobAsText(afterHash) : null,
-    };
+    if (!snap) {
+      return { before: null, after: null, beforeState: "absent", afterState: "absent" };
+    }
+    return this.diffPath(snap.parent_snapshot_id ?? null, snapshotId, path);
   }
 
-  /** Arbitrary-pair variant: resolve `path` in each side independently. */
   getSnapshotPairDiff(
     beforeSnapshotId: string | null,
     afterSnapshotId: string,
     path: string,
-  ): { before: string | null; after: string | null } {
+  ): SnapshotDiffResult {
     return this.diffPath(beforeSnapshotId, afterSnapshotId, path);
+  }
+
+  /**
+   * Walk the worktree and compare (mtime_ms, size) against the resolved
+   * entry map for `snapshotId`. Returned paths are the ones whose stat
+   * differs, or that exist on disk but not in the manifest, or vice versa.
+   * Oversize-on-disk files are surfaced too — they get a stat-only entry
+   * when next flushed.
+   */
+  reconcileWorktree(
+    snapshotId: string,
+    worktreePath: string,
+    ignore: (relpath: string) => boolean,
+  ): string[] {
+    const entries = this.resolveEntries(snapshotId);
+    const dirty = new Set<string>();
+    const seen = new Set<string>();
+
+    walkAll(worktreePath, "", ignore, (rel, st) => {
+      seen.add(rel);
+      const entry = entries[rel];
+      const size = st.size;
+      const mtime = Math.floor(st.mtimeMs);
+      if (!entry || entry.state === "deleted") {
+        dirty.add(rel);
+        return;
+      }
+      if (entry.size !== size || entry.mtime_ms !== mtime) {
+        dirty.add(rel);
+      }
+    });
+
+    for (const [rel, entry] of Object.entries(entries)) {
+      if (entry.state === "deleted") continue;
+      if (!seen.has(rel)) dirty.add(rel);
+    }
+    return Array.from(dirty).sort();
   }
 
   /**
    * Drop snapshots older than `retentionDays` while preserving each
    * stream's most recent snapshot (and anything `streams.current_snapshot_id`
-   * points at) no matter its age. After deleting snapshot rows + manifest
-   * files, sweep `objects/` for blobs that are no longer referenced by any
-   * surviving manifest. `retentionDays === 0` disables pruning entirely.
-   *
-   * Descendant snapshots whose parent was just deleted keep pointing at a
-   * missing id — `resolvePath` simply stops walking when the parent row is
-   * gone, so the oldest surviving snapshot effectively becomes a new
-   * baseline for the files it touches. This is the trade-off: ancient
-   * history drops, recent diffs stay intact.
+   * points at) no matter its age. After deleting snapshot rows (cascades
+   * remove their `snapshot_entry` rows), sweep `objects/` for blobs that
+   * are no longer referenced. `retentionDays === 0` disables pruning.
    */
   cleanupOldSnapshots(retentionDays: number): { snapshotsDeleted: number; blobsDeleted: number } {
     if (retentionDays <= 0) return { snapshotsDeleted: 0, blobsDeleted: 0 };
     const cutoff = new Date(Date.now() - retentionDays * 86400_000).toISOString();
     const keep = new Set<string>();
 
-    // Pin the most recent snapshot per stream.
     const latestRows = this.stateDb.all<{ id: string }>(
       `SELECT id FROM file_snapshot f1
        WHERE created_at = (
@@ -383,9 +434,6 @@ export class SnapshotStore {
     );
     for (const row of latestRows) keep.add(row.id);
 
-    // Pin whatever each stream currently points at (defensive — should
-    // overlap with the "latest" set but handle the edge case of a manually
-    // set pointer that isn't the row with MAX(created_at)).
     const pointedRows = this.stateDb.all<{ current_snapshot_id: string | null }>(
       `SELECT current_snapshot_id FROM streams WHERE current_snapshot_id IS NOT NULL`,
     );
@@ -393,8 +441,8 @@ export class SnapshotStore {
       if (row.current_snapshot_id) keep.add(row.current_snapshot_id);
     }
 
-    const staleRows = this.stateDb.all<{ id: string; manifest_path: string }>(
-      `SELECT id, manifest_path FROM file_snapshot WHERE created_at < ?`,
+    const staleRows = this.stateDb.all<{ id: string }>(
+      `SELECT id FROM file_snapshot WHERE created_at < ?`,
       cutoff,
     );
     const toDelete = staleRows.filter((row) => !keep.has(row.id));
@@ -405,17 +453,7 @@ export class SnapshotStore {
         this.stateDb.run("DELETE FROM file_snapshot WHERE id = ?", row.id);
       }
     });
-    // Remove the manifest JSON files outside the transaction (the DB row is
-    // the source of truth; orphaned files on disk are harmless noise, but
-    // we clean them up for tidiness).
-    for (const row of toDelete) {
-      const manifestAbs = join(this.rootDir, row.manifest_path);
-      try {
-        if (existsSync(manifestAbs)) unlinkSyncSafe(manifestAbs);
-      } catch {
-        // best effort
-      }
-    }
+    this.resolveCache.clear();
 
     const blobsDeleted = this.gcBlobs();
     return { snapshotsDeleted: toDelete.length, blobsDeleted };
@@ -423,30 +461,14 @@ export class SnapshotStore {
 
   /**
    * Sweep `objects/` for blobs whose sha is not referenced by any
-   * surviving manifest. Returns the number of files removed. Invoked after
-   * snapshot deletion; safe to call on its own.
+   * surviving `snapshot_entry` row. Returns the count removed.
    */
   gcBlobs(): number {
     const referenced = new Set<string>();
-    const rows = this.stateDb.all<{ manifest_path: string }>(
-      "SELECT manifest_path FROM file_snapshot",
+    const rows = this.stateDb.all<{ hash: string }>(
+      "SELECT DISTINCT hash FROM snapshot_entry WHERE state = 'present' AND hash != ''",
     );
-    for (const row of rows) {
-      const file = join(this.rootDir, row.manifest_path);
-      if (!existsSync(file)) continue;
-      try {
-        const manifest = JSON.parse(readFileSync(file, "utf8")) as ManifestFile;
-        for (const entry of Object.values(manifest.entries ?? {})) {
-          if (entry.hash && entry.hash !== OVERSIZE_SENTINEL && !entry.deleted) {
-            referenced.add(entry.hash);
-          }
-        }
-      } catch {
-        // unreadable manifest: be conservative — bail on gc so we don't
-        // accidentally delete blobs we can't account for.
-        return 0;
-      }
-    }
+    for (const row of rows) referenced.add(row.hash);
 
     let removed = 0;
     let shardDirs;
@@ -469,10 +491,13 @@ export class SnapshotStore {
         const hash = `${shard.name}${entry.name}`;
         if (referenced.has(hash)) continue;
         try {
-          unlinkSyncSafe(join(shardPath, entry.name));
+          unlinkSync(join(shardPath, entry.name));
           removed++;
-        } catch {
-          // best effort
+        } catch (error) {
+          this.logger?.warn("snapshot blob unlink failed", {
+            hash,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
@@ -511,20 +536,27 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
     turn_id: row.turn_id == null ? null : String(row.turn_id),
     batch_id: row.batch_id == null ? null : String(row.batch_id),
     parent_snapshot_id: row.parent_snapshot_id == null ? null : String(row.parent_snapshot_id),
-    manifest_path: String(row.manifest_path ?? ""),
     created_at: String(row.created_at ?? ""),
   };
 }
 
-function unlinkSyncSafe(path: string): void {
-  try {
-    unlinkSync(path);
-  } catch {
-    // ignore
-  }
+function rowToEntry(row: Record<string, unknown>): SnapshotEntry {
+  const state = String(row.state ?? "present") as SnapshotEntryState;
+  return {
+    hash: String(row.hash ?? ""),
+    mtime_ms: Number(row.mtime_ms ?? 0),
+    size: Number(row.size ?? 0),
+    state,
+  };
 }
 
-function walk(
+/**
+ * Walks every file under `root`, calling `onFile` for each one — including
+ * files that would be too big to blob. The callback receives the stat so the
+ * caller can decide how to classify (present vs oversize). Ignore function
+ * is consulted per path segment.
+ */
+function walkAll(
   root: string,
   rel: string,
   ignore: (relpath: string) => boolean,
@@ -541,7 +573,7 @@ function walk(
     const childRel = rel ? `${rel}/${entry.name}` : entry.name;
     if (ignore(childRel)) continue;
     if (entry.isDirectory()) {
-      walk(root, childRel, ignore, onFile);
+      walkAll(root, childRel, ignore, onFile);
       continue;
     }
     if (!entry.isFile()) continue;
@@ -551,7 +583,6 @@ function walk(
     } catch {
       continue;
     }
-    if (st.size > MAX_BLOB_SIZE) continue;
     onFile(childRel, st);
   }
 }

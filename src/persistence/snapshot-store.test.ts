@@ -72,6 +72,7 @@ describe("SnapshotStore", () => {
     expect(snap!.kind).toBe("turn-start");
     const entries = store.loadManifestEntries(id!);
     expect(Object.keys(entries).sort()).toEqual(["a.txt", "b.txt"]);
+    expect(entries["a.txt"]!.state).toBe("present");
     expect(store.readBlob(entries["a.txt"]!.hash).toString()).toBe("A content");
   });
 
@@ -99,7 +100,7 @@ describe("SnapshotStore", () => {
     })!;
     const entries = store.loadManifestEntries(second);
     expect(entries["gone.txt"]).not.toBeUndefined();
-    expect(entries["gone.txt"]!.deleted).toBe(true);
+    expect(entries["gone.txt"]!.state).toBe("deleted");
     expect(store.resolvePath(second, "gone.txt")).toBeNull();
     expect(store.resolvePath(first, "gone.txt")).not.toBeNull();
   });
@@ -394,6 +395,159 @@ describe("SnapshotStore", () => {
     const result = store.cleanupOldSnapshots(7);
     expect(result.snapshotsDeleted).toBe(0);
     expect(store.getSnapshot(only)).not.toBeNull();
+  });
+
+  test("oversize files record state='oversize' with stat but no blob", () => {
+    const { store, worktreePath, streamId } = seed();
+    store.setMaxFileBytes(16);
+    writeFileSync(join(worktreePath, "big.bin"), Buffer.alloc(32, 0xAB));
+    const id = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["big.bin"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    const entries = store.loadManifestEntries(id);
+    expect(entries["big.bin"]!.state).toBe("oversize");
+    expect(entries["big.bin"]!.hash).toBe("");
+    expect(entries["big.bin"]!.size).toBe(32);
+    // Diff should return null for content but the summary still classifies
+    // it as created on first appearance.
+    const diff = store.getSnapshotFileDiff(id, "big.bin");
+    expect(diff.before).toBeNull();
+    expect(diff.after).toBeNull();
+  });
+
+  test("reconcileWorktree detects oversize files that changed size/mtime", () => {
+    const { store, worktreePath, streamId } = seed();
+    store.setMaxFileBytes(16);
+    writeFileSync(join(worktreePath, "big.bin"), Buffer.alloc(32, 0xAA));
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["big.bin"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    // Grow it — still oversize, but stats change.
+    writeFileSync(join(worktreePath, "big.bin"), Buffer.alloc(48, 0xBB));
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(worktreePath, "big.bin"), future, future);
+    const dirty = store.reconcileWorktree(s1, worktreePath, (rel) => rel.startsWith(".newde"));
+    expect(dirty).toEqual(["big.bin"]);
+  });
+
+  test("cleanupOldSnapshots keeps a snapshot pinned by streams.current_snapshot_id even when newer exists", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "x.txt"), "v1");
+    const pinned = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["x.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    backdateSnapshot(projectDir, store, pinned, 30);
+    writeFileSync(join(worktreePath, "x.txt"), "v2");
+    const latest = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["x.txt"],
+      parentSnapshotId: pinned,
+      turnId: null,
+      batchId: null,
+    })!;
+    backdateSnapshot(projectDir, store, latest, 20);
+
+    // Manually pin the OLDER one so the "defensive second pin" path kicks in.
+    const streams = new StreamStore(projectDir);
+    streams.setCurrentSnapshotId(streamId, pinned);
+
+    const result = store.cleanupOldSnapshots(7);
+    // `latest` is the MAX(created_at) for the stream (kept by primary pin);
+    // `pinned` is preserved only by the current_snapshot_id guard.
+    expect(store.getSnapshot(pinned)).not.toBeNull();
+    expect(store.getSnapshot(latest)).not.toBeNull();
+    expect(result.snapshotsDeleted).toBe(0);
+  });
+
+  test("resolveEntries survives a circular parent chain without looping", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "A");
+    const a = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    // Forge a cycle: point a at itself. Defensive code should detect this
+    // and stop walking rather than hang.
+    getStateDatabase(projectDir).run(
+      "UPDATE file_snapshot SET parent_snapshot_id = ? WHERE id = ?",
+      a,
+      a,
+    );
+    const entries = store.resolveEntries(a);
+    expect(Object.keys(entries)).toEqual(["a.txt"]);
+  });
+
+  test("diffPath returns beforeState/afterState matching entry states", () => {
+    const { store, worktreePath, streamId } = seed();
+    writeFileSync(join(worktreePath, "f.txt"), "v1");
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["f.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    rmSync(join(worktreePath, "f.txt"));
+    const s2 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["f.txt"],
+      parentSnapshotId: s1,
+      turnId: null,
+      batchId: null,
+    })!;
+    const diff = store.getSnapshotFileDiff(s2, "f.txt");
+    expect(diff.before).toBe("v1");
+    expect(diff.beforeState).toBe("present");
+    expect(diff.after).toBeNull();
+    expect(diff.afterState).toBe("deleted");
+  });
+
+  test("oversize side of diff reports state without content", () => {
+    const { store, worktreePath, streamId } = seed();
+    store.setMaxFileBytes(16);
+    writeFileSync(join(worktreePath, "big.bin"), Buffer.alloc(32, 0xAB));
+    const id = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["big.bin"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    const diff = store.getSnapshotFileDiff(id, "big.bin");
+    expect(diff.after).toBeNull();
+    expect(diff.afterState).toBe("oversize");
+    expect(diff.beforeState).toBe("absent");
   });
 
   test("cleanupOldSnapshots with retention 0 is a no-op", () => {

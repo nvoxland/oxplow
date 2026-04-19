@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
@@ -63,6 +63,7 @@ import {
 import {
   SnapshotStore,
   type FileSnapshot,
+  type SnapshotDiffResult,
   type SnapshotKind,
   type SnapshotSummary,
 } from "../persistence/snapshot-store.js";
@@ -123,6 +124,7 @@ export class ElectronRuntime {
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
   private snapshotCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private disposed = false;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
     this.projectDir = projectDir;
@@ -145,6 +147,7 @@ export class ElectronRuntime {
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.fileChangeStore = new FileChangeStore(projectDir, logger.child({ subsystem: "file-change-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
+    this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
       resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
       workItemStore: this.workItemStore,
@@ -401,6 +404,7 @@ export class ElectronRuntime {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.gitRootWatcher?.close();
     this.gitRootWatcher = null;
     if (this.snapshotCleanupTimer) {
@@ -1248,41 +1252,95 @@ export class ElectronRuntime {
   }
 
   /**
-   * First-run seed: if the stream has no current snapshot, walk the worktree
-   * to populate the dirty set with every tracked file. Subsequent opens
-   * reconcile via mtime+size against the existing chain.
+   * Walk the worktree in chunks to seed the dirty set. Two modes, unified
+   * under one walker so large monorepos don't block the event loop either
+   * way:
+   *   - Cold start (no `current_snapshot_id`): mark every file dirty.
+   *   - Reconcile (have a current snapshot): mark files whose disk stat
+   *     differs from the resolved manifest entry, plus files that exist in
+   *     the manifest but not on disk (deletions).
+   *
+   * Runs under `setImmediate` chunks of SEED_CHUNK_SIZE files; disposal
+   * short-circuits further ticks via the `disposed` flag.
    */
   private seedSnapshotTracking(streamId: string): void {
     const stream = this.store.get(streamId);
     if (!stream) return;
-    const current = this.store.getCurrentSnapshotId(streamId);
     const ignore = (relpath: string) => shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
-    if (current) {
-      const drifted = this.snapshotStore.reconcileWorktree(current, stream.worktree_path, ignore);
-      for (const rel of drifted) this.markDirty(streamId, rel);
-      return;
-    }
-    // Cold start: treat every tracked file as dirty.
-    const root = stream.worktree_path;
-    const walk = (rel: string): void => {
-      const abs = rel ? resolve(root, rel) : root;
-      let entries;
+    setImmediate(() => {
+      if (this.disposed) return;
       try {
-        entries = readdirSync(abs, { withFileTypes: true });
-      } catch {
-        return;
+        const current = this.store.getCurrentSnapshotId(streamId);
+        const entries = current ? this.snapshotStore.resolveEntries(current) : null;
+        const seen = entries ? new Set<string>() : null;
+        const stack: string[] = [""];
+        let counter = 0;
+        const step = () => {
+          if (this.disposed) return;
+          while (stack.length > 0 && counter < SEED_CHUNK_SIZE) {
+            const rel = stack.pop()!;
+            const abs = rel ? resolve(stream.worktree_path, rel) : stream.worktree_path;
+            let children;
+            try {
+              children = readdirSync(abs, { withFileTypes: true });
+            } catch {
+              continue;
+            }
+            for (const child of children) {
+              const childRel = rel ? `${rel}/${child.name}` : child.name;
+              if (ignore(childRel)) continue;
+              if (child.isDirectory()) {
+                stack.push(childRel);
+                continue;
+              }
+              if (!child.isFile()) continue;
+              counter++;
+              if (!entries) {
+                this.markDirty(streamId, childRel);
+                continue;
+              }
+              seen!.add(childRel);
+              const entry = entries[childRel];
+              if (!entry || entry.state === "deleted") {
+                this.markDirty(streamId, childRel);
+                continue;
+              }
+              let st;
+              try {
+                st = statSync(abs === stream.worktree_path ? resolve(stream.worktree_path, childRel) : resolve(abs, child.name));
+              } catch {
+                continue;
+              }
+              const size = st.size;
+              const mtime = Math.floor(st.mtimeMs);
+              if (entry.size !== size || entry.mtime_ms !== mtime) {
+                this.markDirty(streamId, childRel);
+              }
+            }
+          }
+          if (stack.length > 0) {
+            counter = 0;
+            setImmediate(step);
+            return;
+          }
+          // Walk finished. In reconcile mode, mark anything in the manifest
+          // that disappeared from disk as dirty (the flush will record a
+          // tombstone).
+          if (entries && seen) {
+            for (const [rel, entry] of Object.entries(entries)) {
+              if (entry.state === "deleted") continue;
+              if (!seen.has(rel)) this.markDirty(streamId, rel);
+            }
+          }
+        };
+        step();
+      } catch (error) {
+        this.logger.warn("seed snapshot tracking failed", {
+          streamId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      for (const entry of entries) {
-        const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-        if (ignore(childRel)) continue;
-        if (entry.isDirectory()) {
-          walk(childRel);
-        } else if (entry.isFile()) {
-          this.markDirty(streamId, childRel);
-        }
-      }
-    };
-    walk("");
+    });
   }
 
   private stampUiWrite(path: string): void {
@@ -1315,9 +1373,9 @@ export class ElectronRuntime {
    * "before" is the turn-start snapshot (or its parent if only an end
    * exists); "after" is the turn-end snapshot.
    */
-  getTurnFileDiff(turnId: string, path: string): { before: string | null; after: string | null } {
+  getTurnFileDiff(turnId: string, path: string): SnapshotDiffResult {
     const { start, end } = this.snapshotStore.getTurnSnapshots(turnId);
-    if (!end) return { before: null, after: null };
+    if (!end) return { before: null, after: null, beforeState: "absent", afterState: "absent" };
     const beforeId = start?.parent_snapshot_id ?? end.parent_snapshot_id ?? null;
     return this.snapshotStore.diffPath(beforeId, end.id, path);
   }
@@ -1330,7 +1388,7 @@ export class ElectronRuntime {
     return this.snapshotStore.getSnapshotSummary(snapshotId);
   }
 
-  getSnapshotFileDiff(snapshotId: string, path: string): { before: string | null; after: string | null } {
+  getSnapshotFileDiff(snapshotId: string, path: string): SnapshotDiffResult {
     return this.snapshotStore.getSnapshotFileDiff(snapshotId, path);
   }
 
@@ -1338,7 +1396,7 @@ export class ElectronRuntime {
     beforeSnapshotId: string | null,
     afterSnapshotId: string,
     path: string,
-  ): { before: string | null; after: string | null } {
+  ): SnapshotDiffResult {
     return this.snapshotStore.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
   }
 
@@ -1571,6 +1629,9 @@ function parseLogLevel(value: unknown): LogLevel {
 
 const UI_WRITE_ECHO_WINDOW_MS = 1000;
 const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+// Yield back to the event loop after this many files during snapshot seed.
+// Keeps large monorepos from blocking UI startup; exact value isn't critical.
+const SEED_CHUNK_SIZE = 2000;
 
 function extractEditedFilePath(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;

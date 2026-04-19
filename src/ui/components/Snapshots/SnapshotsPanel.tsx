@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getSnapshotFileDiff,
   getSnapshotPairDiff,
@@ -106,13 +106,6 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
     };
   }, [dragging]);
 
-  const countsBySnapshot = useMemo(() => {
-    const map = new Map<string, { created: number; updated: number; deleted: number }>();
-    // Lazily filled by detail pane — rows show "?" until clicked. Cheap enough
-    // to leave empty; avoids hammering the summary endpoint on every list load.
-    return map;
-  }, [snapshots]);
-
   const handleRowClick = (id: string) => {
     if (compareMode) {
       if (compareBaseId === id) {
@@ -130,18 +123,13 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
   const handleOpenFileDiff = async (path: string) => {
     if (!stream || !onOpenDiff || !selectedId) return;
     try {
-      let before: string | null;
-      let after: string | null;
+      let result;
       let label: string;
       if (compareMode && compareBaseId) {
-        const result = await getSnapshotPairDiff(compareBaseId, selectedId, path);
-        before = result.before;
-        after = result.after;
+        result = await getSnapshotPairDiff(compareBaseId, selectedId, path);
         label = `${compareBaseId.slice(-6)} → ${selectedId.slice(-6)}`;
       } else {
-        const result = await getSnapshotFileDiff(selectedId, path);
-        before = result.before;
-        after = result.after;
+        result = await getSnapshotFileDiff(selectedId, path);
         label = "parent → snapshot";
       }
       onOpenDiff({
@@ -149,8 +137,8 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
         leftRef: "",
         rightKind: "working",
         baseLabel: label,
-        leftContent: before ?? "",
-        rightContent: after ?? "",
+        leftContent: renderDiffSide(result.before, result.beforeState),
+        rightContent: renderDiffSide(result.after, result.afterState),
         labelOverride: label,
       });
     } catch (err) {
@@ -213,7 +201,6 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
                   snap={snap}
                   selected={selectedId === snap.id}
                   compareBase={compareBaseId === snap.id}
-                  counts={countsBySnapshot.get(snap.id)}
                   onClick={() => handleRowClick(snap.id)}
                 />
               ))
@@ -244,13 +231,11 @@ function SnapshotRow({
   snap,
   selected,
   compareBase,
-  counts,
   onClick,
 }: {
   snap: FileSnapshot;
   selected: boolean;
   compareBase: boolean;
-  counts: { created: number; updated: number; deleted: number } | undefined;
   onClick(): void;
 }) {
   const date = formatRelative(snap.created_at);
@@ -281,13 +266,6 @@ function SnapshotRow({
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: "var(--muted)" }}>
         {snap.turn_id ? `turn ${snap.turn_id.slice(-6)}` : "no turn"}
       </span>
-      {counts ? (
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          {counts.created > 0 ? <span style={{ color: "#86efac" }}>+{counts.created} </span> : null}
-          {counts.updated > 0 ? <span style={{ color: "#e5a06a" }}>~{counts.updated} </span> : null}
-          {counts.deleted > 0 ? <span style={{ color: "#f87171" }}>−{counts.deleted}</span> : null}
-        </span>
-      ) : null}
       <span style={{ color: "var(--muted)", fontSize: 11, minWidth: 48, textAlign: "right" }}>{date}</span>
     </div>
   );
@@ -338,22 +316,44 @@ function DetailPane({
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {paths.map((path) => {
             const row = summary.files[path]!;
+            const oversize = row.entry.state === "oversize";
+            const canRestore = row.entry.state === "present";
+            const hint = oversize
+              ? `Oversize (${formatBytes(row.entry.size)}) — no content diff available.`
+              : "Click to open diff. Right-click to restore this version.";
             return (
               <div
                 key={path}
                 onClick={() => onOpenFileDiff(path)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  if (row.kind === "deleted") return;
+                  if (!canRestore) return;
                   onRestore(path);
                 }}
-                title="Click to open diff. Right-click to restore this version."
+                title={hint}
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: "pointer" }}
               >
                 <span style={{ ...statusBadgeStyle, color: statusColor(row.kind) }}>{statusLabel(row.kind)}</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }} title={path}>
                   {path}
                 </span>
+                {oversize ? (
+                  <span
+                    title="Too large to blob. Size/mtime tracked only."
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      padding: "0 4px",
+                      border: "1px solid var(--border)",
+                      borderRadius: 3,
+                      color: "var(--muted)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    OVERSIZE {formatBytes(row.entry.size)}
+                  </span>
+                ) : null}
               </div>
             );
           })}
@@ -400,6 +400,31 @@ function kindBadgeStyle(kind: "turn-start" | "turn-end"): CSSProperties {
     borderColor: color,
     color,
   };
+}
+
+function renderDiffSide(
+  content: string | null,
+  state: "absent" | "present" | "deleted" | "oversize",
+): string {
+  if (content !== null) return content;
+  switch (state) {
+    case "absent":
+      return "// (file not tracked at this snapshot)";
+    case "deleted":
+      return "// (file did not exist at this snapshot)";
+    case "oversize":
+      return "// (file too large to snapshot — size/mtime tracked only)";
+    case "present":
+      return "// (snapshot blob unreadable)";
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function formatRelative(input: string): string {

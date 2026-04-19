@@ -306,6 +306,53 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    name: "snapshot_entry",
+    up: (db) => {
+      // Move manifest storage out of .newde/snapshots/manifests/*.json into
+      // SQLite. Also drops the now-unused manifest_path column on
+      // file_snapshot. Existing snapshot rows are wiped since their
+      // manifests are on-disk JSON we no longer read; cascades clear
+      // streams.current_snapshot_id and batch_file_change.snapshot_id for
+      // us. Blobs in .newde/snapshots/objects/ are orphaned by this and
+      // get GC'd on the next cleanup cycle.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        DELETE FROM file_snapshot;
+
+        CREATE TABLE file_snapshot_new (
+          id TEXT PRIMARY KEY,
+          stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+          worktree_path TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          turn_id TEXT REFERENCES agent_turn(id) ON DELETE SET NULL,
+          batch_id TEXT REFERENCES batches(id) ON DELETE SET NULL,
+          parent_snapshot_id TEXT REFERENCES file_snapshot_new(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL
+        );
+
+        DROP TABLE file_snapshot;
+        ALTER TABLE file_snapshot_new RENAME TO file_snapshot;
+
+        CREATE INDEX idx_file_snapshot_stream ON file_snapshot(stream_id, created_at DESC);
+        CREATE INDEX idx_file_snapshot_turn ON file_snapshot(turn_id);
+
+        CREATE TABLE snapshot_entry (
+          snapshot_id TEXT NOT NULL REFERENCES file_snapshot(id) ON DELETE CASCADE,
+          path TEXT NOT NULL,
+          hash TEXT NOT NULL,
+          mtime_ms INTEGER NOT NULL,
+          size INTEGER NOT NULL,
+          state TEXT NOT NULL,
+          PRIMARY KEY (snapshot_id, path)
+        );
+
+        CREATE INDEX idx_snapshot_entry_hash ON snapshot_entry(hash);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {
