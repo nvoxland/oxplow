@@ -35,12 +35,14 @@ worktree), `queued` (read-only, agents can run but writes are denied — see
 [agent-model.md](./agent-model.md)'s write-guard section), `completed`
 (archived). Exactly one batch per stream is `active`; the others are
 `queued` or `completed`. Each batch carries an `agent`-written rolling
-`summary` field updated via the `newde__record_batch_summary` MCP tool.
+`summary` field updated via the `newde__record_batch_summary` MCP tool. A
+newly-seeded stream ships with one batch titled `Default` (pre-v12 DBs
+called it `Current Batch`; migration v12 renames the sort_index=0 row).
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 
 The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
-Statuses: `waiting`, `ready`, `in_progress`, `to_check`, `blocked`, `done`,
+Statuses: `waiting`, `ready`, `in_progress`, `human_check`, `blocked`, `done`,
 `canceled`. `parent_id` chains items under epics. `acceptance_criteria` is
 plain text (one criterion per line). Work-item links express dependencies
 (`blocks`, `discovered_from`, `relates_to`, …) via the `work_item_links`
@@ -72,8 +74,11 @@ past, so prompting the agent at all resumes auto-progression. There is no
 
 One row per agent turn (UserPromptSubmit → Stop). Captures the prompt, the
 sole-in-progress work item if any, the Claude session id, and an answer
-extracted from the batch summary at Stop time. Used by the Activity tab
-and by file-change attribution.
+extracted from the batch summary at Stop time. The Stop handler also sums
+assistant-message `usage` from the session's jsonl transcript for the turn's
+time window and stores `input_tokens`, `output_tokens`, and
+`cache_read_input_tokens`. Used by the Activity tab and by file-change
+attribution.
 
 ### `batch_file_change` — `FileChangeStore` (`src/persistence/file-change-store.ts`)
 
@@ -182,7 +187,7 @@ items) and in the UI (buttons are disabled with an explanatory tooltip).
 ## Status diagrams (text)
 
 ```
-work item:    waiting ─► ready ─► in_progress ─► to_check ─► done
+work item:    waiting ─► ready ─► in_progress ─► human_check ─► done
                    ╰─────────► blocked
                    ╰─────────► canceled
 

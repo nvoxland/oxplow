@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
-import { deleteButtonStyle, inputStyle } from "./plan-utils.js";
+import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
 
 export interface WorkItemDetailChanges {
   title?: string;
@@ -12,7 +13,7 @@ export interface WorkItemDetailChanges {
 }
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
-  "waiting", "ready", "in_progress", "to_check", "blocked", "done", "canceled",
+  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
 
@@ -109,6 +110,11 @@ function EditableField({
 }) {
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
+  // Latch "the user clicked Cancel" across the mousedown → blur → click chain
+  // so the blur handler knows to skip auto-commit and revert instead. Using a
+  // ref avoids a state update during the mousedown event.
+  const cancelRequested = useRef(false);
+  const dirty = draft !== value;
 
   useEffect(() => {
     if (!editing) setDraft(value);
@@ -120,21 +126,28 @@ function EditableField({
     onCommit(draft);
   };
 
-  const cancel = () => {
+  const revert = () => {
     setDraft(value);
     setEditing(false);
   };
 
-  const commonProps = {
+  const inputProps = {
     value: draft,
     placeholder,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
     onFocus: () => setEditing(true),
-    onBlur: commit,
+    onBlur: () => {
+      if (cancelRequested.current) {
+        cancelRequested.current = false;
+        revert();
+      } else {
+        commit();
+      }
+    },
     onKeyDown: (event: React.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        cancel();
+        cancelRequested.current = true;
         (event.target as HTMLElement).blur();
       } else if (event.key === "Enter" && !multiline) {
         event.preventDefault();
@@ -153,13 +166,44 @@ function EditableField({
     },
   };
 
+  // Save/Cancel surface while the user is actively editing a dirty draft.
+  // Clicking Save would blur the input anyway (→ commit); the button is
+  // mostly a visible "here's how to save" affordance. Cancel has to set the
+  // cancelRequested latch from mousedown so the blur that follows reverts
+  // instead of committing.
+  const actions = editing && dirty ? (
+    <div style={actionRowStyle}>
+      <button
+        type="button"
+        onMouseDown={(event) => { event.preventDefault(); cancelRequested.current = true; }}
+        onClick={revert}
+        style={{ ...miniButtonStyle, padding: "3px 10px" }}
+        title="Discard changes to this field (Escape)"
+      >Cancel</button>
+      <button
+        type="button"
+        onClick={commit}
+        style={{ ...miniButtonStyle, padding: "3px 10px", background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }}
+        title={multiline ? "Save changes (Cmd/Ctrl+Enter)" : "Save changes (Enter)"}
+      >Save</button>
+    </div>
+  ) : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)" }}>{label}</div>
-      {multiline ? <textarea {...commonProps} /> : <input {...commonProps} />}
+      {multiline ? <textarea {...inputProps} /> : <input {...inputProps} />}
+      {actions}
     </div>
   );
 }
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 6,
+  marginTop: 2,
+};
 
 function InlineSelect({
   value,

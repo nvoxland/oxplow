@@ -1,6 +1,6 @@
 import type { ToolDef } from "./mcp-server.js";
 import type { BatchStore, Batch } from "../persistence/batch-store.js";
-import type { Stream } from "../persistence/stream-store.js";
+import type { Stream, StreamStore } from "../persistence/stream-store.js";
 import type { TurnStore } from "../persistence/turn-store.js";
 import type { FileChangeStore } from "../persistence/file-change-store.js";
 import type {
@@ -13,16 +13,45 @@ import type { CommitPointStore } from "../persistence/commit-point-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
-  resolveBatch(streamId: string, batchId: string): Batch;
+  /** Batch-id-only lookup. Tools accept `batchId` alone; streamId is derived
+   *  from the batch row. Handles the case where the agent's prompt
+   *  streamId drifted out of sync with reality (the old `resolveBatch`
+   *  required both args and threw). */
+  resolveBatchById(batchId: string): Batch;
   batchStore: BatchStore;
+  streamStore: StreamStore;
   workItemStore: WorkItemStore;
   commitPointStore: CommitPointStore;
   turnStore: TurnStore;
   fileChangeStore: FileChangeStore;
 }
 
+export function hasAcceptanceCriteria(raw: string | null | undefined): boolean {
+  return typeof raw === "string" && raw.trim().length > 0;
+}
+
+// Returns true when the description reads like it's hiding the acceptance
+// checklist — specifically the literal phrase "acceptance criteria" AND at
+// least one bullet-looking line. The second gate keeps legitimate
+// discussion-style descriptions (e.g. "the existing acceptance criteria
+// said …") from tripping the guard.
+export function descriptionLooksLikeEmbeddedCriteria(description: string | null | undefined): boolean {
+  if (typeof description !== "string" || description.length === 0) return false;
+  if (!/acceptance criteria/i.test(description)) return false;
+  return /^\s*[-*]\s+\S/m.test(description);
+}
+
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatch, batchStore, workItemStore, commitPointStore, turnStore, fileChangeStore } = deps;
+  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, turnStore, fileChangeStore } = deps;
+
+  // Prefer the batch row's own stream_id over whatever streamId the caller
+  // passed (or didn't). Returns { batch, stream } — both guaranteed to agree
+  // on stream_id. Throws "unknown batch: …" if the batchId doesn't exist.
+  function resolveBatchAndStream(args: { streamId?: string; batchId: string }): { batch: Batch; stream: Stream } {
+    const batch = resolveBatchById(args.batchId);
+    const stream = resolveStream(batch.stream_id);
+    return { batch, stream };
+  }
 
   // Mutation tools return this instead of the full BatchWorkState to keep
   // agent context lean — a full state dump per call was burning tokens for
@@ -45,16 +74,44 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Optional batch id to resolve within the stream." },
         },
       },
       handler: (args: { streamId?: string; batchId?: string }) => {
-        const stream = resolveStream(args.streamId);
+        // When the caller names a batchId, derive stream from the batch row
+        // itself — the agent's prompt streamId may have drifted. Without
+        // batchId, fall back to the current-stream default.
+        const { stream, batch: explicitBatch } = args.batchId
+          ? (() => {
+              const b = resolveBatchById(args.batchId!);
+              return { stream: resolveStream(b.stream_id), batch: b };
+            })()
+          : { stream: resolveStream(args.streamId), batch: null as Batch | null };
         const batchState = batchStore.list(stream.id);
-        const batch = args.batchId
-          ? resolveBatch(stream.id, args.batchId)
-          : batchState.batches.find((candidate) => candidate.id === batchState.selectedBatchId) ?? batchState.batches[0] ?? null;
+        const batch = explicitBatch
+          ?? batchState.batches.find((candidate) => candidate.id === batchState.selectedBatchId)
+          ?? batchState.batches[0]
+          ?? null;
+        // Cross-stream snapshot — lets the agent notice that "current
+        // stream" may have drifted from where it actually writes. Each
+        // entry is the would-be active batch in a peer stream (falling
+        // back to the first batch if nothing's active yet).
+        const otherActiveBatches = streamStore.list()
+          .filter((s) => s.id !== stream.id)
+          .map((peer) => {
+            const peerState = batchStore.list(peer.id);
+            const peerActive = peerState.batches.find((b) => b.id === peerState.activeBatchId)
+              ?? peerState.batches[0]
+              ?? null;
+            return {
+              streamId: peer.id,
+              streamTitle: peer.title,
+              batchId: peerActive?.id ?? null,
+              batchTitle: peerActive?.title ?? null,
+              activeBatchId: peerState.activeBatchId,
+            };
+          });
         return {
           streamId: stream.id,
           streamTitle: stream.title,
@@ -64,6 +121,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           selectedBatchId: batchState.selectedBatchId,
           summary: batch?.summary ?? "",
           summaryUpdatedAt: batch?.summary_updated_at ?? null,
+          otherActiveBatches,
         };
       },
     },
@@ -74,15 +132,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the batch you are summarising." },
           summary: { type: "string", description: "Required 2-3 sentence rolling summary." },
         },
         required: ["batchId", "summary"],
       },
       handler: (args: { streamId?: string; batchId: string; summary: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        const { stream } = resolveBatchAndStream(args);
         const updated = batchStore.recordSummary(stream.id, args.batchId, args.summary);
         return { ok: true, summary: updated.summary, summaryUpdatedAt: updated.summary_updated_at };
       },
@@ -93,14 +150,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
         },
         required: ["batchId"],
       },
       handler: (args: { streamId?: string; batchId: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         return workItemStore.getState(args.batchId);
       },
     },
@@ -110,14 +166,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
         },
         required: ["batchId"],
       },
       handler: (args: { streamId?: string; batchId: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         return workItemStore.listReady(args.batchId);
       },
     },
@@ -127,14 +182,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           parentId: { type: "string", description: "Optional parent epic/task id in the same batch." },
           kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
           title: { type: "string", description: "Short title for the work item." },
           description: { type: "string", description: "Optional longer description of the approach." },
           acceptanceCriteria: { type: "string", description: "Optional plain-text checklist (one criterion per line) defining observable conditions for 'done'." },
-          status: { type: "string", description: "Optional initial status. One of: waiting, ready, in_progress, to_check, blocked, done, canceled." },
+          status: { type: "string", description: "Optional initial status. One of: waiting, ready, in_progress, human_check, blocked, done, canceled." },
           priority: { type: "string", description: "Optional priority: low, medium, high, or urgent." },
         },
         required: ["batchId", "kind", "title"],
@@ -150,8 +205,18 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
       }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
+        // Silent-failure guard: agents sometimes cram the acceptance
+        // checklist into `description` instead of the dedicated top-level
+        // `acceptanceCriteria` field. The DB accepts it either way, so the
+        // mistake shows up only as a UI gap (the Work panel's acceptance
+        // column goes empty). Returning a soft error forces a re-call with
+        // the criteria promoted to the proper field.
+        if (!hasAcceptanceCriteria(args.acceptanceCriteria) && descriptionLooksLikeEmbeddedCriteria(args.description)) {
+          return {
+            error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call newde__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
+          };
+        }
         const item = workItemStore.createItem({
           batchId: args.batchId,
           parentId: args.parentId,
@@ -173,14 +238,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           itemId: { type: "string", description: "Required id of the work item to update." },
           parentId: { type: "string", description: "Optional new parent epic/task id." },
           title: { type: "string", description: "Optional replacement title." },
           description: { type: "string", description: "Optional replacement description." },
           acceptanceCriteria: { type: "string", description: "Optional replacement acceptance criteria (checklist). Pass empty string to clear." },
-          status: { type: "string", description: "Optional replacement status. One of: waiting, ready, in_progress, to_check, blocked, done, canceled. When you believe a task is complete, set status to 'to_check' — never set 'done' yourself; the user marks 'done' after reviewing." },
+          status: { type: "string", description: "Optional replacement status. One of: waiting, ready, in_progress, human_check, blocked, done, canceled. When you believe a task is complete, set status to 'human_check' — never set 'done' yourself; the user marks 'done' after reviewing." },
           priority: { type: "string", description: "Optional replacement priority." },
         },
         required: ["batchId", "itemId"],
@@ -196,8 +261,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
       }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         const item = workItemStore.updateItem({
           batchId: args.batchId,
           itemId: args.itemId,
@@ -219,15 +283,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id." },
           itemId: { type: "string", description: "Required id of the work item to fetch." },
         },
         required: ["batchId", "itemId"],
       },
       handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         const detail = workItemStore.getItemDetail(args.batchId, args.itemId);
         if (!detail) throw new Error(`unknown work item: ${args.itemId}`);
         return detail;
@@ -239,15 +302,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           itemId: { type: "string", description: "Required id of the work item to delete." },
         },
         required: ["batchId", "itemId"],
       },
       handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         workItemStore.deleteItem(args.batchId, args.itemId, "agent", "mcp");
         return { ok: true, counts: counts(args.batchId) };
       },
@@ -258,7 +320,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           orderedItemIds: {
             type: "array",
@@ -269,8 +331,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         required: ["batchId", "orderedItemIds"],
       },
       handler: (args: { streamId?: string; batchId: string; orderedItemIds: string[] }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         workItemStore.reorderItems(args.batchId, args.orderedItemIds, "agent", "mcp");
         return { ok: true, counts: counts(args.batchId) };
       },
@@ -288,7 +349,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           fromItemId: { type: "string", description: "Source work item id." },
           toItemId: { type: "string", description: "Target work item id." },
@@ -303,8 +364,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         toItemId: string;
         linkType: "blocks" | "relates_to" | "discovered_from" | "duplicates" | "supersedes" | "replies_to";
       }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         workItemStore.linkItems(args.batchId, args.fromItemId, args.toItemId, args.linkType);
         return { ok: true };
       },
@@ -316,15 +376,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id." },
           limit: { type: "number", description: "Optional cap on the number of turns returned (default 50)." },
         },
         required: ["batchId"],
       },
       handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         return turnStore.listForBatch(args.batchId, args.limit);
       },
     },
@@ -335,15 +394,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id." },
           limit: { type: "number", description: "Optional cap (default 200)." },
         },
         required: ["batchId"],
       },
       handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         return fileChangeStore.listForBatch(args.batchId, args.limit);
       },
     },
@@ -353,7 +411,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
           itemId: { type: "string", description: "Optional work item id if the note belongs to one specific item." },
           note: { type: "string", description: "Required note content." },
@@ -361,8 +419,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         required: ["batchId", "note"],
       },
       handler: (args: { streamId?: string; batchId: string; itemId?: string; note: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         workItemStore.addNote(args.batchId, args.itemId ?? null, args.note, "agent", "mcp");
         return { ok: true };
       },
@@ -394,14 +451,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional stream id. Defaults to the current stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
           batchId: { type: "string", description: "Required batch id." },
         },
         required: ["batchId"],
       },
       handler: (args: { streamId?: string; batchId: string }) => {
-        const stream = resolveStream(args.streamId);
-        resolveBatch(stream.id, args.batchId);
+        resolveBatchAndStream(args);
         return { commitPoints: commitPointStore.listForBatch(args.batchId) };
       },
     },

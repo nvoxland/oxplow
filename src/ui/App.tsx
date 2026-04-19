@@ -92,6 +92,7 @@ import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
+import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi } from "./logger.js";
@@ -946,6 +947,7 @@ export function App() {
   }, [selectedFilePath, stream]);
   const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [planNewRequest, setPlanNewRequest] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const commandState = useMemo(
     () => ({
       hasStream: !!stream,
@@ -991,10 +993,31 @@ export function App() {
   );
 
   useEffect(() => {
+    // Palette shortcut lives OUTSIDE the menu system (no associated
+    // CommandId) so it works in both Electron and browser modes identically.
+    // Native-menu accelerators can't intercept Cmd+K because there's no menu
+    // item for it — keeping the shortcut here means Electron and browser
+    // users get the same behaviour without a round-trip through main.ts.
+    function handlePaletteShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPaletteOpen((prev) => !prev);
+    }
+    window.addEventListener("keydown", handlePaletteShortcut);
+    return () => window.removeEventListener("keydown", handlePaletteShortcut);
+  }, []);
+
+  useEffect(() => {
     if (isElectron) return;
     function handleKeyDown(event: KeyboardEvent) {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
+      // Only "plan.newWorkItem" suppresses itself inside a text input — the
+      // rest (save, find, quick-open) are explicitly useful while editing.
+      // Rationale: a user in the middle of typing a description shouldn't
+      // lose focus to a New-Work-Item modal and drop their half-typed text.
+      if (commandId === "plan.newWorkItem" && isEditableTarget(event.target)) return;
       const command = commandMap.get(commandId);
       if (!command || !command.enabled || !command.run) return;
       event.preventDefault();
@@ -1015,6 +1038,10 @@ export function App() {
   useEffect(() => {
     if (!isElectron) return;
     return window.newdeApi.onMenuCommand((commandId) => {
+      // Same "don't yank a user out of a text field" rule as the non-Electron
+      // keydown path, applied here because native-menu shortcuts fire
+      // regardless of web-view focus.
+      if (commandId === "plan.newWorkItem" && isEditableTarget(document.activeElement)) return;
       const command = commandMap.get(commandId);
       if (!command || !command.enabled || !command.run) return;
       command.run();
@@ -1379,6 +1406,9 @@ export function App() {
         />
       ) : null}
       {daemonUnavailable ? <DaemonDownDialog /> : null}
+      {paletteOpen ? (
+        <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
+      ) : null}
     </div>
   );
 }
@@ -1388,6 +1418,20 @@ export function App() {
  * doesn't just show blank text with no explanation. State flags from the
  * snapshot store tell us why content is missing.
  */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "INPUT") {
+    const type = (target as HTMLInputElement).type;
+    // Checkbox / button / radio inputs shouldn't block the shortcut — they
+    // don't swallow typed characters the way a text field does.
+    return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
+  }
+  return false;
+}
+
 function renderDiffSide(
   content: string | null,
   state: "absent" | "present" | "deleted" | "oversize",

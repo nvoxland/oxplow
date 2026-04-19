@@ -1,30 +1,21 @@
 import { expect, test } from "bun:test";
-import { ResumeTracker } from "./resume-tracker.js";
+import { decideResumeUpdate } from "./resume-tracker.js";
 
-test("session start persists the pane resume id", () => {
-  const tracker = new ResumeTracker();
-
-  tracker.notePaneLaunch("stream-1", "working", true);
-  const update = tracker.recordHookEvent("stream-1", "working", "SessionStart", "session-1");
-
-  expect(update).toEqual({ type: "set", sessionId: "session-1" });
+test("returns a set directive when a new session id is observed", () => {
+  expect(decideResumeUpdate("", "session-1")).toEqual({ type: "set", sessionId: "session-1" });
 });
 
-test("session end without a prior session start clears a failed resumed pane", () => {
-  const tracker = new ResumeTracker();
-
-  tracker.notePaneLaunch("stream-1", "working", true);
-  const update = tracker.recordHookEvent("stream-1", "working", "SessionEnd", "session-end-1");
-
-  expect(update).toEqual({ type: "clear" });
+test("returns a set directive when the session id changes (e.g. after compact)", () => {
+  expect(decideResumeUpdate("old-session", "new-session")).toEqual({
+    type: "set",
+    sessionId: "new-session",
+  });
 });
 
-test("session end after a successful session start keeps the resume id unchanged", () => {
-  const tracker = new ResumeTracker();
+test("returns null when the observed id matches what's already persisted", () => {
+  expect(decideResumeUpdate("session-1", "session-1")).toBeNull();
+});
 
-  tracker.notePaneLaunch("stream-1", "working", true);
-  tracker.recordHookEvent("stream-1", "working", "SessionStart", "session-1");
-  const update = tracker.recordHookEvent("stream-1", "working", "SessionEnd", "session-1");
-
-  expect(update).toBeNull();
+test("returns null when no session id rode the hook payload", () => {
+  expect(decideResumeUpdate("session-1", undefined)).toBeNull();
 });

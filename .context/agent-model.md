@@ -44,6 +44,20 @@ Claude Code plugin into `<projectDir>/.newde/runtime/claude-plugin/`. The
 plugin's `hooks.json` registers HTTP hooks for `PreToolUse`, `PostToolUse`,
 `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and `Notification`.
 
+Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
+are not supported for SessionStart" in `claude --debug-file`). Only command-
+type hooks are supported there. Everywhere else we rely on hook events to
+learn the session id, so we adopt whichever id shows up on the *next* hook
+that does fire (`UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionEnd`, …) —
+see `decideResumeUpdate` in `src/session/resume-tracker.ts`.
+
+`newde__get_batch_context` returns, besides the caller's stream/batch
+ids + summary, an `otherActiveBatches: Array<{ streamId, streamTitle,
+batchId, batchTitle, activeBatchId }>` with one entry per peer stream —
+handy when the agent suspects the "current stream" has drifted from
+where it actually writes (the same phenomenon that motivated the
+streamId-derivation in other MCP tools).
+
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
 env-var-interpolated `NEWDE_HOOK_TOKEN` header, plus `X-Newde-Stream`,
 `X-Newde-Batch`, `X-Newde-Pane`. The MCP server's `onHook` callback dispatches
@@ -51,14 +65,25 @@ to `runtime.handleHookEnvelope`, which:
 
 1. Stores the event in `HookEventStore` (a ring buffer, also fed to the UI's
    Hook Events tool window via the `hook.recorded` EventBus event).
-2. Updates the resume-session tracker so reconnects find the latest sid.
+2. If the normalized payload carries a session id that differs from
+   `batch.resume_session_id`, persists the new id so a later newde restart
+   relaunches claude with `--resume <id>`.
 3. Calls `applyTurnTracking` to open/close `agent_turn` rows and flush
-   turn-start / turn-end snapshots (see "Snapshot tracking" below).
+   turn-start / turn-end snapshots (see "Snapshot tracking" below). On `Stop`
+   we also read the session transcript (path rides on the hook payload) and
+   sum assistant-message `usage` since the turn's `started_at`, persisting
+   input/output/cache-read token counts on `agent_turn`. See
+   `summarizeTurnUsage` in `src/session/transcript-usage.ts`.
 4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
    blocks the tool (see Write guard below).
-5. For `UserPromptSubmit`: returns `additionalContext` from the editor focus
-   tracker (`src/session/editor-focus.ts`) so the agent sees what the user
-   has open/selected.
+5. For `UserPromptSubmit`: returns `additionalContext` made up of a
+   live `<session-context>` block (stream + batch + writer, rebuilt
+   from the stores — see `buildSessionContextBlock` in `runtime.ts`)
+   followed by the editor-focus summary from
+   `src/session/editor-focus.ts`. The session-context block refreshes
+   on every turn so the agent notices when the user promoted a
+   different batch to writer mid-session; the frozen ids in the
+   launch-time system prompt no longer win.
 6. For `Stop`: runs `computeStopDirective` (below).
 
 ## Stop-hook pipeline
@@ -83,14 +108,25 @@ The pipeline runs in priority order:
 2. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
    UI shows "agent stopped here"; the user resumes by prompting the agent
    directly (`triggered` points are skipped on subsequent Stop hooks, so
-   one prompt is enough — no "continue" button).
+   one prompt is enough — no "continue" button). A marker (commit or wait)
+   is "active" once every preceding work item is terminal, where terminal
+   includes `human_check` — agents never self-mark `done`, so demanding
+   `done` would let the agent march past the line indefinitely while the
+   user catches up on verification.
 3. **Approval-mode commit awaiting user.** Allow stop while the user
    approves/rejects in the UI. After approve, the runtime commits and
    marks the point `done`. (The agent is now idle; the user re-engages
    to drain the rest of the queue.)
 4. **Writer batch with a ready work item.** Block with a directive built
-   by `buildNextWorkItemStopReason` telling the agent the next item's id,
-   kind, and title, and to mark it `in_progress` before working.
+   by `buildNextWorkItemStopReason` naming the item's id + kind + title +
+   batch_id + stream_id, and telling the agent to mark it `in_progress`
+   before working. Items the agent itself filed during the *current* turn
+   are skipped (ready-list filtered by `created_by="agent"` AND
+   `created_at >= currentTurnStartedAt`). Those are triage-inbox entries
+   from flows like `/autoimprove`; forcing the agent to pick them up would
+   invert the user's "leave in waiting" intent. "Queue" here means
+   waiting + ready items only — `human_check` belongs to the user's
+   review queue and is terminal from the pipeline's perspective.
 5. **Otherwise.** Allow stop.
 
 Auto-mode commit points pass straight through: the agent proposes →

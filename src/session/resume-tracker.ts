@@ -1,62 +1,17 @@
-import type { PaneKind } from "../persistence/stream-store.js";
+// Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks are
+// not supported for SessionStart" appears in its debug log). So we can't
+// learn a session id from that hook — instead we adopt whichever session id
+// shows up on *any* hook that carries one (UserPromptSubmit, PreToolUse,
+// Stop, SessionEnd, …). `decideResumeUpdate` returns a directive when the
+// observed id is new or different from the one already persisted for the
+// batch, and null otherwise so callers avoid a no-op DB write.
+export type ResumeUpdate = { type: "set"; sessionId: string };
 
-type ResumeUpdate =
-  | { type: "set"; sessionId: string }
-  | { type: "clear" };
-
-interface PaneState {
-  launchedWithResume: boolean;
-  sawSessionStart: boolean;
-}
-
-export class ResumeTracker {
-  private panes = new Map<string, PaneState>();
-
-  noteSessionLaunch(sessionKey: string, launchedWithResume: boolean): void {
-    this.panes.set(sessionKey, {
-      launchedWithResume,
-      sawSessionStart: false,
-    });
-  }
-
-  notePaneLaunch(streamId: string, pane: PaneKind, launchedWithResume: boolean): void {
-    this.noteSessionLaunch(key(streamId, pane), launchedWithResume);
-  }
-
-  recordSessionHookEvent(
-    sessionKey: string,
-    eventName: string,
-    sessionId?: string,
-  ): ResumeUpdate | null {
-    if (!sessionId) return null;
-    const state = this.panes.get(sessionKey);
-
-    if (eventName === "SessionStart") {
-      this.panes.set(sessionKey, {
-        launchedWithResume: state?.launchedWithResume ?? false,
-        sawSessionStart: true,
-      });
-      return { type: "set", sessionId };
-    }
-
-    if (eventName === "SessionEnd" && state?.launchedWithResume && !state.sawSessionStart) {
-      this.panes.delete(sessionKey);
-      return { type: "clear" };
-    }
-
-    return null;
-  }
-
-  recordHookEvent(
-    streamId: string,
-    pane: PaneKind,
-    eventName: string,
-    sessionId?: string,
-  ): ResumeUpdate | null {
-    return this.recordSessionHookEvent(key(streamId, pane), eventName, sessionId);
-  }
-}
-
-function key(streamId: string, pane: PaneKind): string {
-  return `${streamId}:${pane}`;
+export function decideResumeUpdate(
+  currentResumeId: string,
+  observedSessionId: string | undefined,
+): ResumeUpdate | null {
+  if (!observedSessionId) return null;
+  if (observedSessionId === currentResumeId) return null;
+  return { type: "set", sessionId: observedSessionId };
 }

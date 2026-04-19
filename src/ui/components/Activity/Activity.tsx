@@ -45,6 +45,37 @@ export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile, 
   );
 }
 
+function TokenBadge({ turn }: { turn: AgentTurn }) {
+  // The transcript parse runs on the Stop hook — before that, or if the
+  // parse returned no matching assistant entries, all three counters are
+  // null and we show nothing. Cache-read is billed at ~10x less than input,
+  // so it gets its own compact ticker instead of being folded into `in`.
+  const { input_tokens, output_tokens, cache_read_input_tokens } = turn;
+  if (input_tokens === null && output_tokens === null && cache_read_input_tokens === null) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (input_tokens !== null) parts.push(`${formatTokens(input_tokens)} in`);
+  if (output_tokens !== null) parts.push(`${formatTokens(output_tokens)} out`);
+  if (cache_read_input_tokens !== null && cache_read_input_tokens > 0) {
+    parts.push(`${formatTokens(cache_read_input_tokens)} cache`);
+  }
+  return (
+    <span
+      style={{ fontSize: 10, fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}
+      title={`Token usage for this turn — input: ${input_tokens ?? 0}, output: ${output_tokens ?? 0}, cache-read: ${cache_read_input_tokens ?? 0}`}
+    >
+      · {parts.join(" / ")}
+    </span>
+  );
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 function TurnCard({
   turn,
   linkedItem,
@@ -66,6 +97,7 @@ function TurnCard({
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11, color: "var(--muted)" }}>
         <span>{new Date(turn.started_at).toLocaleString()}</span>
         {open ? <span style={{ color: "var(--accent)" }}>· in progress</span> : null}
+        <TokenBadge turn={turn} />
         {linkedItem ? (
           <span style={{ marginLeft: "auto", padding: "1px 6px", border: "1px solid var(--border)", borderRadius: 999 }}>
             {linkedItem.title}

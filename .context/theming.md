@@ -19,6 +19,10 @@ variables live in `public/index.html` under `:root`.
 | `--border`           | `#2f2b26`  | 1px dividers                                       |
 | `--border-strong`    | `#3c3832`  | Tab frames, panel borders                          |
 | `--accent`           | `#4a9eff`  | Selection, focus, primary buttons, tab underline  |
+| `--priority-urgent`  | `#e06c75`  | Work-item priority icon — urgent                   |
+| `--priority-high`    | `#e5a06a`  | Work-item priority icon — high                     |
+| `--priority-medium`  | `#8d8a85`  | Work-item priority icon — medium (alias of muted)  |
+| `--priority-low`     | `#6b6864`  | Work-item priority icon — low (recedes past muted) |
 
 ## Tier rule
 

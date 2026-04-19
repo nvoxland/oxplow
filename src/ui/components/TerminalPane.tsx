@@ -59,6 +59,21 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return true;
       }
 
+      // Cmd/Ctrl+V — xterm.js doesn't wire paste itself. Read the clipboard
+      // via the Electron renderer's navigator.clipboard and write through
+      // term.paste(). Returning false prevents xterm from also emitting a
+      // literal "v" as user input. Plain Cmd+Shift+V and Ctrl+V handled the
+      // same way; Alt is left alone (Alt+V is a real xterm key combo).
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        void navigator.clipboard.readText().then((text) => {
+          if (text) term.paste(text);
+        }).catch((error) => {
+          logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
+        });
+        return false;
+      }
+
       if (shouldHandleTerminalPageKey(event)) {
         const routeToTmuxHistory = transportMode === "tmux" && shouldRouteWheelToTmuxHistory({
           mode: modeRef.current,
@@ -164,6 +179,33 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       };
       host.addEventListener("mousedown", handleMouseDown);
 
+      // Catches the native Edit → Paste menu path (Electron's role:"paste"
+      // fires a synthetic paste event on the focused element, which bubbles
+      // up from xterm's hidden textarea to this host div) plus any paste
+      // gesture we missed in the keydown handler above.
+      const handlePaste = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text) return;
+        event.preventDefault();
+        event.stopPropagation();
+        term.paste(text);
+      };
+      host.addEventListener("paste", handlePaste);
+
+      // Electron disables the browser's default context menu in renderers,
+      // so a plain right-click shows nothing. Match the tmux / iTerm2
+      // convention — right-click = paste — instead of wiring up a full menu
+      // for a single item.
+      const handleContextMenu = (event: MouseEvent) => {
+        event.preventDefault();
+        void navigator.clipboard.readText().then((text) => {
+          if (text) term.paste(text);
+        }).catch((error) => {
+          logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
+        });
+      };
+      host.addEventListener("contextmenu", handleContextMenu);
+
       // Direct-mode agents replay their scrollback synchronously from inside
       // the openTerminalSession handler, so terminal-event messages may reach
       // the renderer before the invoke response resolves and sessionIdRef is
@@ -238,6 +280,8 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       const prevCleanup = cleanupRef.current;
       cleanupRef.current = () => {
         host.removeEventListener("mousedown", handleMouseDown);
+        host.removeEventListener("paste", handlePaste);
+        host.removeEventListener("contextmenu", handleContextMenu);
         unsubscribe();
         prevCleanup?.();
       };

@@ -38,6 +38,25 @@ export interface BatchSnapshot {
    *  the next item to direct the agent to. Kept as a separate field so
    *  the link-aware filtering stays inside the store. */
   readyWorkItems: WorkItem[];
+  /** ISO timestamp of the currently-open agent turn's `started_at`. When
+   *  present, ready items whose `created_by === "agent"` AND
+   *  `created_at >= currentTurnStartedAt` are skipped for auto-progression
+   *  (the agent filed them for the user to triage — forcing continuation
+   *  would invert that intent). Optional so callers that don't track turn
+   *  lifecycle still get the old behaviour. */
+  currentTurnStartedAt?: string | null;
+  /** Paths the current agent_turn wrote to, relative to the worktree.
+   *  Used to decide whether the "next work item" directive should carry a
+   *  visual-verification nudge (any src/ui/** change ⇒ nudge). Optional;
+   *  empty / absent means "no nudge". */
+  currentTurnFilePaths?: string[];
+}
+
+export interface NextWorkItemContext {
+  /** Set to true when the current turn wrote to any src/ui/** path — the
+   *  builder should emit a "restart newde and exercise in the browser"
+   *  banner before the normal directive text. */
+  uiChangeNudge: boolean;
 }
 
 export interface StopDirective {
@@ -57,7 +76,7 @@ export function decideStopDirective(
   snapshot: BatchSnapshot,
   builders: {
     buildCommitPointReason: (cp: CommitPoint) => string;
-    buildNextWorkItemReason: (item: WorkItem) => string;
+    buildNextWorkItemReason: (item: WorkItem, context: NextWorkItemContext) => string;
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
@@ -87,19 +106,53 @@ export function decideStopDirective(
     return { directive: null, sideEffects };
   }
 
-  const next = snapshot.readyWorkItems[0] ?? null;
+  const next = pickNextReadyItem(snapshot.readyWorkItems, snapshot.currentTurnStartedAt);
   if (!next) return { directive: null, sideEffects };
 
+  const uiChangeNudge = turnTouchedUi(snapshot.currentTurnFilePaths);
   return {
-    directive: { decision: "block", reason: builders.buildNextWorkItemReason(next) },
+    directive: {
+      decision: "block",
+      reason: builders.buildNextWorkItemReason(next, { uiChangeNudge }),
+    },
     sideEffects,
   };
+}
+
+function turnTouchedUi(paths: string[] | undefined): boolean {
+  if (!paths || paths.length === 0) return false;
+  // Any repo-relative path under `src/ui/` — matches `src/ui/**`. Keep the
+  // prefix narrow so touching shared utilities like
+  // `src/electron/work-item-api.ts` doesn't falsely trip the banner.
+  return paths.some((p) => p === "src/ui" || p.startsWith("src/ui/"));
+}
+
+// Skip items that the agent itself filed during the current turn. These are
+// by convention "triage inbox" entries — the /autoimprove flow, bug reports
+// filed during investigation, etc. — and forcing the agent to pick them up
+// immediately would invert the user's triage intent. User-filed items and
+// older agent-filed items still fire the directive.
+function pickNextReadyItem(ready: WorkItem[], turnStartedAtIso: string | null | undefined): WorkItem | null {
+  if (!turnStartedAtIso) return ready[0] ?? null;
+  const turnStartMs = Date.parse(turnStartedAtIso);
+  if (!Number.isFinite(turnStartMs)) return ready[0] ?? null;
+  for (const item of ready) {
+    if (item.created_by !== "agent") return item;
+    const createdMs = Date.parse(item.created_at);
+    if (!Number.isFinite(createdMs) || createdMs < turnStartMs) return item;
+  }
+  return null;
 }
 
 /**
  * Lowest-sort_index marker whose preceding work items are all terminal
  * AND that passes `eligible`. Shared by commit and wait point lookups
- * so the "preceding items must be done" rule lives in one place.
+ * so the "preceding items are past" rule lives in one place.
+ *
+ * Terminal = `done`, `canceled`, or `human_check`. `human_check` is where
+ * the agent parks finished work for the user to verify — from the queue's
+ * perspective the agent is past it, so we must not keep marching
+ * indefinitely just because the human hasn't clicked "done" yet.
  */
 function findActiveMarker<T extends { sort_index: number }>(
   markers: T[],
@@ -109,10 +162,14 @@ function findActiveMarker<T extends { sort_index: number }>(
   for (const marker of markers) {
     if (!eligible(marker)) continue;
     const preceding = workItems.filter((item) => item.sort_index < marker.sort_index);
-    const allTerminal = preceding.every((item) => item.status === "done" || item.status === "canceled");
+    const allTerminal = preceding.every(isTerminalStatus);
     if (!allTerminal) continue;
     return marker;
   }
   return null;
+}
+
+function isTerminalStatus(item: WorkItem): boolean {
+  return item.status === "done" || item.status === "canceled" || item.status === "human_check";
 }
 

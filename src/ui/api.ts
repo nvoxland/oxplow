@@ -40,7 +40,7 @@ export interface BatchState {
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "to_check" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface WorkItem {
@@ -138,6 +138,9 @@ export interface AgentTurn {
   session_id: string | null;
   started_at: string;
   ended_at: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_input_tokens: number | null;
 }
 
 export interface BatchWorkState {

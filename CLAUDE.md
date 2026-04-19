@@ -73,3 +73,22 @@ If you rename a file or remove a referenced symbol, fix the doc.
 Stores have colocated `bun:test` files. Cross-store / Stop-hook / MCP
 behavior goes in `src/electron/runtime.test.ts`. Don't mock the DB —
 tests use a fresh `mkdtempSync` project dir against a real SQLite file.
+
+## Two task surfaces, different grains
+
+Claude Code's built-in TaskCreate/TaskUpdate and newde's
+`mcp__newde__*_work_item` tools both look like "task lists" but serve
+different grains:
+
+- **newde work items** — durable, user-visible, cross-session. "Fix
+  the wait-point bug." "Reorganize the Work panel." Persisted to
+  SQLite, survive restart, user approves and marks done. This is the
+  canonical record of what the agent is doing on behalf of the user.
+- **Claude Code TaskCreate** — ephemeral, within-turn micro-planning.
+  "Read the pipeline file. Write the failing test. Run tests. Update
+  the doc." Invisible to the user, discarded when the turn ends.
+
+The agent prompt tells agents to pick ONE surface per piece of work —
+never mirror. If you're reviewing batch history, that's where newde
+work items live; if you see TaskCreate referenced anywhere, it was a
+within-turn plan, not a deliverable.

@@ -4,7 +4,7 @@ import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "to_check" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 export type WorkItemLinkType =
   | "blocks"
@@ -19,7 +19,7 @@ const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
   "epic", "task", "subtask", "bug", "note",
 ]);
 const WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
-  "waiting", "ready", "in_progress", "to_check", "blocked", "done", "canceled",
+  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
 ]);
 const WORK_ITEM_PRIORITIES: ReadonlySet<WorkItemPriority> = new Set([
   "low", "medium", "high", "urgent",
@@ -150,7 +150,7 @@ export class WorkItemStore {
     return {
       batchId,
       waiting: items.filter((item) => item.status === "waiting" || item.status === "ready" || item.status === "blocked"),
-      inProgress: items.filter((item) => item.status === "in_progress" || item.status === "to_check"),
+      inProgress: items.filter((item) => item.status === "in_progress" || item.status === "human_check"),
       done: items.filter((item) => item.status === "done" || item.status === "canceled"),
       epics: items.filter((item) => item.kind === "epic"),
       items,

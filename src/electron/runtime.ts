@@ -43,8 +43,9 @@ import { EditorFocusStore, formatEditorFocusForAgent, type EditorFocusState } fr
 import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
 import { LspSessionManager, registerLanguageServer } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
-import { ResumeTracker } from "../session/resume-tracker.js";
-import { createElectronPlugin, type ElectronPlugin } from "../session/claude-plugin.js";
+import { decideResumeUpdate } from "../session/resume-tracker.js";
+import { readTurnUsage } from "../session/transcript-usage.js";
+import { createElectronPlugin, HOOK_EVENTS, type ElectronPlugin } from "../session/claude-plugin.js";
 import { startMcpServer, type HookEnvelope, type McpServerHandle } from "../mcp/mcp-server.js";
 import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
 import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
@@ -105,7 +106,6 @@ export class ElectronRuntime {
   readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
-  readonly resumeTracker: ResumeTracker;
   readonly lspManager: LspSessionManager;
   readonly editorFocusStore: EditorFocusStore;
   readonly agentPtyStore: AgentPtyStore;
@@ -156,13 +156,21 @@ export class ElectronRuntime {
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
-    this.resumeTracker = new ResumeTracker();
     this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
     this.editorFocusStore = new EditorFocusStore();
     this.agentPtyStore = new AgentPtyStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
     this.gitRefsWatchers = new GitRefsWatcherRegistry(logger.child({ subsystem: "git-refs-watch" }));
   }
+
+  // Hook delivery health — used to warn once per process when the registered
+  // set in HOOK_EVENTS doesn't match what Claude Code actually ships. The
+  // canonical example is SessionStart, which Claude silently drops for HTTP
+  // hooks (see .context/agent-model.md); anyone hitting a similar dead
+  // registration learns about it from the log instead of by running
+  // `claude --debug-file` and chasing payload shapes.
+  private readonly hookEventsSeen = new Set<string>();
+  private hookHealthReported = false;
 
   static async create(projectDir: string): Promise<ElectronRuntime> {
     // newde manages its own worktrees under .newde/worktrees/; refusing to
@@ -386,8 +394,9 @@ export class ElectronRuntime {
       extraTools: [
         ...buildWorkItemMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
-          resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
+          resolveBatchById: (batchId) => this.resolveBatchById(batchId),
           batchStore: this.batchStore,
+          streamStore: this.store,
           workItemStore: this.workItemStore,
           commitPointStore: this.commitPointStore,
           turnStore: this.turnStore,
@@ -855,7 +864,7 @@ export class ElectronRuntime {
       // a live agent whose resume id has since changed doesn't look like a
       // config change and trigger a respawn.
       const signatureSource = this.getAgentCommand(stream, batch, { withoutResume: true });
-      const created = ensureAgentPane(
+      ensureAgentPane(
         batch.pane_target,
         stream.worktree_path,
         cols,
@@ -863,9 +872,6 @@ export class ElectronRuntime {
         agentCommand,
         { signatureSource, logger: paneLogger },
       );
-      if (created) {
-        this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
-      }
     }
 
     const sessionId = randomUUID();
@@ -880,15 +886,11 @@ export class ElectronRuntime {
       // UI attach/detach. Switching batches or streams detaches the socket
       // but leaves the Claude process running so the user can return to an
       // in-progress agent without killing and resuming it.
-      const alreadySpawned = this.agentPtyStore.get(batch.id) !== null;
       const agentPty = this.agentPtyStore.ensure(
         batch.id,
         { command: agentCommand, cwd: stream.worktree_path, cols, rows },
         paneLogger.child({ subsystem: "agent-pty" }),
       );
-      if (!alreadySpawned) {
-        this.resumeTracker.noteSessionLaunch(`${stream.id}:${batch.id}`, !!batch.resume_session_id);
-      }
       agentPty.attach(socket, cols, rows);
     }
     this.terminalSessions.set(sessionId, socket);
@@ -948,6 +950,32 @@ export class ElectronRuntime {
     return batch;
   }
 
+  // batchIds are globally unique, so a lookup by id alone is enough. MCP
+  // tools use this when the caller omitted streamId (or passed one that
+  // drifted out of sync with the UI's current stream); the agent's session
+  // prompt shouldn't need to stay perfectly aligned with whatever stream
+  // the user is viewing.
+  private resolveBatchById(batchId: string): Batch {
+    const batch = this.batchStore.findById(batchId);
+    if (!batch) throw new Error(`unknown batch: ${batchId}`);
+    return batch;
+  }
+
+  // Build a <session-context> additionalContext block reflecting LIVE state
+  // (as opposed to the frozen snapshot in the agent's system prompt). Called
+  // on every UserPromptSubmit — see handleHookEnvelope. Returns empty string
+  // when the envelope lacks enough to resolve a batch.
+  private buildRefreshedSessionContext(envelopeBatchId: string | null, streamId: string): string {
+    void streamId;
+    const batch = envelopeBatchId ? this.batchStore.findById(envelopeBatchId) : null;
+    if (!batch) return "";
+    const stream = this.store.get(batch.stream_id);
+    if (!stream) return "";
+    const batchState = this.batchStore.list(stream.id);
+    const activeBatch = batchState.batches.find((b) => b.id === batchState.activeBatchId) ?? null;
+    return buildSessionContextBlock({ stream, batch, activeBatch });
+  }
+
   private resolveActiveBatchForPrompt(streamId: string): Batch | null {
     const activeId = this.batchStore.list(streamId).activeBatchId;
     if (!activeId) return null;
@@ -1002,6 +1030,7 @@ export class ElectronRuntime {
   private handleHookEnvelope(envelope: HookEnvelope): { body?: unknown } | void {
     const streamId = envelope.streamId;
     if (!streamId) return;
+    this.hookEventsSeen.add(envelope.event);
     const pane: PaneKind | undefined = envelope.pane === "working" || envelope.pane === "talking"
       ? envelope.pane
       : undefined;
@@ -1011,15 +1040,13 @@ export class ElectronRuntime {
       pane,
     });
     if (envelope.batchId && this.store.get(streamId)) {
-      const update = this.resumeTracker.recordSessionHookEvent(
-        `${streamId}:${envelope.batchId}`,
-        envelope.event,
+      const batch = this.batchStore.findById(envelope.batchId);
+      const update = decideResumeUpdate(
+        batch?.resume_session_id ?? "",
         stored.normalized.sessionId,
       );
-      if (update?.type === "set") {
+      if (update) {
         this.batchStore.updateResume(streamId, envelope.batchId, update.sessionId);
-      } else if (update?.type === "clear") {
-        this.batchStore.updateResume(streamId, envelope.batchId, "");
       }
       this.applyTurnTracking(envelope, stored.normalized.sessionId);
     }
@@ -1034,7 +1061,14 @@ export class ElectronRuntime {
       if (deny) return { body: deny };
     }
     if (envelope.event === "UserPromptSubmit") {
-      const additionalContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
+      const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
+      // Re-inject the session context each turn — the agent's system-prompt
+      // SESSION CONTEXT line is frozen at launch, but the UI's active /
+      // selected batch can flip mid-session. Reading the live state here
+      // keeps the agent pointed at the right ids without a user-visible
+      // prompt edit.
+      const sessionContext = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId);
+      const additionalContext = [sessionContext, focusContext].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -1048,7 +1082,24 @@ export class ElectronRuntime {
     }
     if (envelope.event === "Stop" && envelope.batchId) {
       const directive = this.computeStopDirective(envelope.batchId);
+      this.reportHookHealthIfNeeded();
       if (directive) return { body: directive };
+    }
+  }
+
+  // Warn once per process about registered hooks that never delivered, so
+  // a silent-drop (SessionStart is the known culprit; Claude Code's debug
+  // log says "HTTP hooks are not supported for SessionStart") doesn't get
+  // lost. Runs at first Stop — by then a "full" turn has happened and the
+  // hook set is a useful signal. Paths that legitimately don't fire
+  // (PreToolUse / PostToolUse / Notification when the turn didn't exercise
+  // them) are grouped into one informational line rather than warn'd per
+  // event, so the output is readable.
+  private reportHookHealthIfNeeded(): void {
+    if (this.hookHealthReported) return;
+    this.hookHealthReported = true;
+    for (const report of describeHookHealth(HOOK_EVENTS, this.hookEventsSeen)) {
+      this.logger.warn(report.message, { event: report.event, hint: report.hint });
     }
   }
 
@@ -1061,16 +1112,36 @@ export class ElectronRuntime {
    * testable without spinning up a runtime.
    */
   private computeStopDirective(batchId: string): Record<string, unknown> | null {
+    const batch = this.batchStore.findById(batchId);
+    // The Stop hook fires while the current turn is still "open" (closeTurn
+    // runs inside applyTurnTracking's Stop branch alongside this). Grab its
+    // started_at so decideStopDirective can skip items the agent filed for
+    // triage during the turn. A missing/closed turn falls back to the
+    // pre-fix behaviour.
+    const openTurn = this.turnStore.currentOpenTurn(batchId);
+    const currentTurnFilePaths = openTurn
+      ? this.fileChangeStore.listForTurn(openTurn.id).map((row) => row.path)
+      : [];
     const snapshot: BatchSnapshot = {
-      batch: this.batchStore.findById(batchId),
+      batch,
       commitPoints: this.commitPointStore.listForBatch(batchId),
       waitPoints: this.waitPointStore.listForBatch(batchId),
       workItems: this.workItemStore.listItems(batchId),
       readyWorkItems: this.workItemStore.listReady(batchId),
+      currentTurnStartedAt: openTurn?.started_at ?? null,
+      currentTurnFilePaths,
     };
+    // The item's own batch_id is what matters for the directive text (not
+    // `batchId` — they agree today but could diverge if listReady ever
+    // returns cross-batch candidates). stream_id comes off the batch row.
+    const streamId = batch?.stream_id ?? "";
     const outcome = decideStopDirective(snapshot, {
       buildCommitPointReason: buildCommitPointStopReason,
-      buildNextWorkItemReason: (item) => buildNextWorkItemStopReason(item.id, item.title, item.kind),
+      // item.batch_id is typed nullable (WorkItem covers backlog items too),
+      // but decideStopDirective only emits this reason for in-batch rows, so
+      // a fall-back to `batchId` keeps the directive stable.
+      buildNextWorkItemReason: (item, context) =>
+        buildNextWorkItemStopReason({ ...item, batch_id: item.batch_id ?? batchId }, streamId, context),
     });
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "trigger-wait-point") {
@@ -1121,6 +1192,15 @@ export class ElectronRuntime {
         const answer = batch?.summary?.trim() ? batch.summary : null;
         const workItemId = this.soleInProgressWorkItem(batchId);
         this.turnStore.closeTurn(open.id, { workItemId, answer });
+        const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
+          ? (envelope.payload as { transcript_path: string }).transcript_path
+          : null;
+        if (transcriptPath) {
+          const usage = readTurnUsage(transcriptPath, open.started_at, this.logger);
+          if (usage && (usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadInputTokens !== null)) {
+            this.turnStore.setTurnUsage(open.id, usage);
+          }
+        }
         if (batch) {
           try {
             this.flushSnapshotForStream(batch.stream_id, "turn-end", open.id, batchId);
@@ -1528,16 +1608,71 @@ export class ElectronRuntime {
   }
 }
 
-export function buildNextWorkItemStopReason(itemId: string, title: string, kind: string): string {
-  return [
+export interface HookHealthReport {
+  event: string;
+  message: string;
+  hint: string;
+}
+
+/**
+ * Compare the set of registered hook events against the set we've actually
+ * received, emitting one warn report per missing event. `SessionStart` gets
+ * a dedicated hint (Claude Code silently drops it — see
+ * `.context/agent-model.md`); the rest carry a generic "may be fine, may be
+ * broken" hint so the user can judge. Pure so the test pins the exact
+ * phrasing of both hint kinds.
+ */
+export function describeHookHealth(
+  registered: readonly string[],
+  seen: ReadonlySet<string>,
+): HookHealthReport[] {
+  const out: HookHealthReport[] = [];
+  for (const event of registered) {
+    if (seen.has(event)) continue;
+    if (event === "SessionStart") {
+      out.push({
+        event,
+        message: "registered hook never delivered",
+        hint: "Claude Code drops HTTP hooks for SessionStart — the runtime opportunistically learns session_id from later hooks (see decideResumeUpdate).",
+      });
+    } else {
+      out.push({
+        event,
+        message: "registered hook not observed yet",
+        hint: "Expected if the turn didn't exercise this hook (e.g. PreToolUse when no tools ran). If it NEVER fires, the plugin hook registration may be broken.",
+      });
+    }
+  }
+  return out;
+}
+
+export function buildNextWorkItemStopReason(
+  item: { id: string; title: string; kind: string; batch_id: string },
+  streamId: string,
+  context: { uiChangeNudge?: boolean } = {},
+): string {
+  // Naming both batchId and streamId saves the agent from a list_batch_work
+  // round-trip when the prompt's session-context ids have drifted (the
+  // "unknown work item / unknown batch" error chain).
+  const lines: string[] = [];
+  if (context.uiChangeNudge) {
+    lines.push(
+      `⚠ UI change detected in this turn (src/ui/** paths). Restart newde and exercise the feature in the browser before marking this item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
+      ``,
+    );
+  }
+  lines.push(
     `The current work item is done but the batch queue still has ready work. Pick up this item and continue:`,
     ``,
-    `- work_item_id: ${itemId}`,
-    `- kind: ${kind}`,
-    `- title: ${title}`,
+    `- work_item_id: ${item.id}`,
+    `- kind: ${item.kind}`,
+    `- title: ${item.title}`,
+    `- batch_id: ${item.batch_id}`,
+    `- stream_id: ${streamId}`,
     ``,
-    `Mark it in_progress via \`mcp__newde__update_work_item\`, execute the work, then mark it done before stopping again. Do not stop until the queue is empty, a commit point is due, or a wait point is hit.`,
-  ].join("\n");
+    `Mark it in_progress via \`mcp__newde__update_work_item\` (pass batchId="${item.batch_id}"), execute the work, then mark it done before stopping again. Do not stop until the queue is empty, a commit point is due, or a wait point is hit.`,
+  );
+  return lines.join("\n");
 }
 
 export function buildCommitPointStopReason(cp: CommitPoint): string {
@@ -1595,15 +1730,16 @@ function buildBatchAgentPrompt(
     `Use the title for intent, description for the approach, and acceptanceCriteria for a checklist of observable conditions that define "done" (plain text, one per line).`,
     `Set parentId when the item rolls up under a larger epic or task.`,
     ``,
-    `DECOMPOSE DELIBERATELY: epic = multi-step feature, task = concrete unit of work, subtask = small step inside a task, bug = defect to fix, note = observation that doesn't need execution.`,
+    `TASK LIST SURFACE. Use Claude Code's TaskCreate/TaskUpdate for within-turn micro-planning — the concrete 2–10 steps your current response will take. Use newde work-item MCP tools (above) for anything that should survive the turn, or that the user filed. Never mirror: if an item exists in newde, don't duplicate it in Claude's task list — pick one surface per piece of work.`,
     ``,
     `WORK THE READY QUEUE. Your FIRST tool call every session must be newde__list_ready_work — not a Read, not a Grep, not a response to the user. A high-priority bug may already be queued; you need to see it before you answer. If the user's new request competes with queued work, say so and let them choose; don't silently skip the queue.`,
     `Set the item's status to "in_progress" via newde__update_work_item before touching code.`,
     `Post newde__add_work_note at meaningful milestones.`,
-    `When every acceptance criterion is met, set status to "to_check" (never "done" yourself — the human marks done after reviewing). If you also set "done" you will be corrected.`,
+    `When every acceptance criterion is met, set status to "human_check" (never "done" yourself — the human marks done after reviewing). If you also set "done" you will be corrected.`,
+    `"Queue empty" means zero items in waiting or ready. human_check items belong to the user's review queue, not yours — they don't keep you running and you should not re-open them to "make progress".`,
     `Use newde__get_work_item when resuming a specific item — its response includes links and recent audit events so you can pick up where you left off.`,
     ``,
-    `LINK DEPENDENCIES with newde__link_work_items. linkType is one of: "blocks" (from-item must finish before to-item can start), "discovered_from" (file newly-uncovered work as its own item linked back to the item you were on — do NOT scope-creep the original), "relates_to" (general association), "duplicates" (same work as an existing item; delete or supersede the duplicate), "supersedes" (replaces a stale older item), "replies_to" (threaded response to another item).`,
+    `LINK DEPENDENCIES with newde__link_work_items when items relate. Read \`.newde/runtime/claude-plugin/AGENT_GUIDE.md\` on demand for the link-type catalog (blocks / discovered_from / relates_to / duplicates / supersedes / replies_to) and the work-item kind rubric — no need to quote that reference back, just use the right values.`,
     ``,
     `STAY HONEST. Rewrite description / acceptanceCriteria when your understanding shifts. newde__delete_work_item anything you've decided against instead of letting it rot in "waiting".`,
     ``,
@@ -1624,6 +1760,28 @@ function buildBatchAgentPrompt(
     lines.push("", "USER CUSTOM PROMPT:", userAppend);
   }
   return lines.join("\n");
+}
+
+/**
+ * Pure builder for the <session-context> additionalContext block injected
+ * into every UserPromptSubmit. Shape is stable — any renames to the tag
+ * name or field order will break agents that learned the previous layout.
+ */
+export function buildSessionContextBlock(input: {
+  stream: { id: string; title: string };
+  batch: { id: string; title: string };
+  activeBatch: { id: string; title: string } | null;
+}): string {
+  const { stream, batch, activeBatch } = input;
+  return [
+    `<session-context>`,
+    `stream: "${stream.title}" (id: ${stream.id})`,
+    `batch:  "${batch.title}" (id: ${batch.id})`,
+    activeBatch && activeBatch.id !== batch.id
+      ? `writer: "${activeBatch.title}" (id: ${activeBatch.id}) — your batch is read-only`
+      : `writer: (you) — your batch is the active writer`,
+    `</session-context>`,
+  ].join("\n");
 }
 
 export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {

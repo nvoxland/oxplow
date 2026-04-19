@@ -46,14 +46,38 @@ test("createElectronPlugin writes a valid Claude Code plugin under .newde/runtim
   }
 });
 
+test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+  const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
+  expect(plugin.agentGuidePath).toBe(join(plugin.pluginDir, "AGENT_GUIDE.md"));
+  expect(existsSync(plugin.agentGuidePath)).toBe(true);
+  const text = readFileSync(plugin.agentGuidePath, "utf8");
+  // The reference catalog we pulled out of the system prompt should all
+  // appear in the on-disk guide so trimming the prompt isn't a regression.
+  expect(text).toContain("blocks");
+  expect(text).toContain("discovered_from");
+  expect(text).toContain("relates_to");
+  expect(text).toContain("duplicates");
+  expect(text).toContain("supersedes");
+  expect(text).toContain("replies_to");
+  expect(text).toContain("epic");
+  expect(text).toContain("task");
+  expect(text).toContain("subtask");
+  expect(text).toContain("bug");
+  expect(text).toContain("note");
+});
+
 test("createElectronPlugin is idempotent across calls", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
   const first = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
   const firstManifest = readFileSync(first.manifestPath, "utf8");
   const firstHooks = readFileSync(first.hooksPath, "utf8");
 
+  const firstGuide = readFileSync(first.agentGuidePath, "utf8");
+
   const second = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
   expect(second.pluginDir).toBe(first.pluginDir);
   expect(readFileSync(second.manifestPath, "utf8")).toBe(firstManifest);
   expect(readFileSync(second.hooksPath, "utf8")).toBe(firstHooks);
+  expect(readFileSync(second.agentGuidePath, "utf8")).toBe(firstGuide);
 });

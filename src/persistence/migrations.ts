@@ -353,6 +353,46 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 10,
+    name: "agent_turn_token_usage",
+    up: (db) => {
+      // Token usage is extracted from Claude Code's transcript jsonl on Stop
+      // and shown in the Agent history panel. Nullable so turns that predate
+      // migration v10 (or fail to parse) render as "—".
+      db.exec(`
+        ALTER TABLE agent_turn ADD COLUMN input_tokens INTEGER;
+        ALTER TABLE agent_turn ADD COLUMN output_tokens INTEGER;
+        ALTER TABLE agent_turn ADD COLUMN cache_read_input_tokens INTEGER;
+      `);
+    },
+  },
+  {
+    version: 11,
+    name: "rename_to_check_to_human_check",
+    up: (db) => {
+      // The status enum renamed "to_check" → "human_check" so it reads as
+      // "waiting on a human to verify" instead of a vague to-do phrase. Rewrite
+      // every existing work_items row so old DBs keep working.
+      db.exec(`UPDATE work_items SET status = 'human_check' WHERE status = 'to_check';`);
+    },
+  },
+  {
+    version: 12,
+    name: "rename_current_batch_default_title",
+    up: (db) => {
+      // The seeded batch title changed from "Current Batch" to "Default".
+      // Rewrite the first-ever batch in every stream so existing DBs pick up
+      // the new name. Guard on sort_index = 0 so users who manually named a
+      // batch "Current Batch" further down the queue are untouched.
+      db.exec(`
+        UPDATE batches
+           SET title = 'Default'
+         WHERE title = 'Current Batch'
+           AND sort_index = 0;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

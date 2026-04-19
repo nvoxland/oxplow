@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AGENT_GUIDE_FILENAME, buildAgentGuide } from "./agent-guide.js";
 
 export interface ElectronPluginOptions {
   /** Project dir. The plugin is written to
@@ -17,9 +18,16 @@ export interface ElectronPlugin {
   hooksPath: string;
   /** Absolute path to .claude-plugin/plugin.json. */
   manifestPath: string;
+  /** Absolute path to the reference guide the agent can Read on demand. */
+  agentGuidePath: string;
 }
 
-const HOOK_EVENTS = [
+// SessionStart is registered but Claude Code silently drops HTTP hooks for
+// it ("HTTP hooks are not supported for SessionStart" in its debug log). We
+// learn the session id from the next hook that fires instead — see
+// decideResumeUpdate in resume-tracker.ts. The registration stays in case a
+// future Claude version starts delivering it.
+export const HOOK_EVENTS = [
   "PreToolUse",
   "PostToolUse",
   "UserPromptSubmit",
@@ -74,7 +82,12 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     "utf8",
   );
 
-  return { pluginDir, hooksPath, manifestPath };
+  // Reference catalog the agent can Read on demand instead of carrying
+  // it in the system prompt every turn.
+  const agentGuidePath = join(pluginDir, AGENT_GUIDE_FILENAME);
+  writeFileSync(agentGuidePath, buildAgentGuide(), "utf8");
+
+  return { pluginDir, hooksPath, manifestPath, agentGuidePath };
 }
 
 function buildPluginHooks(hookUrl: string) {

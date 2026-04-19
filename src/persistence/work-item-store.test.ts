@@ -44,6 +44,21 @@ describe("WorkItemStore acceptance_criteria", () => {
     expect(fetched?.acceptance_criteria).toBe(item.acceptance_criteria);
   });
 
+  test("createItem appends to the bottom of the list (regression: new items must sort after existing)", () => {
+    const { workItems, batchId } = seedBatch();
+    const first = workItems.createItem({ batchId, kind: "task", title: "first", createdBy: "user", actorId: "ui" });
+    const second = workItems.createItem({ batchId, kind: "task", title: "second", createdBy: "user", actorId: "ui" });
+    const third = workItems.createItem({ batchId, kind: "task", title: "third", createdBy: "user", actorId: "ui" });
+    expect(second.sort_index).toBeGreaterThan(first.sort_index);
+    expect(third.sort_index).toBeGreaterThan(second.sort_index);
+    // The MAX+1 rule keeps holding after a rename / status change — a new
+    // item still lands strictly past the existing maximum rather than sliding
+    // into a gap.
+    workItems.updateItem({ batchId, itemId: first.id, status: "done", actorKind: "user", actorId: "ui" });
+    const fourth = workItems.createItem({ batchId, kind: "task", title: "fourth", createdBy: "user", actorId: "ui" });
+    expect(fourth.sort_index).toBeGreaterThan(third.sort_index);
+  });
+
   test("updateItem with acceptanceCriteria='' clears the field", () => {
     const { workItems, batchId } = seedBatch();
     const item = workItems.createItem({

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BacklogState,
   Batch,
@@ -26,9 +26,27 @@ import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
   buildGroups,
+  classifyWorkItem,
   inputStyle,
   miniButtonStyle,
 } from "./plan-utils.js";
+
+const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, humanCheck: 2, done: 3 };
+function statusOrderRank(status: WorkItemStatus): number {
+  return STATUS_RANK[classifyWorkItem(status)] ?? 0;
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "INPUT") {
+    const type = (target as HTMLInputElement).type;
+    return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
+  }
+  return false;
+}
 
 interface CreateInput {
   kind: WorkItemKind;
@@ -83,7 +101,6 @@ export function PlanPane({
   const [kind, setKind] = useState<WorkItemKind>("task");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
   const [parentId, setParentId] = useState<string>("");
-  const [showCompleted, setShowCompleted] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -91,6 +108,9 @@ export function PlanPane({
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string } | null>(null);
+  const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
   const streamId = batch?.stream_id ?? null;
@@ -116,9 +136,76 @@ export function PlanPane({
   const epics = batchWork?.epics ?? [];
 
   const groups = useMemo(() => {
-    if (mode === "backlog") return buildBacklogGroups(backlog, showCompleted);
-    return buildGroups(batchWork, showCompleted);
-  }, [mode, batchWork, backlog, showCompleted]);
+    if (mode === "backlog") return buildBacklogGroups(backlog);
+    return buildGroups(batchWork);
+  }, [mode, batchWork, backlog]);
+
+  // Flat top-to-bottom list of work-item ids in the order they appear on
+  // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
+  // sync with the section split in WorkGroupList (In progress → To do →
+  // Human check → Done). Commit/wait-point rows are deliberately excluded:
+  // they're not "selectable work" in the keyboard sense.
+  const navigableIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const group of groups) {
+      const sorted = group.items.slice().sort((a, b) => {
+        const byStatus = statusOrderRank(a.status) - statusOrderRank(b.status);
+        if (byStatus !== 0) return byStatus;
+        return a.sort_index - b.sort_index;
+      });
+      for (const item of sorted) ids.push(item.id);
+    }
+    return ids;
+  }, [groups]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!navigableIds.includes(selectedId)) setSelectedId(null);
+  }, [navigableIds, selectedId]);
+
+  const selectedItem: WorkItem | null = useMemo(() => {
+    if (!selectedId) return null;
+    for (const group of groups) {
+      const hit = group.items.find((item) => item.id === selectedId);
+      if (hit) return hit;
+    }
+    return null;
+  }, [groups, selectedId]);
+
+  useEffect(() => {
+    // Listen at the pane level (not window) so the Agent pane / editor don't
+    // steal the shortcut when they're focused, AND so the Plan pane can
+    // keep a visible "selected" row without grabbing focus away from the
+    // rest of the app. We still honour editable-target suppression for
+    // typing comfort.
+    const el = paneRef.current;
+    if (!el) return;
+    const handler = (event: KeyboardEvent) => {
+      if (kbPicker) return; // modal owns keyboard
+      if (isEditableTarget(event.target)) return;
+      const key = event.key;
+      if (key === "ArrowDown" || key === "ArrowUp") {
+        if (navigableIds.length === 0) return;
+        event.preventDefault();
+        const idx = selectedId ? navigableIds.indexOf(selectedId) : -1;
+        const next = key === "ArrowDown"
+          ? Math.min(idx + 1, navigableIds.length - 1)
+          : idx <= 0 ? 0 : idx - 1;
+        setSelectedId(navigableIds[next] ?? null);
+      } else if (key === "Enter" && selectedId) {
+        event.preventDefault();
+        setExpandedId((prev) => (prev === selectedId ? null : selectedId));
+      } else if ((key === "s" || key === "S") && selectedId) {
+        event.preventDefault();
+        setKbPicker({ kind: "status", itemId: selectedId });
+      } else if ((key === "p" || key === "P") && selectedId) {
+        event.preventDefault();
+        setKbPicker({ kind: "priority", itemId: selectedId });
+      }
+    };
+    el.addEventListener("keydown", handler);
+    return () => el.removeEventListener("keydown", handler);
+  }, [navigableIds, selectedId, kbPicker]);
 
   const activeCreate = mode === "backlog" ? onCreateBacklogItem : onCreateWorkItem;
   const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
@@ -172,7 +259,12 @@ export function PlanPane({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div
+      ref={paneRef}
+      tabIndex={0}
+      onClick={() => paneRef.current?.focus()}
+      style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
+    >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
@@ -182,10 +274,6 @@ export function PlanPane({
             {mode === "backlog" ? "Backlog" : ""}
           </span>
         </div>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 11, cursor: "pointer" }}>
-          <input type="checkbox" checked={showCompleted} onChange={(event) => setShowCompleted(event.target.checked)} />
-          Show completed
-        </label>
       </div>
       {createOpen ? (
         <NewWorkItemModal
@@ -231,77 +319,84 @@ export function PlanPane({
             {mode === "backlog" ? "Backlog is empty." : "No work items."}
           </div>
         ) : (
-          groups.map((group) => (
-            <WorkGroupList
-              key={group.epic?.id ?? "__root__"}
-              group={group}
-              scopeBatchId={currentScopeBatchId}
-              expandedId={expandedId}
-              onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
-              onUpdateWorkItem={activeUpdate}
-              onReorderWorkItems={activeReorder}
-              // Commit/wait points only belong to the root (non-epic) group —
-              // they divide the top-level queue, not items scoped inside an
-              // epic.
-              commitPoints={group.epic === null && mode === "batch" ? commitPoints : []}
-              waitPoints={group.epic === null && mode === "batch" ? waitPoints : []}
-              onReorderMixed={group.epic === null && mode === "batch" && streamId && batchId
-                ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
-                : undefined}
-              onRequestDelete={(item) => {
-                if (!window.confirm(`Delete "${item.title}"?`)) return;
-                if (expandedId === item.id) setExpandedId(null);
-                void activeDelete(item.id);
-              }}
-              onContextMenu={(event, item) => {
-                event.preventDefault();
-                setContextMenu({ x: event.clientX, y: event.clientY, item });
-              }}
-            />
-          ))
+          groups.map((group) => {
+            const isRootBatch = group.epic === null && mode === "batch";
+            const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
+            const addPointsSlot = isRootBatch && batch ? (
+              <div style={queueMarkerBarStyle}>
+                <button
+                  onClick={() => {
+                    if (!streamId || !batchId) return;
+                    runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
+                  }}
+                  disabled={!canAddPoints}
+                  style={{
+                    ...miniButtonStyle,
+                    opacity: canAddPoints ? 1 : 0.5,
+                    cursor: canAddPoints ? "pointer" : "not-allowed",
+                  }}
+                  title={
+                    canAddPoints
+                      ? "Append a commit point to the To-do queue (drag to reposition; click to switch to auto-commit)"
+                      : "Add a work item first — a commit point can't be the very first queue entry"
+                  }
+                >
+                  + Commit when done
+                </button>
+                <button
+                  onClick={() => {
+                    if (!streamId || !batchId) return;
+                    runWithError("Add wait point", createWaitPoint(streamId, batchId, null));
+                  }}
+                  disabled={!canAddPoints}
+                  style={{
+                    ...miniButtonStyle,
+                    opacity: canAddPoints ? 1 : 0.5,
+                    cursor: canAddPoints ? "pointer" : "not-allowed",
+                  }}
+                  title={
+                    canAddPoints
+                      ? "Append a wait point to the To-do queue (drag to reposition; click the divider to add a note)"
+                      : "Add a work item first — a wait point can't be the very first queue entry"
+                  }
+                >
+                  + Wait here
+                </button>
+              </div>
+            ) : null;
+            return (
+              <WorkGroupList
+                key={group.epic?.id ?? "__root__"}
+                group={group}
+                scopeBatchId={currentScopeBatchId}
+                expandedId={expandedId}
+                onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+                onUpdateWorkItem={activeUpdate}
+                onReorderWorkItems={activeReorder}
+                // Commit/wait points only belong to the root (non-epic) group —
+                // they divide the top-level To-do queue, not items scoped inside
+                // an epic.
+                commitPoints={isRootBatch ? commitPoints : []}
+                waitPoints={isRootBatch ? waitPoints : []}
+                onReorderMixed={isRootBatch && streamId && batchId
+                  ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
+                  : undefined}
+                onRequestDelete={(item) => {
+                  if (!window.confirm(`Delete "${item.title}"?`)) return;
+                  if (expandedId === item.id) setExpandedId(null);
+                  void activeDelete(item.id);
+                }}
+                onContextMenu={(event, item) => {
+                  event.preventDefault();
+                  setContextMenu({ x: event.clientX, y: event.clientY, item });
+                }}
+                addPointsSlot={addPointsSlot}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+            );
+          })
         )}
-        {mode === "batch" && batch ? (
-          <div style={queueMarkerBarStyle}>
-            <button
-              onClick={() => {
-                if (!streamId || !batchId) return;
-                runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
-              }}
-              disabled={!batchWork || batchWork.items.length === 0}
-              style={{
-                ...miniButtonStyle,
-                opacity: !batchWork || batchWork.items.length === 0 ? 0.5 : 1,
-                cursor: !batchWork || batchWork.items.length === 0 ? "not-allowed" : "pointer",
-              }}
-              title={
-                !batchWork || batchWork.items.length === 0
-                  ? "Add a work item first — a commit point can't be the very first queue entry"
-                  : "Append a commit point to the work queue (drag to reposition; click to switch to auto-commit)"
-              }
-            >
-              + Commit when done
-            </button>
-            <button
-              onClick={() => {
-                if (!streamId || !batchId) return;
-                runWithError("Add wait point", createWaitPoint(streamId, batchId, null));
-              }}
-              disabled={!batchWork || batchWork.items.length === 0}
-              style={{
-                ...miniButtonStyle,
-                opacity: !batchWork || batchWork.items.length === 0 ? 0.5 : 1,
-                cursor: !batchWork || batchWork.items.length === 0 ? "not-allowed" : "pointer",
-              }}
-              title={
-                !batchWork || batchWork.items.length === 0
-                  ? "Add a work item first — a wait point can't be the very first queue entry"
-                  : "Append a wait point to the work queue (drag to reposition; click the divider to add a note)"
-              }
-            >
-              + Wait here
-            </button>
-          </div>
-        ) : null}
       </div>
       <div style={bottomBarStyle}>
         <button
@@ -333,9 +428,126 @@ export function PlanPane({
           }}
         />
       ) : null}
+      {kbPicker && selectedItem ? (
+        <KeyboardValuePicker
+          kind={kbPicker.kind}
+          item={selectedItem}
+          onPick={(value) => {
+            if (kbPicker.kind === "status") {
+              void activeUpdate(selectedItem.id, { status: value as WorkItemStatus });
+            } else {
+              void activeUpdate(selectedItem.id, { priority: value as WorkItemPriority });
+            }
+            setKbPicker(null);
+            paneRef.current?.focus();
+          }}
+          onClose={() => { setKbPicker(null); paneRef.current?.focus(); }}
+        />
+      ) : null}
     </div>
   );
 }
+
+const KB_STATUS_OPTIONS: WorkItemStatus[] = [
+  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
+];
+const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
+
+/**
+ * Small centered picker opened by the keyboard shortcuts `S` / `P` when a
+ * work-item row is selected. Autofocuses, ↑/↓ navigate options, Enter
+ * commits, Escape cancels. Mouse click on a row also commits. Kept in-line
+ * in this file rather than extracted because nothing else uses it.
+ */
+function KeyboardValuePicker({
+  kind,
+  item,
+  onPick,
+  onClose,
+}: {
+  kind: "status" | "priority";
+  item: WorkItem;
+  onPick(value: string): void;
+  onClose(): void;
+}) {
+  const options: readonly string[] = kind === "status" ? KB_STATUS_OPTIONS : KB_PRIORITY_OPTIONS;
+  const current = kind === "status" ? item.status : item.priority;
+  const initialIdx = Math.max(0, options.indexOf(current as string));
+  const [idx, setIdx] = useState(initialIdx);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setIdx((prev) => Math.min(prev + 1, options.length - 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setIdx((prev) => Math.max(prev - 1, 0));
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        onPick(options[idx]!);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [idx, options, onPick, onClose]);
+
+  return (
+    <div style={kbPickerOverlayStyle} onClick={onClose}>
+      <div style={kbPickerStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>
+          {kind === "status" ? "Set status" : "Set priority"}
+          <span style={{ float: "right", fontFamily: "ui-monospace, monospace" }}>↑↓ · Enter · Esc</span>
+        </div>
+        <div style={{ padding: 4 }}>
+          {options.map((option, i) => {
+            const active = i === idx;
+            return (
+              <div
+                key={option}
+                onMouseEnter={() => setIdx(i)}
+                onClick={() => onPick(option)}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 4,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  background: active ? "var(--accent)" : "transparent",
+                  color: active ? "#fff" : "var(--fg)",
+                }}
+              >
+                {option}
+                {option === current ? <span style={{ marginLeft: 8, opacity: 0.7 }}>· current</span> : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const kbPickerOverlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.4)",
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "center",
+  paddingTop: "20vh",
+  zIndex: 3000,
+};
+
+const kbPickerStyle: CSSProperties = {
+  background: "var(--bg-1)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: 8,
+  width: "min(280px, 90vw)",
+  boxShadow: "0 12px 32px rgba(0,0,0,0.6)",
+};
 
 function NewWorkItemModal({
   title,

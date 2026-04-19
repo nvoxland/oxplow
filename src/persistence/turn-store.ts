@@ -15,6 +15,15 @@ export interface AgentTurn {
   session_id: string | null;
   started_at: string;
   ended_at: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_input_tokens: number | null;
+}
+
+export interface TurnUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadInputTokens: number | null;
 }
 
 export type TurnChangeKind = "opened" | "closed";
@@ -66,6 +75,9 @@ export class TurnStore {
       session_id: input.sessionId ?? null,
       started_at: now,
       ended_at: null,
+      input_tokens: null,
+      output_tokens: null,
+      cache_read_input_tokens: null,
     };
     this.stateDb.run(
       `INSERT INTO agent_turn (id, batch_id, work_item_id, prompt, answer, session_id, started_at, ended_at)
@@ -100,6 +112,19 @@ export class TurnStore {
     if (!updated) return null;
     this.emit({ batchId: updated.batch_id, turnId: updated.id, kind: "closed" });
     return updated;
+  }
+
+  setTurnUsage(turnId: string, usage: TurnUsage): AgentTurn | null {
+    const existing = this.getById(turnId);
+    if (!existing) return null;
+    this.stateDb.run(
+      `UPDATE agent_turn SET input_tokens = ?, output_tokens = ?, cache_read_input_tokens = ? WHERE id = ?`,
+      usage.inputTokens,
+      usage.outputTokens,
+      usage.cacheReadInputTokens,
+      turnId,
+    );
+    return this.getById(turnId);
   }
 
   currentOpenTurn(batchId: string): AgentTurn | null {
@@ -139,7 +164,16 @@ function rowToTurn(row: Record<string, unknown>): AgentTurn {
     session_id: row.session_id == null ? null : String(row.session_id),
     started_at: String(row.started_at ?? ""),
     ended_at: row.ended_at == null ? null : String(row.ended_at),
+    input_tokens: toNumber(row.input_tokens),
+    output_tokens: toNumber(row.output_tokens),
+    cache_read_input_tokens: toNumber(row.cache_read_input_tokens),
   };
+}
+
+function toNumber(raw: unknown): number | null {
+  if (raw == null) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function clamp(raw: string, max: number): string {

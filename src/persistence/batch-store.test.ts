@@ -41,6 +41,26 @@ describe("BatchStore", () => {
     expect(() => store.recordSummary(stream.id, batchId, "   ")).toThrow(/required/);
   });
 
+  test("findById resolves a batch by id alone, even across streams", () => {
+    // Regression: MCP tools used to require streamId alongside batchId, which
+    // broke when the UI's "current stream" drifted from where the agent was
+    // writing. findById is the single-stream-free lookup that lets the
+    // server derive streamId from the batch row itself.
+    const dir = mkdtempSync(join(tmpdir(), "newde-batches-"));
+    const store = new BatchStore(dir);
+    const streamA = makeStream();
+    const streamB: Stream = { ...makeStream(), id: "s-2", title: "Other" };
+    store.ensureStream(streamA);
+    const stateB = store.ensureStream(streamB);
+
+    const batchA = store.list(streamA.id).batches[0]!;
+    const batchB = stateB.batches[0]!;
+
+    expect(store.findById(batchA.id)?.stream_id).toBe(streamA.id);
+    expect(store.findById(batchB.id)?.stream_id).toBe(streamB.id);
+    expect(store.findById("b-does-not-exist")).toBeNull();
+  });
+
   test("creates, reorders, promotes, and completes batches", () => {
     const dir = mkdtempSync(join(tmpdir(), "newde-batches-"));
     const stream = makeStream();
@@ -64,7 +84,7 @@ describe("BatchStore", () => {
 
     state = store.complete(stream.id, queued!.id);
     expect(state.batches.find((batch) => batch.id === queued!.id)?.status).toBe("completed");
-    expect(state.batches.find((batch) => batch.id === state.activeBatchId)?.title).toBe("Current Batch");
+    expect(state.batches.find((batch) => batch.id === state.activeBatchId)?.title).toBe("Default");
   });
 });
 
