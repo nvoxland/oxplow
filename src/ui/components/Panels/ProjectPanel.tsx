@@ -650,18 +650,20 @@ export function ProjectPanel({
         <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stream.branch}</div>
         <button type="button"
           onClick={() => void expandAll()}
+          aria-label="Expand all"
           title="Expand all"
           style={iconButtonStyle}
         >⤡</button>
         <button type="button"
           onClick={collapseAll}
+          aria-label="Collapse all"
           title="Collapse all"
           style={iconButtonStyle}
         >⤢</button>
         {gitEnabled ? (
           <>
-            <button type="button" onClick={() => setPushPullDialog("pull")} title="Pull…" style={iconButtonStyle}>↓</button>
-            <button type="button" onClick={() => setPushPullDialog("push")} title="Push…" style={iconButtonStyle}>↑</button>
+            <button type="button" onClick={() => setPushPullDialog("pull")} aria-label="Pull…" title="Pull…" style={iconButtonStyle}>↓</button>
+            <button type="button" onClick={() => setPushPullDialog("push")} aria-label="Push…" title="Push…" style={iconButtonStyle}>↑</button>
           </>
         ) : null}
         <FilterMenuButton
