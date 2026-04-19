@@ -1,26 +1,30 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createStream, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { WORK_ITEM_DRAG_MIME } from "./BatchRail.js";
 import type { MenuItem } from "../menu.js";
 
 interface Props {
   stream: Stream | null;
   streams: Stream[];
   streamStatuses: Record<string, AgentStatus>;
+  streamActiveBatchIds?: Record<string, string | null>;
   gitEnabled: boolean;
   onSwitch(id: string): void;
   onStreamCreated(stream: Stream): void;
   onRenameStream?(streamId: string, currentTitle: string): void;
   onRequestCreateBatch?(): void;
   onOpenSettings?(): void;
+  onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromBatchId: string | null): void;
   /** Bumping this number opens the inline "new stream" form. */
   createRequest?: number;
 }
 
-export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, onDropWorkItemOnStream, createRequest }: Props) {
+  const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
   const [branches, setBranches] = useState<BranchRef[]>([]);
@@ -33,6 +37,20 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
   const [selectedRef, setSelectedRef] = useState("");
   const [newBranch, setNewBranch] = useState("");
   const [startPointRef, setStartPointRef] = useState("");
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const t = setTimeout(() => nameInputRef.current?.focus(), 0);
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setShowCreate(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [showCreate]);
 
   const selectableStartPoints = useMemo(
     () => branches.filter((branch) => branch.kind === "local" || !branch.name.endsWith("/HEAD")),
@@ -98,6 +116,8 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
           {streams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "idle";
+            const canDrop = !!onDropWorkItemOnStream && !!streamActiveBatchIds?.[candidate.id];
+            const isDragOver = dragOverStreamId === candidate.id;
             return (
               <button
                 key={candidate.id}
@@ -106,6 +126,29 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
                   event.preventDefault();
                   setContextMenu({ x: event.clientX, y: event.clientY, stream: candidate });
                 }}
+                onDragOver={canDrop ? (event) => {
+                  const types = event.dataTransfer.types;
+                  if (!types || !Array.from(types).includes(WORK_ITEM_DRAG_MIME)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dragOverStreamId !== candidate.id) setDragOverStreamId(candidate.id);
+                } : undefined}
+                onDragLeave={canDrop ? () => {
+                  if (dragOverStreamId === candidate.id) setDragOverStreamId(null);
+                } : undefined}
+                onDrop={canDrop ? (event) => {
+                  const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+                  if (!raw) return;
+                  event.preventDefault();
+                  setDragOverStreamId(null);
+                  try {
+                    const payload = JSON.parse(raw) as { itemId?: string; fromBatchId?: string | null };
+                    if (!payload.itemId) return;
+                    onDropWorkItemOnStream?.(candidate.id, payload.itemId, payload.fromBatchId ?? null);
+                  } catch {
+                    // ignore malformed payload
+                  }
+                } : undefined}
                 style={{
                   ...tabStyle,
                   background: active ? "var(--bg-2)" : "transparent",
@@ -114,6 +157,7 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
                   borderBottom: active
                     ? "2px solid var(--accent)"
                     : "2px solid transparent",
+                  boxShadow: isDragOver ? "inset 0 0 0 2px var(--accent)" : undefined,
                 }}
                 title={candidate.title}
               >
@@ -148,22 +192,20 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
         </span>
       </div>
       {showCreate ? (
-        <form
-          onSubmit={(e) => { e.preventDefault(); void handleCreate(); }}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 8,
-            padding: 10,
-            margin: "0 12px 8px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg-2)",
-          }}
-        >
+        <div style={backdropStyle} onMouseDown={() => setShowCreate(false)}>
+          <form
+            onSubmit={(e) => { e.preventDefault(); void handleCreate(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={modalStyle}
+          >
+            <div style={modalHeaderStyle}>
+              <span>New stream</span>
+              <button type="button" onClick={() => setShowCreate(false)} style={closeBtnStyle} aria-label="Close">×</button>
+            </div>
+            <div style={modalBodyStyle}>
           <label style={labelStyle}>
             <span>Name</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+            <input ref={nameInputRef} value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
           </label>
           <label style={labelStyle}>
             <span>Summary</span>
@@ -210,7 +252,9 @@ export function StreamRail({ stream, streams, streamStatuses, gitEnabled, onSwit
               {creating ? "Creating…" : "Create stream"}
             </button>
           </div>
-        </form>
+            </div>
+          </form>
+        </div>
       ) : null}
       {contextMenu ? (
         <ContextMenu
@@ -292,5 +336,55 @@ const inputStyle: CSSProperties = {
 };
 
 const selectStyle: CSSProperties = { ...inputStyle, minWidth: 220 };
+
+const backdropStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1100,
+};
+
+const modalStyle: CSSProperties = {
+  background: "var(--bg)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: 8,
+  boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+  minWidth: 520,
+  maxWidth: 720,
+  maxHeight: "80vh",
+  display: "flex",
+  flexDirection: "column",
+};
+
+const modalHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "10px 14px",
+  borderBottom: "1px solid var(--border)",
+  fontSize: 13,
+  fontWeight: 600,
+  background: "var(--bg-1, var(--bg-2))",
+};
+
+const modalBodyStyle: CSSProperties = {
+  padding: 14,
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+  overflow: "auto",
+};
+
+const closeBtnStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "var(--muted)",
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: "pointer",
+};
 
 const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };

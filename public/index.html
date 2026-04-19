@@ -49,6 +49,11 @@
          floating next to the trailing "+ New" button. */
       .newde-rail-scroll { scrollbar-width: none; }
       .newde-rail-scroll::-webkit-scrollbar { display: none; }
+      /* Gutter markers for uncommitted changes in the editor (computed
+         against HEAD). A 3px bar on the line-decorations strip. */
+      .newde-gutter-added { box-shadow: inset 3px 0 0 0 #16a34a; }
+      .newde-gutter-modified { box-shadow: inset 3px 0 0 0 #4a9eff; }
+      .newde-gutter-deleted { box-shadow: inset 3px -2px 0 -1px #dc2626; }
     </style>
   </head>
   <body>

@@ -133,7 +133,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));
   ipcMain.handle("newde:deleteWorkItem", (_event, streamId: string, batchId: string, itemId: string) => currentRuntime.workItemApi.deleteWorkItem(streamId, batchId, itemId));
   ipcMain.handle("newde:reorderWorkItems", (_event, streamId: string, batchId: string, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderWorkItems(streamId, batchId, orderedItemIds));
-  ipcMain.handle("newde:moveWorkItemToBatch", (_event, streamId: string, fromBatchId: string, itemId: string, toBatchId: string) => currentRuntime.workItemApi.moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId));
+  ipcMain.handle("newde:moveWorkItemToBatch", (_event, streamId: string, fromBatchId: string, itemId: string, toBatchId: string, toStreamId?: string) => currentRuntime.workItemApi.moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId, toStreamId));
   ipcMain.handle("newde:getBacklogState", () => currentRuntime.workItemApi.getBacklogState());
   ipcMain.handle("newde:createBacklogItem", (_event, input) => currentRuntime.workItemApi.createBacklogItem(input));
   ipcMain.handle("newde:updateBacklogItem", (_event, itemId: string, changes) => currentRuntime.workItemApi.updateBacklogItem(itemId, changes));

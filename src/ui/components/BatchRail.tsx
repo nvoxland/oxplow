@@ -242,8 +242,12 @@ function BatchChip({
     setHovered(false);
   }
 
+  // Count items as "done-ish" when status is done, canceled, or to_check
+  // (the latter is waiting on user review but the agent's work is complete).
   const total = workState?.items.length ?? 0;
-  const done = workState?.done.length ?? 0;
+  const done = workState
+    ? workState.items.filter((i) => i.status === "done" || i.status === "canceled" || i.status === "to_check").length
+    : 0;
   // Two orthogonal states on each tab:
   //  - `isSelected`: what the user is viewing (main bg, accent underline)
   //  - `isActive`:   the designated *writer* batch (the one allowed to write

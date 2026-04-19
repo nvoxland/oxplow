@@ -169,7 +169,7 @@ export interface DesktopApi {
   ): Promise<BatchWorkState>;
   deleteWorkItem(streamId: string, batchId: string, itemId: string): Promise<BatchWorkState>;
   reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): Promise<BatchWorkState>;
-  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string): Promise<{ from: BatchWorkState; to: BatchWorkState }>;
+  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string, toStreamId?: string): Promise<{ from: BatchWorkState; to: BatchWorkState }>;
   getBacklogState(): Promise<BacklogState>;
   createBacklogItem(input: {
     kind: WorkItemKind;

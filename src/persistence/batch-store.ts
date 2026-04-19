@@ -81,7 +81,7 @@ export class BatchStore {
     const batch: Batch = {
       id: createBatchId(),
       stream_id: stream.id,
-      title: "Current Batch",
+      title: "Default",
       status: "active",
       sort_index: 0,
       created_at: now,

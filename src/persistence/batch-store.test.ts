@@ -64,7 +64,7 @@ describe("BatchStore", () => {
 
     state = store.complete(stream.id, queued!.id);
     expect(state.batches.find((batch) => batch.id === queued!.id)?.status).toBe("completed");
-    expect(state.batches.find((batch) => batch.id === state.activeBatchId)?.title).toBe("Current Batch");
+    expect(state.batches.find((batch) => batch.id === state.activeBatchId)?.title).toBe("Default");
   });
 });
 

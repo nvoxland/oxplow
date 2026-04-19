@@ -671,6 +671,24 @@ export function App() {
     }
     return out;
   }, [streams, batchStates, agentStatuses]);
+  const streamActiveBatchIds = useMemo<Record<string, string | null>>(() => {
+    const out: Record<string, string | null> = {};
+    for (const s of streams) out[s.id] = batchStates[s.id]?.activeBatchId ?? null;
+    return out;
+  }, [streams, batchStates]);
+
+  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: string, fromBatchId: string | null) {
+    if (!stream || !fromBatchId) return;
+    const toBatchId = streamActiveBatchIds[targetStreamId];
+    if (!toBatchId || toBatchId === fromBatchId) return;
+    try {
+      const { from, to } = await moveWorkItemToBatch(stream.id, fromBatchId, itemId, toBatchId, targetStreamId);
+      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from, [toBatchId]: to }));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
 
@@ -794,6 +812,17 @@ export function App() {
     });
     return () => { cancelled = true; unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    for (const [streamId, state] of Object.entries(batchStates)) {
+      for (const batch of state.batches) {
+        if (batchWorkStates[batch.id]) continue;
+        void getBatchWorkState(streamId, batch.id)
+          .then((work) => setBatchWorkStates((prev) => (prev[batch.id] ? prev : { ...prev, [batch.id]: work })))
+          .catch((error) => logUi("warn", "failed to preload batch work state", { streamId, batchId: batch.id, error: String(error) }));
+      }
+    }
+  }, [batchStates]);
 
   useEffect(() => {
     const unsubscribe = subscribeWorkItemEvents("all", (event) => {
@@ -1104,7 +1133,7 @@ export function App() {
         id: "agent",
         label: selectedBatch ? selectedBatch.title : "Agent",
         closable: false,
-        activeDot: agentBatchStatus === "working",
+        agentStatus: agentBatchStatus,
         render: () =>
           selectedBatch ? (
             <TerminalPane paneTarget={selectedBatch.pane_target} visible={effectiveCenterActive === "agent"} />
@@ -1274,12 +1303,14 @@ export function App() {
           stream={stream}
           streams={streams}
           streamStatuses={streamStatuses}
+          streamActiveBatchIds={streamActiveBatchIds}
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
           onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => void handleRenameStreamById(id, title)}
           onRequestCreateBatch={stream ? () => setBatchCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => setSettingsOpen(true)}
+          onDropWorkItemOnStream={(targetStreamId, itemId, fromBatchId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromBatchId)}
           createRequest={streamCreateRequest}
         />
         {stream ? (
