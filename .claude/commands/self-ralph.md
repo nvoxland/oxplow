@@ -2,9 +2,9 @@
 description: Drive newde through an exploratory or known-bug task, fix what surfaces, log the run
 ---
 
-# /self-ralph — one self-driving pass
+# /self-ralph — one (or N) self-driving passes
 
-One invocation = one pass through the loop:
+One invocation = one pass through the loop by default:
 
 > **pick → drive → fix → reflect → log → repeat (on next invocation)**
 
@@ -12,6 +12,35 @@ The loop is *resumable from a cold context* and *portable across
 machines*. All state lives in `.self-ralph/` (gitignored), in
 `ux-test.md` (tracked), and in `.context/*.md` (tracked). There's no
 "conversation history" requirement — each pass must stand on its own.
+
+## Argument: pass count
+
+The command takes an optional positive-integer argument:
+`$ARGUMENTS`.
+
+- No argument (or non-numeric / ≤ 0): run **one** pass and stop.
+- A positive integer N: run **N** passes back-to-back, each one
+  fully completing Steps 1–7 (sync bearings, pick, drive, fix,
+  reflect, update todo, write log) before the next starts. Emit
+  the end-of-pass report (Step 8) after *each* pass so progress is
+  visible, then move on to the next pass without waiting for the
+  user. After the N-th pass, emit a final summary line like
+  `/self-ralph N/N complete — next top-of-stack is <X>`.
+
+Stop early (before N is reached) if any of these happen — and tell
+the user why:
+
+- A pass ends with uncommitted changes you can't explain, or with
+  the working tree in a broken state.
+- `.self-ralph/todo.md`'s **Next up** section is empty.
+- The same root cause surfaces in two consecutive passes (you're
+  probably looping on a single issue that wants a bigger fix).
+- The user sends a course correction.
+
+Between passes you must **re-run Step 1 (Sync bearings) fresh**.
+Don't carry `navigableIds`-style state from one pass to the next —
+the whole point of each pass being cold-start safe is so that a
+multi-pass run behaves identically to N separate invocations.
 
 ## Ground rules
 
@@ -152,3 +181,9 @@ Required sections:
 Keep it ≤ 150 words. State: (a) which item you picked, (b) what
 shipped, (c) the headline reflection, (d) "next top-of-stack is X"
 so the user knows what the *next* /self-ralph will do.
+
+When running in multi-pass mode (N > 1), prefix the report with
+`Pass k/N:` so the user can see progress. After the final pass,
+append a single-line roll-up: `/self-ralph N/N complete — shipped:
+<commit>, <commit>, ...; next top-of-stack is <X>`. Then stop —
+don't launch a further pass.
