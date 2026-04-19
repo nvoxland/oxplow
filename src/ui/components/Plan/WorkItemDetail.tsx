@@ -32,7 +32,7 @@ export function WorkItemDetail({
 }) {
   return (
     <div
-      style={{ padding: "6px 10px 10px 10px", background: "var(--bg-2)", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}
+      style={{ padding: "6px 10px 10px 10px", background: "var(--bg-detail)", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}
       onClick={(event) => event.stopPropagation()}
     >
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>

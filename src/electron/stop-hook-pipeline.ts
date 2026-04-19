@@ -63,7 +63,10 @@ export function decideStopDirective(
   const sideEffects: StopHookSideEffect[] = [];
 
   const activeCommit = findActiveMarker(snapshot.commitPoints, snapshot.workItems, (cp) => cp.status !== "done");
-  if (activeCommit && activeCommit.status === "pending") {
+  // Only the writer batch ever commits. Non-active batches share the worktree
+  // read-only, so we must not prompt them to propose a commit; leave the
+  // commit point pending for the batch that eventually becomes writer.
+  if (activeCommit && activeCommit.status === "pending" && snapshot.batch?.status === "active") {
     return {
       directive: { decision: "block", reason: builders.buildCommitPointReason(activeCommit) },
       sideEffects,

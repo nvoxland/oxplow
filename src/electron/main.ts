@@ -115,6 +115,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
   ipcMain.handle("newde:getConfig", () => currentRuntime.getConfig());
   ipcMain.handle("newde:setAgentPromptAppend", (_event, text: string) => currentRuntime.setAgentPromptAppend(text));
+  ipcMain.handle("newde:setSnapshotRetentionDays", (_event, days: number) => currentRuntime.setSnapshotRetentionDays(days));
+  ipcMain.handle("newde:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
   ipcMain.handle("newde:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
   ipcMain.handle("newde:listBranches", () => currentRuntime.listBranches());
   ipcMain.handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());

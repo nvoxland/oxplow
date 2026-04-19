@@ -166,6 +166,16 @@ describe("decideStopDirective", () => {
     expect(out.directive?.reason).toContain("commit: cp1");
   });
 
+  test("non-writer batch with pending commit point: allow stop (only the active batch commits)", () => {
+    const cp = commitPoint("cp1", 1);
+    const out = decideStopDirective(
+      snapshot({ batch: batch({ status: "queued" }), commitPoints: [cp] }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+    expect(out.sideEffects).toEqual([]);
+  });
+
   test("rejected commit point still active until pending again (so user can retry)", () => {
     // findActiveMarker uses `cp.status !== "done"`, so rejected counts as
     // not-done. But the directive only fires for status === "pending", so a

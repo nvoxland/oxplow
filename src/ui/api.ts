@@ -260,6 +260,14 @@ export async function setGeneratedDirs(dirs: string[]): Promise<import("../confi
   return desktopApi().setGeneratedDirs(dirs);
 }
 
+export async function setSnapshotRetentionDays(days: number): Promise<import("../config/config.js").NewdeConfig> {
+  return desktopApi().setSnapshotRetentionDays(days);
+}
+
+export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").NewdeConfig> {
+  return desktopApi().setSnapshotMaxFileBytes(bytes);
+}
+
 export async function listBranches(): Promise<BranchRef[]> {
   return desktopApi().listBranches();
 }

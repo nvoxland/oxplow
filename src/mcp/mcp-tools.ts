@@ -24,6 +24,20 @@ export interface McpToolDeps {
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
   const { resolveStream, resolveBatch, batchStore, workItemStore, commitPointStore, turnStore, fileChangeStore } = deps;
 
+  // Mutation tools return this instead of the full BatchWorkState to keep
+  // agent context lean — a full state dump per call was burning tokens for
+  // data the agent already has (it just did the mutation).
+  function counts(batchId: string): { waiting: number; inProgress: number; done: number; ready: number } {
+    const state = workItemStore.getState(batchId);
+    const ready = state.waiting.filter((item) => item.status === "ready").length;
+    return {
+      waiting: state.waiting.length,
+      inProgress: state.inProgress.length,
+      done: state.done.length,
+      ready,
+    };
+  }
+
   return [
     {
       name: "newde__get_batch_context",
@@ -109,7 +123,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__create_work_item",
-      description: "Create a new epic/task/subtask/bug/note within one batch. Always pass the batchId from your session context.",
+      description: "Create a new epic/task/subtask/bug/note within one batch. Always pass the batchId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags.",
       inputSchema: {
         type: "object",
         properties: {
@@ -150,7 +164,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           createdBy: "agent",
           actorId: "mcp",
         });
-        return { item, state: workItemStore.getState(args.batchId) };
+        return { item, counts: counts(args.batchId) };
       },
     },
     {
@@ -196,7 +210,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           actorKind: "agent",
           actorId: "mcp",
         });
-        return { item, state: workItemStore.getState(args.batchId) };
+        return { item, counts: counts(args.batchId) };
       },
     },
     {
@@ -235,7 +249,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const stream = resolveStream(args.streamId);
         resolveBatch(stream.id, args.batchId);
         workItemStore.deleteItem(args.batchId, args.itemId, "agent", "mcp");
-        return { ok: true, state: workItemStore.getState(args.batchId) };
+        return { ok: true, counts: counts(args.batchId) };
       },
     },
     {
@@ -258,7 +272,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const stream = resolveStream(args.streamId);
         resolveBatch(stream.id, args.batchId);
         workItemStore.reorderItems(args.batchId, args.orderedItemIds, "agent", "mcp");
-        return { ok: true, state: workItemStore.getState(args.batchId) };
+        return { ok: true, counts: counts(args.batchId) };
       },
     },
     {
@@ -350,10 +364,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const stream = resolveStream(args.streamId);
         resolveBatch(stream.id, args.batchId);
         workItemStore.addNote(args.batchId, args.itemId ?? null, args.note, "agent", "mcp");
-        return {
-          ok: true,
-          events: workItemStore.listEvents(args.batchId, args.itemId),
-        };
+        return { ok: true };
       },
     },
     {

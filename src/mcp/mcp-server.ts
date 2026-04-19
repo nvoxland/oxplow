@@ -224,7 +224,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       payload,
     };
 
-    let response: HookHandlerResponse | void;
+    let response: HookHandlerResponse | void = undefined;
     try {
       response = await opts.onHook?.(envelope);
     } catch (error) {

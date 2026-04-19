@@ -223,7 +223,7 @@ export function WorkGroupList({
                 padding: "4px 8px",
                 cursor: isDragging ? "grabbing" : "pointer",
                 borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
-                background: isExpanded ? "var(--bg-2)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
+                background: isExpanded ? "var(--bg-detail)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
                 fontSize: 12,
                 userSelect: "none",
               }}

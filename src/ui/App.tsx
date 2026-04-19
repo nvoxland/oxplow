@@ -235,12 +235,10 @@ export function App() {
     }
   }
 
-  async function handleRenameBatchById(batchId: string, currentTitle: string) {
+  async function handleRenameBatchById(batchId: string, newTitle: string) {
     if (!stream) return;
-    const nextTitle = window.prompt("Rename batch", currentTitle)?.trim();
-    if (!nextTitle || nextTitle === currentTitle) return;
     try {
-      await renameBatch(stream.id, batchId, nextTitle);
+      await renameBatch(stream.id, batchId, newTitle);
       const refreshed = await getBatchState(stream.id);
       setBatchStates((prev) => ({ ...prev, [stream.id]: refreshed }));
       setError(null);
@@ -1299,7 +1297,7 @@ export function App() {
             onCompleteBatch={handleCompleteBatch}
             onMoveWorkItem={handleMoveWorkItemToBatch}
             onMoveBacklogItemToBatch={handleMoveBacklogItemToBatch}
-            onRenameBatch={(id, title) => void handleRenameBatchById(id, title)}
+            onRenameBatch={handleRenameBatchById}
             onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
             createRequest={batchCreateRequest}
           />

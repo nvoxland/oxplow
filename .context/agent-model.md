@@ -72,12 +72,14 @@ from the side effects lets every branch be unit-tested with a fixture.
 
 The pipeline runs in priority order:
 
-1. **Pending commit point.** Block with a directive built by
-   `buildCommitPointStopReason` telling the agent to inspect the diff,
-   draft a commit message in Conventional-Commits style, and call
+1. **Pending commit point (writer batch only).** Block with a directive
+   built by `buildCommitPointStopReason` telling the agent to inspect the
+   diff, draft a commit message in Conventional-Commits style, and call
    `mcp__newde__propose_commit({ commit_point_id, message })`. Don't run
    `git` directly — the runtime will commit on receipt of an approved
-   message.
+   message. **Gated on `batch.status === "active"`**: only the writer
+   batch ever commits. Non-active batches fall through so the commit
+   point stays pending until that batch is promoted to writer.
 2. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
    UI shows "agent stopped here"; the user resumes by prompting the agent
    directly (`triggered` points are skipped on subsequent Stop hooks, so

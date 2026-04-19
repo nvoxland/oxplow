@@ -25,7 +25,7 @@ interface Props {
   onCompleteBatch(batchId: string): void | Promise<void>;
   onMoveWorkItem?(itemId: string, fromBatchId: string, toBatchId: string): Promise<void>;
   onMoveBacklogItemToBatch?(itemId: string, toBatchId: string): Promise<void>;
-  onRenameBatch?(batchId: string, currentTitle: string): void;
+  onRenameBatch?(batchId: string, newTitle: string): Promise<void> | void;
   onRequestCreateStream?(): void;
   onRequestCreateBatch?(): void;
   /** Bumping this number opens the inline "new batch" form. */
@@ -74,6 +74,7 @@ export function BatchRail({
   const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; batch: Batch } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (createRequest === undefined || createRequest === 0) return;
@@ -86,7 +87,7 @@ export function BatchRail({
           id: "batch.rename",
           label: "Rename…",
           enabled: !!onRenameBatch,
-          run: () => onRenameBatch?.(contextMenu.batch.id, contextMenu.batch.title),
+          run: () => setRenamingId(contextMenu.batch.id),
         },
         {
           id: "batch.add-batch",
@@ -120,9 +121,17 @@ export function BatchRail({
             turns={agentTurns[batch.id]}
             fileChangeCount={fileChanges[batch.id]?.length}
             hasQueued={hasQueued}
+            isRenaming={renamingId === batch.id}
             onSelect={() => void onSelectBatch(batch.id)}
             onPromote={() => void onPromoteBatch(batch.id)}
             onComplete={() => void onCompleteBatch(batch.id)}
+            onCancelRename={() => setRenamingId(null)}
+            onSubmitRename={async (newTitle) => {
+              const trimmed = newTitle.trim();
+              setRenamingId(null);
+              if (!trimmed || trimmed === batch.title) return;
+              await onRenameBatch?.(batch.id, trimmed);
+            }}
             onContextMenu={(event) => {
               event.preventDefault();
               setContextMenu({ x: event.clientX, y: event.clientY, batch });
@@ -196,6 +205,9 @@ function BatchChip({
   onComplete,
   onContextMenu,
   onDropWorkItem,
+  isRenaming,
+  onSubmitRename,
+  onCancelRename,
 }: {
   batch: Batch;
   isActive: boolean;
@@ -210,6 +222,9 @@ function BatchChip({
   onComplete(): void;
   onContextMenu?(event: React.MouseEvent): void;
   onDropWorkItem?(payload: { itemId: string; fromBatchId: string | null }): void;
+  isRenaming?: boolean;
+  onSubmitRename?(newTitle: string): void | Promise<void>;
+  onCancelRename?(): void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -276,8 +291,11 @@ function BatchChip({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <button
-        onClick={onSelect}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={isRenaming ? undefined : onSelect}
+        onKeyDown={isRenaming ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
         onContextMenu={onContextMenu}
         style={{
           display: "inline-flex",
@@ -295,7 +313,7 @@ function BatchChip({
           borderTopRightRadius: 6,
           background,
           color,
-          cursor: "pointer",
+          cursor: isRenaming ? "text" : "pointer",
           fontFamily: "inherit",
           fontSize: 12,
           whiteSpace: "nowrap",
@@ -324,13 +342,40 @@ function BatchChip({
             }}
           >✎</span>
         ) : null}
-        <span style={{ fontWeight: isSelected ? 600 : isActive ? 500 : 400 }}>{batch.title}</span>
+        {isRenaming ? (
+          <input
+            autoFocus
+            defaultValue={batch.title}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                void onSubmitRename?.((e.target as HTMLInputElement).value);
+              } else if (e.key === "Escape") {
+                onCancelRename?.();
+              }
+            }}
+            onBlur={(e) => void onSubmitRename?.(e.target.value)}
+            style={{
+              background: "var(--bg)",
+              color: "var(--fg)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              padding: "2px 6px",
+              fontFamily: "inherit",
+              fontSize: 12,
+              minWidth: 120,
+            }}
+          />
+        ) : (
+          <span style={{ fontWeight: isSelected ? 600 : isActive ? 500 : 400 }}>{batch.title}</span>
+        )}
         {total > 0 ? (
           <span style={{ fontSize: 10, opacity: 0.75 }}>
             {done}/{total}
           </span>
         ) : null}
-      </button>
+      </div>
       {hovered ? (
         <HoverCard
           batch={batch}

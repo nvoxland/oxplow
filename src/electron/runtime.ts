@@ -496,6 +496,30 @@ export class ElectronRuntime {
     return next;
   }
 
+  setSnapshotRetentionDays(days: number): NewdeConfig {
+    if (!Number.isFinite(days) || days < 0) {
+      throw new Error("snapshotRetentionDays must be a non-negative number");
+    }
+    const next: NewdeConfig = { ...this.config, snapshotRetentionDays: days };
+    writeProjectConfig(this.projectDir, next);
+    this.config = next;
+    this.logger.info("updated snapshot retention days", { days });
+    this.events.publish({ type: "config.changed" });
+    return next;
+  }
+
+  setSnapshotMaxFileBytes(bytes: number): NewdeConfig {
+    if (!Number.isFinite(bytes) || bytes < 1024) {
+      throw new Error("snapshotMaxFileBytes must be a number >= 1024");
+    }
+    const next: NewdeConfig = { ...this.config, snapshotMaxFileBytes: Math.floor(bytes) };
+    writeProjectConfig(this.projectDir, next);
+    this.config = next;
+    this.logger.info("updated snapshot max file bytes", { bytes: next.snapshotMaxFileBytes });
+    this.events.publish({ type: "config.changed" });
+    return next;
+  }
+
   setGeneratedDirs(dirs: string[]): NewdeConfig {
     // Normalize: strip leading/trailing slashes, dedupe, drop empties. Path
     // separators are illegal — single path segments only, per config schema.
@@ -924,6 +948,12 @@ export class ElectronRuntime {
     return batch;
   }
 
+  private resolveActiveBatchForPrompt(streamId: string): Batch | null {
+    const activeId = this.batchStore.list(streamId).activeBatchId;
+    if (!activeId) return null;
+    return this.batchStore.getBatch(streamId, activeId) ?? null;
+  }
+
   private getAgentCommand(stream: Stream, batch: Batch, opts: { withoutResume?: boolean } = {}): string {
     const resumeSessionId = opts.withoutResume ? "" : batch.resume_session_id;
     if (this.config.agent === "claude") {
@@ -947,7 +977,12 @@ export class ElectronRuntime {
         {
           pluginDir: this.electronPlugin.pluginDir,
           allowedTools: ["mcp__newde__*"],
-          appendSystemPrompt: buildBatchAgentPrompt(stream, batch, this.config.agentPromptAppend),
+          appendSystemPrompt: buildBatchAgentPrompt(
+            stream,
+            batch,
+            this.config.agentPromptAppend,
+            this.resolveActiveBatchForPrompt(stream.id),
+          ),
           mcpConfig: buildBatchMcpConfig(this.mcp),
           env: {
             NEWDE_STREAM_ID: stream.id,
@@ -1545,21 +1580,27 @@ class RuntimeSocket extends EventEmitter {
   }
 }
 
-function buildBatchAgentPrompt(stream: Stream, batch: Batch, agentPromptAppend: string): string {
+function buildBatchAgentPrompt(
+  stream: Stream,
+  batch: Batch,
+  agentPromptAppend: string,
+  activeBatch?: Batch | null,
+): string {
   const lines = [
     `You manage this batch's work through the newde work-item MCP tools.`,
     `Treat them as your durable working memory between turns and sessions; the human watches progress through them.`,
     ``,
-    `PLAN BEFORE CODING. For anything that will take more than about two minutes, call newde__create_work_item before starting.`,
+    `PLAN BEFORE CODING. Every user-requested task gets a work item — no exceptions. Call newde__create_work_item the moment the user hands you a task, BEFORE any Read/Grep/Edit/Bash work on it. The only times you may skip this: (a) a trivial one-shot the user didn't phrase as a task ("what does this file do?"), or (b) you're already inside an existing in_progress item whose acceptanceCriteria already cover the request.`,
+    `If a second task arrives mid-flight, create a new work item for it before switching — do not silently fold it into the current one. Each top-level user request = one work item.`,
     `Use the title for intent, description for the approach, and acceptanceCriteria for a checklist of observable conditions that define "done" (plain text, one per line).`,
     `Set parentId when the item rolls up under a larger epic or task.`,
     ``,
     `DECOMPOSE DELIBERATELY: epic = multi-step feature, task = concrete unit of work, subtask = small step inside a task, bug = defect to fix, note = observation that doesn't need execution.`,
     ``,
-    `WORK THE READY QUEUE. Start each turn with newde__list_ready_work to pick the highest-priority unblocked item.`,
-    `Set its status to "in_progress" via newde__update_work_item before touching code.`,
+    `WORK THE READY QUEUE. Your FIRST tool call every session must be newde__list_ready_work — not a Read, not a Grep, not a response to the user. A high-priority bug may already be queued; you need to see it before you answer. If the user's new request competes with queued work, say so and let them choose; don't silently skip the queue.`,
+    `Set the item's status to "in_progress" via newde__update_work_item before touching code.`,
     `Post newde__add_work_note at meaningful milestones.`,
-    `The moment every acceptance criterion is met, set status to "done".`,
+    `When every acceptance criterion is met, set status to "to_check" (never "done" yourself — the human marks done after reviewing). If you also set "done" you will be corrected.`,
     `Use newde__get_work_item when resuming a specific item — its response includes links and recent audit events so you can pick up where you left off.`,
     ``,
     `LINK DEPENDENCIES with newde__link_work_items. linkType is one of: "blocks" (from-item must finish before to-item can start), "discovered_from" (file newly-uncovered work as its own item linked back to the item you were on — do NOT scope-creep the original), "relates_to" (general association), "duplicates" (same work as an existing item; delete or supersede the duplicate), "supersedes" (replaces a stale older item), "replies_to" (threaded response to another item).`,
@@ -1570,6 +1611,9 @@ function buildBatchAgentPrompt(stream: Stream, batch: Batch, agentPromptAppend: 
     ``,
     `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}).`,
     `Always pass batchId="${batch.id}" to every work-item tool.`,
+    activeBatch && activeBatch.id !== batch.id
+      ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
+      : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
     `Call newde__get_batch_context whenever you need to re-check stream/batch ids or read the current batch summary.`,
   ];
   if (batch.status !== "active") {
