@@ -340,75 +340,84 @@ export function getCommitDetail(projectDir: string, sha: string): CommitDetail |
   // Header: sha \x1f parents \x1f author \x1f author_email \x1f author_date
   //   \x1f committer \x1f committer_email \x1f committer_date \x1f subject \x1e body
   const format = ["%H", "%P", "%an", "%ae", "%aI", "%cn", "%ce", "%cI", "%s"].join(UNIT) + RECORD + "%b";
-  let raw: string;
+  let headerRaw: string;
   try {
-    raw = git(projectDir, ["show", "--format=" + format, "--name-status", "--numstat", "-z", sha]);
+    headerRaw = git(projectDir, ["show", "--no-patch", "--format=" + format, sha]);
   } catch {
     return null;
   }
-  // `git show -z` terminates name-status/numstat entries with NUL. The header
-  // (with our custom %x1f/%x1e separators) comes first, then a blank line, then
-  // name-status entries (NUL-separated), then numstat (NUL-separated), all in
-  // one blob. We parse the header first, then split the rest on NUL.
-  const recordIdx = raw.indexOf(RECORD);
+  const recordIdx = headerRaw.indexOf(RECORD);
   if (recordIdx < 0) return null;
-  const headerLine = raw.slice(0, recordIdx);
-  const rest = raw.slice(recordIdx + 1);
-  const headerParts = headerLine.split(UNIT);
-  const [sha2, parentsRaw, aName, aEmail, aDate, cName, cEmail, cDate, subject] = headerParts;
+  const headerLine = headerRaw.slice(0, recordIdx);
+  const body = headerRaw.slice(recordIdx + 1);
+  const [sha2, parentsRaw, aName, aEmail, aDate, cName, cEmail, cDate, subject] = headerLine.split(UNIT);
   if (!sha2) return null;
 
-  // rest starts with body up to the first blank-line marker. With `-z`, git
-  // emits the body then a NUL-terminated run of entries. The body ends at the
-  // first NUL that isn't inside body text — git always appends a NUL after
-  // the body when --name-status/--numstat follow.
-  const firstNul = rest.indexOf("\0");
-  const body = firstNul < 0 ? rest : rest.slice(0, firstNul);
-  const tail = firstNul < 0 ? "" : rest.slice(firstNul + 1);
-
-  const entries = tail.split("\0").filter((s) => s.length > 0);
+  // git only emits the LAST diff-format flag it sees, so --name-status and
+  // --numstat have to come from separate invocations. Each invocation's output
+  // starts with a leading newline before the first NUL-terminated entry.
   const files = new Map<string, { path: string; status: GitFileStatus; additions: number; deletions: number }>();
-  let i = 0;
-  // name-status entries: [status, path] or [status, from, to] for rename.
-  while (i < entries.length) {
-    const statusCode = entries[i]!;
-    if (!/^[A-Z]/.test(statusCode)) break; // name-status done → numstat starts
-    if (statusCode.startsWith("R") || statusCode.startsWith("C")) {
-      const from = entries[i + 1];
-      const to = entries[i + 2];
-      if (from && to) {
-        files.set(to, { path: `${from} → ${to}`, status: nameStatusToGitFileStatus(statusCode), additions: 0, deletions: 0 });
-      }
-      i += 3;
-    } else {
-      const path = entries[i + 1];
-      if (path) {
-        files.set(path, { path, status: nameStatusToGitFileStatus(statusCode), additions: 0, deletions: 0 });
-      }
-      i += 2;
+
+  const splitEntries = (raw: string): string[] => {
+    const out: string[] = [];
+    for (const part of raw.split("\0")) {
+      const cleaned = part.replace(/^\n+/, "");
+      if (cleaned.length > 0) out.push(cleaned);
     }
+    return out;
+  };
+
+  try {
+    const nameStatusRaw = git(projectDir, ["show", "--format=", "--name-status", "-z", sha]);
+    const entries = splitEntries(nameStatusRaw);
+    let i = 0;
+    while (i < entries.length) {
+      const statusCode = entries[i]!;
+      if (!/^[A-Z]/.test(statusCode)) { i++; continue; }
+      if (statusCode.startsWith("R") || statusCode.startsWith("C")) {
+        const from = entries[i + 1];
+        const to = entries[i + 2];
+        if (from && to) {
+          files.set(to, { path: `${from} → ${to}`, status: nameStatusToGitFileStatus(statusCode), additions: 0, deletions: 0 });
+        }
+        i += 3;
+      } else {
+        const path = entries[i + 1];
+        if (path) {
+          files.set(path, { path, status: nameStatusToGitFileStatus(statusCode), additions: 0, deletions: 0 });
+        }
+        i += 2;
+      }
+    }
+  } catch {
+    // leave files empty — the commit may be unreachable
   }
-  // numstat entries: [additions \t deletions \t path] (or with tabs) — actually
-  // git emits them as one string with tabs; for renames the path is NUL-split
-  // into two entries. Detect "<n>\t<n>\t<path>" vs "<n>\t<n>" followed by two paths.
-  while (i < entries.length) {
-    const entry = entries[i]!;
-    const match = entry.match(/^(-|\d+)\t(-|\d+)(?:\t(.*))?$/);
-    if (!match) { i++; continue; }
-    const additions = match[1] === "-" ? 0 : Number(match[1]);
-    const deletions = match[2] === "-" ? 0 : Number(match[2]);
-    let path = match[3] ?? "";
-    let consumed = 1;
-    if (!path) {
-      // rename: next two entries are from, to
-      const from = entries[i + 1];
-      const to = entries[i + 2];
-      if (from && to) path = to;
-      consumed = 3;
+
+  try {
+    const numstatRaw = git(projectDir, ["show", "--format=", "--numstat", "-z", sha]);
+    const entries = splitEntries(numstatRaw);
+    let i = 0;
+    while (i < entries.length) {
+      const entry = entries[i]!;
+      const match = entry.match(/^(-|\d+)\t(-|\d+)(?:\t(.*))?$/);
+      if (!match) { i++; continue; }
+      const additions = match[1] === "-" ? 0 : Number(match[1]);
+      const deletions = match[2] === "-" ? 0 : Number(match[2]);
+      let path = match[3] ?? "";
+      let consumed = 1;
+      if (!path) {
+        // rename: next two entries are from, to
+        const from = entries[i + 1];
+        const to = entries[i + 2];
+        if (from && to) path = to;
+        consumed = 3;
+      }
+      const existing = files.get(path);
+      if (existing) { existing.additions = additions; existing.deletions = deletions; }
+      i += consumed;
     }
-    const existing = files.get(path);
-    if (existing) { existing.additions = additions; existing.deletions = deletions; }
-    i += consumed;
+  } catch {
+    // leave additions/deletions at 0
   }
 
   return {

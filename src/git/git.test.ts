@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   detectBaseBranch,
   detectCurrentBranch,
+  getCommitDetail,
   gitBlame,
   isGitRepo,
   isGitWorktree,
@@ -154,6 +155,30 @@ test("gitBlame returns [] for non-git paths", () => {
   const dir = mkdtempSync(join(tmpdir(), "newde-noblame-"));
   tempDirs.push(dir);
   expect(gitBlame(dir, "nope.txt")).toEqual([]);
+});
+
+test("getCommitDetail returns files with per-file additions and deletions", () => {
+  const repoDir = mkRepo();
+  writeFileSync(join(repoDir, "a.txt"), "one\ntwo\nthree\n", "utf8");
+  writeFileSync(join(repoDir, "b.txt"), "bee\n", "utf8");
+  execFileSync("git", ["-C", repoDir, "add", "a.txt", "b.txt"], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "add files\n\nbody line"], { stdio: "ignore" });
+  const sha = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+
+  const detail = getCommitDetail(repoDir, sha);
+  expect(detail).not.toBeNull();
+  expect(detail!.files.length).toBe(2);
+  const a = detail!.files.find((f) => f.path === "a.txt");
+  const b = detail!.files.find((f) => f.path === "b.txt");
+  expect(a).toBeDefined();
+  expect(a!.additions).toBe(3);
+  expect(a!.deletions).toBe(0);
+  expect(a!.status).toBe("added");
+  expect(b).toBeDefined();
+  expect(b!.additions).toBe(1);
+  expect(b!.deletions).toBe(0);
+  expect(detail!.subject).toBe("add files");
+  expect(detail!.body).toBe("body line");
 });
 
 test("detectBaseBranch prefers main when no origin is configured", () => {
