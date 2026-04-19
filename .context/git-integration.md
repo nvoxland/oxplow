@@ -53,6 +53,15 @@ stream, recursive on the stream's `.git/` directory, debounced ~200ms
 (a single `git commit` fires a dozen events touching `HEAD`, `refs/*`,
 `logs/*`, `index`, `ORIG_HEAD`, …).
 
+When the stream lives in a secondary worktree (the common case — newde
+manages its own worktrees under `.newde/worktrees/`), the stream's
+`.git` is a pointer file, not a directory. The watcher reads the
+`gitdir:` line to find the per-worktree state dir (containing `HEAD`,
+`index`, `logs/HEAD`) and also follows the `commondir` pointer to watch
+the shared `.git` (where `refs/heads/*` actually update). Both dirs are
+watched; without the commondir watch, `git fetch` / ref updates from
+outside the worktree would be missed.
+
 Fires `git-refs.changed` after each debounce. Consumed silently (no
 loading spinner) by:
 

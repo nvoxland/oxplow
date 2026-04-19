@@ -371,8 +371,9 @@ export async function moveWorkItemToBatch(
   fromBatchId: string,
   itemId: string,
   toBatchId: string,
+  toStreamId?: string,
 ): Promise<{ from: BatchWorkState; to: BatchWorkState }> {
-  return desktopApi().moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId);
+  return desktopApi().moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId, toStreamId);
 }
 
 export async function getBacklogState(): Promise<BacklogState> {

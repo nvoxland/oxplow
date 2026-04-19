@@ -494,27 +494,151 @@ function DetailPane({
           <span style={{ marginLeft: 6, color: "#86efac" }}>+{totalAdditions}</span>
           <span style={{ marginLeft: 4, color: "#f87171" }}>−{totalDeletions}</span>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {detail.files.map((file) => (
-            <div
-              key={file.path}
-              onDoubleClick={() => {
-                if (!onOpenFileDiff || !detail) return;
-                // Strip rename decoration ("from → to") to keep just the current path.
-                const realPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
-                onOpenFileDiff(detail.sha, realPath, detail.parents[0] ?? null);
-              }}
-              title="Double-click to open diff"
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: onOpenFileDiff ? "pointer" : "default" }}
-            >
-              <span style={{ ...statusBadgeStyle, color: statusColor(file.status) }}>{statusLabel(file.status)}</span>
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }} title={file.path}>{file.path}</span>
-              {file.additions > 0 ? <span style={{ color: "#86efac" }}>+{file.additions}</span> : null}
-              {file.deletions > 0 ? <span style={{ color: "#f87171" }}>−{file.deletions}</span> : null}
-            </div>
-          ))}
-        </div>
+        <FileTreeView
+          files={detail.files}
+          onOpenFile={(path) => {
+            if (!onOpenFileDiff) return;
+            onOpenFileDiff(detail.sha, path, detail.parents[0] ?? null);
+          }}
+        />
       </div>
+    </div>
+  );
+}
+
+type DetailFile = CommitDetail["files"][number];
+
+interface TreeDir {
+  kind: "dir";
+  label: string;           // compacted path segment(s) shown for this node
+  fullPath: string;        // path from repo root to this node
+  children: TreeNode[];
+}
+
+interface TreeFile {
+  kind: "file";
+  label: string;
+  file: DetailFile;
+}
+
+type TreeNode = TreeDir | TreeFile;
+
+function buildFileTree(files: DetailFile[]): TreeNode[] {
+  const root: TreeDir = { kind: "dir", label: "", fullPath: "", children: [] };
+  for (const file of files) {
+    const displayPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
+    const parts = displayPath.split("/").filter(Boolean);
+    let cur: TreeDir = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i]!;
+      let next = cur.children.find((c): c is TreeDir => c.kind === "dir" && c.label === seg);
+      if (!next) {
+        next = { kind: "dir", label: seg, fullPath: cur.fullPath ? `${cur.fullPath}/${seg}` : seg, children: [] };
+        cur.children.push(next);
+      }
+      cur = next;
+    }
+    cur.children.push({ kind: "file", label: parts[parts.length - 1] ?? file.path, file });
+  }
+  const sortAndCompact = (node: TreeDir) => {
+    node.children.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+    for (const child of node.children) {
+      if (child.kind === "dir") sortAndCompact(child);
+    }
+    // Compact "foo" > "bar" chains into "foo/bar" when the parent has a single
+    // dir child (IntelliJ-style path compaction).
+    while (node.children.length === 1 && node.children[0]!.kind === "dir") {
+      const only = node.children[0] as TreeDir;
+      node.label = node.label ? `${node.label}/${only.label}` : only.label;
+      node.fullPath = only.fullPath;
+      node.children = only.children;
+    }
+  };
+  sortAndCompact(root);
+  return root.children;
+}
+
+function FileTreeView({
+  files,
+  onOpenFile,
+}: {
+  files: DetailFile[];
+  onOpenFile(path: string): void;
+}) {
+  const tree = useMemo(() => buildFileTree(files), [files]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {tree.map((node, i) => (
+        <TreeRow key={treeKey(node, i)} node={node} depth={0} onOpenFile={onOpenFile} />
+      ))}
+    </div>
+  );
+}
+
+function treeKey(node: TreeNode, index: number): string {
+  return node.kind === "dir" ? `d:${node.fullPath}:${index}` : `f:${node.file.path}`;
+}
+
+function TreeRow({
+  node,
+  depth,
+  onOpenFile,
+}: {
+  node: TreeNode;
+  depth: number;
+  onOpenFile(path: string): void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const indent = 10 + depth * 12;
+  if (node.kind === "dir") {
+    return (
+      <>
+        <div
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 11,
+            cursor: "pointer",
+            paddingLeft: indent,
+            color: "var(--muted)",
+          }}
+          title={node.fullPath}
+        >
+          <span style={{ width: 10, flexShrink: 0, fontSize: 9 }}>{expanded ? "▾" : "▸"}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.label}</span>
+        </div>
+        {expanded
+          ? node.children.map((child, i) => (
+              <TreeRow key={treeKey(child, i)} node={child} depth={depth + 1} onOpenFile={onOpenFile} />
+            ))
+          : null}
+      </>
+    );
+  }
+  const file = node.file;
+  const realPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
+  return (
+    <div
+      onDoubleClick={() => onOpenFile(realPath)}
+      title={`${file.path}\nDouble-click to open diff`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 11,
+        cursor: "pointer",
+        paddingLeft: indent + 14,
+      }}
+    >
+      <span style={{ ...statusBadgeStyle, color: statusColor(file.status) }}>{statusLabel(file.status)}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{node.label}</span>
+      {file.additions > 0 ? <span style={{ color: "#86efac" }}>+{file.additions}</span> : null}
+      {file.deletions > 0 ? <span style={{ color: "#f87171" }}>−{file.deletions}</span> : null}
     </div>
   );
 }

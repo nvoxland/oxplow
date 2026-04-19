@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
+import type { AgentStatus } from "../../api.js";
+import { AgentStatusDot } from "../AgentStatusDot.js";
 
 export interface CenterTab {
   id: string;
   label: string;
   closable: boolean;
   render: () => ReactNode;
-  activeDot?: boolean;
+  agentStatus?: AgentStatus;
 }
 
 interface CenterTabsProps {
@@ -41,7 +43,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
                 gap: 6,
               }}
             >
-              {tab.activeDot ? <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--accent)" }} /> : null}
+              {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
               <span>{tab.label}</span>
               {tab.closable && onClose ? (
                 <button

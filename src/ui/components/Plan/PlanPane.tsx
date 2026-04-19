@@ -98,7 +98,6 @@ export function PlanPane({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [acceptance, setAcceptance] = useState("");
-  const [kind, setKind] = useState<WorkItemKind>("task");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
   const [parentId, setParentId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -283,8 +282,6 @@ export function PlanPane({
           setDescription={setDescription}
           acceptance={acceptance}
           setAcceptance={setAcceptance}
-          kind={kind}
-          setKind={setKind}
           priority={priority}
           setPriority={setPriority}
           parentId={parentId}
@@ -297,17 +294,17 @@ export function PlanPane({
             const nextTitle = title.trim();
             if (!nextTitle) return;
             await activeCreate({
-              kind,
+              kind: "task",
               title: nextTitle,
               description,
               acceptanceCriteria: acceptance || null,
               parentId: mode === "batch" ? (parentId || undefined) : undefined,
               priority,
-              status: kind === "epic" ? "in_progress" : "waiting",
+              status: "waiting",
             });
             setTitle(""); setDescription(""); setAcceptance("");
             if (!andAnother) {
-              setParentId(""); setKind("task"); setPriority("medium");
+              setParentId(""); setPriority("medium");
               setCreateOpen(false);
             }
           }}
@@ -556,8 +553,6 @@ function NewWorkItemModal({
   setDescription,
   acceptance,
   setAcceptance,
-  kind,
-  setKind,
   priority,
   setPriority,
   parentId,
@@ -574,8 +569,6 @@ function NewWorkItemModal({
   setDescription(value: string): void;
   acceptance: string;
   setAcceptance(value: string): void;
-  kind: WorkItemKind;
-  setKind(value: WorkItemKind): void;
   priority: WorkItemPriority;
   setPriority(value: WorkItemPriority): void;
   parentId: string;
@@ -644,21 +637,12 @@ function NewWorkItemModal({
           placeholder="Title (required)"
           style={inputStyle}
         />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          <select value={kind} onChange={(e) => setKind(e.target.value as WorkItemKind)} style={inputStyle}>
-            <option value="epic">Epic</option>
-            <option value="task">Task</option>
-            <option value="subtask">Subtask</option>
-            <option value="bug">Bug</option>
-            <option value="note">Note</option>
-          </select>
-          <select value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </div>
+        <select value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="urgent">Urgent</option>
+        </select>
         {showParent ? (
         <select value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
           <option value="">No parent epic</option>

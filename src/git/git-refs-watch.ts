@@ -1,4 +1,4 @@
-import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Logger } from "../core/logger.js";
 import type { Stream } from "../persistence/stream-store.js";
@@ -82,18 +82,27 @@ class StreamGitRefsWatcher {
   start(): void {
     const gitDir = this.resolveGitDir();
     if (!gitDir) {
-      // Not a git checkout (or `.git` is a worktree pointer we can't read).
-      // The runtime's gitRootWatcher will (re)start us if a repo appears.
+      // Not a git checkout. The runtime's gitRootWatcher will (re)start us if
+      // a repo appears.
       return;
     }
-    if (this.tryRecursive(gitDir)) return;
-    // Fall back to watching the top-level .git entries that change on common
-    // git operations — enough to catch commits/checkouts/pulls without the
-    // cost of per-dir watchers across refs/ and logs/.
-    this.watchDir(gitDir);
-    for (const sub of ["refs", join("refs", "heads"), join("refs", "remotes"), join("refs", "tags"), "logs", "logs/refs"]) {
-      const path = join(gitDir, sub);
-      if (existsSync(path) && safeStat(path)?.isDirectory()) this.watchDir(path);
+    // For a worktree, gitDir is the per-worktree state (HEAD, index,
+    // logs/HEAD) under `<main>/.git/worktrees/<name>/`. Shared refs live in
+    // the common dir (pointed to by `commondir`), so watch both.
+    const dirs = [gitDir];
+    const commonDir = this.resolveCommonDir(gitDir);
+    if (commonDir && commonDir !== gitDir) dirs.push(commonDir);
+
+    for (const dir of dirs) {
+      if (this.tryRecursive(dir)) continue;
+      // Fall back to watching the top-level entries that change on common git
+      // operations — enough to catch commits/checkouts/pulls without the cost
+      // of per-dir watchers across refs/ and logs/.
+      this.watchDir(dir);
+      for (const sub of ["refs", join("refs", "heads"), join("refs", "remotes"), join("refs", "tags"), "logs", "logs/refs"]) {
+        const path = join(dir, sub);
+        if (existsSync(path) && safeStat(path)?.isDirectory()) this.watchDir(path);
+      }
     }
   }
 
@@ -104,15 +113,43 @@ class StreamGitRefsWatcher {
     this.debounceTimer = null;
   }
 
-  /** Resolves `.git`: a directory in the main checkout, a pointer file in a
-   *  worktree. We don't follow pointer files here — secondary worktrees are
-   *  refused at startup, and the runtime is the only consumer of this. */
+  /** Resolves `.git`: a directory for the main checkout, or the target of a
+   *  `gitdir:` pointer file for secondary worktrees (streams are usually
+   *  worktrees under `.newde/worktrees/`). */
   private resolveGitDir(): string | null {
     const dotGit = join(this.rootDir, ".git");
     const stat = safeStat(dotGit);
     if (!stat) return null;
     if (stat.isDirectory()) return dotGit;
-    return null;
+    if (!stat.isFile()) return null;
+    let raw: string;
+    try {
+      raw = readFileSync(dotGit, "utf8");
+    } catch (error) {
+      this.logger.warn("failed to read .git pointer", { error: errorMessage(error) });
+      return null;
+    }
+    const match = raw.match(/^gitdir:\s*(.+?)\s*$/m);
+    if (!match || !match[1]) return null;
+    const target = resolve(this.rootDir, match[1]);
+    const targetStat = safeStat(target);
+    return targetStat?.isDirectory() ? target : null;
+  }
+
+  /** For a worktree, read the `commondir` pointer to locate the shared .git.
+   *  Returns null if this is the main checkout (gitDir already *is* common). */
+  private resolveCommonDir(gitDir: string): string | null {
+    const commonFile = join(gitDir, "commondir");
+    if (!existsSync(commonFile)) return null;
+    let raw: string;
+    try {
+      raw = readFileSync(commonFile, "utf8").trim();
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+    const target = resolve(gitDir, raw);
+    return safeStat(target)?.isDirectory() ? target : null;
   }
 
   private tryRecursive(gitDir: string): boolean {

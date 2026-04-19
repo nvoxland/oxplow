@@ -52,7 +52,7 @@ export interface WorkItemApi {
   updateWorkItem(streamId: string, batchId: string, itemId: string, changes: UpdateWorkItemChanges): BatchWorkState;
   deleteWorkItem(streamId: string, batchId: string, itemId: string): BatchWorkState;
   reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): BatchWorkState;
-  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string): { from: BatchWorkState; to: BatchWorkState };
+  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string, toStreamId?: string): { from: BatchWorkState; to: BatchWorkState };
   getBacklogState(): BacklogState;
   createBacklogItem(input: CreateWorkItemInput): BacklogState;
   updateBacklogItem(itemId: string, changes: UpdateWorkItemChanges): BacklogState;
@@ -134,9 +134,9 @@ export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, file
       return workItemStore.getState(batchId);
     },
 
-    moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId) {
+    moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId, toStreamId) {
       resolveBatch(streamId, fromBatchId);
-      resolveBatch(streamId, toBatchId);
+      resolveBatch(toStreamId ?? streamId, toBatchId);
       workItemStore.moveItemToBatch(fromBatchId, itemId, toBatchId, "user", "ui");
       return {
         from: workItemStore.getState(fromBatchId),

@@ -62,6 +62,24 @@ Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
 edit because blame is against `HEAD`, not the buffer.
 
+## Uncommitted-change gutter markers
+
+`EditorPane` fetches the file's HEAD content via `readFileAtRef(stream,
+"HEAD", path)` on file open, caches it per-path, and diffs the buffer
+against it on every content change. The line-level LCS diff runs in
+`diffLineKinds` (capped at 5000 lines per side — larger files skip
+diffing). Gutter bars render via Monaco `linesDecorationsClassName`:
+
+- `newde-gutter-added` — green 3px inset bar (new line, no nearby delete).
+- `newde-gutter-modified` — blue 3px inset bar (added line next to a delete).
+- `newde-gutter-deleted` — red bottom bar on the surviving line next to a
+  pure deletion.
+
+Classes are defined in `public/index.html`. HEAD is re-fetched when
+`filePath` changes; a subsequent commit won't invalidate the cache until
+the file is reopened. Decoration ids live in `diffDecoIdsRef` and are
+updated via `editor.deltaDecorations`.
+
 ## Diff editor
 
 `src/ui/components/Diff/DiffPane.tsx` uses Monaco's `createDiffEditor`.

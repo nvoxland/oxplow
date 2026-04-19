@@ -415,18 +415,49 @@ export function ProjectPanel({
     setExpandedDirs({ "": true });
   }
 
+  function openUncommittedDiff(path: string) {
+    onOpenDiff?.({ path, leftRef: "HEAD", rightKind: "working", baseLabel: "HEAD" });
+  }
+  function openBranchDiff(path: string) {
+    if (!scopes?.branchBase) return;
+    onOpenDiff?.({ path, leftRef: scopes.branchBase, rightKind: "working", baseLabel: scopes.branchBase });
+  }
+  function openOriginDiff(path: string) {
+    if (!scopes?.upstream) return;
+    onOpenDiff?.({ path, leftRef: scopes.upstream, rightKind: "working", baseLabel: scopes.upstream });
+  }
+
+  // The file tree's click/double-click opens something contextual to the
+  // current filter — file in "all", matching diff in scope-filtered views.
+  function openForCurrentFilter(path: string) {
+    if (filterMode === "uncommitted") { openUncommittedDiff(path); return; }
+    if (filterMode === "branch" && scopes?.branchBase) { openBranchDiff(path); return; }
+    if (filterMode === "unpushed" && scopes?.upstream) { openOriginDiff(path); return; }
+    onOpenFile(path);
+  }
+
   async function handleContextAction(
     action:
       | "open" | "new-file" | "new-folder" | "rename" | "delete"
       | "copy" | "copy-reference" | "find-usages" | "agent-history"
       | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
-      | "mark-generated" | "unmark-generated",
+      | "mark-generated" | "unmark-generated"
+      | "diff-uncommitted" | "diff-branch" | "diff-origin",
   ) {
     if (!contextMenu) return;
     try {
       switch (action) {
         case "open":
           onOpenFile(contextMenu.path);
+          break;
+        case "diff-uncommitted":
+          openUncommittedDiff(contextMenu.path);
+          break;
+        case "diff-branch":
+          openBranchDiff(contextMenu.path);
+          break;
+        case "diff-origin":
+          openOriginDiff(contextMenu.path);
           break;
         case "new-file": {
           const suggested = contextMenu.kind === "directory"
@@ -545,7 +576,31 @@ export function ProjectPanel({
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
       ...(contextMenu.kind === "file"
-        ? [{ id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") }]
+        ? [
+            { id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") },
+            ...(gitEnabled && !!onOpenDiff
+              ? [
+                  {
+                    id: "files.diff-uncommitted",
+                    label: "Show uncommitted",
+                    enabled: uncommittedPaths.includes(contextMenu.path) || uncommittedDeletions.has(contextMenu.path),
+                    run: () => handleContextAction("diff-uncommitted"),
+                  },
+                  {
+                    id: "files.diff-branch",
+                    label: scopes?.branchBase ? `Show branch changes (vs ${scopes.branchBase})` : "Show branch changes",
+                    enabled: !!scopes?.branchBase && !scopes.onDefaultBranch,
+                    run: () => handleContextAction("diff-branch"),
+                  },
+                  {
+                    id: "files.diff-origin",
+                    label: scopes?.upstream ? `Show difference from origin (vs ${scopes.upstream})` : "Show difference from origin",
+                    enabled: !!scopes?.upstream,
+                    run: () => handleContextAction("diff-origin"),
+                  },
+                ] as MenuItem[]
+              : []),
+          ]
         : []),
       { id: "files.new-file", label: "New File…", enabled: true, run: () => handleContextAction("new-file") },
       { id: "files.new-folder", label: "New Directory…", enabled: true, run: () => handleContextAction("new-folder") },
@@ -650,7 +705,7 @@ export function ProjectPanel({
               selectedFilePath={selectedFilePath}
               generatedSet={generatedSet}
               onToggleDirectory={toggleDirectory}
-              onOpenFile={onOpenFile}
+              onOpenFile={openForCurrentFilter}
               onContextMenu={setContextMenu}
             />
           </>
