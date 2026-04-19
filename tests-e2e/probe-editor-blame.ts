@@ -116,6 +116,46 @@ async function main() {
       process.exit(6);
     }
 
+    // Close the history panel so we can test "uncommitted click should NOT
+    // reopen it." There's no close button exposed; collapse the dock by
+    // clicking the active tab.
+    await window.getByTestId("dock-tab-history").click();
+    await window.waitForTimeout(300);
+
+    // Make a dirty edit so we get at least one uncommitted blame line.
+    // Insert a char at the start of the editor.
+    await window.evaluate(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(".monaco-editor textarea");
+      ta?.focus();
+    });
+    await window.keyboard.press("Home");
+    await window.keyboard.type("// probe-uncommitted\n");
+    await window.waitForTimeout(1_500); // let blame refresh on dirty change
+
+    // Find an uncommitted blame row (title === "Uncommitted").
+    const uncommittedClick = await window.evaluate(() => {
+      const row = Array.from(document.querySelectorAll<HTMLElement>("div[title]"))
+        .find((d) => d.getAttribute("title") === "Uncommitted");
+      if (!row) return { present: false };
+      row.click();
+      return { present: true };
+    });
+    console.log("[probe] uncommitted row present:", uncommittedClick.present);
+    if (!uncommittedClick.present) {
+      console.log("[probe] WARN: no uncommitted blame row appeared; skipping guard check");
+    } else {
+      await window.waitForTimeout(600);
+      const historyAfterUncommittedClick = await window.evaluate(() => {
+        const panel = document.querySelector<HTMLElement>('[data-testid="dock-panel-history"]');
+        return panel ? panel.offsetParent !== null : false;
+      });
+      if (historyAfterUncommittedClick) {
+        console.log("[probe] FAIL: uncommitted blame row opened the history panel");
+        process.exit(7);
+      }
+      console.log("[probe] OK: uncommitted blame row does not trigger history reveal");
+    }
+
     console.log("[probe] OK: blame toggle + reveal-in-history round-trip works");
   } finally {
     await close();

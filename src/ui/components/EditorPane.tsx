@@ -712,7 +712,7 @@ function BlameOverlay({
             <div
               key={line.line}
               title={uncommitted ? "Uncommitted" : `${line.sha.slice(0, 8)} ${line.author} <${line.authorMail}>\n${line.summary}`}
-              onClick={() => onClick(line.sha)}
+              onClick={uncommitted ? undefined : () => onClick(line.sha)}
               style={{
                 height: lineHeight,
                 lineHeight: `${lineHeight}px`,

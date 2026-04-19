@@ -91,7 +91,9 @@ sub-component). Layout details:
 - On click, calls the `onRevealCommit(sha)` prop (wired from `App.tsx`)
   which bumps two tokens: `historyReveal` (passed to `HistoryPanel` to
   select the commit) and `bottomActivate` (passed to the bottom
-  `DockShell` to open the History tool window).
+  `DockShell` to open the History tool window). Uncommitted lines
+  (all-zero sha) intentionally pass `onClick={undefined}` so clicking
+  them does nothing — there is no commit to reveal.
 
 Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
