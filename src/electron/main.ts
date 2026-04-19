@@ -171,6 +171,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:rejectCommitPoint", (_event, id: string, note: string) => currentRuntime.rejectCommitPoint(id, note));
   ipcMain.handle("newde:resetCommitPoint", (_event, id: string) => currentRuntime.resetCommitPoint(id));
   ipcMain.handle("newde:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
+  ipcMain.handle("newde:reorderBatchQueue", (_event, streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderBatchQueue(streamId, batchId, entries));
   ipcMain.handle("newde:listWaitPoints", (_event, batchId: string) => currentRuntime.listWaitPoints(batchId));
   ipcMain.handle("newde:createWaitPoint", (_event, streamId: string, batchId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, batchId, note));
   ipcMain.handle("newde:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));

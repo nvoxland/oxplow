@@ -86,6 +86,30 @@ export class WaitPointStore {
     return updated;
   }
 
+  /** Bulk assign sort_index values — paired with commit-point + work-item
+   *  bulk setters so the batch-queue reorder can keep all three tables in a
+   *  single index space. */
+  setSortIndexes(entries: Array<{ id: string; sortIndex: number }>): void {
+    if (entries.length === 0) return;
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      for (const entry of entries) {
+        this.stateDb.run(
+          `UPDATE wait_point SET sort_index = ?, updated_at = ? WHERE id = ?`,
+          entry.sortIndex, now, entry.id,
+        );
+      }
+    });
+    const batches = new Set<string>();
+    for (const entry of entries) {
+      const wp = this.get(entry.id);
+      if (wp) batches.add(wp.batch_id);
+    }
+    for (const batchId of batches) {
+      this.emit({ batchId, kind: "updated", id: null });
+    }
+  }
+
   setNote(id: string, note: string | null): WaitPoint {
     this.require(id);
     const now = new Date().toISOString();

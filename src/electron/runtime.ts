@@ -1168,6 +1168,13 @@ export class ElectronRuntime {
 
   createCommitPoint(streamId: string, batchId: string, mode: CommitPointMode): CommitPoint {
     this.resolveBatch(streamId, batchId);
+    // A commit point with no preceding work items has nothing to commit; refuse
+    // to create one as the very first queue entry. The mixed reorder still
+    // lets users drag a point above all work items if they really insist.
+    const hasWork = this.workItemStore.listItems(batchId).length > 0;
+    if (!hasWork) {
+      throw new Error("cannot add a commit point before any work items exist");
+    }
     const sortIndex = this.nextQueueSortIndex(batchId);
     return this.commitPointStore.create({ batchId, mode, sortIndex });
   }
@@ -1192,6 +1199,30 @@ export class ElectronRuntime {
     this.commitPointStore.delete(id);
   }
 
+  /**
+   * Reorder the mixed batch queue (work items + commit points). `entries` is
+   * the desired top-to-bottom order; sort_indexes are rewritten to match so
+   * findActiveCommitPoint and the Stop-hook pipeline see the new position.
+   */
+  reorderBatchQueue(
+    streamId: string,
+    batchId: string,
+    entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+  ): void {
+    this.resolveBatch(streamId, batchId);
+    const workEntries: Array<{ id: string; sortIndex: number }> = [];
+    const commitEntries: Array<{ id: string; sortIndex: number }> = [];
+    const waitEntries: Array<{ id: string; sortIndex: number }> = [];
+    entries.forEach((entry, index) => {
+      if (entry.kind === "work") workEntries.push({ id: entry.id, sortIndex: index });
+      else if (entry.kind === "commit") commitEntries.push({ id: entry.id, sortIndex: index });
+      else waitEntries.push({ id: entry.id, sortIndex: index });
+    });
+    this.workItemStore.setItemSortIndexes(batchId, workEntries);
+    this.commitPointStore.setSortIndexes(commitEntries);
+    this.waitPointStore.setSortIndexes(waitEntries);
+  }
+
   // -------- wait points (IPC-exposed methods) --------
 
   listWaitPoints(batchId: string): WaitPoint[] {
@@ -1200,6 +1231,12 @@ export class ElectronRuntime {
 
   createWaitPoint(streamId: string, batchId: string, note?: string | null): WaitPoint {
     this.resolveBatch(streamId, batchId);
+    // Wait points have nothing to "wait after" without preceding work items;
+    // refuse to create one as the very first queue entry.
+    const hasWork = this.workItemStore.listItems(batchId).length > 0;
+    if (!hasWork) {
+      throw new Error("cannot add a wait point before any work items exist");
+    }
     const sortIndex = this.nextQueueSortIndex(batchId);
     return this.waitPointStore.create({ batchId, sortIndex, note: note ?? null });
   }

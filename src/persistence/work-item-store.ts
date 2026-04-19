@@ -393,6 +393,22 @@ export class WorkItemStore {
     }
   }
 
+  /** Explicit sort_index writes — used by the mixed batch-queue reorder so
+   *  work items and commit points share a single index space. */
+  setItemSortIndexes(batchId: string, entries: Array<{ id: string; sortIndex: number }>): void {
+    if (entries.length === 0) return;
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      for (const entry of entries) {
+        this.stateDb.run(
+          `UPDATE work_items SET sort_index = ?, updated_at = ? WHERE batch_id = ? AND id = ?`,
+          entry.sortIndex, now, batchId, entry.id,
+        );
+      }
+    });
+    this.emitChange({ batchId, kind: "reordered", itemId: null });
+  }
+
   reorderItems(
     batchId: string,
     orderedItemIds: string[],

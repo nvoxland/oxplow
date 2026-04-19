@@ -481,6 +481,14 @@ export async function deleteCommitPoint(id: string): Promise<void> {
   return desktopApi().deleteCommitPoint(id);
 }
 
+export async function reorderBatchQueue(
+  streamId: string,
+  batchId: string,
+  entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+): Promise<void> {
+  return desktopApi().reorderBatchQueue(streamId, batchId, entries);
+}
+
 export async function listWaitPoints(batchId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
   return desktopApi().listWaitPoints(batchId);
 }

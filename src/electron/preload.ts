@@ -65,6 +65,7 @@ const api: DesktopApi = {
   rejectCommitPoint: (id, note) => ipcRenderer.invoke("newde:rejectCommitPoint", id, note),
   resetCommitPoint: (id) => ipcRenderer.invoke("newde:resetCommitPoint", id),
   deleteCommitPoint: (id) => ipcRenderer.invoke("newde:deleteCommitPoint", id),
+  reorderBatchQueue: (streamId, batchId, entries) => ipcRenderer.invoke("newde:reorderBatchQueue", streamId, batchId, entries),
   listWaitPoints: (batchId) => ipcRenderer.invoke("newde:listWaitPoints", batchId),
   createWaitPoint: (streamId, batchId, note) => ipcRenderer.invoke("newde:createWaitPoint", streamId, batchId, note),
   setWaitPointNote: (id, note) => ipcRenderer.invoke("newde:setWaitPointNote", id, note),

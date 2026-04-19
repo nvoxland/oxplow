@@ -21,6 +21,7 @@ import {
   listCommitPoints,
   listWaitPoints,
   rejectCommitPoint,
+  reorderBatchQueue,
   resetCommitPoint,
   setCommitPointMode,
   setWaitPointNote,
@@ -98,7 +99,6 @@ export function PlanPane({
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
-  const [commitMode, setCommitMode] = useState<CommitPointMode>("approval");
 
   const batchId = batch?.id ?? null;
   const streamId = batch?.stream_id ?? null;
@@ -187,7 +187,7 @@ export function PlanPane({
             + New work item
           </button>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
-            {mode === "backlog" ? "Backlog" : batch?.title}
+            {mode === "backlog" ? "Backlog" : ""}
           </span>
         </div>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 11, cursor: "pointer" }}>
@@ -248,6 +248,14 @@ export function PlanPane({
               onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
               onUpdateWorkItem={activeUpdate}
               onReorderWorkItems={activeReorder}
+              // Commit/wait points only belong to the root (non-epic) group —
+              // they divide the top-level queue, not items scoped inside an
+              // epic.
+              commitPoints={group.epic === null && mode === "batch" ? commitPoints : []}
+              waitPoints={group.epic === null && mode === "batch" ? waitPoints : []}
+              onReorderMixed={group.epic === null && mode === "batch" && streamId && batchId
+                ? (entries) => { void reorderBatchQueue(streamId, batchId, entries).catch(() => {}); }
+                : undefined}
               onRequestDelete={(item) => {
                 if (!window.confirm(`Delete "${item.title}"?`)) return;
                 if (expandedId === item.id) setExpandedId(null);
@@ -261,25 +269,46 @@ export function PlanPane({
           ))
         )}
         {mode === "batch" && batch ? (
-          <>
-            <CommitPointsSection
-              commitPoints={commitPoints}
-              commitMode={commitMode}
-              setCommitMode={setCommitMode}
-              onAdd={() => {
+          <div style={queueMarkerBarStyle}>
+            <button
+              onClick={() => {
                 if (!streamId || !batchId) return;
-                void createCommitPoint(streamId, batchId, commitMode).catch(() => {});
+                void createCommitPoint(streamId, batchId, "approval").catch(() => {});
               }}
-            />
-            <WaitPointsSection
-              waitPoints={waitPoints}
-              onAdd={() => {
+              disabled={!batchWork || batchWork.items.length === 0}
+              style={{
+                ...miniButtonStyle,
+                opacity: !batchWork || batchWork.items.length === 0 ? 0.5 : 1,
+                cursor: !batchWork || batchWork.items.length === 0 ? "not-allowed" : "pointer",
+              }}
+              title={
+                !batchWork || batchWork.items.length === 0
+                  ? "Add a work item first — a commit point can't be the very first queue entry"
+                  : "Append a commit point to the work queue (drag to reposition; click to switch to auto-commit)"
+              }
+            >
+              + Commit when done
+            </button>
+            <button
+              onClick={() => {
                 if (!streamId || !batchId) return;
-                const note = window.prompt("Optional note for this wait point:", "") ?? "";
-                void createWaitPoint(streamId, batchId, note || null).catch(() => {});
+                void createWaitPoint(streamId, batchId, null).catch(() => {});
               }}
-            />
-          </>
+              disabled={!batchWork || batchWork.items.length === 0}
+              style={{
+                ...miniButtonStyle,
+                opacity: !batchWork || batchWork.items.length === 0 ? 0.5 : 1,
+                cursor: !batchWork || batchWork.items.length === 0 ? "not-allowed" : "pointer",
+              }}
+              title={
+                !batchWork || batchWork.items.length === 0
+                  ? "Add a work item first — a wait point can't be the very first queue entry"
+                  : "Append a wait point to the work queue (drag to reposition; click the divider to add a note)"
+              }
+            >
+              + Wait here
+            </button>
+          </div>
         ) : null}
       </div>
       <div style={bottomBarStyle}>
@@ -463,6 +492,11 @@ function NewWorkItemModal({
   );
 }
 
+type QueueRow =
+  | { kind: "work"; id: string; sortIndex: number; item: WorkItem }
+  | { kind: "commit"; id: string; sortIndex: number; cp: CommitPoint }
+  | { kind: "wait"; id: string; sortIndex: number; wp: WaitPoint };
+
 function WorkGroupList({
   group,
   scopeBatchId,
@@ -470,6 +504,9 @@ function WorkGroupList({
   onToggleExpand,
   onUpdateWorkItem,
   onReorderWorkItems,
+  commitPoints,
+  waitPoints,
+  onReorderMixed,
   onRequestDelete,
   onContextMenu,
 }: {
@@ -479,27 +516,55 @@ function WorkGroupList({
   onToggleExpand(id: string): void;
   onUpdateWorkItem: (itemId: string, changes: UpdateChanges) => Promise<void>;
   onReorderWorkItems: (orderedItemIds: string[]) => Promise<void>;
+  commitPoints?: CommitPoint[];
+  waitPoints?: WaitPoint[];
+  onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
   onRequestDelete(item: WorkItem): void;
   onContextMenu(event: React.MouseEvent, item: WorkItem): void;
 }) {
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
 
-  const handleDrop = (targetId: string) => {
-    if (!draggingId || draggingId === targetId) {
-      setDraggingId(null); setOverId(null); return;
+  // Merge work items + commit points into one ordered list by sort_index.
+  // Commit points only apply at the root group; epic groups get just their
+  // own child work items.
+  const rows: QueueRow[] = useMemo(() => {
+    const work: QueueRow[] = group.items.map((item) => ({
+      kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
+    }));
+    const commits: QueueRow[] = (commitPoints ?? []).map((cp) => ({
+      kind: "commit" as const, id: cp.id, sortIndex: cp.sort_index, cp,
+    }));
+    const waits: QueueRow[] = (waitPoints ?? []).map((wp) => ({
+      kind: "wait" as const, id: wp.id, sortIndex: wp.sort_index, wp,
+    }));
+    return [...work, ...commits, ...waits].sort((a, b) => a.sortIndex - b.sortIndex);
+  }, [group.items, commitPoints, waitPoints]);
+
+  const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
+
+  const handleDropOnKey = (targetKey: string) => {
+    if (!draggingKey || draggingKey === targetKey) {
+      setDraggingKey(null); setOverKey(null); return;
     }
-    const ids = group.items.map((item) => item.id);
-    const from = ids.indexOf(draggingId);
-    const to = ids.indexOf(targetId);
+    const from = rows.findIndex((row) => keyFor(row) === draggingKey);
+    const to = rows.findIndex((row) => keyFor(row) === targetKey);
     if (from < 0 || to < 0) {
-      setDraggingId(null); setOverId(null); return;
+      setDraggingKey(null); setOverKey(null); return;
     }
-    const next = ids.slice();
+    const next = rows.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved!);
-    setDraggingId(null); setOverId(null);
-    void onReorderWorkItems(next);
+    setDraggingKey(null); setOverKey(null);
+    if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
+      // Mixed list — use the cross-store reorder so commit points get their
+      // sort_index updated alongside work items.
+      onReorderMixed(next.map((row) => ({ kind: row.kind, id: row.id })));
+    } else {
+      // Pure work-item list — keep using the scope-aware reorder handler
+      // (it also handles the backlog mode).
+      void onReorderWorkItems(next.filter((row) => row.kind === "work").map((row) => row.id));
+    }
   };
 
   return (
@@ -511,15 +576,99 @@ function WorkGroupList({
           <span style={{ color: "var(--muted)", fontSize: 10 }}>{priorityIcon(group.epic.priority)}</span>
         </div>
       ) : null}
-      {group.items.map((item) => {
+      {rows.map((row) => {
+        const key = keyFor(row);
+        const isOver = overKey === key && draggingKey !== key;
+        const isDragging = draggingKey === key;
+        if (row.kind === "commit") {
+          const isExpanded = expandedId === key;
+          return (
+            <div key={key}>
+              <div
+                draggable
+                onDragStart={(event) => {
+                  setDraggingKey(key);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", row.id);
+                }}
+                onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
+                onDragOver={(event) => {
+                  if (!draggingKey || draggingKey === key) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (overKey !== key) setOverKey(key);
+                }}
+                onDragLeave={() => { if (overKey === key) setOverKey(null); }}
+                onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
+                onClick={() => onToggleExpand(key)}
+                style={{
+                  ...commitDividerStyle,
+                  cursor: isDragging ? "grabbing" : "pointer",
+                  borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
+                  background: isDragging ? "rgba(74,158,255,0.08)" : "transparent",
+                }}
+                title="Commit point — drag to reposition"
+              >
+                <span style={commitDividerLineStyle} />
+                <span style={commitDividerBadgeStyle(row.cp.mode, row.cp.status)}>
+                  commit · {row.cp.mode}
+                  {row.cp.status !== "pending" && row.cp.status !== "done" ? ` · ${row.cp.status}` : ""}
+                  {row.cp.status === "done" ? " · done" : ""}
+                </span>
+                <span style={commitDividerLineStyle} />
+              </div>
+              {isExpanded ? <CommitPointRow cp={row.cp} /> : null}
+            </div>
+          );
+        }
+        if (row.kind === "wait") {
+          const isExpanded = expandedId === key;
+          return (
+            <div key={key}>
+              <div
+                draggable
+                onDragStart={(event) => {
+                  setDraggingKey(key);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", row.id);
+                }}
+                onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
+                onDragOver={(event) => {
+                  if (!draggingKey || draggingKey === key) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (overKey !== key) setOverKey(key);
+                }}
+                onDragLeave={() => { if (overKey === key) setOverKey(null); }}
+                onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
+                onClick={() => onToggleExpand(key)}
+                style={{
+                  ...commitDividerStyle,
+                  cursor: isDragging ? "grabbing" : "pointer",
+                  borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
+                  background: isDragging ? "rgba(217,119,6,0.08)" : "transparent",
+                }}
+                title="Wait point — drag to reposition"
+              >
+                <span style={commitDividerLineStyle} />
+                <span style={waitDividerBadgeStyle(row.wp.status)}>
+                  wait{row.wp.note ? ` · ${row.wp.note}` : ""}
+                  {row.wp.status === "triggered" ? " · stopped" : ""}
+                </span>
+                <span style={commitDividerLineStyle} />
+              </div>
+              {isExpanded ? <WaitPointRow wp={row.wp} /> : null}
+            </div>
+          );
+        }
+        const item = row.item;
         const isExpanded = expandedId === item.id;
-        const isOver = overId === item.id && draggingId !== item.id;
         return (
-          <div key={item.id}>
+          <div key={key}>
             <div
               draggable
               onDragStart={(event) => {
-                setDraggingId(item.id);
+                setDraggingKey(key);
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("text/plain", item.id);
                 event.dataTransfer.setData(
@@ -527,15 +676,15 @@ function WorkGroupList({
                   JSON.stringify({ itemId: item.id, fromBatchId: scopeBatchId }),
                 );
               }}
-              onDragEnd={() => { setDraggingId(null); setOverId(null); }}
+              onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
               onDragOver={(event) => {
-                if (!draggingId || draggingId === item.id) return;
+                if (!draggingKey || draggingKey === key) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
-                if (overId !== item.id) setOverId(item.id);
+                if (overKey !== key) setOverKey(key);
               }}
-              onDragLeave={() => { if (overId === item.id) setOverId(null); }}
-              onDrop={(event) => { event.preventDefault(); handleDrop(item.id); }}
+              onDragLeave={() => { if (overKey === key) setOverKey(null); }}
+              onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
               onClick={() => onToggleExpand(item.id)}
               onContextMenu={(event) => onContextMenu(event, item)}
               style={{
@@ -543,9 +692,9 @@ function WorkGroupList({
                 alignItems: "center",
                 gap: 6,
                 padding: "4px 8px",
-                cursor: draggingId === item.id ? "grabbing" : "pointer",
+                cursor: isDragging ? "grabbing" : "pointer",
                 borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
-                background: isExpanded ? "var(--bg-2)" : draggingId === item.id ? "rgba(255,255,255,0.04)" : "transparent",
+                background: isExpanded ? "var(--bg-2)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
                 fontSize: 12,
                 userSelect: "none",
               }}
@@ -910,46 +1059,7 @@ const groupHeaderStyle: CSSProperties = {
   color: "var(--muted)",
 };
 
-function CommitPointsSection({
-  commitPoints,
-  commitMode,
-  setCommitMode,
-  onAdd,
-}: {
-  commitPoints: CommitPoint[];
-  commitMode: CommitPointMode;
-  setCommitMode(mode: CommitPointMode): void;
-  onAdd(): void;
-}) {
-  return (
-    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8 }}>
-      <div style={{ ...groupHeaderStyle, justifyContent: "space-between" }}>
-        <span>Commit points</span>
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", textTransform: "none", letterSpacing: 0 }}>
-          <select
-            value={commitMode}
-            onChange={(e) => setCommitMode(e.target.value as CommitPointMode)}
-            title="Default mode for new commit points"
-            style={{ fontSize: 11, padding: "2px 4px" }}
-          >
-            <option value="approval">Approval</option>
-            <option value="auto">Auto-commit</option>
-          </select>
-          <button onClick={onAdd} style={{ ...miniButtonStyle, padding: "2px 8px" }} title="Add a commit point at the end of this batch's queue">
-            + Commit when done
-          </button>
-        </span>
-      </div>
-      {commitPoints.length === 0 ? (
-        <div style={{ padding: 8, color: "var(--muted)", fontSize: 11 }}>No commit points.</div>
-      ) : (
-        commitPoints.map((cp, i) => <CommitPointRow key={cp.id} cp={cp} index={i + 1} />)
-      )}
-    </div>
-  );
-}
-
-function CommitPointRow({ cp, index }: { cp: CommitPoint; index: number }) {
+function CommitPointRow({ cp }: { cp: CommitPoint }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(cp.proposed_message ?? "");
   useEffect(() => { setDraft(cp.proposed_message ?? ""); }, [cp.proposed_message]);
@@ -957,7 +1067,7 @@ function CommitPointRow({ cp, index }: { cp: CommitPoint; index: number }) {
   return (
     <div style={commitRowStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={commitBadgeStyle(cp.status)}>#{index} {cp.status}</span>
+        <span style={commitBadgeStyle(cp.status)}>{cp.status}</span>
         <select
           value={cp.mode}
           disabled={cp.status !== "pending"}
@@ -973,7 +1083,7 @@ function CommitPointRow({ cp, index }: { cp: CommitPoint; index: number }) {
           ) : null}
           {cp.status !== "done" ? (
             <button style={miniButtonStyle} onClick={() => {
-              if (window.confirm("Delete this commit point?")) void deleteCommitPoint(cp.id).catch(() => {});
+              void deleteCommitPoint(cp.id).catch(() => {});
             }}>Delete</button>
           ) : null}
         </span>
@@ -1022,6 +1132,48 @@ function CommitPointRow({ cp, index }: { cp: CommitPoint; index: number }) {
   );
 }
 
+const queueMarkerBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "6px 10px",
+};
+
+const commitDividerStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "6px 8px",
+  borderTop: "1px solid transparent",
+  userSelect: "none",
+};
+
+const commitDividerLineStyle: CSSProperties = {
+  flex: 1,
+  height: 1,
+  background: "var(--border-strong)",
+};
+
+function commitDividerBadgeStyle(mode: CommitPointMode, status: CommitPoint["status"]): CSSProperties {
+  const accent = status === "proposed" ? "#d97706"
+    : status === "rejected" ? "#e06b6b"
+    : status === "done" ? "#10b981"
+    : status === "approved" ? "#0ea5e9"
+    : "#8888aa";
+  return {
+    fontSize: 10,
+    fontFamily: "ui-monospace, monospace",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    padding: "2px 8px",
+    borderRadius: 999,
+    background: accent + "22",
+    color: accent,
+    border: `1px solid ${accent}55`,
+    flexShrink: 0,
+  };
+}
+
 const commitRowStyle: CSSProperties = {
   padding: "6px 10px",
   borderBottom: "1px solid var(--border)",
@@ -1051,37 +1203,10 @@ const commitMessageEditStyle: CSSProperties = {
   resize: "vertical",
 };
 
-function WaitPointsSection({
-  waitPoints,
-  onAdd,
-}: {
-  waitPoints: WaitPoint[];
-  onAdd(): void;
-}) {
-  return (
-    <div style={{ borderTop: "1px solid var(--border)" }}>
-      <div style={{ ...groupHeaderStyle, justifyContent: "space-between" }}>
-        <span>Wait points</span>
-        <button onClick={onAdd} style={{ ...miniButtonStyle, padding: "2px 8px" }} title="Stop auto-progression here until you click Continue">
-          + Wait here
-        </button>
-      </div>
-      {waitPoints.length === 0 ? (
-        <div style={{ padding: 8, color: "var(--muted)", fontSize: 11 }}>
-          No wait points. Active batch auto-advances through its work queue.
-        </div>
-      ) : (
-        waitPoints.map((wp, i) => <WaitPointRow key={wp.id} wp={wp} index={i + 1} />)
-      )}
-    </div>
-  );
-}
-
-function WaitPointRow({ wp, index }: { wp: WaitPoint; index: number }) {
+function WaitPointRow({ wp }: { wp: WaitPoint }) {
   return (
     <div style={commitRowStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={waitBadgeStyle(wp.status)}>#{index} {wp.status}</span>
         {wp.note ? <span style={{ color: "var(--muted)", fontSize: 11 }}>{wp.note}</span> : null}
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
           {wp.status === "pending" ? (
@@ -1114,21 +1239,19 @@ function WaitPointRow({ wp, index }: { wp: WaitPoint; index: number }) {
   );
 }
 
-function waitBadgeStyle(status: WaitPoint["status"]): CSSProperties {
-  const colors: Record<WaitPoint["status"], string> = {
-    pending: "#6b7280",
-    triggered: "#d97706",
-  };
+function waitDividerBadgeStyle(status: WaitPoint["status"]): CSSProperties {
+  const accent = status === "triggered" ? "#d97706" : "#8888aa";
   return {
     fontSize: 10,
     fontFamily: "ui-monospace, monospace",
-    padding: "1px 6px",
-    borderRadius: 8,
-    background: colors[status] + "22",
-    color: colors[status],
-    border: `1px solid ${colors[status]}55`,
-    textTransform: "uppercase",
     letterSpacing: 0.4,
+    textTransform: "uppercase",
+    padding: "2px 8px",
+    borderRadius: 999,
+    background: accent + "22",
+    color: accent,
+    border: `1px solid ${accent}55`,
+    flexShrink: 0,
   };
 }
 

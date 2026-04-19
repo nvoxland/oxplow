@@ -90,6 +90,30 @@ export class CommitPointStore {
     return row;
   }
 
+  /** Bulk assign sort_index values. Caller provides entries in desired order;
+   *  the store just writes the given index verbatim (no renumbering). */
+  setSortIndexes(entries: Array<{ id: string; sortIndex: number }>): void {
+    if (entries.length === 0) return;
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      for (const entry of entries) {
+        this.stateDb.run(
+          `UPDATE commit_point SET sort_index = ?, updated_at = ? WHERE id = ?`,
+          entry.sortIndex, now, entry.id,
+        );
+      }
+    });
+    // Emit one reordered change per distinct batch touched.
+    const batches = new Set<string>();
+    for (const entry of entries) {
+      const cp = this.get(entry.id);
+      if (cp) batches.add(cp.batch_id);
+    }
+    for (const batchId of batches) {
+      this.emit({ batchId, kind: "reordered", id: null });
+    }
+  }
+
   setMode(id: string, mode: CommitPointMode): CommitPoint {
     if (!COMMIT_POINT_MODES.has(mode)) throw new Error(`invalid commit mode: ${mode}`);
     const existing = this.requireCommitPoint(id);
