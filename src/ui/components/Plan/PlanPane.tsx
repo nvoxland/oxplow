@@ -744,9 +744,11 @@ function ContextMenu({ menu, onDelete }: { menu: ContextMenuState; onDelete(): v
       }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
+      data-testid="plan-context-menu"
     >
       <button type="button"
         onClick={onDelete}
+        data-testid="plan-context-menu-delete"
         style={{
           display: "block",
           width: "100%",

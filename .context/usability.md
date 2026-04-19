@@ -64,6 +64,8 @@ Things I keep forgetting. Read this before adding any UI.
   - `batch-rail-new`, `batch-chip-<batchId>` (chip testid is on the
     outer wrapper that owns the drop handlers, so drag probes can
     target it directly)
+  - `plan-context-menu` on the Plan-pane right-click menu wrapper,
+    `plan-context-menu-delete` on the Delete action inside it
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback
