@@ -7,6 +7,7 @@ import {
   classifyWorkItem,
   groupHeaderStyle,
   inputStyle,
+  sectionDefaultStatus,
   sectionHeaderStyle,
   statusIcon,
   type WorkItemGroup,
@@ -33,10 +34,13 @@ import { WorkItemDetail, type WorkItemDetailChanges } from "./WorkItemDetail.js"
  * `addPointsSlot` so the shape of the queue doesn't require scrolling past
  * done work.
  *
- * Drag-reorder rewrites `sort_index` globally; the section split is purely
- * visual, so dragging an item into a section it doesn't belong in just
- * slides past that section's header until the user moves it somewhere its
- * status fits.
+ * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
+ * section boundaries also changes its status to that section's default
+ * (toDo → ready, humanCheck → human_check, done → done) so the user can
+ * triage straight from the Work panel. InProgress rejects drop-in: the
+ * agent owns that status and in-progress items are drag-locked. Empty
+ * sections stay hidden until a drag is active, at which point they appear
+ * as drop targets.
  */
 export type QueueRow =
   | { kind: "work"; id: string; sortIndex: number; item: WorkItem }
@@ -89,6 +93,7 @@ export function WorkGroupList({
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
+  const [overSection, setOverSection] = useState<WorkItemSectionKind | null>(null);
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
@@ -112,34 +117,71 @@ export function WorkGroupList({
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
     for (const { kind, label } of SECTION_ORDER) {
-      if (buckets[kind].length === 0) continue;
       buckets[kind].sort((a, b) => a.sortIndex - b.sortIndex);
-      orderedSections.push({ kind, label, rows: buckets[kind] });
-      flat.push(...buckets[kind]);
+      // Keep empty sections in the list while a drag is active so the user
+      // can drop into an empty "Done" / "Human check" to create the first
+      // item there. When nothing is dragging, empty sections are suppressed
+      // by the renderer below.
+      if (buckets[kind].length === 0) {
+        orderedSections.push({ kind, label, rows: [] });
+      } else {
+        orderedSections.push({ kind, label, rows: buckets[kind] });
+        flat.push(...buckets[kind]);
+      }
     }
     return { sections: orderedSections, allRows: flat };
   }, [group.items, commitPoints, waitPoints]);
 
   const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
 
+  // Look up the dragged work item (if any) so cross-section drops can route
+  // through onUpdateWorkItem. Commit/wait rows don't have a status to change.
+  const draggedWorkItem = (() => {
+    if (!draggingKey) return null;
+    const row = allRows.find((r) => keyFor(r) === draggingKey);
+    return row && row.kind === "work" ? row.item : null;
+  })();
+
+  const resetDrag = () => { setDraggingKey(null); setOverKey(null); setOverSection(null); };
+
   const handleDropOnKey = (targetKey: string) => {
-    if (!draggingKey || draggingKey === targetKey) {
-      setDraggingKey(null); setOverKey(null); return;
-    }
+    if (!draggingKey || draggingKey === targetKey) { resetDrag(); return; }
     const from = allRows.findIndex((row) => keyFor(row) === draggingKey);
     const to = allRows.findIndex((row) => keyFor(row) === targetKey);
-    if (from < 0 || to < 0) {
-      setDraggingKey(null); setOverKey(null); return;
+    if (from < 0 || to < 0) { resetDrag(); return; }
+    const dragged = allRows[from]!;
+    const target = allRows[to]!;
+    // Cross-section drop of a work item — change its status to match the
+    // target section. The reorder that follows keeps its relative position
+    // in the flattened list.
+    if (dragged.kind === "work" && target.kind === "work") {
+      const fromSection = classifyWorkItem(dragged.item.status);
+      const toSection = classifyWorkItem(target.item.status);
+      if (fromSection !== toSection) {
+        const nextStatus = sectionDefaultStatus(toSection);
+        if (nextStatus && nextStatus !== dragged.item.status) {
+          void onUpdateWorkItem(dragged.item.id, { status: nextStatus });
+        }
+      }
     }
     const next = allRows.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved!);
-    setDraggingKey(null); setOverKey(null);
+    resetDrag();
     if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
       onReorderMixed(next.map((row) => ({ kind: row.kind, id: row.id })));
     } else {
       void onReorderWorkItems(next.filter((row) => row.kind === "work").map((row) => row.id));
     }
+  };
+
+  const handleDropOnSection = (section: WorkItemSectionKind) => {
+    if (!draggedWorkItem) { resetDrag(); return; }
+    const nextStatus = sectionDefaultStatus(section);
+    resetDrag();
+    if (!nextStatus) return;
+    if (classifyWorkItem(draggedWorkItem.status) === section) return;
+    void onUpdateWorkItem(draggedWorkItem.id, { status: nextStatus });
   };
 
   const renderRow = (row: QueueRow) => {
@@ -157,7 +199,7 @@ export function WorkGroupList({
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", row.id);
             }}
-            onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
+            onDragEnd={resetDrag}
             onDragOver={(event) => {
               if (!draggingKey || draggingKey === key) return;
               event.preventDefault();
@@ -198,7 +240,7 @@ export function WorkGroupList({
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", row.id);
             }}
-            onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
+            onDragEnd={resetDrag}
             onDragOver={(event) => {
               if (!draggingKey || draggingKey === key) return;
               event.preventDefault();
@@ -251,7 +293,7 @@ export function WorkGroupList({
             JSON.stringify({ itemId: row.item.id, fromBatchId: scopeBatchId }),
           );
         }}
-        onDragEnd={() => { setDraggingKey(null); setOverKey(null); }}
+        onDragEnd={resetDrag}
         onDragOver={(event) => {
           if (!draggingKey || draggingKey === key) return;
           event.preventDefault();
@@ -273,14 +315,50 @@ export function WorkGroupList({
           <PriorityIcon priority={group.epic.priority} />
         </div>
       ) : null}
-      {sections.map((section, index) => (
-        <div key={section.kind}>
-          {index === 0 && !group.epic ? null : <div style={sectionHeaderStyle}>{section.label}</div>}
-          {index === 0 && !group.epic ? <div style={firstSectionLabelStyle}>{section.label}</div> : null}
-          {section.rows.map(renderRow)}
-          {section.kind === "toDo" && addPointsSlot ? addPointsSlot : null}
-        </div>
-      ))}
+      {sections.map((section, index) => {
+        const empty = section.rows.length === 0;
+        // Only show empty sections while a work item is actively being
+        // dragged — they act as drop zones for status changes. Otherwise
+        // hide them so the panel stays compact.
+        if (empty && (!draggedWorkItem || section.kind === "inProgress")) {
+          return null;
+        }
+        const canDrop = !!draggedWorkItem
+          && section.kind !== "inProgress"
+          && classifyWorkItem(draggedWorkItem.status) !== section.kind;
+        const isOverSection = canDrop && overSection === section.kind;
+        const headerDropHandlers = canDrop
+          ? {
+              onDragOver: (event: React.DragEvent) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (overSection !== section.kind) setOverSection(section.kind);
+              },
+              onDragLeave: () => {
+                if (overSection === section.kind) setOverSection(null);
+              },
+              onDrop: (event: React.DragEvent) => {
+                event.preventDefault();
+                handleDropOnSection(section.kind);
+              },
+            }
+          : {};
+        const headerBaseStyle: CSSProperties =
+          index === 0 && !group.epic ? firstSectionLabelStyle : sectionHeaderStyle;
+        const headerStyle: CSSProperties = {
+          ...headerBaseStyle,
+          outline: isOverSection ? "1px solid var(--accent)" : "none",
+          background: isOverSection ? "rgba(74,158,255,0.08)" : headerBaseStyle.background,
+          cursor: canDrop ? "copy" : headerBaseStyle.cursor,
+        };
+        return (
+          <div key={section.kind}>
+            <div style={headerStyle} {...headerDropHandlers}>{section.label}</div>
+            {section.rows.map(renderRow)}
+            {section.kind === "toDo" && addPointsSlot ? addPointsSlot : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

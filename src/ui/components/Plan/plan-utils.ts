@@ -38,6 +38,18 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   }
 }
 
+// Default landing status when a work item is dragged *into* a section. Returns
+// null for inProgress: the agent owns that status, and in-progress items are
+// drag-locked anyway, so we don't let users promote items into it by drop.
+export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStatus | null {
+  switch (section) {
+    case "inProgress": return null;
+    case "toDo": return "ready";
+    case "humanCheck": return "human_check";
+    case "done": return "done";
+  }
+}
+
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
     inProgress: [], toDo: [], humanCheck: [], done: [],

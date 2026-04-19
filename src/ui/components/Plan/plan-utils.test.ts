@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { WorkItem, WorkItemStatus } from "../../api.js";
-import { classifyWorkItem, splitIntoSections } from "./plan-utils.js";
+import { classifyWorkItem, sectionDefaultStatus, splitIntoSections } from "./plan-utils.js";
 
 function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem {
   return {
@@ -62,6 +62,14 @@ test("splitIntoSections sorts items within a section by sort_index", () => {
     item("w2", "waiting", 10),
   ]);
   expect(sections[0]?.items.map((i) => i.id)).toEqual(["w1", "w2", "w3"]);
+});
+
+test("sectionDefaultStatus maps drop-target sections to landing statuses; in-progress is blocked", () => {
+  expect(sectionDefaultStatus("toDo")).toBe("ready");
+  expect(sectionDefaultStatus("humanCheck")).toBe("human_check");
+  expect(sectionDefaultStatus("done")).toBe("done");
+  // The agent owns in_progress and its items are drag-locked — reject drops.
+  expect(sectionDefaultStatus("inProgress")).toBeNull();
 });
 
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {
