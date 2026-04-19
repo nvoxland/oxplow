@@ -20,6 +20,67 @@ the agent are:
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
 
+**Caveat — the first turn still needs a user prompt.** "Runtime never
+prompts" is about auto-progression, not cold-start. When the agent is
+sitting idle at its shell prompt (e.g. just after `newde` opens a
+fresh project, or after a `Stop` that didn't block), creating a work
+item does **not** kick it off. Someone — a human, or a harness typing
+into the xterm — has to send the first `UserPromptSubmit`. Stop-hook
+chaining only begins after the agent has done at least one turn.
+
+## Driving from automation
+
+Everything a test harness (or another agent) needs to drive an inner
+newde agent:
+
+- **Where the agent runs.** Each batch has a tmux pane rendered in the
+  first center-area tab. The renderer is `TerminalPane` attached to
+  `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
+  `.xterm`. Click that element to focus, type with regular keystrokes —
+  xterm pipes them through the PTY to claude.
+- **When a turn is done.** `deriveBatchAgentStatus`
+  (`src/session/agent-status.ts`) reduces hook events to
+  `idle | working | waiting | done`; the UI surfaces it as the colored
+  dot on each batch tab. Poll for the transition *out* of `working` to
+  know a turn finished. Looking at terminal rows alone is fragile
+  (scrollback, progress indicators, partial lines).
+- **Committing from a driven session.** Two paths, pick one up front:
+  - **Ad-hoc.** Tell the agent to run `git commit` directly. No commit
+    point needed, no approval UI. Good for "do this one thing and
+    land it."
+  - **Automated multi-step.** Insert a commit point into the queue
+    (`createCommitPoint`, or click `+ Commit when done` in the Plan
+    panel) *before* prompting the agent. When the Stop hook sees a
+    pending commit point, it blocks with a directive telling the
+    agent to call `mcp__newde__propose_commit({ commit_point_id,
+    message })`. The point then transitions to `approved` (auto-mode)
+    or awaits user approval in the UI (approval-mode) before
+    `executeApprovedCommit` runs `gitCommitAll`.
+- **Work-item lifecycle.** Create → Stop-hook picks next ready item →
+  agent marks `in_progress` → agent works → agent marks `human_check`
+  when waiting for user review. Agents **never self-mark `done`** —
+  `done` is user-only. Polling "is everything done?" must treat
+  `human_check` as terminal-from-the-pipeline's-perspective.
+
+## Common pitfalls
+
+- **`propose_commit` with no active commit point silently fails.** The
+  agent logs a suggested message to the terminal and moves on; the
+  diff stays uncommitted. If you want an ad-hoc commit, ask for
+  `git commit`, not `propose_commit`.
+- **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
+  non-`active` batch.** See "Write guard" below. If the agent reports
+  "permission denied" on a file write inside a non-writer batch,
+  that's the hook doing its job — promote the batch to writer or
+  switch to the writer batch instead.
+- **Queueing work without a prompt does nothing if the agent is
+  idle.** See the first-turn caveat above.
+- **`human_check` is terminal for the pipeline, not for the user.**
+  Pipeline considers all preceding work "done" once it's in
+  `human_check`, so commit-point activation doesn't wait for user
+  review. That's intentional — it lets the agent land code while the
+  user catches up on review asynchronously.
+
 ## Launching the agent
 
 `buildAgentCommandForSession` in `src/agent/agent-command.ts` constructs a
@@ -128,18 +189,6 @@ The pipeline runs in priority order:
    waiting + ready items only — `human_check` belongs to the user's
    review queue and is terminal from the pipeline's perspective.
 5. **Otherwise.** Allow stop.
-
-**`propose_commit` vs. direct `git commit`.** Commit points + the
-"+ Commit when done" Work-panel button are for **automated workflows**
-where the user wants the agent to pause and commit at a specific point
-in a multi-step batch. For one-off "finish this and commit" work,
-just tell the agent to run `git commit` directly — no commit point
-needed, no approval UI. If you prompt the agent to `propose_commit`
-and there's no active commit point, the agent will skip it and the
-diff stays uncommitted until someone notices. The `+ Commit when done`
-bar renders even when the To-do section is empty (so it's
-discoverable), but the canonical path for ad-hoc commits is still
-plain `git commit` via the agent.
 
 Auto-mode commit points pass straight through: the agent proposes →
 `commitPointStore.propose` jumps the status to `approved` →
