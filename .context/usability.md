@@ -54,6 +54,9 @@ Things I keep forgetting. Read this before adding any UI.
   - `command-palette-input`
   - `plan-add-points-bar`, `plan-add-commit-point`, `plan-add-wait-point`
   - `files-commit`, `files-commit-message`, `files-commit-submit`
+  - `batch-rail-new`, `batch-chip-<batchId>` (chip testid is on the
+    outer wrapper that owns the drop handlers, so drag probes can
+    target it directly)
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback

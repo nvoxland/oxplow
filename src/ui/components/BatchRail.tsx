@@ -147,7 +147,7 @@ export function BatchRail({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
-        <button type="button" style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
+        <button type="button" data-testid="batch-rail-new" style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
           {showCreate ? "Cancel" : "+ New batch"}
         </button>
         {completed.length > 0 ? (
@@ -288,6 +288,7 @@ function BatchChip({
 
   return (
     <div
+      data-testid={`batch-chip-${batch.id}`}
       style={{ position: "relative", flexShrink: 0 }}
       onMouseEnter={scheduleShow}
       onMouseLeave={cancelShow}
