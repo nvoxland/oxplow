@@ -12,13 +12,27 @@ async function main() {
 
   const { window, close } = await launchNewde(projectDir);
   try {
-    await window.waitForTimeout(2_000);
+    await window.waitForTimeout(4_000);
+    // Make sure Work tab is active.
+    await window.getByRole("button", { name: "Work", exact: true }).first().click().catch(() => {});
+    await window.waitForTimeout(500);
     await window.screenshot({ path: resolve(outDir, "02-before.png") });
+
+    // Count all buttons by type BEFORE clicking anything — captures current state.
+    const pre = await window.evaluate(() => {
+      const bs = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
+      const counts: Record<string, number> = {};
+      for (const b of bs) counts[b.type] = (counts[b.type] ?? 0) + 1;
+      return { total: bs.length, counts };
+    });
+    console.log("[probe] pre-click button counts:", JSON.stringify(pre));
 
     // Try to find and click "+ New work item" by text.
     const btn = window.getByText("+ New work item", { exact: true }).first();
     console.log("[probe] visible?", await btn.isVisible().catch(() => false));
-    await btn.click({ timeout: 5_000 });
+    console.log("[probe] count:", await btn.count());
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ timeout: 10_000 });
     await window.waitForTimeout(800);
     await window.screenshot({ path: resolve(outDir, "03-after-click.png") });
 
