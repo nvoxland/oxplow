@@ -28,6 +28,25 @@ Things I keep forgetting. Read this before adding any UI.
   `keybindings.ts` so they appear in the native menu and help discoverability.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find, Cmd/Ctrl+P quick
   open, Cmd/Ctrl+Shift+N new work item. Don't collide with these.
+- **Cmd+K palette listener uses `capture: true`.** Monaco and other focused
+  inputs run their own keydown handlers in the bubble phase; capture lets
+  the palette fire before any of them. If you add another global shortcut
+  that needs to beat an editor, copy that pattern.
+
+## Test-driveability
+
+- **Add a `data-testid` to every new seam a user — or a test — would
+  need to drive:** tabs, primary action buttons, form inputs, list
+  items, dock panels. Existing conventions:
+  - `dock-tab-<id>` / `dock-panel-<id>` on DockShell rail + content
+  - `file-tree-entry-<path>` on FileTree nodes (plus `data-kind` and,
+    for dirs, `data-expanded`)
+  - `monaco-host` on the editor container, `data-file-path=<path>`
+  - `plan-new-work-item`, `work-item-title`, `work-item-priority`,
+    `work-item-description`, `work-item-acceptance`, `work-item-save`,
+    `work-item-save-another`, `work-item-cancel`
+  - `command-palette-input`
+  These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback
 

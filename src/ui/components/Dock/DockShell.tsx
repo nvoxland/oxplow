@@ -177,6 +177,8 @@ export function DockShell({
             key={tw.id}
             onClick={() => setActiveId(tw.id)}
             title={tw.label}
+            data-testid={`dock-tab-${tw.id}`}
+            data-active={active ? "true" : "false"}
             style={orientedStyle}
           >
             {tw.label}
@@ -206,6 +208,8 @@ export function DockShell({
         return (
           <div
             key={tw.id}
+            data-testid={`dock-panel-${tw.id}`}
+            data-active={isActive ? "true" : "false"}
             style={{
               flex: 1,
               minHeight: 0,

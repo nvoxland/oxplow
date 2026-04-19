@@ -266,7 +266,7 @@ export function PlanPane({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
+          <button type="button" data-testid="plan-new-work-item" onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
             + New work item
           </button>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
@@ -632,45 +632,50 @@ function NewWorkItemModal({
         </div>
         <input
           autoFocus
+          data-testid="work-item-title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title (required)"
           style={inputStyle}
         />
-        <select value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
+        <select data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
           <option value="urgent">Urgent</option>
         </select>
         {showParent ? (
-        <select value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
+        <select data-testid="work-item-parent" value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
           <option value="">No parent epic</option>
           {epics.map((epic) => (<option key={epic.id} value={epic.id}>{epic.title}</option>))}
         </select>
         ) : null}
         <textarea
+          data-testid="work-item-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description"
           style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
         />
         <textarea
+          data-testid="work-item-acceptance"
           value={acceptance}
           onChange={(e) => setAcceptance(e.target.value)}
           placeholder="Acceptance criteria, one per line"
           style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
         />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={miniButtonStyle}>Cancel</button>
+          <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>Cancel</button>
           <button
             type="button"
+            data-testid="work-item-save-another"
             disabled={!canSubmit}
             onClick={() => { if (canSubmit) void onSubmit(true); }}
             style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
           >Save and Another</button>
           <button
             type="submit"
+            data-testid="work-item-save"
             disabled={!canSubmit}
             style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5 }}
           >Save</button>

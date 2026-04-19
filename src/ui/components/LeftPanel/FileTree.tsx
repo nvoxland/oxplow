@@ -66,6 +66,9 @@ export function TreeEntries({
         return (
           <div key={entry.path}>
             <button type="button"
+              data-testid={`file-tree-entry-${entry.path}`}
+              data-kind={entry.kind}
+              data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
               onClick={() => {
                 if (entry.kind === "directory") {
                   void onToggleDirectory(entry.path);

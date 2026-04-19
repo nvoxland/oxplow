@@ -104,6 +104,7 @@ export function CommandPalette({
             }
           }}
           placeholder="Run a command…"
+          data-testid="command-palette-input"
           style={inputStyle}
         />
         <div ref={listRef} style={listStyle}>
