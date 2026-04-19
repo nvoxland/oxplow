@@ -66,6 +66,9 @@ Things I keep forgetting. Read this before adding any UI.
     target it directly)
   - `plan-context-menu` on the Plan-pane right-click menu wrapper,
     `plan-context-menu-delete` on the Delete action inside it
+  - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
+    agent tab, `file:<path>` for open-file tabs);
+    `center-tab-close-<id>` on the × close button
   - `batch-rail-create-input`, `batch-rail-create-submit` on the
     new-batch creation row; `batch-chip-rename-input-<id>` on the
     inline rename input; `batch-chip-promote-<id>` and

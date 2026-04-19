@@ -29,6 +29,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
           return (
             <div
               key={tab.id}
+              data-testid={`center-tab-${tab.id}`}
               onClick={() => onActivate(tab.id)}
               style={{
                 padding: "8px 12px",
@@ -47,6 +48,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
               <span>{tab.label}</span>
               {tab.closable && onClose ? (
                 <button type="button"
+                  data-testid={`center-tab-close-${tab.id}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     onClose(tab.id);
