@@ -171,6 +171,12 @@ export function PlanPane({
     return null;
   }, [groups, selectedId]);
 
+  const activeCreate = mode === "backlog" ? onCreateBacklogItem : onCreateWorkItem;
+  const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
+  const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
+  const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;
+  const currentScopeBatchId = mode === "backlog" ? null : batch?.id ?? null;
+
   useEffect(() => {
     // Listen at the pane level (not window) so the Agent pane / editor don't
     // steal the shortcut when they're focused, AND so the Plan pane can
@@ -183,6 +189,35 @@ export function PlanPane({
       if (kbPicker) return; // modal owns keyboard
       if (isEditableTarget(event.target)) return;
       const key = event.key;
+      if ((key === "ArrowDown" || key === "ArrowUp") && event.shiftKey) {
+        // Shift+↑/↓ reorders the selected item within its own status
+        // section. Crossing a section boundary is a no-op — for that,
+        // the user drags, which intentionally changes status as a side
+        // effect. Reordering is section-local so the keyboard path
+        // doesn't silently promote/demote.
+        if (!selectedId) return;
+        const selected = groups
+          .flatMap((g) => g.items)
+          .find((item) => item.id === selectedId);
+        if (!selected) return;
+        const selSection = classifyWorkItem(selected.status);
+        const sectionIds = navigableIds.filter((id) => {
+          const item = groups.flatMap((g) => g.items).find((i) => i.id === id);
+          return item ? classifyWorkItem(item.status) === selSection : false;
+        });
+        const posInSection = sectionIds.indexOf(selectedId);
+        const neighborPosInSection = key === "ArrowDown" ? posInSection + 1 : posInSection - 1;
+        if (neighborPosInSection < 0 || neighborPosInSection >= sectionIds.length) return;
+        event.preventDefault();
+        const neighborId = sectionIds[neighborPosInSection]!;
+        const nextOrder = navigableIds.slice();
+        const i = nextOrder.indexOf(selectedId);
+        const j = nextOrder.indexOf(neighborId);
+        if (i < 0 || j < 0) return;
+        [nextOrder[i], nextOrder[j]] = [nextOrder[j]!, nextOrder[i]!];
+        void runWithError("Reorder work items", activeReorder(nextOrder));
+        return;
+      }
       if (key === "ArrowDown" || key === "ArrowUp") {
         if (navigableIds.length === 0) return;
         event.preventDefault();
@@ -204,13 +239,7 @@ export function PlanPane({
     };
     el.addEventListener("keydown", handler);
     return () => el.removeEventListener("keydown", handler);
-  }, [navigableIds, selectedId, kbPicker]);
-
-  const activeCreate = mode === "backlog" ? onCreateBacklogItem : onCreateWorkItem;
-  const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
-  const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
-  const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;
-  const currentScopeBatchId = mode === "backlog" ? null : batch?.id ?? null;
+  }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   useEffect(() => {
     if (openNewRequest === undefined || openNewRequest === 0) return;
@@ -261,6 +290,7 @@ export function PlanPane({
     <div
       ref={paneRef}
       tabIndex={0}
+      data-testid="plan-pane"
       onClick={() => paneRef.current?.focus()}
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >

@@ -34,6 +34,11 @@ Things I keep forgetting. Read this before adding any UI.
   `keybindings.ts` so they appear in the native menu and help discoverability.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find, Cmd/Ctrl+P quick
   open, Cmd/Ctrl+Shift+N new work item. Don't collide with these.
+- **Plan pane: Shift+↑/↓ reorders the selected work item within its own
+  status section.** Crossing a section boundary is a deliberate no-op —
+  to change status, the user drags (which changes status as a side
+  effect). Plain ↑/↓ just moves selection; Enter toggles the detail
+  pane; `s`/`p` opens the status/priority pickers.
 - **Cmd+K palette listener uses `capture: true`.** Monaco and other focused
   inputs run their own keydown handlers in the bubble phase; capture lets
   the palette fire before any of them. If you add another global shortcut
@@ -52,6 +57,8 @@ Things I keep forgetting. Read this before adding any UI.
     `work-item-description`, `work-item-acceptance`, `work-item-save`,
     `work-item-save-another`, `work-item-cancel`
   - `command-palette-input`
+  - `plan-pane` (the keydown-listening wrapper — focus this before
+    dispatching keyboard probes, otherwise the listener misses them)
   - `plan-add-points-bar`, `plan-add-commit-point`, `plan-add-wait-point`
   - `files-commit`, `files-commit-message`, `files-commit-submit`
   - `batch-rail-new`, `batch-chip-<batchId>` (chip testid is on the
