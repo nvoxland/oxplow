@@ -157,6 +157,30 @@ additions from the 2026-04-19 Playwright dogfood pass:
 - **B6.** Trace "rejected unauthorized mcp websocket" — legitimate
   defense or spurious noise?
 
+## Dogfood-cycle lessons (2026-04-19)
+
+First full loop through newde-driving-newde surfaced process issues
+worth codifying as scenarios:
+
+- **C1.** Cover the "ad-hoc commit" path explicitly: create a work
+  item → prompt the agent to do it and then `git commit` directly →
+  verify the commit lands on `main`. The "+ Commit when done" bar is
+  for automated multi-step batches, not the normal workflow.
+- **C2.** Cover the "automated commit point" path: pre-insert a
+  commit point AFTER a work item, prompt the agent, watch the Stop
+  hook deliver the `propose_commit` directive, approve via the Work
+  panel UI. This is the path where the approval affordance must be
+  driveable.
+- **C3.** If the agent finds no active commit point to propose
+  against, the terminal gets a hand-edited message; the Work panel
+  shows nothing. Consider surfacing that state in the UI — right now
+  the only way to realize the agent skipped its commit is to read
+  terminal output.
+- **C4.** The agent correctly re-scopes when the work-item description
+  points at the wrong file (task said "PlanPane"; buttons lived in
+  ProjectPanel). Good. But write item descriptions that identify
+  behavior, not file paths, to avoid that mismatch.
+
 ## Out of scope (intentional)
 
 - Building a full Playwright test *suite* that runs in CI. This plan is about
