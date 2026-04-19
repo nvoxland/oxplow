@@ -632,34 +632,44 @@ function NewWorkItemModal({
           <div style={{ fontWeight: 600 }}>{modalTitle}</div>
           <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
         </div>
+        <label htmlFor="work-item-title" style={srOnlyStyle}>Title</label>
         <input
           autoFocus
+          id="work-item-title"
           data-testid="work-item-title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title (required)"
           style={inputStyle}
         />
-        <select data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
+        <label htmlFor="work-item-priority" style={srOnlyStyle}>Priority</label>
+        <select id="work-item-priority" data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
           <option value="urgent">Urgent</option>
         </select>
         {showParent ? (
-        <select data-testid="work-item-parent" value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
+        <>
+        <label htmlFor="work-item-parent" style={srOnlyStyle}>Parent epic</label>
+        <select id="work-item-parent" data-testid="work-item-parent" value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
           <option value="">No parent epic</option>
           {epics.map((epic) => (<option key={epic.id} value={epic.id}>{epic.title}</option>))}
         </select>
+        </>
         ) : null}
+        <label htmlFor="work-item-description" style={srOnlyStyle}>Description</label>
         <textarea
+          id="work-item-description"
           data-testid="work-item-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description"
           style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
         />
+        <label htmlFor="work-item-acceptance" style={srOnlyStyle}>Acceptance criteria</label>
         <textarea
+          id="work-item-acceptance"
           data-testid="work-item-acceptance"
           value={acceptance}
           onChange={(e) => setAcceptance(e.target.value)}
@@ -729,6 +739,18 @@ function ContextMenu({ menu, onDelete }: { menu: ContextMenuState; onDelete(): v
 
 const primaryButtonStyle: CSSProperties = {
   borderRadius: 6, border: "1px solid var(--border)", background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit", padding: "6px 10px",
+};
+
+const srOnlyStyle: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0,
 };
 
 const queueMarkerBarStyle: CSSProperties = {
