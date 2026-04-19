@@ -44,6 +44,7 @@ const api: DesktopApi = {
   gitAppendToGitignore: (streamId, path) => ipcRenderer.invoke("newde:gitAppendToGitignore", streamId, path),
   gitPush: (streamId, options) => ipcRenderer.invoke("newde:gitPush", streamId, options),
   gitPull: (streamId, options) => ipcRenderer.invoke("newde:gitPull", streamId, options),
+  gitCommitAll: (streamId, message) => ipcRenderer.invoke("newde:gitCommitAll", streamId, message),
   listFileCommits: (streamId, path, limit) => ipcRenderer.invoke("newde:listFileCommits", streamId, path, limit),
   gitBlame: (streamId, path) => ipcRenderer.invoke("newde:gitBlame", streamId, path),
   listAllRefs: (streamId) => ipcRenderer.invoke("newde:listAllRefs", streamId),

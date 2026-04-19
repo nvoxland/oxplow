@@ -213,6 +213,7 @@ export interface DesktopApi {
   gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
   gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  gitCommitAll(streamId: string, message: string): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
   listAllRefs(streamId: string): Promise<RefOption[]>;

@@ -26,6 +26,7 @@ import {
   appendToGitignore,
   gitPush,
   gitPull,
+  gitCommitAll,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -616,6 +617,11 @@ export class ElectronRuntime {
   gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): GitOpResult {
     const stream = this.resolveStream(streamId);
     return gitPull(stream.worktree_path, options);
+  }
+
+  gitCommitAll(streamId: string, message: string): GitOpResult & { sha?: string } {
+    const stream = this.resolveStream(streamId);
+    return gitCommitAll(stream.worktree_path, message);
   }
 
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {

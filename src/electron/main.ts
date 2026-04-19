@@ -150,6 +150,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
   ipcMain.handle("newde:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
   ipcMain.handle("newde:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
+  ipcMain.handle("newde:gitCommitAll", (_event, streamId: string, message: string) => currentRuntime.gitCommitAll(streamId, message));
   ipcMain.handle("newde:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
   ipcMain.handle("newde:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));
   ipcMain.handle("newde:listAllRefs", (_event, streamId: string) => currentRuntime.listAllRefs(streamId));

@@ -5,6 +5,7 @@ import {
   getChangeScopes,
   gitAddPath,
   gitAppendToGitignore,
+  gitCommitAll,
   gitPull,
   gitPush,
   gitRestorePath,
@@ -375,6 +376,7 @@ export function ProjectPanel({
   const [agentHistoryState, setAgentHistoryState] = useState<{ path: string } | null>(null);
   const [opResult, setOpResult] = useState<{ title: string; result: GitOpResult } | null>(null);
   const [pushPullDialog, setPushPullDialog] = useState<"push" | "pull" | null>(null);
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
 
   if (!stream) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>loading stream…</div>;
@@ -662,6 +664,18 @@ export function ProjectPanel({
         >⤢</button>
         {gitEnabled ? (
           <>
+            {uncommittedPaths.length > 0 ? (
+              <button
+                type="button"
+                data-testid="files-commit"
+                onClick={() => setCommitDialogOpen(true)}
+                aria-label={`Commit ${uncommittedPaths.length} uncommitted change${uncommittedPaths.length === 1 ? "" : "s"}`}
+                title={`Commit ${uncommittedPaths.length} uncommitted change${uncommittedPaths.length === 1 ? "" : "s"}`}
+                style={commitButtonStyle}
+              >
+                Commit ({uncommittedPaths.length})
+              </button>
+            ) : null}
             <button type="button" onClick={() => setPushPullDialog("pull")} aria-label="Pull…" title="Pull…" style={iconButtonStyle}>↓</button>
             <button type="button" onClick={() => setPushPullDialog("push")} aria-label="Push…" title="Push…" style={iconButtonStyle}>↑</button>
           </>
@@ -774,6 +788,17 @@ export function ProjectPanel({
           turns={currentBatchTurns ?? []}
           fileChanges={currentBatchFileChanges ?? []}
           onClose={() => setAgentHistoryState(null)}
+        />
+      ) : null}
+      {commitDialogOpen && stream ? (
+        <CommitDialog
+          streamId={stream.id}
+          pathCount={uncommittedPaths.length}
+          onClose={() => setCommitDialogOpen(false)}
+          onComplete={(result) => {
+            setCommitDialogOpen(false);
+            setOpResult({ title: "git commit", result });
+          }}
         />
       ) : null}
       {pushPullDialog && stream ? (
@@ -1092,6 +1117,85 @@ function PushPullDialog({
   );
 }
 
+function CommitDialog({
+  streamId,
+  pathCount,
+  onClose,
+  onComplete,
+}: {
+  streamId: string;
+  pathCount: number;
+  onClose(): void;
+  onComplete(result: GitOpResult): void;
+}) {
+  const [message, setMessage] = useState("");
+  const [running, setRunning] = useState(false);
+  useEscape(onClose);
+
+  const trimmed = message.trim();
+  const canSubmit = trimmed.length > 0 && !running;
+
+  const run = async () => {
+    if (!canSubmit) return;
+    setRunning(true);
+    const result = await gitCommitAll(streamId, trimmed);
+    setRunning(false);
+    onComplete(result);
+  };
+
+  return (
+    <ModalShell onClose={onClose} title={`Commit ${pathCount} change${pathCount === 1 ? "" : "s"}`}>
+      <form
+        onSubmit={(e) => { e.preventDefault(); void run(); }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 12, minWidth: 380 }}
+      >
+        <label htmlFor="files-commit-message" style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
+          Commit message
+        </label>
+        <textarea
+          id="files-commit-message"
+          data-testid="files-commit-message"
+          autoFocus
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Summary line&#10;&#10;Optional body"
+          style={{
+            minHeight: 96,
+            resize: "vertical",
+            background: "var(--bg)",
+            color: "var(--fg)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            padding: "6px 8px",
+            font: "inherit",
+          }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canSubmit) {
+              event.preventDefault();
+              void run();
+            }
+          }}
+        />
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>
+          Runs <code>git add -A &amp;&amp; git commit -m …</code> in the stream's worktree.
+          Cmd/Ctrl+Enter to commit.
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
+          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
+          <button
+            type="submit"
+            data-testid="files-commit-submit"
+            disabled={!canSubmit}
+            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff", opacity: canSubmit ? 1 : 0.5 }}
+          >
+            {running ? "Committing…" : "Commit"}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
 function GitOpResultModal({ title, result, onClose }: { title: string; result: GitOpResult; onClose(): void }) {
   useEscape(onClose);
   const colour = result.ok ? "#86efac" : "#f87171";
@@ -1250,6 +1354,14 @@ const iconButtonStyle = {
   fontSize: 12,
   lineHeight: 1,
   flexShrink: 0,
+} as const;
+
+const commitButtonStyle = {
+  ...iconButtonStyle,
+  background: "var(--accent)",
+  color: "#fff",
+  padding: "2px 10px",
+  fontWeight: 600,
 } as const;
 
 const filterSelectStyle = {

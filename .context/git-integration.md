@@ -108,6 +108,21 @@ nested git repos and parent-dir lookups are explicitly refused (see
 secondary worktrees so newde won't try to nest its own worktrees inside
 another tool's checkout.
 
+## UI commit affordance
+
+The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
+header toolbar whenever `gitEnabled && uncommittedPaths.length > 0`.
+Clicking it opens a small `CommitDialog` with a commit-message
+textarea; submitting runs `gitCommitAll` through a dedicated
+`newde:gitCommitAll` IPC method. This is the UI entry point for the
+**ad-hoc commit path** (the path `agent-model.md` distinguishes from
+commit points). The commit-point flow still owns automated batches;
+the button is for "I've got changes and want to land them now."
+
+Button carries `data-testid="files-commit"`; the dialog's message
+textarea is `files-commit-message` and the submit button is
+`files-commit-submit`.
+
 ## Agents never call git directly
 
 A hard rule: the agent's system prompt forbids `git add`, `git commit`,

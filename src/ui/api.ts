@@ -482,6 +482,13 @@ export async function gitPull(
   return desktopApi().gitPull(streamId, options);
 }
 
+export async function gitCommitAll(
+  streamId: string,
+  message: string,
+): Promise<import("../git/git.js").GitOpResult & { sha?: string }> {
+  return desktopApi().gitCommitAll(streamId, message);
+}
+
 export async function listFileCommits(
   streamId: string,
   path: string,
