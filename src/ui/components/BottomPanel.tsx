@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listHookEvents, subscribeHookEvents, type StoredEvent, type NormalizedEvent } from "../api.js";
+import { reportUiError } from "../ui-error.js";
 
 const MAX_ROWS = 200;
 
@@ -12,7 +13,7 @@ export function BottomPanel({ streamId }: { streamId: string | null }) {
     setEvents([]);
     void listHookEvents(streamId).then((initial) => {
       setEvents(initial.slice(-MAX_ROWS));
-    }).catch(() => {});
+    }).catch((err) => reportUiError("Load hook events", err));
     return subscribeHookEvents(streamId, (evt) => {
       setEvents((prev) => {
         const next = [...prev, evt];

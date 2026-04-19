@@ -62,9 +62,14 @@ to `runtime.handleHookEnvelope`, which:
 
 ## Stop-hook pipeline
 
-`computeStopDirective(batchId)` in `src/electron/runtime.ts` is the single
-decision point for what the agent does at the end of a turn. It runs in
-priority order:
+The decision logic lives in `decideStopDirective` (a pure function in
+`src/electron/stop-hook-pipeline.ts`). The runtime's
+`computeStopDirective(batchId)` builds a `BatchSnapshot` from the live
+stores, calls the pure function, then applies any returned side effects
+(currently only `trigger-wait-point`). Keeping the decision separate
+from the side effects lets every branch be unit-tested with a fixture.
+
+The pipeline runs in priority order:
 
 1. **Pending commit point.** Block with a directive built by
    `buildCommitPointStopReason` telling the agent to inspect the diff,

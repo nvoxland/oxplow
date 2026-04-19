@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
+import { decideStopDirective, type BatchSnapshot } from "./stop-hook-pipeline.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
 import {
@@ -957,62 +958,36 @@ export class ElectronRuntime {
   }
 
   /**
-   * Stop-hook pipeline. Runs in priority order:
-   *   1. Pending commit point whose prior items are all terminal: block and
-   *      tell the agent to propose a commit message.
-   *   2. Pending wait point whose prior items are terminal: flip to
-   *      `triggered` and let the agent stop; the user clicks Continue.
-   *   3. Approval-mode commit point sitting at `proposed`: let the agent stop
-   *      while the user reviews the message.
-   *   4. No blockers but a ready work item exists and this is the writer
-   *      batch: block and tell the agent to pick it up so the queue drains
-   *      without manual re-prompting.
-   * Returns the hook body or null to allow Stop.
+   * Stop-hook pipeline entry point. Snapshots the relevant stores, hands
+   * the snapshot to the pure `decideStopDirective`, applies any returned
+   * side effects (e.g. flipping a wait point to `triggered`), and
+   * returns the hook body for Claude. The decision logic itself lives
+   * in `src/electron/stop-hook-pipeline.ts` so each branch is unit-
+   * testable without spinning up a runtime.
    */
   private computeStopDirective(batchId: string): Record<string, unknown> | null {
-    const activeCommit = this.findActiveCommitPoint(batchId);
-    if (activeCommit && activeCommit.status === "pending") {
-      return { decision: "block", reason: buildCommitPointStopReason(activeCommit) };
-    }
-    const activeWait = this.findActiveWaitPoint(batchId);
-    if (activeWait) {
-      // Flip to triggered so the UI can surface "agent stopped here" and let
-      // the agent stop. The user re-engages by prompting the agent directly;
-      // findActiveWaitPoint skips triggered points so the next Stop resumes
-      // auto-progression past this marker.
-      try { this.waitPointStore.trigger(activeWait.id); } catch {}
-      return null;
-    }
-    if (activeCommit && activeCommit.status === "proposed") {
-      // Approval-mode commit awaiting user review — let the agent rest.
-      return null;
-    }
-    const batch = this.batchStore.findById(batchId);
-    if (!batch || batch.status !== "active") return null;
-    const ready = this.workItemStore.listReady(batchId);
-    if (ready.length === 0) return null;
-    const next = ready[0]!;
-    return {
-      decision: "block",
-      reason: buildNextWorkItemStopReason(next.id, next.title, next.kind),
+    const snapshot: BatchSnapshot = {
+      batch: this.batchStore.findById(batchId),
+      commitPoints: this.commitPointStore.listForBatch(batchId),
+      waitPoints: this.waitPointStore.listForBatch(batchId),
+      workItems: this.workItemStore.listItems(batchId),
+      readyWorkItems: this.workItemStore.listReady(batchId),
     };
-  }
-
-  /** Lowest-sort_index non-done wait point whose preceding work items are
-   *  all terminal. Mirrors findActiveCommitPoint. */
-  findActiveWaitPoint(batchId: string): WaitPoint | null {
-    const points = this.waitPointStore.listForBatch(batchId);
-    const workItems = this.workItemStore.listItems(batchId);
-    for (const wp of points) {
-      // `triggered` points are "consumed" — they already stopped the agent
-      // once and the user has re-engaged; don't stop again for them.
-      if (wp.status !== "pending") continue;
-      const preceding = workItems.filter((item) => item.sort_index < wp.sort_index);
-      const allTerminal = preceding.every((item) => item.status === "done" || item.status === "canceled");
-      if (!allTerminal) continue;
-      return wp;
+    const outcome = decideStopDirective(snapshot, {
+      buildCommitPointReason: buildCommitPointStopReason,
+      buildNextWorkItemReason: (item) => buildNextWorkItemStopReason(item.id, item.title, item.kind),
+    });
+    for (const effect of outcome.sideEffects) {
+      if (effect.kind === "trigger-wait-point") {
+        try { this.waitPointStore.trigger(effect.id); } catch (err) {
+          this.logger.warn("trigger-wait-point side effect failed", {
+            id: effect.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
-    return null;
+    return outcome.directive ? { ...outcome.directive } : null;
   }
 
   private applyTurnTracking(envelope: HookEnvelope, sessionId: string | undefined): void {
@@ -1247,27 +1222,6 @@ export class ElectronRuntime {
 
   deleteWaitPoint(id: string): void {
     this.waitPointStore.delete(id);
-  }
-
-  /**
-   * The next commit point the agent should act on for a batch — the
-   * lowest-sort_index non-done/non-rejected point whose preceding work items
-   * are all done or canceled. Returns null if nothing is due.
-   */
-  findActiveCommitPoint(batchId: string): CommitPoint | null {
-    const points = this.commitPointStore.listForBatch(batchId);
-    const workItems = this.workItemStore.listItems(batchId);
-    for (const cp of points) {
-      if (cp.status === "done") continue;
-      // A point is "ready" only if every non-commit item with a smaller
-      // sort_index has reached a terminal state. `sort_index` on commit_point
-      // lives in the same numeric space as work_items via nextQueueSortIndex.
-      const preceding = workItems.filter((item) => item.sort_index < cp.sort_index);
-      const allTerminal = preceding.every((item) => item.status === "done" || item.status === "canceled");
-      if (!allTerminal) continue;
-      return cp;
-    }
-    return null;
   }
 
   private nextQueueSortIndex(batchId: string): number {

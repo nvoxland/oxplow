@@ -288,6 +288,10 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
           if (!tool) {
             return { error: { code: -32601, message: `unknown tool: ${name}` } };
           }
+          const validation = validateToolArgs(tool, args);
+          if (validation) {
+            return { error: { code: -32602, message: `invalid params for ${name}: ${validation}` } };
+          }
           const out = tool.handler(args);
           return {
             result: {
@@ -430,4 +434,38 @@ function isPidAlive(pid: number): boolean {
   } catch (e: any) {
     return e.code === "EPERM";
   }
+}
+
+/**
+ * Validate `args` against the tool's `inputSchema` (a small subset of JSON
+ * Schema: required fields + per-property types). Returns null on success,
+ * a human-readable error message on failure. Deliberately tiny — the tool
+ * schemas in this project use only `string` / `number` / `boolean` /
+ * `object` / `array` and `required` lists; if a future tool needs richer
+ * validation, swap in Ajv.
+ */
+export function validateToolArgs(tool: ToolDef, args: unknown): string | null {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return "arguments must be an object";
+  }
+  const a = args as Record<string, unknown>;
+  for (const requiredKey of tool.inputSchema.required ?? []) {
+    if (!(requiredKey in a)) return `missing required field: ${requiredKey}`;
+  }
+  for (const [key, spec] of Object.entries(tool.inputSchema.properties)) {
+    if (!(key in a)) continue;
+    const expected = (spec as { type?: string }).type;
+    if (!expected) continue;
+    const actual = jsonTypeOf(a[key]);
+    if (actual !== expected) {
+      return `field ${key} should be ${expected} but got ${actual}`;
+    }
+  }
+  return null;
+}
+
+function jsonTypeOf(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
 }

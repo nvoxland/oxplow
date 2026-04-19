@@ -28,6 +28,7 @@ import {
   subscribeNewdeEvents,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
+import { reportUiError, runWithError } from "../../ui-error.js";
 
 interface CreateInput {
   kind: WorkItemKind;
@@ -108,10 +109,10 @@ export function PlanPane({
     let cancelled = false;
     const refreshCommits = () => void listCommitPoints(batchId)
       .then((points) => { if (!cancelled) setCommitPoints(points); })
-      .catch(() => {});
+      .catch((err) => reportUiError("Load commit points", err));
     const refreshWaits = () => void listWaitPoints(batchId)
       .then((points) => { if (!cancelled) setWaitPoints(points); })
-      .catch(() => {});
+      .catch((err) => reportUiError("Load wait points", err));
     refreshCommits();
     refreshWaits();
     const off = subscribeNewdeEvents((event) => {
@@ -254,7 +255,7 @@ export function PlanPane({
               commitPoints={group.epic === null && mode === "batch" ? commitPoints : []}
               waitPoints={group.epic === null && mode === "batch" ? waitPoints : []}
               onReorderMixed={group.epic === null && mode === "batch" && streamId && batchId
-                ? (entries) => { void reorderBatchQueue(streamId, batchId, entries).catch(() => {}); }
+                ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
                 : undefined}
               onRequestDelete={(item) => {
                 if (!window.confirm(`Delete "${item.title}"?`)) return;
@@ -273,7 +274,7 @@ export function PlanPane({
             <button
               onClick={() => {
                 if (!streamId || !batchId) return;
-                void createCommitPoint(streamId, batchId, "approval").catch(() => {});
+                runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
               }}
               disabled={!batchWork || batchWork.items.length === 0}
               style={{
@@ -292,7 +293,7 @@ export function PlanPane({
             <button
               onClick={() => {
                 if (!streamId || !batchId) return;
-                void createWaitPoint(streamId, batchId, null).catch(() => {});
+                runWithError("Add wait point", createWaitPoint(streamId, batchId, null));
               }}
               disabled={!batchWork || batchWork.items.length === 0}
               style={{
@@ -1071,7 +1072,7 @@ function CommitPointRow({ cp }: { cp: CommitPoint }) {
         <select
           value={cp.mode}
           disabled={cp.status !== "pending"}
-          onChange={(e) => void setCommitPointMode(cp.id, e.target.value as CommitPointMode).catch(() => {})}
+          onChange={(e) => runWithError("Change commit mode", setCommitPointMode(cp.id, e.target.value as CommitPointMode))}
           style={{ fontSize: 11, padding: "2px 4px" }}
         >
           <option value="approval">Approval</option>
@@ -1079,11 +1080,11 @@ function CommitPointRow({ cp }: { cp: CommitPoint }) {
         </select>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
           {cp.status === "rejected" ? (
-            <button style={miniButtonStyle} onClick={() => void resetCommitPoint(cp.id).catch(() => {})}>Retry</button>
+            <button style={miniButtonStyle} onClick={() => runWithError("Reset commit point", resetCommitPoint(cp.id))}>Retry</button>
           ) : null}
           {cp.status !== "done" ? (
             <button style={miniButtonStyle} onClick={() => {
-              void deleteCommitPoint(cp.id).catch(() => {});
+              runWithError("Delete commit point", deleteCommitPoint(cp.id));
             }}>Delete</button>
           ) : null}
         </span>
@@ -1109,16 +1110,16 @@ function CommitPointRow({ cp }: { cp: CommitPoint }) {
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
             {editing ? (
               <>
-                <button style={miniButtonStyle} onClick={() => { void approveCommitPoint(cp.id, draft).catch(() => {}); }}>Save & approve</button>
+                <button style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id, draft))}>Save & approve</button>
                 <button style={miniButtonStyle} onClick={() => { setEditing(false); setDraft(cp.proposed_message ?? ""); }}>Cancel</button>
               </>
             ) : (
               <>
-                <button style={miniButtonStyle} onClick={() => void approveCommitPoint(cp.id).catch(() => {})}>Approve</button>
+                <button style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id))}>Approve</button>
                 <button style={miniButtonStyle} onClick={() => setEditing(true)}>Edit</button>
                 <button style={miniButtonStyle} onClick={() => {
                   const note = window.prompt("Rejection note (sent to agent on retry):", "");
-                  if (note != null) void rejectCommitPoint(cp.id, note).catch(() => {});
+                  if (note != null) runWithError("Reject commit point", rejectCommitPoint(cp.id, note));
                 }}>Reject</button>
               </>
             )}
@@ -1214,7 +1215,7 @@ function WaitPointRow({ wp }: { wp: WaitPoint }) {
               style={miniButtonStyle}
               onClick={() => {
                 const next = window.prompt("Wait point note:", wp.note ?? "");
-                if (next != null) void setWaitPointNote(wp.id, next || null).catch(() => {});
+                if (next != null) runWithError("Update wait note", setWaitPointNote(wp.id, next || null));
               }}
             >
               Edit
@@ -1223,7 +1224,7 @@ function WaitPointRow({ wp }: { wp: WaitPoint }) {
           <button
             style={miniButtonStyle}
             onClick={() => {
-              if (window.confirm("Delete this wait point?")) void deleteWaitPoint(wp.id).catch(() => {});
+              if (window.confirm("Delete this wait point?")) runWithError("Delete wait point", deleteWaitPoint(wp.id));
             }}
           >
             Delete

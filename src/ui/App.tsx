@@ -71,6 +71,7 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
 import { SettingsModal } from "./components/SettingsModal.js";
+import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
 import { DockShell } from "./components/Dock/DockShell.js";
@@ -123,6 +124,12 @@ export function App() {
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
+
+  useEffect(() => {
+    return subscribeUiError(({ label, message }) => {
+      setError(`${label}: ${message}`);
+    });
+  }, []);
 
   useEffect(() => {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])

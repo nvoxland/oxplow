@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { startMcpServer } from "./mcp-server.js";
+import { startMcpServer, validateToolArgs, type ToolDef } from "./mcp-server.js";
 
 interface RpcResponse {
   jsonrpc: "2.0";
@@ -318,4 +318,28 @@ test("hook endpoint rejects unauthenticated requests", async () => {
     await server.stop();
     rmSync(ideDir, { recursive: true, force: true });
   }
+});
+
+test("validateToolArgs accepts valid args, rejects missing required, rejects wrong types", () => {
+  const tool: ToolDef = {
+    name: "test",
+    description: "",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        count: { type: "number" },
+        flag: { type: "boolean" },
+      },
+      required: ["name"],
+    },
+    handler: () => null,
+  };
+  expect(validateToolArgs(tool, { name: "x" })).toBeNull();
+  expect(validateToolArgs(tool, { name: "x", count: 3, flag: true })).toBeNull();
+  expect(validateToolArgs(tool, {})).toContain("missing required");
+  expect(validateToolArgs(tool, { name: 5 })).toContain("string");
+  expect(validateToolArgs(tool, { name: "x", count: "3" })).toContain("number");
+  expect(validateToolArgs(tool, "not an object")).toContain("must be an object");
+  expect(validateToolArgs(tool, ["array"])).toContain("must be an object");
 });
