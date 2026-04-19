@@ -351,6 +351,7 @@ function BatchChip({
           <input
             autoFocus
             defaultValue={batch.title}
+            data-testid={`batch-chip-rename-input-${batch.id}`}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
@@ -478,11 +479,11 @@ function HoverCard({
       ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
-          <button type="button" style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
+          <button type="button" data-testid={`batch-chip-complete-${batch.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
             Complete batch
           </button>
         ) : batch.status !== "completed" ? (
-          <button type="button" style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
+          <button type="button" data-testid={`batch-chip-promote-${batch.id}`} style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
             Make writer
           </button>
         ) : null}
@@ -574,8 +575,9 @@ function CreateBatchInput({
         }}
         style={inputStyle}
         placeholder="Batch title"
+        data-testid="batch-rail-create-input"
       />
-      <button type="button" style={smallBtn} onClick={() => void submit()} disabled={submitting}>
+      <button type="button" data-testid="batch-rail-create-submit" style={smallBtn} onClick={() => void submit()} disabled={submitting}>
         {submitting ? "Creating…" : "Create"}
       </button>
       {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}

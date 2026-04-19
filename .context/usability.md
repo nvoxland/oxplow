@@ -66,6 +66,10 @@ Things I keep forgetting. Read this before adding any UI.
     target it directly)
   - `plan-context-menu` on the Plan-pane right-click menu wrapper,
     `plan-context-menu-delete` on the Delete action inside it
+  - `batch-rail-create-input`, `batch-rail-create-submit` on the
+    new-batch creation row; `batch-chip-rename-input-<id>` on the
+    inline rename input; `batch-chip-promote-<id>` and
+    `batch-chip-complete-<id>` on the hover-card actions
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback
