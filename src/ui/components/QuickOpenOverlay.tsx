@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listWorkspaceFiles, subscribeWorkspaceEvents, type Stream, type WorkspaceIndexedFile } from "../api.js";
+import { fuzzyMatches } from "../fuzzy-match.js";
 
 interface Props {
   open: boolean;
@@ -61,7 +62,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
 
   const filteredFiles = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const next = q ? files.filter((file) => file.path.toLowerCase().includes(q)) : files;
+    const next = q ? files.filter((file) => fuzzyMatches(file.path.toLowerCase(), q)) : files;
     return next.slice(0, 80);
   }, [files, query]);
 

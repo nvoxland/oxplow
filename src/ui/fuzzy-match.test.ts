@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { fuzzyMatches } from "./CommandPalette.js";
+import { fuzzyMatches } from "./fuzzy-match.js";
 
 test("subsequence matches skip over unrelated characters", () => {
   expect(fuzzyMatches("work new work item", "wn")).toBe(true);
@@ -18,4 +18,9 @@ test("empty query matches everything (palette shows the full list)", () => {
 
 test("non-matching characters fail the match", () => {
   expect(fuzzyMatches("file save", "zzz")).toBe(false);
+});
+
+test("useful for quick-open: non-contiguous filename typing", () => {
+  expect(fuzzyMatches("src/ui/app.tsx", "apptsx")).toBe(true);
+  expect(fuzzyMatches("src/ui/app.tsx", "srctsx")).toBe(true);
 });

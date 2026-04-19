@@ -56,8 +56,8 @@ async function main() {
       process.exit(2);
     }
 
-    // Non-contiguous fuzzy — "apptsx" should FAIL (current design: substring).
-    // This codifies the known limitation the todo calls out.
+    // Non-contiguous fuzzy — since quick-open shares `fuzzyMatches` with
+    // the command palette, "apptsx" must match "app.tsx" (subsequence).
     await qoInput.fill("apptsx");
     await window.waitForTimeout(400);
     const fuzzyHits = await window.evaluate(() => {
@@ -65,9 +65,10 @@ async function main() {
         .map((b) => b.textContent ?? "")
         .filter((t) => t.toLowerCase().includes("app.tsx"));
     });
-    console.log("[probe] non-contiguous 'apptsx' hits:", fuzzyHits.length, "(expected 0 with substring match)");
-    if (fuzzyHits.length > 0) {
-      console.log("[probe] NOTE: quick-open now matches non-contiguously. Update probe assumption.");
+    console.log("[probe] non-contiguous 'apptsx' hits:", fuzzyHits.length);
+    if (fuzzyHits.length === 0) {
+      console.log("[probe] FAIL: quick-open should fuzzy-match 'apptsx' to App.tsx");
+      process.exit(3);
     }
 
     // Pick via arrow + Enter.

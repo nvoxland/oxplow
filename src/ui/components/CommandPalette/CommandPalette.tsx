@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { MenuGroup } from "../../commands.js";
+import { fuzzyMatches } from "../../fuzzy-match.js";
 
 /**
  * Cmd/Ctrl+K palette — a second renderer for the same command registry that
@@ -137,18 +138,6 @@ export function CommandPalette({
       </div>
     </div>
   );
-}
-
-// Subsequence match — each character in the query must appear in order in
-// the haystack, with any gap allowed. Matches Linear's feel ("wn" → "work /
-// new work item") without pulling in a scoring library for six commands.
-export function fuzzyMatches(haystack: string, needle: string): boolean {
-  if (!needle) return true;
-  let ni = 0;
-  for (let hi = 0; hi < haystack.length && ni < needle.length; hi++) {
-    if (haystack[hi] === needle[ni]) ni++;
-  }
-  return ni === needle.length;
 }
 
 const overlayStyle: CSSProperties = {
