@@ -14,7 +14,13 @@ Things I keep forgetting. Read this before adding any UI.
   you. For multi-line textareas, Enter inserts a newline and Cmd/Ctrl+Enter
   submits.
 - **Escape cancels.** Modals close on Escape. Inline edit fields (click-to-edit)
-  revert on Escape.
+  revert on Escape. When the pattern is "Escape → set a cancel latch →
+  blur() → onBlur decides commit-vs-revert," the latch **must be a
+  `useRef`, not `useState`**. React state updates are async; the blur
+  fires synchronously on the same tick and the onBlur closure will still
+  see `cancelRequested === false` and silently commit the half-typed
+  text. See `WorkItemDetail.tsx`'s `EditableField` and
+  `WorkGroupList.tsx`'s `InlineItemRow` for the correct ref-based shape.
 - **Disabled submit button when invalid** rather than erroring on submit. Show
   required-field hints inline.
 - **Autofocus the first input** when a modal opens.

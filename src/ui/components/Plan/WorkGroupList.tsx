@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 import { CommitPointRow } from "./CommitPointRow.js";
@@ -433,9 +433,10 @@ function InlineItemRow({
 }) {
   // null = not editing; "" valid draft during edit
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
-  // Latch an explicit Escape so the blur handler reverts instead of committing
-  // the half-typed string (same pattern as WorkItemDetail's EditableField).
-  const [cancelRequested, setCancelRequested] = useState(false);
+  // Ref (not state) so Escape's handler can set it synchronously and the
+  // blur handler that fires on the same tick sees the update — matches
+  // WorkItemDetail's EditableField, where useState raced the blur.
+  const cancelRequested = useRef(false);
 
   useEffect(() => { setTitleDraft(null); }, [item.id]);
 
@@ -445,8 +446,8 @@ function InlineItemRow({
 
   const commitTitle = () => {
     if (titleDraft === null) return;
-    if (cancelRequested) {
-      setCancelRequested(false);
+    if (cancelRequested.current) {
+      cancelRequested.current = false;
       setTitleDraft(null);
       return;
     }
@@ -517,7 +518,7 @@ function InlineItemRow({
                 (event.target as HTMLElement).blur();
               } else if (event.key === "Escape") {
                 event.preventDefault();
-                setCancelRequested(true);
+                cancelRequested.current = true;
                 (event.target as HTMLElement).blur();
               }
             }}
