@@ -1,5 +1,8 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface LaunchedNewde {
   app: ElectronApplication;
@@ -11,7 +14,6 @@ export interface LaunchedNewde {
 // Mirrors what `bin/newde` does: `electron . --project <dir>`.
 export async function launchNewde(projectDir: string, opts: { timeoutMs?: number } = {}): Promise<LaunchedNewde> {
   const repoRoot = resolve(__dirname, "..");
-  const electronEntry = resolve(repoRoot, "dist/electron-main.cjs");
 
   const app = await electron.launch({
     args: [repoRoot, "--project", projectDir],

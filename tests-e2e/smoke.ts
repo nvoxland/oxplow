@@ -1,6 +1,9 @@
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { launchNewde } from "./harness.ts";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
