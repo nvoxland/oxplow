@@ -7,7 +7,7 @@ public/dist/
 *.iml
 .newde
 .playwright-mcp
-ux-test-findings.md
 tests-e2e/screenshots/
 tests-e2e/scratch-edit-target.txt
 tests-e2e/scratch-commit-target.txt
+.self-ralph/
