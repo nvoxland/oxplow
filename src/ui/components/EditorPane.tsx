@@ -52,6 +52,8 @@ export function EditorPane({
   const focusDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openFilesRef = useRef({ order: openFileOrder, files: openFiles });
   const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const onNavigateRef = useRef(onNavigateToLocation);
   const streamRef = useRef(stream);
   const filePathRef = useRef(filePath);
@@ -97,6 +99,16 @@ export function EditorPane({
         contextmenu: false,
       });
       editorRef.current = editor;
+      // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
+      // editor has focus. The native Electron menu also binds this — menu
+      // accelerators fire at the OS level BEFORE the keydown reaches the
+      // webview, so the two don't double-fire in practice. This path is
+      // what makes the shortcut work under Playwright (synthetic keystrokes
+      // bypass the native menu) and if the native menu is ever dismissed.
+      editor.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+        () => { void onSaveRef.current(); },
+      );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
       registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
@@ -537,7 +549,7 @@ export function EditorPane({
       {/* File tabs live in the parent CenterTabs bar now; this component
           just hosts the single Monaco editor that swaps models on filePath. */}
       <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
-        <div ref={hostRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
+        <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
         {showBlame ? (
           <BlameOverlay
             lines={blame!.lines}

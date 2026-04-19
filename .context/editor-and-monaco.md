@@ -16,6 +16,30 @@ This avoids the cost (and visual flicker) of rebuilding the editor on
 every tab switch — the parent `CenterTabs` keeps `EditorPane` mounted
 in the same slot and only changes the `filePath` prop.
 
+The Monaco host `<div>` carries `data-testid="monaco-host"` and
+`data-file-path=<currentFilePath>` so test harnesses can assert which
+file the editor is showing without relying on tab text. Keep the
+attributes in sync if the mount structure changes.
+
+## Save shortcut (Cmd/Ctrl+S) is double-bound by design
+
+Save is registered TWICE on purpose:
+
+1. The native Electron menu (via `commands.ts` → `setNativeMenu`) binds
+   the Cmd/Ctrl+S accelerator. This is what real users hit in day-to-day
+   use — the OS menu catches the key before the webview sees it.
+2. Inside `EditorPane`, right after the editor is created:
+   `editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, onSave)`.
+   Monaco owns its own keybinding service, so this makes the shortcut
+   work when (a) the editor has focus, and (b) under synthetic
+   keystrokes (Playwright, automation) that never reach the native
+   menu.
+
+These don't double-fire in normal use because the OS menu consumes the
+keydown before it propagates to the webview. If you ever see save
+firing twice, something changed in that dispatch order — investigate
+before deleting either binding.
+
 ## Custom context menu
 
 Monaco's native menu is disabled (`contextmenu: false`). Right-click is

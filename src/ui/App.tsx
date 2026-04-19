@@ -1031,10 +1031,17 @@ export function App() {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       if (event.key.toLowerCase() !== "k") return;
       event.preventDefault();
+      // stopImmediatePropagation so Monaco's own keydown listener doesn't also
+      // see Cmd+K (it otherwise runs its default "trigger editor command"
+      // keybinding flow and eats the event before the bubble-phase handler).
+      event.stopImmediatePropagation();
       setPaletteOpen((prev) => !prev);
     }
-    window.addEventListener("keydown", handlePaletteShortcut);
-    return () => window.removeEventListener("keydown", handlePaletteShortcut);
+    // capture:true so the shortcut fires during the capture phase, BEFORE any
+    // focused descendant (Monaco, a textarea, a <select>) can call
+    // stopPropagation or call preventDefault on its own Cmd+K handling.
+    window.addEventListener("keydown", handlePaletteShortcut, { capture: true });
+    return () => window.removeEventListener("keydown", handlePaletteShortcut, { capture: true } as EventListenerOptions);
   }, []);
 
   useEffect(() => {
