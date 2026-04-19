@@ -53,3 +53,16 @@ export async function launchNewde(projectDir: string, opts: { timeoutMs?: number
     },
   };
 }
+
+// Trigger a native-menu-backed command by its CommandId — same IPC channel
+// the Electron menubar uses. Playwright's `window.keyboard.press("Meta+K")`
+// only works for shortcuts wired through a window-level keydown listener
+// (e.g. Cmd+K). Everything else (Cmd+P quick-open, Cmd+S save, file.find,
+// etc.) routes through the native menu, which Playwright can't click. Use
+// this helper for those.
+export async function sendMenuCommand(app: ElectronApplication, commandId: string): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, id) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win?.webContents.send("newde:menu-command", id);
+  }, commandId);
+}

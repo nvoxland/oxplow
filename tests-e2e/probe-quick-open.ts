@@ -9,17 +9,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde } from "./harness.ts";
-
-// In Electron mode, Cmd+P goes through the native menu system, which
-// Playwright can't click from the renderer. Send the menu command over
-// IPC instead — same path the native menubar uses.
-async function sendMenuCommand(app: import("playwright").ElectronApplication, commandId: string) {
-  await app.evaluate(({ BrowserWindow }, id) => {
-    const win = BrowserWindow.getAllWindows()[0];
-    win?.webContents.send("newde:menu-command", id);
-  }, commandId);
-}
+import { launchNewde, sendMenuCommand } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
