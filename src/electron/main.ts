@@ -115,6 +115,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
   ipcMain.handle("newde:getConfig", () => currentRuntime.getConfig());
   ipcMain.handle("newde:setAgentPromptAppend", (_event, text: string) => currentRuntime.setAgentPromptAppend(text));
+  ipcMain.handle("newde:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
   ipcMain.handle("newde:listBranches", () => currentRuntime.listBranches());
   ipcMain.handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   ipcMain.handle("newde:createStream", (_event, input) => currentRuntime.createStream(input));
@@ -154,6 +155,12 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   ipcMain.handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
   ipcMain.handle("newde:listAgentTurns", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, batchId, limit));
   ipcMain.handle("newde:listBatchFileChanges", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listFileChanges(streamId, batchId, limit));
+  ipcMain.handle("newde:getTurnFileDiff", (_event, turnId: string, path: string) => currentRuntime.getTurnFileDiff(turnId, path));
+  ipcMain.handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
+  ipcMain.handle("newde:getSnapshotSummary", (_event, snapshotId: string) => currentRuntime.getSnapshotSummary(snapshotId));
+  ipcMain.handle("newde:getSnapshotFileDiff", (_event, snapshotId: string, path: string) => currentRuntime.getSnapshotFileDiff(snapshotId, path));
+  ipcMain.handle("newde:getSnapshotPairDiff", (_event, beforeSnapshotId: string | null, afterSnapshotId: string, path: string) => currentRuntime.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path));
+  ipcMain.handle("newde:restoreFileFromSnapshot", (_event, streamId: string, snapshotId: string, path: string) => currentRuntime.restoreFileFromSnapshot(streamId, snapshotId, path));
   ipcMain.handle("newde:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
   ipcMain.handle("newde:readFileAtRef", (_event, streamId: string, ref: string, path: string) => currentRuntime.readFileAtRef(streamId, ref, path));
   ipcMain.handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));

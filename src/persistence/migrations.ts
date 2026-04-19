@@ -276,6 +276,36 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    name: "file_snapshot",
+    up: (db) => {
+      // Content-addressed snapshot tracking. `file_snapshot` is the metadata
+      // row for one flushed manifest on disk; the manifest itself lives at
+      // `.newde/snapshots/manifests/<id>.json` and holds the dirty-path
+      // entries (hash + mtime + size). Walking the parent chain
+      // reconstructs the full file set at any point in time.
+      db.exec(`
+        CREATE TABLE file_snapshot (
+          id TEXT PRIMARY KEY,
+          stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+          worktree_path TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          turn_id TEXT REFERENCES agent_turn(id) ON DELETE SET NULL,
+          batch_id TEXT REFERENCES batches(id) ON DELETE SET NULL,
+          parent_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL,
+          manifest_path TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_file_snapshot_stream ON file_snapshot(stream_id, created_at DESC);
+        CREATE INDEX idx_file_snapshot_turn ON file_snapshot(turn_id);
+
+        ALTER TABLE batch_file_change ADD COLUMN snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL;
+        ALTER TABLE streams ADD COLUMN current_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

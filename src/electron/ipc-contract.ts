@@ -2,6 +2,8 @@ import type {
   AgentTurn,
   BacklogState,
   BatchFileChange,
+  FileSnapshot,
+  SnapshotSummary,
   BranchChanges,
   BranchRef,
   Batch,
@@ -41,6 +43,8 @@ export type {
   AgentTurn,
   BacklogState,
   BatchFileChange,
+  FileSnapshot,
+  SnapshotSummary,
   BranchChanges,
   BranchRef,
   Batch,
@@ -118,6 +122,7 @@ export interface DesktopApi {
   renameStream(streamId: string, title: string): Promise<Stream>;
   getConfig(): Promise<import("../config/config.js").NewdeConfig>;
   setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig>;
+  setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").NewdeConfig>;
   listBranches(): Promise<BranchRef[]>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
@@ -188,6 +193,12 @@ export interface DesktopApi {
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
+  getTurnFileDiff(turnId: string, path: string): Promise<{ before: string | null; after: string | null }>;
+  listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
+  getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null>;
+  getSnapshotFileDiff(snapshotId: string, path: string): Promise<{ before: string | null; after: string | null }>;
+  getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<{ before: string | null; after: string | null }>;
+  restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
   getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;
   getCommitDetail(streamId: string, sha: string): Promise<CommitDetail | null>;

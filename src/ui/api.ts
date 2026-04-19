@@ -86,6 +86,38 @@ export interface BatchFileChange {
   created_at: string;
 }
 
+export type SnapshotKind = "turn-start" | "turn-end";
+
+export interface FileSnapshot {
+  id: string;
+  stream_id: string;
+  worktree_path: string;
+  kind: SnapshotKind;
+  turn_id: string | null;
+  batch_id: string | null;
+  parent_snapshot_id: string | null;
+  manifest_path: string;
+  created_at: string;
+}
+
+export interface ManifestEntry {
+  hash: string;
+  mtime_ms: number;
+  size: number;
+  deleted?: boolean;
+}
+
+export interface SnapshotFileRow {
+  entry: ManifestEntry;
+  kind: "created" | "updated" | "deleted";
+}
+
+export interface SnapshotSummary {
+  snapshot: FileSnapshot;
+  files: Record<string, SnapshotFileRow>;
+  counts: { created: number; updated: number; deleted: number };
+}
+
 export interface AgentTurn {
   id: string;
   batch_id: string;
@@ -211,6 +243,10 @@ export async function getConfig(): Promise<import("../config/config.js").NewdeCo
 
 export async function setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig> {
   return desktopApi().setAgentPromptAppend(text);
+}
+
+export async function setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").NewdeConfig> {
+  return desktopApi().setGeneratedDirs(dirs);
 }
 
 export async function listBranches(): Promise<BranchRef[]> {
@@ -562,6 +598,69 @@ export async function listBatchFileChanges(
   limit?: number,
 ): Promise<BatchFileChange[]> {
   return desktopApi().listBatchFileChanges(streamId, batchId, limit);
+}
+
+export async function getTurnFileDiff(
+  turnId: string,
+  path: string,
+): Promise<{ before: string | null; after: string | null }> {
+  return desktopApi().getTurnFileDiff(turnId, path);
+}
+
+export async function listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]> {
+  return desktopApi().listSnapshots(streamId, limit);
+}
+
+export async function getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null> {
+  return desktopApi().getSnapshotSummary(snapshotId);
+}
+
+export async function getSnapshotFileDiff(
+  snapshotId: string,
+  path: string,
+): Promise<{ before: string | null; after: string | null }> {
+  return desktopApi().getSnapshotFileDiff(snapshotId, path);
+}
+
+export async function getSnapshotPairDiff(
+  beforeSnapshotId: string | null,
+  afterSnapshotId: string,
+  path: string,
+): Promise<{ before: string | null; after: string | null }> {
+  return desktopApi().getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
+}
+
+export async function restoreFileFromSnapshot(
+  streamId: string,
+  snapshotId: string,
+  path: string,
+): Promise<void> {
+  return desktopApi().restoreFileFromSnapshot(streamId, snapshotId, path);
+}
+
+export interface FileSnapshotCreatedEventPayload {
+  streamId: string;
+  snapshotId: string;
+  kind: SnapshotKind;
+  turnId: string | null;
+  batchId: string | null;
+}
+
+export function subscribeSnapshotEvents(
+  streamId: string,
+  fn: (payload: FileSnapshotCreatedEventPayload) => void,
+): () => void {
+  return subscribeNewdeEvents((event) => {
+    if (event.type !== "file-snapshot.created") return;
+    if (event.streamId !== streamId) return;
+    fn({
+      streamId: event.streamId,
+      snapshotId: event.snapshotId,
+      kind: event.kind,
+      turnId: event.turnId,
+      batchId: event.batchId,
+    });
+  });
 }
 
 export interface FileChangeRecordedEventPayload {

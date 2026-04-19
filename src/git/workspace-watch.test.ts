@@ -65,6 +65,14 @@ test("workspace watcher ignores internal runtime paths", () => {
   expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
 });
 
+test("workspace watcher ignores additional directory names from extras", () => {
+  expect(shouldIgnoreWorkspaceWatchPath("generated/api.ts", ["generated"])).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("packages/a/generated", ["generated"])).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("src/not-generated/foo.ts", ["generated"])).toBe(false);
+  // Without extras, the path is kept.
+  expect(shouldIgnoreWorkspaceWatchPath("generated/api.ts")).toBe(false);
+});
+
 test("workspace watcher ignores heavy build/cache directories", () => {
   expect(shouldIgnoreWorkspaceWatchPath("node_modules")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath("node_modules/react/index.js")).toBe(true);

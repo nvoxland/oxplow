@@ -17,8 +17,16 @@ export class WorkspaceWatcherRegistry {
   private readonly watchers = new Map<string, StreamWorkspaceWatcher>();
   private readonly subscribers = new Set<(event: WorkspaceWatchEvent) => void>();
   private nextId = 1;
+  private extraIgnoreDirs: string[] = [];
 
   constructor(private readonly logger: Logger) {}
+
+  setExtraIgnoreDirs(dirs: string[]): void {
+    // Stored by reference so the filter inside each watcher sees live
+    // updates when the user edits `generatedDirs` in newde.yaml. Callers
+    // that mutate the config should call this again on reload.
+    this.extraIgnoreDirs = [...dirs];
+  }
 
   ensureWatching(stream: Stream): void {
     const existing = this.watchers.get(stream.id);
@@ -30,6 +38,7 @@ export class WorkspaceWatcherRegistry {
       stream,
       (kind, path) => this.emit(stream.id, kind, path),
       this.logger.child({ streamId: stream.id, subsystem: "workspace-watch" }),
+      () => this.extraIgnoreDirs,
     );
     watcher.start();
     this.watchers.set(stream.id, watcher);
@@ -82,8 +91,13 @@ class StreamWorkspaceWatcher {
     stream: Stream,
     private readonly emit: (kind: WorkspaceWatchKind, path: string) => void,
     private readonly logger: Logger,
+    private readonly getExtraIgnoreDirs: () => string[] = () => [],
   ) {
     this.rootDir = resolve(stream.worktree_path);
+  }
+
+  private shouldIgnore(path: string): boolean {
+    return shouldIgnoreWorkspaceWatchPath(path, this.getExtraIgnoreDirs());
   }
 
   start(): void {
@@ -130,7 +144,7 @@ class StreamWorkspaceWatcher {
     if (!filename) return;
     const rel = normalizeRelativePath(filename);
     if (!rel || rel.startsWith("..")) return;
-    if (shouldIgnoreWorkspaceWatchPath(rel)) return;
+    if (this.shouldIgnore(rel)) return;
     const abs = resolve(this.rootDir, rel);
     const stat = safeStat(abs);
     if (eventType === "change") {
@@ -143,7 +157,7 @@ class StreamWorkspaceWatcher {
   private watchDirectory(dir: string): void {
     if (this.watchers.has(dir)) return;
     const dirRelativePath = normalizeRelativePath(relative(this.rootDir, dir));
-    if (dirRelativePath && shouldIgnoreWorkspaceWatchPath(dirRelativePath)) {
+    if (dirRelativePath && this.shouldIgnore(dirRelativePath)) {
       return;
     }
     const watcher = watch(dir, (eventType, filename) => {
@@ -173,7 +187,7 @@ class StreamWorkspaceWatcher {
     const abs = resolve(dir, filename);
     const rel = normalizeRelativePath(relative(this.rootDir, abs));
     if (rel.startsWith("..")) return;
-    if (shouldIgnoreWorkspaceWatchPath(rel)) return;
+    if (this.shouldIgnore(rel)) return;
 
     const stat = safeStat(abs);
     if (stat?.isDirectory()) {
@@ -224,11 +238,13 @@ const IGNORED_DIR_NAMES = new Set([
   ".tox",
 ]);
 
-export function shouldIgnoreWorkspaceWatchPath(path: string): boolean {
+export function shouldIgnoreWorkspaceWatchPath(path: string, extraIgnoreDirs: string[] = []): boolean {
   if (path === ".newde/logs" || path.startsWith(".newde/logs/")) return true;
   if (path === ".newde/worktrees" || path.startsWith(".newde/worktrees/")) return true;
+  const extras = extraIgnoreDirs.length > 0 ? new Set(extraIgnoreDirs) : null;
   for (const segment of path.split("/")) {
     if (IGNORED_DIR_NAMES.has(segment)) return true;
+    if (extras && extras.has(segment)) return true;
   }
   return false;
 }

@@ -127,6 +127,35 @@ are tested in `src/persistence/migrations.test.ts`; if you add a new
 migration, add a test that runs it from a clean state and asserts the
 expected schema.
 
+## Snapshot store
+
+`SnapshotStore` (`src/persistence/snapshot-store.ts`) is a hybrid: a
+SQLite-indexed table (`file_snapshot`) plus an on-disk content-
+addressed blob store at `.newde/snapshots/` (`objects/xx/yyyy…` +
+`manifests/<id>.json`). Unlike other stores it doesn't expose a
+`subscribe()`; the runtime publishes `file-snapshot.created` on the
+EventBus after each successful flush.
+
+IPC methods (all go through `ipc-contract.ts` → `main.ts` →
+`preload.ts` → `src/ui/api.ts`):
+
+- `getTurnFileDiff(turnId, path)` — before/after for a path within a
+  single turn.
+- `listSnapshots(streamId, limit?)` — snapshot rows newest-first.
+- `getSnapshotSummary(snapshotId)` — snapshot row, manifest entries
+  joined with A/M/D kind against the parent chain, plus counts.
+- `getSnapshotFileDiff(snapshotId, path)` — before/after for a path
+  between a snapshot and its parent.
+- `getSnapshotPairDiff(beforeId, afterId, path)` — arbitrary-pair
+  diff, used by the Snapshots panel's compare mode.
+- `restoreFileFromSnapshot(streamId, snapshotId, path)` — overwrites
+  the worktree file with the snapshot's content via the existing
+  `writeWorkspaceFile` path (so the UI-echo filter and file-change
+  event bus behave the same as a UI edit).
+
+UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
+`file-snapshot.created` by stream and unpacks the payload.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas.

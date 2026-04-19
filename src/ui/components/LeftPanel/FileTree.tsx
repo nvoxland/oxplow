@@ -37,6 +37,7 @@ export function TreeEntries({
   expandedDirs,
   loadingDirs,
   selectedFilePath,
+  generatedDirs,
   onToggleDirectory,
   onOpenFile,
   onContextMenu,
@@ -47,15 +48,22 @@ export function TreeEntries({
   expandedDirs: Record<string, boolean>;
   loadingDirs: Record<string, boolean>;
   selectedFilePath: string | null;
+  generatedDirs: string[];
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
   onContextMenu(target: ContextMenuTarget | null): void;
 }) {
+  const generatedSet = new Set(generatedDirs);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
       {entries.map((entry) => {
         const expanded = !!expandedDirs[entry.path];
         const children = entriesByDir[entry.path] ?? [];
+        // "Marked" = this directory's name itself is in the config list.
+        // "Inside" = some ancestor segment matches, so this path is being
+        // ignored by inheritance even if its own name isn't in the list.
+        const markedSelf = entry.kind === "directory" && generatedSet.has(entry.name);
+        const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
         return (
           <div key={entry.path}>
             <button
@@ -122,9 +130,32 @@ export function TreeEntries({
                   flex: 1,
                   whiteSpace: "nowrap",
                   textDecoration: entry.gitStatus === "deleted" ? "line-through" : undefined,
-                  color: entry.gitStatus === "deleted" ? "var(--muted)" : undefined,
+                  color:
+                    entry.gitStatus === "deleted"
+                      ? "var(--muted)"
+                      : insideGenerated
+                        ? "var(--muted)"
+                        : undefined,
+                  fontStyle: insideGenerated ? "italic" : undefined,
                 }}
               >{entry.name}</span>
+              {markedSelf ? (
+                <span
+                  title="Marked as generated — excluded from fs-watch and snapshot tracking"
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    padding: "0 4px",
+                    border: "1px solid #e5a06a",
+                    color: "#e5a06a",
+                    borderRadius: 3,
+                    flexShrink: 0,
+                  }}
+                >
+                  GEN
+                </span>
+              ) : null}
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
             </button>
             {entry.kind === "directory" && expanded ? (
@@ -139,6 +170,7 @@ export function TreeEntries({
                     expandedDirs={expandedDirs}
                     loadingDirs={loadingDirs}
                     selectedFilePath={selectedFilePath}
+                    generatedDirs={generatedDirs}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
                     onContextMenu={onContextMenu}

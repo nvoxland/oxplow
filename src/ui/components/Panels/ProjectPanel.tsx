@@ -41,12 +41,14 @@ interface Props {
   selectedFilePath: string | null;
   currentBatchTurns: AgentTurn[] | null;
   currentBatchFileChanges: BatchFileChange[] | null;
+  generatedDirs: string[];
   onOpenFile(path: string): void;
   onOpenDiff?(request: DiffRequest): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
+  onToggleGeneratedDir(name: string, mark: boolean): Promise<void>;
 }
 
 export function ProjectPanel({
@@ -55,12 +57,14 @@ export function ProjectPanel({
   selectedFilePath,
   currentBatchTurns,
   currentBatchFileChanges,
+  generatedDirs,
   onOpenFile,
   onOpenDiff,
   onCreateFile,
   onCreateDirectory,
   onRenamePath,
   onDeletePath,
+  onToggleGeneratedDir,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
@@ -414,7 +418,8 @@ export function ProjectPanel({
     action:
       | "open" | "new-file" | "new-folder" | "rename" | "delete"
       | "copy" | "copy-reference" | "find-usages" | "agent-history"
-      | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add",
+      | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
+      | "mark-generated" | "unmark-generated",
   ) {
     if (!contextMenu) return;
     try {
@@ -517,6 +522,12 @@ export function ProjectPanel({
           setOpResult({ title: `Add ${contextMenu.path} to .gitignore`, result });
           break;
         }
+        case "mark-generated":
+          await onToggleGeneratedDir(contextMenu.name, true);
+          break;
+        case "unmark-generated":
+          await onToggleGeneratedDir(contextMenu.name, false);
+          break;
       }
       setError(null);
     } catch (e) {
@@ -528,6 +539,8 @@ export function ProjectPanel({
 
   const isUntracked = contextMenu?.kind === "file"
     && indexedFiles.some((f) => f.path === contextMenu.path && f.gitStatus === "untracked");
+  const isDirMarkedGenerated = contextMenu?.kind === "directory"
+    && generatedDirs.includes(contextMenu.name);
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
       ...(contextMenu.kind === "file"
@@ -553,6 +566,23 @@ export function ProjectPanel({
           { id: "files.git.add", label: "Add", enabled: isUntracked, run: () => handleContextAction("git-add") },
         ] as MenuItem[],
       }] : []),
+      ...(contextMenu.kind === "directory"
+        ? [
+          isDirMarkedGenerated
+            ? {
+                id: "files.unmark-generated",
+                label: `Unmark "${contextMenu.name}" as Generated`,
+                enabled: true,
+                run: () => handleContextAction("unmark-generated"),
+              }
+            : {
+                id: "files.mark-generated",
+                label: `Mark "${contextMenu.name}" as Generated`,
+                enabled: true,
+                run: () => handleContextAction("mark-generated"),
+              },
+        ]
+        : []),
       { id: "files.rename", label: "Rename…", enabled: true, run: () => handleContextAction("rename") },
       { id: "files.delete", label: "Delete…", enabled: true, run: () => handleContextAction("delete") },
     ]
@@ -617,6 +647,7 @@ export function ProjectPanel({
               expandedDirs={expandedDirs}
               loadingDirs={loadingDirs}
               selectedFilePath={selectedFilePath}
+              generatedDirs={generatedDirs}
               onToggleDirectory={toggleDirectory}
               onOpenFile={onOpenFile}
               onContextMenu={setContextMenu}

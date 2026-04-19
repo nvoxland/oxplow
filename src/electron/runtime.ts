@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
@@ -60,6 +60,13 @@ import {
   type FileChangeKind,
   type FileChangeSource,
 } from "../persistence/file-change-store.js";
+import {
+  SnapshotStore,
+  type FileSnapshot,
+  type SnapshotKind,
+  type SnapshotSummary,
+} from "../persistence/snapshot-store.js";
+import { shouldIgnoreWorkspaceWatchPath } from "../git/workspace-watch.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
 import { EventBus, type NewdeEvent } from "../core/event-bus.js";
 import {
@@ -94,6 +101,7 @@ export class ElectronRuntime {
   readonly batchQueue: BatchQueueOrchestrator;
   readonly turnStore: TurnStore;
   readonly fileChangeStore: FileChangeStore;
+  readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
   readonly resumeTracker: ResumeTracker;
@@ -110,9 +118,11 @@ export class ElectronRuntime {
   private readonly lspClients = new Map<string, RuntimeSocket>();
   private readonly agentStatusByBatch = new Map<string, AgentStatus>();
   private readonly recentUiWrites = new Map<string, number>();
+  private readonly dirtyPathsByStream = new Map<string, Set<string>>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
+  private snapshotCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
     this.projectDir = projectDir;
@@ -134,6 +144,7 @@ export class ElectronRuntime {
     );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.fileChangeStore = new FileChangeStore(projectDir, logger.child({ subsystem: "file-change-store" }));
+    this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.workItemApi = createWorkItemApi({
       resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
       workItemStore: this.workItemStore,
@@ -197,10 +208,16 @@ export class ElectronRuntime {
     cleanupSessions(this.store.list());
     this.logger.info("initialized current stream", { streamId: this.store.getCurrentStreamId() });
 
+    // Push the user's `generatedDirs` down to the watcher before starting
+    // any stream-scoped watchers so they pick up the filter from the first
+    // event.
+    this.workspaceWatchers.setExtraIgnoreDirs(this.config.generatedDirs);
+
     for (const existingStream of this.store.list()) {
       this.batchStore.ensureStream(existingStream);
       this.workspaceWatchers.ensureWatching(existingStream);
       this.gitRefsWatchers.ensureWatching(existingStream);
+      this.seedSnapshotTracking(existingStream.id);
     }
 
     this.workspaceWatchers.subscribe((event) => {
@@ -212,6 +229,10 @@ export class ElectronRuntime {
         path: event.path,
         t: event.t,
       });
+      // Track into the snapshot dirty set regardless of active batch state —
+      // edits between turns still need to show up in the next turn-start
+      // snapshot so the agent's "before" is accurate.
+      this.markDirty(event.streamId, event.path);
       this.recordFsWatchChange(event.streamId, event.path, event.kind, event.t);
     });
     this.gitRefsWatchers.subscribe((change) => {
@@ -351,6 +372,11 @@ export class ElectronRuntime {
     // run haven't had their `git commit` executed yet. Drain them now.
     this.batchQueue.drainPendingExecutions();
 
+    // Snapshot retention: prune on startup, then once per 24h while running.
+    // `snapshotRetentionDays === 0` disables pruning.
+    this.runSnapshotCleanup();
+    this.snapshotCleanupTimer = setInterval(() => this.runSnapshotCleanup(), 24 * 60 * 60 * 1000);
+
     this.mcp = await startMcpServer({
       workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
       logger: this.logger.child({ subsystem: "mcp" }),
@@ -377,6 +403,10 @@ export class ElectronRuntime {
   async dispose(): Promise<void> {
     this.gitRootWatcher?.close();
     this.gitRootWatcher = null;
+    if (this.snapshotCleanupTimer) {
+      clearInterval(this.snapshotCleanupTimer);
+      this.snapshotCleanupTimer = null;
+    }
     cleanupSessions(this.store.list());
     for (const socket of this.terminalSessions.values()) socket.close();
     this.terminalSessions.clear();
@@ -458,6 +488,25 @@ export class ElectronRuntime {
     writeProjectConfig(this.projectDir, next);
     this.config = next;
     this.logger.info("updated agent prompt append", { length: text.length });
+    this.events.publish({ type: "config.changed" });
+    return next;
+  }
+
+  setGeneratedDirs(dirs: string[]): NewdeConfig {
+    // Normalize: strip leading/trailing slashes, dedupe, drop empties. Path
+    // separators are illegal — single path segments only, per config schema.
+    const normalized = Array.from(
+      new Set(
+        dirs
+          .map((entry) => entry.trim().replace(/^\/+|\/+$/g, ""))
+          .filter((entry) => entry.length > 0 && !entry.includes("/")),
+      ),
+    ).sort();
+    const next: NewdeConfig = { ...this.config, generatedDirs: normalized };
+    writeProjectConfig(this.projectDir, next);
+    this.config = next;
+    this.workspaceWatchers.setExtraIgnoreDirs(normalized);
+    this.logger.info("updated generated dirs", { count: normalized.length });
     this.events.publish({ type: "config.changed" });
     return next;
   }
@@ -1011,7 +1060,19 @@ export class ElectronRuntime {
         if (stillOpen) {
           this.turnStore.closeTurn(stillOpen.id, { workItemId: null, answer: null });
         }
-        this.turnStore.openTurn({ batchId, prompt, sessionId });
+        const turn = this.turnStore.openTurn({ batchId, prompt, sessionId });
+        const batch = this.batchStore.findById(batchId);
+        if (batch) {
+          try {
+            this.flushSnapshotForStream(batch.stream_id, "turn-start", turn.id, batchId);
+          } catch (error) {
+            this.logger.warn("turn-start snapshot flush failed", {
+              batchId,
+              turnId: turn.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         return;
       }
       case "Stop": {
@@ -1021,6 +1082,17 @@ export class ElectronRuntime {
         const answer = batch?.summary?.trim() ? batch.summary : null;
         const workItemId = this.soleInProgressWorkItem(batchId);
         this.turnStore.closeTurn(open.id, { workItemId, answer });
+        if (batch) {
+          try {
+            this.flushSnapshotForStream(batch.stream_id, "turn-end", open.id, batchId);
+          } catch (error) {
+            this.logger.warn("turn-end snapshot flush failed", {
+              batchId,
+              turnId: open.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         return;
       }
       case "SessionEnd": {
@@ -1115,6 +1187,102 @@ export class ElectronRuntime {
       source,
       toolName,
     });
+    const batch = this.batchStore.findById(batchId);
+    if (batch) this.markDirty(batch.stream_id, path);
+  }
+
+  private markDirty(streamId: string, path: string): void {
+    let set = this.dirtyPathsByStream.get(streamId);
+    if (!set) {
+      set = new Set();
+      this.dirtyPathsByStream.set(streamId, set);
+    }
+    set.add(path);
+  }
+
+  private flushSnapshotForStream(
+    streamId: string,
+    kind: SnapshotKind,
+    turnId: string | null,
+    batchId: string | null,
+  ): string | null {
+    const stream = this.store.get(streamId);
+    if (!stream) return null;
+    const dirty = this.dirtyPathsByStream.get(streamId);
+    if (!dirty || dirty.size === 0) return null;
+    const dirtyPaths = Array.from(dirty);
+    const parent = this.store.getCurrentSnapshotId(streamId);
+    const snapshotId = this.snapshotStore.flushSnapshot({
+      kind,
+      streamId,
+      worktreePath: stream.worktree_path,
+      dirtyPaths,
+      parentSnapshotId: parent,
+      turnId,
+      batchId,
+    });
+    if (!snapshotId) return null;
+    dirty.clear();
+    this.store.setCurrentSnapshotId(streamId, snapshotId);
+    // Backfill any pending batch_file_change rows for this stream that
+    // haven't been attached to a snapshot yet.
+    const placeholders = dirtyPaths.map(() => "?").join(",");
+    getStateDatabase(this.projectDir).run(
+      `UPDATE batch_file_change SET snapshot_id = ?
+       WHERE snapshot_id IS NULL
+         AND path IN (${placeholders})
+         AND batch_id IN (SELECT id FROM batches WHERE stream_id = ?)`,
+      snapshotId,
+      ...dirtyPaths,
+      streamId,
+    );
+    this.events.publish({
+      type: "file-snapshot.created",
+      streamId,
+      snapshotId,
+      kind,
+      turnId,
+      batchId,
+    });
+    return snapshotId;
+  }
+
+  /**
+   * First-run seed: if the stream has no current snapshot, walk the worktree
+   * to populate the dirty set with every tracked file. Subsequent opens
+   * reconcile via mtime+size against the existing chain.
+   */
+  private seedSnapshotTracking(streamId: string): void {
+    const stream = this.store.get(streamId);
+    if (!stream) return;
+    const current = this.store.getCurrentSnapshotId(streamId);
+    const ignore = (relpath: string) => shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
+    if (current) {
+      const drifted = this.snapshotStore.reconcileWorktree(current, stream.worktree_path, ignore);
+      for (const rel of drifted) this.markDirty(streamId, rel);
+      return;
+    }
+    // Cold start: treat every tracked file as dirty.
+    const root = stream.worktree_path;
+    const walk = (rel: string): void => {
+      const abs = rel ? resolve(root, rel) : root;
+      let entries;
+      try {
+        entries = readdirSync(abs, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+        if (ignore(childRel)) continue;
+        if (entry.isDirectory()) {
+          walk(childRel);
+        } else if (entry.isFile()) {
+          this.markDirty(streamId, childRel);
+        }
+      }
+    };
+    walk("");
   }
 
   private stampUiWrite(path: string): void {
@@ -1140,6 +1308,71 @@ export class ElectronRuntime {
 
   listFileChanges(batchId: string, limit?: number): BatchFileChange[] {
     return this.fileChangeStore.listForBatch(batchId, limit);
+  }
+
+  /**
+   * Returns before/after contents for a single path within one turn.
+   * "before" is the turn-start snapshot (or its parent if only an end
+   * exists); "after" is the turn-end snapshot.
+   */
+  getTurnFileDiff(turnId: string, path: string): { before: string | null; after: string | null } {
+    const { start, end } = this.snapshotStore.getTurnSnapshots(turnId);
+    if (!end) return { before: null, after: null };
+    const beforeId = start?.parent_snapshot_id ?? end.parent_snapshot_id ?? null;
+    return this.snapshotStore.diffPath(beforeId, end.id, path);
+  }
+
+  listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
+    return this.snapshotStore.listSnapshotsForStream(streamId, limit);
+  }
+
+  getSnapshotSummary(snapshotId: string): SnapshotSummary | null {
+    return this.snapshotStore.getSnapshotSummary(snapshotId);
+  }
+
+  getSnapshotFileDiff(snapshotId: string, path: string): { before: string | null; after: string | null } {
+    return this.snapshotStore.getSnapshotFileDiff(snapshotId, path);
+  }
+
+  getSnapshotPairDiff(
+    beforeSnapshotId: string | null,
+    afterSnapshotId: string,
+    path: string,
+  ): { before: string | null; after: string | null } {
+    return this.snapshotStore.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
+  }
+
+  /**
+   * Overwrite a file in the stream's worktree with the content it had
+   * in `snapshotId`. Uses the existing `writeWorkspaceFile` path so the
+   * UI-echo filter and event bus behave identically to a UI edit.
+   */
+  runSnapshotCleanup(): { snapshotsDeleted: number; blobsDeleted: number } {
+    const days = this.config.snapshotRetentionDays;
+    try {
+      const result = this.snapshotStore.cleanupOldSnapshots(days);
+      if (result.snapshotsDeleted > 0 || result.blobsDeleted > 0) {
+        this.logger.info("snapshot cleanup", {
+          retentionDays: days,
+          ...result,
+        });
+      }
+      return result;
+    } catch (error) {
+      this.logger.warn("snapshot cleanup failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { snapshotsDeleted: 0, blobsDeleted: 0 };
+    }
+  }
+
+  restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): void {
+    const stream = this.store.get(streamId);
+    if (!stream) throw new Error(`unknown stream: ${streamId}`);
+    const hash = this.snapshotStore.resolvePath(snapshotId, path);
+    if (!hash) throw new Error(`snapshot ${snapshotId} has no content for ${path}`);
+    const content = this.snapshotStore.readBlob(hash).toString("utf8");
+    this.writeWorkspaceFile(streamId, path, content);
   }
 
   // -------- commit points (IPC-exposed delegations) --------

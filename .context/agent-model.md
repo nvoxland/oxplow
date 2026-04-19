@@ -52,7 +52,8 @@ to `runtime.handleHookEnvelope`, which:
 1. Stores the event in `HookEventStore` (a ring buffer, also fed to the UI's
    Hook Events tool window via the `hook.recorded` EventBus event).
 2. Updates the resume-session tracker so reconnects find the latest sid.
-3. Calls `applyTurnTracking` to open/close `agent_turn` rows.
+3. Calls `applyTurnTracking` to open/close `agent_turn` rows and flush
+   turn-start / turn-end snapshots (see "Snapshot tracking" below).
 4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
    blocks the tool (see Write guard below).
 5. For `UserPromptSubmit`: returns `additionalContext` from the editor focus
@@ -156,6 +157,40 @@ sessions keep the prompt they launched with.
 of hook events into one of `idle | working | waiting | done`. The runtime
 recomputes on every hook arrival and emits `agent-status.changed`. The UI
 shows it as a colored dot on each batch tab.
+
+## Snapshot tracking
+
+The runtime keeps a content-addressed history of worktree files so the
+UI (and future tooling) can render turn-level diffs without relying on
+git. Mechanics:
+
+- A per-stream in-memory **dirty set** accumulates relative paths. It
+  is populated by the workspace fs-watcher (always, regardless of
+  batch state) and by the PostToolUse hook (`persistFileChange`).
+- On `UserPromptSubmit`, after the new `agent_turn` row is opened,
+  `flushSnapshotForStream(streamId, "turn-start", turnId, batchId)` is
+  called. If the dirty set is non-empty it writes blobs + a manifest
+  under `.newde/snapshots/`, inserts a `file_snapshot` row, updates
+  `streams.current_snapshot_id`, and backfills `snapshot_id` on the
+  `batch_file_change` rows whose paths match. The dirty set is then
+  cleared.
+- On `Stop`, after the turn is closed, `flushSnapshotForStream` is
+  called again with `kind: "turn-end"`.
+- On project open, `seedSnapshotTracking` runs once per stream. If the
+  stream has no `current_snapshot_id`, every file in the worktree is
+  marked dirty (the baseline case). Otherwise `reconcileWorktree`
+  walks the tree and compares `(mtime_ms, size)` against the resolved
+  entry map from the parent chain; drifted paths plus tombstone
+  mismatches (file deleted / created while the app was closed) go
+  into the dirty set so the next turn-start captures them.
+- `runtime.getTurnFileDiff(turnId, path)` returns `{ before, after }`
+  strings by resolving the turn-start snapshot's parent (the "before")
+  and the turn-end snapshot (the "after") through `SnapshotStore.diffPath`.
+
+See [data-model.md](./data-model.md) for the `file_snapshot` schema
+and manifest layout, and [ipc-and-stores.md](./ipc-and-stores.md) for
+the `file-snapshot.created` EventBus event and the `getTurnFileDiff`
+IPC method.
 
 ## Related
 

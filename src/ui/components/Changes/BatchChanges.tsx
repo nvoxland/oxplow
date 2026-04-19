@@ -4,9 +4,10 @@ import { fileChangeKindColor, netFileChanges } from "../../file-change-net.js";
 interface Props {
   batchFileChanges: BatchFileChange[] | null;
   onOpenFile(path: string): void;
+  onOpenTurnDiff?(turnId: string, path: string): void;
 }
 
-export function BatchChanges({ batchFileChanges, onOpenFile }: Props) {
+export function BatchChanges({ batchFileChanges, onOpenFile, onOpenTurnDiff }: Props) {
   if (batchFileChanges === null) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;
   }
@@ -66,6 +67,19 @@ export function BatchChanges({ batchFileChanges, onOpenFile }: Props) {
               {change.change_kind}
             </span>
             <span style={{ fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{change.path}</span>
+            {onOpenTurnDiff && change.turn_id ? (
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenTurnDiff(change.turn_id!, change.path);
+                }}
+                title="Open turn diff"
+                style={{ fontSize: 10, padding: "0 4px", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--muted)" }}
+              >
+                diff
+              </span>
+            ) : null}
             <span style={{ color: "var(--muted)", marginLeft: "auto", fontSize: 11 }}>
               {rawCount > 1 ? `×${rawCount} · ` : ""}
               {change.source}

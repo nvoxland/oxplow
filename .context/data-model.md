@@ -80,7 +80,72 @@ and by file-change attribution.
 Per-batch log of file mutations attributed to either a hook (Write/Edit/
 MultiEdit/NotebookEdit PostToolUse) or fs-watch (anything else). Carries
 turn_id and work_item_id when known. Drives the file-change indicators in
-the project pane and the per-turn file filter.
+the project pane and the per-turn file filter. Each row gets a nullable
+`snapshot_id` pointing at the `file_snapshot` that absorbed the change
+(backfilled when a turn-start or turn-end snapshot flushes).
+
+### `file_snapshot` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
+
+Metadata rows for content-addressed file snapshots. The actual blobs
+and per-snapshot manifests live under `.newde/snapshots/` (blobs in
+`objects/xx/yyyy…` sha256-addressed, manifests in
+`manifests/<snapshot_id>.json`). Each snapshot stores only the files in
+the dirty set at flush time, plus a pointer to the parent snapshot —
+walking the chain reconstructs the full file set. `kind` is
+`turn-start` or `turn-end`; the first turn-start on a stream doubles as
+its baseline. Manifest entries carry `hash`, `mtime_ms`, and `size` so
+startup reconciliation can detect drift cheaply without rehashing
+unchanged files. Deletions are recorded as tombstone entries. Oversized
+files (> 5 MB) are recorded with a sentinel hash rather than blobbed.
+
+The `streams.current_snapshot_id` column holds the stream's latest
+snapshot — it's the parent for the next flush.
+
+Read API (surfaced via IPC — see `ipc-and-stores.md`):
+
+- `listSnapshotsForStream(streamId, limit)` — newest-first.
+- `getSnapshotSummary(id)` → `{ snapshot, files: {path: {entry,
+  kind}}, counts }`; classifies each manifest entry as
+  created/updated/deleted relative to the parent chain.
+- `getSnapshotFileDiff(id, path)` — resolves "before" from the
+  parent chain and "after" from this snapshot.
+- `getSnapshotPairDiff(beforeId, afterId, path)` — arbitrary pair.
+- `getTurnSnapshots(turnId)` — `{ start, end }` for a turn, used by
+  `runtime.getTurnFileDiff`.
+
+**Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
+deletes snapshots older than the cutoff (default 7 days, configurable
+via `newde.yaml`'s `snapshotRetentionDays`; `0` disables pruning),
+except:
+
+- the most recent snapshot per stream is always kept;
+- anything `streams.current_snapshot_id` points at is always kept.
+
+After snapshot deletion, `gcBlobs()` sweeps `.newde/snapshots/objects/`
+and removes any blob whose sha isn't referenced by a surviving
+manifest. Descendants whose parent was deleted keep pointing at a
+missing id — `resolvePath` simply stops walking there, so the oldest
+surviving snapshot effectively becomes a new baseline for files it
+touches. The trade-off: ancient history drops; recent diffs stay
+intact. The blob store is shared across all streams in the project
+(`.newde/snapshots/objects/`), so GC runs at the project level and
+naturally dedupes identical content across branches.
+
+Cleanup runs at runtime startup and again once every 24 hours via
+`runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in
+`dispose()`).
+
+**Ignoring generated directories.** The fs-watcher and the snapshot
+seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
+`src/git/workspace-watch.ts`. It covers `.git/`, `.newde/logs/`,
+`.newde/worktrees/`, and a hardcoded list of common build/cache dir
+names (`node_modules`, `dist`, `build`, `target`, `.next`, `.turbo`,
+`.cache`, `.venv`, `__pycache__`, …). Users can extend the list via
+`generatedDirs: [...]` in `newde.yaml` — names are single path
+segments matched anywhere in the relative path, and apply to both
+the workspace watcher and the snapshot store. No changes to
+existing snapshots on toggle; newly ignored paths simply stop
+appearing in future dirty sets.
 
 ## The shared `sort_index` queue
 
@@ -137,7 +202,7 @@ The runtime relays each store's changes onto the typed EventBus
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
 - `work-item.changed`, `backlog.changed`, `batch.changed`, `turn.changed`
-- `file-change.recorded`, `agent-status.changed`
+- `file-change.recorded`, `file-snapshot.created`, `agent-status.changed`
 - `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`
 

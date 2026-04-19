@@ -169,6 +169,22 @@ export class StreamStore {
     );
   }
 
+  getCurrentSnapshotId(streamId: string): string | null {
+    const row = this.stateDb.get<{ current_snapshot_id: string | null }>(
+      "SELECT current_snapshot_id FROM streams WHERE id = ? LIMIT 1",
+      streamId,
+    );
+    return row?.current_snapshot_id ?? null;
+  }
+
+  setCurrentSnapshotId(streamId: string, snapshotId: string): void {
+    this.stateDb.run(
+      "UPDATE streams SET current_snapshot_id = ? WHERE id = ?",
+      snapshotId,
+      streamId,
+    );
+  }
+
   update(streamId: string, mutate: (stream: Stream) => Stream): Stream {
     const existing = this.get(streamId);
     if (!existing) throw new Error(`unknown stream: ${streamId}`);

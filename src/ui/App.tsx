@@ -41,6 +41,8 @@ import {
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
+  getConfig,
+  setGeneratedDirs,
   selectBatch,
   promoteBatch,
   switchStream,
@@ -85,6 +87,7 @@ import { Activity } from "./components/Activity/Activity.js";
 import { BatchChanges } from "./components/Changes/BatchChanges.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
+import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -121,6 +124,7 @@ export function App() {
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [batchCreateRequest, setBatchCreateRequest] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.newdeDesktop?.isElectron;
@@ -831,6 +835,40 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const reload = () => {
+      void getConfig()
+        .then((cfg) => {
+          if (cancelled) return;
+          setGeneratedDirsState(cfg.generatedDirs);
+        })
+        .catch((error) => {
+          logUi("warn", "failed to load config", { error: String(error) });
+        });
+    };
+    reload();
+    const unsub = subscribeNewdeEvents((event) => {
+      if (event.type === "config.changed") reload();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  const handleToggleGeneratedDir = async (name: string, mark: boolean) => {
+    const next = mark
+      ? Array.from(new Set([...generatedDirs, name])).sort()
+      : generatedDirs.filter((entry) => entry !== name);
+    try {
+      const cfg = await setGeneratedDirs(next);
+      setGeneratedDirsState(cfg.generatedDirs);
+    } catch (err) {
+      setError(`Failed to update generated dirs: ${String(err)}`);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
     listAgentStatuses()
       .then((entries) => {
         if (cancelled) return;
@@ -992,9 +1030,12 @@ export function App() {
   }, [currentSession.openOrder, diffTabs]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
-  const handleOpenDiff = (request: DiffRequest) => {
+  const handleOpenDiff = (request: DiffSpec) => {
     const rightKey = request.rightKind === "working" ? "working" : `ref:${request.rightKind.ref}`;
-    const id = `diff:${request.leftRef}:${rightKey}:${request.path}`;
+    // Including the labelOverride in the id lets snapshot diffs coexist with
+    // git diffs for the same path without colliding.
+    const labelKey = request.labelOverride ? `:${request.labelOverride}` : "";
+    const id = `diff:${request.leftRef}:${rightKey}:${request.path}${labelKey}`;
     setDiffTabs((prev) => {
       if (prev.some((tab) => tab.id === id)) return prev;
       return [...prev, { id, spec: request }];
@@ -1022,6 +1063,28 @@ export function App() {
     };
     setDiffTabs((prev) => [...prev, { id, spec }]);
     setCenterActive(id);
+  };
+
+  const handleOpenTurnDiff = async (turnId: string, path: string) => {
+    try {
+      const { getTurnFileDiff } = await import("./api.js");
+      const diff = await getTurnFileDiff(turnId, path);
+      if (diff.before === null && diff.after === null) {
+        setError(`No snapshot diff available for ${path} in this turn`);
+        return;
+      }
+      handleOpenDiff({
+        path,
+        leftRef: "",
+        rightKind: "working",
+        baseLabel: `turn ${turnId.slice(-6)}`,
+        leftContent: diff.before ?? "",
+        rightContent: diff.after ?? "",
+        labelOverride: `turn ${turnId.slice(-6)}`,
+      });
+    } catch (err) {
+      setError(`Open turn diff failed: ${String(err)}`);
+    }
   };
 
   const handleRevealCommit = (sha: string) => {
@@ -1142,12 +1205,14 @@ export function App() {
           selectedFilePath={selectedFilePath}
           currentBatchTurns={selectedBatchTurns}
           currentBatchFileChanges={selectedBatchFileChanges}
+          generatedDirs={generatedDirs}
           onOpenFile={handleOpenFile}
           onOpenDiff={handleOpenDiff}
           onCreateFile={handleCreateFile}
           onCreateDirectory={handleCreateDirectory}
           onRenamePath={handleRenamePath}
           onDeletePath={handleDeletePath}
+          onToggleGeneratedDir={handleToggleGeneratedDir}
         />
       ),
     },
@@ -1160,6 +1225,7 @@ export function App() {
           batchFileChanges={selectedBatchFileChanges}
           workItems={selectedBatchWork?.items ?? []}
           onOpenFile={handleOpenFile}
+          onOpenTurnDiff={handleOpenTurnDiff}
         />
       ),
     },
@@ -1170,6 +1236,7 @@ export function App() {
         <BatchChanges
           batchFileChanges={selectedBatchFileChanges}
           onOpenFile={handleOpenFile}
+          onOpenTurnDiff={handleOpenTurnDiff}
         />
       ),
     },
@@ -1193,6 +1260,11 @@ export function App() {
       id: "history",
       label: "History",
       render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />,
+    },
+    {
+      id: "snapshots",
+      label: "Snapshots",
+      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} />,
     },
   ];
 

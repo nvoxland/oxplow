@@ -7,9 +7,10 @@ interface Props {
   batchFileChanges: BatchFileChange[] | null;
   workItems: WorkItem[];
   onOpenFile(path: string): void;
+  onOpenTurnDiff?(turnId: string, path: string): void;
 }
 
-export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile }: Props) {
+export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile, onOpenTurnDiff }: Props) {
   const itemById = useMemo(() => new Map(workItems.map((item) => [item.id, item] as const)), [workItems]);
   const changesByTurn = useMemo(() => {
     const out = new Map<string, BatchFileChange[]>();
@@ -37,6 +38,7 @@ export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile }
           linkedItem={turn.work_item_id ? itemById.get(turn.work_item_id) ?? null : null}
           fileChanges={changesByTurn.get(turn.id) ?? []}
           onOpenFile={onOpenFile}
+          onOpenTurnDiff={onOpenTurnDiff}
         />
       ))}
     </div>
@@ -48,11 +50,13 @@ function TurnCard({
   linkedItem,
   fileChanges,
   onOpenFile,
+  onOpenTurnDiff,
 }: {
   turn: AgentTurn;
   linkedItem: WorkItem | null;
   fileChanges: BatchFileChange[];
   onOpenFile(path: string): void;
+  onOpenTurnDiff?(turnId: string, path: string): void;
 }) {
   const open = turn.ended_at == null;
   const [filesOpen, setFilesOpen] = useState(false);
@@ -109,6 +113,19 @@ function TurnCard({
                     {change.change_kind}
                   </span>
                   <span style={{ fontFamily: "ui-monospace, monospace", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2 }}>{change.path}</span>
+                  {onOpenTurnDiff ? (
+                    <span
+                      role="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenTurnDiff(turn.id, change.path);
+                      }}
+                      title="Open turn diff"
+                      style={{ fontSize: 10, padding: "0 4px", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--muted)" }}
+                    >
+                      diff
+                    </span>
+                  ) : null}
                   <span style={{ color: "var(--muted)", marginLeft: "auto" }}>
                     {change.source}
                     {change.tool_name ? ` · ${change.tool_name}` : ""}

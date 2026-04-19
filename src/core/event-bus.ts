@@ -104,6 +104,15 @@ export interface FileChangeRecordedEvent {
   source: "hook" | "fs-watch";
 }
 
+export interface FileSnapshotCreatedEvent {
+  type: "file-snapshot.created";
+  streamId: string;
+  snapshotId: string;
+  kind: "turn-start" | "turn-end";
+  turnId: string | null;
+  batchId: string | null;
+}
+
 export type NewdeEvent =
   | WorkspaceChangedEvent
   | HookRecordedEvent
@@ -113,6 +122,7 @@ export type NewdeEvent =
   | AgentStatusChangedEvent
   | TurnChangedEvent
   | FileChangeRecordedEvent
+  | FileSnapshotCreatedEvent
   | WorkspaceContextChangedEvent
   | CommitPointChangedEvent
   | WaitPointChangedEvent
