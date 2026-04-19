@@ -1,0 +1,113 @@
+# Editor and Monaco patterns
+
+What this doc covers: how `EditorPane` hosts Monaco, the conventions for
+context menus / decorations / overlays, and the LSP bridge. For the
+broader "Monaco at the core, custom shell around it" rationale, see
+`architecture.md`.
+
+## Single editor instance, models per file
+
+`src/ui/components/EditorPane.tsx` mounts **one** Monaco editor and
+swaps `editor.model` whenever `filePath` changes. Models are keyed by
+URI via `streamFileUri(stream, path)` (see `src/ui/lsp.ts`), so opening
+the same file across tabs hits the same model and edit history.
+
+This avoids the cost (and visual flicker) of rebuilding the editor on
+every tab switch — the parent `CenterTabs` keeps `EditorPane` mounted
+in the same slot and only changes the `filePath` prop.
+
+## Custom context menu
+
+Monaco's native menu is disabled (`contextmenu: false`). Right-click is
+caught via `editor.onContextMenu`, which:
+
+1. Computes the click's text position.
+2. **Preserves any existing selection** if the click falls inside it
+   (so actions like "Compare with Clipboard" still see the selected
+   text). Only collapses the selection when the click lands outside.
+3. Opens the shared `ContextMenu` component
+   (`src/ui/components/ContextMenu.tsx`) at the cursor.
+
+Menu items live in a per-render `MenuItem[]` array — `Save`, `Find`,
+`Go to Definition`, `Format Document`, `Copy Path`,
+`Annotate with Git Blame`, `Compare with Clipboard`. Items are gated on
+`enabled` based on file path, language LSP support, and selection
+presence.
+
+The `ContextMenu` component handles its own viewport-clamping and
+submenu flip-up logic; never re-implement that per-call site.
+
+## Blame overlay
+
+When the user toggles `Annotate with Git Blame`, `EditorPane` fetches
+blame via `gitBlame(stream.id, filePath)` and renders an absolutely-
+positioned DOM overlay on the left gutter (the `BlameOverlay`
+sub-component). Layout details:
+
+- Reserves ~150px of left space by setting `lineNumbers: "off"` and
+  `lineDecorationsWidth: 150` on the editor while blame is on.
+- Syncs to scroll via `editor.onDidScrollChange` updating a
+  `blameScrollTop` state.
+- Reads `monaco.editor.EditorOption.lineHeight` so each row aligns with
+  the corresponding text line.
+- Ages each line via `blameColor(ageDays)` — bright blue for fresh
+  commits, fading through gray for older ones. Uncommitted lines (sha
+  all zeros) render blank.
+- On click, calls the `onRevealCommit(sha)` prop (wired from `App.tsx`)
+  which bumps two tokens: `historyReveal` (passed to `HistoryPanel` to
+  select the commit) and `bottomActivate` (passed to the bottom
+  `DockShell` to open the History tool window).
+
+Refresh rule: the overlay re-fetches when the file is saved
+(`isDirty` transitions true → false). It does **not** refresh on every
+edit because blame is against `HEAD`, not the buffer.
+
+## Diff editor
+
+`src/ui/components/Diff/DiffPane.tsx` uses Monaco's `createDiffEditor`.
+The `DiffSpec` type (`src/ui/components/Diff/diff-request.ts`) supports
+two render modes:
+
+- **Git-ref backed.** `leftRef` plus `rightKind: "working" | { ref }`.
+  Each side fetched via `readFileAtRef` / `readWorkspaceFile`.
+- **Inline content.** Optional `leftContent`/`rightContent` strings that
+  bypass git/workspace reads. Used by the editor's "Compare with
+  Clipboard" action — left = selection, right = clipboard text.
+
+Tab labels honor an optional `labelOverride` so inline diffs can show
+"selection vs clipboard" instead of generic "(diff)".
+
+## LSP bridge
+
+`src/ui/lsp.ts` defines `LspClient`, which talks to a per-language LSP
+server through a runtime-managed socket (the runtime spawns the server
+process via `LspSessionManager` and bridges its stdio to a WebSocket).
+`EditorPane` registers Monaco providers (definition, hover, references)
+that proxy to the client; the work of mapping LSP positions ↔ Monaco
+positions and locations ↔ Monaco editor ranges happens in the editor
+component.
+
+The set of languages eligible for LSP is determined by
+`isLspCandidateLanguage` (`src/ui/editor-language.ts`). The runtime
+loads extra LSP servers from `newde.yaml` on startup
+(`config.lspServers` → `registerLanguageServer` per server).
+
+LSP is also exposed to **agents** via `buildLspMcpTools`
+(`src/mcp/lsp-mcp-tools.ts`) so they can run definition/reference queries
+without shelling out.
+
+## Editor focus tracking
+
+`EditorPane` pushes the user's current file/selection/caret to the
+runtime via `window.newdeApi.updateEditorFocus`, debounced ~150ms. The
+runtime relays it through `EditorFocusStore` and uses
+`formatEditorFocusForAgent` to inject it as `additionalContext` on the
+agent's `UserPromptSubmit` hook — so the agent automatically knows what
+the user has open and selected when they start a turn.
+
+## Related
+
+- [agent-model.md](./agent-model.md) — how editor focus reaches the
+  agent, and how MCP LSP tools work.
+- [git-integration.md](./git-integration.md) — `gitBlame` + history
+  panel that the blame overlay reveals into.
