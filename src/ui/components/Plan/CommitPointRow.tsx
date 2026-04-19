@@ -38,10 +38,10 @@ export function CommitPointRow({ cp }: { cp: CommitPoint }) {
         </select>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
           {cp.status === "rejected" ? (
-            <button style={miniButtonStyle} onClick={() => runWithError("Reset commit point", resetCommitPoint(cp.id))}>Retry</button>
+            <button type="button" style={miniButtonStyle} onClick={() => runWithError("Reset commit point", resetCommitPoint(cp.id))}>Retry</button>
           ) : null}
           {cp.status !== "done" ? (
-            <button style={miniButtonStyle} onClick={() => runWithError("Delete commit point", deleteCommitPoint(cp.id))}>Delete</button>
+            <button type="button" style={miniButtonStyle} onClick={() => runWithError("Delete commit point", deleteCommitPoint(cp.id))}>Delete</button>
           ) : null}
         </span>
       </div>
@@ -66,14 +66,14 @@ export function CommitPointRow({ cp }: { cp: CommitPoint }) {
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
             {editing ? (
               <>
-                <button style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id, draft))}>Save & approve</button>
-                <button style={miniButtonStyle} onClick={() => { setEditing(false); setDraft(cp.proposed_message ?? ""); }}>Cancel</button>
+                <button type="button" style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id, draft))}>Save & approve</button>
+                <button type="button" style={miniButtonStyle} onClick={() => { setEditing(false); setDraft(cp.proposed_message ?? ""); }}>Cancel</button>
               </>
             ) : (
               <>
-                <button style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id))}>Approve</button>
-                <button style={miniButtonStyle} onClick={() => setEditing(true)}>Edit</button>
-                <button style={miniButtonStyle} onClick={() => {
+                <button type="button" style={miniButtonStyle} onClick={() => runWithError("Approve commit point", approveCommitPoint(cp.id))}>Approve</button>
+                <button type="button" style={miniButtonStyle} onClick={() => setEditing(true)}>Edit</button>
+                <button type="button" style={miniButtonStyle} onClick={() => {
                   const note = window.prompt("Rejection note (sent to agent on retry):", "");
                   if (note != null) runWithError("Reject commit point", rejectCommitPoint(cp.id, note));
                 }}>Reject</button>

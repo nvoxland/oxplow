@@ -30,7 +30,7 @@ export function BatchChanges({ batchFileChanges, onOpenFile, onOpenTurnDiff }: P
       {net.map((change) => {
         const rawCount = rawCountByPath.get(change.path) ?? 1;
         return (
-          <button
+          <button type="button"
             key={change.id}
             onClick={() => onOpenFile(change.path)}
             style={{

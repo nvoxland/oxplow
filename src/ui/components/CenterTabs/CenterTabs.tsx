@@ -46,7 +46,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
               <span>{tab.label}</span>
               {tab.closable && onClose ? (
-                <button
+                <button type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     onClose(tab.id);

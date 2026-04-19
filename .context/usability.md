@@ -4,6 +4,10 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Forms
 
+- **Every `<button>` needs an explicit `type`.** HTML defaults `<button>` to
+  `type="submit"`, which silently submits any enclosing form on click. Use
+  `type="button"` for every action button; use `type="submit"` only on the
+  form's primary action. Don't rely on the default — it's a tripwire.
 - **Enter submits.** Any form with a primary action must submit on Enter from
   any single-line input or select when all required fields are valid. Use a
   real `<form onSubmit=...>` wrapper; the browser handles single-line Enter for

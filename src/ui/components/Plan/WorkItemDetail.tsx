@@ -54,7 +54,7 @@ export function WorkItemDetail({
         <span style={{ color: "var(--muted)" }}>·</span>
         <span style={{ color: "var(--muted)" }}>by {item.created_by}</span>
         <span style={{ flex: 1 }} />
-        <button onClick={onRequestDelete} style={deleteButtonStyle} title="Delete work item">Delete</button>
+        <button type="button" onClick={onRequestDelete} style={deleteButtonStyle} title="Delete work item">Delete</button>
       </div>
       <EditableField
         key={`title-${item.id}-${item.updated_at}`}

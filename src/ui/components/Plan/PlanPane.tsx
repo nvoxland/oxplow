@@ -266,7 +266,7 @@ export function PlanPane({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
+          <button type="button" onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
             + New work item
           </button>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
@@ -321,7 +321,7 @@ export function PlanPane({
             const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
             const addPointsSlot = isRootBatch && batch ? (
               <div style={queueMarkerBarStyle}>
-                <button
+                <button type="button"
                   onClick={() => {
                     if (!streamId || !batchId) return;
                     runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
@@ -340,7 +340,7 @@ export function PlanPane({
                 >
                   + Commit when done
                 </button>
-                <button
+                <button type="button"
                   onClick={() => {
                     if (!streamId || !batchId) return;
                     runWithError("Add wait point", createWaitPoint(streamId, batchId, null));
@@ -396,7 +396,7 @@ export function PlanPane({
         )}
       </div>
       <div style={bottomBarStyle}>
-        <button
+        <button type="button"
           onClick={() => setMode((prev) => (prev === "backlog" ? "batch" : "backlog"))}
           onDragOver={handleBacklogChipDragOver}
           onDragLeave={() => setBacklogChipDragOver(false)}
@@ -698,7 +698,7 @@ function ContextMenu({ menu, onDelete }: { menu: ContextMenuState; onDelete(): v
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <button
+      <button type="button"
         onClick={onDelete}
         style={{
           display: "block",

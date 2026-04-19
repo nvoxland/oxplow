@@ -1510,7 +1510,7 @@ function DaemonDownDialog() {
           The backend daemon was killed or is no longer reachable. Stream switching, terminal panes, and hook
           updates will not keep working until the daemon is started again.
         </div>
-        <button
+        <button type="button"
           onClick={() => window.location.reload()}
           style={{
             background: "var(--accent)",
@@ -1572,7 +1572,7 @@ function ExternalFileChangedDialog({
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button
+          <button type="button"
             onClick={onKeepMine}
             style={{
               background: "transparent",
@@ -1586,7 +1586,7 @@ function ExternalFileChangedDialog({
           >
             Keep my changes
           </button>
-          <button
+          <button type="button"
             onClick={onReload}
             style={{
               background: "var(--accent)",

@@ -648,20 +648,20 @@ export function ProjectPanel({
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 6 }}>
         <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stream.branch}</div>
-        <button
+        <button type="button"
           onClick={() => void expandAll()}
           title="Expand all"
           style={iconButtonStyle}
         >⤡</button>
-        <button
+        <button type="button"
           onClick={collapseAll}
           title="Collapse all"
           style={iconButtonStyle}
         >⤢</button>
         {gitEnabled ? (
           <>
-            <button onClick={() => setPushPullDialog("pull")} title="Pull…" style={iconButtonStyle}>↓</button>
-            <button onClick={() => setPushPullDialog("push")} title="Push…" style={iconButtonStyle}>↑</button>
+            <button type="button" onClick={() => setPushPullDialog("pull")} title="Pull…" style={iconButtonStyle}>↓</button>
+            <button type="button" onClick={() => setPushPullDialog("push")} title="Push…" style={iconButtonStyle}>↑</button>
           </>
         ) : null}
         <FilterMenuButton
@@ -857,7 +857,7 @@ function FindUsagesModal({
               “{state.query}” &middot; from {state.path}
             </div>
           </div>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 0" }}>
           {state.loading ? (
@@ -872,7 +872,7 @@ function FindUsagesModal({
                   <span>{hits.length}</span>
                 </div>
                 {hits.map((hit) => (
-                  <button
+                  <button type="button"
                     key={`${hit.path}:${hit.line}`}
                     onClick={() => onOpen(hit.path)}
                     style={{
@@ -923,7 +923,7 @@ function FileHistoryModal({
         <div style={modalEmptyStyle}>No commits touched this file.</div>
       ) : (
         state.commits.map((commit) => (
-          <button
+          <button type="button"
             key={commit.sha}
             onDoubleClick={() => onOpenDiff(commit.sha, commit.parents[0]?.sha ?? null)}
             title="Double-click to open diff"
@@ -970,7 +970,7 @@ function CompareWithModal({
         <div style={modalEmptyStyle}>No matches.</div>
       ) : (
         filtered.map((ref) => (
-          <button key={`${ref.kind}-${ref.name}`} onClick={() => onPick(ref.ref)} style={modalRowStyle}>
+          <button type="button" key={`${ref.kind}-${ref.name}`} onClick={() => onPick(ref.ref)} style={modalRowStyle}>
             <span style={{ color: ref.kind === "tag" ? "#fcd34d" : "#4a9eff", fontSize: 10, textTransform: "uppercase", minWidth: 48 }}>
               {ref.kind}
             </span>
@@ -1140,7 +1140,7 @@ function ModalShell({ title, onClose, children }: { title: string; onClose(): vo
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-          <button onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
           {children}
@@ -1331,7 +1331,7 @@ function FilterMenuButton({
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
-      <button
+      <button type="button"
         onClick={() => setOpen((v) => !v)}
         title={`Filter: ${filterModeLabel(filterMode, scopes, null, recentTurns)}`}
         style={{
@@ -1349,7 +1349,7 @@ function FilterMenuButton({
       {open ? (
         <div style={filterMenuStyle}>
           {options.map((opt) => (
-            <button
+            <button type="button"
               key={opt.value}
               disabled={opt.disabled}
               onClick={() => {

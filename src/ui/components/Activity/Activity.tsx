@@ -114,7 +114,7 @@ function TurnCard({
       ) : null}
       {deduped.length > 0 ? (
         <div style={{ marginTop: 4 }}>
-          <button
+          <button type="button"
             onClick={() => setFilesOpen((v) => !v)}
             style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 11, fontFamily: "inherit" }}
           >
@@ -123,7 +123,7 @@ function TurnCard({
           {filesOpen ? (
             <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
               {deduped.map((change) => (
-                <button
+                <button type="button"
                   key={change.id}
                   onClick={() => onOpenFile(change.path)}
                   style={{ background: "transparent", border: "none", padding: 0, fontSize: 11, display: "flex", gap: 6, alignItems: "baseline", cursor: "pointer", textAlign: "left", color: "inherit", fontFamily: "inherit" }}

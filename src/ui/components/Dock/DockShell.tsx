@@ -173,7 +173,7 @@ export function DockShell({
                 transform: side === "left" ? "rotate(180deg)" : undefined,
               };
         return (
-          <button
+          <button type="button"
             key={tw.id}
             onClick={() => setActiveId(tw.id)}
             title={tw.label}

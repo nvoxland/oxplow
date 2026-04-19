@@ -58,7 +58,7 @@ export function Menubar({ groups }: Props) {
               }
             }}
             >
-              <button
+              <button type="button"
                 onClick={() => setOpenMenuId(open ? null : group.id)}
               style={{
                 ...menuButtonStyle,

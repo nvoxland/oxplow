@@ -65,7 +65,7 @@ export function TreeEntries({
         const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
         return (
           <div key={entry.path}>
-            <button
+            <button type="button"
               onClick={() => {
                 if (entry.kind === "directory") {
                   void onToggleDirectory(entry.path);
@@ -198,7 +198,7 @@ function FileRow({
   onContextMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       onContextMenu={(event) => {
         event.preventDefault();

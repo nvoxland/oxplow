@@ -92,7 +92,7 @@ export function SettingsModal({ open, onClose }: Props) {
       <div style={modalStyle} onClick={(event) => event.stopPropagation()}>
         <div style={headerStyle}>
           <span>Settings</span>
-          <button onClick={onClose} style={closeBtnStyle} aria-label="Close settings">×</button>
+          <button type="button" onClick={onClose} style={closeBtnStyle} aria-label="Close settings">×</button>
         </div>
         <div style={bodyStyle}>
           <section style={sectionStyle}>
@@ -160,8 +160,8 @@ export function SettingsModal({ open, onClose }: Props) {
               {error ? <span style={{ color: "#ff6b6b", fontSize: 12 }}>{error}</span> : null}
               {savedMessage ? <span style={{ color: "var(--muted)", fontSize: 12 }}>{savedMessage}</span> : null}
               <span style={{ flex: 1 }} />
-              <button onClick={onClose} style={buttonStyle} disabled={saving}>Cancel</button>
-              <button onClick={() => void handleSave()} style={primaryButtonStyle} disabled={!loaded || saving}>
+              <button type="button" onClick={onClose} style={buttonStyle} disabled={saving}>Cancel</button>
+              <button type="button" onClick={() => void handleSave()} style={primaryButtonStyle} disabled={!loaded || saving}>
                 {saving ? "Saving…" : "Save"}
               </button>
             </div>

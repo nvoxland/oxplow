@@ -48,7 +48,7 @@ export const iconButtonStyle = {
 
 export function SidebarButton({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       style={{
         flex: 1,

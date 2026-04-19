@@ -126,7 +126,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
             <div style={emptyStyle}>No matching files.</div>
           ) : (
             filteredFiles.map((file, index) => (
-              <button
+              <button type="button"
                 key={file.path}
                 onClick={() => confirmSelection(file.path)}
                 style={{

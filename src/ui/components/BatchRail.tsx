@@ -147,12 +147,12 @@ export function BatchRail({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
-        <button style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
+        <button type="button" style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
           {showCreate ? "Cancel" : "+ New batch"}
         </button>
         {completed.length > 0 ? (
           <div style={{ position: "relative" }}>
-            <button style={smallBtn} onClick={() => setShowOverflow((v) => !v)}>
+            <button type="button" style={smallBtn} onClick={() => setShowOverflow((v) => !v)}>
               … {completed.length} done ▾
             </button>
             {showOverflow ? (
@@ -477,11 +477,11 @@ function HoverCard({
       ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
-          <button style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
+          <button type="button" style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
             Complete batch
           </button>
         ) : batch.status !== "completed" ? (
-          <button style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
+          <button type="button" style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
             Make writer
           </button>
         ) : null}
@@ -513,7 +513,7 @@ function OverflowDropdown({
   return (
     <div data-batch-overflow style={overflowStyle}>
       {batches.map((batch) => (
-        <button
+        <button type="button"
           key={batch.id}
           onClick={() => onSelect(batch.id)}
           style={{
@@ -574,7 +574,7 @@ function CreateBatchInput({
         style={inputStyle}
         placeholder="Batch title"
       />
-      <button style={smallBtn} onClick={() => void submit()} disabled={submitting}>
+      <button type="button" style={smallBtn} onClick={() => void submit()} disabled={submitting}>
         {submitting ? "Creating…" : "Create"}
       </button>
       {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}

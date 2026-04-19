@@ -119,7 +119,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
             const canDrop = !!onDropWorkItemOnStream && !!streamActiveBatchIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
             return (
-              <button
+              <button type="button"
                 key={candidate.id}
                 onClick={() => onSwitch(candidate.id)}
                 onContextMenu={(event) => {
@@ -168,7 +168,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
           })}
         </div>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 0 6px 8px" }}>
-          <button
+          <button type="button"
             onClick={openCreate}
             title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
             style={{ ...buttonStyle, opacity: gitEnabled ? 1 : 0.6, cursor: gitEnabled ? "pointer" : "not-allowed" }}
@@ -177,7 +177,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
             + New stream
           </button>
           {onOpenSettings ? (
-            <button
+            <button type="button"
               onClick={onOpenSettings}
               title="Settings"
               aria-label="Settings"

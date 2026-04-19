@@ -16,7 +16,7 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
         {wp.note ? <span style={{ color: "var(--muted)", fontSize: 11 }}>{wp.note}</span> : null}
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
           {wp.status === "pending" ? (
-            <button
+            <button type="button"
               style={miniButtonStyle}
               onClick={() => {
                 const next = window.prompt("Wait point note:", wp.note ?? "");
@@ -26,7 +26,7 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
               Edit
             </button>
           ) : null}
-          <button
+          <button type="button"
             style={miniButtonStyle}
             onClick={() => {
               if (window.confirm("Delete this wait point?")) runWithError("Delete wait point", deleteWaitPoint(wp.id));

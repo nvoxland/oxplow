@@ -310,14 +310,14 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
       <div style={{ position: "absolute", top: 10, right: 10, zIndex: 2, display: "flex", gap: 8 }}>
         {transportMode === "direct" ? (
-          <button
+          <button type="button"
             onClick={() => setTransportMode("tmux")}
             style={modeButtonStyle}
           >
             Open in tmux
           </button>
         ) : (
-          <button
+          <button type="button"
             onClick={() => setTransportMode("direct")}
             style={modeButtonStyle}
           >
