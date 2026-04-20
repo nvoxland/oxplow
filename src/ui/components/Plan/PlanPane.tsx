@@ -190,7 +190,13 @@ export function PlanPane({
         if (byStatus !== 0) return byStatus;
         return a.sort_index - b.sort_index;
       });
-      for (const item of sorted) ids.push(item.id);
+      for (const item of sorted) {
+        ids.push(item.id);
+        const children = group.epicChildren.get(item.id);
+        if (children) {
+          for (const child of children) ids.push(child.id);
+        }
+      }
     }
     return ids;
   }, [groups]);
@@ -256,6 +262,10 @@ export function PlanPane({
     for (const group of groups) {
       const hit = group.items.find((item) => item.id === selectedId);
       if (hit) return hit;
+      for (const children of group.epicChildren.values()) {
+        const childHit = children.find((item) => item.id === selectedId);
+        if (childHit) return childHit;
+      }
     }
     return null;
   }, [groups, selectedId]);
@@ -274,6 +284,10 @@ export function PlanPane({
     // typing comfort.
     const el = paneRef.current;
     if (!el) return;
+    const allItems = groups.flatMap((g) => [
+      ...g.items,
+      ...[...g.epicChildren.values()].flat(),
+    ]);
     const handler = (event: KeyboardEvent) => {
       if (kbPicker) return; // modal owns keyboard
       if (isEditableTarget(event.target)) return;
@@ -285,13 +299,11 @@ export function PlanPane({
         // effect. Reordering is section-local so the keyboard path
         // doesn't silently promote/demote.
         if (!selectedId) return;
-        const selected = groups
-          .flatMap((g) => g.items)
-          .find((item) => item.id === selectedId);
+        const selected = allItems.find((item) => item.id === selectedId);
         if (!selected) return;
         const selSection = classifyWorkItem(selected.status);
         const sectionIds = navigableIds.filter((id) => {
-          const item = groups.flatMap((g) => g.items).find((i) => i.id === id);
+          const item = allItems.find((i) => i.id === id);
           return item ? classifyWorkItem(item.status) === selSection : false;
         });
         const posInSection = sectionIds.indexOf(selectedId);
@@ -317,9 +329,10 @@ export function PlanPane({
         setSelectedId(navigableIds[next] ?? null);
       } else if (key === "Enter" && selectedId) {
         event.preventDefault();
-        const item = groups.flatMap((g) => g.items).find((i) => i.id === selectedId);
+        const item = allItems.find((i) => i.id === selectedId);
         if (item) openEditModal(item);
       } else if ((key === "s" || key === "S") && selectedId) {
+        if (allItems.find((i) => i.id === selectedId)?.status === "in_progress") return;
         event.preventDefault();
         setKbPicker({ kind: "status", itemId: selectedId });
       } else if ((key === "p" || key === "P") && selectedId) {
@@ -481,7 +494,7 @@ export function PlanPane({
           </div>
         ) : (
           groups.map((group) => {
-            const isRootBatch = group.epic === null && mode === "batch";
+            const isRootBatch = mode === "batch";
             const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
             const addPointsSlot = isRootBatch && batch ? (
               <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
@@ -536,9 +549,6 @@ export function PlanPane({
                 onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                 onUpdateWorkItem={activeUpdate}
                 onReorderWorkItems={activeReorder}
-                // Commit/wait points only belong to the root (non-epic) group —
-                // they divide the top-level To-do queue, not items scoped inside
-                // an epic.
                 commitPoints={isRootBatch ? commitPoints : []}
                 waitPoints={isRootBatch ? waitPoints : []}
                 onReorderMixed={isRootBatch && streamId && batchId
@@ -556,6 +566,8 @@ export function PlanPane({
                 markedIds={markedIds}
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
+                epicChildrenMap={group.epicChildren}
+                onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
               />
             );
           })
@@ -591,7 +603,9 @@ export function PlanPane({
                 onChangeStatus: (item, ids) => {
                   setContextMenu(null);
                   setSelectedId(item.id);
-                  setKbPicker({ kind: "status", itemId: item.id, extraIds: ids.filter((id) => id !== item.id) });
+                  const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
+                  setKbPicker({ kind: "status", itemId: item.id, extraIds: liveIds.filter((id) => id !== item.id) });
                 },
                 onChangePriority: (item, ids) => {
                   setContextMenu(null);
@@ -600,7 +614,9 @@ export function PlanPane({
                 },
                 onDelete: (_item, ids) => {
                   setContextMenu(null);
-                  setPendingDeleteGroup(ids);
+                  const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
+                  if (liveIds.length > 0) setPendingDeleteGroup(liveIds);
                 },
               })
             : buildWorkItemMenu(contextMenu.item, {
@@ -942,18 +958,18 @@ function buildWorkItemMenu(
     onChangePriority: (item: WorkItem) => void;
   },
 ): MenuItem[] {
-  const renameEnabled = item.status !== "in_progress";
+  const locked = item.status === "in_progress";
   return [
     {
       id: "workitem.rename",
       label: "Rename…",
-      enabled: renameEnabled,
+      enabled: !locked,
       run: () => actions.onRename(item),
     },
     {
       id: "workitem.status",
       label: "Change status…",
-      enabled: true,
+      enabled: !locked,
       run: () => actions.onChangeStatus(item),
     },
     {
@@ -965,7 +981,7 @@ function buildWorkItemMenu(
     {
       id: "workitem.delete",
       label: "Delete",
-      enabled: true,
+      enabled: !locked,
       run: () => actions.onDelete(item),
     },
   ];
@@ -980,12 +996,13 @@ function buildGroupMenu(
     onDelete: (item: WorkItem, ids: string[]) => void;
   },
 ): MenuItem[] {
+  const locked = item.status === "in_progress";
   const n = groupIds.length;
   return [
     {
       id: "workitem.status",
       label: `Change status… (${n} items)`,
-      enabled: true,
+      enabled: !locked,
       run: () => actions.onChangeStatus(item, groupIds),
     },
     {
@@ -997,7 +1014,7 @@ function buildGroupMenu(
     {
       id: "workitem.delete",
       label: `Delete (${n} items)`,
-      enabled: true,
+      enabled: !locked,
       run: () => actions.onDelete(item, groupIds),
     },
   ];

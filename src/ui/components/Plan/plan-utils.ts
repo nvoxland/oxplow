@@ -10,6 +10,7 @@ import type {
 export interface WorkItemGroup {
   epic: WorkItem | null;
   items: WorkItem[];
+  epicChildren: Map<string, WorkItem[]>;
 }
 
 export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "blocked" | "done";
@@ -75,40 +76,40 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
   const items = [...state.waiting, ...state.inProgress, ...state.done];
   if (items.length === 0) return [];
   items.sort((a, b) => a.sort_index - b.sort_index);
-  return [{ epic: null, items }];
+  return [{ epic: null, items, epicChildren: new Map() }];
 }
 
 export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
   if (!batchWork) return [];
   const all = [...batchWork.waiting, ...batchWork.inProgress, ...batchWork.done];
-  const nonEpics = all.filter((item) => item.kind !== "epic");
 
-  const epicMap = new Map<string, WorkItemGroup>();
+  const epicChildrenMap = new Map<string, WorkItem[]>();
+  const epicIdSet = new Set(batchWork.epics.map((e) => e.id));
+
   for (const epic of batchWork.epics) {
-    epicMap.set(epic.id, { epic, items: [] });
+    epicChildrenMap.set(epic.id, []);
   }
-  const rootGroup: WorkItemGroup = { epic: null, items: [] };
 
-  for (const item of nonEpics) {
-    const parentGroup = item.parent_id ? epicMap.get(item.parent_id) : undefined;
-    if (parentGroup) {
-      parentGroup.items.push(item);
+  const rootItems: WorkItem[] = [];
+  for (const item of all) {
+    if (item.kind === "epic") continue;
+    if (item.parent_id && epicIdSet.has(item.parent_id)) {
+      epicChildrenMap.get(item.parent_id)!.push(item);
     } else {
-      rootGroup.items.push(item);
+      rootItems.push(item);
     }
   }
 
-  const groups: WorkItemGroup[] = [];
-  if (rootGroup.items.length > 0) groups.push(rootGroup);
-  const epicGroups = [...epicMap.values()].sort(
-    (a, b) => (a.epic?.sort_index ?? 0) - (b.epic?.sort_index ?? 0),
-  );
-  for (const group of epicGroups) {
-    group.items.sort((a, b) => a.sort_index - b.sort_index);
-    groups.push(group);
+  for (const children of epicChildrenMap.values()) {
+    children.sort((a, b) => a.sort_index - b.sort_index);
   }
-  rootGroup.items.sort((a, b) => a.sort_index - b.sort_index);
-  return groups;
+
+  const epicsAndRoots: WorkItem[] = [
+    ...batchWork.epics,
+    ...rootItems,
+  ].sort((a, b) => a.sort_index - b.sort_index);
+
+  return [{ epic: null, items: epicsAndRoots, epicChildren: epicChildrenMap }];
 }
 
 // User-facing label for a status. The raw id ("human_check", "in_progress")

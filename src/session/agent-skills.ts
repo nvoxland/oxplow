@@ -181,6 +181,13 @@ You are the **orchestrator**. You never do Read/Edit/Bash/test work
 directly — that all happens inside subagents, so your context stays flat
 across a long work queue.
 
+**Step 0 — file before you dispatch.** If the user just handed you a new
+task that isn't in the queue yet, create the work items *first* (see
+"Plans → epics" above) before calling \`read_work_options\`. Never skip
+straight from plan approval to subagent dispatch without filing. The user
+monitors progress through the work-item UI; if nothing is filed, they
+have no visibility.
+
 **For each work unit:**
 
 1. Call \`newde__read_work_options\` (batchId=your batch) to get the next
@@ -194,6 +201,8 @@ across a long work queue.
    acceptance criteria, and these standing instructions:
    - Mark each item \`in_progress\` via \`mcp__newde__update_work_item\` before starting.
    - Mark \`human_check\` when acceptance criteria are met.
+   - When dispatched as an epic unit: after all child tasks are marked
+     \`human_check\`, mark the epic itself \`human_check\` too.
    - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.
    - Use \`mcp__newde__propose_commit\` when a commit point is due.
    - Return a short plain-text summary of what was done.

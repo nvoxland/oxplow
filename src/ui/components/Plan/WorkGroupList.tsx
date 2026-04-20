@@ -5,7 +5,6 @@ import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 import { CommitPointRow } from "./CommitPointRow.js";
 import {
   classifyWorkItem,
-  groupHeaderStyle,
   sectionDefaultStatus,
   sectionHeaderStyle,
   statusIcon,
@@ -77,6 +76,8 @@ export function WorkGroupList({
   markedIds,
   onSelect,
   onRequestEdit,
+  epicChildrenMap,
+  onReparentWorkItem,
 }: {
   group: WorkItemGroup;
   scopeBatchId: string | null;
@@ -93,6 +94,8 @@ export function WorkGroupList({
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
+  epicChildrenMap: Map<string, WorkItem[]>;
+  onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -101,6 +104,7 @@ export function WorkGroupList({
   // done-section header carries a "Show archived (N)" toggle and an
   // "Archive all" action.
   const [showArchived, setShowArchived] = useState(false);
+  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<string>>(() => new Set());
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
@@ -309,6 +313,91 @@ export function WorkGroupList({
       );
     }
     const isMarked = markedIds?.has(row.item.id) ?? false;
+    const sharedDragHandlers = {
+      onDragStart: (event: React.DragEvent) => {
+        setDraggingKey(key);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", row.item.id);
+        const ids = isMarked && markedIds && markedIds.size > 1
+          ? [...markedIds]
+          : [row.item.id];
+        event.dataTransfer.setData(
+          WORK_ITEM_DRAG_MIME,
+          JSON.stringify({
+            itemId: row.item.id,
+            itemIds: ids,
+            fromBatchId: scopeBatchId,
+          }),
+        );
+      },
+      onDragEnd: resetDrag,
+      onDragOver: (event: React.DragEvent) => {
+        if (!draggingKey || draggingKey === key) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        if (overKey !== key) setOverKey(key);
+      },
+      onDragLeave: () => { if (overKey === key) setOverKey(null); },
+      onDrop: (event: React.DragEvent) => {
+        event.preventDefault();
+        if (draggingKey) { handleDropOnKey(key); return; }
+        const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+        if (!raw) return;
+        try {
+          const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; parentEpicId?: string };
+          if (payload.parentEpicId) {
+            const ids = payload.itemIds?.length ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
+            for (const id of ids) void onReparentWorkItem(id, null);
+          }
+        } catch { /* ignore */ }
+      },
+    };
+    if (row.item.kind === "epic") {
+      const isExpanded = expandedEpicIds.has(row.item.id);
+      const children = epicChildrenMap.get(row.item.id) ?? [];
+      return (
+        <div key={key}>
+          <EpicInlineRow
+            rowKey={key}
+            item={row.item}
+            isExpanded={isExpanded}
+            onToggleExpand={() => {
+              setExpandedEpicIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(row.item.id)) next.delete(row.item.id);
+                else next.add(row.item.id);
+                return next;
+              });
+            }}
+            isSelected={selectedId === row.item.id}
+            isMarked={isMarked}
+            isOver={isOver}
+            isDragging={isDragging}
+            scopeBatchId={scopeBatchId}
+            onSelect={onSelect}
+            onRequestEdit={onRequestEdit}
+            onUpdateWorkItem={onUpdateWorkItem}
+            onContextMenu={onContextMenu}
+            {...sharedDragHandlers}
+          />
+          {isExpanded ? (
+            <EpicChildrenPane
+              epicId={row.item.id}
+              children={children}
+              onReorderWorkItems={onReorderWorkItems}
+              onReparentWorkItem={onReparentWorkItem}
+              onUpdateWorkItem={onUpdateWorkItem}
+              onContextMenu={onContextMenu}
+              scopeBatchId={scopeBatchId}
+              onRequestEdit={onRequestEdit}
+              selectedId={selectedId}
+              markedIds={markedIds}
+              onSelect={onSelect}
+            />
+          ) : null}
+        </div>
+      );
+    }
     return (
       <InlineItemRow
         key={key}
@@ -323,48 +412,13 @@ export function WorkGroupList({
         onSelect={onSelect}
         onUpdateWorkItem={onUpdateWorkItem}
         onContextMenu={onContextMenu}
-        onDragStart={(event) => {
-          setDraggingKey(key);
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", row.item.id);
-          // If the dragged row is part of the mark set, ship every marked id
-          // with the payload so the drop target (BatchRail / backlog chip /
-          // stream chip) can move them all at once. Otherwise it's a single-
-          // item drag as before.
-          const ids = isMarked && markedIds && markedIds.size > 1
-            ? [...markedIds]
-            : [row.item.id];
-          event.dataTransfer.setData(
-            WORK_ITEM_DRAG_MIME,
-            JSON.stringify({
-              itemId: row.item.id,
-              itemIds: ids,
-              fromBatchId: scopeBatchId,
-            }),
-          );
-        }}
-        onDragEnd={resetDrag}
-        onDragOver={(event) => {
-          if (!draggingKey || draggingKey === key) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-          if (overKey !== key) setOverKey(key);
-        }}
-        onDragLeave={() => { if (overKey === key) setOverKey(null); }}
-        onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
+        {...sharedDragHandlers}
       />
     );
   };
 
   return (
     <div>
-      {group.epic ? (
-        <div style={groupHeaderStyle}>
-          <span style={{ marginRight: 6 }}>{statusIcon(group.epic.status)}</span>
-          <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.epic.title}</span>
-          <PriorityIcon priority={group.epic.priority} />
-        </div>
-      ) : null}
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
         // "To do" is the primary queue surface and always renders (even empty)
@@ -396,7 +450,7 @@ export function WorkGroupList({
             }
           : {};
         const headerBaseStyle: CSSProperties =
-          index === 0 && !group.epic ? firstSectionLabelStyle : sectionHeaderStyle;
+          index === 0 ? firstSectionLabelStyle : sectionHeaderStyle;
         const headerStyle: CSSProperties = {
           ...headerBaseStyle,
           outline: isOverSection ? "1px solid var(--accent)" : "none",
@@ -519,6 +573,197 @@ const STATUS_OPTIONS: WorkItemStatus[] = [
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
+function EpicInlineRow({
+  rowKey, item, isExpanded, onToggleExpand,
+  isSelected, isMarked, isOver, isDragging,
+  scopeBatchId, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
+  onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
+}: {
+  rowKey: string;
+  item: WorkItem;
+  isExpanded: boolean;
+  onToggleExpand(): void;
+  isSelected: boolean;
+  isMarked: boolean;
+  isOver: boolean;
+  isDragging: boolean;
+  scopeBatchId: string | null;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onRequestEdit?(item: WorkItem): void;
+  onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
+  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onDragStart(event: React.DragEvent): void;
+  onDragEnd(event: React.DragEvent): void;
+  onDragOver(event: React.DragEvent): void;
+  onDragLeave(event: React.DragEvent): void;
+  onDrop(event: React.DragEvent): void;
+}) {
+  const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
+  const locked = item.status === "in_progress";
+  void scopeBatchId;
+  return (
+    <div
+      draggable={!locked}
+      onDragStart={locked ? undefined : onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onClick={(event) => {
+        const toggle = event.metaKey || event.ctrlKey;
+        const range = event.shiftKey && !toggle;
+        if (toggle || range) { onSelect?.(item.id, { toggle, range }); return; }
+        onSelect?.(item.id);
+      }}
+      onDoubleClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+        onSelect?.(item.id);
+        onRequestEdit?.(item);
+      }}
+      onContextMenu={(event) => onContextMenu(event, item)}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
+        cursor: isDragging ? "grabbing" : "pointer",
+        borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
+        borderLeft: isMarked ? "2px solid var(--priority-urgent)" : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        background: isMarked ? "rgba(234,179,8,0.14)" : isSelected ? "rgba(74,158,255,0.12)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
+        fontSize: 12, userSelect: "none", opacity: dimmed ? 0.6 : 1,
+      }}
+      title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
+      data-key={rowKey}
+      data-testid={`work-item-row-${item.id}`}
+    >
+      <span
+        onClick={(event) => { event.stopPropagation(); onToggleExpand(); }}
+        style={{ flexShrink: 0, width: 12, textAlign: "center", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}
+        title={isExpanded ? "Collapse epic children" : "Expand epic children"}
+      >
+        {isExpanded ? "\u25BC" : "\u25B6"}
+      </span>
+      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={item.status === "in_progress"} />
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+        {item.title}
+      </span>
+      <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
+    </div>
+  );
+}
+
+function EpicChildrenPane({
+  epicId, children, onReorderWorkItems, onReparentWorkItem,
+  onUpdateWorkItem, onContextMenu, scopeBatchId, onRequestEdit,
+  selectedId, markedIds, onSelect,
+}: {
+  epicId: string;
+  children: WorkItem[];
+  onReorderWorkItems(ids: string[]): Promise<void>;
+  onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
+  onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
+  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  scopeBatchId: string | null;
+  onRequestEdit?(item: WorkItem): void;
+  selectedId?: string | null;
+  markedIds?: ReadonlySet<string>;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+}) {
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+  const [dropTargetOver, setDropTargetOver] = useState(false);
+  const resetDrag = () => { setDraggingKey(null); setOverKey(null); };
+
+  const handleDropOnChild = (targetId: string) => {
+    if (!draggingKey || draggingKey === targetId) { resetDrag(); return; }
+    const from = children.findIndex((c) => c.id === draggingKey);
+    const to = children.findIndex((c) => c.id === targetId);
+    if (from < 0 || to < 0) { resetDrag(); return; }
+    const next = children.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
+    resetDrag();
+    void onReorderWorkItems(next.map((c) => c.id));
+  };
+
+  const handleExternalDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    setDropTargetOver(false);
+    const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+    if (!raw) return;
+    try {
+      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromBatchId?: string | null };
+      const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
+      for (const id of ids) {
+        if (!children.some((c) => c.id === id)) {
+          void onReparentWorkItem(id, epicId);
+        }
+      }
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div style={{ marginLeft: 20, borderLeft: "2px solid var(--border)", paddingLeft: 4 }}>
+      {children.map((child) => {
+        const key = child.id;
+        const isOver = overKey === key && draggingKey !== key;
+        const isDragging = draggingKey === key;
+        const isMarked = markedIds?.has(child.id) ?? false;
+        return (
+          <InlineItemRow
+            key={key}
+            rowKey={key}
+            item={child}
+            isSelected={selectedId === child.id}
+            isMarked={isMarked}
+            isOver={isOver}
+            isDragging={isDragging}
+            scopeBatchId={scopeBatchId}
+            onSelect={onSelect}
+            onRequestEdit={onRequestEdit}
+            onUpdateWorkItem={onUpdateWorkItem}
+            onContextMenu={onContextMenu}
+            onDragStart={(event) => {
+              setDraggingKey(key);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", child.id);
+              const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
+              event.dataTransfer.setData(
+                WORK_ITEM_DRAG_MIME,
+                JSON.stringify({ itemId: child.id, itemIds: ids, fromBatchId: scopeBatchId, parentEpicId: epicId }),
+              );
+            }}
+            onDragEnd={resetDrag}
+            onDragOver={(event) => {
+              if (!draggingKey || draggingKey === key) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (overKey !== key) setOverKey(key);
+            }}
+            onDragLeave={() => { if (overKey === key) setOverKey(null); }}
+            onDrop={(event) => { event.preventDefault(); handleDropOnChild(key); }}
+          />
+        );
+      })}
+      <div
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes(WORK_ITEM_DRAG_MIME)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropTargetOver(true);
+        }}
+        onDragLeave={() => setDropTargetOver(false)}
+        onDrop={handleExternalDrop}
+        style={{
+          height: 24, display: "flex", alignItems: "center", paddingLeft: 8,
+          fontSize: 10, color: dropTargetOver ? "var(--accent)" : "var(--muted)",
+          borderTop: dropTargetOver ? "1px solid var(--accent)" : "1px solid transparent",
+          opacity: dropTargetOver ? 1 : 0.5,
+        }}
+      >
+        {children.length === 0 ? "Drop items here to add to epic" : ""}
+      </div>
+    </div>
+  );
+}
+
 /**
  * One collapsed work-item row with inline editing. Title click swaps to an
  * input; status icon and priority marker each open a transparent <select>
@@ -624,6 +869,7 @@ function InlineItemRow({
       <InlineStatusPicker
         status={item.status}
         onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }}
+        locked={item.status === "in_progress"}
       />
       <span
         style={{
@@ -647,35 +893,39 @@ function InlineItemRow({
 function InlineStatusPicker({
   status,
   onChange,
+  locked,
 }: {
   status: WorkItemStatus;
   onChange(next: WorkItemStatus): void;
+  locked?: boolean;
 }) {
   return (
     <span
       onClick={(event) => event.stopPropagation()}
       style={{ position: "relative", display: "inline-block", flexShrink: 0, width: 14, textAlign: "center" }}
-      title={`Status: ${statusLabel(status)} — click to change`}
+      title={locked ? `Status: ${statusLabel(status)} — locked while in progress` : `Status: ${statusLabel(status)} — click to change`}
     >
       <span>{statusIcon(status)}</span>
-      <select
-        value={status}
-        onChange={(event) => onChange(event.target.value as WorkItemStatus)}
-        onClick={(event) => event.stopPropagation()}
-        style={{
-          position: "absolute",
-          inset: 0,
-          opacity: 0,
-          cursor: "pointer",
-          width: "100%",
-          height: "100%",
-          font: "inherit",
-        }}
-      >
-        {STATUS_OPTIONS.map((option) => (
-          <option key={option} value={option}>{statusLabel(option)}</option>
-        ))}
-      </select>
+      {!locked ? (
+        <select
+          value={status}
+          onChange={(event) => onChange(event.target.value as WorkItemStatus)}
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: 0,
+            cursor: "pointer",
+            width: "100%",
+            height: "100%",
+            font: "inherit",
+          }}
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <option key={option} value={option}>{statusLabel(option)}</option>
+          ))}
+        </select>
+      ) : null}
     </span>
   );
 }

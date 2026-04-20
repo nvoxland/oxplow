@@ -1708,7 +1708,7 @@ function buildBatchAgentPrompt(
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
     `When referring to work items in text you show the user, use the item's TITLE (in quotes). Never print raw ids like "wi-abc123…" — the user sees titles in the UI, not ids.`,
     `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__read_work_options\` at the start of a session to check for queued work and dispatch to a \`general-purpose\` subagent.`,
-    `ORCHESTRATOR PATTERN: You are the orchestrator — never do Read/Edit/Bash/test work directly. For every work unit, call \`newde__read_work_options\` to get the dispatch unit, then launch one \`general-purpose\` subagent with all item ids, titles, descriptions, acceptance criteria, and instructions to write results back via MCP tools. Your context stays flat; all implementation detail lives in the subagent.`,
+    `ORCHESTRATOR PATTERN: You are the orchestrator — never do Read/Edit/Bash/test work directly. When the user gives you a new task, file it as work items (epic + child tasks) via \`newde__create_work_item\` BEFORE dispatching — never skip from plan approval to subagent without filing. Then call \`newde__read_work_options\` to get the dispatch unit and launch one \`general-purpose\` subagent with all item ids, titles, descriptions, acceptance criteria, and instructions to write results back via MCP tools. Your context stays flat; all implementation detail lives in the subagent.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
