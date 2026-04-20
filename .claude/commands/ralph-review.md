@@ -7,10 +7,22 @@ description: Review the /self-ralph passes in this session and report honestly o
 Look back through **this conversation's transcript since the last
 `/ralph-review` invocation** (or since the start of the session if
 there hasn't been one). Evaluate the `/self-ralph` passes that
-happened in that window.
+happened in that window. **Write the findings to a timestamped
+file in `.self-ralph/`** so future reviews can compare against it.
 
 The point is a brutally honest read, not a victory lap. The loop is
 only as good as what it notices about its own failure modes.
+
+## Before you start
+
+1. Run `ls -t .self-ralph/review-*.md 2>/dev/null | head -3` to
+   find any prior reviews.
+2. If one exists, **read the most recent one** before writing this
+   one. You'll need to compare against it.
+3. Decide the window for this review:
+   - If a prior review exists: start immediately after its
+     timestamp / commit mentions.
+   - Otherwise: start at the beginning of the session.
 
 ## What to examine
 
@@ -35,9 +47,16 @@ Don't delegate the synthesis. Read the transcript yourself.
 
 ## Structure the report like this
 
-Respond to the user directly (no intermediate file). Headings are
-mandatory; length is not. Aim for honest and specific — skip a
-section entirely rather than pad it with filler.
+Write the full report to
+`.self-ralph/review-<YYYYMMDD-HHMMSS>.md` (timestamp via
+`date +%Y%m%d-%H%M%S`). Also respond in the chat with a ≤120-word
+summary + the file path, so the user can skim without opening the
+file.
+
+Headings are mandatory in the file; length is not. Aim for honest
+and specific — skip a section entirely rather than pad it with
+filler. Keep the file under ~150 lines unless the window is
+genuinely huge.
 
 ### Scoreboard
 
@@ -90,6 +109,23 @@ a retrospective names a pattern.
 Things you *noticed* but either dropped or described so loosely
 that a future pass can't act on them. Sharpen them here.
 
+### Compared to the previous review
+**Skip this section entirely if no prior review exists** and say
+so in one line.
+
+Otherwise compare against the most recent `.self-ralph/review-*.md`
+you read at Before-you-start time:
+
+- **Problems that were flagged and stayed unfixed.** Name them.
+  Repeat offenses are the most damning evidence.
+- **Problems that were flagged and DID get fixed** (prompt, harness,
+  todo, or newde code). Credit the commit.
+- **Problems that newly appeared** in this window that the prior
+  review would have caught if it had been run again sooner.
+- **Delta in behavior:** are you cheating less / dogfooding more /
+  picking better items / spending fewer tokens on hung probes than
+  last time? Be specific with numbers where you can.
+
 ### Follow-up actions
 
 Two lists:
@@ -104,15 +140,32 @@ Two lists:
    future passes pick them up. Avoid the testid-adding-as-todo
    trap from the current prompt's guard.
 
+## File header template
+
+Open the review file with:
+
+```markdown
+# /ralph-review <YYYY-MM-DD HH:MM>
+
+**Window:** from <previous review filename OR "session start"> to
+<current HEAD short sha> (<N> commits, <M> /self-ralph passes).
+
+**Previous review:** <filename>, or "none".
+```
+
+This gives future reviews a stable anchor when they scan for the
+prior one. Keep `.self-ralph/review-*.md` gitignored (the whole
+`.self-ralph/` dir already is).
+
 ## After the review
 
 - If you named harness/prompt infra that's broken, **fix it now**
   and commit. The review IS the trigger for those fixes.
 - Update `.self-ralph/todo.md` to reflect any new / sharpened /
   outdated items.
-- Commit the fixes with a clear message. The review itself is
-  ephemeral (it's in the transcript); the resulting code / prompt
-  / todo changes are the durable artifact.
+- Commit the fixes with a clear message. The review file stays in
+  `.self-ralph/` (gitignored) so later reviews can read it; the
+  resulting code / prompt / todo changes are the durable artifact.
 
 ## Scope rules
 
@@ -121,7 +174,8 @@ Two lists:
   response in the transcript, start the window immediately after
   it.
 - **If no `/self-ralph` passes have happened in the window,** say
-  so in one sentence and stop. There's nothing to review.
+  so in one sentence and stop — don't create a review file for an
+  empty window.
 - **Be honest about your own mistakes.** "I abandoned this pass
   because I couldn't root-cause a hang" is more useful than
   "the pass was exploratory."
