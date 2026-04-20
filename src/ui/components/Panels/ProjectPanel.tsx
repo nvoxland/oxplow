@@ -1465,6 +1465,13 @@ function truncate(input: string, max: number): string {
 
 type FilterMode = "all" | "uncommitted" | "branch" | "unpushed" | "turn";
 
+const FILTER_CHIP_LABELS: Record<Exclude<FilterMode, "all">, string> = {
+  uncommitted: "Uncommitted",
+  branch: "Branch",
+  unpushed: "Unpushed",
+  turn: "Turn",
+};
+
 function filterModeLabel(
   mode: FilterMode,
   scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null,
@@ -1536,6 +1543,9 @@ function FilterMenuButton({
           ...iconButtonStyle,
           background: filterMode !== "all" ? "var(--accent)" : "var(--bg-2)",
           color: filterMode !== "all" ? "#fff" : "inherit",
+          ...(filterMode !== "all"
+            ? { display: "inline-flex", alignItems: "center", gap: 4, padding: "0 6px", width: "auto" }
+            : null),
         }}
       >
         {/* eye icon (SVG for crisp rendering) */}
@@ -1543,6 +1553,11 @@ function FilterMenuButton({
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
+        {filterMode !== "all" ? (
+          <span style={{ fontSize: 11, lineHeight: 1, whiteSpace: "nowrap" }}>
+            {FILTER_CHIP_LABELS[filterMode]}
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div style={filterMenuStyle}>
