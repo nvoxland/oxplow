@@ -36,6 +36,11 @@ export interface NewdeConfig {
    *  larger than this get a stat-only entry (mtime + size tracked, but no
    *  content blob, so diffs show "oversize"). Default 5 MiB. */
   snapshotMaxFileBytes: number;
+  /** When true (default), the UserPromptSubmit hook injects a
+   *  <session-context> block into every agent prompt. Users who trust the
+   *  agent to track stream/batch ids on its own can turn this off to save
+   *  a few tokens per turn. */
+  injectSessionContext: boolean;
 }
 
 /** Partial shape that survives YAML parsing — loadProjectConfig fills in
@@ -48,11 +53,13 @@ export interface ParsedNewdeConfig {
   snapshotRetentionDays: number;
   generatedDirs: string[];
   snapshotMaxFileBytes: number;
+  injectSessionContext: boolean;
 }
 
 const DEFAULT_AGENT: AgentKind = "claude";
 const DEFAULT_SNAPSHOT_RETENTION_DAYS = 7;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const DEFAULT_INJECT_SESSION_CONTEXT = true;
 
 export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeConfig {
   const configPath = join(projectDir, NEWDE_CONFIG_FILE);
@@ -67,6 +74,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
       snapshotRetentionDays: DEFAULT_SNAPSHOT_RETENTION_DAYS,
       generatedDirs: [],
       snapshotMaxFileBytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+      injectSessionContext: DEFAULT_INJECT_SESSION_CONTEXT,
     };
   }
 
@@ -80,6 +88,7 @@ export function loadProjectConfig(projectDir: string, logger?: Logger): NewdeCon
     snapshotRetentionDays: parsed.snapshotRetentionDays,
     generatedDirs: parsed.generatedDirs,
     snapshotMaxFileBytes: parsed.snapshotMaxFileBytes,
+    injectSessionContext: parsed.injectSessionContext,
   };
   logger?.info("loaded project config", {
     configPath,
@@ -103,6 +112,7 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     "snapshotRetentionDays",
     "generatedDirs",
     "snapshotMaxFileBytes",
+    "injectSessionContext",
   ]);
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) {
@@ -165,6 +175,14 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     });
   }
 
+  let injectSessionContext = DEFAULT_INJECT_SESSION_CONTEXT;
+  if (value.injectSessionContext !== undefined) {
+    if (typeof value.injectSessionContext !== "boolean") {
+      throw new Error("newde.yaml injectSessionContext must be a boolean");
+    }
+    injectSessionContext = value.injectSessionContext;
+  }
+
   let snapshotMaxFileBytes = DEFAULT_SNAPSHOT_MAX_FILE_BYTES;
   if (value.snapshotMaxFileBytes !== undefined) {
     if (typeof value.snapshotMaxFileBytes !== "number" || !Number.isFinite(value.snapshotMaxFileBytes) || value.snapshotMaxFileBytes < 1024) {
@@ -181,6 +199,7 @@ export function parseNewdeConfig(value: unknown): ParsedNewdeConfig {
     snapshotRetentionDays,
     generatedDirs,
     snapshotMaxFileBytes,
+    injectSessionContext,
   };
 }
 
@@ -205,6 +224,9 @@ export function writeProjectConfig(projectDir: string, config: NewdeConfig): voi
   }
   if (config.snapshotMaxFileBytes !== DEFAULT_SNAPSHOT_MAX_FILE_BYTES) {
     doc.snapshotMaxFileBytes = config.snapshotMaxFileBytes;
+  }
+  if (config.injectSessionContext !== DEFAULT_INJECT_SESSION_CONTEXT) {
+    doc.injectSessionContext = config.injectSessionContext;
   }
   if (config.lspServers.length > 0) {
     doc.lsp = {

@@ -82,6 +82,8 @@ export function ProjectPanel({
     { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
   >(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
+  const entriesByDirRef = useRef<Record<string, WorkspaceEntry[]>>({});
+  useEffect(() => { entriesByDirRef.current = entriesByDir; }, [entriesByDir]);
 
   const loadDir = useCallback(async (path: string) => {
     if (!stream || loadingDirsRef.current[path]) return;
@@ -157,7 +159,16 @@ export function ProjectPanel({
     // colored status badges stay in sync.
     const unsubscribeRefs = subscribeGitRefsEvents(stream.id, () => {
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => { void loadWorkspaceIndex(); }, 150);
+      refreshTimer = setTimeout(() => {
+        void loadWorkspaceIndex();
+        // WorkspaceEntry.hasChanges and .gitStatus are baked in at loadDir
+        // time. Ancestor dirs of committed files never receive a workspace
+        // fs-watch event, so without reloading them here their stale yellow
+        // dots linger after the commit clears git status.
+        for (const dir of Object.keys(entriesByDirRef.current)) {
+          void loadDir(dir);
+        }
+      }, 150);
     });
     return () => {
       unsubscribe();

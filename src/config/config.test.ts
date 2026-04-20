@@ -99,3 +99,9 @@ test("parseNewdeConfig rejects lsp extensions that don't start with a dot", () =
     }),
   ).toThrow(/extension/);
 });
+
+test("injectSessionContext defaults to true and round-trips", () => {
+  expect(parseNewdeConfig({}).injectSessionContext).toBe(true);
+  expect(parseNewdeConfig({ injectSessionContext: false }).injectSessionContext).toBe(false);
+  expect(() => parseNewdeConfig({ injectSessionContext: "yes" })).toThrow(/injectSessionContext/);
+});

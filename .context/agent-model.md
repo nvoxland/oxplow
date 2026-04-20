@@ -248,6 +248,25 @@ in-progress changes.
 - MCP tools (`mcp__newde__*`) are always allowed: they write to the state
   DB, not the worktree.
 
+## Session-context injection
+
+On every `UserPromptSubmit`, the runtime builds a fresh
+`<session-context>` block (stream/batch/writer flag) and returns it as
+`hookSpecificOutput.additionalContext` so the agent stays pointed at the
+right ids mid-session. If a project really wants to save those tokens
+(they're tiny but replayed on every turn), set
+`injectSessionContext: false` in `newde.yaml` — default is `true`.
+
+## Preamble vs skill split
+
+`buildBatchAgentPrompt` is intentionally terse — session ids, writer
+flag, a reminder to reference items by title, and a pointer to the
+skill. Procedural policy (when to file, how to shape items, acceptance-
+criteria style, status conventions) lives in the `newde-task-management`
+skill (`src/session/agent-skills.ts`). Reason: the preamble is replayed
+via cache-read on every turn; skills load only when the agent needs
+them. Keep additions to the preamble situational, not educational.
+
 ## Custom prompt addendum
 
 `config.agentPromptAppend` (loaded from `newde.yaml` via

@@ -127,25 +127,33 @@ Button carries `data-testid="files-commit"`; the dialog's message
 textarea is `files-commit-message` and the submit button is
 `files-commit-submit`.
 
-## Agents never call git directly
+## Two commit paths
 
-A hard rule: the agent's system prompt forbids `git add`, `git commit`,
-`git checkout`, etc. The write-guard prompt block
-(`NON_WRITER_PROMPT_BLOCK` in `src/electron/write-guard.ts`) lists this
-explicitly for non-writer batches; the standard prompt
-(`buildBatchAgentPrompt` in `runtime.ts`) reinforces it via the
-commit-point flow.
+newde supports two paths for landing a commit, and they exist for
+different reasons:
 
-For commits specifically: the agent calls `mcp__newde__propose_commit`
-with a drafted message, the runtime stores the proposal, and the runtime
-runs `gitCommitAll` either immediately (auto mode) or after user approval
-(approval mode). This keeps:
+1. **Ad-hoc.** The writer-batch agent runs `git add` / `git commit`
+   directly via Bash when the user tells it to commit. No commit
+   point, no approval UI, no `propose_commit`. This is the default
+   shape for "I've got changes, land them now."
+2. **Commit-point / approval.** A `commit_point` row exists in the
+   queue and the Stop-hook has blocked the agent with a directive
+   telling it to call `mcp__newde__propose_commit`. The agent drafts a
+   message, the user approves in chat, and `mcp__newde__commit` (or
+   auto-mode) runs `gitCommitAll` through the runtime. This path
+   records a commit sha on the commit_point row for provenance.
 
-- A consistent provenance trail (commit sha is recorded on the
-  commit_point row).
-- A single permission boundary (the runtime, not the agent process).
-- A natural place to hang the approval UI without having to interrupt
-  the agent mid-shell-command.
+`propose_commit` is **only** for path 2 — don't ask the agent to
+propose when no commit point is pending.
+
+### Non-writer batches still cannot call git
+
+`NON_WRITER_PROMPT_BLOCK` (`src/electron/write-guard.ts`) explicitly
+forbids git mutations for non-writer batches — they share the
+worktree with the writer and any ref/index change corrupts the
+writer's in-progress work. The write-guard hook denies Write/Edit/
+MultiEdit/NotebookEdit in those batches, and the prompt block covers
+Bash (which the hook can't classify reliably).
 
 ## Related
 

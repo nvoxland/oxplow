@@ -1064,7 +1064,9 @@ export class ElectronRuntime {
       // selected batch can flip mid-session. Reading the live state here
       // keeps the agent pointed at the right ids without a user-visible
       // prompt edit.
-      const sessionContext = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId);
+      const sessionContext = this.config.injectSessionContext
+        ? this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId)
+        : "";
       const additionalContext = [sessionContext, focusContext].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
@@ -1695,34 +1697,17 @@ function buildBatchAgentPrompt(
   agentPromptAppend: string,
   activeBatch?: Batch | null,
 ): string {
+  // Keep this preamble SITUATIONAL only — procedural "how to use the work-item
+  // tools" policy lives in the `newde-task-management` skill so it's only
+  // loaded when the agent actually needs it. Every line here is replayed via
+  // cache-read on every turn; treat additions as expensive.
   const lines = [
-    `You manage this batch's work through the newde work-item MCP tools.`,
-    `Treat them as your durable working memory between turns and sessions; the human watches progress through them.`,
-    ``,
-    `PLAN BEFORE CODING. Every user-requested task gets a work item — no exceptions. Call newde__create_work_item the moment the user hands you a task, BEFORE any Read/Grep/Edit/Bash work on it. The only times you may skip this: (a) a trivial one-shot the user didn't phrase as a task ("what does this file do?"), or (b) you're already inside an existing in_progress item whose acceptanceCriteria already cover the request.`,
-    `If a second task arrives mid-flight, create a new work item for it before switching — do not silently fold it into the current one. Each top-level user request = one work item.`,
-    `Use the title for intent, description for the approach, and acceptanceCriteria for a checklist of observable conditions that define "done" (plain text, one per line).`,
-    `Set parentId when the item rolls up under a larger epic or task.`,
-    ``,
-    `TASK LIST SURFACE. Use Claude Code's TaskCreate/TaskUpdate for within-turn micro-planning — the concrete 2–10 steps your current response will take. Use newde work-item MCP tools (above) for anything that should survive the turn, or that the user filed. Never mirror: if an item exists in newde, don't duplicate it in Claude's task list — pick one surface per piece of work.`,
-    ``,
-    `WORK THE READY QUEUE. Your FIRST tool call every session must be newde__list_ready_work — not a Read, not a Grep, not a response to the user. A high-priority bug may already be queued; you need to see it before you answer. If the user's new request competes with queued work, say so and let them choose; don't silently skip the queue.`,
-    `Set the item's status to "in_progress" via newde__update_work_item before touching code.`,
-    `Post newde__add_work_note at meaningful milestones.`,
-    `When every acceptance criterion is met, set status to "human_check" (never "done" yourself — the human marks done after reviewing). If you also set "done" you will be corrected.`,
-    `"Queue empty" means zero items in waiting or ready. human_check items belong to the user's review queue, not yours — they don't keep you running and you should not re-open them to "make progress".`,
-    `Use newde__get_work_item when resuming a specific item — its response includes links and recent audit events so you can pick up where you left off.`,
-    ``,
-    `LINK DEPENDENCIES with newde__link_work_items when items relate. Read \`.newde/runtime/claude-plugin/AGENT_GUIDE.md\` on demand for the link-type catalog (blocks / discovered_from / relates_to / duplicates / supersedes / replies_to) and the work-item kind rubric — no need to quote that reference back, just use the right values.`,
-    ``,
-    `STAY HONEST. Rewrite description / acceptanceCriteria when your understanding shifts. newde__delete_work_item anything you've decided against instead of letting it rot in the queue.`,
-    ``,
-    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}).`,
-    `Always pass batchId="${batch.id}" to every work-item tool.`,
+    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}). Always pass batchId="${batch.id}" to newde work-item tools.`,
     activeBatch && activeBatch.id !== batch.id
       ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
-    `Call newde__get_batch_context whenever you need to re-check stream/batch ids.`,
+    `When referring to work items in text you show the user, use the item's TITLE (in quotes). Never print raw ids like "wi-abc123…" — the user sees titles in the UI, not ids.`,
+    `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__list_ready_work\` at the start of a session to check for queued work.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

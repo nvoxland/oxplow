@@ -153,6 +153,12 @@ Rewrite title / description / acceptance criteria whenever your
 understanding shifts. Stale state in the queue costs more than a tool
 call to fix it.
 
+## Referring to items in user-visible output
+
+The user sees work items in the UI by **title**, not id. When you mention an
+item in chat or summaries, quote the title ("Slim MCP responses"), not the
+id. Ids are for MCP calls only — surfacing them to the user is noise.
+
 ## Notes and history
 
 Use \`add_work_note\` at meaningful milestones — decisions you made,

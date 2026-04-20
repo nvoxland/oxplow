@@ -30,6 +30,29 @@ export interface McpToolDeps {
   fileChangeStore: FileChangeStore;
 }
 
+// Strip noisy fields off audit events before handing them to the agent.
+// Stored payloads include full before/after rows for `updated`; keeping only
+// the changed keys typically cuts a 1.5 kB event to ~100 bytes.
+export function slimWorkItemEvent(ev: { event_type: string; payload_json: string; created_at: string; actor_kind: string }) {
+  const base = { event_type: ev.event_type, actor_kind: ev.actor_kind, created_at: ev.created_at };
+  let payload: unknown = {};
+  try { payload = JSON.parse(ev.payload_json); } catch { /* payload stays {} */ }
+  if (ev.event_type !== "updated" || typeof payload !== "object" || payload === null) {
+    return { ...base, payload };
+  }
+  const p = payload as { before?: Record<string, unknown>; after?: Record<string, unknown> };
+  if (!p.before || !p.after) return { ...base, payload };
+  const beforeDiff: Record<string, unknown> = {};
+  const afterDiff: Record<string, unknown> = {};
+  for (const key of Object.keys(p.after)) {
+    if (!Object.is(p.before[key], p.after[key])) {
+      beforeDiff[key] = p.before[key];
+      afterDiff[key] = p.after[key];
+    }
+  }
+  return { ...base, payload: { before: beforeDiff, after: afterDiff } };
+}
+
 export function hasAcceptanceCriteria(raw: string | null | undefined): boolean {
   return typeof raw === "string" && raw.trim().length > 0;
 }
@@ -156,7 +179,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
       handler: (args: { streamId?: string; batchId: string }) => {
         resolveBatchAndStream(args);
-        return workItemStore.listReady(args.batchId);
+        return workItemStore.listReady(args.batchId).map((i) => ({
+          id: i.id,
+          title: i.title,
+          kind: i.kind,
+          priority: i.priority,
+          sort_index: i.sort_index,
+          parent_id: i.parent_id,
+        }));
       },
     },
     {
@@ -212,7 +242,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           createdBy: "agent",
           actorId: "mcp",
         });
-        return { item, counts: counts(args.batchId) };
+        return { ok: true, id: item.id, sort_index: item.sort_index, counts: counts(args.batchId) };
       },
     },
     {
@@ -257,7 +287,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           actorKind: "agent",
           actorId: "mcp",
         });
-        return { item, counts: counts(args.batchId) };
+        return { ok: true, id: item.id, status: item.status, counts: counts(args.batchId) };
       },
     },
     {
@@ -274,9 +304,12 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
       handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
         resolveBatchAndStream(args);
-        const detail = workItemStore.getItemDetail(args.batchId, args.itemId);
+        const detail = workItemStore.getItemDetail(args.batchId, args.itemId, 5);
         if (!detail) throw new Error(`unknown work item: ${args.itemId}`);
-        return detail;
+        return {
+          ...detail,
+          recentEvents: detail.recentEvents.map(slimWorkItemEvent),
+        };
       },
     },
     {

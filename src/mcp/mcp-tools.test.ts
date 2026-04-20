@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { BatchStore } from "../persistence/batch-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
 import type { Stream } from "../persistence/stream-store.js";
-import { buildWorkItemMcpTools, descriptionLooksLikeEmbeddedCriteria } from "./mcp-tools.js";
+import { buildWorkItemMcpTools, descriptionLooksLikeEmbeddedCriteria, slimWorkItemEvent } from "./mcp-tools.js";
 import type { ToolDef } from "./mcp-server.js";
 
 function makeStream(id: string, title: string): Stream {
@@ -86,9 +86,9 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
       kind: "task",
       title: "streamId-free create",
     } as never);
-    const itemId = (result as { item: { id: string; batch_id: string } }).item.id;
-    expect((result as { item: { batch_id: string } }).item.batch_id).toBe(batchB.id);
+    const itemId = (result as { id: string }).id;
     const fetched = workItemStore.getItem(batchB.id, itemId);
+    expect(fetched?.batch_id).toBe(batchB.id);
     expect(fetched?.title).toBe("streamId-free create");
   });
 
@@ -131,8 +131,8 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
     const errText = (result as { error?: string }).error;
     expect(errText).toBeDefined();
     expect(errText).toContain("acceptanceCriteria is a top-level JSON field");
-    // The item was NOT created — the response has no `item` field.
-    expect((result as { item?: unknown }).item).toBeUndefined();
+    // The item was NOT created — the response has no `id` field.
+    expect((result as { id?: unknown }).id).toBeUndefined();
   });
 
   test("create_work_item accepts the happy path: acceptanceCriteria promoted to its own field", async () => {
@@ -145,7 +145,9 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
       description: "background prose about why",
       acceptanceCriteria: "- visible condition 1\n- visible condition 2",
     } as never);
-    expect((result as { item: { title: string } }).item.title).toBe("Proper fields");
+    const createdId = (result as { id: string }).id;
+    expect(createdId).toMatch(/^wi-/);
+    expect((result as { sort_index: number }).sort_index).toBeGreaterThanOrEqual(0);
   });
 
   test("descriptionLooksLikeEmbeddedCriteria ignores description mentions without a bullet-looking block", () => {
@@ -156,6 +158,29 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
     expect(descriptionLooksLikeEmbeddedCriteria("acceptance criteria:\n- item A")).toBe(true);
     expect(descriptionLooksLikeEmbeddedCriteria("")).toBe(false);
     expect(descriptionLooksLikeEmbeddedCriteria(null)).toBe(false);
+  });
+
+  test("slimWorkItemEvent reduces updated events to the changed keys only", () => {
+    const slim = slimWorkItemEvent({
+      event_type: "updated",
+      actor_kind: "agent",
+      created_at: "2024-01-01T00:00:00Z",
+      payload_json: JSON.stringify({
+        before: { id: "wi-1", title: "T", status: "ready", description: "same" },
+        after: { id: "wi-1", title: "T", status: "in_progress", description: "same" },
+      }),
+    });
+    expect(slim.payload).toEqual({ before: { status: "ready" }, after: { status: "in_progress" } });
+  });
+
+  test("slimWorkItemEvent preserves non-updated event payloads as-is", () => {
+    const slim = slimWorkItemEvent({
+      event_type: "note",
+      actor_kind: "agent",
+      created_at: "2024-01-01T00:00:00Z",
+      payload_json: JSON.stringify({ note: "hi" }),
+    });
+    expect(slim.payload).toEqual({ note: "hi" });
   });
 
   test("unknown batchId still throws, with the same error text", async () => {
