@@ -22,23 +22,21 @@ duplicate them here.
 
 ## When to create a work item
 
-File a new work item **before** you start coding whenever any of these are
-true:
+**If you are making any file changes, create a work item first — no
+exceptions.** A two-line edit is still a work item. The user monitors
+what you are doing through the work-item UI; if nothing is filed, they
+have no visibility into the change.
 
-- The user handed you a task. Every top-level request = one work item.
-- You discovered follow-up work mid-turn (bug, refactor, doc drift). Don't
-  silently fold it into the current item — file it and link it with
+The only time you skip filing is when you are answering a question and
+making zero file changes ("what does this function do?", "explain X").
+Everything else gets a work item.
+
+- **Single change** (a one-line fix, a rename, a trivial tweak) → one
+  \`task\`. Don't bother with an epic.
+- **Multi-step work** (a feature, a refactor, a bug that touches several
+  files) → one \`epic\` with child tasks (see "Plans → epics" below).
+- **Follow-up work discovered mid-turn** → file it and link it with
   \`discovered_from\` so the original's scope stays honest.
-- You are about to execute a plan of more than one or two steps. Convert
-  the plan into an epic + child tasks before you touch code (see
-  "Plans → epics" below).
-
-Skip only these cases:
-
-- A one-shot factual question ("what does this file do?") — no task
-  intent.
-- You're already inside an in_progress item whose acceptanceCriteria
-  already cover the ask.
 
 ## Plans → epics
 
@@ -62,9 +60,6 @@ into one task:
    (migration before the feature that uses it). Sibling tasks without
    hard ordering should not be over-linked — the ready queue sorts on
    \`sort_index\`/priority already.
-
-For single-step work (a rename, a one-line fix, a trivial doc tweak)
-don't bother with an epic — a single task is clearer.
 
 ## Choosing the batch and stream
 
@@ -199,7 +194,10 @@ have no visibility.
 
 2. Assemble a subagent brief containing: item ids, titles, descriptions,
    acceptance criteria, and these standing instructions:
-   - Mark each item \`in_progress\` via \`mcp__newde__update_work_item\` before starting.
+   - Work through items sequentially. For each item: mark it \`in_progress\`
+     via \`mcp__newde__update_work_item\` immediately before starting it, do the
+     work, then mark it \`human_check\` before moving to the next. Never mark
+     multiple items \`in_progress\` simultaneously.
    - Mark \`human_check\` when acceptance criteria are met.
    - When dispatched as an epic unit: after all child tasks are marked
      \`human_check\`, mark the epic itself \`human_check\` too.

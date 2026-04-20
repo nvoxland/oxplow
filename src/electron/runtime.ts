@@ -1686,7 +1686,7 @@ export function buildNextWorkItemStopReason(
     `1. Call \`mcp__newde__read_work_options\` with batchId="${item.batch_id}" to get the next dispatch unit (may be an epic + its children, or a list of standalone items).`,
     `2. Launch a \`general-purpose\` subagent. Include in the brief:`,
     `   - The item ids, titles, descriptions, and acceptance criteria from the dispatch unit.`,
-    `   - **REQUIRED — before touching any files:** call \`mcp__newde__update_work_item\` to mark each item \`in_progress\`. File-change attribution is driven by the sole in-progress item; if the subagent skips this step, changes will be attributed to the wrong item.`,
+    `   - **REQUIRED — work items one at a time:** for each item, mark it \`in_progress\` via \`mcp__newde__update_work_item\` immediately before starting it, do the work, then mark it \`human_check\` before moving to the next. Never mark multiple items \`in_progress\` simultaneously. File-change attribution is driven by the sole in-progress item; if the subagent skips this step or marks all items in_progress at once, changes will be attributed to the wrong item.`,
     `   - Mark \`human_check\` (not \`done\`) when acceptance criteria are met.`,
     `   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.`,
     `   - Use \`mcp__newde__propose_commit\` when a commit point is due.`,

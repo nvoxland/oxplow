@@ -168,6 +168,21 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
 
+## Batch and stream reorder IPC
+
+- `reorderBatches(streamId, orderedBatchIds[])` — reassigns sequential
+  `sort_index` values to the given batch ids (only rows belonging to
+  `streamId` are updated). Emits `batch.changed` (kind: "reordered").
+  Promoting or completing a batch no longer auto-moves it to position 0;
+  the user controls order via drag-to-reorder in `BatchRail`.
+- `reorderStreams(orderedStreamIds[])` — reassigns sequential
+  `sort_index` to streams. Emits `stream.changed` (kind: "reordered").
+  `listStreams` now orders by `sort_index, rowid` instead of
+  `created_at, rowid`.
+
+Both follow the standard 7-layer IPC flow (migration → store →
+runtime → ipc-contract → preload → main → ui/api).
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas.

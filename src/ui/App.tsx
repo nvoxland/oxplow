@@ -35,7 +35,6 @@ import {
   readWorkspaceFile,
   renameWorkspacePath,
   renameBatch,
-  renameCurrentStream,
   renameStream,
   subscribeNewdeEvents,
   subscribeWorkItemEvents,
@@ -46,6 +45,8 @@ import {
   setGeneratedDirs,
   selectBatch,
   promoteBatch,
+  reorderBatches,
+  reorderStreams,
   switchStream,
   updateWorkItem,
   writeWorkspaceFile,
@@ -83,7 +84,6 @@ import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import { BatchRail } from "./components/BatchRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
-import type { DiffRequest } from "./components/Diff/diff-request.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { Activity } from "./components/Activity/Activity.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
@@ -247,25 +247,6 @@ export function App() {
       setError(null);
     } catch (e) {
       setError(String(e));
-    }
-  }
-
-  async function handleRename(title: string) {
-    try {
-      const updated = await renameCurrentStream(title);
-      setStream(updated);
-      setStreams((prev) =>
-        prev
-          .map((candidate) => (candidate.id === updated.id ? updated : candidate))
-          .sort((a, b) => a.created_at.localeCompare(b.created_at)),
-      );
-      setError(null);
-      setDaemonUnavailable(false);
-      logUi("info", "renamed current stream", { streamId: updated.id, title: updated.title });
-    } catch (e) {
-      setError(String(e));
-      logUi("error", "failed to rename current stream", { error: String(e), title });
-      throw e;
     }
   }
 
@@ -508,6 +489,29 @@ export function App() {
       const next = await completeBatch(stream.id, batchId);
       setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
       setCenterActive("agent");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleReorderBatches(orderedBatchIds: string[]) {
+    if (!stream) return;
+    try {
+      await reorderBatches(stream.id, orderedBatchIds);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleReorderStreams(orderedStreamIds: string[]) {
+    try {
+      await reorderStreams(orderedStreamIds);
+      setStreams((prev) => {
+        const byId = new Map(prev.map((s) => [s.id, s]));
+        return orderedStreamIds.map((id) => byId.get(id)).filter((s): s is Stream => s !== undefined);
+      });
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -1369,6 +1373,7 @@ export function App() {
           onRequestCreateBatch={stream ? () => setBatchCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => setSettingsOpen(true)}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromBatchId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromBatchId)}
+          onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}
         />
         {stream ? (
@@ -1387,6 +1392,7 @@ export function App() {
             onMoveWorkItem={handleMoveWorkItemToBatch}
             onMoveBacklogItemToBatch={handleMoveBacklogItemToBatch}
             onRenameBatch={handleRenameBatchById}
+            onReorderBatches={handleReorderBatches}
             onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
             createRequest={batchCreateRequest}
           />

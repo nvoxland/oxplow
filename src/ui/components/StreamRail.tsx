@@ -4,8 +4,7 @@ import { createStream, listBranches, type AgentStatus, type BranchRef, type Stre
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
-import { WORK_ITEM_DRAG_MIME } from "./BatchRail.js";
-import type { MenuItem } from "../menu.js";
+import { WORK_ITEM_DRAG_MIME, BATCH_DRAG_MIME } from "./BatchRail.js";
 
 interface Props {
   stream: Stream | null;
@@ -19,12 +18,16 @@ interface Props {
   onRequestCreateBatch?(): void;
   onOpenSettings?(): void;
   onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromBatchId: string | null): void;
+  onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
   /** Bumping this number opens the inline "new stream" form. */
   createRequest?: number;
 }
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, onDropWorkItemOnStream, createRequest }: Props) {
+export const STREAM_DRAG_MIME = "application/x-newde-stream";
+
+export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
+  const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
   const [branches, setBranches] = useState<BranchRef[]>([]);
@@ -118,25 +121,61 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
             const status = streamStatuses[candidate.id] ?? "idle";
             const canDrop = !!onDropWorkItemOnStream && !!streamActiveBatchIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
+            const isStreamDragTarget = isDragOver && draggingStreamId !== null && draggingStreamId !== candidate.id;
             return (
               <button type="button"
                 key={candidate.id}
+                draggable={!!onReorderStreams}
                 onClick={() => onSwitch(candidate.id)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setContextMenu({ x: event.clientX, y: event.clientY, stream: candidate });
                 }}
-                onDragOver={canDrop ? (event) => {
-                  const types = event.dataTransfer.types;
-                  if (!types || !Array.from(types).includes(WORK_ITEM_DRAG_MIME)) return;
+                onDragStart={onReorderStreams ? (event) => {
+                  event.dataTransfer.setData(STREAM_DRAG_MIME, JSON.stringify({ streamId: candidate.id }));
+                  event.dataTransfer.effectAllowed = "move";
+                  setDraggingStreamId(candidate.id);
+                } : undefined}
+                onDragEnd={onReorderStreams ? () => {
+                  setDraggingStreamId(null);
+                  setDragOverStreamId(null);
+                } : undefined}
+                onDragOver={(event) => {
+                  const types = Array.from(event.dataTransfer.types);
+                  if (types.includes(STREAM_DRAG_MIME)) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    if (dragOverStreamId !== candidate.id) setDragOverStreamId(candidate.id);
+                    return;
+                  }
+                  if (!canDrop) return;
+                  if (!types.includes(WORK_ITEM_DRAG_MIME) && !types.includes(BATCH_DRAG_MIME)) return;
+                  if (!types.includes(WORK_ITEM_DRAG_MIME)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   if (dragOverStreamId !== candidate.id) setDragOverStreamId(candidate.id);
-                } : undefined}
-                onDragLeave={canDrop ? () => {
+                }}
+                onDragLeave={() => {
                   if (dragOverStreamId === candidate.id) setDragOverStreamId(null);
-                } : undefined}
-                onDrop={canDrop ? (event) => {
+                }}
+                onDrop={(event) => {
+                  const types = Array.from(event.dataTransfer.types);
+                  if (types.includes(STREAM_DRAG_MIME) && onReorderStreams) {
+                    event.preventDefault();
+                    setDragOverStreamId(null);
+                    if (!draggingStreamId || draggingStreamId === candidate.id) return;
+                    const ids = streams.map((s) => s.id);
+                    const fromIdx = ids.indexOf(draggingStreamId);
+                    const toIdx = ids.indexOf(candidate.id);
+                    if (fromIdx < 0 || toIdx < 0) return;
+                    const next = ids.slice();
+                    const [moved] = next.splice(fromIdx, 1);
+                    next.splice(toIdx, 0, moved);
+                    void onReorderStreams(next);
+                    setDraggingStreamId(null);
+                    return;
+                  }
+                  if (!canDrop) return;
                   const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
                   if (!raw) return;
                   event.preventDefault();
@@ -156,7 +195,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
                   } catch {
                     // ignore malformed payload
                   }
-                } : undefined}
+                }}
                 style={{
                   ...tabStyle,
                   background: active ? "var(--bg-2)" : "transparent",
@@ -165,7 +204,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
                   borderBottom: active
                     ? "2px solid var(--accent)"
                     : "2px solid transparent",
-                  boxShadow: isDragOver ? "inset 0 0 0 2px var(--accent)" : undefined,
+                  borderLeft: isStreamDragTarget ? "2px solid var(--accent)" : undefined,
+                  boxShadow: isDragOver && !isStreamDragTarget ? "inset 0 0 0 2px var(--accent)" : undefined,
                 }}
                 title={candidate.title}
               >

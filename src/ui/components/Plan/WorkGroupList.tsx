@@ -421,12 +421,11 @@ export function WorkGroupList({
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        // toDo, humanCheck, and done always render so the user sees the full
-        // section layout even when empty. inProgress and blocked only appear
-        // while a drag is active (as drop targets). toDo also anchors the
-        // add-points slot.
-        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done";
-        if (empty && !alwaysShow && (!draggedWorkItem || section.kind === "inProgress")) {
+        // toDo, humanCheck, done, and inProgress always render so the user sees
+        // the full section layout even when empty. blocked only appears while a
+        // drag is active (as a drop target). toDo also anchors the add-points slot.
+        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done" || section.kind === "inProgress";
+        if (empty && !alwaysShow && !draggedWorkItem) {
           return null;
         }
         const canDrop = !!draggedWorkItem

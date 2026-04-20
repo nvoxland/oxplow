@@ -127,7 +127,7 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   expect(text).toContain("general-purpose");
   // batch_id is embedded in the read_work_options call so the agent can pass the right batchId.
   expect(text).toMatch(/batchId="b-xyz"/);
-  // Attribution warning must be present and come before human_check mention.
-  expect(text).toContain("before touching any files");
+  // Attribution warning must be present: tasks are marked in_progress one at a time.
+  expect(text).toContain("one at a time");
   expect(text).toContain("File-change attribution");
 });

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
+import { StoreEmitter } from "./store-emitter.js";
 
 export type PaneKind = "working" | "talking";
 export type StreamBranchSource = "local" | "remote" | "new";
@@ -27,11 +28,16 @@ export interface Stream {
   };
 }
 
+export interface StreamChange {
+  kind: "reordered";
+}
+
 export class StreamStore {
   private readonly rootDir: string;
   private readonly legacyDir: string;
   private readonly legacyStatePath: string;
   private readonly stateDb;
+  private readonly emitter: StoreEmitter<StreamChange>;
 
   constructor(
     private readonly projectDir: string,
@@ -41,12 +47,17 @@ export class StreamStore {
     this.legacyDir = join(this.rootDir, "streams");
     this.legacyStatePath = join(this.rootDir, "state.json");
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
+    this.emitter = new StoreEmitter("stream change", logger);
     this.migrateLegacyIfNeeded();
+  }
+
+  subscribe(listener: (change: StreamChange) => void): () => void {
+    return this.emitter.subscribe(listener);
   }
 
   list(): Stream[] {
     return this.stateDb
-      .all<Record<string, unknown>>("SELECT * FROM streams ORDER BY created_at, rowid")
+      .all<Record<string, unknown>>("SELECT * FROM streams ORDER BY sort_index, rowid")
       .map(rowToStream);
   }
 
@@ -192,6 +203,21 @@ export class StreamStore {
     updated.updated_at = new Date().toISOString();
     this.save(updated);
     return updated;
+  }
+
+  reorderStreams(orderedStreamIds: string[]): void {
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      for (const [index, id] of orderedStreamIds.entries()) {
+        this.stateDb.run(
+          "UPDATE streams SET sort_index = ?, updated_at = ? WHERE id = ?",
+          index,
+          now,
+          id,
+        );
+      }
+    });
+    this.emitter.emit({ kind: "reordered" });
   }
 
   private migrateLegacyIfNeeded(): void {

@@ -26,6 +26,7 @@ interface Props {
   onMoveWorkItem?(itemId: string, fromBatchId: string, toBatchId: string): Promise<void>;
   onMoveBacklogItemToBatch?(itemId: string, toBatchId: string): Promise<void>;
   onRenameBatch?(batchId: string, newTitle: string): Promise<void> | void;
+  onReorderBatches?(orderedBatchIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
   onRequestCreateBatch?(): void;
   /** Bumping this number opens the inline "new batch" form. */
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
+export const BATCH_DRAG_MIME = "application/x-newde-batch";
 
 export function BatchRail({
   batches,
@@ -49,10 +51,14 @@ export function BatchRail({
   onMoveWorkItem,
   onMoveBacklogItemToBatch,
   onRenameBatch,
+  onReorderBatches,
   onRequestCreateStream,
   onRequestCreateBatch,
   createRequest,
 }: Props) {
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [overBatchId, setOverBatchId] = useState<string | null>(null);
+
   const { ordered, completed } = useMemo(() => {
     const active = batches.find((b) => b.id === activeBatchId && b.status !== "completed");
     const queued = batches
@@ -134,6 +140,7 @@ export function BatchRail({
             fileChangeCount={fileChanges[batch.id]?.length}
             hasQueued={hasQueued}
             isRenaming={renamingId === batch.id}
+            isDragTarget={overBatchId === batch.id && draggingId !== null && draggingId !== batch.id}
             onSelect={() => void onSelectBatch(batch.id)}
             onPromote={() => void onPromoteBatch(batch.id)}
             onComplete={() => void onCompleteBatch(batch.id)}
@@ -154,6 +161,22 @@ export function BatchRail({
               } else {
                 if (onMoveWorkItem) void onMoveWorkItem(payload.itemId, payload.fromBatchId, batch.id);
               }
+            } : undefined}
+            onDragStart={onReorderBatches ? () => setDraggingId(batch.id) : undefined}
+            onDragEnd={onReorderBatches ? () => { setDraggingId(null); setOverBatchId(null); } : undefined}
+            onDragOver={onReorderBatches ? () => setOverBatchId(batch.id) : undefined}
+            onDrop={onReorderBatches ? () => {
+              if (!draggingId || draggingId === batch.id) return;
+              const ids = ordered.map((b) => b.id);
+              const fromIdx = ids.indexOf(draggingId);
+              const toIdx = ids.indexOf(batch.id);
+              if (fromIdx < 0 || toIdx < 0) return;
+              const next = ids.slice();
+              const [moved] = next.splice(fromIdx, 1);
+              next.splice(toIdx, 0, moved);
+              void onReorderBatches(next);
+              setDraggingId(null);
+              setOverBatchId(null);
             } : undefined}
           />
         ))}
@@ -220,6 +243,11 @@ function BatchChip({
   isRenaming,
   onSubmitRename,
   onCancelRename,
+  isDragTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
 }: {
   batch: Batch;
   isActive: boolean;
@@ -237,6 +265,11 @@ function BatchChip({
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
   onCancelRename?(): void;
+  isDragTarget?: boolean;
+  onDragStart?(): void;
+  onDragEnd?(): void;
+  onDragOver?(): void;
+  onDrop?(): void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -272,9 +305,15 @@ function BatchChip({
   const color = isSelected ? "var(--fg)" : "var(--muted)";
 
   const handleDragOver = (event: React.DragEvent) => {
+    const types = Array.from(event.dataTransfer.types);
+    if (types.includes(BATCH_DRAG_MIME)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      onDragOver?.();
+      return;
+    }
     if (!onDropWorkItem) return;
-    const types = event.dataTransfer.types;
-    if (!types || !Array.from(types).includes(WORK_ITEM_DRAG_MIME)) return;
+    if (!types.includes(WORK_ITEM_DRAG_MIME)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (!dragOver) setDragOver(true);
@@ -283,6 +322,11 @@ function BatchChip({
     if (dragOver) setDragOver(false);
   };
   const handleDrop = (event: React.DragEvent) => {
+    if (event.dataTransfer.types && Array.from(event.dataTransfer.types).includes(BATCH_DRAG_MIME)) {
+      event.preventDefault();
+      onDrop?.();
+      return;
+    }
     if (!onDropWorkItem) return;
     const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
     if (!raw) return;
@@ -313,9 +357,16 @@ function BatchChip({
   return (
     <div
       data-testid={`batch-chip-${batch.id}`}
-      style={{ position: "relative", flexShrink: 0 }}
+      draggable={!!onDragStart}
+      style={{ position: "relative", flexShrink: 0, borderLeft: isDragTarget ? "2px solid var(--accent)" : undefined }}
       onMouseEnter={scheduleShow}
       onMouseLeave={cancelShow}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(BATCH_DRAG_MIME, JSON.stringify({ batchId: batch.id }));
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      onDragEnd={() => onDragEnd?.()}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

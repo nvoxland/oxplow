@@ -13,7 +13,7 @@ export interface WorkItemDetailChanges {
 }
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "canceled", "archived",
+  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
 
