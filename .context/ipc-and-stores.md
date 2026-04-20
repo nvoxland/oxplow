@@ -37,7 +37,11 @@ touches roughly seven files. They sit in this order:
    names follow `newde:<methodName>`.
 
 6. **Main-process handler** — `src/electron/main.ts`.
-   `ipcMain.handle("newde:name", (_event, ...args) => currentRuntime.name(...args))`.
+   `handle("newde:name", (_event, ...args) => currentRuntime.name(...args))`.
+   Use the local `handle()` wrapper, not `ipcMain.handle` directly —
+   the wrapper records the channel so `disposeRuntime()` can remove
+   every handler before the SQLite database closes (otherwise late
+   in-flight requests crash with "database is not open" during quit).
 
 7. **UI api wrapper** — `src/ui/api.ts`. `desktopApi().name(...)` with a
    typed return.

@@ -14,7 +14,8 @@
     "build": "bun run build:ui && bun run build:electron-main && bun run build:electron-preload",
     "dev:electron": "bun run build && electron .",
     "start": "electron .",
-    "test": "bun test"
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bunx tsc --noEmit && bun test"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
