@@ -151,6 +151,39 @@ this and chose not to, that's a cheat — and usually a finding
 (the affordance was there but wasn't discoverable enough that
 you noticed it under pressure). Log the near-miss.
 
+**Specific surfaces you should actively use — not just know about:**
+
+- **Bottom pane → History tab.** The canonical "what did we
+  ship?" view. Use it instead of `git log` when verifying the
+  inner agent's commit landed (see Step 7 of the canonical pass).
+  It also shows turn-level history with changed-files trees —
+  a richer view than git gives.
+- **Bottom pane → Snapshots tab.** Per-turn snapshots of the
+  working tree. Cross-reference against History when you want to
+  see what a specific turn changed.
+- **Bottom pane → file history.** When a file is open in the
+  editor, its per-commit history view is the answer to "when
+  did this line change?" — faster than `git log -p <file>` if it
+  works well. Open it at least once per session.
+- **Files pane filter modes.** `ProjectPanel` surfaces filters
+  along `branchBase`, `upstream`, `uncommitted`, and the current
+  batch's file changes. Try switching filters — they're the
+  newde-native answer to `git diff --stat HEAD` and
+  `git diff origin/main...HEAD`. Notice if a filter doesn't do
+  what its label suggests.
+
+**Check-in rule.** Even when the task doesn't need History,
+Snapshots, or filter modes, **open each of these panes once
+during every dogfood pass** and confirm it shows sensible
+content. "Sensible" means: reflects recent commits, loads
+within a second or so, doesn't render an empty-state when
+there's obviously state. Any of these failing in passing — slow
+load, empty render, inconsistent count, broken filter —
+becomes a Surprises bullet. The point is not to re-verify
+every pass; it's that **these are the surfaces most likely to
+rot silently** because they're read-only and no test pings them
+on a normal flow.
+
 **3. Spend 60 seconds exploring unrelated surfaces.** At some
 point during each dogfood pass — ideally after the inner agent's
 commit lands but before you write the fix log — **poke at three
@@ -383,14 +416,22 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
    `files-commit` palette command (Cmd+K → "Commit") and commit
    the agent's changes manually. Either way, the commit lands
    through newde's UI — not via `git commit`.
-7. Verify: open newde's History panel, confirm the commit appears
-   there as a user would see it. **Don't use `git log`** — that's
-   the cheat from the 2026-04-19 22:16 review. If opening the
-   History panel is awkward or shows less than you need, that's
-   itself a finding.
+7. **Verify through newde, not git.** Open the History tab in the
+   bottom pane and confirm the commit appears there as a user
+   would see it. If the commit touched files, open one of them
+   and try the per-file history view. Also flip the Files pane
+   filter to "uncommitted" (should be empty after approval) and
+   to "branchBase" / "upstream" (to see this pass's delta in
+   context). If any of these is awkward, slow, stale, or shows
+   less than you expected, it's a finding. `git log` is the
+   cheat — don't default to it.
 8. **60-second exploration.** Before writing the fix log, poke
-   at three UI elements you didn't need for the task. See "The
-   user-experience mindset" above. Log anything surprising.
+   at three UI elements you didn't need for the task. Suggested
+   targets if you're not sure where to look: the Snapshots tab,
+   a Files-pane filter you haven't tried, or a context menu on
+   a row type (history row, blame row, backlog item) you didn't
+   touch for the task. See "The user-experience mindset" above.
+   Log anything surprising.
 
 Everything that slowed you down in steps 2–8 is a finding, as is
 every expectation that didn't match reality. Those go into the fix
