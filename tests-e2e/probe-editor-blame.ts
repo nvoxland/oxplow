@@ -10,7 +10,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, sendMenuCommand } from "./harness.ts";
+import { launchNewde, sendMenuCommand, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -162,7 +162,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[probe] failed:", err);
-  process.exit(1);
-});
+runProbe("probe-editor-blame", main).catch(() => process.exit(1));
