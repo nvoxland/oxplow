@@ -74,6 +74,7 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
 import { SettingsModal } from "./components/SettingsModal.js";
+import { ConfirmDialog } from "./components/ConfirmDialog.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
@@ -121,6 +122,7 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
+  const [pendingDirtyClose, setPendingDirtyClose] = useState<{ path: string; basename: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
@@ -383,9 +385,14 @@ export function App() {
     const currentFile = fileSessions[stream.id]?.files[path];
     if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
       const basename = path.split("/").pop() ?? path;
-      const ok = window.confirm(`"${basename}" has unsaved changes. Close and discard them?`);
-      if (!ok) return;
+      setPendingDirtyClose({ path, basename });
+      return;
     }
+    closeOpenFileNow(path);
+  }
+
+  function closeOpenFileNow(path: string) {
+    if (!stream) return;
     setFileSessions((prev) => ({
       ...prev,
       [stream.id]: closeOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
@@ -1454,6 +1461,19 @@ export function App() {
       {daemonUnavailable ? <DaemonDownDialog /> : null}
       {paletteOpen ? (
         <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
+      ) : null}
+      {pendingDirtyClose ? (
+        <ConfirmDialog
+          message={`"${pendingDirtyClose.basename}" has unsaved changes. Close and discard them?`}
+          confirmLabel="Discard"
+          destructive
+          onConfirm={() => {
+            const { path } = pendingDirtyClose;
+            setPendingDirtyClose(null);
+            closeOpenFileNow(path);
+          }}
+          onCancel={() => setPendingDirtyClose(null)}
+        />
       ) : null}
     </div>
   );

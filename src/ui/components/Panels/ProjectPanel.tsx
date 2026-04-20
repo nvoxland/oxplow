@@ -32,6 +32,7 @@ import {
 import type { DiffRequest } from "../Diff/diff-request.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
@@ -74,6 +75,10 @@ export function ProjectPanel({
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
+  // Destructive-action confirmations that used to be window.confirm().
+  const [pendingConfirm, setPendingConfirm] = useState<
+    { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
+  >(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
 
   const loadDir = useCallback(async (path: string) => {
@@ -485,10 +490,16 @@ export function ProjectPanel({
           await onRenamePath(contextMenu.path, nextPath);
           break;
         }
-        case "delete":
-          if (!window.confirm(`Delete ${contextMenu.path}?`)) return;
-          await onDeletePath(contextMenu.path);
-          break;
+        case "delete": {
+          const path = contextMenu.path;
+          setPendingConfirm({
+            message: `Delete ${path}?`,
+            confirmLabel: "Delete",
+            run: () => onDeletePath(path),
+          });
+          setContextMenu(null);
+          return;
+        }
         case "copy": {
           if (contextMenu.kind === "directory") {
             await copyText(contextMenu.path);
@@ -539,10 +550,18 @@ export function ProjectPanel({
         }
         case "git-rollback": {
           if (!stream) return;
-          if (!window.confirm(`Rollback ${contextMenu.path} to HEAD? Uncommitted changes will be lost.`)) return;
-          const result = await gitRestorePath(stream.id, contextMenu.path);
-          setOpResult({ title: `Rollback ${contextMenu.path}`, result });
-          break;
+          const path = contextMenu.path;
+          const currentStream = stream;
+          setPendingConfirm({
+            message: `Rollback ${path} to HEAD? Uncommitted changes will be lost.`,
+            confirmLabel: "Rollback",
+            run: async () => {
+              const result = await gitRestorePath(currentStream.id, path);
+              setOpResult({ title: `Rollback ${path}`, result });
+            },
+          });
+          setContextMenu(null);
+          return;
         }
         case "git-add": {
           if (!stream) return;
@@ -817,6 +836,19 @@ export function ProjectPanel({
           title={opResult.title}
           result={opResult.result}
           onClose={() => setOpResult(null)}
+        />
+      ) : null}
+      {pendingConfirm ? (
+        <ConfirmDialog
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          destructive
+          onConfirm={() => {
+            const { run } = pendingConfirm;
+            setPendingConfirm(null);
+            void run();
+          }}
+          onCancel={() => setPendingConfirm(null)}
         />
       ) : null}
     </div>

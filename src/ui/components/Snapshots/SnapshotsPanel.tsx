@@ -13,6 +13,7 @@ import {
 } from "../../api.js";
 import { logUi } from "../../logger.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
 
 interface Props {
   stream: Stream | null;
@@ -25,6 +26,7 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
   const [compareBaseId, setCompareBaseId] = useState<string | null>(null);
@@ -146,10 +148,13 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
     }
   };
 
-  const handleRestore = async (path: string) => {
+  const handleRestore = (path: string) => {
     if (!stream || !selectedId) return;
-    const ok = window.confirm(`Restore ${path} to its content from this snapshot? This overwrites the current file in the worktree.`);
-    if (!ok) return;
+    setPendingRestore(path);
+  };
+
+  const performRestore = async (path: string) => {
+    if (!stream || !selectedId) return;
     try {
       await restoreFileFromSnapshot(stream.id, selectedId, path);
     } catch (err) {
@@ -223,6 +228,19 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
           />
         </div>
       </div>
+      {pendingRestore ? (
+        <ConfirmDialog
+          message={`Restore ${pendingRestore} to its content from this snapshot? This overwrites the current file in the worktree.`}
+          confirmLabel="Restore"
+          destructive
+          onConfirm={() => {
+            const path = pendingRestore;
+            setPendingRestore(null);
+            void performRestore(path);
+          }}
+          onCancel={() => setPendingRestore(null)}
+        />
+      ) : null}
     </div>
   );
 }

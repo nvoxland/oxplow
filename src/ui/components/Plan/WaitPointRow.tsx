@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { WaitPoint } from "../../api.js";
 import { deleteWaitPoint, setWaitPointNote } from "../../api.js";
 import { runWithError } from "../../ui-error.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
 import { miniButtonStyle } from "./plan-utils.js";
 import { queueRowExpandedStyle } from "./queue-markers.js";
 
@@ -10,6 +12,7 @@ import { queueRowExpandedStyle } from "./queue-markers.js";
  * triggered. The compact divider itself is in WorkGroupList.
  */
 export function WaitPointRow({ wp }: { wp: WaitPoint }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <div style={queueRowExpandedStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -28,9 +31,7 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
           ) : null}
           <button type="button"
             style={miniButtonStyle}
-            onClick={() => {
-              if (window.confirm("Delete this wait point?")) runWithError("Delete wait point", deleteWaitPoint(wp.id));
-            }}
+            onClick={() => setConfirmDelete(true)}
           >
             Delete
           </button>
@@ -40,6 +41,18 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
         <div style={{ marginTop: 4, fontSize: 11, color: "#d97706" }}>
           Agent stopped here. Prompt the agent directly to resume.
         </div>
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          message="Delete this wait point?"
+          confirmLabel="Delete"
+          destructive
+          onConfirm={() => {
+            setConfirmDelete(false);
+            runWithError("Delete wait point", deleteWaitPoint(wp.id));
+          }}
+          onCancel={() => setConfirmDelete(false)}
+        />
       ) : null}
     </div>
   );
