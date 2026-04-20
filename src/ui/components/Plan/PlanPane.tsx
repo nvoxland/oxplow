@@ -20,6 +20,9 @@ import {
   subscribeNewdeEvents,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
+import { ContextMenu } from "../ContextMenu.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
+import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
@@ -103,6 +106,7 @@ export function PlanPane({
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
   const [mode, setMode] = useState<"batch" | "backlog">("batch");
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
@@ -246,18 +250,6 @@ export function PlanPane({
     setCreateOpen(true);
   }, [openNewRequest]);
 
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    window.addEventListener("click", close);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [contextMenu]);
 
   if (mode === "batch" && !batch) {
     return <div style={{ padding: 12, color: "var(--muted)" }}>No batch selected.</div>;
@@ -410,11 +402,7 @@ export function PlanPane({
                 onReorderMixed={isRootBatch && streamId && batchId
                   ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
                   : undefined}
-                onRequestDelete={(item) => {
-                  if (!window.confirm(`Delete "${item.title}"?`)) return;
-                  if (expandedId === item.id) setExpandedId(null);
-                  void activeDelete(item.id);
-                }}
+                onRequestDelete={(item) => setPendingDelete(item)}
                 onContextMenu={(event, item) => {
                   event.preventDefault();
                   setContextMenu({ x: event.clientX, y: event.clientY, item });
@@ -447,14 +435,27 @@ export function PlanPane({
       </div>
       {contextMenu ? (
         <ContextMenu
-          menu={contextMenu}
-          onDelete={() => {
-            const item = contextMenu.item;
+          items={buildWorkItemMenu(contextMenu.item, (item) => {
             setContextMenu(null);
-            if (!window.confirm(`Delete "${item.title}"?`)) return;
+            setPendingDelete(item);
+          })}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          minWidth={160}
+        />
+      ) : null}
+      {pendingDelete ? (
+        <ConfirmDialog
+          message={`Delete "${pendingDelete.title}"?`}
+          confirmLabel="Delete"
+          destructive
+          onConfirm={() => {
+            const item = pendingDelete;
+            setPendingDelete(null);
             if (expandedId === item.id) setExpandedId(null);
             void activeDelete(item.id);
           }}
+          onCancel={() => setPendingDelete(null)}
         />
       ) : null}
       {kbPicker && selectedItem ? (
@@ -727,46 +728,15 @@ function NewWorkItemModal({
   );
 }
 
-function ContextMenu({ menu, onDelete }: { menu: ContextMenuState; onDelete(): void }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        top: menu.y,
-        left: menu.x,
-        background: "var(--bg-2)",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: 4,
-        boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-        zIndex: 1000,
-        minWidth: 140,
-      }}
-      onClick={(event) => event.stopPropagation()}
-      onContextMenu={(event) => event.preventDefault()}
-      data-testid="plan-context-menu"
-    >
-      <button type="button"
-        onClick={onDelete}
-        data-testid="plan-context-menu-delete"
-        style={{
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: "6px 10px",
-          background: "transparent",
-          border: "none",
-          color: "inherit",
-          font: "inherit",
-          fontSize: 12,
-          cursor: "pointer",
-          borderRadius: 4,
-        }}
-        onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg)"; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
-      >Delete</button>
-    </div>
-  );
+function buildWorkItemMenu(item: WorkItem, onDelete: (item: WorkItem) => void): MenuItem[] {
+  return [
+    {
+      id: "workitem.delete",
+      label: "Delete",
+      enabled: true,
+      run: () => onDelete(item),
+    },
+  ];
 }
 
 const primaryButtonStyle: CSSProperties = {

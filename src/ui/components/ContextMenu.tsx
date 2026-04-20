@@ -89,6 +89,7 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
             onMouseLeave={() => openSubmenuId === item.id && setOpenSubmenuId(null)}
           >
             <button type="button"
+              data-testid={`menu-item-${item.id}`}
               ref={(el) => { submenuRefs.current.set(item.id, el); }}
               onClick={async () => {
                 if (!item.enabled) return;

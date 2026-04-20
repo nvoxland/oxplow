@@ -41,8 +41,6 @@ async function main() {
       process.exit(2);
     }
 
-    // Auto-accept any window.confirm.
-    window.on("dialog", (d) => void d.accept());
 
     await window.screenshot({ path: resolve(outDir, "delete-ctx-01-before.png") });
 
@@ -73,9 +71,14 @@ async function main() {
     await window.waitForTimeout(150);
     await window.screenshot({ path: resolve(outDir, "delete-ctx-02-menu.png") });
 
-    const deleteBtn = window.getByTestId("plan-context-menu-delete");
+    const deleteBtn = window.getByTestId("menu-item-workitem.delete");
     await deleteBtn.waitFor({ timeout: 2_000 });
     await deleteBtn.click();
+
+    // Confirm in the themed destructive dialog.
+    const confirmBtn = window.getByTestId("confirm-dialog-confirm");
+    await confirmBtn.waitFor({ timeout: 2_000 });
+    await confirmBtn.click();
 
     await window.waitForTimeout(600);
     await window.screenshot({ path: resolve(outDir, "delete-ctx-03-after.png") });

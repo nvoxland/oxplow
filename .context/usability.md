@@ -64,8 +64,11 @@ Things I keep forgetting. Read this before adding any UI.
   - `batch-rail-new`, `batch-chip-<batchId>` (chip testid is on the
     outer wrapper that owns the drop handlers, so drag probes can
     target it directly)
-  - `plan-context-menu` on the Plan-pane right-click menu wrapper,
-    `plan-context-menu-delete` on the Delete action inside it
+  - `menu-item-<item.id>` on every button inside the shared
+    `ContextMenu` / `MenuList` — the `MenuItem.id` becomes the
+    testid suffix (e.g. `menu-item-workitem.delete`)
+  - `confirm-dialog`, `confirm-dialog-confirm`, `confirm-dialog-cancel`
+    on the themed destructive-action `ConfirmDialog`
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
     `center-tab-close-<id>` on the × close button
