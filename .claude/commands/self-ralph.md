@@ -289,7 +289,14 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
 2. Click through to the UI area you're exercising (Work panel,
    editor, History, etc.) as a user would. Notice every delay,
    missing affordance, or unclear label on the way.
-3. **Focus the agent pane xterm and prompt the inner agent
+3. **Click `+ Commit when done` first** (the
+   `plan-add-commit-point` button on the `plan-add-points-bar`).
+   Without an active commit point, `propose_commit` silently
+   no-ops and the agent will report "no active commit point
+   existed" only in its terminal output — not in the Work panel.
+   Surfaced by the 2026-04-19 22:02 dogfood run (`fix-
+   20260419-220229-ctxmenu-dogfood.md`).
+4. **Focus the agent pane xterm and prompt the inner agent
    directly.** That's the canonical channel. Your prompt names
    the task verbatim, gives scope / file pointers / acceptance
    criteria, and asks the agent to run tests and propose a commit
@@ -298,18 +305,26 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
      for your own visibility, create **one** work item via `+ New
      work item` *before* prompting and reference it by title in the
      prompt. That's it. Don't pre-queue a backlog.
-4. **Watch.** Poll every ~10s: screenshot, dump `.xterm-rows`
-   innerText to a file, check `[data-agent-status]`. Heartbeat
-   with `probeLog()` each tick so the silence watchdog stays
-   happy. Use a long `wallMs` (e.g. 12 * 60_000) and matching
-   `silenceMs` (e.g. 60_000) — the agent can be quiet while
-   thinking.
-5. When the work panel surfaces a commit point, **click Approve
-   through the UI**. Not git. Not MCP.
-6. Verify: open newde's History panel, confirm the commit appears
+5. **Watch.** Poll every ~10-15s: screenshot, dump `.xterm-rows`
+   innerText to a file. Heartbeat with `probeLog()` each tick so
+   the silence watchdog stays happy. Use a long `wallMs` (e.g.
+   10 * 60_000) and matching `silenceMs` (e.g. 90_000) — the
+   agent can be quiet while thinking. Reference template:
+   `tests-e2e/dogfood-ctx-menu.ts`.
+   - `[data-agent-status]` doesn't work as a signal — there's a
+     filed `[F]` against newde for it. Rely on terminal content
+     until that lands.
+6. **Approve via the UI.** When the agent surfaces a propose
+   result, the Work panel should offer an approve affordance.
+   If the agent no-op'd `propose_commit` (check terminal for
+   "no active commit point existed"), fall back to the
+   `files-commit` palette command (Cmd+K → "Commit") and commit
+   the agent's changes manually. Either way, the commit lands
+   through newde's UI — not via `git commit`.
+7. Verify: open newde's History panel, confirm the commit appears
    there as a user would see it.
 
-Everything that slowed you down in steps 2–6 is a finding. Those
+Everything that slowed you down in steps 2–7 is a finding. Those
 go into the fix log under "Friction" and become new todo entries.
 Don't skip this reflection — it's the whole point.
 
