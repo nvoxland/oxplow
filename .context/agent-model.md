@@ -68,6 +68,13 @@ newde agent:
   agent logs a suggested message to the terminal and moves on; the
   diff stays uncommitted. If you want an ad-hoc commit, ask for
   `git commit`, not `propose_commit`.
+  - **UI signal:** the Work panel renders an inline hint
+    (`data-testid="plan-no-commit-point-hint"`) above the bottom bar
+    whenever the current batch has at least one `human_check` / `done`
+    item and no live (non-`done`, non-`rejected`) commit point — a nudge
+    to click `+ Commit when done` so the next Stop-hook turn has
+    something to fire. Derived purely on the client from `batchWork` +
+    `commitPoints` state; no new store/IPC.
 - **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
   non-`active` batch.** See "Write guard" below. If the agent reports
   "permission denied" on a file write inside a non-writer batch,

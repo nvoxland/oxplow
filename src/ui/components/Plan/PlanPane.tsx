@@ -139,6 +139,24 @@ export function PlanPane({
 
   const epics = batchWork?.epics ?? [];
 
+  // When a batch has items that reached human_check or done but zero
+  // remaining commit points in its queue, the agent's Stop hook has
+  // nothing to fire and propose_commit silently no-ops. Surface that
+  // so the user knows "+ Commit when done" is the next move — see
+  // .context/agent-model.md, "No-commit-point signal".
+  const noCommitPointHint = useMemo(() => {
+    if (mode !== "batch") return false;
+    if (!batchWork) return false;
+    const hasSettled = batchWork.items.some(
+      (item) => item.status === "human_check" || item.status === "done",
+    );
+    if (!hasSettled) return false;
+    const liveCommitPoint = commitPoints.some(
+      (cp) => cp.status !== "done" && cp.status !== "rejected",
+    );
+    return !liveCommitPoint;
+  }, [mode, batchWork, commitPoints]);
+
   const groups = useMemo(() => {
     if (mode === "backlog") return buildBacklogGroups(backlog);
     return buildGroups(batchWork);
@@ -417,6 +435,11 @@ export function PlanPane({
           })
         )}
       </div>
+      {noCommitPointHint ? (
+        <div data-testid="plan-no-commit-point-hint" style={noCommitHintStyle}>
+          No commit point queued — click <strong>+ Commit when done</strong> to land this work.
+        </div>
+      ) : null}
       <div style={bottomBarStyle}>
         <button type="button"
           onClick={() => setMode((prev) => (prev === "backlog" ? "batch" : "backlog"))}
@@ -787,6 +810,15 @@ function buildWorkItemMenu(
 
 const primaryButtonStyle: CSSProperties = {
   borderRadius: 6, border: "1px solid var(--border)", background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit", padding: "6px 10px",
+};
+
+const noCommitHintStyle: CSSProperties = {
+  padding: "6px 10px",
+  borderTop: "1px solid var(--border)",
+  background: "var(--bg-2)",
+  color: "var(--muted)",
+  fontSize: 11,
+  lineHeight: 1.4,
 };
 
 const srOnlyStyle: CSSProperties = {
