@@ -79,7 +79,11 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   const wss = new WebSocketServer({ server: http });
   wss.on("connection", (ws, req) => {
     if (!isAuthorizedHttpRequest(req, authToken)) {
-      logger?.warn("rejected unauthorized mcp websocket");
+      // debug, not warn — unauthorized probes from other IDEs scanning
+      // `~/.claude/ide/*.lock` fire this on every newde launch. The
+      // rejection itself is correct defense; surfacing it at WARN just
+      // pollutes startup logs with expected behavior.
+      logger?.debug("rejected unauthorized mcp websocket");
       ws.close(1008, "unauthorized");
       return;
     }

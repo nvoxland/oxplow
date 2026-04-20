@@ -100,6 +100,14 @@ For commonly-filtered events there are scoped helpers in `src/ui/api.ts`:
 Add a new helper any time more than one component would write the same
 filter.
 
+**Listener count:** each UI subscriber adds one listener to
+`ipcRenderer`. Electron's default `MaxListeners=10` is too low for
+newde (~11 stores subscribe on startup), so `src/electron/preload.ts`
+calls `ipcRenderer.setMaxListeners(64)` at load time. These are
+long-lived per-store subscribers and grow only when we add a store —
+not a leak. If the count ever climbs into dozens, switch to a single
+preload fan-out bus instead of raising the cap further.
+
 ## Cross-store atomicity
 
 When an operation must update multiple tables together, do it in a

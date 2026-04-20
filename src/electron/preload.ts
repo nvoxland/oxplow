@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { CommandId, DesktopApi, LspEvent, NewdeEvent, TerminalEvent } from "./ipc-contract.js";
 
+// Each newde:event subscriber from the renderer adds one listener to
+// ipcRenderer. The renderer has ~11 stores subscribing on startup
+// (batches, streams, work items, backlog, agent status, turns, file
+// changes, workspace events, workspace-context, etc.). Electron's
+// default MaxListeners=10 fires a noisy MaxListenersExceededWarning on
+// every launch. Raise the cap — these are long-lived per-store
+// subscribers, not a leak. If this ever balloons further, switch to a
+// single preload fan-out bus.
+ipcRenderer.setMaxListeners(64);
+
 const api: DesktopApi = {
   getCurrentStream: () => ipcRenderer.invoke("newde:getCurrentStream"),
   listStreams: () => ipcRenderer.invoke("newde:listStreams"),
