@@ -117,6 +117,68 @@ commit via Work panel." The string "none" or "n/a" is a valid but
 passes (harness / prompt / .self-ralph/ edits), which must be
 disclosed as such in "Picked."
 
+### The user-experience mindset (non-negotiable)
+
+Dogfood isn't just "drive the happy path." It's **using the
+product the way a real user would — curiously, fallibly, with
+expectations** — and writing down every moment reality didn't
+match what you expected. Three disciplines make this real:
+
+**1. Narrate expectations BEFORE acting.** Every non-trivial UI
+action gets a one-line "I expect X to happen when I click Y"
+written in the fix log or probe commentary *before* the click.
+The delta between expectation and observation is the finding.
+Examples of expectations worth naming:
+
+- "I click + New work item — I expect a modal with title,
+  description, and a focused title input."
+- "I click the Commit (5) button — I expect a dialog showing
+  only my changed files, with the option to unstage untracked
+  ones."
+- "I press Cmd+K and type 'history' — I expect one row, View ›
+  History."
+
+If what you expect is different from what you see, **that's a
+bug**. File it. Don't rationalize ("oh, I see why they did it
+that way") — a user's first read is the test.
+
+**2. Scan for capability before reaching outside newde.** When
+you think "I need to see the git log" or "I need to check what
+changed," pause and look at newde's UI first. What's on the
+screen? Does a History panel, a Changes tab, a blame overlay,
+a Cmd+K command already do this? If you could use newde for
+this and chose not to, that's a cheat — and usually a finding
+(the affordance was there but wasn't discoverable enough that
+you noticed it under pressure). Log the near-miss.
+
+**3. Spend 60 seconds exploring unrelated surfaces.** At some
+point during each dogfood pass — ideally after the inner agent's
+commit lands but before you write the fix log — **poke at three
+UI elements you didn't need for the task**. Open a panel you
+haven't used. Right-click something. Try a keyboard shortcut
+you're not sure of. Log anything surprising:
+
+- An empty state that's misleading.
+- A hover card you didn't know existed.
+- A button whose title reveals behavior the label hides.
+- A response time that feels slow.
+- A state that rendered wrong after a drag/drop/approval.
+
+The point is NOT to fix everything you find. The point is to
+NOTICE. "Surprise" bullets go in the fix log's Friction section
+alongside the task-related findings. If you found nothing
+surprising, write "nothing surprising in 60s of exploration" —
+but scrutinize whether you actually explored or just scanned the
+Work panel again.
+
+**Why this matters.** Without these, dogfood degenerates into
+"script the happy path, approve the commit, call it done." The
+loop then ships fixes but doesn't discover the usability
+regressions that any real user would hit in minute one. The
+2026-04-19 22:16 review flagged this: 3 dogfood passes shipped,
+8 frictions surfaced — but all 8 were task-local. Zero came
+from unrelated exploration.
+
 ## Argument: pass count
 
 The command takes an optional positive-integer argument:
@@ -322,11 +384,18 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
    the agent's changes manually. Either way, the commit lands
    through newde's UI — not via `git commit`.
 7. Verify: open newde's History panel, confirm the commit appears
-   there as a user would see it.
+   there as a user would see it. **Don't use `git log`** — that's
+   the cheat from the 2026-04-19 22:16 review. If opening the
+   History panel is awkward or shows less than you need, that's
+   itself a finding.
+8. **60-second exploration.** Before writing the fix log, poke
+   at three UI elements you didn't need for the task. See "The
+   user-experience mindset" above. Log anything surprising.
 
-Everything that slowed you down in steps 2–7 is a finding. Those
-go into the fix log under "Friction" and become new todo entries.
-Don't skip this reflection — it's the whole point.
+Everything that slowed you down in steps 2–8 is a finding, as is
+every expectation that didn't match reality. Those go into the fix
+log under "Expected vs actual" and "Friction" and become new todo
+entries. Don't skip this reflection — it's the whole point.
 
 ### 3c. Regression lock-in (derived, secondary)
 
@@ -419,11 +488,33 @@ prompted inner agent with "Y", approved commit at <sha> via Work
 panel. OR "infra-only pass — no dogfood needed because <reason>".
 Bare "none" without justification is a failed pass.>
 
-## Friction
-<what surprised you, slowed you down, or required reaching outside
-newde during the dogfood run. One bullet per finding. If "nothing",
-say so explicitly — but scrutinize whether that's true, because
-smooth passes usually mean you skipped step 4 of the dogfood flow.>
+## Expected vs actual
+<the expectations you named before acting, paired with what
+happened. Each bullet: "expected X → got Y" — the delta is the
+finding. At least two bullets if this wasn't an infra pass.
+Example:
+ - expected + Commit dialog to show only tracked changes →
+   actually bundled untracked probe files too.
+ - expected agent-pane scrollback to be empty on fresh launch →
+   actually showed prior session's transcript including
+   reverted commits.
+If literally every expectation matched, say so — but that's rare
+enough to be worth double-checking whether you had expectations
+at all.>
+
+## Surprises (60-second exploration)
+<three things you poked at outside the task's direct path, with
+what was notable about each. Examples:
+ - Right-clicked a completed batch chip: no "Reopen" option,
+   only Rename/Add-batch/Add-stream. Intentional or gap?
+ - Opened History panel while uncommitted: the timeline showed
+   "working" state correctly but turn-diff loading spinner
+   hung for 2+ seconds on a 12-file turn.
+ - Pressed Tab in the agent pane xterm: no tab-completion; cursor
+   just inserted a literal tab. Is that intended?
+If you didn't explore, write "skipped — <reason>". Skipping is
+OK if the pass was infra-only, otherwise it's a sign the pass
+was too task-focused.>
 
 ## Shipped
 <commit hash + one-line summary, optional `git show --stat`>
@@ -445,14 +536,16 @@ load-bearing sections.
 
 ## Step 8 — End-of-pass report to the user
 
-≤ 80 words. State:
+≤ 90 words. State:
 (a) which item you picked (+ any rotation/skip reasoning),
 (b) **Dogfood:** one line naming concrete UI actions you took as a
     user — "launched newde, created work item, prompted inner agent,
     approved commit." Bare "none" means this was an infra-only pass
     AND you must justify that in (a).
-(c) what shipped (commit hash),
-(d) one-line headline reflection or friction finding,
+(c) **Top surprise or expectation miss:** the single most
+    interesting finding from Expected-vs-actual + Surprises. If
+    nothing was surprising, say so — but infrequently.
+(d) what shipped (commit hash),
 (e) next top-of-stack.
 
 In multi-pass mode, prefix with `Pass k/N:`. After the final pass,

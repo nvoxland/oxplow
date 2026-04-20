@@ -1,7 +1,7 @@
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
@@ -160,4 +160,148 @@ export function preflightKillStrays(): void {
 
 function isPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+// ---------------------------------------------------------------------
+// Dogfood helpers
+//
+// The three helpers below collapse the pattern that every dogfood probe
+// used to open-code: add a commit point, create a single work item,
+// prompt the xterm, poll until the agent goes quiet, then later
+// approve via the Files-commit dialog in a separate launch.
+//
+// Extracted 2026-04-19 after review-20260419-221646.md called out
+// three near-duplicate dogfood-commit-*.ts files.
+// ---------------------------------------------------------------------
+
+/**
+ * Drive the canonical dogfood pass inside an already-launched newde
+ * window:
+ *   1. Click + Commit when done so propose_commit has something to
+ *      target.
+ *   2. Create one work item (title + body).
+ *   3. Focus the xterm and type `prompt` followed by Enter.
+ *   4. Poll every `tickMs` ms (default 15s), screenshotting and
+ *      dumping .xterm-rows to `outDir/<slug>-rows-NN.txt`. Emit a
+ *      heartbeat each tick so runProbe's silence watchdog is happy.
+ *   5. Return when the terminal content has been unchanged for
+ *      `quietTicks` ticks (default 3) or when `maxTicks` (default 40)
+ *      is reached — whichever first.
+ *
+ * The caller decides what to do after (usually close & reopen to
+ * approve). Does NOT rely on scrollback-text matching for "propose"
+ * or "approve" — that proved unreliable in pass 2026-04-19 22:09
+ * because prior-session text leaks in.
+ */
+export async function dogfoodInnerAgent(
+  window: Page,
+  opts: {
+    slug: string;
+    outDir: string;
+    workItemTitle: string;
+    workItemBody: string;
+    prompt: string;
+    tickMs?: number;
+    quietTicks?: number;
+    maxTicks?: number;
+    addCommitPoint?: boolean;
+  },
+): Promise<{ ticks: number; exitReason: "quiet" | "max" }> {
+  const tickMs = opts.tickMs ?? 15_000;
+  const quietTicks = opts.quietTicks ?? 3;
+  const maxTicks = opts.maxTicks ?? 40;
+  const addCommitPoint = opts.addCommitPoint ?? true;
+
+  // Activate Work panel.
+  const workPanel = window.getByTestId("dock-panel-plan");
+  for (let i = 0; i < 3; i++) {
+    if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
+    await window.getByTestId("dock-tab-plan").click();
+    await window.waitForTimeout(300);
+  }
+  probeLog(`[dogfood:${opts.slug}] Work panel active`);
+
+  // Add commit point so propose_commit has a target. Without this,
+  // the agent will narrate "no active commit point existed" and
+  // leave the suggestion as a work-note only.
+  if (addCommitPoint) {
+    await window.getByTestId("plan-add-commit-point").click();
+    await window.waitForTimeout(400);
+    probeLog(`[dogfood:${opts.slug}] + Commit when done clicked`);
+  }
+
+  // Create one work item for Plan-UI visibility (the allowed
+  // single-item exception to "don't pre-queue").
+  await window.getByTestId("plan-new-work-item").click();
+  await window.waitForTimeout(400);
+  await window.getByTestId("work-item-title").fill(opts.workItemTitle);
+  await window.getByTestId("work-item-description").fill(opts.workItemBody);
+  await window.getByTestId("work-item-save").click();
+  await window.waitForTimeout(800);
+  probeLog(`[dogfood:${opts.slug}] work item created: ${opts.workItemTitle}`);
+
+  // Focus xterm and send prompt.
+  const xterm = window.locator(".xterm").first();
+  await xterm.waitFor({ state: "visible", timeout: 5_000 });
+  await xterm.click();
+  await window.waitForTimeout(400);
+  await window.keyboard.type(opts.prompt);
+  await window.waitForTimeout(500);
+  await window.keyboard.press("Enter");
+  probeLog(`[dogfood:${opts.slug}] prompt sent`);
+
+  // Poll for quiet.
+  let tick = 0;
+  let quiet = 0;
+  let lastRows = "";
+  while (tick < maxTicks) {
+    tick += 1;
+    await window.waitForTimeout(tickMs);
+    const snapshotPath = resolve(opts.outDir, `${opts.slug}-poll-${String(tick).padStart(2, "0")}.png`);
+    await window.screenshot({ path: snapshotPath });
+    const rows = await window.evaluate(() => {
+      const r = document.querySelector(".xterm-rows");
+      return r ? (r as HTMLElement).innerText : "";
+    });
+    const rowsPath = resolve(opts.outDir, `${opts.slug}-rows-${String(tick).padStart(2, "0")}.txt`);
+    try { writeFileSync(rowsPath, rows); } catch { /* best effort */ }
+    if (rows === lastRows) quiet += 1; else quiet = 0;
+    lastRows = rows;
+    probeLog(`[dogfood:${opts.slug}] tick=${tick} quiet=${quiet}`);
+    if (quiet >= quietTicks) {
+      probeLog(`[dogfood:${opts.slug}] quiet for ${quietTicks} ticks; stopping`);
+      return { ticks: tick, exitReason: "quiet" };
+    }
+  }
+  probeLog(`[dogfood:${opts.slug}] hit maxTicks=${maxTicks}; stopping`);
+  return { ticks: tick, exitReason: "max" };
+}
+
+/**
+ * Approve a pending set of changes by opening Files panel, clicking
+ * the files-commit button, filling the message, and submitting.
+ * Must be called inside an already-launched newde window.
+ *
+ * Note: the Files-commit dialog bundles untracked files by default.
+ * Filed as `[F]` in todo.md. If that matters, stage the files
+ * outside newde first.
+ */
+export async function approveViaFiles(
+  window: Page,
+  opts: { slug: string; outDir?: string; message: string },
+): Promise<void> {
+  await window.getByTestId("dock-tab-project").click();
+  await window.waitForTimeout(400);
+  await window.getByTestId("files-commit").click();
+  await window.waitForTimeout(500);
+  await window.getByTestId("files-commit-message").fill(opts.message);
+  if (opts.outDir) {
+    await window.screenshot({ path: resolve(opts.outDir, `${opts.slug}-approve-filled.png`) });
+  }
+  await window.getByTestId("files-commit-submit").click();
+  probeLog(`[approve:${opts.slug}] submitted`);
+  await window.waitForTimeout(3_000);
+  if (opts.outDir) {
+    await window.screenshot({ path: resolve(opts.outDir, `${opts.slug}-approve-done.png`) });
+  }
 }
