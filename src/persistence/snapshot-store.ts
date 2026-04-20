@@ -52,6 +52,7 @@ export interface FileSnapshot {
   batch_id: string | null;
   parent_snapshot_id: string | null;
   created_at: string;
+  turn_prompt: string | null;
 }
 
 /**
@@ -507,11 +508,16 @@ export class SnapshotStore {
   listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        "SELECT * FROM file_snapshot WHERE stream_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        `SELECT fs.*, at.prompt AS turn_prompt
+         FROM file_snapshot fs
+         LEFT JOIN agent_turn at ON fs.turn_id = at.id
+         WHERE fs.stream_id = ?
+         ORDER BY fs.created_at DESC, fs.rowid DESC
+         LIMIT ?`,
         streamId,
         limit,
       )
-      .map(rowToSnapshot);
+      .map(rowToSnapshotWithPrompt);
   }
 
   getTurnSnapshots(turnId: string): { start: FileSnapshot | null; end: FileSnapshot | null } {
@@ -537,6 +543,14 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
     batch_id: row.batch_id == null ? null : String(row.batch_id),
     parent_snapshot_id: row.parent_snapshot_id == null ? null : String(row.parent_snapshot_id),
     created_at: String(row.created_at ?? ""),
+    turn_prompt: null,
+  };
+}
+
+function rowToSnapshotWithPrompt(row: Record<string, unknown>): FileSnapshot {
+  return {
+    ...rowToSnapshot(row),
+    turn_prompt: row.turn_prompt == null ? null : String(row.turn_prompt),
   };
 }
 

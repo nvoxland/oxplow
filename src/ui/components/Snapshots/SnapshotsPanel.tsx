@@ -24,6 +24,7 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
@@ -163,11 +164,27 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
     }
   };
 
+  const filterLower = filter.trim().toLowerCase();
+  const filteredSnapshots = filterLower
+    ? snapshots.filter((snap) => {
+        const description = snap.turn_id
+          ? (snap.turn_prompt ?? `turn ${snap.turn_id.slice(-6)}`)
+          : "External";
+        return description.toLowerCase().includes(filterLower);
+      })
+    : snapshots;
+
   return (
     <div id="snapshots-panel-root" style={containerStyle}>
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
         <div style={leftPaneStyle}>
           <div style={toolbarStyle}>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter snapshots"
+              style={{ ...inputStyle, flex: 1, minWidth: 120 }}
+            />
             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--muted)" }}>
               <input
                 type="checkbox"
@@ -189,7 +206,7 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
               </span>
             ) : null}
             <div style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)" }}>
-              {loading ? "loading…" : `${snapshots.length}`}
+              {loading ? "loading…" : filterLower ? `${filteredSnapshots.length} / ${snapshots.length}` : `${snapshots.length}`}
             </div>
           </div>
           <div style={listStyle}>
@@ -199,8 +216,10 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
             ) : snapshots.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots yet.</div>
+            ) : filteredSnapshots.length === 0 ? (
+              <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots match filter.</div>
             ) : (
-              snapshots.map((snap) => (
+              filteredSnapshots.map((snap) => (
                 <SnapshotRow
                   key={snap.id}
                   snap={snap}
@@ -257,13 +276,17 @@ function SnapshotRow({
   onClick(): void;
 }) {
   const date = formatRelative(snap.created_at);
+  const isAgent = snap.kind === "turn-end" && snap.turn_id != null;
+  const description = isAgent
+    ? (snap.turn_prompt ?? "(agent turn)").replace(/\n/g, " ")
+    : "External";
   return (
     <div
       onClick={onClick}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 8,
+        gap: 6,
         height: 24,
         cursor: "pointer",
         background: selected
@@ -277,14 +300,28 @@ function SnapshotRow({
         overflow: "hidden",
       }}
     >
-      <span style={kindBadgeStyle(snap.kind)}>{snap.kind === "turn-start" ? "START" : "END"}</span>
-      <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>
-        {snap.id.slice(-6)}
+      {isAgent ? (
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+          <path d="M7 1L8.5 5.5H13L9.25 8.25L10.75 13L7 10.25L3.25 13L4.75 8.25L1 5.5H5.5L7 1Z" fill="var(--accent)" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+          <path d="M9.5 2.5L11.5 4.5L5 11L2 12L3 9L9.5 2.5Z" stroke="var(--muted)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      <span
+        title={description}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          color: isAgent ? "inherit" : "var(--muted)",
+        }}
+      >
+        {description}
       </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: "var(--muted)" }}>
-        {snap.turn_id ? `turn ${snap.turn_id.slice(-6)}` : "no turn"}
-      </span>
-      <span style={{ color: "var(--muted)", fontSize: 11, minWidth: 48, textAlign: "right" }}>{date}</span>
+      <span style={{ color: "var(--muted)", fontSize: 11, minWidth: 90, textAlign: "right", flexShrink: 0 }}>{date}</span>
     </div>
   );
 }
@@ -311,16 +348,14 @@ function DetailPane({
   return (
     <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10, fontSize: 12, overflow: "auto", height: "100%" }}>
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", color: "var(--muted)", fontSize: 11 }}>
-        <span>Snapshot</span>
-        <span style={{ fontFamily: "var(--mono, monospace)" }}>{summary.snapshot.id}</span>
-        <span>Kind</span>
-        <span>{summary.snapshot.kind}</span>
         <span>Created</span>
         <span>{formatAbsolute(summary.snapshot.created_at)}</span>
         {summary.snapshot.turn_id ? (
           <>
-            <span>Turn</span>
-            <span style={{ fontFamily: "var(--mono, monospace)" }}>{summary.snapshot.turn_id}</span>
+            <span style={{ alignSelf: "start" }}>Prompt</span>
+            <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {summary.snapshot.turn_prompt ?? summary.snapshot.turn_id}
+            </span>
           </>
         ) : null}
       </div>
@@ -403,22 +438,6 @@ function statusColor(kind: "created" | "updated" | "deleted"): string {
   }
 }
 
-function kindBadgeStyle(kind: "turn-start" | "turn-end"): CSSProperties {
-  const color = kind === "turn-start" ? "#4a9eff" : "#c4b5fd";
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    border: "1px solid",
-    borderRadius: 999,
-    padding: "0 6px",
-    fontSize: 9,
-    lineHeight: "13px",
-    fontWeight: 600,
-    flexShrink: 0,
-    borderColor: color,
-    color,
-  };
-}
 
 function renderDiffSide(
   content: string | null,
@@ -469,6 +488,16 @@ function formatAbsolute(input: string): string {
   if (Number.isNaN(d.getTime())) return input;
   return d.toLocaleString();
 }
+
+const inputStyle: CSSProperties = {
+  borderRadius: 6,
+  border: "1px solid var(--border)",
+  background: "var(--bg)",
+  color: "inherit",
+  font: "inherit",
+  padding: "3px 6px",
+  fontSize: 12,
+};
 
 const containerStyle: CSSProperties = {
   display: "flex",

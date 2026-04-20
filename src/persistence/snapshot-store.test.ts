@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, utimesSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SnapshotStore } from "./snapshot-store.js";
 import { StreamStore } from "./stream-store.js";
+import { BatchStore } from "./batch-store.js";
+import { TurnStore } from "./turn-store.js";
 import { getStateDatabase } from "./state-db.js";
 
-function backdateSnapshot(projectDir: string, store: SnapshotStore, snapshotId: string, daysAgo: number) {
+function backdateSnapshot(projectDir: string, _store: SnapshotStore, snapshotId: string, daysAgo: number) {
   const when = new Date(Date.now() - daysAgo * 86400_000).toISOString();
   getStateDatabase(projectDir).run(
     "UPDATE file_snapshot SET created_at = ? WHERE id = ?",
@@ -567,6 +569,51 @@ describe("SnapshotStore", () => {
     const result = store.cleanupOldSnapshots(0);
     expect(result.snapshotsDeleted).toBe(0);
     expect(result.blobsDeleted).toBe(0);
+  });
+
+  test("listSnapshotsForStream includes turn_prompt via JOIN", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "content");
+
+    // Create a snapshot without a turn — turn_prompt should be null.
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+
+    // Set up a batch and turn using the real stores to satisfy FK constraints.
+    const batchStore = new BatchStore(projectDir);
+    const stream = new StreamStore(projectDir).get(streamId)!;
+    const batchState = batchStore.ensureStream(stream);
+    const batchId = batchState.batches[0]!.id;
+    const turns = new TurnStore(projectDir);
+    const turn = turns.openTurn({ batchId, prompt: "the agent prompt text" });
+
+    // Create a snapshot linked to that turn.
+    writeFileSync(join(worktreePath, "a.txt"), "content v2");
+    const s2 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+      parentSnapshotId: s1,
+      turnId: turn.id,
+      batchId,
+    })!;
+
+    const list = store.listSnapshotsForStream(streamId);
+    const snap1 = list.find((s) => s.id === s1)!;
+    const snap2 = list.find((s) => s.id === s2)!;
+
+    expect(snap1).not.toBeUndefined();
+    expect(snap1.turn_prompt).toBeNull();
+    expect(snap2).not.toBeUndefined();
+    expect(snap2.turn_prompt).toBe("the agent prompt text");
   });
 
   test("getSnapshotPairDiff diffs arbitrary snapshots", () => {

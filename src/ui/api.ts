@@ -94,8 +94,8 @@ export interface FileSnapshot {
   turn_id: string | null;
   batch_id: string | null;
   parent_snapshot_id: string | null;
-  manifest_path: string;
   created_at: string;
+  turn_prompt: string | null;
 }
 
 export type SnapshotEntryState = "present" | "deleted" | "oversize";
