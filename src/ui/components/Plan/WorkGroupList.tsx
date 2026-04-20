@@ -162,22 +162,42 @@ export function WorkGroupList({
     if (from < 0 || to < 0) { resetDrag(); return; }
     const dragged = allRows[from]!;
     const target = allRows[to]!;
-    // Cross-section drop of a work item — change its status to match the
-    // target section. The reorder that follows keeps its relative position
-    // in the flattened list.
+    const isMultiDrag = dragged.kind === "work" && markedIds && markedIds.has(dragged.item.id) && markedIds.size > 1;
+    // Cross-section drop — change status to match the target section.
+    // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
       const fromSection = classifyWorkItem(dragged.item.status);
       const toSection = classifyWorkItem(target.item.status);
       if (fromSection !== toSection) {
         const nextStatus = sectionDefaultStatus(toSection);
-        if (nextStatus && nextStatus !== dragged.item.status) {
-          void onUpdateWorkItem(dragged.item.id, { status: nextStatus });
+        if (nextStatus) {
+          if (isMultiDrag && markedIds) {
+            for (const id of markedIds) {
+              const row = allRows.find((r) => r.kind === "work" && r.id === id);
+              if (row && row.kind === "work" && row.item.status !== nextStatus) {
+                void onUpdateWorkItem(id, { status: nextStatus });
+              }
+            }
+          } else if (nextStatus !== dragged.item.status) {
+            void onUpdateWorkItem(dragged.item.id, { status: nextStatus });
+          }
         }
       }
     }
-    const next = allRows.slice();
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved!);
+    // Reorder: multi-drag moves all marked rows as a block to the drop position.
+    let next: QueueRow[];
+    if (isMultiDrag && markedIds) {
+      const markedSet = new Set(markedIds);
+      const markedRows = allRows.filter((r) => r.kind === "work" && markedSet.has(r.id));
+      const unmarked = allRows.filter((r) => r.kind !== "work" || !markedSet.has(r.id));
+      const insertIdx = unmarked.findIndex((r) => keyFor(r) === targetKey);
+      const insertAt = insertIdx < 0 ? unmarked.length : insertIdx;
+      next = [...unmarked.slice(0, insertAt), ...markedRows, ...unmarked.slice(insertAt)];
+    } else {
+      next = allRows.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved!);
+    }
     resetDrag();
     if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
       onReorderMixed(next.map((row) => ({ kind: row.kind, id: row.id })));
@@ -192,7 +212,17 @@ export function WorkGroupList({
     resetDrag();
     if (!nextStatus) return;
     if (classifyWorkItem(draggedWorkItem.status) === section) return;
-    void onUpdateWorkItem(draggedWorkItem.id, { status: nextStatus });
+    const isMultiDrag = markedIds && markedIds.has(draggedWorkItem.id) && markedIds.size > 1;
+    if (isMultiDrag && markedIds) {
+      for (const id of markedIds) {
+        const row = allRows.find((r) => r.kind === "work" && r.id === id);
+        if (row && row.kind === "work" && classifyWorkItem(row.item.status) !== section) {
+          void onUpdateWorkItem(id, { status: nextStatus });
+        }
+      }
+    } else {
+      void onUpdateWorkItem(draggedWorkItem.id, { status: nextStatus });
+    }
   };
 
   const renderRow = (row: QueueRow) => {
@@ -554,15 +584,14 @@ function InlineItemRow({
         const toggle = event.metaKey || event.ctrlKey;
         const range = event.shiftKey && !toggle;
         if (toggle || range) {
-          // Cmd/Ctrl+click toggles the mark set; Shift+click ranges from the
-          // primary selection. Both skip the edit modal so multi-select
-          // doesn't open the form for every clicked row.
           onSelect?.(item.id, { toggle, range });
           return;
         }
-        // Plain click: select + open the edit modal. Title/description/
-        // acceptance edits all happen there; the row itself only exposes
-        // the inline status + priority pickers.
+        // Plain click: select only. Double-click (or Enter) opens the edit modal.
+        onSelect?.(item.id);
+      }}
+      onDoubleClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}

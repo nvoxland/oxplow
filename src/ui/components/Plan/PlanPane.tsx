@@ -82,6 +82,8 @@ interface ContextMenuState {
   x: number;
   y: number;
   item: WorkItem;
+  /** Non-null when the right-clicked item belongs to a multi-selection. */
+  groupIds: string[] | null;
 }
 
 export function PlanPane({
@@ -125,7 +127,8 @@ export function PlanPane({
   // whole set so drop targets (BatchRail, backlog chip, stream chip) can move
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
-  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string } | null>(null);
+  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<string[] | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -348,6 +351,7 @@ export function PlanPane({
   const closeModal = () => {
     setModalMode(null);
     setEditingItemId(null);
+    paneRef.current?.focus();
   };
 
   useEffect(() => {
@@ -542,7 +546,10 @@ export function PlanPane({
                   : undefined}
                 onContextMenu={(event, item) => {
                   event.preventDefault();
-                  setContextMenu({ x: event.clientX, y: event.clientY, item });
+                  const groupIds = markedIds.has(item.id) && markedIds.size > 1
+                    ? [...markedIds]
+                    : null;
+                  setContextMenu({ x: event.clientX, y: event.clientY, item, groupIds });
                 }}
                 addPointsSlot={addPointsSlot}
                 selectedId={selectedId}
@@ -579,27 +586,44 @@ export function PlanPane({
       </div>
       {contextMenu ? (
         <ContextMenu
-          items={buildWorkItemMenu(contextMenu.item, {
-            onDelete: (item) => {
-              setContextMenu(null);
-              setPendingDelete(item);
-            },
-            onRename: (item) => {
-              setContextMenu(null);
-              setSelectedId(item.id);
-              openEditModal(item);
-            },
-            onChangeStatus: (item) => {
-              setContextMenu(null);
-              setSelectedId(item.id);
-              setKbPicker({ kind: "status", itemId: item.id });
-            },
-            onChangePriority: (item) => {
-              setContextMenu(null);
-              setSelectedId(item.id);
-              setKbPicker({ kind: "priority", itemId: item.id });
-            },
-          })}
+          items={contextMenu.groupIds
+            ? buildGroupMenu(contextMenu.item, contextMenu.groupIds, {
+                onChangeStatus: (item, ids) => {
+                  setContextMenu(null);
+                  setSelectedId(item.id);
+                  setKbPicker({ kind: "status", itemId: item.id, extraIds: ids.filter((id) => id !== item.id) });
+                },
+                onChangePriority: (item, ids) => {
+                  setContextMenu(null);
+                  setSelectedId(item.id);
+                  setKbPicker({ kind: "priority", itemId: item.id, extraIds: ids.filter((id) => id !== item.id) });
+                },
+                onDelete: (_item, ids) => {
+                  setContextMenu(null);
+                  setPendingDeleteGroup(ids);
+                },
+              })
+            : buildWorkItemMenu(contextMenu.item, {
+                onDelete: (item) => {
+                  setContextMenu(null);
+                  setPendingDelete(item);
+                },
+                onRename: (item) => {
+                  setContextMenu(null);
+                  setSelectedId(item.id);
+                  openEditModal(item);
+                },
+                onChangeStatus: (item) => {
+                  setContextMenu(null);
+                  setSelectedId(item.id);
+                  setKbPicker({ kind: "status", itemId: item.id });
+                },
+                onChangePriority: (item) => {
+                  setContextMenu(null);
+                  setSelectedId(item.id);
+                  setKbPicker({ kind: "priority", itemId: item.id });
+                },
+              })}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
           minWidth={160}
@@ -619,15 +643,31 @@ export function PlanPane({
           onCancel={() => setPendingDelete(null)}
         />
       ) : null}
+      {pendingDeleteGroup ? (
+        <ConfirmDialog
+          message={`Delete ${pendingDeleteGroup.length} work items?`}
+          confirmLabel="Delete all"
+          destructive
+          onConfirm={() => {
+            const ids = pendingDeleteGroup;
+            setPendingDeleteGroup(null);
+            for (const id of ids) void activeDelete(id);
+          }}
+          onCancel={() => setPendingDeleteGroup(null)}
+        />
+      ) : null}
       {kbPicker && selectedItem ? (
         <KeyboardValuePicker
           kind={kbPicker.kind}
           item={selectedItem}
           onPick={(value) => {
+            const allIds = kbPicker.extraIds
+              ? [kbPicker.itemId, ...kbPicker.extraIds]
+              : [kbPicker.itemId];
             if (kbPicker.kind === "status") {
-              void activeUpdate(selectedItem.id, { status: value as WorkItemStatus });
+              for (const id of allIds) void activeUpdate(id, { status: value as WorkItemStatus });
             } else {
-              void activeUpdate(selectedItem.id, { priority: value as WorkItemPriority });
+              for (const id of allIds) void activeUpdate(id, { priority: value as WorkItemPriority });
             }
             setKbPicker(null);
             paneRef.current?.focus();
@@ -927,6 +967,38 @@ function buildWorkItemMenu(
       label: "Delete",
       enabled: true,
       run: () => actions.onDelete(item),
+    },
+  ];
+}
+
+function buildGroupMenu(
+  item: WorkItem,
+  groupIds: string[],
+  actions: {
+    onChangeStatus: (item: WorkItem, ids: string[]) => void;
+    onChangePriority: (item: WorkItem, ids: string[]) => void;
+    onDelete: (item: WorkItem, ids: string[]) => void;
+  },
+): MenuItem[] {
+  const n = groupIds.length;
+  return [
+    {
+      id: "workitem.status",
+      label: `Change status… (${n} items)`,
+      enabled: true,
+      run: () => actions.onChangeStatus(item, groupIds),
+    },
+    {
+      id: "workitem.priority",
+      label: `Change priority… (${n} items)`,
+      enabled: true,
+      run: () => actions.onChangePriority(item, groupIds),
+    },
+    {
+      id: "workitem.delete",
+      label: `Delete (${n} items)`,
+      enabled: true,
+      run: () => actions.onDelete(item, groupIds),
     },
   ];
 }

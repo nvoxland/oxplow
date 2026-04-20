@@ -34,13 +34,15 @@ Things I keep forgetting. Read this before adding any UI.
   `keybindings.ts` so they appear in the native menu and help discoverability.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find, Cmd/Ctrl+P quick
   open, Cmd/Ctrl+Shift+N new work item. Don't collide with these.
-- **Plan pane: multi-select with Cmd/Ctrl+click (toggle) and Shift+click
-  (range).** A plain click clears the mark set and selects the one row.
-  Marked rows render with a yellow left-stripe + tint. Dragging any marked
-  row carries every marked id in `WORK_ITEM_DRAG_MIME.itemIds` so drops on
-  BatchRail chips, the backlog chip, or StreamRail move all of them at
-  once. Drop targets that handle single-item payloads still work — they
-  fall back to `itemId` when `itemIds` is absent.
+- **Plan pane: single-click selects a work-item row (keyboard cursor);
+  double-click opens the edit modal.** Enter also opens the modal for the
+  selected row. Cmd/Ctrl+click toggles the mark set; Shift+click ranges
+  from the selected anchor. A plain click clears marks and moves the
+  selection. Marked rows render with a yellow left-stripe + tint. Dragging
+  any marked row carries every marked id in `WORK_ITEM_DRAG_MIME.itemIds`
+  so drops on BatchRail chips, the backlog chip, or StreamRail move all of
+  them at once. Drop targets that handle single-item payloads still work —
+  they fall back to `itemId` when `itemIds` is absent.
 - **Plan pane: Shift+↑/↓ reorders the selected work item within its own
   status section.** Crossing a section boundary is a deliberate no-op —
   to change status, the user drags (which changes status as a side
