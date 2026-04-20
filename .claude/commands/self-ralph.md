@@ -36,13 +36,22 @@ caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
    from `tests-e2e/harness.ts`) but you are driving as a user: you
    click the buttons a user would click, you read the text a user
    would read, you notice the delays a user would notice.
-2. **Create a work item through the UI** describing the fix you
-   want. Write it the way you'd write a ticket — clear scope,
-   specific file pointers, acceptance criteria.
-3. **Prompt the inner agent** by typing into newde's agent pane
-   terminal. Example: "Pick up the work item titled X, do the work,
-   run bun test, propose a commit." The inner agent has MCP tools;
-   it's allowed to call `mcp__newde__*`. **You are not.**
+2. **Prompt the inner agent in the agent pane terminal** — this is
+   your primary channel. Type a clear task description directly
+   into xterm: "Pick up this todo: <verbatim line>. Here's the
+   scope: <pointers>. Run bun test after, propose a commit." The
+   inner agent has MCP tools; it will create its own work items to
+   plan, surface a commit point when ready, etc. **You prompt; it
+   executes.** You are not allowed to call `mcp__newde__*`.
+3. **Do not pre-stack work items via the Plan UI.** The `+ New work
+   item` button exists, but work items are mostly the *inner
+   agent's* planning artifact and your window into what it did. If
+   you preemptively fill the Plan queue with items the agent hasn't
+   started yet, you're acting like a PM, not a user — and you're
+   front-running the inner agent's own decomposition. Exception:
+   one work item per pass is fine if you want the Plan UI to
+   reflect "the thing I'm dogfooding right now." Don't queue up
+   pass 2's work in pass 1.
 4. **Watch.** Snapshot the terminal rows periodically. Read what
    the inner agent is doing. Notice when the UI tells you nothing
    about progress. Notice when a wait point lands without surfacing
@@ -57,7 +66,10 @@ caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
 
 `tests-e2e/dogfood-cycle.ts` is the reference implementation of
 this flow. It's the canonical probe; treat its structure as the
-template for any new scenario.
+template for any new scenario. (Note: that probe does create one
+work item before prompting, because the prompt references it by
+title — that's the acceptable one-item exception in step 3, not
+a license to pre-queue.)
 
 ### Hard rules
 
@@ -274,24 +286,30 @@ entry, so no separate cleanup step.
 Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
 
 1. `launchNewde(projectDir)` into a fresh userData dir.
-2. Click through to the Work panel as a user would. Notice every
-   delay, missing affordance, or unclear label.
-3. Click **+ New work item**, type a clear title + description of
-   the fix, save. If the +New button is hard to find, note it.
-4. Focus the agent pane's xterm and type a prompt telling the inner
-   agent to pick up the item, do the work, run tests, and propose
-   a commit. Press Enter.
-5. Poll every ~10s: screenshot, dump `.xterm-rows` innerText to a
-   file, check `[data-agent-status]`. Heartbeat with `probeLog()`
-   each tick so the silence watchdog stays happy. Use a long
-   `wallMs` (e.g. 12 * 60_000) and a matching `silenceMs` (e.g.
-   60_000) — the agent can be quiet while thinking.
-6. When the work panel surfaces a commit point, **click Approve
+2. Click through to the UI area you're exercising (Work panel,
+   editor, History, etc.) as a user would. Notice every delay,
+   missing affordance, or unclear label on the way.
+3. **Focus the agent pane xterm and prompt the inner agent
+   directly.** That's the canonical channel. Your prompt names
+   the task verbatim, gives scope / file pointers / acceptance
+   criteria, and asks the agent to run tests and propose a commit
+   when done. Press Enter.
+   - Optional: if you want the Plan UI to reflect the active task
+     for your own visibility, create **one** work item via `+ New
+     work item` *before* prompting and reference it by title in the
+     prompt. That's it. Don't pre-queue a backlog.
+4. **Watch.** Poll every ~10s: screenshot, dump `.xterm-rows`
+   innerText to a file, check `[data-agent-status]`. Heartbeat
+   with `probeLog()` each tick so the silence watchdog stays
+   happy. Use a long `wallMs` (e.g. 12 * 60_000) and matching
+   `silenceMs` (e.g. 60_000) — the agent can be quiet while
+   thinking.
+5. When the work panel surfaces a commit point, **click Approve
    through the UI**. Not git. Not MCP.
-7. Verify: open newde's History panel, confirm the commit appears
+6. Verify: open newde's History panel, confirm the commit appears
    there as a user would see it.
 
-Everything that slowed you down in steps 2–7 is a finding. Those
+Everything that slowed you down in steps 2–6 is a finding. Those
 go into the fix log under "Friction" and become new todo entries.
 Don't skip this reflection — it's the whole point.
 
