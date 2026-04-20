@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
@@ -64,6 +64,7 @@ export function EditorPane({
   const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
   const [blame, setBlame] = useState<{ path: string; lines: BlameLine[] } | null>(null);
   const [blameScrollTop, setBlameScrollTop] = useState(0);
   const [blameLineHeight, setBlameLineHeight] = useState(19);
@@ -559,6 +560,11 @@ export function EditorPane({
               if (sha.replace(/0/g, "") === "") return;
               onRevealCommitRef.current?.(sha);
             }}
+            onContextMenu={(event, line) => {
+              if (line.sha.replace(/0/g, "") === "") return;
+              event.preventDefault();
+              setBlameMenu({ x: event.clientX, y: event.clientY, sha: line.sha, authorMail: line.authorMail });
+            }}
           />
         ) : null}
         {filePath && lspStatus ? <div style={lspStatusStyle}>{lspStatus}</div> : null}
@@ -572,6 +578,32 @@ export function EditorPane({
             items={contextMenuItems}
             position={contextMenu}
             onClose={() => setContextMenu(null)}
+          />
+        ) : null}
+        {blameMenu ? (
+          <ContextMenu
+            items={[
+              {
+                id: "blame.copy-sha",
+                label: "Copy commit SHA",
+                enabled: true,
+                run: () => { void navigator.clipboard?.writeText(blameMenu.sha); },
+              },
+              {
+                id: "blame.reveal",
+                label: "Reveal commit",
+                enabled: true,
+                run: () => { onRevealCommitRef.current?.(blameMenu.sha); },
+              },
+              {
+                id: "blame.copy-author-email",
+                label: "Copy author email",
+                enabled: !!blameMenu.authorMail,
+                run: () => { void navigator.clipboard?.writeText(blameMenu.authorMail); },
+              },
+            ]}
+            position={{ x: blameMenu.x, y: blameMenu.y }}
+            onClose={() => setBlameMenu(null)}
           />
         ) : null}
       </div>
@@ -679,11 +711,13 @@ function BlameOverlay({
   scrollTop,
   lineHeight,
   onClick,
+  onContextMenu,
 }: {
   lines: BlameLine[];
   scrollTop: number;
   lineHeight: number;
   onClick(sha: string): void;
+  onContextMenu(event: ReactMouseEvent, line: BlameLine): void;
 }) {
   const now = Date.now() / 1000;
   return (
@@ -713,6 +747,7 @@ function BlameOverlay({
               key={line.line}
               title={uncommitted ? "Uncommitted" : `${line.sha.slice(0, 8)} ${line.author} <${line.authorMail}>\n${line.summary}`}
               onClick={uncommitted ? undefined : () => onClick(line.sha)}
+              onContextMenu={uncommitted ? undefined : (event) => onContextMenu(event, line)}
               style={{
                 height: lineHeight,
                 lineHeight: `${lineHeight}px`,

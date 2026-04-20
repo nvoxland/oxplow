@@ -94,6 +94,10 @@ sub-component). Layout details:
   `DockShell` to open the History tool window). Uncommitted lines
   (all-zero sha) intentionally pass `onClick={undefined}` so clicking
   them does nothing — there is no commit to reveal.
+- On right-click, opens the shared `ContextMenu` with three entries —
+  Copy commit SHA, Reveal commit, Copy author email. Uncommitted rows
+  also skip the context menu (`onContextMenu={undefined}`) since the
+  three actions all need a real sha or author.
 
 Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
