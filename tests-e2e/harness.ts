@@ -24,9 +24,22 @@ export interface LaunchedNewde {
 // "Files" dock tab toggles the dock closed, and the next probe finds
 // file-tree rows in the DOM but display:none. Isolating userData
 // per launch is what makes probes reproducible.
-export async function launchNewde(projectDir: string, opts: { timeoutMs?: number } = {}): Promise<LaunchedNewde> {
+export async function launchNewde(projectDir: string, opts: { timeoutMs?: number; fresh?: boolean } = {}): Promise<LaunchedNewde> {
   const repoRoot = resolve(__dirname, "..");
   const userDataDir = mkdtempSync(join(tmpdir(), "newde-e2e-userdata-"));
+
+  // When `fresh: true`, wipe the project's persisted newde state so a
+  // probe doesn't inherit stale work_items / commit_points / wait_points
+  // from a prior run. Without this, the Stop hook can pick up an
+  // orphaned work item from a totally different session and steer the
+  // inner agent sideways. Targets `.newde/state.sqlite*` (DB + WAL +
+  // SHM) and the runtime instance lock; leaves snapshots/git alone.
+  if (opts.fresh) {
+    for (const name of ["state.sqlite", "state.sqlite-wal", "state.sqlite-shm"]) {
+      try { rmSync(join(projectDir, ".newde", name), { force: true }); } catch { /* ignore */ }
+    }
+    try { rmSync(join(projectDir, ".newde", "runtime", "instance.lock"), { force: true }); } catch { /* ignore */ }
+  }
 
   const app = await electron.launch({
     args: [repoRoot, `--user-data-dir=${userDataDir}`, "--project", projectDir],
@@ -53,6 +66,18 @@ export async function launchNewde(projectDir: string, opts: { timeoutMs?: number
       try { rmSync(userDataDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
+}
+
+/**
+ * Wait until newde's chrome has mounted by polling for the dock-tab-plan
+ * testid. Replaces the blind `await window.waitForTimeout(3_000)` that
+ * every probe used to sleep for at startup. Returns as soon as the
+ * marker is present (typically <1s on a warm machine), or throws if it
+ * doesn't show up within `timeoutMs`.
+ */
+export async function waitForNewdeReady(window: Page, opts: { timeoutMs?: number } = {}): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  await window.locator('[data-testid="dock-tab-plan"]').first().waitFor({ state: "visible", timeout: timeoutMs });
 }
 
 // Trigger a native-menu-backed command by its CommandId — same IPC channel
