@@ -1025,6 +1025,19 @@ export function App() {
       setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
       setPlanNewRequest((prev) => prev + 1);
     },
+    newStream() {
+      setStreamCreateRequest((n) => n + 1);
+    },
+    newBatch() {
+      if (!stream) return;
+      setBatchCreateRequest((n) => n + 1);
+    },
+    openHistory() {
+      setBottomActivate({ id: "history", token: Date.now() });
+    },
+    openSnapshots() {
+      setBottomActivate({ id: "snapshots", token: Date.now() });
+    },
   }), [stream, selectedFilePath]);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
   const menuGroups = useMemo(

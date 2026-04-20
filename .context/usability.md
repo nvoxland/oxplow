@@ -43,6 +43,13 @@ Things I keep forgetting. Read this before adding any UI.
   inputs run their own keydown handlers in the bubble phase; capture lets
   the palette fire before any of them. If you add another global shortcut
   that needs to beat an editor, copy that pattern.
+- **Palette is the main keyboard lever — keep it populated.** Every new
+  menu command in `commands.ts` flows into Cmd+K automatically (the
+  palette reads from the same `buildMenuGroups` registry). When adding a
+  user-visible action, prefer wiring it as a CommandId over a bespoke
+  button so it stays keyboard-reachable. Current entries include
+  `stream.new`, `batch.new`, `history.open`, `snapshots.open` alongside
+  save/find/quick-open/new-work-item.
 
 ## Test-driveability
 

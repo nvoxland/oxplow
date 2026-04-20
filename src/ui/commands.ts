@@ -6,7 +6,11 @@ export type CommandId =
   | "edit.find"
   | "view.agent"
   | "view.editor"
-  | "plan.newWorkItem";
+  | "history.open"
+  | "snapshots.open"
+  | "plan.newWorkItem"
+  | "stream.new"
+  | "batch.new";
 
 export type MenuId = "file" | "edit" | "view" | "plan";
 export type MainViewId = "agent" | "editor";
@@ -50,6 +54,10 @@ export interface CommandHandlers {
   showAgentPane(): void;
   showEditorPane(): void;
   newWorkItem(): void;
+  newStream(): void;
+  newBatch(): void;
+  openHistory(): void;
+  openSnapshots(): void;
 }
 
 export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
@@ -75,6 +83,8 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       items: [
         { id: "view.agent", label: "Agent", enabled: state.hasStream, checked: state.activeTab === "agent" },
         { id: "view.editor", label: "Editor", enabled: state.hasStream, checked: state.activeTab === "editor" },
+        { id: "history.open", label: "History", enabled: state.hasStream },
+        { id: "snapshots.open", label: "Snapshots", enabled: state.hasStream },
       ],
     },
     {
@@ -82,6 +92,8 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       label: "Work",
       items: [
         { id: "plan.newWorkItem", label: "New Work Item…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasBatch },
+        { id: "batch.new", label: "New Batch…", enabled: state.hasStream },
+        { id: "stream.new", label: "New Stream…", enabled: true },
       ],
     },
   ];
@@ -95,6 +107,10 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "view.agent": handlers.showAgentPane,
     "view.editor": handlers.showEditorPane,
     "plan.newWorkItem": handlers.newWorkItem,
+    "stream.new": handlers.newStream,
+    "batch.new": handlers.newBatch,
+    "history.open": handlers.openHistory,
+    "snapshots.open": handlers.openSnapshots,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({
     ...group,

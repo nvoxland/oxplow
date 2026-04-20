@@ -46,7 +46,21 @@ async function main() {
       process.exit(2);
     }
 
+    // Verify newly-populated entries show up. "history" should match
+    // "View / History" — regresses if history.open gets dropped.
+    await paletteInput.fill("history");
+    await window.waitForTimeout(150);
+    const historyRows = await window.evaluate(() => {
+      return Array.from(document.querySelectorAll("[data-palette-row]")).map((el) => el.textContent ?? "");
+    });
+    console.log("[probe] palette rows after 'history':", historyRows);
+    if (!historyRows.some((t) => t.toLowerCase().includes("history"))) {
+      console.log("[probe] FAIL: history.open not found in palette");
+      process.exit(5);
+    }
+
     // Dismiss via Escape.
+    await paletteInput.fill("");
     await window.keyboard.press("Escape");
     await window.waitForTimeout(200);
     const stillOpen = await window.evaluate(() => !!document.querySelector('[data-testid="command-palette-input"]'));
