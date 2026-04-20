@@ -82,7 +82,10 @@ Things I keep forgetting. Read this before adding any UI.
   - `batch-rail-create-input`, `batch-rail-create-submit` on the
     new-batch creation row; `batch-chip-rename-input-<id>` on the
     inline rename input; `batch-chip-promote-<id>` and
-    `batch-chip-complete-<id>` on the hover-card actions
+    `batch-chip-complete-<id>` on the hover-card actions (also
+    reachable via right-click → `menu-item-batch.promote` /
+    `menu-item-batch.complete` — keyboard-first users should never
+    have to hover to promote a batch)
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback

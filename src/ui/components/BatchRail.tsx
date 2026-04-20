@@ -84,6 +84,18 @@ export function BatchRail({
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
         {
+          id: "batch.promote",
+          label: "Promote to writer",
+          enabled: contextMenu.batch.id !== activeBatchId,
+          run: () => onPromoteBatch(contextMenu.batch.id),
+        },
+        {
+          id: "batch.complete",
+          label: "Mark complete",
+          enabled: hasQueued,
+          run: () => onCompleteBatch(contextMenu.batch.id),
+        },
+        {
           id: "batch.rename",
           label: "Rename…",
           enabled: !!onRenameBatch,
