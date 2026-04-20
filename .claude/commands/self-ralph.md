@@ -137,6 +137,17 @@ Run in parallel, and do not read more than this:
 - `head -40 .self-ralph/todo.md` — the top of the work stack.
 - `ls -t .self-ralph/fix-*.md 2>/dev/null | head -3` — skim titles.
   Open one only if its subject is close to what you'll pick.
+- `ls -t .self-ralph/review-*.md 2>/dev/null | head -1` — the most
+  recent `/ralph-review`. **If one exists, read it fully.** It's
+  the tightest summary of what the loop is doing badly right now;
+  it names repeat-offender patterns, items that got flagged and
+  stayed unfixed, and infra fixes the review itself made. Apply
+  those findings — don't repeat mistakes it already called out.
+- Also scan the transcript of **this conversation since the last
+  `/ralph-review`** (or since session start if there hasn't been
+  one). That window is what the next `/ralph-review` will
+  evaluate you on. Knowing what's already in it helps you avoid
+  redundant work and surface-area blind spots.
 
 **Do not** default-read `.context/*.md` in Step 1. Only read the
 specific doc matching the todo item you're about to pick, and only
@@ -149,9 +160,15 @@ command is mis-installed.
 
 1. Check the "Guard against the testid rut" condition. If it
    applies, skip forward.
-2. Check the "Rotation rule" — if this pass number is a multiple of
+2. **Apply the prior-review guidance.** If the most recent
+   `/ralph-review` flagged a specific pattern you're about to
+   repeat (e.g. "three of the last four passes were testid
+   busywork", or "the loop keeps under-picking IPC noise"),
+   pick against that pattern, not with it. Name the review's
+   finding when you announce your pick.
+3. Check the "Rotation rule" — if this pass number is a multiple of
    3, pick from (a)/(b)/(c) regardless of top-of-stack.
-3. Otherwise take the topmost item in the **Next up** section. Only
+4. Otherwise take the topmost item in the **Next up** section. Only
    cherry-pick from lower if the top is genuinely blocked — say so,
    explain why, then take the next one.
 
