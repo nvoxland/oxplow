@@ -82,7 +82,7 @@ export function ProjectPanel({
     setLoadingDirs((prev) => ({ ...prev, [path]: true }));
     try {
       const entries = await listWorkspaceEntries(stream.id, path);
-      setEntriesByDir((prev) => ({ ...prev, [path]: entries }));
+      setEntriesByDir((prev) => ({ ...prev, [path]: sortFileTreeEntries(entries) }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -821,6 +821,31 @@ export function ProjectPanel({
       ) : null}
     </div>
   );
+}
+
+// Dev-noise directory names that a first-time user almost never wants to
+// scroll past to get to their code. At the project root, these sort to
+// the bottom (after src, app, lib, etc.) so the tree leads with source.
+// Inside the list we still keep directories-before-files and alphabetical
+// ordering within each bucket.
+const DEV_NOISE_DIRS = new Set([
+  ".claude", ".newde", ".git", ".github", ".vscode", ".idea",
+  "bin", "dist", "build", "out", "node_modules", "public", "coverage",
+  "target", "vendor", "tmp", ".tmp", ".cache",
+]);
+
+function sortFileTreeEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
+  const copy = entries.slice();
+  copy.sort((a, b) => {
+    const aDir = a.kind === "directory";
+    const bDir = b.kind === "directory";
+    if (aDir !== bDir) return aDir ? -1 : 1;
+    const aNoise = aDir && DEV_NOISE_DIRS.has(a.name);
+    const bNoise = bDir && DEV_NOISE_DIRS.has(b.name);
+    if (aNoise !== bNoise) return aNoise ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+  return copy;
 }
 
 function FindUsagesModal({
