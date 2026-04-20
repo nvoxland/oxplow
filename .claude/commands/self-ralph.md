@@ -347,6 +347,14 @@ overlaps; new probes are expensive to maintain.
   at each meaningful step so a hang is localized.
 - **Run with `node --experimental-strip-types`.** Playwright + bun
   don't mix.
+- **Inside `page.evaluate`, raw CSS only.** Playwright's Locator
+  syntax (`:has-text`, `:visible`, `>>`) is library-level, not CSS.
+  They silently fail as invalid selectors and throw from
+  `querySelector`. For text or role matching inside the browser,
+  iterate `document.querySelectorAll("button")` and filter on
+  `.textContent`. Use `window.getByRole(...)` / `getByText(...)`
+  at the Playwright API level instead. Surfaced by
+  `review-20260419-221646.md`.
 - **Capture the first concrete friction; don't broaden.** Land the
   fix (via inner agent) before chasing the second thing.
 
