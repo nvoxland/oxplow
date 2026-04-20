@@ -222,6 +222,21 @@ like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in
 `src/ui/api.ts`. See [ipc-and-stores.md](./ipc-and-stores.md) for how to
 plumb a new event end-to-end.
 
+## UI-only state worth naming
+
+A few UI surfaces hold non-persisted state that callers (probes,
+docs, future stores) reference by name. Listed here so renames touch
+the docs in one diff:
+
+- **Files-pane filter mode** — `FilterMode = "all" | "uncommitted" |
+  "branch" | "unpushed" | "turn"` lives in `ProjectPanel` state and
+  drives the file-tree visibility filter. The eye-icon trigger button
+  is `data-testid="files-filter-toggle"`; each popover option is
+  `data-testid="files-filter-option-<value>"` (e.g.
+  `files-filter-option-uncommitted`). `branch` / `unpushed` auto-
+  fall back to `uncommitted` if the underlying scope disappears (no
+  branch base, no upstream).
+
 ## Related
 
 - [ipc-and-stores.md](./ipc-and-stores.md) — adding new stores and IPC.

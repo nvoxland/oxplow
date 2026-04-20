@@ -1512,6 +1512,8 @@ function FilterMenuButton({
     <div ref={containerRef} style={{ position: "relative" }}>
       <button type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-label="Filter files"
+        data-testid="files-filter-toggle"
         title={`Filter: ${filterModeLabel(filterMode, scopes, null, recentTurns)}`}
         style={{
           ...iconButtonStyle,
@@ -1530,6 +1532,7 @@ function FilterMenuButton({
           {options.map((opt) => (
             <button type="button"
               key={opt.value}
+              data-testid={`files-filter-option-${opt.value}`}
               disabled={opt.disabled}
               onClick={() => {
                 if (opt.disabled) return;
