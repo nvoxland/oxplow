@@ -74,6 +74,29 @@ export interface WorkItemDetail {
   recentEvents: WorkItemEvent[];
 }
 
+export interface WorkItemWithLinks {
+  item: WorkItem;
+  outgoing: WorkItemLink[];
+  incoming: WorkItemLink[];
+}
+
+export interface EpicWorkUnit {
+  mode: "epic";
+  epic: WorkItem;
+  children: WorkItemWithLinks[];
+}
+
+export interface StandaloneWorkUnit {
+  mode: "standalone";
+  items: WorkItemWithLinks[];
+}
+
+export interface EmptyWorkUnit {
+  mode: "empty";
+}
+
+export type ReadWorkOptionsResult = EpicWorkUnit | StandaloneWorkUnit | EmptyWorkUnit;
+
 export interface WorkItemEvent {
   id: string;
   batch_id: string | null;
@@ -816,6 +839,74 @@ export class WorkItemStore {
       batchId,
     );
     return rows.map(toWorkItem);
+  }
+
+  readWorkOptions(batchId: string, beforeSortIndex?: number): ReadWorkOptionsResult {
+    const allReady = this.listReady(batchId);
+    const ready = beforeSortIndex !== undefined
+      ? allReady.filter((i) => i.sort_index < beforeSortIndex)
+      : allReady;
+    if (ready.length === 0) return { mode: "empty" };
+
+    const head = ready[0]!;
+
+    if (head.kind === "epic") {
+      const childRows = this.stateDb.all<Record<string, unknown>>(
+        `WITH RECURSIVE descendants(id) AS (
+           SELECT id FROM work_items
+           WHERE batch_id = ? AND parent_id = ? AND deleted_at IS NULL
+           UNION ALL
+           SELECT wi.id FROM work_items wi
+           JOIN descendants d ON wi.parent_id = d.id
+           WHERE wi.batch_id = ? AND wi.deleted_at IS NULL
+         )
+         SELECT wi.* FROM work_items wi
+         JOIN descendants d ON wi.id = d.id
+         WHERE wi.status = 'ready'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM work_item_links l
+             JOIN work_items blocker ON blocker.id = l.from_item_id
+             WHERE l.batch_id = wi.batch_id
+               AND l.to_item_id = wi.id
+               AND l.link_type = 'blocks'
+               AND blocker.status NOT IN ('done', 'canceled', 'archived')
+               AND blocker.deleted_at IS NULL
+           )
+         ORDER BY wi.sort_index, wi.created_at`,
+        batchId,
+        head.id,
+        batchId,
+      );
+      const children = childRows.map(toWorkItem);
+      const withLinks = this.attachLinks(batchId, children);
+      return { mode: "epic", epic: head, children: withLinks };
+    }
+
+    const standaloneItems = ready.filter((i) => i.kind !== "epic");
+    const withLinks = this.attachLinks(batchId, standaloneItems);
+    return { mode: "standalone", items: withLinks };
+  }
+
+  private attachLinks(batchId: string, items: WorkItem[]): WorkItemWithLinks[] {
+    if (items.length === 0) return [];
+    const ids = items.map((i) => i.id);
+    const placeholders = ids.map(() => "?").join(",");
+    const linkRows = this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_item_links
+         WHERE batch_id = ? AND (from_item_id IN (${placeholders}) OR to_item_id IN (${placeholders}))
+         ORDER BY created_at`,
+        batchId,
+        ...ids,
+        ...ids,
+      )
+      .map(toWorkItemLink);
+    return items.map((item) => ({
+      item,
+      outgoing: linkRows.filter((l) => l.from_item_id === item.id),
+      incoming: linkRows.filter((l) => l.to_item_id === item.id),
+    }));
   }
 
   listEvents(batchId: string, itemId?: string): WorkItemEvent[] {

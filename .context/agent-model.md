@@ -217,13 +217,48 @@ point flips to `approved`) is also there, called both eagerly via
 the runtime's `commitPointStore.subscribe` handler and at startup
 via `drainPendingExecutions()` to cover crashes mid-commit.
 
+## Orchestrator pattern
+
+The batch agent is a long-lived process that must stay context-lean
+across a work queue that could span dozens of items. The solution is
+**orchestrator-style dispatch**: the main agent never does Read/Edit/Bash
+work directly. Instead it:
+
+1. Calls `newde__read_work_options` to get the next dispatch unit.
+2. Launches one `general-purpose` subagent with all item ids, titles,
+   descriptions, acceptance criteria, and standing MCP-write instructions.
+3. Records the subagent's summary via `add_work_note` and loops.
+
+Subagents run in isolated context windows — their tokens don't count
+against the main agent. Main context accumulates only short summaries,
+keeping it flat regardless of queue depth. Auto-compact still fires when
+the main context fills, but it fires much later and on lean material.
+
+`newde__read_work_options` (defined in `src/mcp/mcp-tools.ts`, backed by
+`WorkItemStore.readWorkOptions`) returns one of three shapes:
+- `{ mode: "epic", epic, children }` — the highest-priority ready item is
+  an epic; all ready descendants (filtered for blocks links, transitively)
+  are included as children. Dispatch the entire epic as one unit.
+- `{ mode: "standalone", items }` — the head is not an epic; all ready
+  non-epic items are returned with link edges inline so the agent can
+  pick one or a link-related cluster. Epics are excluded from this list.
+- `{ mode: "empty" }` — nothing ready; allow stop.
+
+The Stop-hook directive (step 4 in the pipeline) now says "call
+`read_work_options` and dispatch to a `general-purpose` subagent" rather
+than naming a specific item. This keeps the directive stable across
+epic/task/subtask distinctions and lets the tool do the grouping.
+
+`list_ready_work` remains available for inspection but is no longer the
+primary tool for queue-driven dispatch.
+
 ## MCP tools
 
 `buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
 `newde__*` tool surface:
 
 - `get_batch_context`, `list_batch_work`,
-  `list_ready_work`, `create_work_item`, `update_work_item`,
+  `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
   `get_work_item`, `delete_work_item`, `reorder_work_items`,
   `link_work_items`, `add_work_note`, `list_recent_file_changes`
 - `propose_commit(commit_point_id, message)`, `list_commit_points(batchId)`

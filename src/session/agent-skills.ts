@@ -174,5 +174,38 @@ pull-request description.
   *user-visible, durable* record.
 - Things the user explicitly asked you to *skip*: if they say "don't
   file this," don't file it.
+
+## Subagent dispatch protocol
+
+You are the **orchestrator**. You never do Read/Edit/Bash/test work
+directly — that all happens inside subagents, so your context stays flat
+across a long work queue.
+
+**For each work unit:**
+
+1. Call \`newde__read_work_options\` (batchId=your batch) to get the next
+   dispatch unit. Three possible shapes:
+   - \`{ mode: "epic", epic, children }\` — dispatch the entire epic as one unit.
+   - \`{ mode: "standalone", items }\` — pick one item, or a link-related
+     cluster, to dispatch together.
+   - \`{ mode: "empty" }\` — nothing left; allow stop.
+
+2. Assemble a subagent brief containing: item ids, titles, descriptions,
+   acceptance criteria, and these standing instructions:
+   - Mark each item \`in_progress\` via \`mcp__newde__update_work_item\` before starting.
+   - Mark \`human_check\` when acceptance criteria are met.
+   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.
+   - Use \`mcp__newde__propose_commit\` when a commit point is due.
+   - Return a short plain-text summary of what was done.
+
+3. Launch one \`general-purpose\` subagent with that brief.
+
+4. When the subagent returns, call \`newde__add_work_note\` on each item
+   with the returned summary.
+
+5. Loop from step 1.
+
+Never mark items \`in_progress\` yourself before dispatching — let the
+subagent do it so file-change attribution works correctly.
 `;
 }

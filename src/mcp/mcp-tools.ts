@@ -10,6 +10,7 @@ import type {
   WorkItemStore,
 } from "../persistence/work-item-store.js";
 import type { CommitPoint, CommitPointStore } from "../persistence/commit-point-store.js";
+import type { WaitPointStore } from "../persistence/wait-point-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
@@ -28,6 +29,7 @@ export interface McpToolDeps {
   executeCommit(cpId: string, message: string): CommitPoint;
   turnStore: TurnStore;
   fileChangeStore: FileChangeStore;
+  waitPointStore: WaitPointStore;
 }
 
 // Strip noisy fields off audit events before handing them to the agent.
@@ -69,7 +71,7 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, executeCommit, turnStore, fileChangeStore } = deps;
+  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore, fileChangeStore } = deps;
 
   // Prefer the batch row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { batch, stream } — both guaranteed to agree
@@ -187,6 +189,71 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           sort_index: i.sort_index,
           parent_id: i.parent_id,
         }));
+      },
+    },
+    {
+      name: "newde__read_work_options",
+      description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items (with link edges inline) so you can pick one or a related cluster to dispatch. Always pass the batchId from your session context. Use this instead of list_ready_work when you are about to launch a subagent to execute work.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted." },
+          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+        },
+        required: ["batchId"],
+      },
+      handler: (args: { streamId?: string; batchId: string }) => {
+        resolveBatchAndStream(args);
+        // Stop the dispatch unit at the first pending commit or wait point so
+        // the subagent never works across a queue boundary it shouldn't cross.
+        const commitCutoff = commitPointStore.listForBatch(args.batchId)
+          .filter((cp) => cp.status !== "done")
+          .map((cp) => cp.sort_index)[0] ?? Infinity;
+        const waitCutoff = waitPointStore.listForBatch(args.batchId)
+          .filter((wp) => wp.status === "pending")
+          .map((wp) => wp.sort_index)[0] ?? Infinity;
+        const cutoff = Math.min(commitCutoff, waitCutoff);
+        const result = workItemStore.readWorkOptions(args.batchId, cutoff < Infinity ? cutoff : undefined);
+        if (result.mode === "empty") return { mode: "empty" };
+        if (result.mode === "epic") {
+          return {
+            mode: "epic",
+            epic: {
+              id: result.epic.id,
+              title: result.epic.title,
+              kind: result.epic.kind,
+              priority: result.epic.priority,
+              description: result.epic.description,
+              acceptance_criteria: result.epic.acceptance_criteria,
+            },
+            children: result.children.map(({ item, outgoing, incoming }) => ({
+              id: item.id,
+              title: item.title,
+              kind: item.kind,
+              priority: item.priority,
+              parent_id: item.parent_id,
+              description: item.description,
+              acceptance_criteria: item.acceptance_criteria,
+              outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
+              incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
+            })),
+          };
+        }
+        return {
+          mode: "standalone",
+          items: result.items.map(({ item, outgoing, incoming }) => ({
+            id: item.id,
+            title: item.title,
+            kind: item.kind,
+            priority: item.priority,
+            sort_index: item.sort_index,
+            parent_id: item.parent_id,
+            description: item.description,
+            acceptance_criteria: item.acceptance_criteria,
+            outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
+            incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
+          })),
+        };
       },
     },
     {
