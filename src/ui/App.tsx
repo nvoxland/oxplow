@@ -127,6 +127,7 @@ export function App() {
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [batchCreateRequest, setBatchCreateRequest] = useState(0);
+  const [commitFilesRequest, setCommitFilesRequest] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const daemonDownLogged = useRef(false);
@@ -999,8 +1000,9 @@ export function App() {
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
       hasBatch: !!selectedBatch,
       activeTab: centerActive.startsWith("file:") ? "editor" : "agent",
+      canCommit: !!stream && !!workspaceContext.gitEnabled,
     } as const),
-    [centerActive, currentFile, currentFileDirty, selectedBatch, selectedFilePath, stream],
+    [centerActive, currentFile, currentFileDirty, selectedBatch, selectedFilePath, stream, workspaceContext.gitEnabled],
   );
   const commandHandlers = useMemo(() => ({
     save() {
@@ -1038,7 +1040,12 @@ export function App() {
     openSnapshots() {
       setBottomActivate({ id: "snapshots", token: Date.now() });
     },
-  }), [stream, selectedFilePath]);
+    commitFiles() {
+      if (!stream || !workspaceContext.gitEnabled) return;
+      setLeftDockActivate((prev) => ({ id: "project", token: (prev?.token ?? 0) + 1 }));
+      setCommitFilesRequest((n) => n + 1);
+    },
+  }), [stream, selectedFilePath, workspaceContext.gitEnabled]);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
   const menuGroups = useMemo(
     () => buildMenuGroups(commandState, commandHandlers),
@@ -1302,6 +1309,7 @@ export function App() {
           onRenamePath={handleRenamePath}
           onDeletePath={handleDeletePath}
           onToggleGeneratedDir={handleToggleGeneratedDir}
+          commitRequest={commitFilesRequest}
         />
       ),
     },

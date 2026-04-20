@@ -51,6 +51,7 @@ interface Props {
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
   onToggleGeneratedDir(name: string, mark: boolean): Promise<void>;
+  commitRequest?: number;
 }
 
 export function ProjectPanel({
@@ -67,6 +68,7 @@ export function ProjectPanel({
   onRenamePath,
   onDeletePath,
   onToggleGeneratedDir,
+  commitRequest,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
@@ -382,6 +384,12 @@ export function ProjectPanel({
   const [opResult, setOpResult] = useState<{ title: string; result: GitOpResult } | null>(null);
   const [pushPullDialog, setPushPullDialog] = useState<"push" | "pull" | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (commitRequest && commitRequest > 0 && gitEnabled && stream) {
+      setCommitDialogOpen(true);
+    }
+  }, [commitRequest, gitEnabled, stream]);
 
   if (!stream) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>loading stream…</div>;

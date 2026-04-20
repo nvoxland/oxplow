@@ -10,7 +10,8 @@ export type CommandId =
   | "snapshots.open"
   | "plan.newWorkItem"
   | "stream.new"
-  | "batch.new";
+  | "batch.new"
+  | "files.commit";
 
 export type MenuId = "file" | "edit" | "view" | "plan";
 export type MainViewId = "agent" | "editor";
@@ -45,6 +46,7 @@ export interface CommandState {
   canSave: boolean;
   hasBatch: boolean;
   activeTab: MainViewId;
+  canCommit?: boolean;
 }
 
 export interface CommandHandlers {
@@ -58,6 +60,7 @@ export interface CommandHandlers {
   newBatch(): void;
   openHistory(): void;
   openSnapshots(): void;
+  commitFiles(): void;
 }
 
 export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
@@ -68,6 +71,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       items: [
         { id: "file.save", label: "Save", shortcut: "Ctrl/Cmd+S", enabled: state.canSave },
         { id: "file.quickOpen", label: "Quick Open…", shortcut: "Ctrl/Cmd+P", enabled: state.hasStream },
+        { id: "files.commit", label: "Commit Changes…", enabled: !!state.canCommit },
       ],
     },
     {
@@ -111,6 +115,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "batch.new": handlers.newBatch,
     "history.open": handlers.openHistory,
     "snapshots.open": handlers.openSnapshots,
+    "files.commit": handlers.commitFiles,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({
     ...group,

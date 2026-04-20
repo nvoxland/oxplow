@@ -87,6 +87,34 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "history.open")?.enabled).toBe(false);
     expect(findCommandById(groups, "snapshots.open")?.enabled).toBe(false);
   });
+
+  test("files.commit enabled only when git is available", () => {
+    const withGit = buildMenuGroups(
+      {
+        hasStream: true,
+        hasSelectedFile: false,
+        canSave: false,
+        hasBatch: false,
+        activeTab: "agent",
+        canCommit: true,
+      },
+      noopHandlers(),
+    );
+    const withoutGit = buildMenuGroups(
+      {
+        hasStream: true,
+        hasSelectedFile: false,
+        canSave: false,
+        hasBatch: false,
+        activeTab: "agent",
+        canCommit: false,
+      },
+      noopHandlers(),
+    );
+
+    expect(findCommandById(withGit, "files.commit")?.enabled).toBe(true);
+    expect(findCommandById(withoutGit, "files.commit")?.enabled).toBe(false);
+  });
 });
 
 describe("buildMenuGroupSnapshots", () => {
@@ -117,5 +145,6 @@ function noopHandlers() {
     newBatch() {},
     openHistory() {},
     openSnapshots() {},
+    commitFiles() {},
   };
 }
