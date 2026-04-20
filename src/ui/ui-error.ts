@@ -45,6 +45,14 @@ export function reportUiError(label: string, cause: unknown): void {
  *
  *   runWithError("Create commit point", createCommitPoint(...));
  */
-export function runWithError(label: string, promise: Promise<unknown>): void {
+export function runWithError<T>(label: string, promise: Promise<T>): void {
+  // Catch the common bug of passing a thunk instead of a started promise:
+  //   runWithError("X", () => doWork())   // type-loose, silently no-ops
+  // The runtime check fires immediately so the bug surfaces in dev.
+  if (typeof promise === "function" || promise == null || typeof (promise as { then?: unknown }).then !== "function") {
+    const err = new Error(`runWithError("${label}") expected a Promise, got ${typeof promise}. Did you pass a thunk like () => fn() instead of fn()?`);
+    reportUiError(label, err);
+    return;
+  }
   promise.catch((cause) => reportUiError(label, cause));
 }
