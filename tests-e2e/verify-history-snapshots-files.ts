@@ -71,16 +71,29 @@ async function main() {
     probeLog(`[verify] file-filter-like buttons: ${JSON.stringify(filters)}`);
     await window.screenshot({ path: resolve(outDir, "verify-files-default.png") });
 
-    // Try clicking a filter labeled like "uncommitted"
-    const uncommittedBtn = window.locator("button", { hasText: /uncommitted/i }).first();
-    if (await uncommittedBtn.count() > 0) {
-      await uncommittedBtn.click();
-      await window.waitForTimeout(500);
-      await window.screenshot({ path: resolve(outDir, "verify-files-uncommitted.png") });
-      const txt = await window.evaluate(() => (document.querySelector("[data-testid='dock-panel-project']") as HTMLElement)?.innerText?.slice(0, 400) ?? "");
-      probeLog(`[verify] uncommitted filter contents (first 200): ${txt.slice(0, 200).replace(/\n/g, " ⏎ ")}`);
+    // Open the filter popover via the canonical testid (added in 2e097c7)
+    const filterToggle = window.locator("[data-testid='files-filter-toggle']");
+    if (await filterToggle.count() > 0) {
+      await filterToggle.click();
+      await window.waitForTimeout(400);
+      const opts = await window.evaluate(() => {
+        return Array.from(document.querySelectorAll("[data-testid^='files-filter-option-']"))
+          .map((el) => ({
+            value: el.getAttribute("data-testid")?.replace("files-filter-option-", ""),
+            label: (el as HTMLElement).innerText?.trim().slice(0, 60),
+            disabled: (el as HTMLButtonElement).disabled,
+          }));
+      });
+      probeLog(`[verify] filter options: ${JSON.stringify(opts)}`);
+      // Click "uncommitted"
+      const uncommitted = window.locator("[data-testid='files-filter-option-uncommitted']");
+      if (await uncommitted.count() > 0) {
+        await uncommitted.click();
+        await window.waitForTimeout(500);
+        await window.screenshot({ path: resolve(outDir, "verify-files-uncommitted.png") });
+      }
     } else {
-      probeLog("[verify] no uncommitted filter button visible");
+      probeLog("[verify] files-filter-toggle testid not found");
     }
   } finally {
     await close();
