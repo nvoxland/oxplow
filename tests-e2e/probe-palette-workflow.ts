@@ -63,10 +63,11 @@ async function main() {
       process.exit(3);
     }
 
-    // Step 3: batch.new. Fuzzy search works on "group label" so a
-    // query like "batch new" fails ordering against "Work › New Batch".
-    // Use "new batch" which preserves order.
-    await runPaletteEntry("new batch", "03-batch-new");
+    // Step 3: batch.new. Queries like "batch new" (label-first) used
+    // to fail against "Work › New Batch" because the fuzzy match is
+    // order-sensitive and the group was prefixed. The alt search key
+    // ("label group") should now catch it.
+    await runPaletteEntry("batch new", "03-batch-new");
     // The BatchRail surfaces the create input either inline or via a dialog.
     // We check for a focused text input that wasn't there before; the
     // BatchRail create-request counter routes to an input.

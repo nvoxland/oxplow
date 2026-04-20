@@ -54,7 +54,13 @@ export function CommandPalette({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
-    return entries.filter((entry) => fuzzyMatches(entry.searchKey, q));
+    // Split the query on whitespace and require each token to
+    // fuzzy-match independently. This lets users type the label and
+    // group in any order — "batch new" finds "Work › New Batch" just
+    // as well as "new batch" does. Within a token, the subsequence
+    // match is still order-sensitive, so "bn" still needs b-then-n.
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return entries.filter((entry) => tokens.every((tok) => fuzzyMatches(entry.searchKey, tok)));
   }, [entries, query]);
 
   useEffect(() => { setHighlight(0); }, [query]);
