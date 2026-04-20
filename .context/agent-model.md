@@ -14,7 +14,10 @@ the agent are:
 1. The system prompt set at launch (`--append-system-prompt`).
 2. Hook responses returned to Claude over HTTP (especially the Stop hook's
    `{ decision: "block", reason: "…" }` form, which Claude treats as a
-   fresh instruction to keep going).
+   fresh instruction to keep going). The default no-op response is
+   `200 {}` (not `202` empty) — Claude Code prints a "non-blocking
+   status code" warning into the user's terminal on every empty 202,
+   which fills the xterm with noise on Edit/Write-heavy turns.
 3. MCP tool responses (when the agent calls a `newde__*` tool).
 
 Auto-progression through the queue is built entirely on (2). The agent

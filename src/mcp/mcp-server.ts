@@ -244,8 +244,14 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       res.end(JSON.stringify(response.body));
       return;
     }
-    res.statusCode = response?.status ?? 202;
-    res.end();
+    // Claude Code interprets a 202 with empty body as a non-blocking hook
+    // failure and prints "PostToolUse:Edit hook error / Failed with non-
+    // blocking status code: ---" into the user's terminal on every tool
+    // call. A 200 with `{}` is the spec-sanctioned "no directive, success"
+    // response — same semantics, no scary log line.
+    res.statusCode = response?.status ?? 200;
+    res.setHeader("content-type", "application/json");
+    res.end("{}");
   }
 
   function handleConnection(ws: WebSocket) {

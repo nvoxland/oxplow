@@ -249,7 +249,8 @@ test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", 
       },
       body: JSON.stringify({ session_id: "s1", cwd: "/tmp/demo" }),
     });
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({});
     expect(received).toHaveLength(1);
     expect(received[0].event).toBe("SessionStart");
     expect(received[0].streamId).toBe("s-1");
