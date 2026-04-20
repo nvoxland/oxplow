@@ -104,8 +104,8 @@ test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context
   expect(text).toMatch(/^⚠ UI change detected/);
   expect(text).toMatch(/restart newde/i);
   expect(text).toContain("exercise the feature in the browser");
-  // The normal body still follows after the banner.
-  expect(text).toContain("work_item_id: wi-x");
+  // The dispatch body still follows after the banner.
+  expect(text).toContain("read_work_options");
 });
 
 test("buildNextWorkItemStopReason omits the nudge banner when uiChangeNudge is false / absent", () => {
@@ -115,21 +115,19 @@ test("buildNextWorkItemStopReason omits the nudge banner when uiChangeNudge is f
     {},
   );
   expect(text).not.toContain("UI change detected");
-  expect(text).toMatch(/^The current work item is done/);
+  expect(text).toMatch(/^The batch queue has ready work/);
 });
 
-test("buildNextWorkItemStopReason names batch_id and stream_id so the agent doesn't need a lookup", () => {
-  // Regression: the Stop hook used to emit work_item_id + kind + title only.
-  // When the agent's prompt session-context had drifted, picking up the item
-  // required a list_batch_work round-trip to find the right batch.
+test("buildNextWorkItemStopReason directs the agent to call read_work_options and dispatch a subagent", () => {
   const text = buildNextWorkItemStopReason(
     { id: "wi-abc", title: "Do the thing", kind: "task", batch_id: "b-xyz" },
     "s-123",
   );
-  expect(text).toContain("work_item_id: wi-abc");
-  expect(text).toContain("batch_id: b-xyz");
-  expect(text).toContain("stream_id: s-123");
-  // And the "how to mark it in_progress" line should echo the batchId so
-  // even a naive agent pastes the right arg.
+  expect(text).toContain("read_work_options");
+  expect(text).toContain("general-purpose");
+  // batch_id is embedded in the read_work_options call so the agent can pass the right batchId.
   expect(text).toMatch(/batchId="b-xyz"/);
+  // Attribution warning must be present and come before human_check mention.
+  expect(text).toContain("before touching any files");
+  expect(text).toContain("File-change attribution");
 });

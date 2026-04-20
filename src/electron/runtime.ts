@@ -393,6 +393,7 @@ export class ElectronRuntime {
           executeCommit: (cpId, message) => this.batchQueue.executeCommit(cpId, message),
           turnStore: this.turnStore,
           fileChangeStore: this.fileChangeStore,
+          waitPointStore: this.waitPointStore,
         }),
         ...buildLspMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
@@ -1630,29 +1631,28 @@ export function describeHookHealth(
 
 export function buildNextWorkItemStopReason(
   item: { id: string; title: string; kind: string; batch_id: string },
-  streamId: string,
+  _streamId: string,
   context: { uiChangeNudge?: boolean } = {},
 ): string {
-  // Naming both batchId and streamId saves the agent from a list_batch_work
-  // round-trip when the prompt's session-context ids have drifted (the
-  // "unknown work item / unknown batch" error chain).
   const lines: string[] = [];
   if (context.uiChangeNudge) {
     lines.push(
-      `⚠ UI change detected in this turn (src/ui/** paths). Restart newde and exercise the feature in the browser before marking this item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
+      `⚠ UI change detected in this turn (src/ui/** paths). Restart newde and exercise the feature in the browser before the subagent marks any item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
       ``,
     );
   }
   lines.push(
-    `The current work item is done but the batch queue still has ready work. Pick up this item and continue:`,
+    `The batch queue has ready work. Dispatch it to a subagent:`,
     ``,
-    `- work_item_id: ${item.id}`,
-    `- kind: ${item.kind}`,
-    `- title: ${item.title}`,
-    `- batch_id: ${item.batch_id}`,
-    `- stream_id: ${streamId}`,
-    ``,
-    `Mark it in_progress via \`mcp__newde__update_work_item\` (pass batchId="${item.batch_id}"), execute the work, then mark it done before stopping again. Do not stop until the queue is empty, a commit point is due, or a wait point is hit.`,
+    `1. Call \`mcp__newde__read_work_options\` with batchId="${item.batch_id}" to get the next dispatch unit (may be an epic + its children, or a list of standalone items).`,
+    `2. Launch a \`general-purpose\` subagent. Include in the brief:`,
+    `   - The item ids, titles, descriptions, and acceptance criteria from the dispatch unit.`,
+    `   - **REQUIRED — before touching any files:** call \`mcp__newde__update_work_item\` to mark each item \`in_progress\`. File-change attribution is driven by the sole in-progress item; if the subagent skips this step, changes will be attributed to the wrong item.`,
+    `   - Mark \`human_check\` (not \`done\`) when acceptance criteria are met.`,
+    `   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.`,
+    `   - Use \`mcp__newde__propose_commit\` when a commit point is due.`,
+    `3. When the subagent returns, record a brief outcome note on each item via \`mcp__newde__add_work_note\`.`,
+    `4. Repeat from step 1 until \`read_work_options\` returns \`{ mode: "empty" }\`, a commit point is due, or a wait point is hit.`,
   );
   return lines.join("\n");
 }
@@ -1707,7 +1707,8 @@ function buildBatchAgentPrompt(
       ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
     `When referring to work items in text you show the user, use the item's TITLE (in quotes). Never print raw ids like "wi-abc123…" — the user sees titles in the UI, not ids.`,
-    `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__list_ready_work\` at the start of a session to check for queued work.`,
+    `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__read_work_options\` at the start of a session to check for queued work and dispatch to a \`general-purpose\` subagent.`,
+    `ORCHESTRATOR PATTERN: You are the orchestrator — never do Read/Edit/Bash/test work directly. For every work unit, call \`newde__read_work_options\` to get the dispatch unit, then launch one \`general-purpose\` subagent with all item ids, titles, descriptions, acceptance criteria, and instructions to write results back via MCP tools. Your context stays flat; all implementation detail lives in the subagent.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
