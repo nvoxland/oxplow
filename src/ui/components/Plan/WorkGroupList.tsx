@@ -421,12 +421,12 @@ export function WorkGroupList({
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        // "To do" is the primary queue surface and always renders (even empty)
-        // so the user has a visible anchor for the add-points slot and an
-        // obvious drop target. Other empty sections only appear while a work
-        // item is actively being dragged — they act as drop zones for status
-        // changes. inProgress stays hidden when empty either way.
-        if (empty && section.kind !== "toDo" && (!draggedWorkItem || section.kind === "inProgress")) {
+        // toDo, humanCheck, and done always render so the user sees the full
+        // section layout even when empty. inProgress and blocked only appear
+        // while a drag is active (as drop targets). toDo also anchors the
+        // add-points slot.
+        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done";
+        if (empty && !alwaysShow && (!draggedWorkItem || section.kind === "inProgress")) {
           return null;
         }
         const canDrop = !!draggedWorkItem
@@ -498,7 +498,12 @@ export function WorkGroupList({
               ) : null}
             </div>
             {renderedRows.map(renderRow)}
-            {/* The "+ Commit when done" / "+ Wait here" bar hangs off the tail
+            {empty && !draggedWorkItem ? (
+              <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                (nothing here)
+              </div>
+            ) : null}
+            {/* The "+ Commit Point" / "+ Wait Point" bar hangs off the tail
                 of the "To do" section (not the very bottom of the list) so
                 queueing a marker feels like appending to the active queue
                 rather than the dead/done pile. Because "To do" always renders
@@ -569,7 +574,7 @@ const firstSectionLabelStyle: CSSProperties = {
 };
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "canceled", "archived",
+  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -633,6 +638,7 @@ function EpicInlineRow({
       data-key={rowKey}
       data-testid={`work-item-row-${item.id}`}
     >
+      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={item.status === "in_progress"} />
       <span
         onClick={(event) => { event.stopPropagation(); onToggleExpand(); }}
         style={{ flexShrink: 0, width: 12, textAlign: "center", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}
@@ -640,7 +646,6 @@ function EpicInlineRow({
       >
         {isExpanded ? "\u25BC" : "\u25B6"}
       </span>
-      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={item.status === "in_progress"} />
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
         {item.title}
       </span>

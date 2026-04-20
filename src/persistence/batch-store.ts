@@ -19,6 +19,7 @@ export interface Batch {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
+  auto_commit: boolean;
 }
 
 export interface BatchState {
@@ -27,7 +28,7 @@ export interface BatchState {
   batches: Batch[];
 }
 
-export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed";
+export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "auto-commit-changed";
 
 export interface BatchChange {
   streamId: string;
@@ -84,6 +85,7 @@ export class BatchStore {
       updated_at: now,
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
+      auto_commit: false,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
@@ -140,6 +142,7 @@ export class BatchStore {
       updated_at: now,
       pane_target: `${paneSessionName(stream)}:batch-${createWindowName()}`,
       resume_session_id: "",
+      auto_commit: false,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
@@ -188,7 +191,8 @@ export class BatchStore {
       }
       this.setSelected(streamId, batchId);
     });
-    return this.reorder(streamId, batchId, 0);
+    this.emitChange({ streamId, batchId, kind: "promoted" });
+    return this.list(streamId);
   }
 
   complete(streamId: string, batchId: string): BatchState {
@@ -204,7 +208,24 @@ export class BatchStore {
       this.stateDb.run("UPDATE batches SET status = 'active', updated_at = ? WHERE id = ?", now, nextQueued.id);
       this.setSelected(streamId, nextQueued.id);
     });
-    return this.reorder(streamId, nextQueued.id, 0);
+    this.emitChange({ streamId, batchId: nextQueued.id, kind: "promoted" });
+    return this.list(streamId);
+  }
+
+  reorderBatches(streamId: string, orderedBatchIds: string[]): void {
+    const now = new Date().toISOString();
+    this.stateDb.transaction(() => {
+      for (const [index, id] of orderedBatchIds.entries()) {
+        this.stateDb.run(
+          "UPDATE batches SET sort_index = ?, updated_at = ? WHERE stream_id = ? AND id = ?",
+          index,
+          now,
+          streamId,
+          id,
+        );
+      }
+    });
+    this.emitChange({ streamId, batchId: orderedBatchIds[0] ?? "", kind: "reordered" });
   }
 
   rename(streamId: string, batchId: string, title: string): Batch {
@@ -235,6 +256,19 @@ export class BatchStore {
       batchId,
     );
     this.emitChange({ streamId, batchId, kind: "resume-updated" });
+  }
+
+  setAutoCommit(batchId: string, enabled: boolean): Batch[] {
+    const batch = this.findById(batchId);
+    if (!batch) throw new Error(`unknown batch: ${batchId}`);
+    this.stateDb.run(
+      "UPDATE batches SET auto_commit = ?, updated_at = ? WHERE id = ?",
+      enabled ? 1 : 0,
+      new Date().toISOString(),
+      batchId,
+    );
+    this.emitChange({ streamId: batch.stream_id, batchId, kind: "auto-commit-changed" });
+    return this.fetchBatches(batch.stream_id);
   }
 
   private fetchBatches(streamId: string): Batch[] {
@@ -350,6 +384,7 @@ function rowToBatch(row: Record<string, unknown>): Batch {
     updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
     pane_target: String(row.pane_target ?? ""),
     resume_session_id: String(row.resume_session_id ?? ""),
+    auto_commit: row.auto_commit === 1 || row.auto_commit === true,
   };
 }
 

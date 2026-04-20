@@ -50,6 +50,10 @@ export interface BatchSnapshot {
    *  visual-verification nudge (any src/ui/** change ⇒ nudge). Optional;
    *  empty / absent means "no nudge". */
   currentTurnFilePaths?: string[];
+  /** When true and the batch is the writer, the stop-hook automatically
+   *  proposes a commit whenever settled work (human_check/done) exists
+   *  but no commit point is in the queue. */
+  autoCommit?: boolean;
 }
 
 export interface NextWorkItemContext {

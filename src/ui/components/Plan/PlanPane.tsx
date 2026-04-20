@@ -17,6 +17,7 @@ import {
   listCommitPoints,
   listWaitPoints,
   reorderBatchQueue,
+  setAutoCommit,
   subscribeNewdeEvents,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
@@ -105,7 +106,7 @@ export function PlanPane({
   const [description, setDescription] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
-  const [parentId, setParentId] = useState<string>("");
+  const [itemStatus, setItemStatus] = useState<WorkItemStatus>("ready");
   // Modal surface: `create` = blank New Work Item form; `edit` = same modal
   // shape but pre-filled from `editingItemId` and writing back via
   // activeUpdate on submit. Plain clicks on a work-item row open edit mode
@@ -151,8 +152,6 @@ export function PlanPane({
     });
     return () => { cancelled = true; off(); };
   }, [batchId]);
-
-  const epics = batchWork?.epics ?? [];
 
   // When a batch has items that reached human_check or done but zero
   // remaining commit points in its queue, the agent's Stop hook has
@@ -346,7 +345,7 @@ export function PlanPane({
 
   const openCreateModal = () => {
     setTitle(""); setDescription(""); setAcceptance("");
-    setParentId(""); setPriority("medium");
+    setPriority("medium");
     setEditingItemId(null);
     setModalMode("create");
   };
@@ -355,8 +354,8 @@ export function PlanPane({
     setTitle(item.title);
     setDescription(item.description ?? "");
     setAcceptance(item.acceptance_criteria ?? "");
-    setParentId(item.parent_id ?? "");
     setPriority(item.priority);
+    setItemStatus(item.status);
     setEditingItemId(item.id);
     setModalMode("edit");
   };
@@ -364,6 +363,7 @@ export function PlanPane({
   const closeModal = () => {
     setModalMode(null);
     setEditingItemId(null);
+    setItemStatus("ready");
     paneRef.current?.focus();
   };
 
@@ -445,10 +445,9 @@ export function PlanPane({
           setAcceptance={setAcceptance}
           priority={priority}
           setPriority={setPriority}
-          parentId={parentId}
-          setParentId={setParentId}
-          epics={mode === "batch" ? epics : []}
-          showParent={mode === "batch"}
+          itemStatus={itemStatus}
+          setItemStatus={setItemStatus}
+          showStatus={modalMode === "edit"}
           showSaveAndAnother={modalMode === "create"}
           modalTitle={
             modalMode === "edit"
@@ -464,8 +463,8 @@ export function PlanPane({
                 title: nextTitle,
                 description,
                 acceptanceCriteria: acceptance || null,
-                parentId: mode === "batch" ? (parentId || null) : undefined,
                 priority,
+                status: itemStatus,
               });
               closeModal();
               return;
@@ -475,13 +474,12 @@ export function PlanPane({
               title: nextTitle,
               description,
               acceptanceCriteria: acceptance || null,
-              parentId: mode === "batch" ? (parentId || undefined) : undefined,
               priority,
               status: "ready",
             });
             setTitle(""); setDescription(""); setAcceptance("");
             if (!andAnother) {
-              setParentId(""); setPriority("medium");
+              setPriority("medium");
               closeModal();
             }
           }}
@@ -496,28 +494,31 @@ export function PlanPane({
           groups.map((group) => {
             const isRootBatch = mode === "batch";
             const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
+            const autoCommitOn = batch?.auto_commit ?? false;
             const addPointsSlot = isRootBatch && batch ? (
               <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
-                <button type="button"
-                  data-testid="plan-add-commit-point"
-                  onClick={() => {
-                    if (!streamId || !batchId) return;
-                    runWithError("Add commit point", createCommitPoint(streamId, batchId));
-                  }}
-                  disabled={!canAddPoints}
-                  style={{
-                    ...miniButtonStyle,
-                    opacity: canAddPoints ? 1 : 0.5,
-                    cursor: canAddPoints ? "pointer" : "not-allowed",
-                  }}
-                  title={
-                    canAddPoints
-                      ? "Append a commit point to the To-do queue (drag to reposition; click to switch to auto-commit)"
-                      : "Add a work item first — a commit point can't be the very first queue entry"
-                  }
-                >
-                  + Commit when done
-                </button>
+                {!autoCommitOn ? (
+                  <button type="button"
+                    data-testid="plan-add-commit-point"
+                    onClick={() => {
+                      if (!streamId || !batchId) return;
+                      runWithError("Add commit point", createCommitPoint(streamId, batchId));
+                    }}
+                    disabled={!canAddPoints}
+                    style={{
+                      ...miniButtonStyle,
+                      opacity: canAddPoints ? 1 : 0.5,
+                      cursor: canAddPoints ? "pointer" : "not-allowed",
+                    }}
+                    title={
+                      canAddPoints
+                        ? "Add a commit point to the queue"
+                        : "Add a work item first — a commit point can't be the very first queue entry"
+                    }
+                  >
+                    + Commit Point
+                  </button>
+                ) : null}
                 <button type="button"
                   data-testid="plan-add-wait-point"
                   onClick={() => {
@@ -532,11 +533,28 @@ export function PlanPane({
                   }}
                   title={
                     canAddPoints
-                      ? "Append a wait point to the To-do queue (drag to reposition; click the divider to add a note)"
+                      ? "Add a wait point to the queue"
                       : "Add a work item first — a wait point can't be the very first queue entry"
                   }
                 >
-                  + Wait here
+                  + Wait Point
+                </button>
+                <button type="button"
+                  data-testid="plan-auto-commit-toggle"
+                  onClick={() => {
+                    if (!streamId || !batchId) return;
+                    runWithError("Toggle auto-commit", setAutoCommit(streamId, batchId, !autoCommitOn));
+                  }}
+                  style={{
+                    ...miniButtonStyle,
+                    background: autoCommitOn ? "var(--accent)" : undefined,
+                    color: autoCommitOn ? "#fff" : undefined,
+                  }}
+                  title={autoCommitOn
+                    ? "Auto-commit is on — the agent will commit automatically when settled work exists"
+                    : "Auto-commit is off — turn on to commit automatically without placing a commit point"}
+                >
+                  Auto-commit
                 </button>
               </div>
             ) : null;
@@ -575,7 +593,7 @@ export function PlanPane({
       </div>
       {noCommitPointHint ? (
         <div data-testid="plan-no-commit-point-hint" style={noCommitHintStyle}>
-          No commit point queued — click <strong>+ Commit when done</strong> to land this work.
+          No commit point queued — click <strong>+ Commit Point</strong> to land this work.
         </div>
       ) : null}
       <div style={bottomBarStyle}>
@@ -696,7 +714,10 @@ export function PlanPane({
 }
 
 const KB_STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "canceled", "archived",
+  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
+];
+const MODAL_STATUS_OPTIONS: WorkItemStatus[] = [
+  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
 ];
 const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -805,10 +826,9 @@ function NewWorkItemModal({
   setAcceptance,
   priority,
   setPriority,
-  parentId,
-  setParentId,
-  epics,
-  showParent = true,
+  itemStatus,
+  setItemStatus,
+  showStatus = false,
   showSaveAndAnother = true,
   modalTitle = "New work item",
   onClose,
@@ -822,10 +842,9 @@ function NewWorkItemModal({
   setAcceptance(value: string): void;
   priority: WorkItemPriority;
   setPriority(value: WorkItemPriority): void;
-  parentId: string;
-  setParentId(value: string): void;
-  epics: WorkItem[];
-  showParent?: boolean;
+  itemStatus: WorkItemStatus;
+  setItemStatus(value: WorkItemStatus): void;
+  showStatus?: boolean;
   showSaveAndAnother?: boolean;
   modalTitle?: string;
   onClose(): void;
@@ -899,14 +918,21 @@ function NewWorkItemModal({
           <option value="high">High</option>
           <option value="urgent">Urgent</option>
         </select>
-        {showParent ? (
-        <>
-        <label htmlFor="work-item-parent" style={srOnlyStyle}>Parent epic</label>
-        <select id="work-item-parent" data-testid="work-item-parent" value={parentId} onChange={(e) => setParentId(e.target.value)} style={inputStyle}>
-          <option value="">No parent epic</option>
-          {epics.map((epic) => (<option key={epic.id} value={epic.id}>{epic.title}</option>))}
-        </select>
-        </>
+        {showStatus ? (
+          <label style={labelStyle}>
+            Status
+            <select
+              value={itemStatus}
+              disabled={itemStatus === "in_progress"}
+              onChange={(e) => setItemStatus(e.target.value as WorkItemStatus)}
+              style={{ ...inputStyle, width: "100%", opacity: itemStatus === "in_progress" ? 0.5 : 1 }}
+              title={itemStatus === "in_progress" ? "Status is locked while the agent is working" : undefined}
+            >
+              {MODAL_STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{statusLabel(s)}</option>
+              ))}
+            </select>
+          </label>
         ) : null}
         <label htmlFor="work-item-description" style={srOnlyStyle}>Description</label>
         <textarea
@@ -1031,6 +1057,14 @@ const noCommitHintStyle: CSSProperties = {
   color: "var(--muted)",
   fontSize: 11,
   lineHeight: 1.4,
+};
+
+const labelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  fontSize: 12,
+  color: "var(--muted)",
 };
 
 const srOnlyStyle: CSSProperties = {

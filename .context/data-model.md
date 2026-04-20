@@ -24,6 +24,11 @@ Each stream owns:
 - two tmux pane targets (`working` and `talking`)
 - per-pane Claude resume session ids (so reconnecting picks up history)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
+- a `sort_index` column (migration v14) — streams are listed ordered by
+  `sort_index, rowid`; drag-to-reorder in the StreamRail calls
+  `reorderStreams(orderedStreamIds)` which reassigns sequential indexes.
+  Emits a `stream.changed` event (kind: "reordered") so the UI can
+  refresh.
 
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
@@ -39,6 +44,15 @@ worktree), `queued` (read-only, agents can run but writes are denied — see
 the sort_index=0 row). The rolling `summary` field + `record_batch_summary`
 MCP tool were removed in v13 — use the work-item log as the source of
 truth instead.
+
+`auto_commit` (migration v15, `INTEGER NOT NULL DEFAULT 0`) — when `true` on
+the active batch, the stop-hook pipeline automatically synthesizes a commit
+point whenever settled work (`human_check`/`done` items) exists and no
+pending commit point is already in the queue. Toggled via
+`setAutoCommit(batchId, enabled)` on `BatchStore`; IPC-exposed as
+`setAutoCommit(streamId, batchId, enabled)`. Surfaced in the Plan pane as an
+"Auto-commit" toggle button next to the queue marker bar; while on, the
+"+ Commit Point" button is hidden.
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 

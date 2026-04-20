@@ -135,10 +135,13 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:getBatchState", (_event, streamId: string) => currentRuntime.getBatchState(streamId));
   handle("newde:createBatch", (_event, streamId: string, title: string) => currentRuntime.createBatch(streamId, title));
   handle("newde:reorderBatch", (_event, streamId: string, batchId: string, targetIndex: number) => currentRuntime.reorderBatch(streamId, batchId, targetIndex));
+  handle("newde:reorderBatches", (_event, streamId: string, orderedBatchIds: string[]) => currentRuntime.reorderBatches(streamId, orderedBatchIds));
+  handle("newde:reorderStreams", (_event, orderedStreamIds: string[]) => currentRuntime.reorderStreams(orderedStreamIds));
   handle("newde:selectBatch", (_event, streamId: string, batchId: string) => currentRuntime.selectBatch(streamId, batchId));
   handle("newde:promoteBatch", (_event, streamId: string, batchId: string) => currentRuntime.promoteBatch(streamId, batchId));
   handle("newde:completeBatch", (_event, streamId: string, batchId: string) => currentRuntime.completeBatch(streamId, batchId));
   handle("newde:renameBatch", (_event, streamId: string, batchId: string, title: string) => currentRuntime.renameBatch(streamId, batchId, title));
+  handle("newde:setAutoCommit", (_event, streamId: string, batchId: string, enabled: boolean) => currentRuntime.setAutoCommit(streamId, batchId, enabled));
   handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.workItemApi.getBatchWorkState(streamId, batchId));
   handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, batchId, input));
   handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));

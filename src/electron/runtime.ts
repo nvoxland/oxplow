@@ -33,7 +33,6 @@ import {
   type BranchChanges,
   type ChangeScopes,
   type CommitDetail,
-  type GitLogResult,
   type GitLogCommit,
   type GitOpResult,
   type RefOption,
@@ -290,6 +289,9 @@ export class ElectronRuntime {
         batchId: change.batchId,
         kind: change.kind,
       });
+    });
+    this.store.subscribe((change) => {
+      this.events.publish({ type: "stream.changed", kind: change.kind });
     });
     this.fileChangeStore.subscribe((change) => {
       const batch = this.batchStore.findById(change.batch_id);
@@ -723,6 +725,15 @@ export class ElectronRuntime {
     return this.batchStore.reorder(streamId, batchId, targetIndex);
   }
 
+  reorderBatches(streamId: string, orderedBatchIds: string[]): void {
+    this.resolveStream(streamId);
+    this.batchStore.reorderBatches(streamId, orderedBatchIds);
+  }
+
+  reorderStreams(orderedStreamIds: string[]): void {
+    this.store.reorderStreams(orderedStreamIds);
+  }
+
   selectBatch(streamId: string, batchId: string): BatchState {
     this.resolveStream(streamId);
     return this.batchStore.select(streamId, batchId);
@@ -741,6 +752,11 @@ export class ElectronRuntime {
   renameBatch(streamId: string, batchId: string, title: string): Batch {
     this.resolveStream(streamId);
     return this.batchStore.rename(streamId, batchId, title);
+  }
+
+  setAutoCommit(streamId: string, batchId: string, enabled: boolean): Batch[] {
+    this.resolveBatch(streamId, batchId);
+    return this.batchStore.setAutoCommit(batchId, enabled);
   }
 
   listWorkspaceEntries(streamId: string, path = "") {
@@ -1122,6 +1138,28 @@ export class ElectronRuntime {
     const currentTurnFilePaths = openTurn
       ? this.fileChangeStore.listForTurn(openTurn.id).map((row) => row.path)
       : [];
+    // When auto-commit is on and the batch is the writer, synthesize a commit
+    // point if settled work exists but no pending commit point is in the queue.
+    // This lets the normal pipeline fire the commit directive without the user
+    // having to place a commit point manually.
+    if (batch?.auto_commit && batch.status === "active") {
+      const existingCommits = this.commitPointStore.listForBatch(batchId);
+      const hasPendingCommit = existingCommits.some((cp) => cp.status !== "done");
+      if (!hasPendingCommit) {
+        const workItems = this.workItemStore.listItems(batchId);
+        const hasSettledWork = workItems.some(
+          (item) => item.status === "human_check" || item.status === "done",
+        );
+        if (hasSettledWork) {
+          try { this.batchQueue.createCommitPoint(batchId); } catch (err) {
+            this.logger.warn("auto-commit: failed to create commit point", {
+              batchId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+    }
     const snapshot: BatchSnapshot = {
       batch,
       commitPoints: this.commitPointStore.listForBatch(batchId),
@@ -1130,6 +1168,7 @@ export class ElectronRuntime {
       readyWorkItems: this.workItemStore.listReady(batchId),
       currentTurnStartedAt: openTurn?.started_at ?? null,
       currentTurnFilePaths,
+      autoCommit: batch?.auto_commit ?? false,
     };
     // The item's own batch_id is what matters for the directive text (not
     // `batchId` — they agree today but could diverge if listReady ever
@@ -1708,7 +1747,7 @@ function buildBatchAgentPrompt(
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
     `When referring to work items in text you show the user, use the item's TITLE (in quotes). Never print raw ids like "wi-abc123…" — the user sees titles in the UI, not ids.`,
     `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__read_work_options\` at the start of a session to check for queued work and dispatch to a \`general-purpose\` subagent.`,
-    `ORCHESTRATOR PATTERN: You are the orchestrator — never do Read/Edit/Bash/test work directly. When the user gives you a new task, file it as work items (epic + child tasks) via \`newde__create_work_item\` BEFORE dispatching — never skip from plan approval to subagent without filing. Then call \`newde__read_work_options\` to get the dispatch unit and launch one \`general-purpose\` subagent with all item ids, titles, descriptions, acceptance criteria, and instructions to write results back via MCP tools. Your context stays flat; all implementation detail lives in the subagent.`,
+    `ORCHESTRATOR PATTERN: You are the orchestrator — never do Read/Edit/Bash/test work directly. Any file change, no matter how small, requires a work item filed via \`newde__create_work_item\` BEFORE dispatching — the only exception is answering a question with zero file changes. For multi-step work use an epic + child tasks; for a single change use one task. Then call \`newde__read_work_options\` to get the dispatch unit and launch one \`general-purpose\` subagent with all item ids, titles, descriptions, acceptance criteria, and instructions to write results back via MCP tools. Your context stays flat; all implementation detail lives in the subagent.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

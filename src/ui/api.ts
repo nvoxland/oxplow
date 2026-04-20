@@ -29,6 +29,7 @@ export interface Batch {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
+  auto_commit: boolean;
 }
 
 export interface BatchState {
@@ -296,6 +297,14 @@ export async function reorderBatch(streamId: string, batchId: string, targetInde
   return desktopApi().reorderBatch(streamId, batchId, targetIndex);
 }
 
+export async function reorderBatches(streamId: string, orderedBatchIds: string[]): Promise<void> {
+  return desktopApi().reorderBatches(streamId, orderedBatchIds);
+}
+
+export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
+  return desktopApi().reorderStreams(orderedStreamIds);
+}
+
 export async function selectBatch(streamId: string, batchId: string): Promise<BatchState> {
   return desktopApi().selectBatch(streamId, batchId);
 }
@@ -310,6 +319,10 @@ export async function completeBatch(streamId: string, batchId: string): Promise<
 
 export async function renameBatch(streamId: string, batchId: string, title: string): Promise<Batch> {
   return desktopApi().renameBatch(streamId, batchId, title);
+}
+
+export async function setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]> {
+  return desktopApi().setAutoCommit(streamId, batchId, enabled);
 }
 
 export async function getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState> {

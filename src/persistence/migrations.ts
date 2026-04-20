@@ -407,6 +407,23 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 14,
+    name: "streams.sort_index",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE streams ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0;
+        UPDATE streams SET sort_index = rowid;
+      `);
+    },
+  },
+  {
+    version: 15,
+    name: "batches.auto_commit",
+    up: (db) => {
+      db.exec(`ALTER TABLE batches ADD COLUMN auto_commit INTEGER NOT NULL DEFAULT 0;`);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

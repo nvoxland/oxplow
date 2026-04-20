@@ -168,6 +168,15 @@ from the side effects lets every branch be unit-tested with a fixture.
 
 The pipeline runs in priority order:
 
+0. **Auto-commit synthesis (writer batch only, pre-pass).** Before
+   `decideStopDirective` runs, `computeStopDirective` in the runtime checks
+   whether `batch.auto_commit` is true, the batch is `active`, no pending
+   commit point exists, and settled work (`human_check`/`done` items) is
+   present. If so, it calls `batchQueue.createCommitPoint(batchId)` to
+   synthesize one. The rest of the pipeline then fires as normal (step 1
+   picks it up). This means with auto-commit on the user never needs to
+   place a commit point manually — every stop that has settled work will
+   trigger a commit proposal.
 1. **Pending commit point (writer batch only).** Block with a directive
    built by `buildCommitPointStopReason` telling the agent to inspect the
    diff, draft a commit message in Conventional-Commits style, and call

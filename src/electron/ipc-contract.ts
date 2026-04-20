@@ -134,10 +134,13 @@ export interface DesktopApi {
   getBatchState(streamId: string): Promise<BatchState>;
   createBatch(streamId: string, title: string): Promise<BatchState>;
   reorderBatch(streamId: string, batchId: string, targetIndex: number): Promise<BatchState>;
+  reorderBatches(streamId: string, orderedBatchIds: string[]): Promise<void>;
+  reorderStreams(orderedStreamIds: string[]): Promise<void>;
   selectBatch(streamId: string, batchId: string): Promise<BatchState>;
   promoteBatch(streamId: string, batchId: string): Promise<BatchState>;
   completeBatch(streamId: string, batchId: string): Promise<BatchState>;
   renameBatch(streamId: string, batchId: string, title: string): Promise<Batch>;
+  setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]>;
   getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState>;
   createWorkItem(
     streamId: string,
