@@ -278,23 +278,43 @@ export async function dogfoodInnerAgent(
 }
 
 /**
+ * Synchronous `bun run build` — call between dogfood phase 1 and
+ * phase 2 so the second launch picks up the inner agent's edits.
+ * Without this, phase 2 runs against `dist/` from before the
+ * inner agent's commit, so any UI-default change introduced in
+ * the same pass won't take effect at approval time. See
+ * `fix-20260419-225421-untracked-toggle.md`.
+ */
+export function runBuild(): void {
+  const repoRoot = resolve(__dirname, "..");
+  probeLog("[runBuild] bun run build");
+  execSync("bun run build", { cwd: repoRoot, stdio: "ignore" });
+  probeLog("[runBuild] done");
+}
+
+/**
  * Approve a pending set of changes by opening Files panel, clicking
  * the files-commit button, filling the message, and submitting.
  * Must be called inside an already-launched newde window.
  *
- * Note: the Files-commit dialog bundles untracked files by default.
- * Filed as `[F]` in todo.md. If that matters, stage the files
- * outside newde first.
+ * Since `096b2f0` the Files-commit dialog defaults Include-untracked
+ * to OFF, so this helper only commits tracked changes. Pass an
+ * `includeUntracked` option if you need the legacy `git add -A`
+ * behavior.
  */
 export async function approveViaFiles(
   window: Page,
-  opts: { slug: string; outDir?: string; message: string },
+  opts: { slug: string; outDir?: string; message: string; includeUntracked?: boolean },
 ): Promise<void> {
   await window.getByTestId("dock-tab-project").click();
   await window.waitForTimeout(400);
   await window.getByTestId("files-commit").click();
   await window.waitForTimeout(500);
   await window.getByTestId("files-commit-message").fill(opts.message);
+  if (opts.includeUntracked) {
+    const cb = window.locator("[data-testid='files-commit-include-untracked']");
+    if (await cb.count() > 0) await cb.check();
+  }
   if (opts.outDir) {
     await window.screenshot({ path: resolve(opts.outDir, `${opts.slug}-approve-filled.png`) });
   }
