@@ -170,6 +170,6 @@ function findActiveMarker<T extends { sort_index: number }>(
 }
 
 function isTerminalStatus(item: WorkItem): boolean {
-  return item.status === "done" || item.status === "canceled" || item.status === "human_check";
+  return item.status === "done" || item.status === "canceled" || item.status === "archived" || item.status === "human_check";
 }
 

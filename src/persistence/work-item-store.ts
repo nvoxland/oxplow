@@ -4,7 +4,7 @@ import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 export type WorkItemLinkType =
   | "blocks"
@@ -19,7 +19,7 @@ const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
   "epic", "task", "subtask", "bug", "note",
 ]);
 const WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
-  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
+  "ready", "in_progress", "human_check", "blocked", "done", "canceled", "archived",
 ]);
 const WORK_ITEM_PRIORITIES: ReadonlySet<WorkItemPriority> = new Set([
   "low", "medium", "high", "urgent",
@@ -149,9 +149,9 @@ export class WorkItemStore {
     const items = this.listItems(batchId);
     return {
       batchId,
-      waiting: items.filter((item) => item.status === "waiting" || item.status === "ready" || item.status === "blocked"),
+      waiting: items.filter((item) => item.status === "ready" || item.status === "blocked"),
       inProgress: items.filter((item) => item.status === "in_progress" || item.status === "human_check"),
-      done: items.filter((item) => item.status === "done" || item.status === "canceled"),
+      done: items.filter((item) => item.status === "done" || item.status === "canceled" || item.status === "archived"),
       epics: items.filter((item) => item.kind === "epic"),
       items,
     };
@@ -184,7 +184,7 @@ export class WorkItemStore {
     const description = clampDescription(input.description);
     const acceptance = clampAcceptanceCriteria(input.acceptanceCriteria);
     const kind = requireWorkItemKind(input.kind);
-    const status = input.status ? requireWorkItemStatus(input.status) : "waiting";
+    const status = input.status ? requireWorkItemStatus(input.status) : "ready";
     const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
     const createdBy = requireWorkItemActorKind(input.createdBy);
     const parentId = input.parentId ?? null;
@@ -609,7 +609,7 @@ export class WorkItemStore {
     const description = clampDescription(input.description);
     const acceptance = clampAcceptanceCriteria(input.acceptanceCriteria);
     const kind = requireWorkItemKind(input.kind);
-    const status = input.status ? requireWorkItemStatus(input.status) : "waiting";
+    const status = input.status ? requireWorkItemStatus(input.status) : "ready";
     const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
     const createdBy = requireWorkItemActorKind(input.createdBy);
     const now = new Date().toISOString();
@@ -675,7 +675,7 @@ export class WorkItemStore {
       if (input.status !== undefined) {
         const status = requireWorkItemStatus(input.status);
         fields.push("status = ?"); values.push(status);
-        if (status === "done" || status === "canceled") { fields.push("completed_at = ?"); values.push(now); }
+        if (status === "done" || status === "canceled" || status === "archived") { fields.push("completed_at = ?"); values.push(now); }
         else { fields.push("completed_at = NULL"); }
       }
       if (input.priority !== undefined) { fields.push("priority = ?"); values.push(requireWorkItemPriority(input.priority)); }
@@ -801,7 +801,7 @@ export class WorkItemStore {
        FROM work_items wi
        WHERE wi.batch_id = ?
          AND wi.deleted_at IS NULL
-         AND wi.status IN ('waiting', 'ready')
+         AND wi.status IN ('ready')
          AND NOT EXISTS (
            SELECT 1
            FROM work_item_links l
@@ -809,7 +809,7 @@ export class WorkItemStore {
            WHERE l.batch_id = wi.batch_id
              AND l.to_item_id = wi.id
              AND l.link_type = 'blocks'
-             AND blocker.status NOT IN ('done', 'canceled')
+             AND blocker.status NOT IN ('done', 'canceled', 'archived')
              AND blocker.deleted_at IS NULL
          )
        ORDER BY wi.priority DESC, wi.sort_index, wi.created_at`,

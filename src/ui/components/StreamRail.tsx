@@ -142,9 +142,17 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
                   event.preventDefault();
                   setDragOverStreamId(null);
                   try {
-                    const payload = JSON.parse(raw) as { itemId?: string; fromBatchId?: string | null };
-                    if (!payload.itemId) return;
-                    onDropWorkItemOnStream?.(candidate.id, payload.itemId, payload.fromBatchId ?? null);
+                    const payload = JSON.parse(raw) as {
+                      itemId?: string;
+                      itemIds?: string[];
+                      fromBatchId?: string | null;
+                    };
+                    const ids = payload.itemIds && payload.itemIds.length > 0
+                      ? payload.itemIds
+                      : payload.itemId ? [payload.itemId] : [];
+                    for (const id of ids) {
+                      onDropWorkItemOnStream?.(candidate.id, id, payload.fromBatchId ?? null);
+                    }
                   } catch {
                     // ignore malformed payload
                   }

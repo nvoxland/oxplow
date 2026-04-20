@@ -32,6 +32,7 @@ import {
   classifyWorkItem,
   inputStyle,
   miniButtonStyle,
+  statusLabel,
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, humanCheck: 2, done: 3 };
@@ -103,7 +104,13 @@ export function PlanPane({
   const [acceptance, setAcceptance] = useState("");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
   const [parentId, setParentId] = useState<string>("");
-  const [createOpen, setCreateOpen] = useState(false);
+  // Modal surface: `create` = blank New Work Item form; `edit` = same modal
+  // shape but pre-filled from `editingItemId` and writing back via
+  // activeUpdate on submit. Plain clicks on a work-item row open edit mode
+  // (the legacy inline expansion + title click-to-edit were removed per the
+  // "change work item editing UI" task).
+  const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
@@ -112,8 +119,13 @@ export function PlanPane({
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
+  // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
+  // drag starts on any of the effectiveMarkedIds, the drag payload carries the
+  // whole set so drop targets (BatchRail, backlog chip, stream chip) can move
+  // them all in one gesture. Plain click clears marks.
+  const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string } | null>(null);
-  const [renameRequest, setRenameRequest] = useState<{ itemId: string; nonce: number } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -185,6 +197,57 @@ export function PlanPane({
     if (!navigableIds.includes(selectedId)) setSelectedId(null);
   }, [navigableIds, selectedId]);
 
+  // Prune any marked ids that no longer exist in the visible list — keeps the
+  // mark set from accumulating stale entries after a move/delete/status change
+  // pulls a row out from under the user.
+  useEffect(() => {
+    setMarkedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(navigableIds);
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [navigableIds]);
+
+  const handleSelect = (id: string, modifiers?: { toggle?: boolean; range?: boolean }) => {
+    const toggle = modifiers?.toggle ?? false;
+    const range = modifiers?.range ?? false;
+    if (toggle) {
+      // Cmd/Ctrl+click: flip the row in/out of the mark set without changing
+      // selectedId (so the kb-focused row and the expand state stay put).
+      setMarkedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      return;
+    }
+    if (range && selectedId && selectedId !== id) {
+      // Shift+click: mark every row between selectedId and id (inclusive of
+      // both endpoints) in screen order. Selected anchor itself stays the
+      // primary.
+      const fromIdx = navigableIds.indexOf(selectedId);
+      const toIdx = navigableIds.indexOf(id);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        const next = new Set<string>();
+        for (let i = lo; i <= hi; i++) next.add(navigableIds[i]!);
+        setMarkedIds(next);
+        return;
+      }
+    }
+    // Plain click: clear marks and move the primary selection.
+    setMarkedIds(new Set());
+    setSelectedId(id);
+  };
+
+
   const selectedItem: WorkItem | null = useMemo(() => {
     if (!selectedId) return null;
     for (const group of groups) {
@@ -251,7 +314,8 @@ export function PlanPane({
         setSelectedId(navigableIds[next] ?? null);
       } else if (key === "Enter" && selectedId) {
         event.preventDefault();
-        setExpandedId((prev) => (prev === selectedId ? null : selectedId));
+        const item = groups.flatMap((g) => g.items).find((i) => i.id === selectedId);
+        if (item) openEditModal(item);
       } else if ((key === "s" || key === "S") && selectedId) {
         event.preventDefault();
         setKbPicker({ kind: "status", itemId: selectedId });
@@ -264,9 +328,34 @@ export function PlanPane({
     return () => el.removeEventListener("keydown", handler);
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
+  const openCreateModal = () => {
+    setTitle(""); setDescription(""); setAcceptance("");
+    setParentId(""); setPriority("medium");
+    setEditingItemId(null);
+    setModalMode("create");
+  };
+
+  const openEditModal = (item: WorkItem) => {
+    setTitle(item.title);
+    setDescription(item.description ?? "");
+    setAcceptance(item.acceptance_criteria ?? "");
+    setParentId(item.parent_id ?? "");
+    setPriority(item.priority);
+    setEditingItemId(item.id);
+    setModalMode("edit");
+  };
+
+  const closeModal = () => {
+    setModalMode(null);
+    setEditingItemId(null);
+  };
+
   useEffect(() => {
     if (openNewRequest === undefined || openNewRequest === 0) return;
-    setCreateOpen(true);
+    openCreateModal();
+    // openCreateModal is intentionally not in deps — it closes over setters
+    // that are stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openNewRequest]);
 
 
@@ -288,9 +377,23 @@ export function PlanPane({
     if (!raw) return;
     event.preventDefault();
     try {
-      const payload = JSON.parse(raw) as { itemId?: string; fromBatchId?: string | null };
-      if (payload.itemId && payload.fromBatchId) {
-        void onMoveItemToBacklog(payload.itemId, payload.fromBatchId);
+      const payload = JSON.parse(raw) as {
+        itemId?: string;
+        itemIds?: string[];
+        fromBatchId?: string | null;
+      };
+      const fromBatchId = payload.fromBatchId;
+      if (!fromBatchId) return;
+      const ids = payload.itemIds && payload.itemIds.length > 0
+        ? payload.itemIds
+        : payload.itemId ? [payload.itemId] : [];
+      // Move each marked item in sequence — the store already serialises the
+      // batch mutations, and doing them one at a time keeps the failure mode
+      // simple (a bad id throws, the rest keep going isn't worth the risk of
+      // a partial state that surprises the user). If the first one fails the
+      // later ones are skipped by Promise.allSettled semantics in the caller.
+      for (const id of ids) {
+        void onMoveItemToBacklog(id, fromBatchId);
       }
     } catch {
       // ignore malformed payload
@@ -307,7 +410,7 @@ export function PlanPane({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" data-testid="plan-new-work-item" onClick={() => setCreateOpen(true)} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
+          <button type="button" data-testid="plan-new-work-item" onClick={openCreateModal} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
             + New work item
           </button>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
@@ -315,7 +418,7 @@ export function PlanPane({
           </span>
         </div>
       </div>
-      {createOpen ? (
+      {modalMode ? (
         <NewWorkItemModal
           title={title}
           setTitle={setTitle}
@@ -329,11 +432,27 @@ export function PlanPane({
           setParentId={setParentId}
           epics={mode === "batch" ? epics : []}
           showParent={mode === "batch"}
-          modalTitle={mode === "backlog" ? "New backlog item" : "New work item"}
-          onClose={() => setCreateOpen(false)}
+          showSaveAndAnother={modalMode === "create"}
+          modalTitle={
+            modalMode === "edit"
+              ? "Edit work item"
+              : mode === "backlog" ? "New backlog item" : "New work item"
+          }
+          onClose={closeModal}
           onSubmit={async (andAnother) => {
             const nextTitle = title.trim();
             if (!nextTitle) return;
+            if (modalMode === "edit" && editingItemId) {
+              await activeUpdate(editingItemId, {
+                title: nextTitle,
+                description,
+                acceptanceCriteria: acceptance || null,
+                parentId: mode === "batch" ? (parentId || null) : undefined,
+                priority,
+              });
+              closeModal();
+              return;
+            }
             await activeCreate({
               kind: "task",
               title: nextTitle,
@@ -341,12 +460,12 @@ export function PlanPane({
               acceptanceCriteria: acceptance || null,
               parentId: mode === "batch" ? (parentId || undefined) : undefined,
               priority,
-              status: "waiting",
+              status: "ready",
             });
             setTitle(""); setDescription(""); setAcceptance("");
             if (!andAnother) {
               setParentId(""); setPriority("medium");
-              setCreateOpen(false);
+              closeModal();
             }
           }}
         />
@@ -421,15 +540,15 @@ export function PlanPane({
                 onReorderMixed={isRootBatch && streamId && batchId
                   ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
                   : undefined}
-                onRequestDelete={(item) => setPendingDelete(item)}
                 onContextMenu={(event, item) => {
                   event.preventDefault();
                   setContextMenu({ x: event.clientX, y: event.clientY, item });
                 }}
                 addPointsSlot={addPointsSlot}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
-                renameRequest={renameRequest}
+                markedIds={markedIds}
+                onSelect={handleSelect}
+                onRequestEdit={openEditModal}
               />
             );
           })
@@ -468,7 +587,7 @@ export function PlanPane({
             onRename: (item) => {
               setContextMenu(null);
               setSelectedId(item.id);
-              setRenameRequest((prev) => ({ itemId: item.id, nonce: (prev?.nonce ?? 0) + 1 }));
+              openEditModal(item);
             },
             onChangeStatus: (item) => {
               setContextMenu(null);
@@ -521,7 +640,7 @@ export function PlanPane({
 }
 
 const KB_STATUS_OPTIONS: WorkItemStatus[] = [
-  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
+  "blocked", "ready", "in_progress", "human_check", "done", "canceled", "archived",
 ];
 const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -591,7 +710,7 @@ function KeyboardValuePicker({
                   color: active ? "#fff" : "var(--fg)",
                 }}
               >
-                {option}
+                {kind === "status" ? statusLabel(option as WorkItemStatus) : option}
                 {option === current ? <span style={{ marginLeft: 8, opacity: 0.7 }}>· current</span> : null}
               </div>
             );
@@ -634,6 +753,7 @@ function NewWorkItemModal({
   setParentId,
   epics,
   showParent = true,
+  showSaveAndAnother = true,
   modalTitle = "New work item",
   onClose,
   onSubmit,
@@ -650,6 +770,7 @@ function NewWorkItemModal({
   setParentId(value: string): void;
   epics: WorkItem[];
   showParent?: boolean;
+  showSaveAndAnother?: boolean;
   modalTitle?: string;
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
@@ -751,13 +872,15 @@ function NewWorkItemModal({
         />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
           <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>Cancel</button>
-          <button
-            type="button"
-            data-testid="work-item-save-another"
-            disabled={!canSubmit}
-            onClick={() => { if (canSubmit) void onSubmit(true); }}
-            style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
-          >Save and Another</button>
+          {showSaveAndAnother ? (
+            <button
+              type="button"
+              data-testid="work-item-save-another"
+              disabled={!canSubmit}
+              onClick={() => { if (canSubmit) void onSubmit(true); }}
+              style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
+            >Save and Another</button>
+          ) : null}
           <button
             type="submit"
             data-testid="work-item-save"

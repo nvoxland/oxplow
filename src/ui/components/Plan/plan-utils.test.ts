@@ -23,12 +23,12 @@ function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem 
 
 test("classifyWorkItem buckets each status into exactly one section", () => {
   expect(classifyWorkItem("in_progress")).toBe("inProgress");
-  expect(classifyWorkItem("waiting")).toBe("toDo");
   expect(classifyWorkItem("ready")).toBe("toDo");
   expect(classifyWorkItem("blocked")).toBe("toDo");
   expect(classifyWorkItem("human_check")).toBe("humanCheck");
   expect(classifyWorkItem("done")).toBe("done");
   expect(classifyWorkItem("canceled")).toBe("done");
+  expect(classifyWorkItem("archived")).toBe("archived");
 });
 
 test("splitIntoSections returns sections in fixed order: inProgress → toDo → humanCheck → done", () => {
@@ -36,7 +36,7 @@ test("splitIntoSections returns sections in fixed order: inProgress → toDo →
     item("d1", "done", 3),
     item("t1", "human_check", 2),
     item("p1", "in_progress", 0),
-    item("w1", "waiting", 1),
+    item("w1", "ready", 1),
   ]);
   expect(sections.map((section) => section.kind)).toEqual([
     "inProgress",
@@ -48,8 +48,8 @@ test("splitIntoSections returns sections in fixed order: inProgress → toDo →
 
 test("splitIntoSections skips empty sections entirely so no header renders for them", () => {
   const sections = splitIntoSections([
-    item("w1", "waiting", 0),
-    item("w2", "waiting", 1),
+    item("w1", "ready", 0),
+    item("w2", "ready", 1),
   ]);
   expect(sections).toHaveLength(1);
   expect(sections[0]?.kind).toBe("toDo");
@@ -57,9 +57,9 @@ test("splitIntoSections skips empty sections entirely so no header renders for t
 
 test("splitIntoSections sorts items within a section by sort_index", () => {
   const sections = splitIntoSections([
-    item("w3", "waiting", 20),
-    item("w1", "waiting", 5),
-    item("w2", "waiting", 10),
+    item("w3", "ready", 20),
+    item("w1", "ready", 5),
+    item("w2", "ready", 10),
   ]);
   expect(sections[0]?.items.map((i) => i.id)).toEqual(["w1", "w2", "w3"]);
 });
@@ -68,6 +68,7 @@ test("sectionDefaultStatus maps drop-target sections to landing statuses; in-pro
   expect(sectionDefaultStatus("toDo")).toBe("ready");
   expect(sectionDefaultStatus("humanCheck")).toBe("human_check");
   expect(sectionDefaultStatus("done")).toBe("done");
+  expect(sectionDefaultStatus("archived")).toBe("archived");
   // The agent owns in_progress and its items are drag-locked — reject drops.
   expect(sectionDefaultStatus("inProgress")).toBeNull();
 });

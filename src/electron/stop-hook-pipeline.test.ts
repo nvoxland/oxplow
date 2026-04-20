@@ -153,7 +153,7 @@ describe("decideStopDirective", () => {
     // pushed the agent into implementing them — the exact opposite of the
     // intent. Now the hook ignores items created_by="agent" with
     // created_at >= the current turn's started_at.
-    const justFiled = workItem("w1", 0, "waiting", {
+    const justFiled = workItem("w1", 0, "ready", {
       created_by: "agent",
       created_at: "2024-06-01T12:00:10Z",
     });
@@ -173,7 +173,7 @@ describe("decideStopDirective", () => {
       created_by: "user",
       created_at: "2024-05-01T00:00:00Z",
     });
-    const justFiled = workItem("w2", 1, "waiting", {
+    const justFiled = workItem("w2", 1, "ready", {
       created_by: "agent",
       created_at: "2024-06-01T12:00:10Z",
     });
@@ -247,7 +247,7 @@ describe("decideStopDirective", () => {
   test("without a currentTurnStartedAt snapshot field, behaviour matches the pre-fix baseline", () => {
     // Backwards compat: builds that pre-date the runtime plumbing still
     // behave as before (no filtering).
-    const justFiled = workItem("w1", 0, "waiting", {
+    const justFiled = workItem("w1", 0, "ready", {
       created_by: "agent",
       created_at: "2024-06-01T12:00:10Z",
     });

@@ -86,7 +86,6 @@ import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import type { DiffRequest } from "./components/Diff/diff-request.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { Activity } from "./components/Activity/Activity.js";
-import { BatchChanges } from "./components/Changes/BatchChanges.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
@@ -521,7 +520,7 @@ export function App() {
     description?: string;
     acceptanceCriteria?: string | null;
     parentId?: string | null;
-    status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+    status?: "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
     priority?: "low" | "medium" | "high" | "urgent";
   }) {
     if (!stream || !selectedBatch) return;
@@ -542,7 +541,7 @@ export function App() {
       description?: string;
       acceptanceCriteria?: string | null;
       parentId?: string | null;
-      status?: "waiting" | "ready" | "in_progress" | "blocked" | "done" | "canceled";
+      status?: "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
       priority?: "low" | "medium" | "high" | "urgent";
     },
   ) {
@@ -1326,17 +1325,6 @@ export function App() {
         />
       ),
     },
-    {
-      id: "changes",
-      label: "Changes",
-      render: () => (
-        <BatchChanges
-          batchFileChanges={selectedBatchFileChanges}
-          onOpenFile={handleOpenFile}
-          onOpenTurnDiff={handleOpenTurnDiff}
-        />
-      ),
-    },
   ], [
     stream,
     selectedFilePath,
@@ -1355,12 +1343,12 @@ export function App() {
     },
     {
       id: "history",
-      label: "History",
+      label: "Git history",
       render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />,
     },
     {
       id: "snapshots",
-      label: "Snapshots",
+      label: "Local history",
       render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} />,
     },
   ];

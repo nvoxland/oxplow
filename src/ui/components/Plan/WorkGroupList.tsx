@@ -1,15 +1,15 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 import { CommitPointRow } from "./CommitPointRow.js";
 import {
   classifyWorkItem,
   groupHeaderStyle,
-  inputStyle,
   sectionDefaultStatus,
   sectionHeaderStyle,
   statusIcon,
+  statusLabel,
   type WorkItemGroup,
   type WorkItemSectionKind,
 } from "./plan-utils.js";
@@ -21,7 +21,7 @@ import {
   waitDividerBadgeStyle,
 } from "./queue-markers.js";
 import { WaitPointRow } from "./WaitPointRow.js";
-import { WorkItemDetail, type WorkItemDetailChanges } from "./WorkItemDetail.js";
+import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 
 /**
  * Renders one work-item group (an epic + its children, or the root group
@@ -58,6 +58,7 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "toDo", label: "To do" },
   { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
+  { kind: "archived", label: "Archived" },
 ];
 
 export function WorkGroupList({
@@ -70,12 +71,12 @@ export function WorkGroupList({
   commitPoints,
   waitPoints,
   onReorderMixed,
-  onRequestDelete,
   onContextMenu,
   addPointsSlot,
   selectedId,
+  markedIds,
   onSelect,
-  renameRequest,
+  onRequestEdit,
 }: {
   group: WorkItemGroup;
   scopeBatchId: string | null;
@@ -86,23 +87,27 @@ export function WorkGroupList({
   commitPoints?: CommitPoint[];
   waitPoints?: WaitPoint[];
   onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
-  onRequestDelete(item: WorkItem): void;
   onContextMenu(event: React.MouseEvent, item: WorkItem): void;
   addPointsSlot?: React.ReactNode;
   selectedId?: string | null;
-  onSelect?(id: string): void;
-  renameRequest?: { itemId: string; nonce: number } | null;
+  markedIds?: ReadonlySet<string>;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onRequestEdit?(item: WorkItem): void;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   const [overSection, setOverSection] = useState<WorkItemSectionKind | null>(null);
+  // Archived items are hidden by default — the "Archived (N)" header acts as
+  // a click-to-reveal so the Work panel isn't cluttered by tombstoned items,
+  // but they're still reachable (and drop-targetable) when the user wants them.
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
     const buckets: Record<WorkItemSectionKind, QueueRow[]> = {
-      inProgress: [], toDo: [], humanCheck: [], done: [],
+      inProgress: [], toDo: [], humanCheck: [], done: [], archived: [],
     };
     for (const row of work) {
       if (row.kind !== "work") continue;
@@ -219,13 +224,11 @@ export function WorkGroupList({
             }}
             title="Commit point — drag to reposition"
           >
-            <span style={commitDividerLineStyle} />
             <span style={commitDividerBadgeStyle(row.cp.status)}>
               commit · {row.cp.mode}
               {row.cp.status !== "pending" && row.cp.status !== "done" ? ` · ${row.cp.status}` : ""}
               {row.cp.status === "done" ? " · done" : ""}
             </span>
-            <span style={commitDividerLineStyle} />
           </div>
           {isExpanded ? <CommitPointRow cp={row.cp} /> : null}
         </div>
@@ -271,29 +274,39 @@ export function WorkGroupList({
         </div>
       );
     }
+    const isMarked = markedIds?.has(row.item.id) ?? false;
     return (
       <InlineItemRow
         key={key}
         rowKey={key}
         item={row.item}
-        isExpanded={expandedId === row.item.id}
         isSelected={selectedId === row.item.id}
-        renameRequest={renameRequest && renameRequest.itemId === row.item.id ? renameRequest : null}
+        isMarked={isMarked}
         isOver={isOver}
         isDragging={isDragging}
         scopeBatchId={scopeBatchId}
-        onToggleExpand={onToggleExpand}
+        onRequestEdit={onRequestEdit}
         onSelect={onSelect}
         onUpdateWorkItem={onUpdateWorkItem}
-        onRequestDelete={onRequestDelete}
         onContextMenu={onContextMenu}
         onDragStart={(event) => {
           setDraggingKey(key);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", row.item.id);
+          // If the dragged row is part of the mark set, ship every marked id
+          // with the payload so the drop target (BatchRail / backlog chip /
+          // stream chip) can move them all at once. Otherwise it's a single-
+          // item drag as before.
+          const ids = isMarked && markedIds && markedIds.size > 1
+            ? [...markedIds]
+            : [row.item.id];
           event.dataTransfer.setData(
             WORK_ITEM_DRAG_MIME,
-            JSON.stringify({ itemId: row.item.id, fromBatchId: scopeBatchId }),
+            JSON.stringify({
+              itemId: row.item.id,
+              itemIds: ids,
+              fromBatchId: scopeBatchId,
+            }),
           );
         }}
         onDragEnd={resetDrag}
@@ -320,10 +333,12 @@ export function WorkGroupList({
       ) : null}
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        // Only show empty sections while a work item is actively being
-        // dragged — they act as drop zones for status changes. Otherwise
-        // hide them so the panel stays compact.
-        if (empty && (!draggedWorkItem || section.kind === "inProgress")) {
+        // "To do" is the primary queue surface and always renders (even empty)
+        // so the user has a visible anchor for the add-points slot and an
+        // obvious drop target. Other empty sections only appear while a work
+        // item is actively being dragged — they act as drop zones for status
+        // changes. inProgress stays hidden when empty either way.
+        if (empty && section.kind !== "toDo" && (!draggedWorkItem || section.kind === "inProgress")) {
           return null;
         }
         const canDrop = !!draggedWorkItem
@@ -354,25 +369,31 @@ export function WorkGroupList({
           background: isOverSection ? "rgba(74,158,255,0.08)" : headerBaseStyle.background,
           cursor: canDrop ? "copy" : headerBaseStyle.cursor,
         };
+        const isArchived = section.kind === "archived";
+        const collapsed = isArchived && !archivedExpanded;
+        const archivedCount = isArchived ? section.rows.length : 0;
         return (
           <div key={section.kind} data-testid={`plan-section-${section.kind}`}>
             <div
-              style={headerStyle}
+              style={{ ...headerStyle, cursor: isArchived ? "pointer" : headerStyle.cursor }}
               data-testid={`plan-section-header-${section.kind}`}
+              onClick={isArchived ? () => setArchivedExpanded((v) => !v) : undefined}
               {...headerDropHandlers}
             >
-              {section.label}
+              {isArchived
+                ? `${collapsed ? "▸" : "▾"} ${section.label}${archivedCount > 0 ? ` (${archivedCount})` : ""}`
+                : section.label}
             </div>
-            {section.rows.map(renderRow)}
+            {collapsed ? null : section.rows.map(renderRow)}
+            {/* The "+ Commit when done" / "+ Wait here" bar hangs off the tail
+                of the "To do" section (not the very bottom of the list) so
+                queueing a marker feels like appending to the active queue
+                rather than the dead/done pile. Because "To do" always renders
+                (even when empty), the slot is always reachable. */}
+            {section.kind === "toDo" ? addPointsSlot : null}
           </div>
         );
       })}
-      {/* Queue-marker bar always renders after the sections when the parent
-          provides one, so users can add a commit or wait point even when the
-          To do section is empty (e.g. after the agent has pushed every item
-          to human_check). Previously this slot lived inside the toDo section
-          and disappeared whenever that section was empty. */}
-      {addPointsSlot}
     </div>
   );
 }
@@ -383,7 +404,7 @@ const firstSectionLabelStyle: CSSProperties = {
 };
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
-  "waiting", "ready", "in_progress", "human_check", "blocked", "done", "canceled",
+  "blocked", "ready", "in_progress", "human_check", "done", "canceled", "archived",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -400,74 +421,40 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"]
 function InlineItemRow({
   rowKey,
   item,
-  isExpanded,
   isSelected,
+  isMarked,
   isOver,
   isDragging,
   scopeBatchId,
-  onToggleExpand,
   onSelect,
+  onRequestEdit,
   onUpdateWorkItem,
-  onRequestDelete,
   onContextMenu,
   onDragStart,
   onDragEnd,
   onDragOver,
   onDragLeave,
   onDrop,
-  renameRequest,
 }: {
   rowKey: string;
   item: WorkItem;
-  isExpanded: boolean;
   isSelected: boolean;
+  isMarked: boolean;
   isOver: boolean;
   isDragging: boolean;
   scopeBatchId: string | null;
-  onToggleExpand(id: string): void;
-  onSelect?(id: string): void;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onRequestDelete(item: WorkItem): void;
   onContextMenu(event: React.MouseEvent, item: WorkItem): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
   onDragLeave(event: React.DragEvent): void;
   onDrop(event: React.DragEvent): void;
-  renameRequest?: { itemId: string; nonce: number } | null;
 }) {
-  // null = not editing; "" valid draft during edit
-  const [titleDraft, setTitleDraft] = useState<string | null>(null);
-  // Ref (not state) so Escape's handler can set it synchronously and the
-  // blur handler that fires on the same tick sees the update — matches
-  // WorkItemDetail's EditableField, where useState raced the blur.
-  const cancelRequested = useRef(false);
-
-  useEffect(() => { setTitleDraft(null); }, [item.id]);
-
-  useEffect(() => {
-    if (!renameRequest || renameRequest.itemId !== item.id) return;
-    if (item.status === "in_progress") return;
-    setTitleDraft(item.title);
-  }, [renameRequest?.nonce, renameRequest?.itemId, item.id, item.status, item.title]);
-
-  const editing = titleDraft !== null;
-  const dimmed = item.status === "done" || item.status === "canceled";
+  const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
   const locked = item.status === "in_progress";
-
-  const commitTitle = () => {
-    if (titleDraft === null) return;
-    if (cancelRequested.current) {
-      cancelRequested.current = false;
-      setTitleDraft(null);
-      return;
-    }
-    const next = titleDraft.trim();
-    setTitleDraft(null);
-    if (next && next !== item.title) {
-      void onUpdateWorkItem(item.id, { title: next });
-    }
-  };
 
   // scopeBatchId isn't used directly here, but the outer drag handler that
   // encoded it into dataTransfer was captured at onDragStart creation time —
@@ -475,98 +462,74 @@ function InlineItemRow({
   void scopeBatchId;
 
   return (
-    <div>
-      <div
-        draggable={!locked && !editing}
-        onDragStart={locked || editing ? undefined : onDragStart}
-        onDragEnd={onDragEnd}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        onClick={() => {
-          if (editing) return;
-          onSelect?.(item.id);
-          onToggleExpand(item.id);
-        }}
-        onContextMenu={(event) => onContextMenu(event, item)}
+    <div
+      draggable={!locked}
+      onDragStart={locked ? undefined : onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onClick={(event) => {
+        const toggle = event.metaKey || event.ctrlKey;
+        const range = event.shiftKey && !toggle;
+        if (toggle || range) {
+          // Cmd/Ctrl+click toggles the mark set; Shift+click ranges from the
+          // primary selection. Both skip the edit modal so multi-select
+          // doesn't open the form for every clicked row.
+          onSelect?.(item.id, { toggle, range });
+          return;
+        }
+        // Plain click: select + open the edit modal. Title/description/
+        // acceptance edits all happen there; the row itself only exposes
+        // the inline status + priority pickers.
+        onSelect?.(item.id);
+        onRequestEdit?.(item);
+      }}
+      onContextMenu={(event) => onContextMenu(event, item)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        cursor: isDragging ? "grabbing" : "pointer",
+        borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
+        borderLeft: isMarked
+          ? "2px solid var(--priority-urgent)"
+          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        background: isMarked
+          ? "rgba(234,179,8,0.14)"
+          : isSelected
+            ? "rgba(74,158,255,0.12)"
+            : isDragging
+              ? "rgba(255,255,255,0.04)"
+              : "transparent",
+        fontSize: 12,
+        userSelect: "none",
+        opacity: dimmed ? 0.6 : 1,
+      }}
+      title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
+      data-key={rowKey}
+      data-testid={`work-item-row-${item.id}`}
+    >
+      <InlineStatusPicker
+        status={item.status}
+        onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }}
+      />
+      <span
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "4px 8px",
-          cursor: isDragging ? "grabbing" : "pointer",
-          borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
-          borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-          background: isExpanded
-            ? "var(--bg-detail)"
-            : isSelected
-              ? "rgba(74,158,255,0.12)"
-              : isDragging
-                ? "rgba(255,255,255,0.04)"
-                : "transparent",
-          fontSize: 12,
-          userSelect: editing ? "text" : "none",
-          opacity: dimmed ? 0.6 : 1,
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
-        title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
-        data-key={rowKey}
-        data-testid={`work-item-row-${item.id}`}
       >
-        <InlineStatusPicker
-          status={item.status}
-          onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }}
-        />
-        {editing ? (
-          <input
-            autoFocus
-            value={titleDraft ?? ""}
-            onChange={(event) => setTitleDraft(event.target.value)}
-            onClick={(event) => event.stopPropagation()}
-            onBlur={commitTitle}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                (event.target as HTMLElement).blur();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                cancelRequested.current = true;
-                (event.target as HTMLElement).blur();
-              }
-            }}
-            style={{
-              ...inputStyle,
-              flex: 1,
-              minWidth: 0,
-              padding: "2px 4px",
-            }}
-          />
-        ) : (
-          <span
-            onClick={(event) => {
-              event.stopPropagation();
-              setTitleDraft(item.title);
-            }}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontWeight: isExpanded ? 600 : 400,
-            }}
-            title="Click to rename"
-          >
-            {item.title}
-          </span>
-        )}
-        <InlinePriorityPicker
-          priority={item.priority}
-          onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
-        />
-      </div>
-      {isExpanded ? (
-        <WorkItemDetail item={item} onUpdateWorkItem={onUpdateWorkItem} onRequestDelete={() => onRequestDelete(item)} />
-      ) : null}
+        {item.title}
+      </span>
+      <InlinePriorityPicker
+        priority={item.priority}
+        onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
+      />
     </div>
   );
 }
@@ -582,7 +545,7 @@ function InlineStatusPicker({
     <span
       onClick={(event) => event.stopPropagation()}
       style={{ position: "relative", display: "inline-block", flexShrink: 0, width: 14, textAlign: "center" }}
-      title={`Status: ${status} — click to change`}
+      title={`Status: ${statusLabel(status)} — click to change`}
     >
       <span>{statusIcon(status)}</span>
       <select
@@ -600,7 +563,7 @@ function InlineStatusPicker({
         }}
       >
         {STATUS_OPTIONS.map((option) => (
-          <option key={option} value={option}>{option}</option>
+          <option key={option} value={option}>{statusLabel(option)}</option>
         ))}
       </select>
     </span>

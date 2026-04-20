@@ -70,9 +70,9 @@ function buildBacklogState(store: WorkItemStore): BacklogState {
   const items = store.listBacklog();
   return {
     items,
-    waiting: items.filter((item) => item.status === "waiting" || item.status === "ready" || item.status === "blocked"),
+    waiting: items.filter((item) => item.status === "ready" || item.status === "blocked"),
     inProgress: items.filter((item) => item.status === "in_progress" || item.status === "human_check"),
-    done: items.filter((item) => item.status === "done" || item.status === "canceled"),
+    done: items.filter((item) => item.status === "done" || item.status === "canceled" || item.status === "archived"),
   };
 }
 

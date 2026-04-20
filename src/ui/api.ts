@@ -40,7 +40,7 @@ export interface BatchState {
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "waiting" | "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled";
+export type WorkItemStatus = "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface WorkItem {

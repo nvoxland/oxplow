@@ -2,7 +2,7 @@
 description: Review this session's transcript and propose concrete newde improvements
 ---
 
-# /autoimprove — reflect on the session, propose newde upgrades
+# /self-reflect — reflect on the session, propose newde upgrades
 
 You are going to review **your own transcript** for the current batch and produce a focused critique of newde itself. The goal is to find changes to newde's code, prompts, tooling, or UX that would make future sessions faster, cheaper, more correct, and more collaborative.
 

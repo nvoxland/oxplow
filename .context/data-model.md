@@ -42,8 +42,11 @@ called it `Current Batch`; migration v12 renames the sort_index=0 row).
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 
 The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
-Statuses: `waiting`, `ready`, `in_progress`, `human_check`, `blocked`, `done`,
-`canceled`. `parent_id` chains items under epics. `acceptance_criteria` is
+Statuses: `ready`, `in_progress`, `human_check`, `blocked`, `done`,
+`canceled`, `archived`. `archived` is a terminal state that hides the item
+from the default Work panel view (the "Archived" section is collapsed until
+the user expands it); `listReady`'s blocker check treats archived the same
+as done/canceled. `parent_id` chains items under epics. `acceptance_criteria` is
 plain text (one criterion per line). Work-item links express dependencies
 (`blocks`, `discovered_from`, `relates_to`, …) via the `work_item_links`
 join table.
@@ -187,9 +190,9 @@ items) and in the UI (buttons are disabled with an explanatory tooltip).
 ## Status diagrams (text)
 
 ```
-work item:    waiting ─► ready ─► in_progress ─► human_check ─► done
+work item:    ready ─► in_progress ─► human_check ─► done ─► archived
                    ╰─────────► blocked
-                   ╰─────────► canceled
+                   ╰─────────► canceled ─► archived
 
 commit point: pending ─► proposed ─► approved ─► done
                               ╰─► rejected ─► pending  (user reject)

@@ -12,7 +12,7 @@ export interface WorkItemGroup {
   items: WorkItem[];
 }
 
-export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "done";
+export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "done" | "archived";
 
 export interface WorkItemSection {
   kind: WorkItemSectionKind;
@@ -27,14 +27,16 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "toDo", label: "To do" },
   { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
+  { kind: "archived", label: "Archived" },
 ];
 
 export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   switch (status) {
     case "in_progress": return "inProgress";
-    case "waiting": case "ready": case "blocked": return "toDo";
+    case "ready": case "blocked": return "toDo";
     case "human_check": return "humanCheck";
     case "done": case "canceled": return "done";
+    case "archived": return "archived";
   }
 }
 
@@ -47,12 +49,13 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
     case "toDo": return "ready";
     case "humanCheck": return "human_check";
     case "done": return "done";
+    case "archived": return "archived";
   }
 }
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
-    inProgress: [], toDo: [], humanCheck: [], done: [],
+    inProgress: [], toDo: [], humanCheck: [], done: [], archived: [],
   };
   for (const item of items) buckets[classifyWorkItem(item.status)].push(item);
   const sections: WorkItemSection[] = [];
@@ -105,15 +108,30 @@ export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
   return groups;
 }
 
+// User-facing label for a status. The raw id ("human_check", "in_progress")
+// still flows through the wire and the `value` on <select> options, but every
+// label the user sees goes through this helper so tweaks land in one place.
+export function statusLabel(status: WorkItemStatus): string {
+  switch (status) {
+    case "ready": return "Ready";
+    case "in_progress": return "In Progress";
+    case "human_check": return "Human Check";
+    case "blocked": return "Blocked";
+    case "done": return "Done";
+    case "canceled": return "Canceled";
+    case "archived": return "Archived";
+  }
+}
+
 export function statusIcon(status: WorkItemStatus): string {
   switch (status) {
-    case "waiting": return "○";
     case "ready": return "◔";
     case "in_progress": return "◐";
     case "human_check": return "?";
     case "blocked": return "⊘";
     case "done": return "✓";
     case "canceled": return "✕";
+    case "archived": return "▣";
   }
 }
 

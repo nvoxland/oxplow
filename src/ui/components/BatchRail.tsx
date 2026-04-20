@@ -259,7 +259,7 @@ function BatchChip({
   // work is complete).
   const total = workState?.items.length ?? 0;
   const done = workState
-    ? workState.items.filter((i) => i.status === "done" || i.status === "canceled" || i.status === "human_check").length
+    ? workState.items.filter((i) => i.status === "done" || i.status === "canceled" || i.status === "archived" || i.status === "human_check").length
     : 0;
   // Two orthogonal states on each tab:
   //  - `isSelected`: what the user is viewing (main bg, accent underline)
@@ -289,11 +289,22 @@ function BatchChip({
     event.preventDefault();
     setDragOver(false);
     try {
-      const payload = JSON.parse(raw) as { itemId?: string; fromBatchId?: string | null };
-      if (!payload.itemId) return;
+      const payload = JSON.parse(raw) as {
+        itemId?: string;
+        itemIds?: string[];
+        fromBatchId?: string | null;
+      };
       const fromBatchId = payload.fromBatchId ?? null;
       if (fromBatchId === batch.id) return;
-      onDropWorkItem({ itemId: payload.itemId, fromBatchId });
+      // `itemIds` carries the full mark set when the drag originated on a
+      // marked row; fall back to the single `itemId` for regular drags so
+      // older payloads still work.
+      const ids = payload.itemIds && payload.itemIds.length > 0
+        ? payload.itemIds
+        : payload.itemId ? [payload.itemId] : [];
+      for (const id of ids) {
+        onDropWorkItem({ itemId: id, fromBatchId });
+      }
     } catch {
       // ignore malformed payload
     }
