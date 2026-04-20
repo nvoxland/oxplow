@@ -51,9 +51,9 @@ describe("runMigrations", () => {
     runMigrations(driver);
     const now = "2024-01-01T00:00:00Z";
     driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'p1:working', 'p1:talking', '', '', '${now}', '${now}')`);
-    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, summary, summary_updated_at, created_at, updated_at) VALUES ('b1', 's1', 'Current Batch', 'active', 0, 'pt1', '', '', NULL, '${now}', '${now}')`);
-    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, summary, summary_updated_at, created_at, updated_at) VALUES ('b2', 's1', 'Current Batch', 'queued', 1, 'pt2', '', '', NULL, '${now}', '${now}')`);
-    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, summary, summary_updated_at, created_at, updated_at) VALUES ('b3', 's1', 'Something else', 'queued', 2, 'pt3', '', '', NULL, '${now}', '${now}')`);
+    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b1', 's1', 'Current Batch', 'active', 0, 'pt1', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b2', 's1', 'Current Batch', 'queued', 1, 'pt2', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b3', 's1', 'Something else', 'queued', 2, 'pt3', '', '${now}', '${now}')`);
 
     // Re-invoke the v12 up directly so the assertion is scoped to that
     // migration's effect, independent of whether it already ran as part of

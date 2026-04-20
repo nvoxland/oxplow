@@ -2,7 +2,6 @@ import type { Logger } from "../core/logger.js";
 import type { Batch, BatchStore } from "../persistence/batch-store.js";
 import {
   type CommitPoint,
-  type CommitPointMode,
   type CommitPointStore,
 } from "../persistence/commit-point-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
@@ -13,20 +12,8 @@ import { gitCommitAll } from "../git/git.js";
 /**
  * Owns the parts of the batch queue that span multiple stores: commit
  * points, wait points, the shared sort_index space they occupy alongside
- * work items, and the runtime-side execution of approved commits.
- *
- * Pulled out of `ElectronRuntime` so:
- *   - the cross-store reorder + execute paths stay close together rather
- *     than scattered across a god-object;
- *   - failure handling for `executeApprovedCommit` (which used to deadlock
- *     the queue when `git commit` failed) lives next to the proposal /
- *     approve / mark-done methods that produce the state it acts on;
- *   - tests can exercise the orchestrator with mock stores instead of
- *     spinning up an Electron runtime.
- *
- * The orchestrator does not subscribe to its own change events — the
- * runtime's existing subscription on `commitPointStore` continues to call
- * `executeApprovedCommit` when a point flips to `approved`.
+ * work items, and the synchronous execution of a commit once the agent
+ * calls `newde__commit` (after the user approves in chat).
  */
 export class BatchQueueOrchestrator {
   constructor(
@@ -44,7 +31,7 @@ export class BatchQueueOrchestrator {
     return this.commitPointStore.listForBatch(batchId);
   }
 
-  createCommitPoint(batchId: string, mode: CommitPointMode): CommitPoint {
+  createCommitPoint(batchId: string): CommitPoint {
     // A commit point with no preceding work items has nothing to commit;
     // refuse to create one as the very first queue entry. The mixed reorder
     // still lets users drag a point above all work items if they really
@@ -54,25 +41,12 @@ export class BatchQueueOrchestrator {
     }
     return this.commitPointStore.create({
       batchId,
-      mode,
       sortIndex: this.nextQueueSortIndex(batchId),
     });
   }
 
-  setCommitPointMode(id: string, mode: CommitPointMode): CommitPoint {
-    return this.commitPointStore.setMode(id, mode);
-  }
-
-  approveCommitPoint(id: string, editedMessage?: string): CommitPoint {
-    return this.commitPointStore.approve(id, editedMessage);
-  }
-
-  rejectCommitPoint(id: string, note: string): CommitPoint {
-    return this.commitPointStore.reject(id, note);
-  }
-
-  resetCommitPoint(id: string): CommitPoint {
-    return this.commitPointStore.resetToPending(id);
+  proposeCommit(id: string, message: string): CommitPoint {
+    return this.commitPointStore.propose(id, message);
   }
 
   deleteCommitPoint(id: string): void {
@@ -132,61 +106,29 @@ export class BatchQueueOrchestrator {
   // -------- commit execution --------
 
   /**
-   * Run `git commit` for an `approved` commit point. Called both eagerly
-   * (when a point flips to `approved` via the runtime's subscribe handler)
-   * and at startup (for any approved-but-uncommitted points left over
-   * from a crash).
-   *
-   * Failure path moves the point to `rejected` via `failExecution` so the
-   * startup-recovery loop doesn't retry the same broken commit forever
-   * — the user reads the rejection_note in the UI and clicks Retry.
+   * Run `git commit` for a commit point. Called synchronously from the
+   * `newde__commit` MCP handler after the user has approved the drafted
+   * message in chat. Throws if git commit fails; the caller surfaces the
+   * error to the agent so it can retry.
    */
-  executeApprovedCommit(cp: CommitPoint): void {
+  executeCommit(cpId: string, message: string): CommitPoint {
+    const cp = this.commitPointStore.get(cpId);
+    if (!cp) throw new Error(`commit point ${cpId} not found`);
+    if (cp.status === "done") throw new Error(`commit point ${cpId} already committed`);
     const batch = this.batchStore.findById(cp.batch_id);
-    if (!batch) {
-      this.logger.warn("commit point has no batch; dropping", { id: cp.id });
-      return;
-    }
+    if (!batch) throw new Error(`commit point ${cpId} has no batch`);
     const stream = this.streamStore.get(batch.stream_id);
-    if (!stream) {
-      this.logger.warn("commit point has no stream; dropping", { id: cp.id });
-      return;
-    }
-    const message = cp.approved_message ?? cp.proposed_message;
-    if (!message) {
-      this.logger.warn("commit point approved with no message; skipping", { id: cp.id });
-      return;
-    }
-    // Commit-point auto-commits keep the historical `git add -A` behaviour:
-    // the agent that authored the commit-point queue is the only writer in
-    // its worktree, so picking up untracked files is the intent. The
-    // includeUntracked toggle on the manual Files-commit dialog (default
-    // OFF) is what addresses the dogfood-scripts-bundling problem.
+    if (!stream) throw new Error(`commit point ${cpId} has no stream`);
+    // The agent that authored the queue is the only writer in its worktree,
+    // so picking up untracked files is the intent here. The Files-commit
+    // dialog keeps its own narrower default.
     const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
     if (!result.ok || !result.sha) {
-      this.logger.warn("git commit failed for commit point", {
-        id: cp.id,
-        stderr: result.stderr,
-      });
-      this.commitPointStore.failExecution(cp.id, `commit failed: ${result.stderr || "unknown"}`);
-      return;
+      throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
     }
-    try {
-      this.commitPointStore.markDone(cp.id, result.sha);
-      this.logger.info("committed for commit point", { id: cp.id, sha: result.sha });
-    } catch (err) {
-      this.logger.warn("failed to mark commit point done", {
-        id: cp.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  /** Drain any commit points left in `approved` from a prior run. */
-  drainPendingExecutions(): void {
-    for (const cp of this.commitPointStore.listApproved()) {
-      this.executeApprovedCommit(cp);
-    }
+    const updated = this.commitPointStore.markCommitted(cpId, message, result.sha);
+    this.logger.info("committed for commit point", { id: cpId, sha: result.sha });
+    return updated;
   }
 
   /**

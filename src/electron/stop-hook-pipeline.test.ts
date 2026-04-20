@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { decideStopDirective, type BatchSnapshot } from "./stop-hook-pipeline.js";
 import type { Batch } from "../persistence/batch-store.js";
-import type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
+import type { CommitPoint, CommitPointStatus } from "../persistence/commit-point-store.js";
 import type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
 
@@ -22,8 +22,6 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     updated_at: "2024-01-01T00:00:00Z",
     pane_target: "p",
     resume_session_id: "",
-    summary: "",
-    summary_updated_at: null,
     ...overrides,
   };
 }
@@ -49,17 +47,14 @@ function workItem(id: string, sort_index: number, status: WorkItemStatus = "read
   };
 }
 
-function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending", mode: CommitPointMode = "approval"): CommitPoint {
+function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending"): CommitPoint {
   return {
     id,
     batch_id: "b1",
     sort_index,
-    mode,
     status,
     proposed_message: null,
-    approved_message: null,
     commit_sha: null,
-    rejection_note: null,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     completed_at: null,
@@ -131,8 +126,8 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("approval-mode commit at proposed: allow stop, no side effects", () => {
-    const cp = commitPoint("cp1", 1, "proposed", "approval");
+  test("commit at proposed (awaiting user chat approval): allow stop, no side effects", () => {
+    const cp = commitPoint("cp1", 1, "proposed");
     const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
@@ -303,12 +298,4 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("rejected commit point still active until pending again (so user can retry)", () => {
-    // findActiveMarker uses `cp.status !== "done"`, so rejected counts as
-    // not-done. But the directive only fires for status === "pending", so a
-    // rejected point holds up the queue without re-prompting the agent.
-    const rejected = commitPoint("cp1", 1, "rejected");
-    const out = decideStopDirective(snapshot({ commitPoints: [rejected] }), builders);
-    expect(out.directive).toBeNull();
-  });
 });

@@ -18,7 +18,6 @@ import type {
   GitLogCommit,
   BlameLine,
   CommitPoint,
-  CommitPointMode,
   WaitPoint,
   RefOption,
   BatchWorkState,
@@ -62,7 +61,6 @@ export type {
   GitLogCommit,
   BlameLine,
   CommitPoint,
-  CommitPointMode,
   WaitPoint,
   RefOption,
   AgentStatus,
@@ -227,11 +225,7 @@ export interface DesktopApi {
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string): Promise<WorkspaceRenameResult>;
   deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange>;
   listCommitPoints(batchId: string): Promise<CommitPoint[]>;
-  createCommitPoint(streamId: string, batchId: string, mode: CommitPointMode): Promise<CommitPoint>;
-  setCommitPointMode(id: string, mode: CommitPointMode): Promise<CommitPoint>;
-  approveCommitPoint(id: string, editedMessage?: string): Promise<CommitPoint>;
-  rejectCommitPoint(id: string, note: string): Promise<CommitPoint>;
-  resetCommitPoint(id: string): Promise<CommitPoint>;
+  createCommitPoint(streamId: string, batchId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;
   reorderBatchQueue(streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
   listWaitPoints(batchId: string): Promise<WaitPoint[]>;

@@ -11,8 +11,6 @@ function makeBatch(overrides: Partial<Batch> = {}): Batch {
     sort_index: 0,
     pane_target: "newde:0",
     resume_session_id: "",
-    summary: "",
-    summary_updated_at: null,
     created_at: "2026-04-19T00:00:00Z",
     updated_at: "2026-04-19T00:00:00Z",
     ...overrides,

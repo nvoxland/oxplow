@@ -24,11 +24,11 @@ function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem 
 test("classifyWorkItem buckets each status into exactly one section", () => {
   expect(classifyWorkItem("in_progress")).toBe("inProgress");
   expect(classifyWorkItem("ready")).toBe("toDo");
-  expect(classifyWorkItem("blocked")).toBe("toDo");
+  expect(classifyWorkItem("blocked")).toBe("blocked");
   expect(classifyWorkItem("human_check")).toBe("humanCheck");
   expect(classifyWorkItem("done")).toBe("done");
   expect(classifyWorkItem("canceled")).toBe("done");
-  expect(classifyWorkItem("archived")).toBe("archived");
+  expect(classifyWorkItem("archived")).toBe("done");
 });
 
 test("splitIntoSections returns sections in fixed order: inProgress → toDo → humanCheck → done", () => {
@@ -68,7 +68,6 @@ test("sectionDefaultStatus maps drop-target sections to landing statuses; in-pro
   expect(sectionDefaultStatus("toDo")).toBe("ready");
   expect(sectionDefaultStatus("humanCheck")).toBe("human_check");
   expect(sectionDefaultStatus("done")).toBe("done");
-  expect(sectionDefaultStatus("archived")).toBe("archived");
   // The agent owns in_progress and its items are drag-locked — reject drops.
   expect(sectionDefaultStatus("inProgress")).toBeNull();
 });

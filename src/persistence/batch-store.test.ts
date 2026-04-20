@@ -18,29 +18,6 @@ describe("BatchStore", () => {
     expect(state.batches[0]?.pane_target).toBe("newde-demo:working-s-1");
   });
 
-  test("recordSummary updates summary fields and emits an event", () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-batches-"));
-    const stream = makeStream();
-    const store = new BatchStore(dir);
-    const initial = store.ensureStream(stream);
-    const batchId = initial.batches[0]!.id;
-
-    expect(initial.batches[0]?.summary).toBe("");
-    expect(initial.batches[0]?.summary_updated_at).toBeNull();
-
-    const changes: string[] = [];
-    store.subscribe((change) => {
-      if (change.batchId === batchId) changes.push(change.kind);
-    });
-
-    const updated = store.recordSummary(stream.id, batchId, "  Read the README. Planning next steps.  ");
-    expect(updated.summary).toBe("Read the README. Planning next steps.");
-    expect(updated.summary_updated_at).not.toBeNull();
-    expect(changes).toContain("summary-updated");
-
-    expect(() => store.recordSummary(stream.id, batchId, "   ")).toThrow(/required/);
-  });
-
   test("findById resolves a batch by id alone, even across streams", () => {
     // Regression: MCP tools used to require streamId alongside batchId, which
     // broke when the UI's "current stream" drifted from where the agent was

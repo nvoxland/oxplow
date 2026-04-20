@@ -496,11 +496,6 @@ function HoverCard({
           last turn: {relativeTime(lastTurn.started_at)}
         </div>
       ) : null}
-      {batch.summary ? (
-        <div style={{ fontSize: 11, color: "var(--fg)", lineHeight: 1.4, whiteSpace: "pre-wrap" }}>
-          {batch.summary}
-        </div>
-      ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
           <button type="button" data-testid={`batch-chip-complete-${batch.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">

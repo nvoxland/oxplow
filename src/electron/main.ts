@@ -186,11 +186,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
   handle("newde:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
   handle("newde:listCommitPoints", (_event, batchId: string) => currentRuntime.listCommitPoints(batchId));
-  handle("newde:createCommitPoint", (_event, streamId: string, batchId: string, mode: "auto" | "approval") => currentRuntime.createCommitPoint(streamId, batchId, mode));
-  handle("newde:setCommitPointMode", (_event, id: string, mode: "auto" | "approval") => currentRuntime.setCommitPointMode(id, mode));
-  handle("newde:approveCommitPoint", (_event, id: string, editedMessage?: string) => currentRuntime.approveCommitPoint(id, editedMessage));
-  handle("newde:rejectCommitPoint", (_event, id: string, note: string) => currentRuntime.rejectCommitPoint(id, note));
-  handle("newde:resetCommitPoint", (_event, id: string) => currentRuntime.resetCommitPoint(id));
+  handle("newde:createCommitPoint", (_event, streamId: string, batchId: string) => currentRuntime.createCommitPoint(streamId, batchId));
   handle("newde:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
   handle("newde:reorderBatchQueue", (_event, streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderBatchQueue(streamId, batchId, entries));
   handle("newde:listWaitPoints", (_event, batchId: string) => currentRuntime.listWaitPoints(batchId));

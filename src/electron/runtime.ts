@@ -53,7 +53,7 @@ import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { BACKLOG_SCOPE, WorkItemStore } from "../persistence/work-item-store.js";
-import { CommitPointStore, type CommitPoint, type CommitPointMode } from "../persistence/commit-point-store.js";
+import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import {
@@ -324,12 +324,6 @@ export class ElectronRuntime {
         id: change.id,
         kind: change.kind,
       });
-      // Approved proposals get committed eagerly on the runtime side so the
-      // agent sees the queue move forward without further prompting.
-      if (change.kind === "updated" && change.id) {
-        const cp = this.commitPointStore.get(change.id);
-        if (cp?.status === "approved") this.batchQueue.executeApprovedCommit(cp);
-      }
     });
     this.turnStore.subscribe((change) => {
       const batch = this.batchStore.findById(change.batchId);
@@ -380,10 +374,6 @@ export class ElectronRuntime {
       });
     }
 
-    // Crash recovery: any commit points left in `approved` state from a prior
-    // run haven't had their `git commit` executed yet. Drain them now.
-    this.batchQueue.drainPendingExecutions();
-
     // Snapshot retention: prune on startup, then once per 24h while running.
     // `snapshotRetentionDays === 0` disables pruning.
     this.runSnapshotCleanup();
@@ -400,6 +390,7 @@ export class ElectronRuntime {
           streamStore: this.store,
           workItemStore: this.workItemStore,
           commitPointStore: this.commitPointStore,
+          executeCommit: (cpId, message) => this.batchQueue.executeCommit(cpId, message),
           turnStore: this.turnStore,
           fileChangeStore: this.fileChangeStore,
         }),
@@ -1195,9 +1186,8 @@ export class ElectronRuntime {
         const open = this.turnStore.currentOpenTurn(batchId);
         if (!open) return;
         const batch = this.batchStore.findById(batchId);
-        const answer = batch?.summary?.trim() ? batch.summary : null;
         const workItemId = this.soleInProgressWorkItem(batchId);
-        this.turnStore.closeTurn(open.id, { workItemId, answer });
+        this.turnStore.closeTurn(open.id, { workItemId, answer: null });
         const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
           ? (envelope.payload as { transcript_path: string }).transcript_path
           : null;
@@ -1560,25 +1550,9 @@ export class ElectronRuntime {
     return this.batchQueue.listCommitPoints(batchId);
   }
 
-  createCommitPoint(streamId: string, batchId: string, mode: CommitPointMode): CommitPoint {
+  createCommitPoint(streamId: string, batchId: string): CommitPoint {
     this.resolveBatch(streamId, batchId);
-    return this.batchQueue.createCommitPoint(batchId, mode);
-  }
-
-  setCommitPointMode(id: string, mode: CommitPointMode): CommitPoint {
-    return this.batchQueue.setCommitPointMode(id, mode);
-  }
-
-  approveCommitPoint(id: string, editedMessage?: string): CommitPoint {
-    return this.batchQueue.approveCommitPoint(id, editedMessage);
-  }
-
-  rejectCommitPoint(id: string, note: string): CommitPoint {
-    return this.batchQueue.rejectCommitPoint(id, note);
-  }
-
-  resetCommitPoint(id: string): CommitPoint {
-    return this.batchQueue.resetCommitPoint(id);
+    return this.batchQueue.createCommitPoint(batchId);
   }
 
   deleteCommitPoint(id: string): void {
@@ -1683,20 +1657,14 @@ export function buildNextWorkItemStopReason(
 
 export function buildCommitPointStopReason(cp: CommitPoint): string {
   const lines = [
-    `A commit point is due in this batch's work queue (commit_point_id=${cp.id}, mode=${cp.mode}).`,
+    `A commit point is due in this batch's work queue (commit_point_id=${cp.id}).`,
     ``,
     `Inspect the unstaged/staged changes since the last commit (use read-only commands like \`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message in Conventional-Commits style describing those changes.`,
     ``,
-    `Call \`mcp__newde__propose_commit\` with { commit_point_id: "${cp.id}", message: "<your message>" }. Do NOT run \`git add\` or \`git commit\` yourself — the runtime executes the commit once the message is approved.`,
+    `Call \`mcp__newde__propose_commit\` with { commit_point_id: "${cp.id}", message: "<your message>" } to record the draft, then output the message in your reply and ASK the user to approve. Do NOT run \`git add\` or \`git commit\` yourself.`,
+    ``,
+    `After the user replies: if they approve, call \`mcp__newde__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the commit. If they suggest changes, call propose_commit again with the updated message and ask again.`,
   ];
-  if (cp.mode === "auto") {
-    lines.push(``, `Mode is "auto": the runtime will commit immediately after you propose, so your message is final.`);
-  } else {
-    lines.push(``, `Mode is "approval": after you propose, wait — the user will approve, edit, or reject the message. You'll see the outcome on your next turn.`);
-  }
-  if (cp.rejection_note) {
-    lines.push(``, `Previous attempt was rejected with this note: ${cp.rejection_note}`);
-  }
   return lines.join("\n");
 }
 
@@ -1747,16 +1715,14 @@ function buildBatchAgentPrompt(
     ``,
     `LINK DEPENDENCIES with newde__link_work_items when items relate. Read \`.newde/runtime/claude-plugin/AGENT_GUIDE.md\` on demand for the link-type catalog (blocks / discovered_from / relates_to / duplicates / supersedes / replies_to) and the work-item kind rubric — no need to quote that reference back, just use the right values.`,
     ``,
-    `STAY HONEST. Rewrite description / acceptanceCriteria when your understanding shifts. newde__delete_work_item anything you've decided against instead of letting it rot in "waiting".`,
-    ``,
-    `BEFORE ENDING EACH TURN, call newde__record_batch_summary with a 2-3 sentence description of what has been happening in this batch overall and what changed in the latest round. Rewrite from scratch so it reflects the current state of the work-item log.`,
+    `STAY HONEST. Rewrite description / acceptanceCriteria when your understanding shifts. newde__delete_work_item anything you've decided against instead of letting it rot in the queue.`,
     ``,
     `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}).`,
     `Always pass batchId="${batch.id}" to every work-item tool.`,
     activeBatch && activeBatch.id !== batch.id
       ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
-    `Call newde__get_batch_context whenever you need to re-check stream/batch ids or read the current batch summary.`,
+    `Call newde__get_batch_context whenever you need to re-check stream/batch ids.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

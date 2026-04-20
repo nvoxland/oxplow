@@ -222,7 +222,7 @@ via `drainPendingExecutions()` to cover crashes mid-commit.
 `buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
 `newde__*` tool surface:
 
-- `get_batch_context`, `record_batch_summary`, `list_batch_work`,
+- `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `create_work_item`, `update_work_item`,
   `get_work_item`, `delete_work_item`, `reorder_work_items`,
   `link_work_items`, `add_work_note`, `list_recent_file_changes`

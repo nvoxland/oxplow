@@ -1,6 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_GUIDE_FILENAME, buildAgentGuide } from "./agent-guide.js";
+import {
+  TASK_MANAGEMENT_SKILL_FILE,
+  TASK_MANAGEMENT_SKILL_NAME,
+  buildTaskManagementSkill,
+} from "./agent-skills.js";
 
 export interface ElectronPluginOptions {
   /** Project dir. The plugin is written to
@@ -20,6 +25,8 @@ export interface ElectronPlugin {
   manifestPath: string;
   /** Absolute path to the reference guide the agent can Read on demand. */
   agentGuidePath: string;
+  /** Absolute path to the task-management SKILL.md. */
+  taskManagementSkillPath: string;
 }
 
 // SessionStart is registered but Claude Code silently drops HTTP hooks for
@@ -87,7 +94,15 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const agentGuidePath = join(pluginDir, AGENT_GUIDE_FILENAME);
   writeFileSync(agentGuidePath, buildAgentGuide(), "utf8");
 
-  return { pluginDir, hooksPath, manifestPath, agentGuidePath };
+  // Model-invoked skill that fires whenever the agent is about to file or
+  // manage newde work items. Keeps task-filing policy out of the always-on
+  // system prompt without losing it.
+  const skillsDir = join(pluginDir, "skills", TASK_MANAGEMENT_SKILL_NAME);
+  mkdirSync(skillsDir, { recursive: true });
+  const taskManagementSkillPath = join(skillsDir, TASK_MANAGEMENT_SKILL_FILE);
+  writeFileSync(taskManagementSkillPath, buildTaskManagementSkill(), "utf8");
+
+  return { pluginDir, hooksPath, manifestPath, agentGuidePath, taskManagementSkillPath };
 }
 
 function buildPluginHooks(hookUrl: string) {

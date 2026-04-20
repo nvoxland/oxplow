@@ -9,7 +9,7 @@ import type {
   WorkItemStatus,
   WorkItemStore,
 } from "../persistence/work-item-store.js";
-import type { CommitPointStore } from "../persistence/commit-point-store.js";
+import type { CommitPoint, CommitPointStore } from "../persistence/commit-point-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
@@ -22,6 +22,10 @@ export interface McpToolDeps {
   streamStore: StreamStore;
   workItemStore: WorkItemStore;
   commitPointStore: CommitPointStore;
+  /** Synchronously run `git commit` for a commit point (message is the final
+   *  text the user approved). Wired by the runtime to the batch queue
+   *  orchestrator; thrown errors bubble back to the agent so it can retry. */
+  executeCommit(cpId: string, message: string): CommitPoint;
   turnStore: TurnStore;
   fileChangeStore: FileChangeStore;
 }
@@ -42,7 +46,7 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, turnStore, fileChangeStore } = deps;
+  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, executeCommit, turnStore, fileChangeStore } = deps;
 
   // Prefer the batch row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { batch, stream } — both guaranteed to agree
@@ -119,29 +123,8 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           batchTitle: batch?.title ?? null,
           activeBatchId: batchState.activeBatchId,
           selectedBatchId: batchState.selectedBatchId,
-          summary: batch?.summary ?? "",
-          summaryUpdatedAt: batch?.summary_updated_at ?? null,
           otherActiveBatches,
         };
-      },
-    },
-    {
-      name: "newde__record_batch_summary",
-      description:
-        "Record a 2-3 sentence rolling summary of what has been happening in this batch. Call this near the end of each turn. Replace the prior summary with one that reflects the overall state plus the latest round's activity.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the batch you are summarising." },
-          summary: { type: "string", description: "Required 2-3 sentence rolling summary." },
-        },
-        required: ["batchId", "summary"],
-      },
-      handler: (args: { streamId?: string; batchId: string; summary: string }) => {
-        const { stream } = resolveBatchAndStream(args);
-        const updated = batchStore.recordSummary(stream.id, args.batchId, args.summary);
-        return { ok: true, summary: updated.summary, summaryUpdatedAt: updated.summary_updated_at };
       },
     },
     {
@@ -427,22 +410,35 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     {
       name: "newde__propose_commit",
       description:
-        "Propose a git commit message for an active commit point. The runtime will either commit immediately (auto mode) or park the proposal for user approval (approval mode). Do NOT run `git add` or `git commit` yourself — the runtime handles the commit once this tool returns. The caller should NOT call this without having been instructed to by a Stop-hook commit directive; call `newde__list_commit_points` first if unsure which point is active.",
+        "Record (or re-record) a drafted commit message for an active commit point. Call this as soon as you've drafted a message, THEN output the message in your reply and ASK the user to approve. Do NOT run `git add` or `git commit` yourself, and do NOT call `newde__commit` until the user has approved. If the user suggests changes, call this again with the updated message.",
       inputSchema: {
         type: "object",
         properties: {
-          commit_point_id: { type: "string", description: "Required id of the commit_point to propose for." },
-          message: { type: "string", description: "Required commit message. Conventional-Commits style recommended." },
+          commit_point_id: { type: "string", description: "Required id of the commit_point to draft for." },
+          message: { type: "string", description: "Required drafted commit message. Conventional-Commits style recommended." },
         },
         required: ["commit_point_id", "message"],
       },
       handler: (args: { commit_point_id: string; message: string }) => {
         const updated = commitPointStore.propose(args.commit_point_id, args.message);
-        return {
-          ok: true,
-          commitPoint: updated,
-          awaiting: updated.status === "proposed" ? "user-approval" : null,
-        };
+        return { ok: true, commitPoint: updated, awaiting: "user-approval" };
+      },
+    },
+    {
+      name: "newde__commit",
+      description:
+        "Run the git commit for an active commit point. Only call this AFTER the user has explicitly approved your drafted message in chat. The `message` you pass here is the final message that will be committed (usually the same as your most recent propose_commit draft). Throws on git failure; read the error, fix the underlying issue, and call again.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          commit_point_id: { type: "string", description: "Required id of the commit_point to execute." },
+          message: { type: "string", description: "Required final commit message." },
+        },
+        required: ["commit_point_id", "message"],
+      },
+      handler: (args: { commit_point_id: string; message: string }) => {
+        const updated = executeCommit(args.commit_point_id, args.message);
+        return { ok: true, commitPoint: updated, commitSha: updated.commit_sha };
       },
     },
     {

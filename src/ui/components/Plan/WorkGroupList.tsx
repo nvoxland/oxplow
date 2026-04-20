@@ -55,10 +55,10 @@ interface SectionBucket {
 
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "To do" },
+  { kind: "toDo", label: "Ready" },
   { kind: "humanCheck", label: "Human check" },
+  { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
-  { kind: "archived", label: "Archived" },
 ];
 
 export function WorkGroupList({
@@ -97,28 +97,32 @@ export function WorkGroupList({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   const [overSection, setOverSection] = useState<WorkItemSectionKind | null>(null);
-  // Archived items are hidden by default — the "Archived (N)" header acts as
-  // a click-to-reveal so the Work panel isn't cluttered by tombstoned items,
-  // but they're still reachable (and drop-targetable) when the user wants them.
-  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  // Archived items fold into the Done section but are hidden by default — the
+  // done-section header carries a "Show archived (N)" toggle and an
+  // "Archive all" action.
+  const [showArchived, setShowArchived] = useState(false);
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
     const buckets: Record<WorkItemSectionKind, QueueRow[]> = {
-      inProgress: [], toDo: [], humanCheck: [], done: [], archived: [],
+      inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
     };
     for (const row of work) {
       if (row.kind !== "work") continue;
       buckets[classifyWorkItem(row.item.status)].push(row);
     }
     // Commit / wait points only belong to the To do section — they represent
-    // a future action, not something that has run or is waiting for review.
+    // a future action. Done / triggered markers are historical; hide them so
+    // the To do list is actually the to-do list (the commit sha is in git
+    // log; the wait point already fired).
     for (const cp of commitPoints ?? []) {
+      if (cp.status === "done") continue;
       buckets.toDo.push({ kind: "commit", id: cp.id, sortIndex: cp.sort_index, cp });
     }
     for (const wp of waitPoints ?? []) {
+      if (wp.status === "triggered") continue;
       buckets.toDo.push({ kind: "wait", id: wp.id, sortIndex: wp.sort_index, wp });
     }
     const orderedSections: SectionBucket[] = [];
@@ -225,8 +229,8 @@ export function WorkGroupList({
             title="Commit point — drag to reposition"
           >
             <span style={commitDividerBadgeStyle(row.cp.status)}>
-              commit · {row.cp.mode}
-              {row.cp.status !== "pending" && row.cp.status !== "done" ? ` · ${row.cp.status}` : ""}
+              commit
+              {row.cp.status === "proposed" ? " · drafted" : ""}
               {row.cp.status === "done" ? " · done" : ""}
             </span>
           </div>
@@ -369,22 +373,47 @@ export function WorkGroupList({
           background: isOverSection ? "rgba(74,158,255,0.08)" : headerBaseStyle.background,
           cursor: canDrop ? "copy" : headerBaseStyle.cursor,
         };
-        const isArchived = section.kind === "archived";
-        const collapsed = isArchived && !archivedExpanded;
-        const archivedCount = isArchived ? section.rows.length : 0;
+        const isDone = section.kind === "done";
+        // Split the done bucket into "visible done" (done + canceled) and
+        // "archived" so the header can surface both an archive-all action
+        // (which only operates on visible done rows) and a toggle for the
+        // archived ones. When the toggle is on, archived rows render
+        // right after the regular done rows.
+        const archivedRows = isDone
+          ? section.rows.filter((r) => r.kind === "work" && r.item.status === "archived")
+          : [];
+        const visibleDoneRows = isDone
+          ? section.rows.filter((r) => r.kind !== "work" || r.item.status !== "archived")
+          : section.rows;
+        const renderedRows = isDone && !showArchived ? visibleDoneRows : section.rows;
+        const archivableCount = isDone
+          ? visibleDoneRows.filter((r) => r.kind === "work" && r.item.status !== "archived").length
+          : 0;
         return (
           <div key={section.kind} data-testid={`plan-section-${section.kind}`}>
             <div
-              style={{ ...headerStyle, cursor: isArchived ? "pointer" : headerStyle.cursor }}
+              style={{ ...headerStyle, display: "flex", alignItems: "center", gap: 8 }}
               data-testid={`plan-section-header-${section.kind}`}
-              onClick={isArchived ? () => setArchivedExpanded((v) => !v) : undefined}
               {...headerDropHandlers}
             >
-              {isArchived
-                ? `${collapsed ? "▸" : "▾"} ${section.label}${archivedCount > 0 ? ` (${archivedCount})` : ""}`
-                : section.label}
+              <span style={{ flex: 1, minWidth: 0 }}>{section.label}</span>
+              {isDone ? (
+                <DoneHeaderActions
+                  archivableCount={archivableCount}
+                  archivedCount={archivedRows.length}
+                  showArchived={showArchived}
+                  onToggleArchived={() => setShowArchived((v) => !v)}
+                  onArchiveAll={() => {
+                    for (const row of visibleDoneRows) {
+                      if (row.kind !== "work") continue;
+                      if (row.item.status === "archived") continue;
+                      void onUpdateWorkItem(row.item.id, { status: "archived" });
+                    }
+                  }}
+                />
+              ) : null}
             </div>
-            {collapsed ? null : section.rows.map(renderRow)}
+            {renderedRows.map(renderRow)}
             {/* The "+ Commit when done" / "+ Wait here" bar hangs off the tail
                 of the "To do" section (not the very bottom of the list) so
                 queueing a marker feels like appending to the active queue
@@ -397,6 +426,58 @@ export function WorkGroupList({
     </div>
   );
 }
+
+function DoneHeaderActions({
+  archivableCount,
+  archivedCount,
+  showArchived,
+  onToggleArchived,
+  onArchiveAll,
+}: {
+  archivableCount: number;
+  archivedCount: number;
+  showArchived: boolean;
+  onToggleArchived(): void;
+  onArchiveAll(): void;
+}) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0 }}>
+      {archivedCount > 0 ? (
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onToggleArchived(); }}
+          style={{ ...miniDoneHeaderButtonStyle }}
+          data-testid="plan-done-toggle-archived"
+          title={showArchived ? "Hide archived items" : "Show archived items inline with Done"}
+        >
+          {showArchived ? `▾ Hide archived (${archivedCount})` : `▸ Show archived (${archivedCount})`}
+        </button>
+      ) : null}
+      {archivableCount > 0 ? (
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onArchiveAll(); }}
+          style={{ ...miniDoneHeaderButtonStyle }}
+          data-testid="plan-done-archive-all"
+          title={`Archive all ${archivableCount} visible done item${archivableCount === 1 ? "" : "s"}`}
+        >
+          Archive all
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+const miniDoneHeaderButtonStyle: CSSProperties = {
+  borderRadius: 6,
+  border: "1px solid var(--border)",
+  background: "var(--bg)",
+  color: "var(--fg)",
+  cursor: "pointer",
+  font: "inherit",
+  padding: "1px 6px",
+  fontSize: 10,
+};
 
 const firstSectionLabelStyle: CSSProperties = {
   ...sectionHeaderStyle,

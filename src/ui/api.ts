@@ -2,7 +2,7 @@ import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
 
 export type { NewdeEvent } from "../electron/ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
-export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
+export type { CommitPoint, CommitPointStatus } from "../persistence/commit-point-store.js";
 export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
 export interface Stream {
@@ -29,8 +29,6 @@ export interface Batch {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
-  summary: string;
-  summary_updated_at: string | null;
 }
 
 export interface BatchState {
@@ -512,36 +510,8 @@ export async function listCommitPoints(batchId: string): Promise<import("../pers
 export async function createCommitPoint(
   streamId: string,
   batchId: string,
-  mode: import("../persistence/commit-point-store.js").CommitPointMode,
 ): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().createCommitPoint(streamId, batchId, mode);
-}
-
-export async function setCommitPointMode(
-  id: string,
-  mode: import("../persistence/commit-point-store.js").CommitPointMode,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().setCommitPointMode(id, mode);
-}
-
-export async function approveCommitPoint(
-  id: string,
-  editedMessage?: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().approveCommitPoint(id, editedMessage);
-}
-
-export async function rejectCommitPoint(
-  id: string,
-  note: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().rejectCommitPoint(id, note);
-}
-
-export async function resetCommitPoint(
-  id: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().resetCommitPoint(id);
+  return desktopApi().createCommitPoint(streamId, batchId);
 }
 
 export async function deleteCommitPoint(id: string): Promise<void> {

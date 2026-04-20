@@ -393,6 +393,20 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 13,
+    name: "drop_batch_summary_columns",
+    up: (db) => {
+      // The "batch summary" feature (record_batch_summary MCP tool + Stop-
+      // hook rolling summary) was removed. The `summary` and
+      // `summary_updated_at` columns are no longer read or written; drop
+      // them so the schema matches the TypeScript model.
+      db.exec(`
+        ALTER TABLE batches DROP COLUMN summary_updated_at;
+        ALTER TABLE batches DROP COLUMN summary;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

@@ -12,7 +12,7 @@ export interface WorkItemGroup {
   items: WorkItem[];
 }
 
-export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "done" | "archived";
+export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "blocked" | "done";
 
 export interface WorkItemSection {
   kind: WorkItemSectionKind;
@@ -24,19 +24,22 @@ export interface WorkItemSection {
 // renderer; empty sections are skipped there.
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "To do" },
+  { kind: "toDo", label: "Ready" },
   { kind: "humanCheck", label: "Human check" },
+  { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
-  { kind: "archived", label: "Archived" },
 ];
 
 export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   switch (status) {
     case "in_progress": return "inProgress";
-    case "ready": case "blocked": return "toDo";
+    case "ready": return "toDo";
+    case "blocked": return "blocked";
     case "human_check": return "humanCheck";
-    case "done": case "canceled": return "done";
-    case "archived": return "archived";
+    // `archived` rolls into the Done section — the done-section header
+    // owns a "Show archived" toggle that controls whether those rows are
+    // visible. Keeping archived in its own section cluttered the panel.
+    case "done": case "canceled": case "archived": return "done";
   }
 }
 
@@ -48,14 +51,14 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
     case "inProgress": return null;
     case "toDo": return "ready";
     case "humanCheck": return "human_check";
+    case "blocked": return "blocked";
     case "done": return "done";
-    case "archived": return "archived";
   }
 }
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
-    inProgress: [], toDo: [], humanCheck: [], done: [], archived: [],
+    inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
   };
   for (const item of items) buckets[classifyWorkItem(item.status)].push(item);
   const sections: WorkItemSection[] = [];

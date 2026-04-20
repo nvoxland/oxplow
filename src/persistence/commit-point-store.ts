@@ -3,27 +3,26 @@ import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 
-export type CommitPointMode = "auto" | "approval";
-export type CommitPointStatus = "pending" | "proposed" | "approved" | "done" | "rejected";
+// Commit points are now a two-step, chat-driven approval: the agent proposes
+// a draft message (status=proposed), shows it to the user in chat, and waits.
+// On the user's "approve", the agent calls the commit tool, which runs
+// `git commit` synchronously and flips to `done`. There is no longer an
+// "auto" vs "approval" mode — every commit goes through the chat loop.
+export type CommitPointStatus = "pending" | "proposed" | "done";
 
-const COMMIT_POINT_MODES: ReadonlySet<CommitPointMode> = new Set(["auto", "approval"]);
 const COMMIT_POINT_STATUSES: ReadonlySet<CommitPointStatus> = new Set([
-  "pending", "proposed", "approved", "done", "rejected",
+  "pending", "proposed", "done",
 ]);
 
 const MESSAGE_MAX_LEN = 20_000;
-const NOTE_MAX_LEN = 2_000;
 
 export interface CommitPoint {
   id: string;
   batch_id: string;
   sort_index: number;
-  mode: CommitPointMode;
   status: CommitPointStatus;
   proposed_message: string | null;
-  approved_message: string | null;
   commit_sha: string | null;
-  rejection_note: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -66,20 +65,19 @@ export class CommitPointStore {
     return row ? toCommitPoint(row) : null;
   }
 
-  /**
-   * Append a commit point at the end of the batch's work queue. The caller
-   * passes the current max sort_index of work_items for that batch so we land
-   * strictly after all existing items; the runtime is the right place to look
-   * up that max (it has both stores).
-   */
-  create(input: { batchId: string; mode: CommitPointMode; sortIndex: number }): CommitPoint {
-    if (!COMMIT_POINT_MODES.has(input.mode)) throw new Error(`invalid commit mode: ${input.mode}`);
+  /** Append a commit point at the end of the batch's queue. The caller passes
+   *  the next sort_index (the runtime computes it across all three queue
+   *  tables). */
+  create(input: { batchId: string; sortIndex: number }): CommitPoint {
     const id = createId("cp");
     const now = new Date().toISOString();
+    // `mode` column survives as a legacy schema field (see migration v14
+    // notes); we write a fixed placeholder so pre-v14 DBs keep their NOT NULL
+    // constraint happy. The value is never read.
     this.stateDb.run(
       `INSERT INTO commit_point (id, batch_id, sort_index, mode, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
-      id, input.batchId, input.sortIndex, input.mode, now, now,
+       VALUES (?, ?, ?, 'auto', 'pending', ?, ?)`,
+      id, input.batchId, input.sortIndex, now, now,
     );
     const row = this.get(id);
     if (!row) throw new Error("commit point not persisted");
@@ -111,81 +109,16 @@ export class CommitPointStore {
     }
   }
 
-  setMode(id: string, mode: CommitPointMode): CommitPoint {
-    if (!COMMIT_POINT_MODES.has(mode)) throw new Error(`invalid commit mode: ${mode}`);
-    const existing = this.requireCommitPoint(id);
-    if (existing.status !== "pending") {
-      throw new Error(`cannot change mode once commit point is ${existing.status}`);
-    }
-    const now = new Date().toISOString();
-    this.stateDb.run(`UPDATE commit_point SET mode = ?, updated_at = ? WHERE id = ?`, mode, now, id);
-    const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
-    return updated;
-  }
-
+  /** Agent drafts (or redrafts) a commit message. Status lands at `proposed`
+   *  and the Stop-hook stops re-blocking so the user can respond in chat. */
   propose(id: string, message: string): CommitPoint {
     const cp = this.requireCommitPoint(id);
     if (cp.status === "done") throw new Error("commit point already completed");
     const trimmed = clampMessage(message);
-    const now = new Date().toISOString();
-    // Auto-mode: jump straight to approved so the runtime will commit on the
-    // next poll. Approval mode: park at proposed for the user.
-    const nextStatus: CommitPointStatus = cp.mode === "auto" ? "approved" : "proposed";
-    this.stateDb.run(
-      `UPDATE commit_point SET proposed_message = ?, approved_message = ?, status = ?, rejection_note = NULL, updated_at = ? WHERE id = ?`,
-      trimmed,
-      cp.mode === "auto" ? trimmed : null,
-      nextStatus,
-      now,
-      id,
-    );
-    const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
-    return updated;
-  }
-
-  /** User approves (optionally editing the message). Moves to `approved`; the
-   *  runtime's commit executor will pick it up and move it to `done`. */
-  approve(id: string, editedMessage?: string): CommitPoint {
-    const cp = this.requireCommitPoint(id);
-    if (cp.status !== "proposed") throw new Error(`cannot approve commit point in status ${cp.status}`);
-    const message = clampMessage(editedMessage ?? cp.proposed_message ?? "");
-    if (!message) throw new Error("approved message is empty");
+    if (!trimmed) throw new Error("proposed message is empty");
     const now = new Date().toISOString();
     this.stateDb.run(
-      `UPDATE commit_point SET approved_message = ?, status = 'approved', updated_at = ? WHERE id = ?`,
-      message, now, id,
-    );
-    const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
-    return updated;
-  }
-
-  reject(id: string, note: string): CommitPoint {
-    const cp = this.requireCommitPoint(id);
-    if (cp.status !== "proposed") throw new Error(`cannot reject commit point in status ${cp.status}`);
-    return this.transitionToRejected(id, note);
-  }
-
-  /**
-   * Move an `approved` point to `rejected` because the runtime's `git commit`
-   * itself failed. Distinct from user-initiated reject (which only fires from
-   * `proposed`) because the failure path needs to escape from `approved` —
-   * otherwise the startup-recovery loop retries the same broken commit
-   * forever.
-   */
-  failExecution(id: string, note: string): CommitPoint {
-    const cp = this.requireCommitPoint(id);
-    if (cp.status !== "approved") throw new Error(`cannot fail execution in status ${cp.status}`);
-    return this.transitionToRejected(id, note);
-  }
-
-  private transitionToRejected(id: string, note: string): CommitPoint {
-    const trimmed = note.slice(0, NOTE_MAX_LEN);
-    const now = new Date().toISOString();
-    this.stateDb.run(
-      `UPDATE commit_point SET status = 'rejected', rejection_note = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE commit_point SET proposed_message = ?, status = 'proposed', updated_at = ? WHERE id = ?`,
       trimmed, now, id,
     );
     const updated = this.requireCommitPoint(id);
@@ -193,29 +126,17 @@ export class CommitPointStore {
     return updated;
   }
 
-  /** Called after runtime performs the git commit. */
-  markDone(id: string, sha: string): CommitPoint {
+  /** Record that the git commit succeeded. Callers run `git commit`
+   *  themselves and pass the resulting sha here. */
+  markCommitted(id: string, message: string, sha: string): CommitPoint {
     const cp = this.requireCommitPoint(id);
-    if (cp.status !== "approved") throw new Error(`cannot mark done in status ${cp.status}`);
+    if (cp.status === "done") throw new Error("commit point already completed");
+    const trimmed = clampMessage(message);
+    if (!trimmed) throw new Error("commit message is empty");
     const now = new Date().toISOString();
     this.stateDb.run(
-      `UPDATE commit_point SET status = 'done', commit_sha = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
-      sha, now, now, id,
-    );
-    const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
-    return updated;
-  }
-
-  /** Transition a previously-rejected point back to pending so the agent can
-   *  retry on the next Stop hook. */
-  resetToPending(id: string): CommitPoint {
-    const cp = this.requireCommitPoint(id);
-    if (cp.status !== "rejected") throw new Error(`cannot reset commit point in status ${cp.status}`);
-    const now = new Date().toISOString();
-    this.stateDb.run(
-      `UPDATE commit_point SET status = 'pending', proposed_message = NULL, approved_message = NULL, updated_at = ? WHERE id = ?`,
-      now, id,
+      `UPDATE commit_point SET proposed_message = ?, commit_sha = ?, status = 'done', completed_at = ?, updated_at = ? WHERE id = ?`,
+      trimmed, sha, now, now, id,
     );
     const updated = this.requireCommitPoint(id);
     this.emit({ batchId: updated.batch_id, kind: "updated", id });
@@ -230,13 +151,6 @@ export class CommitPointStore {
     this.emit({ batchId: cp.batch_id, kind: "deleted", id });
   }
 
-  /** Approved but not yet committed; the runtime's commit executor polls this. */
-  listApproved(): CommitPoint[] {
-    return this.stateDb
-      .all<Record<string, unknown>>(`SELECT * FROM commit_point WHERE status = 'approved' ORDER BY updated_at`)
-      .map(toCommitPoint);
-  }
-
   private requireCommitPoint(id: string): CommitPoint {
     const cp = this.get(id);
     if (!cp) throw new Error(`commit point ${id} not found`);
@@ -249,20 +163,23 @@ function clampMessage(s: string): string {
 }
 
 function toCommitPoint(row: Record<string, unknown>): CommitPoint {
-  const mode = String(row.mode);
-  const status = String(row.status);
-  if (!COMMIT_POINT_MODES.has(mode as CommitPointMode)) throw new Error(`invalid commit_point.mode: ${mode}`);
-  if (!COMMIT_POINT_STATUSES.has(status as CommitPointStatus)) throw new Error(`invalid commit_point.status: ${status}`);
+  // Historical rows from pre-chat-approval builds may carry statuses
+  // ("approved", "rejected") that are no longer valid. Coerce them forward:
+  //   approved  → proposed  (message drafted; not yet committed)
+  //   rejected  → pending   (start over)
+  const rawStatus = String(row.status);
+  const status: CommitPointStatus =
+    rawStatus === "approved" ? "proposed"
+    : rawStatus === "rejected" ? "pending"
+    : COMMIT_POINT_STATUSES.has(rawStatus as CommitPointStatus) ? rawStatus as CommitPointStatus
+    : (() => { throw new Error(`invalid commit_point.status: ${rawStatus}`); })();
   return {
     id: String(row.id),
     batch_id: String(row.batch_id),
     sort_index: Number(row.sort_index),
-    mode: mode as CommitPointMode,
-    status: status as CommitPointStatus,
+    status,
     proposed_message: row.proposed_message == null ? null : String(row.proposed_message),
-    approved_message: row.approved_message == null ? null : String(row.approved_message),
     commit_sha: row.commit_sha == null ? null : String(row.commit_sha),
-    rejection_note: row.rejection_note == null ? null : String(row.rejection_note),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
     completed_at: row.completed_at == null ? null : String(row.completed_at),

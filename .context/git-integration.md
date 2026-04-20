@@ -96,11 +96,10 @@ All git invocations go through `src/git/git.ts`. Notable:
   `git commit -m message`, returning the new sha. The Files-commit
   dialog defaults the include-untracked toggle OFF and only renders the
   checkbox when the workspace has untracked files; the orchestrator's
-  commit-point auto-commit passes `{ includeUntracked: true }` to keep
-  its historical behaviour. Used by the runtime's `executeApprovedCommit`
-  (called whenever a commit point reaches the `approved` state,
-  including a startup-recovery pass that drains any
-  approved-but-uncommitted points left over from a crash).
+  commit-point commit passes `{ includeUntracked: true }` to keep
+  its historical behaviour. Used by `batchQueue.executeCommit`, which
+  is called synchronously from the `newde__commit` MCP tool after the
+  user approves the drafted message in chat.
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
   `gitPush`, `gitPull`, `listFileCommits`, `listAllRefs`,

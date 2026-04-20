@@ -34,19 +34,23 @@ Units of work *within* a stream. Statuses: `active` (writer — may mutate the
 worktree), `queued` (read-only, agents can run but writes are denied — see
 [agent-model.md](./agent-model.md)'s write-guard section), `completed`
 (archived). Exactly one batch per stream is `active`; the others are
-`queued` or `completed`. Each batch carries an `agent`-written rolling
-`summary` field updated via the `newde__record_batch_summary` MCP tool. A
-newly-seeded stream ships with one batch titled `Default` (pre-v12 DBs
-called it `Current Batch`; migration v12 renames the sort_index=0 row).
+`queued` or `completed`. A newly-seeded stream ships with one batch titled
+`Default` (pre-v12 DBs called it `Current Batch`; migration v12 renames
+the sort_index=0 row). The rolling `summary` field + `record_batch_summary`
+MCP tool were removed in v13 — use the work-item log as the source of
+truth instead.
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 
 The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
 Statuses: `ready`, `in_progress`, `human_check`, `blocked`, `done`,
 `canceled`, `archived`. `archived` is a terminal state that hides the item
-from the default Work panel view (the "Archived" section is collapsed until
-the user expands it); `listReady`'s blocker check treats archived the same
-as done/canceled. `parent_id` chains items under epics. `acceptance_criteria` is
+from the default Work panel view — archived rows fold into the Done
+section's bucketing but aren't rendered unless the user flips the "Show
+archived (N)" toggle in the Done section header. The same header carries
+an "Archive all" action that bulk-archives every visible Done/Canceled
+row. `listReady`'s blocker check treats archived the same as done/
+canceled. `parent_id` chains items under epics. `acceptance_criteria` is
 plain text (one criterion per line). Work-item links express dependencies
 (`blocks`, `discovered_from`, `relates_to`, …) via the `work_item_links`
 join table.
@@ -58,12 +62,15 @@ distinguish backlog changes from in-batch changes.
 
 ### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
 
-Markers in the queue that say "commit at this point." Mode: `auto` or
-`approval`. Status: `pending → proposed → approved → done`, or
-`proposed → rejected → pending` on user reject. Holds the agent-proposed
-message, the user-approved (possibly edited) message, and the resulting
-commit sha. The runtime executes the actual `git commit` — agents only
-propose. See [agent-model.md](./agent-model.md) for the Stop-hook flow.
+Markers in the queue that say "commit at this point." Status:
+`pending → proposed → done`. Approval happens in chat — the agent drafts
+via `newde__propose_commit` (status=proposed, no commit yet), outputs the
+message in its reply, and waits. On the user's approve, the agent calls
+`newde__commit` which runs `git commit` synchronously and flips the
+point to `done`. There is no UI approve/reject surface anymore and no
+auto-vs-approval mode. Columns hold the drafted message and the
+resulting commit sha. See [agent-model.md](./agent-model.md) for the
+Stop-hook flow.
 
 ### `wait_point` — `WaitPointStore` (`src/persistence/wait-point-store.ts`)
 
@@ -76,12 +83,11 @@ past, so prompting the agent at all resumes auto-progression. There is no
 ### `agent_turn` — `TurnStore` (`src/persistence/turn-store.ts`)
 
 One row per agent turn (UserPromptSubmit → Stop). Captures the prompt, the
-sole-in-progress work item if any, the Claude session id, and an answer
-extracted from the batch summary at Stop time. The Stop handler also sums
-assistant-message `usage` from the session's jsonl transcript for the turn's
-time window and stores `input_tokens`, `output_tokens`, and
-`cache_read_input_tokens`. Used by the Activity tab and by file-change
-attribution.
+sole-in-progress work item if any, and the Claude session id. The Stop
+handler also sums assistant-message `usage` from the session's jsonl
+transcript for the turn's time window and stores `input_tokens`,
+`output_tokens`, and `cache_read_input_tokens`. Used by the Activity tab
+and by file-change attribution.
 
 ### `batch_file_change` — `FileChangeStore` (`src/persistence/file-change-store.ts`)
 

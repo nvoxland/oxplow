@@ -67,6 +67,24 @@ test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand
   expect(text).toContain("note");
 });
 
+test("createElectronPlugin writes the task-management skill Claude Code can model-invoke", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+  const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
+  expect(plugin.taskManagementSkillPath).toBe(
+    join(plugin.pluginDir, "skills", "newde-task-management", "SKILL.md"),
+  );
+  expect(existsSync(plugin.taskManagementSkillPath)).toBe(true);
+  const body = readFileSync(plugin.taskManagementSkillPath, "utf8");
+  // Frontmatter — Claude Code's skill loader keys off name + description.
+  expect(body.startsWith("---\n")).toBe(true);
+  expect(body).toContain("name: newde-task-management");
+  expect(body).toContain("description:");
+  // Policy content the skill owns (distinct from the MCP tool descriptions).
+  expect(body).toContain("epic");
+  expect(body).toContain("acceptance criteria");
+  expect(body).toContain("human_check");
+});
+
 test("createElectronPlugin is idempotent across calls", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
   const first = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });

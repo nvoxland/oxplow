@@ -164,7 +164,7 @@ export function PlanPane({
     );
     if (!hasSettled) return false;
     const liveCommitPoint = commitPoints.some(
-      (cp) => cp.status !== "done" && cp.status !== "rejected",
+      (cp) => cp.status !== "done",
     );
     return !liveCommitPoint;
   }, [mode, batchWork, commitPoints]);
@@ -485,7 +485,7 @@ export function PlanPane({
                   data-testid="plan-add-commit-point"
                   onClick={() => {
                     if (!streamId || !batchId) return;
-                    runWithError("Add commit point", createCommitPoint(streamId, batchId, "approval"));
+                    runWithError("Add commit point", createCommitPoint(streamId, batchId));
                   }}
                   disabled={!canAddPoints}
                   style={{
