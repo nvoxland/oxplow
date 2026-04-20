@@ -548,12 +548,16 @@ export function gitPush(projectDir: string, options?: { force?: boolean; setUpst
 }
 
 /**
- * Stage all tracked/untracked changes and create a commit with the given
- * message. Returns the new commit sha on success, or a GitOpResult-shaped
- * error if either `git add` or `git commit` fails.
+ * Stage tracked changes (and optionally untracked files) and create a
+ * commit with the given message. `includeUntracked: false` runs
+ * `git add -u` so brand-new files stay out — the default for the UI
+ * commit dialog after dogfood passes shipped probe scripts by accident.
+ * Returns the new commit sha on success, or a GitOpResult-shaped error
+ * if either `git add` or `git commit` fails.
  */
-export function gitCommitAll(projectDir: string, message: string): GitOpResult & { sha?: string } {
-  const add = runGit(projectDir, ["add", "-A"]);
+export function gitCommitAll(projectDir: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
+  const addArgs = options?.includeUntracked ? ["add", "-A"] : ["add", "-u"];
+  const add = runGit(projectDir, addArgs);
   if (!add.ok) return add;
   const commit = runGit(projectDir, ["commit", "-m", message]);
   if (!commit.ok) return commit;

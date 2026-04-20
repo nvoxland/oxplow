@@ -91,10 +91,15 @@ All git invocations go through `src/git/git.ts`. Notable:
 
 - `gitBlame(projectDir, path)` — `git blame --porcelain HEAD` parsed via
   `parseBlamePorcelain`. Powers the editor blame overlay.
-- `gitCommitAll(projectDir, message)` — `git add -A && git commit -m
-  message` in one helper, returning the new sha. Used by the runtime's
-  `executeApprovedCommit` (called whenever a commit point reaches the
-  `approved` state, including a startup-recovery pass that drains any
+- `gitCommitAll(projectDir, message, options?)` — `git add -u` (or
+  `git add -A` when `options.includeUntracked` is true) then
+  `git commit -m message`, returning the new sha. The Files-commit
+  dialog defaults the include-untracked toggle OFF and only renders the
+  checkbox when the workspace has untracked files; the orchestrator's
+  commit-point auto-commit passes `{ includeUntracked: true }` to keep
+  its historical behaviour. Used by the runtime's `executeApprovedCommit`
+  (called whenever a commit point reaches the `approved` state,
+  including a startup-recovery pass that drains any
   approved-but-uncommitted points left over from a crash).
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,

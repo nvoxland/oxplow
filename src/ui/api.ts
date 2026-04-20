@@ -485,8 +485,9 @@ export async function gitPull(
 export async function gitCommitAll(
   streamId: string,
   message: string,
+  options?: { includeUntracked?: boolean },
 ): Promise<import("../git/git.js").GitOpResult & { sha?: string }> {
-  return desktopApi().gitCommitAll(streamId, message);
+  return desktopApi().gitCommitAll(streamId, message, options);
 }
 
 export async function listFileCommits(

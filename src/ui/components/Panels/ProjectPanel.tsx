@@ -821,6 +821,7 @@ export function ProjectPanel({
         <CommitDialog
           streamId={stream.id}
           pathCount={uncommittedPaths.length}
+          untrackedCount={indexedFiles.filter((f) => f.gitStatus === "untracked").length}
           onClose={() => setCommitDialogOpen(false)}
           onComplete={(result) => {
             setCommitDialogOpen(false);
@@ -1185,16 +1186,21 @@ function PushPullDialog({
 function CommitDialog({
   streamId,
   pathCount,
+  untrackedCount,
   onClose,
   onComplete,
 }: {
   streamId: string;
   pathCount: number;
+  untrackedCount: number;
   onClose(): void;
   onComplete(result: GitOpResult): void;
 }) {
   const [message, setMessage] = useState("");
   const [running, setRunning] = useState(false);
+  // Default OFF so probe scripts / lock files don't ride along — three
+  // dogfood passes shipped commits that bundled local-only files.
+  const [includeUntracked, setIncludeUntracked] = useState(false);
   useEscape(onClose);
 
   const trimmed = message.trim();
@@ -1203,7 +1209,7 @@ function CommitDialog({
   const run = async () => {
     if (!canSubmit) return;
     setRunning(true);
-    const result = await gitCommitAll(streamId, trimmed);
+    const result = await gitCommitAll(streamId, trimmed, { includeUntracked });
     setRunning(false);
     onComplete(result);
   };
@@ -1241,8 +1247,19 @@ function CommitDialog({
             }
           }}
         />
+        {untrackedCount > 0 ? (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--fg)" }}>
+            <input
+              type="checkbox"
+              data-testid="files-commit-include-untracked"
+              checked={includeUntracked}
+              onChange={(e) => setIncludeUntracked(e.target.checked)}
+            />
+            Include {untrackedCount} untracked file{untrackedCount === 1 ? "" : "s"}
+          </label>
+        ) : null}
         <div style={{ color: "var(--muted)", fontSize: 11 }}>
-          Runs <code>git add -A &amp;&amp; git commit -m …</code> in the stream's worktree.
+          Runs <code>{includeUntracked ? "git add -A" : "git add -u"} &amp;&amp; git commit -m …</code> in the stream's worktree.
           Cmd/Ctrl+Enter to commit.
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>

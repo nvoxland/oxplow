@@ -157,7 +157,12 @@ export class BatchQueueOrchestrator {
       this.logger.warn("commit point approved with no message; skipping", { id: cp.id });
       return;
     }
-    const result = gitCommitAll(stream.worktree_path, message);
+    // Commit-point auto-commits keep the historical `git add -A` behaviour:
+    // the agent that authored the commit-point queue is the only writer in
+    // its worktree, so picking up untracked files is the intent. The
+    // includeUntracked toggle on the manual Files-commit dialog (default
+    // OFF) is what addresses the dogfood-scripts-bundling problem.
+    const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
     if (!result.ok || !result.sha) {
       this.logger.warn("git commit failed for commit point", {
         id: cp.id,

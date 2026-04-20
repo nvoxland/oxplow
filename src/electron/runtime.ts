@@ -619,9 +619,9 @@ export class ElectronRuntime {
     return gitPull(stream.worktree_path, options);
   }
 
-  gitCommitAll(streamId: string, message: string): GitOpResult & { sha?: string } {
+  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
     const stream = this.resolveStream(streamId);
-    return gitCommitAll(stream.worktree_path, message);
+    return gitCommitAll(stream.worktree_path, message, options);
   }
 
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {
