@@ -73,7 +73,11 @@ Things I keep forgetting. Read this before adding any UI.
     target it directly)
   - `menu-item-<item.id>` on every button inside the shared
     `ContextMenu` / `MenuList` — the `MenuItem.id` becomes the
-    testid suffix (e.g. `menu-item-workitem.delete`)
+    testid suffix (e.g. `menu-item-workitem.delete`,
+    `menu-item-workitem.rename`, `menu-item-workitem.status`,
+    `menu-item-workitem.priority` — rename/status/priority mirror the
+    inline click / `s` / `p` shortcuts so keyboard-first users don't
+    have to hover)
   - `confirm-dialog`, `confirm-dialog-confirm`, `confirm-dialog-cancel`
     on the themed destructive-action `ConfirmDialog`
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the

@@ -113,6 +113,7 @@ export function PlanPane({
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string } | null>(null);
+  const [renameRequest, setRenameRequest] = useState<{ itemId: string; nonce: number } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -410,6 +411,7 @@ export function PlanPane({
                 addPointsSlot={addPointsSlot}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                renameRequest={renameRequest}
               />
             );
           })
@@ -435,9 +437,26 @@ export function PlanPane({
       </div>
       {contextMenu ? (
         <ContextMenu
-          items={buildWorkItemMenu(contextMenu.item, (item) => {
-            setContextMenu(null);
-            setPendingDelete(item);
+          items={buildWorkItemMenu(contextMenu.item, {
+            onDelete: (item) => {
+              setContextMenu(null);
+              setPendingDelete(item);
+            },
+            onRename: (item) => {
+              setContextMenu(null);
+              setSelectedId(item.id);
+              setRenameRequest((prev) => ({ itemId: item.id, nonce: (prev?.nonce ?? 0) + 1 }));
+            },
+            onChangeStatus: (item) => {
+              setContextMenu(null);
+              setSelectedId(item.id);
+              setKbPicker({ kind: "status", itemId: item.id });
+            },
+            onChangePriority: (item) => {
+              setContextMenu(null);
+              setSelectedId(item.id);
+              setKbPicker({ kind: "priority", itemId: item.id });
+            },
           })}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
@@ -728,13 +747,40 @@ function NewWorkItemModal({
   );
 }
 
-function buildWorkItemMenu(item: WorkItem, onDelete: (item: WorkItem) => void): MenuItem[] {
+function buildWorkItemMenu(
+  item: WorkItem,
+  actions: {
+    onDelete: (item: WorkItem) => void;
+    onRename: (item: WorkItem) => void;
+    onChangeStatus: (item: WorkItem) => void;
+    onChangePriority: (item: WorkItem) => void;
+  },
+): MenuItem[] {
+  const renameEnabled = item.status !== "in_progress";
   return [
+    {
+      id: "workitem.rename",
+      label: "Rename…",
+      enabled: renameEnabled,
+      run: () => actions.onRename(item),
+    },
+    {
+      id: "workitem.status",
+      label: "Change status…",
+      enabled: true,
+      run: () => actions.onChangeStatus(item),
+    },
+    {
+      id: "workitem.priority",
+      label: "Change priority…",
+      enabled: true,
+      run: () => actions.onChangePriority(item),
+    },
     {
       id: "workitem.delete",
       label: "Delete",
       enabled: true,
-      run: () => onDelete(item),
+      run: () => actions.onDelete(item),
     },
   ];
 }

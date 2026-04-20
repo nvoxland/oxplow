@@ -75,6 +75,7 @@ export function WorkGroupList({
   addPointsSlot,
   selectedId,
   onSelect,
+  renameRequest,
 }: {
   group: WorkItemGroup;
   scopeBatchId: string | null;
@@ -90,6 +91,7 @@ export function WorkGroupList({
   addPointsSlot?: React.ReactNode;
   selectedId?: string | null;
   onSelect?(id: string): void;
+  renameRequest?: { itemId: string; nonce: number } | null;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -276,6 +278,7 @@ export function WorkGroupList({
         item={row.item}
         isExpanded={expandedId === row.item.id}
         isSelected={selectedId === row.item.id}
+        renameRequest={renameRequest && renameRequest.itemId === row.item.id ? renameRequest : null}
         isOver={isOver}
         isDragging={isDragging}
         scopeBatchId={scopeBatchId}
@@ -412,6 +415,7 @@ function InlineItemRow({
   onDragOver,
   onDragLeave,
   onDrop,
+  renameRequest,
 }: {
   rowKey: string;
   item: WorkItem;
@@ -430,6 +434,7 @@ function InlineItemRow({
   onDragOver(event: React.DragEvent): void;
   onDragLeave(event: React.DragEvent): void;
   onDrop(event: React.DragEvent): void;
+  renameRequest?: { itemId: string; nonce: number } | null;
 }) {
   // null = not editing; "" valid draft during edit
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
@@ -439,6 +444,12 @@ function InlineItemRow({
   const cancelRequested = useRef(false);
 
   useEffect(() => { setTitleDraft(null); }, [item.id]);
+
+  useEffect(() => {
+    if (!renameRequest || renameRequest.itemId !== item.id) return;
+    if (item.status === "in_progress") return;
+    setTitleDraft(item.title);
+  }, [renameRequest?.nonce, renameRequest?.itemId, item.id, item.status, item.title]);
 
   const editing = titleDraft !== null;
   const dimmed = item.status === "done" || item.status === "canceled";
