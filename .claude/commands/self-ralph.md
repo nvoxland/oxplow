@@ -228,7 +228,14 @@ The command takes an optional positive-integer argument:
 - A pass ends with uncommitted changes you can't explain, or the
   working tree is broken.
 - `.self-ralph/todo.md`'s **Next up** section is empty.
-- The same root cause shows up in two consecutive passes.
+- A pass hits a root cause that **(a) was flagged in the most
+  recent `/ralph-review` AND already hit again this invocation**,
+  or **(b) hit twice within the same multi-pass invocation**. By
+  the second occurrence the damage has shipped — stop, meta-fix,
+  and let the next invocation resume cleanly. (Tightened
+  2026-04-19 23:15 by `review-20260419-231543.md` — the prior
+  rule "two consecutive passes" was too coarse and let one
+  feat-commit ship dirty before the trigger fired.)
 - A probe hangs and the watchdog (Step 3 below) had to kill it;
   file an `[F]` against the harness and move on, but don't retry
   in the next pass.
@@ -587,7 +594,12 @@ load-bearing sections.
     interesting finding from Expected-vs-actual + Surprises. If
     nothing was surprising, say so — but infrequently.
 (d) what shipped (commit hash),
-(e) next top-of-stack.
+(e) **60-sec exploration targets:** name the three unrelated UI
+    elements you poked. "skipped" is a valid but damning answer
+    on a non-infra pass. Added 2026-04-19 23:15 by
+    `review-20260419-231543.md` because the discipline was
+    decaying back to 0–1 explorations per pass.
+(f) next top-of-stack.
 
 In multi-pass mode, prefix with `Pass k/N:`. After the final pass,
 emit a single roll-up line (`/self-ralph N/N complete — shipped:
