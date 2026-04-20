@@ -13,40 +13,97 @@ machines*. All state lives in `.self-ralph/` (gitignored), in
 `ux-test.md` (tracked), and in `.context/*.md` (tracked). Each pass
 must stand on its own.
 
-## What "dogfooding newde" actually means (read first)
+## What "dogfooding newde" actually means (read first — THIS IS THE WHOLE POINT)
 
-Self-ralph is a **user-level** loop. You are the user. The newde app
-in front of you is the thing under test. The agents **inside** newde
-are the ones with MCP access — they call `mcp__newde__*_work_item`,
-commit, approve, etc. on their own when a user (you) prompts them.
+Self-ralph is **newde improving newde** through actual use. You, the
+outer agent, are a **human engineer** sitting at a newde window.
+When you want a fix, you don't open an editor — you **tell the inner
+agent inside newde to do it**, by creating a work item and prompting
+the agent pane. You watch the inner agent work, you approve the
+commit through the UI, and you **notice every friction that slowed
+you down**. Those frictions are the raw material of the loop.
 
-**Rules that follow from that:**
+If you finish a pass and you never launched newde, never typed into
+the agent pane, never approved a commit through the UI — **you did
+not dogfood, and the pass was a failure** regardless of what code
+got committed. The `/ralph-review` at `20260419-213605` explicitly
+caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
 
-- **Never call `mcp__newde__*` tools yourself.** Don't create work
-  items, approve commit points, or mutate batches via MCP. If a
-  scenario needs that state, drive it through the UI — type in the
-  agent pane, click the approve button, drop a file into a batch
-  chip. That's the dogfood.
-- **Never write to `.newde/state.sqlite` with `sqlite3`** while newde
-  is running. You're a user, not a database admin.
-- **Prefer using newde over reaching around it.** When you need to
-  look at a batch's history, open it in newde's history panel
-  (ideally via a probe that drives the UI there) instead of running
-  `git log` directly. `git log` is fine for reading your own commit
-  trail in the same conversation; it's not fine for answering "what
-  does newde show the user about this branch?" — that's dogfood
-  territory.
+### The canonical pass, spelled out
 
-Your two modes of driving newde, in order of preference:
+1. **Launch newde yourself**, via the electron app running from this
+   repo. You can script the launch with Playwright (`launchNewde`
+   from `tests-e2e/harness.ts`) but you are driving as a user: you
+   click the buttons a user would click, you read the text a user
+   would read, you notice the delays a user would notice.
+2. **Create a work item through the UI** describing the fix you
+   want. Write it the way you'd write a ticket — clear scope,
+   specific file pointers, acceptance criteria.
+3. **Prompt the inner agent** by typing into newde's agent pane
+   terminal. Example: "Pick up the work item titled X, do the work,
+   run bun test, propose a commit." The inner agent has MCP tools;
+   it's allowed to call `mcp__newde__*`. **You are not.**
+4. **Watch.** Snapshot the terminal rows periodically. Read what
+   the inner agent is doing. Notice when the UI tells you nothing
+   about progress. Notice when a wait point lands without surfacing
+   in the Work panel. Notice when an approval button is hidden
+   under a hover card. **These are the findings.**
+5. **Approve the commit through newde's UI** — not via `git
+   commit`, not by editing a file. Click the approve button. If
+   you can't find it, that's a finding.
+6. **Reflect on friction.** Everything that surprised you, slowed
+   you down, or required reaching outside newde goes into the
+   fix log and/or a new todo entry.
 
-1. **Scenario probes** (`tests-e2e/probe-*.ts`) — Playwright drives
-   newde through a full user flow (prompt → wait → approve →
-   inspect). Probes are reproducible, hit the real UI, and lock in
-   regressions.
-2. **Widget probes** — Playwright exercises a single affordance
-   (click this, verify that testid). These are fine when you're
-   fixing a specific bug but should not dominate the loop. See
-   "Guard against the testid rut" below.
+`tests-e2e/dogfood-cycle.ts` is the reference implementation of
+this flow. It's the canonical probe; treat its structure as the
+template for any new scenario.
+
+### Hard rules
+
+- **Never call `mcp__newde__*` tools yourself.** Those are for the
+  inner agent. You prompt it; you don't bypass it.
+- **Never write to `.newde/state.sqlite` with `sqlite3`** while
+  newde is running. You're a user, not a DB admin.
+- **No reaching around newde.** When you need to look at a batch's
+  history, open it in newde's History panel. When you want to see
+  what changed, open the diff in newde's editor. `git log` is fine
+  for reading your own commit trail in the conversation; it is not
+  fine for answering "what does newde show the user about this
+  branch?" — that's dogfood territory. Cheating through Grep and
+  Read is easier than driving the UI, which is exactly why the
+  friction you'd notice never gets noticed.
+
+### When Playwright is and isn't appropriate
+
+Playwright is a **user-simulation harness**, not a shortcut around
+user-level interaction:
+
+- **Primary use (dogfood):** script the canonical pass above — the
+  agent-loop scenario end-to-end. The probe drives newde as a user
+  would: creates a work item, prompts the agent, approves the
+  commit. This is a full dogfood run captured as a regression test.
+- **Secondary use (regression lock-in):** after a dogfood pass
+  surfaces a bug and you fix it, a narrower widget probe can lock
+  in the fix. This is *derived* from a dogfood finding, not a
+  substitute for one.
+- **Failure mode to avoid:** writing a widget probe *instead* of
+  doing the dogfood pass, because the widget probe is easier.
+  That's the 2026-04-19 session's whole mistake. If the first
+  thing you reach for is a Playwright probe that drives a specific
+  testid without ever creating a work item or prompting the inner
+  agent, stop — you're about to repeat the failure.
+
+### Attestation requirement
+
+Every end-of-pass report (Step 8) **must include a one-line
+"Dogfood:" field** stating what you actually did as a user. Valid
+answers name concrete UI interactions — "launched newde, created
+work item via +New, prompted inner agent in terminal, approved
+commit via Work panel." The string "none" or "n/a" is a valid but
+**damning** answer and should only be used for pure infra-only
+passes (harness / prompt / .self-ralph/ edits), which must be
+disclosed as such in "Picked."
 
 ## Argument: pass count
 
@@ -197,47 +254,79 @@ sentence so the user can redirect before you spend tokens.
 Then read the single `.context/*.md` that matches the area you're
 about to touch.
 
-## Step 3 — Drive
+## Step 3 — Drive (dogfood first, Playwright second)
 
-For `[F]` items: go fix it. TDD normally — failing test first when
-feasible.
+**The default shape of every pass is a dogfood run**, whether it's
+flagged `[E]` or `[F]`. You launch newde, create a work item, prompt
+the inner agent, watch, approve. The fix itself should be done by
+the inner agent through newde, not by you in your editor. Skip this
+only if the item is harness/prompt/infra — and disclose that in the
+"Picked" announcement.
 
-For `[E]` items:
+### 3a. Preflight
+If `dist/` looks stale (`find src -newer dist/electron-main.cjs`
+emits anything), run `bun run build` first. The `runProbe()`
+wrapper kills stray electron processes and stale instance locks on
+entry, so no separate cleanup step.
 
-1. **Preflight.** If `dist/` looks stale (`find src -newer
-   dist/electron-main.cjs` emits anything), run `bun run build`
-   first. The `runProbe()` wrapper in harness also kills stray
-   electron processes and stale instance locks on entry, so you
-   don't need a separate cleanup step.
-2. **Reuse before writing.** Extend an existing
-   `tests-e2e/probe-*.ts` when the scenario overlaps. New probes
-   are cheap to create and expensive to maintain.
-3. **Every probe must use `runProbe("name", main)`** from
-   `tests-e2e/harness.ts`. That wrapper supplies:
-   - a wall-clock hard timeout (default 90s),
-   - a silence watchdog (default 30s — if no `[probe]` line in that
-     window, the probe is killed),
-   - `[probe:boot]` / `[probe:done]` / `[probe:fail]` markers,
-   - stray-electron cleanup.
-   Adjust `{ wallMs, silenceMs }` for scenarios that legitimately
-   take longer.
-4. **Log with `probeLog(...)` or bare `console.log`** — both work;
-   the watchdog treats any stdout line as a heartbeat. Emit a
-   `[probe] ...` line at each meaningful step so a hang is
-   localized.
-5. **Run with `node --experimental-strip-types`.** Playwright +
-   bun don't mix; see `.self-ralph/README.md` if it exists.
-6. **Capture the first concrete friction; don't broaden.** Land the
-   fix before chasing the second thing.
+### 3b. The dogfood run (canonical — do this unless it's infra)
+
+Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
+
+1. `launchNewde(projectDir)` into a fresh userData dir.
+2. Click through to the Work panel as a user would. Notice every
+   delay, missing affordance, or unclear label.
+3. Click **+ New work item**, type a clear title + description of
+   the fix, save. If the +New button is hard to find, note it.
+4. Focus the agent pane's xterm and type a prompt telling the inner
+   agent to pick up the item, do the work, run tests, and propose
+   a commit. Press Enter.
+5. Poll every ~10s: screenshot, dump `.xterm-rows` innerText to a
+   file, check `[data-agent-status]`. Heartbeat with `probeLog()`
+   each tick so the silence watchdog stays happy. Use a long
+   `wallMs` (e.g. 12 * 60_000) and a matching `silenceMs` (e.g.
+   60_000) — the agent can be quiet while thinking.
+6. When the work panel surfaces a commit point, **click Approve
+   through the UI**. Not git. Not MCP.
+7. Verify: open newde's History panel, confirm the commit appears
+   there as a user would see it.
+
+Everything that slowed you down in steps 2–7 is a finding. Those
+go into the fix log under "Friction" and become new todo entries.
+Don't skip this reflection — it's the whole point.
+
+### 3c. Regression lock-in (derived, secondary)
+
+**Only after** a dogfood pass has surfaced a concrete bug and you
+(or the inner agent) have fixed it, a narrower widget probe can
+lock in the fix. Reuse `tests-e2e/probe-*.ts` when the scenario
+overlaps; new probes are expensive to maintain.
+
+### 3d. Probe hygiene (applies to both 3b and 3c)
+
+- **Every probe must use `runProbe("name", main)`** from
+  `tests-e2e/harness.ts`. Supplies wall-clock timeout (default
+  90s), silence watchdog (default 30s), `[probe:boot]` /
+  `[probe:done]` / `[probe:fail]` markers, and stray-electron
+  cleanup. Tune `{ wallMs, silenceMs }` up for dogfood runs.
+- **Log with `probeLog(...)` or bare `console.log`.** The watchdog
+  treats any stdout line as a heartbeat. Emit a `[probe] ...` line
+  at each meaningful step so a hang is localized.
+- **Run with `node --experimental-strip-types`.** Playwright + bun
+  don't mix.
+- **Capture the first concrete friction; don't broaden.** Land the
+  fix (via inner agent) before chasing the second thing.
 
 **If `runProbe` kills a probe as silent or timed-out:** do not try
-again in the same pass. File `[F]` against the harness (or the
-newde code if the hang is clearly in newde), write the log, and
-stop this pass. Retrying eats tokens without progress — we saw this
-eat 25 minutes in a pass-3 incident.
+again in the same pass. File `[F]` against the harness (or newde if
+the hang is clearly in newde), write the log, stop this pass.
+Retrying eats tokens — saw this burn 25 minutes in the pass-3
+toggleBlame incident.
 
-If the probe uncovers user-facing friction, flip the pass from
-`[E]` to a fix. Red/green: the probe IS your failing test.
+If a dogfood run uncovers user-facing friction, that IS the finding
+— file it, prompt the inner agent to fix it, and approve through
+the UI. Red/green still applies: the friction is the failing test,
+the fix is when the friction is gone.
 
 ## Step 4 — Fix (when something surfaces)
 
@@ -283,6 +372,18 @@ surprise):
 ## Picked
 <verbatim todo line, why (for [E]: what hypothesis)>
 
+## Dogfood
+<concrete user actions: launched newde, created work item "X",
+prompted inner agent with "Y", approved commit at <sha> via Work
+panel. OR "infra-only pass — no dogfood needed because <reason>".
+Bare "none" without justification is a failed pass.>
+
+## Friction
+<what surprised you, slowed you down, or required reaching outside
+newde during the dogfood run. One bullet per finding. If "nothing",
+say so explicitly — but scrutinize whether that's true, because
+smooth passes usually mean you skipped step 4 of the dogfood flow.>
+
 ## Shipped
 <commit hash + one-line summary, optional `git show --stat`>
 
@@ -297,15 +398,21 @@ surprise):
 ```
 
 If you have nothing surprising to say in reflection, write "nothing
-surprising." That's a valid and preferred answer.
+surprising." That's a valid and preferred answer. **"Dogfood" and
+"Friction" cannot be empty without disclosure** — those are the
+load-bearing sections.
 
 ## Step 8 — End-of-pass report to the user
 
 ≤ 80 words. State:
 (a) which item you picked (+ any rotation/skip reasoning),
-(b) what shipped (commit hash),
-(c) one-line headline reflection (or "nothing surprising"),
-(d) next top-of-stack.
+(b) **Dogfood:** one line naming concrete UI actions you took as a
+    user — "launched newde, created work item, prompted inner agent,
+    approved commit." Bare "none" means this was an infra-only pass
+    AND you must justify that in (a).
+(c) what shipped (commit hash),
+(d) one-line headline reflection or friction finding,
+(e) next top-of-stack.
 
 In multi-pass mode, prefix with `Pass k/N:`. After the final pass,
 emit a single roll-up line (`/self-ralph N/N complete — shipped:
