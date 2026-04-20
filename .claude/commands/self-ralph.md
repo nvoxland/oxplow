@@ -95,6 +95,25 @@ run must behave identically to N separate invocations from cold.
 6. **You are a user, not an MCP caller.** See "What dogfooding
    means" above — no `mcp__newde__*` calls from /self-ralph, ever.
 
+## Guard against the subsystem rut
+
+**One file or directory shouldn't own 3+ consecutive commits.** The
+`/ralph-review` at `20260419-213605` caught four consecutive passes
+landing in `src/ui/commands.ts` + `src/ui/components/CommandPalette/`;
+each pass was individually legitimate but the aggregate starved the
+rest of the app.
+
+- **At pick time, run `git log --oneline -3` and check the files
+  touched.** If the last 3 commits all touched the same single file
+  or the same top-level directory under `src/ui/components/`,
+  force-pick an item from a different area. Announce the redirect.
+- This guard sits *above* the top-of-stack rule — it's a blast-
+  radius concern, not a priority concern. The topmost item comes
+  right back on the following invocation.
+- It does **not** trip on harness/prompt/probe commits; only newde
+  code. Infra commits are meta and shouldn't count against
+  newde subsystems.
+
 ## Guard against the testid rut
 
 **Testids are probe infrastructure, not newde deliverables.**
