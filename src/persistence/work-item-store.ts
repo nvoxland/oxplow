@@ -332,13 +332,29 @@ export class WorkItemStore {
       throw new Error("work item cannot be its own parent");
     }
 
+    // When an item transitions into "done" (from any non-done status), bump
+    // its sort_index to MAX+1 within the batch so the Done section (which
+    // renders descending by sort_index) places it at the top. Canceled /
+    // archived also render in the Done visual bucket; treat them the same.
+    const nowDoneLike = nextStatus === "done" || nextStatus === "canceled" || nextStatus === "archived";
+    const wasDoneLike = existing.status === "done" || existing.status === "canceled" || existing.status === "archived";
+    const bumpSortIndex = nowDoneLike && !wasDoneLike;
+
     this.stateDb.transaction(() => {
       if (nextParentId && nextParentId !== existing.parent_id) {
         this.requireItemInBatch(input.batchId, nextParentId, "parent");
       }
+      if (bumpSortIndex) {
+        const row = this.stateDb.get<{ next_index: number }>(
+          `SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index
+           FROM work_items WHERE batch_id = ?`,
+          updated.batch_id,
+        );
+        updated.sort_index = row?.next_index ?? 0;
+      }
       this.stateDb.run(
         `UPDATE work_items
-         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, updated_at = ?, completed_at = ?
+         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, sort_index = ?, updated_at = ?, completed_at = ?
          WHERE batch_id = ? AND id = ?`,
         updated.parent_id,
         updated.title,
@@ -346,6 +362,7 @@ export class WorkItemStore {
         updated.acceptance_criteria,
         updated.status,
         updated.priority,
+        updated.sort_index,
         updated.updated_at,
         updated.completed_at,
         updated.batch_id,

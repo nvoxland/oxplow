@@ -66,7 +66,7 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   for (const { kind, label } of SECTION_ORDER) {
     if (buckets[kind].length === 0) continue;
     buckets[kind].sort((a, b) =>
-      kind === "humanCheck" ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
+      (kind === "humanCheck" || kind === "done") ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
     );
     sections.push({ kind, label, items: buckets[kind] });
   }
@@ -74,19 +74,26 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
 }
 
 /**
- * The Human Check section renders descending (newest / highest sort_index on
- * top) so recent candidates for review stay visible without scrolling. Every
+ * The Human Check and Done sections render descending (newest / highest
+ * sort_index on top) so recent items stay visible without scrolling. Every
  * other section renders ascending. Persistence is a single ascending
  * sort_index space per batch, so when we flatten the visual order into an id
- * list for the store we need to flip the humanCheck run back to ascending —
+ * list for the store we need to flip descending runs back to ascending —
  * otherwise the store's "rewrite sort_index = position" rule would invert
- * humanCheck on the next render and drag-reorders inside the section would
+ * them on the next render and drag-reorders inside the section would
  * visually jump in the opposite direction.
  *
  * This helper takes a flat list of rows in **visual** order and returns the
- * list of ids in **persistence** order. Rows outside the humanCheck run are
- * kept in place; the humanCheck run is reversed in situ.
+ * list of ids in **persistence** order. Rows outside descending runs are
+ * kept in place; descending runs are reversed in situ.
  */
+const DESCENDING_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+  "human_check",
+  "done",
+  "canceled",
+  "archived",
+]);
+
 export function finalizeReorderIds(
   rows: ReadonlyArray<{ id: string; status: WorkItemStatus }>,
 ): string[] {
@@ -106,8 +113,17 @@ export function finalizeReorderIds(
     runStart = -1;
   };
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i]!.status === "human_check") {
-      if (runStart < 0) runStart = i;
+    const status = rows[i]!.status;
+    const inDescRun = DESCENDING_STATUSES.has(status);
+    // Group human_check separately from done so a boundary between them flips.
+    // The done section (done/canceled/archived) is one run; human_check is its own.
+    const runKind = status === "human_check" ? "hc" : (inDescRun ? "done" : null);
+    const prevKind = runStart >= 0 ? (rows[runStart]!.status === "human_check" ? "hc" : "done") : null;
+    if (runKind && runKind === prevKind) {
+      // continue current run
+    } else if (runKind) {
+      flipRun(i);
+      runStart = i;
     } else {
       flipRun(i);
     }
