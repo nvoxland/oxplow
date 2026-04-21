@@ -56,10 +56,9 @@ What landed across each layer when commit points were added:
 - **Migration v6** in `migrations.ts`: `CREATE TABLE commit_point (...)`,
   plus indexes on `(batch_id, sort_index)` and `(batch_id, status)`.
 - **Store**: `src/persistence/commit-point-store.ts` —
-  `create/propose/markCommitted/delete/setSortIndexes/listForBatch/get`.
-  Status machine is `pending → proposed → done`; approval is a chat
-  conversation, not a UI surface. Every mutation calls `emit({ batchId,
-  kind, id })`.
+  `create/update/markCommitted/delete/setSortIndexes/listForBatch/get`.
+  Status machine is `pending → done`; the drafted message lives in
+  chat, not the DB. Every mutation calls `emit({ batchId, kind, id })`.
 - **Runtime / batch-queue-orchestrator**: methods
   `createCommitPoint/deleteCommitPoint/listCommitPoints/
   reorderBatchQueue/executeCommit` plus the Stop-hook integration via
@@ -75,9 +74,11 @@ What landed across each layer when commit points were added:
 - **UI consumption**: `PlanPane.tsx` loads commit points on batch change
   and refetches via `subscribeNewdeEvents` filtered to
   `event.type === "commit-point.changed" && event.batchId === batchId`.
-- **MCP**: `propose_commit`, `commit`, and `list_commit_points`
-  registered in `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
-  `commitPointStore` to its `McpToolDeps`).
+- **MCP**: `commit` and `list_commit_points` registered in
+  `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
+  `commitPointStore` to its `McpToolDeps`). The agent drafts messages
+  in chat and calls `commit` once the user approves; there is no
+  `propose_commit` tool — the draft has no DB-side representation.
 
 That's the full template — duplicate the shape for any new persisted
 feature.

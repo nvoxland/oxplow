@@ -252,7 +252,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:listCommitPoints", (_event, batchId: string) => currentRuntime.listCommitPoints(batchId));
   handle("newde:createCommitPoint", (_event, streamId: string, batchId: string) => currentRuntime.createCommitPoint(streamId, batchId));
   handle("newde:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
-  handle("newde:updateCommitPoint", (_event, id: string, changes: { mode?: "auto" | "approve"; message?: string }) => currentRuntime.updateCommitPoint(id, changes));
+  handle("newde:updateCommitPoint", (_event, id: string, changes: { mode?: "auto" | "approve" }) => currentRuntime.updateCommitPoint(id, changes));
   handle("newde:commitCommitPoint", (_event, id: string, message: string) => currentRuntime.commitCommitPoint(id, message));
   handle("newde:reorderBatchQueue", (_event, streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderBatchQueue(streamId, batchId, entries));
   handle("newde:listWaitPoints", (_event, batchId: string) => currentRuntime.listWaitPoints(batchId));

@@ -270,7 +270,7 @@ test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit 
   }) });
   const cp = {
     id: "cp1", batch_id: "b1", sort_index: 1, mode: "approve" as const,
-    status: "pending" as const, proposed_message: null, commit_sha: null,
+    status: "pending" as const, commit_sha: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", completed_at: null,
   };
   const out = decideStopDirective(

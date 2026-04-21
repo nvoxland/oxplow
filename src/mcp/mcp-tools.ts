@@ -508,26 +508,9 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__propose_commit",
-      description:
-        "Record (or re-record) a drafted commit message for an active commit point. Call this as soon as you've drafted a message, THEN output the message in your reply and ASK the user to approve. Do NOT run `git add` or `git commit` yourself, and do NOT call `newde__commit` until the user has approved. If the user suggests changes, call this again with the updated message.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          commit_point_id: { type: "string", description: "Required id of the commit_point to draft for." },
-          message: { type: "string", description: "Required drafted commit message. Conventional-Commits style recommended." },
-        },
-        required: ["commit_point_id", "message"],
-      },
-      handler: (args: { commit_point_id: string; message: string }) => {
-        const updated = commitPointStore.propose(args.commit_point_id, args.message);
-        return { ok: true, commitPoint: updated, awaiting: "user-approval" };
-      },
-    },
-    {
       name: "newde__commit",
       description:
-        "Run the git commit for an active commit point. Only call this AFTER the user has explicitly approved your drafted message in chat. The `message` you pass here is the final message that will be committed (usually the same as your most recent propose_commit draft). Throws on git failure; read the error, fix the underlying issue, and call again.",
+        "Run the git commit for an active commit point. Only call this AFTER the user has explicitly approved your drafted message in chat. The `message` you pass here is the final message that will be committed. Throws on git failure; read the error, fix the underlying issue, and call again.",
       inputSchema: {
         type: "object",
         properties: {

@@ -13,7 +13,6 @@ import type {
   WorkNote,
 } from "../../api.js";
 import {
-  commitCommitPoint,
   createCommitPoint,
   createWaitPoint,
   getWorkNotes,
@@ -707,10 +706,6 @@ export function PlanPane({
             await updateCommitPoint(editingCommitPoint.id, changes);
             setEditingCommitPoint(null);
           }}
-          onApproveAndCommit={editingCommitPoint.status === "proposed" ? async (message) => {
-            await commitCommitPoint(editingCommitPoint.id, message);
-            setEditingCommitPoint(null);
-          } : undefined}
           onClose={() => setEditingCommitPoint(null)}
         />
       ) : null}
@@ -1300,24 +1295,20 @@ const bottomChipStyle: CSSProperties = {
 
 /**
  * Modal for editing a commit point — opened by double-clicking a commit
- * divider row. Lets the user change the mode (auto vs approve) and edit the
- * proposed message. Shows "Approve & Commit" when the point is in `proposed`
- * status so the user can commit straight from the panel without going through
- * the chat loop.
+ * divider row. Only lets the user change the mode (auto vs approve); the
+ * drafted commit message now lives in chat between the agent and the user,
+ * not in the commit point row.
  */
 function CommitPointModal({
   cp,
   onSave,
-  onApproveAndCommit,
   onClose,
 }: {
   cp: CommitPoint;
-  onSave(changes: { mode?: "auto" | "approve"; message?: string }): Promise<void>;
-  onApproveAndCommit?: ((message: string) => Promise<void>) | undefined;
+  onSave(changes: { mode?: "auto" | "approve" }): Promise<void>;
   onClose(): void;
 }) {
   const [mode, setMode] = useState<"auto" | "approve">(cp.mode);
-  const [message, setMessage] = useState(cp.proposed_message ?? "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -1334,20 +1325,9 @@ function CommitPointModal({
   const handleSave = async () => {
     setSaving(true);
     try {
-      const changes: { mode?: "auto" | "approve"; message?: string } = {};
+      const changes: { mode?: "auto" | "approve" } = {};
       if (mode !== cp.mode) changes.mode = mode;
-      if (message !== (cp.proposed_message ?? "")) changes.message = message;
       await onSave(changes);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleApproveAndCommit = async () => {
-    if (!onApproveAndCommit) return;
-    setSaving(true);
-    try {
-      await onApproveAndCommit(message);
     } finally {
       setSaving(false);
     }
@@ -1424,29 +1404,8 @@ function CommitPointModal({
           </div>
         </label>
 
-        <label style={labelStyle}>
-          Message
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Commit message (leave blank to auto-generate)"
-            style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
-          />
-        </label>
-
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
           <button type="button" onClick={onClose} style={miniButtonStyle} disabled={saving}>Cancel</button>
-          {onApproveAndCommit ? (
-            <button
-              type="button"
-              data-testid="commit-point-approve-commit"
-              onClick={() => void handleApproveAndCommit()}
-              disabled={saving}
-              style={{ ...miniButtonStyle, padding: "6px 10px", background: "#10b981", color: "#fff", border: "1px solid #10b981" }}
-            >
-              Approve & Commit
-            </button>
-          ) : null}
           <button
             type="button"
             data-testid="commit-point-save"

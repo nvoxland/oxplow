@@ -23,9 +23,7 @@ export const commitDividerLineStyle: CSSProperties = {
 };
 
 export function commitDividerBadgeStyle(status: CommitPoint["status"]): CSSProperties {
-  const accent = status === "proposed" ? "#d97706"
-    : status === "done" ? "#10b981"
-    : "#8888aa";
+  const accent = status === "done" ? "#10b981" : "#8888aa";
   return badgeStyle(accent);
 }
 
@@ -37,7 +35,6 @@ export function waitDividerBadgeStyle(status: WaitPoint["status"]): CSSPropertie
 export function commitBadgeStyle(status: CommitPoint["status"]): CSSProperties {
   const colors: Record<CommitPoint["status"], string> = {
     pending: "#6b7280",
-    proposed: "#d97706",
     done: "#10b981",
   };
   return {

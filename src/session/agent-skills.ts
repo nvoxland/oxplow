@@ -232,7 +232,8 @@ have no visibility.
    - When dispatched as an epic unit: after all child tasks are marked
      \`human_check\`, mark the epic itself \`human_check\` too.
    - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.
-   - Use \`mcp__newde__propose_commit\` when a commit point is due.
+   - When a commit point is due, draft a commit message in the reply,
+     ask the user to approve, and call \`mcp__newde__commit\` once they do.
    - If you hit an error you cannot resolve, mark the item \`blocked\`
      and add a work note with the error details before stopping.
    - Return a short plain-text summary of what was done.

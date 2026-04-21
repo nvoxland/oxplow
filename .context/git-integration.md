@@ -134,17 +134,18 @@ different reasons:
 
 1. **Ad-hoc.** The writer-batch agent runs `git add` / `git commit`
    directly via Bash when the user tells it to commit. No commit
-   point, no approval UI, no `propose_commit`. This is the default
-   shape for "I've got changes, land them now."
+   point, no approval UI. This is the default shape for "I've got
+   changes, land them now."
 2. **Commit-point / approval.** A `commit_point` row exists in the
    queue and the Stop-hook has blocked the agent with a directive
-   telling it to call `mcp__newde__propose_commit`. The agent drafts a
-   message, the user approves in chat, and `mcp__newde__commit` (or
-   auto-mode) runs `gitCommitAll` through the runtime. This path
-   records a commit sha on the commit_point row for provenance.
+   telling it to inspect the diff, draft a message in its chat reply,
+   and ask the user to approve. On approval the agent calls
+   `mcp__newde__commit` (or in auto mode the runtime commits
+   immediately) which runs `gitCommitAll` through the runtime. The
+   row records the commit sha for provenance.
 
-`propose_commit` is **only** for path 2 — don't ask the agent to
-propose when no commit point is pending.
+The drafted message lives only in chat — there is no `propose_commit`
+tool and no DB-side drafted-message column.
 
 ### Non-writer batches still cannot call git
 

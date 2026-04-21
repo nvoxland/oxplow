@@ -55,10 +55,12 @@ newde agent:
     (`createCommitPoint`, or click `+ Commit when done` in the Plan
     panel) *before* prompting the agent. When the Stop hook sees a
     pending commit point, it blocks with a directive telling the
-    agent to call `mcp__newde__propose_commit({ commit_point_id,
-    message })`. The point then transitions to `approved` (auto-mode)
-    or awaits user approval in the UI (approval-mode) before
-    `executeApprovedCommit` runs `gitCommitAll`.
+    agent to inspect the diff, draft a message in its reply, and ask
+    the user to approve. On approval the agent calls
+    `mcp__newde__commit({ commit_point_id, message })`, which runs
+    `gitCommitAll` and flips the point to `done`. Auto-mode commit
+    points skip the chat round-trip — the runtime commits immediately
+    with a generated message.
 - **Work-item lifecycle.** Create → Stop-hook picks next ready item →
   agent marks `in_progress` → agent works → agent marks `human_check`
   when waiting for user review. Agents **never self-mark `done`** —
@@ -67,16 +69,15 @@ newde agent:
 
 ## Common pitfalls
 
-- **`propose_commit` with no active commit point silently fails.** The
-  agent logs a suggested message to the terminal and moves on; the
-  diff stays uncommitted. If you want an ad-hoc commit, ask for
-  `git commit`, not `propose_commit`.
+- **`mcp__newde__commit` only works when a commit point is pending.**
+  The tool requires an existing commit_point row; for ad-hoc commits
+  have the agent run `git commit` directly via Bash.
   - **UI signal:** the Work panel renders an inline hint
     (`data-testid="plan-no-commit-point-hint"`) above the bottom bar
     whenever the current batch has at least one `human_check` / `done`
-    item and no live (non-`done`, non-`rejected`) commit point — a nudge
-    to click `+ Commit when done` so the next Stop-hook turn has
-    something to fire. Derived purely on the client from `batchWork` +
+    item and no live (non-`done`) commit point — a nudge to click
+    `+ Commit when done` so the next Stop-hook turn has something to
+    fire. Derived purely on the client from `batchWork` +
     `commitPoints` state; no new store/IPC.
 - **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
   non-`active` batch.** See "Write guard" below. If the agent reports
@@ -181,12 +182,14 @@ The pipeline runs in priority order:
    same `runAutoCommit` helper and then flips its own DB row to `done`.
 1. **Pending commit point (writer batch only).** Block with a directive
    built by `buildCommitPointStopReason` telling the agent to inspect the
-   diff, draft a commit message in Conventional-Commits style, and call
-   `mcp__newde__propose_commit({ commit_point_id, message })`. Don't run
-   `git` directly — the runtime will commit on receipt of an approved
-   message. **Gated on `batch.status === "active"`**: only the writer
-   batch ever commits. Non-active batches fall through so the commit
-   point stays pending until that batch is promoted to writer.
+   diff, draft a concise commit message in its chat reply, and ask the
+   user to approve. On approval the agent calls
+   `mcp__newde__commit({ commit_point_id, message })` which runs
+   `gitCommitAll` and flips the point to `done`. The drafted message
+   lives only in chat — there is no DB column for it. **Gated on
+   `batch.status === "active"`**: only the writer batch ever commits.
+   Non-active batches fall through so the commit point stays pending
+   until that batch is promoted to writer.
 2. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
    UI shows "agent stopped here"; the user resumes by prompting the agent
    directly (`triggered` points are skipped on subsequent Stop hooks, so
@@ -195,11 +198,7 @@ The pipeline runs in priority order:
    includes `human_check` — agents never self-mark `done`, so demanding
    `done` would let the agent march past the line indefinitely while the
    user catches up on verification.
-3. **Approval-mode commit awaiting user.** Allow stop while the user
-   approves/rejects in the UI. After approve, the runtime commits and
-   marks the point `done`. (The agent is now idle; the user re-engages
-   to drain the rest of the queue.)
-4. **Writer batch with a ready work item.** Block with a directive built
+3. **Writer batch with a ready work item.** Block with a directive built
    by `buildNextWorkItemStopReason` naming the item's id + kind + title +
    batch_id + stream_id, and telling the agent to mark it `in_progress`
    before working. Items the agent itself filed during the *current* turn
@@ -209,13 +208,12 @@ The pipeline runs in priority order:
    invert the user's "leave in waiting" intent. "Queue" here means
    waiting + ready items only — `human_check` belongs to the user's
    review queue and is terminal from the pipeline's perspective.
-5. **Otherwise.** Allow stop.
+4. **Otherwise.** Allow stop.
 
-Auto-mode commit points pass straight through: the agent proposes →
-`commitPointStore.propose` jumps the status to `approved` →
-`runtime.executeApprovedCommit` runs `gitCommitAll` and marks `done` →
-the agent's `propose_commit` MCP call returns → agent tries to Stop again
-→ pipeline picks the next thing. No human in the loop.
+Auto-mode commit points are handled by the runtime's Stop-hook pre-pass
+before the pipeline runs: `runAutoCommit` generates a message from the
+settled work items, `gitCommitAll` runs, and the point flips straight to
+`done`. No human in the loop and no agent chat round-trip.
 
 ## BatchQueueOrchestrator
 
@@ -223,10 +221,9 @@ Cross-store queue logic (commit points + wait points + the
 `reorderBatchQueue` that rewrites all three sort_index spaces) lives
 in `src/electron/batch-queue-orchestrator.ts`. The runtime instantiates
 it as `this.batchQueue` and delegates IPC-exposed methods through.
-`executeApprovedCommit` (which runs the actual `git commit` after a
-point flips to `approved`) is also there, called both eagerly via
-the runtime's `commitPointStore.subscribe` handler and at startup
-via `drainPendingExecutions()` to cover crashes mid-commit.
+`executeCommit` (which runs `git commit` synchronously from the
+`newde__commit` MCP handler once the user has approved in chat) is
+also there.
 
 ## Orchestrator pattern
 
@@ -272,7 +269,7 @@ primary tool for queue-driven dispatch.
   `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
   `get_work_item`, `delete_work_item`, `reorder_work_items`,
   `link_work_items`, `add_work_note`, `list_recent_file_changes`
-- `propose_commit(commit_point_id, message)`, `list_commit_points(batchId)`
+- `commit(commit_point_id, message)`, `list_commit_points(batchId)`
 
 `buildLspMcpTools` (`src/mcp/lsp-mcp-tools.ts`) adds language-server
 queries (definition, references, hover) the agent can use without

@@ -472,6 +472,21 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 19,
+    name: "drop_commit_point_proposed_message_and_status",
+    up: (db) => {
+      // The "proposed" status + `proposed_message` column were part of a
+      // two-step draft-then-commit flow that's been replaced by the agent
+      // drafting a message directly in chat and calling `newde__commit` once
+      // the user approves. Collapse any lingering `proposed` rows back to
+      // `pending` and drop the now-unused column.
+      db.exec(`
+        UPDATE commit_point SET status = 'pending' WHERE status = 'proposed';
+        ALTER TABLE commit_point DROP COLUMN proposed_message;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

@@ -552,7 +552,7 @@ export async function deleteCommitPoint(id: string): Promise<void> {
 
 export async function updateCommitPoint(
   id: string,
-  changes: { mode?: "auto" | "approve"; message?: string },
+  changes: { mode?: "auto" | "approve" },
 ): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
   return desktopApi().updateCommitPoint(id, changes);
 }

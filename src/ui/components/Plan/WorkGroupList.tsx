@@ -299,8 +299,6 @@ export function WorkGroupList({
           >
             <span style={commitDividerBadgeStyle(row.cp.status)}>
               commit
-              {row.cp.status === "proposed" ? " · drafted" : ""}
-              {row.cp.status === "done" ? " · done" : ""}
             </span>
             <span style={commitModeBadgeStyle(row.cp.mode)}>
               {row.cp.mode === "auto" ? "Auto" : "Approve"}

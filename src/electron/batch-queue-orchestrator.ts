@@ -47,14 +47,10 @@ export class BatchQueueOrchestrator {
     });
   }
 
-  proposeCommit(id: string, message: string): CommitPoint {
-    return this.commitPointStore.propose(id, message);
-  }
-
-  /** Update mutable fields on a commit point (mode and/or message).
+  /** Update mutable fields on a commit point (currently only `mode`).
    *  Returns the updated list of commit points for the batch so the UI can
    *  refresh in one round-trip. */
-  updateCommitPoint(id: string, changes: { mode?: CommitPointMode; message?: string }): CommitPoint[] {
+  updateCommitPoint(id: string, changes: { mode?: CommitPointMode }): CommitPoint[] {
     const updated = this.commitPointStore.update(id, changes);
     return this.commitPointStore.listForBatch(updated.batch_id);
   }

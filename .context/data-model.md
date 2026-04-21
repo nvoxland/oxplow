@@ -107,14 +107,14 @@ display.
 ### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
 
 Markers in the queue that say "commit at this point." Status:
-`pending → proposed → done`. Approval happens in chat — the agent drafts
-via `newde__propose_commit` (status=proposed, no commit yet), outputs the
-message in its reply, and waits. On the user's approve, the agent calls
-`newde__commit` which runs `git commit` synchronously and flips the
-point to `done`. There is no UI approve/reject surface anymore and no
-auto-vs-approval mode. Columns hold the drafted message and the
-resulting commit sha. See [agent-model.md](./agent-model.md) for the
-Stop-hook flow.
+`pending → done`. `mode` is `approve` (default) or `auto`. In approve
+mode the agent inspects the diff, drafts a message in its chat reply,
+asks the user to approve, and calls `newde__commit` once they do —
+that runs `git commit` synchronously and flips the point to `done`. In
+auto mode the runtime commits immediately with a generated message.
+Drafted messages live only in chat; the row just stores mode, status,
+and (once committed) the sha. See [agent-model.md](./agent-model.md)
+for the Stop-hook flow.
 
 ### `wait_point` — `WaitPointStore` (`src/persistence/wait-point-store.ts`)
 
@@ -255,10 +255,7 @@ work item:    ready ─► in_progress ─► human_check ─► done ─► arc
                    ╰─────────► blocked
                    ╰─────────► canceled ─► archived
 
-commit point: pending ─► proposed ─► approved ─► done
-                              ╰─► rejected ─► pending  (user reject)
-                                       approved ─► rejected (git failure;
-                                                             via failExecution)
+commit point: pending ─► done
 
 wait point:   pending ─► triggered                     (consumed)
 ```

@@ -13,14 +13,13 @@ import type { WorkItem } from "../persistence/work-item-store.js";
  * `directive` to Claude.
  *
  * The pipeline runs in priority order:
- *   1. Pending commit point: block, ask the agent to propose a commit.
+ *   1. Pending commit point: block, ask the agent to draft a message
+ *      (approve mode) or let the runtime auto-commit (auto mode).
  *   2. Pending wait point: side-effect "trigger" + allow stop. The
  *      user resumes by prompting the agent directly.
- *   3. Approval-mode commit at `proposed`: allow stop while the user
- *      reviews.
- *   4. Writer batch with a ready work item: block, ask the agent to
+ *   3. Writer batch with a ready work item: block, ask the agent to
  *      pick it up (auto-progression).
- *   5. Allow stop.
+ *   4. Allow stop.
  *
  * `directive` of `null` lets Claude stop normally; otherwise it's the
  * hook body (typically `{ decision: "block", reason: string }`).
@@ -99,10 +98,6 @@ export function decideStopDirective(
   const activeWait = findActiveMarker(snapshot.waitPoints, snapshot.workItems, (wp) => wp.status === "pending");
   if (activeWait) {
     sideEffects.push({ kind: "trigger-wait-point", id: activeWait.id });
-    return { directive: null, sideEffects };
-  }
-
-  if (activeCommit && activeCommit.status === "proposed") {
     return { directive: null, sideEffects };
   }
 

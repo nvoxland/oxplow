@@ -235,7 +235,7 @@ export interface DesktopApi {
   listCommitPoints(batchId: string): Promise<CommitPoint[]>;
   createCommitPoint(streamId: string, batchId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve"; message?: string }): Promise<CommitPoint[]>;
+  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): Promise<CommitPoint[]>;
   commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
   reorderBatchQueue(streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
   listWaitPoints(batchId: string): Promise<WaitPoint[]>;

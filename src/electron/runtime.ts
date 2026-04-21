@@ -1649,12 +1649,11 @@ export class ElectronRuntime {
     this.batchQueue.deleteCommitPoint(id);
   }
 
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve"; message?: string }): CommitPoint[] {
+  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): CommitPoint[] {
     return this.batchQueue.updateCommitPoint(id, changes);
   }
 
-  /** IPC-exposed: run the git commit for a proposed commit point immediately
-   *  (user triggered via the Plan panel "Approve & Commit" button). */
+  /** IPC-exposed: run the git commit for a commit point immediately. */
   commitCommitPoint(id: string, message: string): CommitPoint {
     return this.batchQueue.executeCommit(id, message);
   }
@@ -1793,7 +1792,7 @@ export function buildNextWorkItemStopReason(
     `   - **REQUIRED — work items one at a time:** for each item, mark it \`in_progress\` via \`mcp__newde__update_work_item\` immediately before starting it, do the work, then mark it \`human_check\` before moving to the next. Never mark multiple items \`in_progress\` simultaneously. File-change attribution is driven by the sole in-progress item; if the subagent skips this step or marks all items in_progress at once, changes will be attributed to the wrong item.`,
     `   - Mark \`human_check\` (not \`done\`) when acceptance criteria are met.`,
     `   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.`,
-    `   - Use \`mcp__newde__propose_commit\` when a commit point is due.`,
+    `   - When a commit point is due, draft a commit message in the reply, ask the user to approve, and call \`mcp__newde__commit\` once they do.`,
     `3. When the subagent returns, record a brief outcome note on each item via \`mcp__newde__add_work_note\`.`,
     `4. Repeat from step 1 until \`read_work_options\` returns \`{ mode: "empty" }\`, a commit point is due, or a wait point is hit.`,
   );
@@ -1856,11 +1855,11 @@ export function buildCommitPointStopReason(cp: CommitPoint): string {
   const lines = [
     `A commit point is due in this batch's work queue (commit_point_id=${cp.id}).`,
     ``,
-    `Inspect the unstaged/staged changes since the last commit (use read-only commands like \`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message in Conventional-Commits style describing those changes.`,
+    `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Keep the subject terse and descriptive — avoid Conventional-Commits prefixes like \`feat(scope):\` or \`fix:\`. Do NOT add Co-Authored-By or any self-attribution lines.`,
     ``,
-    `Call \`mcp__newde__propose_commit\` with { commit_point_id: "${cp.id}", message: "<your message>" } to record the draft, then output the message in your reply and ASK the user to approve. Do NOT run \`git add\` or \`git commit\` yourself.`,
+    `Output the drafted message in your chat reply and ask the user to approve or suggest changes. Do NOT run \`git add\` or \`git commit\` yourself.`,
     ``,
-    `After the user replies: if they approve, call \`mcp__newde__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the commit. If they suggest changes, call propose_commit again with the updated message and ask again.`,
+    `When the user approves, call \`mcp__newde__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the git commit. If the user suggests changes, redraft the message in your next reply and ask again; only call \`mcp__newde__commit\` once the user has explicitly approved.`,
   ];
   return lines.join("\n");
 }

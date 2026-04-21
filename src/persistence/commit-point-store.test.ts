@@ -17,6 +17,7 @@ function seed() {
     branch_ref: "refs/heads/main",
     branch_source: "local",
     worktree_path: "/tmp/demo",
+    custom_prompt: null,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
     panes: { working: "newde-demo:working-s-1", talking: "newde-demo:talking-s-1" },
@@ -38,31 +39,20 @@ describe("CommitPointStore", () => {
     expect(list.map((c) => c.id)).toEqual([a.id, b.id]);
   });
 
-  test("propose records the draft message and parks at `proposed` so the user can respond in chat", () => {
+  test("update changes the mode and leaves status untouched", () => {
     const { store, batchId } = seed();
     const cp = store.create({ batchId, sortIndex: 1 });
-    const drafted = store.propose(cp.id, "  feat: add thing  ");
-    expect(drafted.status).toBe("proposed");
-    expect(drafted.proposed_message).toBe("feat: add thing");
-    expect(drafted.commit_sha).toBeNull();
+    expect(cp.mode).toBe("approve");
+    const updated = store.update(cp.id, { mode: "auto" });
+    expect(updated.mode).toBe("auto");
+    expect(updated.status).toBe("pending");
   });
 
-  test("propose can re-record the draft with a new message (user suggested changes)", () => {
+  test("markCommitted records the sha and flips to done", () => {
     const { store, batchId } = seed();
     const cp = store.create({ batchId, sortIndex: 1 });
-    store.propose(cp.id, "first draft");
-    const redrafted = store.propose(cp.id, "second draft");
-    expect(redrafted.status).toBe("proposed");
-    expect(redrafted.proposed_message).toBe("second draft");
-  });
-
-  test("markCommitted records the final message + sha and flips to done", () => {
-    const { store, batchId } = seed();
-    const cp = store.create({ batchId, sortIndex: 1 });
-    store.propose(cp.id, "draft");
     const done = store.markCommitted(cp.id, "final message", "abc123");
     expect(done.status).toBe("done");
-    expect(done.proposed_message).toBe("final message");
     expect(done.commit_sha).toBe("abc123");
     expect(() => store.markCommitted(cp.id, "x", "def")).toThrow();
   });
@@ -70,7 +60,6 @@ describe("CommitPointStore", () => {
   test("delete refuses on completed commit points", () => {
     const { store, batchId } = seed();
     const cp = store.create({ batchId, sortIndex: 1 });
-    store.propose(cp.id, "msg");
     store.markCommitted(cp.id, "msg", "abc");
     expect(() => store.delete(cp.id)).toThrow();
   });

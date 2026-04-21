@@ -57,7 +57,6 @@ function commitPoint(id: string, sort_index: number, status: CommitPointStatus =
     sort_index,
     mode,
     status,
-    proposed_message: null,
     commit_sha: null,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
@@ -126,13 +125,6 @@ describe("decideStopDirective", () => {
   test("triggered wait point is treated as consumed", () => {
     const wp = waitPoint("wp1", 1, "triggered");
     const out = decideStopDirective(snapshot({ waitPoints: [wp] }), builders);
-    expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([]);
-  });
-
-  test("commit at proposed (awaiting user chat approval): allow stop, no side effects", () => {
-    const cp = commitPoint("cp1", 1, "proposed");
-    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
   });
