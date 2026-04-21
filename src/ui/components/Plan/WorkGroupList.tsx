@@ -17,6 +17,7 @@ import {
   commitDividerBadgeStyle,
   commitDividerLineStyle,
   commitDividerStyle,
+  commitModeBadgeStyle,
   waitDividerBadgeStyle,
 } from "./queue-markers.js";
 import { WaitPointRow } from "./WaitPointRow.js";
@@ -54,7 +55,7 @@ interface SectionBucket {
 
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "Ready" },
+  { kind: "toDo", label: "To Do" },
   { kind: "humanCheck", label: "Human check" },
   { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
@@ -76,8 +77,10 @@ export function WorkGroupList({
   markedIds,
   onSelect,
   onRequestEdit,
+  onDoubleClickCommitPoint,
   epicChildrenMap,
   onReparentWorkItem,
+  isActive,
 }: {
   group: WorkItemGroup;
   scopeBatchId: string | null;
@@ -94,9 +97,14 @@ export function WorkGroupList({
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
+  onDoubleClickCommitPoint?(cp: CommitPoint): void;
   epicChildrenMap: Map<string, WorkItem[]>;
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
+  isActive?: boolean;
 }) {
+  // When the batch is not the active writer, in_progress items are not agent-owned
+  // and can be freely reordered — only lock them when this batch is active.
+  const lockInProgress = isActive !== false;
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   const [overSection, setOverSection] = useState<WorkItemSectionKind | null>(null);
@@ -254,18 +262,25 @@ export function WorkGroupList({
             onDragLeave={() => { if (overKey === key) setOverKey(null); }}
             onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
             onClick={() => onToggleExpand(key)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onDoubleClickCommitPoint?.(row.cp);
+            }}
             style={{
               ...commitDividerStyle,
               cursor: isDragging ? "grabbing" : "pointer",
               borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
               background: isDragging ? "rgba(74,158,255,0.08)" : "transparent",
             }}
-            title="Commit point — drag to reposition"
+            title="Commit point — double-click to edit, drag to reposition"
           >
             <span style={commitDividerBadgeStyle(row.cp.status)}>
               commit
               {row.cp.status === "proposed" ? " · drafted" : ""}
               {row.cp.status === "done" ? " · done" : ""}
+            </span>
+            <span style={commitModeBadgeStyle(row.cp.mode)}>
+              {row.cp.mode === "auto" ? "Auto" : "Approve"}
             </span>
           </div>
           {isExpanded ? <CommitPointRow cp={row.cp} /> : null}
@@ -374,6 +389,7 @@ export function WorkGroupList({
             isOver={isOver}
             isDragging={isDragging}
             scopeBatchId={scopeBatchId}
+            lockInProgress={lockInProgress}
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
@@ -408,6 +424,7 @@ export function WorkGroupList({
         isOver={isOver}
         isDragging={isDragging}
         scopeBatchId={scopeBatchId}
+        lockInProgress={lockInProgress}
         onRequestEdit={onRequestEdit}
         onSelect={onSelect}
         onUpdateWorkItem={onUpdateWorkItem}
@@ -421,10 +438,10 @@ export function WorkGroupList({
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        // toDo, humanCheck, done, and inProgress always render so the user sees
-        // the full section layout even when empty. blocked only appears while a
-        // drag is active (as a drop target). toDo also anchors the add-points slot.
-        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done" || section.kind === "inProgress";
+        // toDo, humanCheck, done, inProgress, and blocked always render so the
+        // user sees the full section layout even when empty. toDo also anchors
+        // the add-points slot.
+        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
         if (empty && !alwaysShow && !draggedWorkItem) {
           return null;
         }
@@ -497,9 +514,9 @@ export function WorkGroupList({
               ) : null}
             </div>
             {renderedRows.map(renderRow)}
-            {empty && !draggedWorkItem ? (
+            {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
               <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-                (nothing here)
+                {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
               </div>
             ) : null}
             {/* The "+ Commit Point" / "+ Wait Point" bar hangs off the tail
@@ -580,7 +597,7 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"]
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
   isSelected, isMarked, isOver, isDragging,
-  scopeBatchId, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
+  scopeBatchId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
@@ -592,6 +609,7 @@ function EpicInlineRow({
   isOver: boolean;
   isDragging: boolean;
   scopeBatchId: string | null;
+  lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
@@ -603,7 +621,7 @@ function EpicInlineRow({
   onDrop(event: React.DragEvent): void;
 }) {
   const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
-  const locked = item.status === "in_progress";
+  const locked = item.status === "in_progress" && (lockInProgress !== false);
   void scopeBatchId;
   return (
     <div
@@ -637,7 +655,7 @@ function EpicInlineRow({
       data-key={rowKey}
       data-testid={`work-item-row-${item.id}`}
     >
-      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={item.status === "in_progress"} />
+      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={locked} />
       <span
         onClick={(event) => { event.stopPropagation(); onToggleExpand(); }}
         style={{ flexShrink: 0, width: 12, textAlign: "center", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}
@@ -647,6 +665,16 @@ function EpicInlineRow({
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
         {item.title}
+        {item.note_count > 0 ? (
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            background: "var(--muted)", color: "var(--bg)", borderRadius: "50%",
+            fontSize: 9, minWidth: 14, height: 14, padding: "0 3px", marginLeft: 4,
+            lineHeight: 1, verticalAlign: "middle", flexShrink: 0,
+          }}>
+            {item.note_count}
+          </span>
+        ) : null}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
     </div>
@@ -786,6 +814,7 @@ function InlineItemRow({
   isOver,
   isDragging,
   scopeBatchId,
+  lockInProgress,
   onSelect,
   onRequestEdit,
   onUpdateWorkItem,
@@ -803,6 +832,7 @@ function InlineItemRow({
   isOver: boolean;
   isDragging: boolean;
   scopeBatchId: string | null;
+  lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
@@ -814,7 +844,7 @@ function InlineItemRow({
   onDrop(event: React.DragEvent): void;
 }) {
   const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
-  const locked = item.status === "in_progress";
+  const locked = item.status === "in_progress" && (lockInProgress !== false);
 
   // scopeBatchId isn't used directly here, but the outer drag handler that
   // encoded it into dataTransfer was captured at onDragStart creation time —
@@ -873,7 +903,7 @@ function InlineItemRow({
       <InlineStatusPicker
         status={item.status}
         onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }}
-        locked={item.status === "in_progress"}
+        locked={locked}
       />
       <span
         style={{
@@ -885,6 +915,16 @@ function InlineItemRow({
         }}
       >
         {item.title}
+        {item.note_count > 0 ? (
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            background: "var(--muted)", color: "var(--bg)", borderRadius: "50%",
+            fontSize: 9, minWidth: 14, height: 14, padding: "0 3px", marginLeft: 4,
+            lineHeight: 1, verticalAlign: "middle", flexShrink: 0,
+          }}>
+            {item.note_count}
+          </span>
+        ) : null}
       </span>
       <InlinePriorityPicker
         priority={item.priority}

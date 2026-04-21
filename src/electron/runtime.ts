@@ -51,7 +51,7 @@ import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
 import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
-import { BACKLOG_SCOPE, WorkItemStore } from "../persistence/work-item-store.js";
+import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
 import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
@@ -1160,6 +1160,19 @@ export class ElectronRuntime {
         }
       }
     }
+    // Auto-mode commit points: commit immediately without blocking the agent.
+    // If the active commit point has mode="auto" and is still pending, generate
+    // a message from settled work items and commit right now. After committing
+    // the point becomes "done", so the snapshot built below sees it as done
+    // and decideStopDirective falls through to the next pipeline step.
+    if (batch?.status === "active") {
+      const commitPoints = this.commitPointStore.listForBatch(batchId);
+      const workItems = this.workItemStore.listItems(batchId);
+      const autoCommitPoint = findActiveAutoCommitPoint(commitPoints, workItems);
+      if (autoCommitPoint) {
+        this.executeAutoCommitPoint(autoCommitPoint, batch, workItems);
+      }
+    }
     const snapshot: BatchSnapshot = {
       batch,
       commitPoints: this.commitPointStore.listForBatch(batchId),
@@ -1601,6 +1614,48 @@ export class ElectronRuntime {
     this.batchQueue.deleteCommitPoint(id);
   }
 
+  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve"; message?: string }): CommitPoint[] {
+    return this.batchQueue.updateCommitPoint(id, changes);
+  }
+
+  /** IPC-exposed: run the git commit for a proposed commit point immediately
+   *  (user triggered via the Plan panel "Approve & Commit" button). */
+  commitCommitPoint(id: string, message: string): CommitPoint {
+    return this.batchQueue.executeCommit(id, message);
+  }
+
+  /**
+   * Execute an auto-mode commit point: generate a commit message from settled
+   * work items, run `git commit`, and mark the point done — all without
+   * blocking the agent. Called from computeStopDirective before the snapshot
+   * is built so the point is already `done` when decideStopDirective runs.
+   */
+  private executeAutoCommitPoint(cp: CommitPoint, batch: Batch, workItems: WorkItem[]): void {
+    const stream = this.store.get(batch.stream_id);
+    if (!stream) {
+      this.logger.warn("auto-commit-point: stream not found", { cpId: cp.id, batchId: batch.id });
+      return;
+    }
+    const message = buildAutoCommitMessage(workItems);
+    try {
+      const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
+      if (!result.ok || !result.sha) {
+        this.logger.warn("auto-commit-point: git commit failed", {
+          cpId: cp.id,
+          stderr: result.stderr,
+        });
+        return;
+      }
+      this.commitPointStore.markCommitted(cp.id, message, result.sha);
+      this.logger.info("auto-commit-point: committed", { cpId: cp.id, sha: result.sha, message });
+    } catch (err) {
+      this.logger.warn("auto-commit-point: execution error", {
+        cpId: cp.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   reorderBatchQueue(
     streamId: string,
     batchId: string,
@@ -1694,6 +1749,58 @@ export function buildNextWorkItemStopReason(
     `4. Repeat from step 1 until \`read_work_options\` returns \`{ mode: "empty" }\`, a commit point is due, or a wait point is hit.`,
   );
   return lines.join("\n");
+}
+
+/**
+ * Find the lowest-sort_index commit point with mode="auto" and status="pending"
+ * whose preceding work items are all terminal. Returns null if none qualifies.
+ * Mirrors the logic in `decideStopDirective`'s findActiveMarker helper.
+ */
+function findActiveAutoCommitPoint(
+  commitPoints: CommitPoint[],
+  workItems: WorkItem[],
+): CommitPoint | null {
+  // Sort ascending by sort_index so we pick the first eligible one.
+  const sorted = [...commitPoints].sort((a, b) => a.sort_index - b.sort_index);
+  for (const cp of sorted) {
+    if (cp.status !== "pending" || cp.mode !== "auto") continue;
+    const preceding = workItems.filter((item) => item.sort_index < cp.sort_index);
+    const allTerminal = preceding.every(
+      (item) =>
+        item.status === "done" ||
+        item.status === "canceled" ||
+        item.status === "archived" ||
+        item.status === "human_check",
+    );
+    if (allTerminal) return cp;
+  }
+  return null;
+}
+
+/**
+ * Build an auto-generated commit message from settled work items. Uses the
+ * titles of all human_check/done/canceled work items in the batch as the
+ * body of a "chore:" conventional commit.
+ */
+export function buildAutoCommitMessage(workItems: WorkItem[]): string {
+  const settled = workItems.filter(
+    (item) =>
+      item.status === "human_check" ||
+      item.status === "done" ||
+      item.status === "canceled",
+  );
+  if (settled.length === 0) {
+    return "chore: auto-commit at queue commit point";
+  }
+  if (settled.length === 1) {
+    return `chore: ${settled[0]!.title}`;
+  }
+  const items = settled
+    .slice(0, 5)
+    .map((item) => `- ${item.title}`)
+    .join("\n");
+  const suffix = settled.length > 5 ? `\n…and ${settled.length - 5} more` : "";
+  return `chore: complete ${settled.length} work items\n\n${items}${suffix}`;
 }
 
 export function buildCommitPointStopReason(cp: CommitPoint): string {

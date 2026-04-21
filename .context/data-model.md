@@ -74,6 +74,22 @@ join table.
 `BACKLOG_SCOPE` as a sentinel string in event payloads so listeners can
 distinguish backlog changes from in-batch changes.
 
+`note_count` is a computed column added to every `WorkItem` returned by the
+store (via COUNT subquery over `work_note`). It drives the note badge on
+list rows and is always 0 when no notes exist.
+
+### `work_note` — `WorkItemStore.getWorkNotes()` (`src/persistence/work-item-store.ts`)
+
+Structured notes attached to individual work items. Each row has `id`,
+`work_item_id`, `body`, `author` (free-form string, e.g. "agent", "user"),
+and `created_at`. Created via migration v17. The store exposes
+`getWorkNotes(itemId)` returning rows sorted by `created_at ASC`. The UI
+calls `getWorkNotes` via the `getWorkNotes(itemId)` IPC method when the
+edit modal opens; the modal renders a read-only "Notes" section. Agent and
+user note writes go through `work_item_events` (event_type = 'note') for
+now — `work_note` is the dedicated query-friendly table for structured note
+display.
+
 ### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
 
 Markers in the queue that say "commit at this point." Status:

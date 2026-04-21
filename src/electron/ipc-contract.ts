@@ -26,6 +26,7 @@ import type {
   WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
+  WorkNote,
   WorkspaceContext,
   WorkspaceEntry,
   WorkspaceFile,
@@ -71,6 +72,7 @@ export type {
   WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
+  WorkNote,
   WorkspaceContext,
   WorkspaceEntry,
   WorkspaceFile,
@@ -196,6 +198,7 @@ export interface DesktopApi {
   moveBacklogItemToBatch(streamId: string, itemId: string, toBatchId: string): Promise<{ backlog: BacklogState; to: BatchWorkState }>;
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
+  getWorkNotes(itemId: string): Promise<WorkNote[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
   getTurnFileDiff(turnId: string, path: string): Promise<SnapshotDiffResult>;
@@ -230,6 +233,8 @@ export interface DesktopApi {
   listCommitPoints(batchId: string): Promise<CommitPoint[]>;
   createCommitPoint(streamId: string, batchId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;
+  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve"; message?: string }): Promise<CommitPoint[]>;
+  commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
   reorderBatchQueue(streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
   listWaitPoints(batchId: string): Promise<WaitPoint[]>;
   createWaitPoint(streamId: string, batchId: string, note?: string | null): Promise<WaitPoint>;

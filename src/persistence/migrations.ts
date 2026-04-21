@@ -424,6 +424,41 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE batches ADD COLUMN auto_commit INTEGER NOT NULL DEFAULT 0;`);
     },
   },
+  {
+    version: 16,
+    name: "commit_point.mode surfaced",
+    up: (db) => {
+      // The `mode` column has existed since v6 but was written as a fixed
+      // 'auto' placeholder and not exposed in the TypeScript type. Now that
+      // auto vs approve mode is a real UI concept, reset every existing row
+      // to 'approve' (the new default intent) so the stop-hook pipeline
+      // interprets them correctly. New rows also default to 'approve' via the
+      // store's create() method.
+      db.exec(`UPDATE commit_point SET mode = 'approve' WHERE mode = 'auto';`);
+    },
+  },
+  {
+    version: 17,
+    name: "work_note",
+    up: (db) => {
+      // Dedicated note rows for work items. Notes are structured (body, author,
+      // created_at) and queried directly, unlike the schemaless work_item_events
+      // log entries. The UI shows a note count badge on list rows and a read-only
+      // notes section in the edit modal. Author is a free-form string so both
+      // "user" and "agent" sources can be written without a separate actor table.
+      db.exec(`
+        CREATE TABLE work_note (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_work_note_item ON work_note(work_item_id, created_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

@@ -10,6 +10,7 @@ import type {
   WorkItemPriority,
   WorkItemStatus,
   WorkItemStore,
+  WorkNote,
 } from "../persistence/work-item-store.js";
 
 export interface BacklogState {
@@ -62,6 +63,7 @@ export interface WorkItemApi {
   moveBacklogItemToBatch(streamId: string, itemId: string, toBatchId: string): { backlog: BacklogState; to: BatchWorkState };
   addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[];
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
+  getWorkNotes(itemId: string): WorkNote[];
   listAgentTurns(streamId: string, batchId: string, limit?: number): AgentTurn[];
   listFileChanges(streamId: string, batchId: string, limit?: number): BatchFileChange[];
 }
@@ -213,6 +215,10 @@ export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, file
     listWorkItemEvents(streamId, batchId, itemId) {
       resolveBatch(streamId, batchId);
       return workItemStore.listEvents(batchId, itemId);
+    },
+
+    getWorkNotes(itemId) {
+      return workItemStore.getWorkNotes(itemId);
     },
 
     listAgentTurns(streamId, batchId, limit) {

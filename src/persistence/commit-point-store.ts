@@ -3,12 +3,13 @@ import { createId } from "../core/ids.js";
 import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 
-// Commit points are now a two-step, chat-driven approval: the agent proposes
-// a draft message (status=proposed), shows it to the user in chat, and waits.
-// On the user's "approve", the agent calls the commit tool, which runs
-// `git commit` synchronously and flips to `done`. There is no longer an
-// "auto" vs "approval" mode — every commit goes through the chat loop.
+// Commit points support two modes:
+//   "approve" (default) — the agent proposes a draft message, shows it to the
+//     user in chat, and waits for approval before committing.
+//   "auto" — the agent proposes a message and the runtime commits immediately
+//     without waiting for user approval (stop-hook pipeline handles this).
 export type CommitPointStatus = "pending" | "proposed" | "done";
+export type CommitPointMode = "auto" | "approve";
 
 const COMMIT_POINT_STATUSES: ReadonlySet<CommitPointStatus> = new Set([
   "pending", "proposed", "done",
@@ -20,6 +21,7 @@ export interface CommitPoint {
   id: string;
   batch_id: string;
   sort_index: number;
+  mode: CommitPointMode;
   status: CommitPointStatus;
   proposed_message: string | null;
   commit_sha: string | null;
@@ -67,17 +69,15 @@ export class CommitPointStore {
 
   /** Append a commit point at the end of the batch's queue. The caller passes
    *  the next sort_index (the runtime computes it across all three queue
-   *  tables). */
-  create(input: { batchId: string; sortIndex: number }): CommitPoint {
+   *  tables). Default mode is 'approve' (user reviews before commit). */
+  create(input: { batchId: string; sortIndex: number; mode?: CommitPointMode }): CommitPoint {
     const id = createId("cp");
     const now = new Date().toISOString();
-    // `mode` column survives as a legacy schema field (see migration v14
-    // notes); we write a fixed placeholder so pre-v14 DBs keep their NOT NULL
-    // constraint happy. The value is never read.
+    const mode = input.mode ?? "approve";
     this.stateDb.run(
       `INSERT INTO commit_point (id, batch_id, sort_index, mode, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'auto', 'pending', ?, ?)`,
-      id, input.batchId, input.sortIndex, now, now,
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+      id, input.batchId, input.sortIndex, mode, now, now,
     );
     const row = this.get(id);
     if (!row) throw new Error("commit point not persisted");
@@ -107,6 +107,30 @@ export class CommitPointStore {
     for (const batchId of batches) {
       this.emit({ batchId, kind: "reordered", id: null });
     }
+  }
+
+  /** Update mutable fields on a commit point (mode and/or proposed_message).
+   *  Returns the full updated commit point. */
+  update(id: string, changes: { mode?: CommitPointMode; message?: string }): CommitPoint {
+    const cp = this.requireCommitPoint(id);
+    if (cp.status === "done") throw new Error("cannot update a completed commit point");
+    const now = new Date().toISOString();
+    if (changes.mode !== undefined) {
+      this.stateDb.run(
+        `UPDATE commit_point SET mode = ?, updated_at = ? WHERE id = ?`,
+        changes.mode, now, id,
+      );
+    }
+    if (changes.message !== undefined) {
+      const trimmed = clampMessage(changes.message);
+      this.stateDb.run(
+        `UPDATE commit_point SET proposed_message = ?, updated_at = ? WHERE id = ?`,
+        trimmed || null, now, id,
+      );
+    }
+    const updated = this.requireCommitPoint(id);
+    this.emit({ batchId: updated.batch_id, kind: "updated", id });
+    return updated;
   }
 
   /** Agent drafts (or redrafts) a commit message. Status lands at `proposed`
@@ -173,10 +197,14 @@ function toCommitPoint(row: Record<string, unknown>): CommitPoint {
     : rawStatus === "rejected" ? "pending"
     : COMMIT_POINT_STATUSES.has(rawStatus as CommitPointStatus) ? rawStatus as CommitPointStatus
     : (() => { throw new Error(`invalid commit_point.status: ${rawStatus}`); })();
+  // Coerce unrecognised mode values to the safe default.
+  const rawMode = String(row.mode ?? "approve");
+  const mode: CommitPointMode = rawMode === "auto" ? "auto" : "approve";
   return {
     id: String(row.id),
     batch_id: String(row.batch_id),
     sort_index: Number(row.sort_index),
+    mode,
     status,
     proposed_message: row.proposed_message == null ? null : String(row.proposed_message),
     commit_sha: row.commit_sha == null ? null : String(row.commit_sha),

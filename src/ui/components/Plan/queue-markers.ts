@@ -73,3 +73,20 @@ export const queueRowExpandedStyle: CSSProperties = {
   borderBottom: "1px solid var(--border)",
   fontSize: 12,
 };
+
+/** Small badge next to the commit divider showing the commit point's mode. */
+export function commitModeBadgeStyle(mode: "auto" | "approve"): CSSProperties {
+  const accent = mode === "auto" ? "#2563eb" : "#7c3aed";
+  return {
+    fontSize: 9,
+    fontFamily: "ui-monospace, monospace",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    padding: "1px 5px",
+    borderRadius: 8,
+    background: accent + "22",
+    color: accent,
+    border: `1px solid ${accent}44`,
+    flexShrink: 0,
+  };
+}

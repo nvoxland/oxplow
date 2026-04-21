@@ -2,7 +2,7 @@ import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
 
 export type { NewdeEvent } from "../electron/ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
-export type { CommitPoint, CommitPointStatus } from "../persistence/commit-point-store.js";
+export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
 export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
 export interface Stream {
@@ -57,6 +57,15 @@ export interface WorkItem {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  note_count: number;
+}
+
+export interface WorkNote {
+  id: string;
+  work_item_id: string;
+  body: string;
+  author: string;
+  created_at: string;
 }
 
 export interface WorkItemEvent {
@@ -531,6 +540,20 @@ export async function deleteCommitPoint(id: string): Promise<void> {
   return desktopApi().deleteCommitPoint(id);
 }
 
+export async function updateCommitPoint(
+  id: string,
+  changes: { mode?: "auto" | "approve"; message?: string },
+): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
+  return desktopApi().updateCommitPoint(id, changes);
+}
+
+export async function commitCommitPoint(
+  id: string,
+  message: string,
+): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
+  return desktopApi().commitCommitPoint(id, message);
+}
+
 export async function reorderBatchQueue(
   streamId: string,
   batchId: string,
@@ -581,6 +604,10 @@ export async function listWorkItemEvents(
   itemId?: string,
 ): Promise<WorkItemEvent[]> {
   return desktopApi().listWorkItemEvents(streamId, batchId, itemId);
+}
+
+export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
+  return desktopApi().getWorkNotes(itemId);
 }
 
 export async function listAgentTurns(

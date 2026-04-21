@@ -136,7 +136,9 @@ For epics, acceptance criteria describe the initiative's done bar, not
   reviewing. If you set done, you will be corrected.
 - **\`blocked\`** is for "can't proceed until X" (missing context,
   waiting on another item, waiting on the user). Add a note that
-  explains what the blocker is.
+  explains what the blocker is. If you hit an error you cannot resolve,
+  mark the item \`blocked\` and call \`add_work_note\` with the error
+  details — do NOT leave the item \`in_progress\` while stuck.
 - **\`canceled\`** is for work the user has decided against. Prefer
   \`delete_work_item\` for things *you* decided against before anyone
   else saw them.
@@ -203,6 +205,8 @@ have no visibility.
      \`human_check\`, mark the epic itself \`human_check\` too.
    - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.
    - Use \`mcp__newde__propose_commit\` when a commit point is due.
+   - If you hit an error you cannot resolve, mark the item \`blocked\`
+     and add a work note with the error details before stopping.
    - Return a short plain-text summary of what was done.
 
 3. Launch one \`general-purpose\` subagent with that brief.

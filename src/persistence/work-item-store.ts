@@ -56,6 +56,15 @@ export interface WorkItem {
   updated_at: string;
   completed_at: string | null;
   deleted_at: string | null;
+  note_count: number;
+}
+
+export interface WorkNote {
+  id: string;
+  work_item_id: string;
+  body: string;
+  author: string;
+  created_at: string;
 }
 
 export interface WorkItemLink {
@@ -183,7 +192,9 @@ export class WorkItemStore {
   listItems(batchId: string): WorkItem[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM work_items
+        `SELECT work_items.*,
+                (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
+         FROM work_items
          WHERE batch_id = ? AND deleted_at IS NULL
          ORDER BY sort_index, created_at, id`,
         batchId,
@@ -193,7 +204,9 @@ export class WorkItemStore {
 
   getItem(batchId: string, itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
-      `SELECT * FROM work_items
+      `SELECT work_items.*,
+              (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
+       FROM work_items
        WHERE batch_id = ? AND id = ? AND deleted_at IS NULL
        LIMIT 1`,
       batchId,
@@ -230,6 +243,7 @@ export class WorkItemStore {
       updated_at: now,
       completed_at: status === "done" ? now : null,
       deleted_at: null,
+      note_count: 0,
     };
 
     this.stateDb.transaction(() => {
@@ -596,7 +610,9 @@ export class WorkItemStore {
   listBacklog(): WorkItem[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM work_items
+        `SELECT work_items.*,
+                (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
+         FROM work_items
          WHERE batch_id IS NULL AND deleted_at IS NULL
          ORDER BY sort_index, created_at, id`,
       )
@@ -605,12 +621,23 @@ export class WorkItemStore {
 
   getBacklogItem(itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
-      `SELECT * FROM work_items
+      `SELECT work_items.*,
+              (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
+       FROM work_items
        WHERE batch_id IS NULL AND id = ? AND deleted_at IS NULL
        LIMIT 1`,
       itemId,
     );
     return row ? toWorkItem(row) : null;
+  }
+
+  getWorkNotes(itemId: string): WorkNote[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_note WHERE work_item_id = ? ORDER BY created_at ASC`,
+        itemId,
+      )
+      .map(toWorkNote);
   }
 
   private getItemInScope(scope: string | null, itemId: string): WorkItem | null {
@@ -820,7 +847,8 @@ export class WorkItemStore {
 
   listReady(batchId: string): WorkItem[] {
     const rows = this.stateDb.all<Record<string, unknown>>(
-      `SELECT wi.*
+      `SELECT wi.*,
+              (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = wi.id) AS note_count
        FROM work_items wi
        WHERE wi.batch_id = ?
          AND wi.deleted_at IS NULL
@@ -860,7 +888,9 @@ export class WorkItemStore {
            JOIN descendants d ON wi.parent_id = d.id
            WHERE wi.batch_id = ? AND wi.deleted_at IS NULL
          )
-         SELECT wi.* FROM work_items wi
+         SELECT wi.*,
+                (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = wi.id) AS note_count
+         FROM work_items wi
          JOIN descendants d ON wi.id = d.id
          WHERE wi.status = 'ready'
            AND NOT EXISTS (
@@ -1001,6 +1031,17 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     completed_at: row.completed_at == null ? null : String(row.completed_at),
     deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
     acceptance_criteria: row.acceptance_criteria == null ? null : String(row.acceptance_criteria),
+    note_count: Number(row.note_count ?? 0),
+  };
+}
+
+function toWorkNote(row: Record<string, unknown>): WorkNote {
+  return {
+    id: requireString(row, "id"),
+    work_item_id: requireString(row, "work_item_id"),
+    body: String(row.body ?? ""),
+    author: String(row.author ?? ""),
+    created_at: requireString(row, "created_at"),
   };
 }
 

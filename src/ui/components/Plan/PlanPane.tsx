@@ -10,15 +10,19 @@ import type {
   WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
+  WorkNote,
 } from "../../api.js";
 import {
+  commitCommitPoint,
   createCommitPoint,
   createWaitPoint,
+  getWorkNotes,
   listCommitPoints,
   listWaitPoints,
   reorderBatchQueue,
   setAutoCommit,
   subscribeNewdeEvents,
+  updateCommitPoint,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 import { ContextMenu } from "../ContextMenu.js";
@@ -65,6 +69,7 @@ interface CreateInput {
 
 interface Props {
   batch: Batch | null;
+  activeBatchId: string | null;
   batchWork: BatchWorkState | null;
   backlog: BacklogState | null;
   onCreateWorkItem(input: CreateInput): Promise<void>;
@@ -89,6 +94,7 @@ interface ContextMenuState {
 
 export function PlanPane({
   batch,
+  activeBatchId,
   batchWork,
   backlog,
   onCreateWorkItem,
@@ -130,6 +136,10 @@ export function PlanPane({
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<string[] | null>(null);
+  // Commit point edit modal: opened by double-clicking a commit point row.
+  const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
+  // Notes for the currently-open edit modal.
+  const [editingItemNotes, setEditingItemNotes] = useState<WorkNote[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -152,24 +162,6 @@ export function PlanPane({
     });
     return () => { cancelled = true; off(); };
   }, [batchId]);
-
-  // When a batch has items that reached human_check or done but zero
-  // remaining commit points in its queue, the agent's Stop hook has
-  // nothing to fire and propose_commit silently no-ops. Surface that
-  // so the user knows "+ Commit when done" is the next move — see
-  // .context/agent-model.md, "No-commit-point signal".
-  const noCommitPointHint = useMemo(() => {
-    if (mode !== "batch") return false;
-    if (!batchWork) return false;
-    const hasSettled = batchWork.items.some(
-      (item) => item.status === "human_check" || item.status === "done",
-    );
-    if (!hasSettled) return false;
-    const liveCommitPoint = commitPoints.some(
-      (cp) => cp.status !== "done",
-    );
-    return !liveCommitPoint;
-  }, [mode, batchWork, commitPoints]);
 
   const groups = useMemo(() => {
     if (mode === "backlog") return buildBacklogGroups(backlog);
@@ -357,13 +349,18 @@ export function PlanPane({
     setPriority(item.priority);
     setItemStatus(item.status);
     setEditingItemId(item.id);
+    setEditingItemNotes([]);
     setModalMode("edit");
+    void getWorkNotes(item.id)
+      .then((notes) => setEditingItemNotes(notes))
+      .catch(() => { /* non-fatal */ });
   };
 
   const closeModal = () => {
     setModalMode(null);
     setEditingItemId(null);
     setItemStatus("ready");
+    setEditingItemNotes([]);
     paneRef.current?.focus();
   };
 
@@ -449,6 +446,7 @@ export function PlanPane({
           setItemStatus={setItemStatus}
           showStatus={modalMode === "edit"}
           showSaveAndAnother={modalMode === "create"}
+          notes={modalMode === "edit" ? editingItemNotes : []}
           modalTitle={
             modalMode === "edit"
               ? "Edit work item"
@@ -493,10 +491,28 @@ export function PlanPane({
         ) : (
           groups.map((group) => {
             const isRootBatch = mode === "batch";
+            const isActive = isRootBatch && batch?.id === activeBatchId;
             const canAddPoints = isRootBatch && !!batchWork && batchWork.items.length > 0;
             const autoCommitOn = batch?.auto_commit ?? false;
             const addPointsSlot = isRootBatch && batch ? (
               <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
+                <button type="button"
+                  data-testid="plan-auto-commit-toggle"
+                  onClick={() => {
+                    if (!streamId || !batchId) return;
+                    runWithError("Toggle auto-commit", setAutoCommit(streamId, batchId, !autoCommitOn));
+                  }}
+                  style={{
+                    ...miniButtonStyle,
+                    background: autoCommitOn ? "var(--accent)" : undefined,
+                    color: autoCommitOn ? "#fff" : undefined,
+                  }}
+                  title={autoCommitOn
+                    ? "Auto-commit is on — the agent will commit automatically when settled work exists"
+                    : "Auto-commit is off — turn on to commit automatically without placing a commit point"}
+                >
+                  Auto-commit
+                </button>
                 {!autoCommitOn ? (
                   <button type="button"
                     data-testid="plan-add-commit-point"
@@ -539,23 +555,6 @@ export function PlanPane({
                 >
                   + Wait Point
                 </button>
-                <button type="button"
-                  data-testid="plan-auto-commit-toggle"
-                  onClick={() => {
-                    if (!streamId || !batchId) return;
-                    runWithError("Toggle auto-commit", setAutoCommit(streamId, batchId, !autoCommitOn));
-                  }}
-                  style={{
-                    ...miniButtonStyle,
-                    background: autoCommitOn ? "var(--accent)" : undefined,
-                    color: autoCommitOn ? "#fff" : undefined,
-                  }}
-                  title={autoCommitOn
-                    ? "Auto-commit is on — the agent will commit automatically when settled work exists"
-                    : "Auto-commit is off — turn on to commit automatically without placing a commit point"}
-                >
-                  Auto-commit
-                </button>
               </div>
             ) : null;
             return (
@@ -584,18 +583,15 @@ export function PlanPane({
                 markedIds={markedIds}
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
+                onDoubleClickCommitPoint={(cp) => setEditingCommitPoint(cp)}
                 epicChildrenMap={group.epicChildren}
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
+                isActive={isActive}
               />
             );
           })
         )}
       </div>
-      {noCommitPointHint ? (
-        <div data-testid="plan-no-commit-point-hint" style={noCommitHintStyle}>
-          No commit point queued — click <strong>+ Commit Point</strong> to land this work.
-        </div>
-      ) : null}
       <div style={bottomBarStyle}>
         <button type="button"
           onClick={() => setMode((prev) => (prev === "backlog" ? "batch" : "backlog"))}
@@ -707,6 +703,20 @@ export function PlanPane({
             paneRef.current?.focus();
           }}
           onClose={() => { setKbPicker(null); paneRef.current?.focus(); }}
+        />
+      ) : null}
+      {editingCommitPoint ? (
+        <CommitPointModal
+          cp={editingCommitPoint}
+          onSave={async (changes) => {
+            await updateCommitPoint(editingCommitPoint.id, changes);
+            setEditingCommitPoint(null);
+          }}
+          onApproveAndCommit={editingCommitPoint.status === "proposed" ? async (message) => {
+            await commitCommitPoint(editingCommitPoint.id, message);
+            setEditingCommitPoint(null);
+          } : undefined}
+          onClose={() => setEditingCommitPoint(null)}
         />
       ) : null}
     </div>
@@ -830,6 +840,7 @@ function NewWorkItemModal({
   setItemStatus,
   showStatus = false,
   showSaveAndAnother = true,
+  notes = [],
   modalTitle = "New work item",
   onClose,
   onSubmit,
@@ -846,6 +857,7 @@ function NewWorkItemModal({
   setItemStatus(value: WorkItemStatus): void;
   showStatus?: boolean;
   showSaveAndAnother?: boolean;
+  notes?: WorkNote[];
   modalTitle?: string;
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
@@ -952,6 +964,24 @@ function NewWorkItemModal({
           placeholder="Acceptance criteria, one per line"
           style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
         />
+        {notes.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)" }}>
+              Notes ({notes.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+              {notes.map((note) => (
+                <div key={note.id} style={{ fontSize: 11, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 2 }}>
+                    <span style={{ fontWeight: 600, color: "var(--fg)" }}>{note.author}</span>
+                    <span style={{ color: "var(--muted)" }}>{formatNoteDate(note.created_at)}</span>
+                  </div>
+                  <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{note.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
           <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>Cancel</button>
           {showSaveAndAnother ? (
@@ -973,6 +1003,24 @@ function NewWorkItemModal({
       </form>
     </div>
   );
+}
+
+function formatNoteDate(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    const now = Date.now();
+    const diffMs = now - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch {
+    return isoString;
+  }
 }
 
 function buildWorkItemMenu(
@@ -1050,15 +1098,6 @@ const primaryButtonStyle: CSSProperties = {
   borderRadius: 6, border: "1px solid var(--border)", background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit", padding: "6px 10px",
 };
 
-const noCommitHintStyle: CSSProperties = {
-  padding: "6px 10px",
-  borderTop: "1px solid var(--border)",
-  background: "var(--bg-2)",
-  color: "var(--muted)",
-  fontSize: 11,
-  lineHeight: 1.4,
-};
-
 const labelStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -1109,3 +1148,167 @@ const bottomChipStyle: CSSProperties = {
   fontSize: 11,
   whiteSpace: "nowrap",
 };
+
+/**
+ * Modal for editing a commit point — opened by double-clicking a commit
+ * divider row. Lets the user change the mode (auto vs approve) and edit the
+ * proposed message. Shows "Approve & Commit" when the point is in `proposed`
+ * status so the user can commit straight from the panel without going through
+ * the chat loop.
+ */
+function CommitPointModal({
+  cp,
+  onSave,
+  onApproveAndCommit,
+  onClose,
+}: {
+  cp: CommitPoint;
+  onSave(changes: { mode?: "auto" | "approve"; message?: string }): Promise<void>;
+  onApproveAndCommit?: ((message: string) => Promise<void>) | undefined;
+  onClose(): void;
+}) {
+  const [mode, setMode] = useState<"auto" | "approve">(cp.mode);
+  const [message, setMessage] = useState(cp.proposed_message ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const changes: { mode?: "auto" | "approve"; message?: string } = {};
+      if (mode !== cp.mode) changes.mode = mode;
+      if (message !== (cp.proposed_message ?? "")) changes.message = message;
+      await onSave(changes);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveAndCommit = async () => {
+    if (!onApproveAndCommit) return;
+    setSaving(true);
+    try {
+      await onApproveAndCommit(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 2000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: 16,
+          width: "min(480px, 90vw)",
+          maxHeight: "90vh",
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Edit commit point</div>
+          <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
+        </div>
+
+        <label style={labelStyle}>
+          Mode
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setMode("approve")}
+              style={{
+                ...miniButtonStyle,
+                padding: "5px 12px",
+                background: mode === "approve" ? "var(--accent)" : "var(--bg-2)",
+                color: mode === "approve" ? "#fff" : "inherit",
+                border: `1px solid ${mode === "approve" ? "var(--accent)" : "var(--border)"}`,
+              }}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("auto")}
+              style={{
+                ...miniButtonStyle,
+                padding: "5px 12px",
+                background: mode === "auto" ? "var(--accent)" : "var(--bg-2)",
+                color: mode === "auto" ? "#fff" : "inherit",
+                border: `1px solid ${mode === "auto" ? "var(--accent)" : "var(--border)"}`,
+              }}
+            >
+              Auto
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {mode === "approve"
+              ? "Agent drafts a message, shows it in chat, and waits for your approval."
+              : "Agent commits immediately without waiting for approval."}
+          </div>
+        </label>
+
+        <label style={labelStyle}>
+          Message
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Commit message (leave blank to auto-generate)"
+            style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
+          />
+        </label>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
+          <button type="button" onClick={onClose} style={miniButtonStyle} disabled={saving}>Cancel</button>
+          {onApproveAndCommit ? (
+            <button
+              type="button"
+              data-testid="commit-point-approve-commit"
+              onClick={() => void handleApproveAndCommit()}
+              disabled={saving}
+              style={{ ...miniButtonStyle, padding: "6px 10px", background: "#10b981", color: "#fff", border: "1px solid #10b981" }}
+            >
+              Approve & Commit
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-testid="commit-point-save"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            style={{ ...primaryButtonStyle }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

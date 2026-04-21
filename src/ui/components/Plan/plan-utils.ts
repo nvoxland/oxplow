@@ -25,7 +25,7 @@ export interface WorkItemSection {
 // renderer; empty sections are skipped there.
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "Ready" },
+  { kind: "toDo", label: "To Do" },
   { kind: "humanCheck", label: "Human check" },
   { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
@@ -65,7 +65,9 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const sections: WorkItemSection[] = [];
   for (const { kind, label } of SECTION_ORDER) {
     if (buckets[kind].length === 0) continue;
-    buckets[kind].sort((a, b) => a.sort_index - b.sort_index);
+    buckets[kind].sort((a, b) =>
+      kind === "humanCheck" ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
+    );
     sections.push({ kind, label, items: buckets[kind] });
   }
   return sections;
@@ -117,7 +119,7 @@ export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
 // label the user sees goes through this helper so tweaks land in one place.
 export function statusLabel(status: WorkItemStatus): string {
   switch (status) {
-    case "ready": return "Ready";
+    case "ready": return "To Do";
     case "in_progress": return "In Progress";
     case "human_check": return "Human Check";
     case "blocked": return "Blocked";
@@ -129,7 +131,7 @@ export function statusLabel(status: WorkItemStatus): string {
 
 export function statusIcon(status: WorkItemStatus): string {
   switch (status) {
-    case "ready": return "◔";
+    case "ready": return "○";
     case "in_progress": return "◐";
     case "human_check": return "?";
     case "blocked": return "⊘";

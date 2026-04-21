@@ -1279,6 +1279,7 @@ export function App() {
       render: () => (
         <PlanPane
           batch={selectedBatch}
+          activeBatchId={currentBatchState.activeBatchId}
           batchWork={selectedBatchWork}
           backlog={backlogState}
           onCreateWorkItem={handleCreateWorkItem}

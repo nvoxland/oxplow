@@ -1,12 +1,36 @@
 import { expect, test } from "bun:test";
-import { buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, describeHookHealth } from "./runtime.js";
+import { buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, describeHookHealth } from "./runtime.js";
 import type { McpServerHandle } from "../mcp/mcp-server.js";
+import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
+import type { BatchStatus } from "../persistence/batch-store.js";
+
+function workItem(id: string, status: WorkItemStatus, title = id): WorkItem {
+  return {
+    id,
+    batch_id: "b1",
+    parent_id: null,
+    kind: "task" as WorkItemKind,
+    title,
+    description: "",
+    acceptance_criteria: null,
+    status,
+    priority: "medium" as WorkItemPriority,
+    sort_index: 0,
+    created_by: "user",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+    completed_at: null,
+    deleted_at: null,
+    note_count: 0,
+  };
+}
 
 function fakeMcp(overrides: Partial<McpServerHandle> = {}): McpServerHandle {
   return {
     port: 43123,
     authToken: "secret-token",
     httpUrl: "http://127.0.0.1:43123/mcp",
+    hookUrl: "http://127.0.0.1:43123/hook",
     lockfilePath: "/tmp/43123.lock",
     stop: async () => {},
     ...overrides,
@@ -130,4 +154,68 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   // Attribution warning must be present: tasks are marked in_progress one at a time.
   expect(text).toContain("one at a time");
   expect(text).toContain("File-change attribution");
+});
+
+// ---- buildAutoCommitMessage: auto-mode commit point message generation ----
+
+test("buildAutoCommitMessage: no settled work → fallback message", () => {
+  const msg = buildAutoCommitMessage([workItem("w1", "ready"), workItem("w2", "in_progress")]);
+  expect(msg).toBe("chore: auto-commit at queue commit point");
+});
+
+test("buildAutoCommitMessage: single settled item → single-item conventional-commit", () => {
+  const msg = buildAutoCommitMessage([workItem("w1", "human_check", "Fix login bug")]);
+  expect(msg).toBe("chore: Fix login bug");
+});
+
+test("buildAutoCommitMessage: multiple settled items → multi-item summary", () => {
+  const items = [
+    workItem("w1", "done", "Add user auth"),
+    workItem("w2", "human_check", "Fix login bug"),
+  ];
+  const msg = buildAutoCommitMessage(items);
+  expect(msg).toMatch(/^chore: complete 2 work items/);
+  expect(msg).toContain("- Add user auth");
+  expect(msg).toContain("- Fix login bug");
+});
+
+test("buildAutoCommitMessage: canceled items count as settled", () => {
+  const msg = buildAutoCommitMessage([workItem("w1", "canceled", "Cancelled task")]);
+  expect(msg).toBe("chore: Cancelled task");
+});
+
+test("buildAutoCommitMessage: more than 5 settled items truncates with ellipsis", () => {
+  const items = Array.from({ length: 7 }, (_, i) =>
+    workItem(`w${i}`, "done", `Task ${i + 1}`),
+  );
+  const msg = buildAutoCommitMessage(items);
+  expect(msg).toContain("…and 2 more");
+  // Only first 5 listed.
+  expect(msg).toContain("- Task 1");
+  expect(msg).toContain("- Task 5");
+  expect(msg).not.toContain("- Task 6");
+});
+
+// ---- stop-hook pipeline: approve-mode commit point blocks; auto-mode is handled by runtime before pipeline ----
+
+test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit point blocks", async () => {
+  // Import the pure pipeline function directly — no need for the full runtime.
+  const { decideStopDirective } = await import("./stop-hook-pipeline.js");
+  const { default: batchFactory } = await Promise.resolve({ default: (overrides = {}) => ({
+    id: "b1", stream_id: "s1", title: "B", status: "active" as BatchStatus, sort_index: 0,
+    pane_target: "p", resume_session_id: "", auto_commit: false,
+    created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
+    ...overrides,
+  }) });
+  const cp = {
+    id: "cp1", batch_id: "b1", sort_index: 1, mode: "approve" as const,
+    status: "pending" as const, proposed_message: null, commit_sha: null,
+    created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", completed_at: null,
+  };
+  const out = decideStopDirective(
+    { batch: batchFactory(), commitPoints: [cp], waitPoints: [], workItems: [], readyWorkItems: [] },
+    { buildCommitPointReason: (c) => `commit: ${c.id}`, buildNextWorkItemReason: (i) => `next: ${i.id}` },
+  );
+  expect(out.directive?.decision).toBe("block");
+  expect(out.directive?.reason).toContain("commit: cp1");
 });

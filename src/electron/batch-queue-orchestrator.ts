@@ -2,6 +2,7 @@ import type { Logger } from "../core/logger.js";
 import type { Batch, BatchStore } from "../persistence/batch-store.js";
 import {
   type CommitPoint,
+  type CommitPointMode,
   type CommitPointStore,
 } from "../persistence/commit-point-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
@@ -47,6 +48,14 @@ export class BatchQueueOrchestrator {
 
   proposeCommit(id: string, message: string): CommitPoint {
     return this.commitPointStore.propose(id, message);
+  }
+
+  /** Update mutable fields on a commit point (mode and/or message).
+   *  Returns the updated list of commit points for the batch so the UI can
+   *  refresh in one round-trip. */
+  updateCommitPoint(id: string, changes: { mode?: CommitPointMode; message?: string }): CommitPoint[] {
+    const updated = this.commitPointStore.update(id, changes);
+    return this.commitPointStore.listForBatch(updated.batch_id);
   }
 
   deleteCommitPoint(id: string): void {

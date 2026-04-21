@@ -22,6 +22,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     updated_at: "2024-01-01T00:00:00Z",
     pane_target: "p",
     resume_session_id: "",
+    auto_commit: false,
     ...overrides,
   };
 }
@@ -43,15 +44,17 @@ function workItem(id: string, sort_index: number, status: WorkItemStatus = "read
     updated_at: "2024-01-01T00:00:00Z",
     completed_at: null,
     deleted_at: null,
+    note_count: 0,
     ...overrides,
   };
 }
 
-function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending"): CommitPoint {
+function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending", mode: import("../persistence/commit-point-store.js").CommitPointMode = "approve"): CommitPoint {
   return {
     id,
     batch_id: "b1",
     sort_index,
+    mode,
     status,
     proposed_message: null,
     commit_sha: null,
