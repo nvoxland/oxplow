@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { LspDiagnostic, LspSession } from "../lsp/lsp.js";
 import { fileUri, registerLanguageServer, unregisterLanguageServer } from "../lsp/lsp.js";
 import type { Stream } from "../persistence/stream-store.js";
-import { buildLspMcpTools, type LspManagerLike } from "./lsp-mcp-tools.js";
+import { buildLspMcpTools, isKnownFalsePositiveDiagnostic, type LspManagerLike } from "./lsp-mcp-tools.js";
 
 interface FakeSession {
   syncDocument: (uri: string, text: string) => void;
@@ -61,7 +61,7 @@ afterEach(() => {
 describe("newde__lsp_definition", () => {
   test("converts 1-based line/column to 0-based LSP position and reads file", async () => {
     writeFileSync(join(workDir, "app.py"), "print('hello')\n");
-    const { manager, calls, syncs } = buildFakeManager({
+    const { manager, syncs } = buildFakeManager({
       request: async (method, params) => {
         expect(method).toBe("textDocument/definition");
         expect(params).toEqual({
@@ -156,6 +156,63 @@ describe("newde__lsp_diagnostics", () => {
         },
       ],
     });
+  });
+});
+
+describe("isKnownFalsePositiveDiagnostic", () => {
+  test("matches ts 'Cannot find module bun:test' noise", () => {
+    expect(
+      isKnownFalsePositiveDiagnostic({
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        severity: 1,
+        message: "Cannot find module 'bun:test' or its corresponding type declarations.",
+        source: "ts",
+        code: 2307,
+      }),
+    ).toBe(true);
+  });
+
+  test("does not match a genuine missing-module error", () => {
+    expect(
+      isKnownFalsePositiveDiagnostic({
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        severity: 1,
+        message: "Cannot find module './missing' or its corresponding type declarations.",
+        source: "ts",
+        code: 2307,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("newde__lsp_diagnostics filtering", () => {
+  test("drops known false positives (bun:test) before returning to the agent", async () => {
+    writeFileSync(join(workDir, "a.test.ts"), "import { test } from 'bun:test'\n");
+    const uri = fileUri(join(workDir, "a.test.ts"));
+    const diagnosticsByUri = new Map<string, LspDiagnostic[]>();
+    diagnosticsByUri.set(uri, [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+        severity: 1,
+        message: "Cannot find module 'bun:test' or its corresponding type declarations.",
+        source: "ts",
+        code: 2307,
+      },
+      {
+        range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } },
+        severity: 1,
+        message: "Real error",
+        source: "ts",
+      },
+    ]);
+    const { manager } = buildFakeManager({
+      getDiagnostics: (u) => diagnosticsByUri.get(u),
+      waitForDiagnostics: async (u) => diagnosticsByUri.get(u) ?? [],
+    });
+    const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
+    const tool = tools.find((t) => t.name === "newde__lsp_diagnostics")!;
+    const out = await tool.handler({ path: "a.test.ts" }) as { diagnostics: Array<{ message: string }> };
+    expect(out.diagnostics.map((d) => d.message)).toEqual(["Real error"]);
   });
 });
 

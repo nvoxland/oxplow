@@ -153,6 +153,22 @@ function severityLabel(severity?: number): "error" | "warning" | "info" | "hint"
   }
 }
 
+/**
+ * Known-false-positive filter. tsserver (and similar) emits
+ * `Cannot find module 'bun:test'` whenever a `.test.ts` file imports
+ * from `bun:test` because bun's ambient types aren't in the tsconfig
+ * the LSP uses. The diagnostic is wrong — bun resolves it at runtime —
+ * and it fires on essentially every test file, drowning out real
+ * errors. Filtering here means no agent-facing surface (lsp_diagnostics
+ * MCP tool, future publishDiagnostics injections) ever sees it.
+ */
+export function isKnownFalsePositiveDiagnostic(diagnostic: LspDiagnostic): boolean {
+  const msg = diagnostic.message ?? "";
+  // ts2307 "Cannot find module" against bun: virtual modules.
+  if (/Cannot find module '(bun:[^']+)'/.test(msg)) return true;
+  return false;
+}
+
 function normalizeDiagnostics(diagnostics: LspDiagnostic[]): Array<{
   severity: string;
   message: string;
@@ -160,18 +176,20 @@ function normalizeDiagnostics(diagnostics: LspDiagnostic[]): Array<{
   code?: string | number;
   range: { line: number; column: number; endLine: number; endColumn: number };
 }> {
-  return diagnostics.map((diagnostic) => ({
-    severity: severityLabel(diagnostic.severity),
-    message: diagnostic.message,
-    source: diagnostic.source,
-    code: diagnostic.code,
-    range: {
-      line: diagnostic.range.start.line + 1,
-      column: diagnostic.range.start.character + 1,
-      endLine: diagnostic.range.end.line + 1,
-      endColumn: diagnostic.range.end.character + 1,
-    },
-  }));
+  return diagnostics
+    .filter((diagnostic) => !isKnownFalsePositiveDiagnostic(diagnostic))
+    .map((diagnostic) => ({
+      severity: severityLabel(diagnostic.severity),
+      message: diagnostic.message,
+      source: diagnostic.source,
+      code: diagnostic.code,
+      range: {
+        line: diagnostic.range.start.line + 1,
+        column: diagnostic.range.start.character + 1,
+        endLine: diagnostic.range.end.line + 1,
+        endColumn: diagnostic.range.end.character + 1,
+      },
+    }));
 }
 
 const POSITION_SCHEMA = {

@@ -154,9 +154,11 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   expect(text).toContain("general-purpose");
   // batch_id is embedded in the read_work_options call so the agent can pass the right batchId.
   expect(text).toMatch(/batchId="b-xyz"/);
-  // Attribution warning must be present: tasks are marked in_progress one at a time.
-  expect(text).toContain("one at a time");
-  expect(text).toContain("File-change attribution");
+  // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
+  // newde-task-management skill — the directive just points at it to stay terse.
+  expect(text).toContain("newde-task-management");
+  // Trimmed: directive should be a single line / well under 400 tokens.
+  expect(text.length).toBeLessThan(400);
 });
 
 // ---- buildAutoCommitMessage: auto-mode commit point message generation ----

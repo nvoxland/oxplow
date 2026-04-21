@@ -335,33 +335,40 @@ work-item UI; if nothing is filed, they have no visibility.
    \`full=true\` on \`read_work_options\` only if you want everything
    in a single call.
 
-2. Assemble a **concise** brief:
-   - Item ids and titles.
-   - Descriptions + acceptance criteria (from \`get_work_item\`).
-   - Any task-specific instructions from the user.
+2. Assemble a **terse** brief. The subagent will call
+   \`get_work_item\` on each id to fetch description + acceptance
+   criteria itself, and it can \`Read\`/\`Grep\` \`.context/*.md\` on
+   its own — do not hand-copy any of that into the brief.
 
-   **Do NOT repeat** status-lifecycle, in_progress-first, attribution,
-   note-discipline, blocked-on-error, or epic-rollup rules. The
-   \`newde-subagent-work-protocol\` skill covers all of that and
-   auto-loads when the subagent sees a \`wi-…\` id or touches the
-   newde update/note tools. Inlining those rules in every brief is
-   wasted tokens (~1000 tokens per dispatch); the skill costs ~150
-   loaded once.
+   A brief contains only:
+   - The work item ids (and titles, for readability).
+   - Ordering, if multiple items.
+   - Task-specific context that is **not already in the item
+     description** (cross-item coordination, a pointer to a doc the
+     description doesn't mention, a decision the user made in chat).
+   - The batchId, so \`get_work_item\` calls have the right scope.
 
-   Example brief (~150 tokens):
+   **Do NOT repeat** (a) the item description or acceptance criteria
+   verbatim — the subagent pulls them via \`get_work_item\`; (b) the
+   status-lifecycle / in_progress-first / attribution / note-discipline
+   / blocked-on-error / epic-rollup rules — the
+   \`newde-subagent-work-protocol\` skill covers those and auto-loads
+   when the subagent sees a \`wi-…\` id; (c) project-standard file
+   locations, conventions, or \`.context/\` doc contents — subagents
+   discover those with Read/Grep.
 
-   > Work items to execute (batchId=b-abc123):
+   Example brief (≈60 tokens):
+
+   > Work items in batchId=b-abc123, in order:
+   >   1. wi-111 — Slim read_work_options response
+   >   2. wi-222 — Update task-management skill language
    >
-   > - wi-111 "Slim read_work_options response by default"
-   >   - Description: <from get_work_item>
-   >   - Acceptance: <from get_work_item>
-   >
-   > - wi-222 "Update task-management skill language"
-   >   - Description: …
-   >   - Acceptance: …
-   >
-   > Work the items in order. Follow the
-   > \`newde-subagent-work-protocol\` skill for status/note conventions.
+   > Fetch details with get_work_item. Protocol lives in the
+   > newde-subagent-work-protocol skill.
+
+   If the user gave specific guidance not captured in any work-item
+   description (e.g. "prefer debounce over dedupe here"), append one
+   short line with that.
 
 3. Launch one \`general-purpose\` subagent with that brief.
 

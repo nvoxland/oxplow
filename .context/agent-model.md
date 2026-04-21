@@ -198,10 +198,13 @@ The pipeline runs in priority order:
    includes `human_check` — agents never self-mark `done`, so demanding
    `done` would let the agent march past the line indefinitely while the
    user catches up on verification.
-3. **Writer batch with a ready work item.** Block with a directive built
-   by `buildNextWorkItemStopReason` naming the item's id + kind + title +
-   batch_id + stream_id, and telling the agent to mark it `in_progress`
-   before working. Items the agent itself filed during the *current* turn
+3. **Writer batch with a ready work item.** Block with a terse directive
+   built by `buildNextWorkItemStopReason` — a one-liner pointing at
+   `mcp__newde__read_work_options` (with the embedded batchId) and the
+   `newde-task-management` skill. Protocol (mark `in_progress` before work,
+   `human_check` after, one-at-a-time attribution) lives in the skill, not
+   the directive — keep the stop-hook message stable and cheap. Items the
+   agent itself filed during the *current* turn
    are skipped (ready-list filtered by `created_by="agent"` AND
    `created_at >= currentTurnStartedAt`). Those are triage-inbox entries
    from flows like `/autoimprove`; forcing the agent to pick them up would
@@ -310,6 +313,32 @@ in-progress changes.
   commands, so the prompt is the only line of defence there).
 - MCP tools (`mcp__newde__*`) are always allowed: they write to the state
   DB, not the worktree.
+
+## MCP tool deferral is a harness decision
+
+Claude Code defers MCP tool schemas (surfacing them as names only until
+`ToolSearch` fetches the schema) based on its own heuristics — it is
+**not** a signal the MCP server sends. `tools/list` already reports
+every newde tool with full `inputSchema`; the harness picks which to
+eagerly inline vs defer. There is no MCP-spec annotation and no plugin
+config knob to declare a tool "always loaded". If this ever becomes
+tunable, the wiring is `src/mcp/mcp-server.ts` `tools/list` response +
+`src/mcp/mcp-tools.ts` tool registrations (see wi-2998dfa502da).
+
+## Harness-injected system-reminders (not ours)
+
+A few system-reminders come from the Claude Code harness itself, not
+newde hooks, and are **not suppressible** from the plugin side:
+
+- "The task tools haven't been used recently…" — harness nudge about
+  `TaskCreate`/`TaskUpdate`. Noise in newde projects where work items
+  live in `mcp__newde__*` tools instead. No hook, env var, or plugin
+  config lets us silence it; it fires on its own schedule. If a future
+  Claude Code release exposes a suppression hook, revisit wi-2a0262ae2ac2.
+- The file-in-IDE reminder ("The user opened the file X in the IDE.
+  This may or may not be related to the current task.") — same story,
+  harness-injected on IDE focus, not a newde hook. Revisit if Claude
+  Code adds a customization hook.
 
 ## Session-context injection
 

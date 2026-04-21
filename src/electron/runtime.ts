@@ -1784,17 +1784,7 @@ export function buildNextWorkItemStopReason(
     );
   }
   lines.push(
-    `The batch queue has ready work. Dispatch it to a subagent:`,
-    ``,
-    `1. Call \`mcp__newde__read_work_options\` with batchId="${item.batch_id}" to get the next dispatch unit (may be an epic + its children, or a list of standalone items).`,
-    `2. Launch a \`general-purpose\` subagent. Include in the brief:`,
-    `   - The item ids, titles, descriptions, and acceptance criteria from the dispatch unit.`,
-    `   - **REQUIRED — work items one at a time:** for each item, mark it \`in_progress\` via \`mcp__newde__update_work_item\` immediately before starting it, do the work, then mark it \`human_check\` before moving to the next. Never mark multiple items \`in_progress\` simultaneously. File-change attribution is driven by the sole in-progress item; if the subagent skips this step or marks all items in_progress at once, changes will be attributed to the wrong item.`,
-    `   - Mark \`human_check\` (not \`done\`) when acceptance criteria are met.`,
-    `   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.`,
-    `   - When a commit point is due, draft a commit message in the reply, ask the user to approve, and call \`mcp__newde__commit\` once they do.`,
-    `3. When the subagent returns, record a brief outcome note on each item via \`mcp__newde__add_work_note\`.`,
-    `4. Repeat from step 1 until \`read_work_options\` returns \`{ mode: "empty" }\`, a commit point is due, or a wait point is hit.`,
+    `The batch queue has ready work (batchId="${item.batch_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-management skill.`,
   );
   return lines.join("\n");
 }
