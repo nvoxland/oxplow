@@ -121,6 +121,10 @@ export class ElectronRuntime {
   private readonly agentStatusByBatch = new Map<string, AgentStatus>();
   private readonly recentUiWrites = new Map<string, number>();
   private readonly dirtyPathsByStream = new Map<string, Set<string>>();
+  /** Last <session-context> block we sent to each Claude session. Used to
+   *  skip re-injecting identical blocks turn-over-turn. Keyed by Claude
+   *  session id; absent key means "nothing sent yet / fall back to emit". */
+  private readonly lastSessionContextBySessionId = new Map<string, string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -1093,10 +1097,22 @@ export class ElectronRuntime {
       // SESSION CONTEXT line is frozen at launch, but the UI's active /
       // selected batch can flip mid-session. Reading the live state here
       // keeps the agent pointed at the right ids without a user-visible
-      // prompt edit.
-      const sessionContext = this.config.injectSessionContext
-        ? this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId)
-        : "";
+      // prompt edit. Skip emission when the block is identical to what we
+      // already sent on the same Claude session — the agent's prompt cache
+      // still holds the prior value, so re-sending is pure overhead.
+      let sessionContext = "";
+      if (this.config.injectSessionContext) {
+        const candidate = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId);
+        const sessionKey = stored.normalized.sessionId ?? "";
+        if (candidate && sessionKey) {
+          if (this.lastSessionContextBySessionId.get(sessionKey) !== candidate) {
+            sessionContext = candidate;
+            this.lastSessionContextBySessionId.set(sessionKey, candidate);
+          }
+        } else {
+          sessionContext = candidate;
+        }
+      }
       const additionalContext = [sessionContext, focusContext].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
@@ -1886,13 +1902,11 @@ function buildBatchAgentPrompt(
   // loaded when the agent actually needs it. Every line here is replayed via
   // cache-read on every turn; treat additions as expensive.
   const lines = [
-    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}). Always pass batchId="${batch.id}" to newde work-item tools.`,
+    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}). Pass batchId="${batch.id}" to all newde work-item tools.`,
     activeBatch && activeBatch.id !== batch.id
       ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
-    `When referring to work items in text you show the user, use the item's TITLE (in quotes). Never print raw ids like "wi-abc123…" — the user sees titles in the UI, not ids.`,
-    `See the \`newde-task-management\` skill for filing/managing work items; call \`newde__read_work_options\` at the start of a session to check for queued work and dispatch to a \`general-purpose\` subagent.`,
-    `ORCHESTRATOR PATTERN: You're the orchestrator. File a work item via \`newde__create_work_item\` for every file change, then either do the change inline (small fixes) or dispatch a \`general-purpose\` subagent (bigger work). See the \`newde-task-management\` skill for the details.`,
+    `Start each session by calling \`newde__read_work_options\`; see the \`newde-task-management\` skill for the orchestrator/subagent pattern, filing conventions, and how to reference items in user-facing text.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

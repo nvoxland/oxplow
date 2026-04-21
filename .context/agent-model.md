@@ -345,19 +345,27 @@ newde hooks, and are **not suppressible** from the plugin side:
 On every `UserPromptSubmit`, the runtime builds a fresh
 `<session-context>` block (stream/batch/writer flag) and returns it as
 `hookSpecificOutput.additionalContext` so the agent stays pointed at the
-right ids mid-session. If a project really wants to save those tokens
-(they're tiny but replayed on every turn), set
-`injectSessionContext: false` in `newde.yaml` — default is `true`.
+right ids mid-session. The runtime caches the last-emitted block per
+Claude session id (`lastSessionContextBySessionId`) and **skips emission
+when the candidate block is byte-identical to what was already sent** —
+re-sending the same string is pure overhead since the agent's prompt
+cache still holds the prior value. The first turn on a session, and any
+turn after the block's contents change (batch flip, writer promotion,
+title edit), emits normally. If a project wants to disable injection
+entirely, set `injectSessionContext: false` in `newde.yaml` — default is
+`true`.
 
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
-flag, a reminder to reference items by title, and a pointer to the
-skill. Procedural policy (when to file, how to shape items, acceptance-
-criteria style, status conventions) lives in the `newde-task-management`
-skill (`src/session/agent-skills.ts`). Reason: the preamble is replayed
-via cache-read on every turn; skills load only when the agent needs
-them. Keep additions to the preamble situational, not educational.
+flag, and a pointer to the skill. Procedural policy (when to file,
+how to shape items, acceptance-criteria style, status conventions,
+orchestrator/subagent pattern, item-referencing conventions) all lives
+in the `newde-task-management` skill (`src/session/agent-skills.ts`).
+Reason: the preamble is replayed via cache-read on every turn; skills
+load only when the agent needs them. Keep additions to the preamble
+situational (what changes per batch), not educational (how to use the
+tools).
 
 ## Custom prompt addendum
 
