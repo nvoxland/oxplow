@@ -117,6 +117,7 @@ export function PlanPane({
   const [description, setDescription] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [priority, setPriority] = useState<WorkItemPriority>("medium");
+  const [status, setStatus] = useState<WorkItemStatus>("ready");
   // Modal surface: `create` = blank New Work Item form; `edit` = same modal
   // shape but pre-filled from `editingItemId` and writing back via
   // activeUpdate on submit. Plain clicks on a work-item row open edit mode
@@ -348,6 +349,7 @@ export function PlanPane({
   const openCreateModal = (parentId: string | null = null) => {
     setTitle(""); setDescription(""); setAcceptance("");
     setPriority("medium");
+    setStatus("ready");
     setEditingItemId(null);
     setCreateParentId(parentId);
     setModalMode("create");
@@ -358,6 +360,8 @@ export function PlanPane({
     setDescription(item.description ?? "");
     setAcceptance(item.acceptance_criteria ?? "");
     setPriority(item.priority);
+    setStatus(item.status);
+    setSelectedId(item.id);
     setEditingItemId(item.id);
     setEditingItem(item);
     setEditingItemNotes([]);
@@ -458,6 +462,26 @@ export function PlanPane({
           setAcceptance={setAcceptance}
           priority={priority}
           setPriority={setPriority}
+          status={status}
+          setStatus={setStatus}
+          onNavigate={modalMode === "edit" && editingItemId ? (direction) => {
+            const idx = navigableIds.indexOf(editingItemId);
+            if (idx < 0) return;
+            const nextIdx = direction === "next" ? idx + 1 : idx - 1;
+            if (nextIdx < 0 || nextIdx >= navigableIds.length) return;
+            const nextId = navigableIds[nextIdx]!;
+            const allItems = groups.flatMap((g) => [
+              ...g.items,
+              ...[...g.epicChildren.values()].flat(),
+            ]);
+            const nextItem = allItems.find((i) => i.id === nextId);
+            if (nextItem) openEditModal(nextItem);
+          } : undefined}
+          canNavigatePrev={modalMode === "edit" && editingItemId ? navigableIds.indexOf(editingItemId) > 0 : false}
+          canNavigateNext={modalMode === "edit" && editingItemId ? (() => {
+            const idx = navigableIds.indexOf(editingItemId);
+            return idx >= 0 && idx < navigableIds.length - 1;
+          })() : false}
           showSaveAndAnother={modalMode === "create"}
           notes={modalMode === "edit" ? editingItemNotes : []}
           fileChanges={modalMode === "edit" ? editingItemFileChanges : []}
@@ -481,6 +505,7 @@ export function PlanPane({
                 description,
                 acceptanceCriteria: acceptance || null,
                 priority,
+                status,
               });
               closeModal();
               return;
@@ -938,6 +963,11 @@ function NewWorkItemModal({
   setAcceptance,
   priority,
   setPriority,
+  status,
+  setStatus,
+  onNavigate,
+  canNavigatePrev = false,
+  canNavigateNext = false,
   showSaveAndAnother = true,
   notes = [],
   fileChanges = [],
@@ -958,6 +988,11 @@ function NewWorkItemModal({
   setAcceptance(value: string): void;
   priority: WorkItemPriority;
   setPriority(value: WorkItemPriority): void;
+  status: WorkItemStatus;
+  setStatus(value: WorkItemStatus): void;
+  onNavigate?(direction: "prev" | "next"): void;
+  canNavigatePrev?: boolean;
+  canNavigateNext?: boolean;
   showSaveAndAnother?: boolean;
   notes?: WorkNote[];
   fileChanges?: BatchFileChange[];
@@ -1092,6 +1127,26 @@ function NewWorkItemModal({
           </div>
           {/* Right column: metadata */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
+            {item ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label htmlFor="work-item-status" style={modalFieldLabelStyle}>Status</label>
+                <select
+                  id="work-item-status"
+                  data-testid="work-item-status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as WorkItemStatus)}
+                  style={inputStyle}
+                >
+                  <option value="ready">ready</option>
+                  <option value="in_progress">in_progress</option>
+                  <option value="blocked">blocked</option>
+                  <option value="human_check">human_check</option>
+                  <option value="done">done</option>
+                  <option value="archived">archived</option>
+                  <option value="canceled">canceled</option>
+                </select>
+              </div>
+            ) : null}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label htmlFor="work-item-priority" style={modalFieldLabelStyle}>Priority</label>
               <select id="work-item-priority" data-testid="work-item-priority" value={priority} disabled={readOnly} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
@@ -1152,8 +1207,29 @@ function NewWorkItemModal({
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginTop: 4 }}>
+          {onNavigate ? (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                data-testid="work-item-prev"
+                disabled={!canNavigatePrev}
+                onClick={() => onNavigate("prev")}
+                style={{ ...miniButtonStyle, opacity: canNavigatePrev ? 1 : 0.4 }}
+                title="Previous work item"
+              >← Previous</button>
+              <button
+                type="button"
+                data-testid="work-item-next"
+                disabled={!canNavigateNext}
+                onClick={() => onNavigate("next")}
+                style={{ ...miniButtonStyle, opacity: canNavigateNext ? 1 : 0.4 }}
+                title="Next work item"
+              >Next →</button>
+            </div>
+          ) : null}
+          <span style={{ flex: 1 }} />
           {readOnly ? (
-            <span style={{ marginRight: "auto", color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
+            <span style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
               Read-only — item is in progress
             </span>
           ) : null}
