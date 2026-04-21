@@ -23,6 +23,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     pane_target: "p",
     resume_session_id: "",
     auto_commit: false,
+    custom_prompt: null,
     ...overrides,
   };
 }
@@ -299,6 +300,26 @@ describe("decideStopDirective", () => {
     );
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
+  });
+
+  test("auto-mode commit point, done after runtime execution: pipeline allows stop (no double-block)", () => {
+    // Contract: the runtime calls executeAutoCommitPoint before decideStopDirective,
+    // so by the time the pipeline runs the auto-mode commit point is already "done".
+    // This test confirms the pipeline does not re-block on a done auto-mode commit.
+    const cp = commitPoint("cp1", 0, "done", "auto");
+    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
+    expect(out.directive).toBeNull();
+    expect(out.sideEffects).toEqual([]);
+  });
+
+  test("auto-mode commit point pending (runtime did not process it): pipeline blocks as a safety net", () => {
+    // If the runtime fails to execute an auto-mode commit, the pipeline catches it.
+    // The fix (passing mode='auto' from the synthesis call) ensures findActiveAutoCommitPoint
+    // picks it up; before the fix, mode='approve' would be synthesized and would also
+    // block here — but now the intent is clear.
+    const cp = commitPoint("cp1", 0, "pending", "auto");
+    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
+    expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
   });
 
 });

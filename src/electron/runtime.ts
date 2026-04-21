@@ -1160,7 +1160,7 @@ export class ElectronRuntime {
           (item) => item.status === "human_check" || item.status === "done",
         );
         if (hasSettledWork) {
-          try { this.batchQueue.createCommitPoint(batchId); } catch (err) {
+          try { this.batchQueue.createCommitPoint(batchId, "auto"); } catch (err) {
             this.logger.warn("auto-commit: failed to create commit point", {
               batchId,
               error: err instanceof Error ? err.message : String(err),

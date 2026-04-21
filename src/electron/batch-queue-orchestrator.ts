@@ -32,7 +32,7 @@ export class BatchQueueOrchestrator {
     return this.commitPointStore.listForBatch(batchId);
   }
 
-  createCommitPoint(batchId: string): CommitPoint {
+  createCommitPoint(batchId: string, mode: CommitPointMode = "approve"): CommitPoint {
     // A commit point with no preceding work items has nothing to commit;
     // refuse to create one as the very first queue entry. The mixed reorder
     // still lets users drag a point above all work items if they really
@@ -43,6 +43,7 @@ export class BatchQueueOrchestrator {
     return this.commitPointStore.create({
       batchId,
       sortIndex: this.nextQueueSortIndex(batchId),
+      mode,
     });
   }
 
