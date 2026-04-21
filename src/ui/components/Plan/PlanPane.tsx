@@ -948,7 +948,8 @@ function NewWorkItemModal({
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
 }) {
-  const canSubmit = title.trim().length > 0;
+  const readOnly = item?.status === "in_progress";
+  const canSubmit = !readOnly && title.trim().length > 0;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1016,6 +1017,7 @@ function NewWorkItemModal({
                 id="work-item-title"
                 data-testid="work-item-title"
                 value={title}
+                readOnly={readOnly}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Title (required)"
                 style={inputStyle}
@@ -1027,6 +1029,7 @@ function NewWorkItemModal({
                 id="work-item-description"
                 data-testid="work-item-description"
                 value={description}
+                readOnly={readOnly}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Description"
                 style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
@@ -1038,6 +1041,7 @@ function NewWorkItemModal({
                 id="work-item-acceptance"
                 data-testid="work-item-acceptance"
                 value={acceptance}
+                readOnly={readOnly}
                 onChange={(e) => setAcceptance(e.target.value)}
                 placeholder="Acceptance criteria, one per line"
                 style={{ ...inputStyle, minHeight: 100, resize: "vertical" }}
@@ -1068,7 +1072,7 @@ function NewWorkItemModal({
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label htmlFor="work-item-priority" style={modalFieldLabelStyle}>Priority</label>
-              <select id="work-item-priority" data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
+              <select id="work-item-priority" data-testid="work-item-priority" value={priority} disabled={readOnly} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -1119,9 +1123,16 @@ function NewWorkItemModal({
             ) : null}
           </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>Cancel</button>
-          {showSaveAndAnother ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginTop: 4 }}>
+          {readOnly ? (
+            <span style={{ marginRight: "auto", color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
+              Read-only — item is in progress
+            </span>
+          ) : null}
+          <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>
+            {readOnly ? "Close" : "Cancel"}
+          </button>
+          {!readOnly && showSaveAndAnother ? (
             <button
               type="button"
               data-testid="work-item-save-another"
@@ -1130,12 +1141,14 @@ function NewWorkItemModal({
               style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
             >Save and Another</button>
           ) : null}
-          <button
-            type="submit"
-            data-testid="work-item-save"
-            disabled={!canSubmit}
-            style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5 }}
-          >Save</button>
+          {!readOnly ? (
+            <button
+              type="submit"
+              data-testid="work-item-save"
+              disabled={!canSubmit}
+              style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5 }}
+            >Save</button>
+          ) : null}
         </div>
       </form>
     </div>
