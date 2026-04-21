@@ -88,7 +88,21 @@ different grains:
   "Read the pipeline file. Write the failing test. Run tests. Update
   the doc." Invisible to the user, discarded when the turn ends.
 
-The agent prompt tells agents to pick ONE surface per piece of work —
-never mirror. If you're reviewing batch history, that's where newde
-work items live; if you see TaskCreate referenced anywhere, it was a
-within-turn plan, not a deliverable.
+Pick ONE surface per piece of work — never mirror. If you're reviewing
+batch history, that's where newde work items live; if you see
+TaskCreate referenced anywhere, it was a within-turn plan, not a
+deliverable.
+
+**Every top-level user request that changes the repo gets a newde work
+item — no exceptions, even for one-line edits.** File it via
+`mcp__newde__newde__create_work_item` before (or as) you start work,
+move it to `in_progress` while you're on it, and set it to
+`human_check` when done (never self-mark `done`). One item per
+top-level request; your own micro-step breakdown stays internal
+(TaskCreate or just in your head) — don't mirror those as newde work
+items. The user relies on the Work panel's TODO / IN PROGRESS / HUMAN
+CHECK sections as the canonical record of agent activity; skipping the
+ticket because a change "feels small" erases that visibility. The only
+things that don't need a ticket are pure Q&A, read-only investigation,
+and discussion that doesn't result in file changes. Load the
+`newde-task-management` skill for the full filing protocol.
