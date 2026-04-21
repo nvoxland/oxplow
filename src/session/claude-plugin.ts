@@ -2,8 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_GUIDE_FILENAME, buildAgentGuide } from "./agent-guide.js";
 import {
+  SUBAGENT_PROTOCOL_SKILL_FILE,
+  SUBAGENT_PROTOCOL_SKILL_NAME,
   TASK_MANAGEMENT_SKILL_FILE,
   TASK_MANAGEMENT_SKILL_NAME,
+  buildSubagentProtocolSkill,
   buildTaskManagementSkill,
 } from "./agent-skills.js";
 
@@ -27,6 +30,8 @@ export interface ElectronPlugin {
   agentGuidePath: string;
   /** Absolute path to the task-management SKILL.md. */
   taskManagementSkillPath: string;
+  /** Absolute path to the subagent work-protocol SKILL.md. */
+  subagentProtocolSkillPath: string;
 }
 
 // SessionStart is registered but Claude Code silently drops HTTP hooks for
@@ -102,7 +107,24 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const taskManagementSkillPath = join(skillsDir, TASK_MANAGEMENT_SKILL_FILE);
   writeFileSync(taskManagementSkillPath, buildTaskManagementSkill(), "utf8");
 
-  return { pluginDir, hooksPath, manifestPath, agentGuidePath, taskManagementSkillPath };
+  // Standing dispatch protocol for subagents — loaded whenever an agent
+  // (typically a general-purpose subagent the orchestrator launched) sees a
+  // work-item id in its brief or touches the newde update/note tools. Keeping
+  // this out of every orchestrator brief cuts per-dispatch brief size from
+  // ~1000 tokens to ~150.
+  const subagentProtocolDir = join(pluginDir, "skills", SUBAGENT_PROTOCOL_SKILL_NAME);
+  mkdirSync(subagentProtocolDir, { recursive: true });
+  const subagentProtocolSkillPath = join(subagentProtocolDir, SUBAGENT_PROTOCOL_SKILL_FILE);
+  writeFileSync(subagentProtocolSkillPath, buildSubagentProtocolSkill(), "utf8");
+
+  return {
+    pluginDir,
+    hooksPath,
+    manifestPath,
+    agentGuidePath,
+    taskManagementSkillPath,
+    subagentProtocolSkillPath,
+  };
 }
 
 function buildPluginHooks(hookUrl: string) {

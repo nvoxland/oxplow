@@ -228,19 +228,33 @@ also there.
 ## Orchestrator pattern
 
 The batch agent is a long-lived process that must stay context-lean
-across a work queue that could span dozens of items. The solution is
-**orchestrator-style dispatch**: the main agent never does Read/Edit/Bash
-work directly. Instead it:
+across a work queue that could span dozens of items. Every file change
+is filed as a work item first (traceability IS the point — local
+history attributes snapshots back to the sole in-progress item). Past
+that, the orchestrator has two modes:
 
-1. Calls `newde__read_work_options` to get the next dispatch unit.
-2. Launches one `general-purpose` subagent with all item ids, titles,
-   descriptions, acceptance criteria, and standing MCP-write instructions.
-3. Records the subagent's summary via `add_work_note` and loops.
+1. **Inline small-fix shortcut.** For mechanical, low-risk changes (≤
+   ~20 lines across ≤ 2 files — test fixtures, import cleanup, label
+   renames), the orchestrator does the Read/Edit/Bash directly under
+   the work item. Mark `in_progress`, edit, run tests, mark
+   `human_check`. Snapshots still fire with correct attribution; we
+   just skip the subagent round-trip.
+2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
+   risky changes, the orchestrator calls `newde__read_work_options`,
+   launches one `general-purpose` subagent with the brief, and
+   records the summary via `add_work_note`. Subagents run in isolated
+   context windows — their tokens don't count against the orchestrator,
+   so main context stays flat regardless of queue depth.
 
-Subagents run in isolated context windows — their tokens don't count
-against the main agent. Main context accumulates only short summaries,
-keeping it flat regardless of queue depth. Auto-compact still fires when
-the main context fills, but it fires much later and on lean material.
+The dispatch protocol (mark `in_progress` before work, `human_check`
+after, never two items `in_progress` at once, blocked + note on
+stuck) is identical for both modes and lives in the
+`newde-task-management` skill plus the `newde-subagent-work-protocol`
+skill (scoped to subagents). Briefs no longer need to repeat it.
+
+Related small fixes get batched into one task ("fix 4 test fixtures" =
+one item, not four). Claude Code's built-in `TaskCreate` is a
+within-turn micro-planner and never mirrors newde items.
 
 `newde__read_work_options` (defined in `src/mcp/mcp-tools.ts`, backed by
 `WorkItemStore.readWorkOptions`) returns one of three shapes:

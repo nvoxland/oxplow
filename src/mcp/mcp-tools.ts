@@ -193,16 +193,17 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__read_work_options",
-      description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items (with link edges inline) so you can pick one or a related cluster to dispatch. Always pass the batchId from your session context. Use this instead of list_ready_work when you are about to launch a subagent to execute work.",
+      description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items so you can pick one or a related cluster to dispatch. Always pass the batchId from your session context. By default returns a slim shape (id, title, kind, priority, parent_id, status, sort_index) for scanning — call `get_work_item` per id when composing a dispatch brief, or pass `full=true` for the verbose shape (adds description, acceptance_criteria, and link edges).",
       inputSchema: {
         type: "object",
         properties: {
           streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted." },
           batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          full: { type: "boolean", description: "Optional. When true, include description, acceptance_criteria, and link edges on every item. Default false returns the slim scanning shape." },
         },
         required: ["batchId"],
       },
-      handler: (args: { streamId?: string; batchId: string }) => {
+      handler: (args: { streamId?: string; batchId: string; full?: boolean }) => {
         resolveBatchAndStream(args);
         // Stop the dispatch unit at the first pending commit or wait point so
         // the subagent never works across a queue boundary it shouldn't cross.
@@ -215,44 +216,85 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const cutoff = Math.min(commitCutoff, waitCutoff);
         const result = workItemStore.readWorkOptions(args.batchId, cutoff < Infinity ? cutoff : undefined);
         if (result.mode === "empty") return { mode: "empty" };
+        const full = args.full === true;
         if (result.mode === "epic") {
           return {
             mode: "epic",
-            epic: {
-              id: result.epic.id,
-              title: result.epic.title,
-              kind: result.epic.kind,
-              priority: result.epic.priority,
-              description: result.epic.description,
-              acceptance_criteria: result.epic.acceptance_criteria,
-            },
-            children: result.children.map(({ item, outgoing, incoming }) => ({
-              id: item.id,
-              title: item.title,
-              kind: item.kind,
-              priority: item.priority,
-              parent_id: item.parent_id,
-              description: item.description,
-              acceptance_criteria: item.acceptance_criteria,
-              outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
-              incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
-            })),
+            epic: full
+              ? {
+                  id: result.epic.id,
+                  title: result.epic.title,
+                  kind: result.epic.kind,
+                  priority: result.epic.priority,
+                  parent_id: result.epic.parent_id,
+                  status: result.epic.status,
+                  sort_index: result.epic.sort_index,
+                  description: result.epic.description,
+                  acceptance_criteria: result.epic.acceptance_criteria,
+                }
+              : {
+                  id: result.epic.id,
+                  title: result.epic.title,
+                  kind: result.epic.kind,
+                  priority: result.epic.priority,
+                  parent_id: result.epic.parent_id,
+                  status: result.epic.status,
+                  sort_index: result.epic.sort_index,
+                },
+            children: result.children.map(({ item, outgoing, incoming }) => (
+              full
+                ? {
+                    id: item.id,
+                    title: item.title,
+                    kind: item.kind,
+                    priority: item.priority,
+                    parent_id: item.parent_id,
+                    status: item.status,
+                    sort_index: item.sort_index,
+                    description: item.description,
+                    acceptance_criteria: item.acceptance_criteria,
+                    outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
+                    incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
+                  }
+                : {
+                    id: item.id,
+                    title: item.title,
+                    kind: item.kind,
+                    priority: item.priority,
+                    parent_id: item.parent_id,
+                    status: item.status,
+                    sort_index: item.sort_index,
+                  }
+            )),
           };
         }
         return {
           mode: "standalone",
-          items: result.items.map(({ item, outgoing, incoming }) => ({
-            id: item.id,
-            title: item.title,
-            kind: item.kind,
-            priority: item.priority,
-            sort_index: item.sort_index,
-            parent_id: item.parent_id,
-            description: item.description,
-            acceptance_criteria: item.acceptance_criteria,
-            outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
-            incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
-          })),
+          items: result.items.map(({ item, outgoing, incoming }) => (
+            full
+              ? {
+                  id: item.id,
+                  title: item.title,
+                  kind: item.kind,
+                  priority: item.priority,
+                  sort_index: item.sort_index,
+                  parent_id: item.parent_id,
+                  status: item.status,
+                  description: item.description,
+                  acceptance_criteria: item.acceptance_criteria,
+                  outgoing: outgoing.map((l) => ({ to_item_id: l.to_item_id, link_type: l.link_type })),
+                  incoming: incoming.map((l) => ({ from_item_id: l.from_item_id, link_type: l.link_type })),
+                }
+              : {
+                  id: item.id,
+                  title: item.title,
+                  kind: item.kind,
+                  priority: item.priority,
+                  sort_index: item.sort_index,
+                  parent_id: item.parent_id,
+                  status: item.status,
+                }
+          )),
         };
       },
     },

@@ -7,6 +7,88 @@
 export const TASK_MANAGEMENT_SKILL_NAME = "newde-task-management";
 export const TASK_MANAGEMENT_SKILL_FILE = "SKILL.md";
 
+export const SUBAGENT_PROTOCOL_SKILL_NAME = "newde-subagent-work-protocol";
+export const SUBAGENT_PROTOCOL_SKILL_FILE = "SKILL.md";
+
+// Standing context for subagents dispatched off a newde work item. The
+// orchestrator's brief references this skill instead of inlining the
+// protocol, shrinking per-dispatch briefs from ~1000 tokens to ~150. The
+// description is tuned to fire whenever a subagent is about to work on an
+// item whose ids arrived in its brief — any mention of "work item",
+// "in_progress", or the mcp__newde__ tool surface will match.
+export function buildSubagentProtocolSkill(): string {
+  return `---
+name: ${SUBAGENT_PROTOCOL_SKILL_NAME}
+description: Standing protocol for subagents executing newde work items. Loads whenever you see a work-item id (wi-…) in your brief, whenever you're told to mark an item in_progress/human_check/blocked, or whenever you call mcp__newde__update_work_item / mcp__newde__add_work_note. Covers status lifecycle, attribution rules, note discipline, and the blocked-on-error rule.
+---
+
+# Subagent work-item protocol
+
+You were dispatched by an orchestrator with a brief listing work item
+ids + titles + task-specific instructions. The brief deliberately does
+NOT repeat the standing protocol — it lives here. Follow this protocol
+for every item in the brief.
+
+## Status lifecycle (mandatory order)
+
+For each item, in this exact order:
+
+1. **Mark \`in_progress\` FIRST.** Call
+   \`mcp__newde__update_work_item\` with \`status: "in_progress"\`
+   **before** any Read, Grep, Bash, Edit, or other tool call related to
+   the item. The UI's "In Progress" section depends on this — if you
+   do the work first and only flip the status at the end, the item
+   visibly skips the In Progress section (ready → human_check in a
+   blink) and the user loses visibility into what you're doing.
+2. Do the investigation / edits / tests.
+3. **Mark \`human_check\` when acceptance criteria are met.** Never
+   mark \`done\` yourself; the user marks done after reviewing.
+
+## One in_progress at a time
+
+Never have two items marked \`in_progress\` simultaneously. Finish the
+current one (\`human_check\` or \`blocked\`) before starting the next.
+
+**Why it matters:** the Stop hook attributes file-change snapshots to
+the sole in-progress item. If two are in-progress, attribution breaks
+and local history can't tell which task produced which change.
+
+## Epics
+
+When the brief dispatches an epic unit (mode: "epic" in
+read_work_options), after all child items are \`human_check\`, mark
+the **epic itself** \`human_check\` too. Don't leave epics with all
+children settled but the parent still \`in_progress\`/\`ready\`.
+
+## Notes at meaningful milestones
+
+Use \`mcp__newde__add_work_note\` for decisions, surprises, tricky
+design choices, or a terse end-of-item summary — the way you'd leave a
+pull-request comment. Don't log every step; the note stream is read
+like a PR description, not a transcript.
+
+## Blocked on error
+
+If you hit an error you cannot resolve, **mark the item \`blocked\`
+and add a note with the error details** before stopping. Do NOT leave
+the item \`in_progress\` while stuck — that keeps the queue from
+advancing and misleads the user about what's actively running.
+
+## Commit points
+
+If you encounter a commit point while working, draft a concise commit
+message in your chat reply, ask the user to approve, and call
+\`mcp__newde__commit\` with the commit_point_id + message once they
+do. Do not run \`git commit\` yourself.
+
+## Returning to the orchestrator
+
+When done, return a short plain-text summary of what was done (the
+orchestrator appends it as a note via \`add_work_note\`). Token
+savings are biggest when the summary is tight.
+`;
+}
+
 export function buildTaskManagementSkill(): string {
   return `---
 name: ${TASK_MANAGEMENT_SKILL_NAME}
@@ -25,7 +107,9 @@ duplicate them here.
 **If you are making any file changes, create a work item first — no
 exceptions.** A two-line edit is still a work item. The user monitors
 what you are doing through the work-item UI; if nothing is filed, they
-have no visibility into the change.
+have no visibility into the change. Traceability is the point —
+local-history snapshots attribute file changes to the sole in-progress
+work item, so every change needs a task to attribute to.
 
 The only time you skip filing is when you are answering a question and
 making zero file changes ("what does this function do?", "explain X").
@@ -33,10 +117,27 @@ Everything else gets a work item.
 
 - **Single change** (a one-line fix, a rename, a trivial tweak) → one
   \`task\`. Don't bother with an epic.
+- **Small-fix shortcut.** Small, mechanical, low-risk changes
+  (heuristic: ≤ ~20 lines across ≤ 2 files, e.g. fix a test fixture,
+  remove an unused import, rename a label) can be done INLINE by the
+  orchestrator under the work item — skip the subagent dispatch.
+  Mark \`in_progress\`, do the Read/Edit/Bash, run tests, mark
+  \`human_check\`. Snapshots still attribute the changes to the task.
 - **Multi-step work** (a feature, a refactor, a bug that touches several
-  files) → one \`epic\` with child tasks (see "Plans → epics" below).
+  files) → one \`epic\` with child tasks (see "Plans → epics" below),
+  dispatched to a \`general-purpose\` subagent.
 - **Follow-up work discovered mid-turn** → file it and link it with
   \`discovered_from\` so the original's scope stays honest.
+
+## Batching
+
+Related small fixes belong in ONE task, not one-per-fix. "Fix 4 test
+fixtures missing custom_prompt" is a single task; filing four
+near-identical items clutters history and makes the work queue look
+busier than it is. The inverse failure is also real — a task like
+"refactor the persistence layer" is too broad to trace; decompose it
+into an epic with children. Aim for tasks whose scope you could
+describe in a one-line commit message.
 
 ## Plans → epics
 
@@ -174,78 +275,111 @@ pull-request description.
 - A single message reply ("explain X"): no task — just answer.
 - Your own scratch todos for the current turn: use the built-in
   TaskCreate tool instead. \`newde\` work items are the
-  *user-visible, durable* record.
+  *user-visible, durable* record. See the next section.
 - Things the user explicitly asked you to *skip*: if they say "don't
   file this," don't file it.
 
+## Claude Code TaskCreate vs newde work items
+
+This project uses BOTH, for different grains — never mirror between
+them.
+
+- **Claude Code \`TaskCreate\`/\`TaskUpdate\`** is the built-in
+  within-turn step tracker. Use it for ephemeral micro-planning: "read
+  pipeline.ts → write failing test → run test → fix → update doc." It
+  is invisible to the user, discarded when the turn ends, and costs
+  nothing durable.
+- **newde work items** (\`mcp__newde__*_work_item\`) are the
+  user-visible, durable, cross-session record. "Slim the MCP response."
+  "Fix the wait-point bug." Persisted to SQLite, survive restart, the
+  user approves and marks done. This is the canonical record of work
+  done on the user's behalf — local history attributes file changes
+  back to these.
+
+If you create a newde work item for "fix X" and then also create a
+TaskCreate entry "fix X" you're duplicating. Pick one surface per
+piece of work: TaskCreate for the within-turn recipe, newde for the
+deliverable.
+
 ## Subagent dispatch protocol
 
-You are the **orchestrator**. You never do Read/Edit/Bash/test work
-directly — that all happens inside subagents, so your context stays flat
-across a long work queue.
+You are the **orchestrator**. For each ready work item, pick one of
+two execution modes (see the small-fix shortcut in "When to create a
+work item" above):
 
-**Step 0 — file before you dispatch.** If the user just handed you a new
-task that isn't in the queue yet, create the work items *first* (see
-"Plans → epics" above) before calling \`read_work_options\`. Never skip
-straight from plan approval to subagent dispatch without filing. The user
-monitors progress through the work-item UI; if nothing is filed, they
-have no visibility.
+- **Inline small fix.** Mechanical, low-risk change (≤ ~20 lines
+  across ≤ 2 files). Do the Read/Edit/Bash yourself under the work
+  item — mark \`in_progress\`, edit, run tests, mark \`human_check\`.
+- **Subagent dispatch.** Larger / multi-file / risky work. Launch a
+  \`general-purpose\` subagent.
 
-**For each work unit:**
+**Step 0 — file before you execute.** If the user just handed you a
+new task that isn't in the queue yet, create the work items *first*
+(see "Plans → epics" above) before calling \`read_work_options\` or
+starting any inline edit. The user monitors progress through the
+work-item UI; if nothing is filed, they have no visibility.
 
-1. Call \`newde__read_work_options\` (batchId=your batch) to get the next
-   dispatch unit. Three possible shapes:
-   - \`{ mode: "epic", epic, children }\` — dispatch the entire epic as one unit.
-   - \`{ mode: "standalone", items }\` — pick one item, or a link-related
-     cluster, to dispatch together.
+### For a subagent dispatch
+
+1. Call \`newde__read_work_options\` (batchId=your batch) to get the
+   next dispatch unit:
+   - \`{ mode: "epic", epic, children }\` — dispatch the whole epic.
+   - \`{ mode: "standalone", items }\` — pick one item or a link-related
+     cluster.
    - \`{ mode: "empty" }\` — nothing left; allow stop.
 
-2. Assemble a subagent brief containing: item ids, titles, descriptions,
-   acceptance criteria, and these standing instructions (copy them into
-   the brief **verbatim**, including the "CRITICAL" section — do not
-   paraphrase or shorten):
+   The response is **slim by default** (id/title/kind/priority/
+   parent_id/status/sort_index). Call \`newde__get_work_item\` per id
+   for descriptions + acceptance criteria when composing the brief,
+   so you only pull detail for items you'll actually dispatch. Use
+   \`full=true\` on \`read_work_options\` only if you want everything
+   in a single call.
 
-   > ### CRITICAL: Mark in_progress BEFORE doing any work
-   >
-   > **Your very first action for each work item must be to call
-   > \`mcp__newde__update_work_item\` with \`status: "in_progress"\`.**
-   > Do this BEFORE any Read, Grep, Bash, Edit, or other tool call
-   > related to the item. The user watches the "In Progress" section in
-   > the UI — if you do all the work first and only flip the status at
-   > the end, the item visibly skips the In Progress section entirely
-   > (ready → human_check in one blink) and the user has no visibility
-   > into what you're doing.
-   >
-   > Concretely, for each item, the order is:
-   > 1. Call \`update_work_item\` with \`status: "in_progress"\`. (No
-   >    other work yet.)
-   > 2. Do the investigation / edits / tests.
-   > 3. Call \`update_work_item\` with \`status: "human_check"\` once
-   >    the acceptance criteria are met.
-   >
-   > Never mark multiple items \`in_progress\` simultaneously — finish
-   > (or mark \`human_check\` / \`blocked\`) the current one before
-   > starting the next.
+2. Assemble a **concise** brief:
+   - Item ids and titles.
+   - Descriptions + acceptance criteria (from \`get_work_item\`).
+   - Any task-specific instructions from the user.
 
-   - Work through items sequentially, following the CRITICAL rule above.
-   - Mark \`human_check\` when acceptance criteria are met.
-   - When dispatched as an epic unit: after all child tasks are marked
-     \`human_check\`, mark the epic itself \`human_check\` too.
-   - Use \`mcp__newde__add_work_note\` for decisions, surprises, or summaries.
-   - When a commit point is due, draft a commit message in the reply,
-     ask the user to approve, and call \`mcp__newde__commit\` once they do.
-   - If you hit an error you cannot resolve, mark the item \`blocked\`
-     and add a work note with the error details before stopping.
-   - Return a short plain-text summary of what was done.
+   **Do NOT repeat** status-lifecycle, in_progress-first, attribution,
+   note-discipline, blocked-on-error, or epic-rollup rules. The
+   \`newde-subagent-work-protocol\` skill covers all of that and
+   auto-loads when the subagent sees a \`wi-…\` id or touches the
+   newde update/note tools. Inlining those rules in every brief is
+   wasted tokens (~1000 tokens per dispatch); the skill costs ~150
+   loaded once.
+
+   Example brief (~150 tokens):
+
+   > Work items to execute (batchId=b-abc123):
+   >
+   > - wi-111 "Slim read_work_options response by default"
+   >   - Description: <from get_work_item>
+   >   - Acceptance: <from get_work_item>
+   >
+   > - wi-222 "Update task-management skill language"
+   >   - Description: …
+   >   - Acceptance: …
+   >
+   > Work the items in order. Follow the
+   > \`newde-subagent-work-protocol\` skill for status/note conventions.
 
 3. Launch one \`general-purpose\` subagent with that brief.
 
-4. When the subagent returns, call \`newde__add_work_note\` on each item
-   with the returned summary.
+4. When the subagent returns, call \`newde__add_work_note\` on each
+   item with its summary.
 
 5. Loop from step 1.
 
-Never mark items \`in_progress\` yourself before dispatching — let the
-subagent do it so file-change attribution works correctly.
+### For an inline small fix
+
+1. Call \`update_work_item\` with \`status: "in_progress"\` FIRST —
+   before any Read, Grep, Bash, or Edit.
+2. Do the edit. Run any relevant tests.
+3. Call \`update_work_item\` with \`status: "human_check"\` once
+   acceptance criteria are met.
+
+Same invariants either mode: never two items \`in_progress\` at once
+(file-change attribution uses the sole in-progress item), mark
+\`blocked\` with a note on unresolved errors, never self-mark \`done\`.
 `;
 }
