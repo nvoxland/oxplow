@@ -15,6 +15,7 @@ export interface Stream {
   worktree_path: string;
   created_at: string;
   updated_at: string;
+  custom_prompt: string | null;
   panes: { working: string; talking: string };
   resume: { working_session_id: string; talking_session_id: string };
 }
@@ -30,6 +31,7 @@ export interface Batch {
   pane_target: string;
   resume_session_id: string;
   auto_commit: boolean;
+  custom_prompt: string | null;
 }
 
 export interface BatchState {
@@ -332,6 +334,14 @@ export async function renameBatch(streamId: string, batchId: string, title: stri
 
 export async function setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]> {
   return desktopApi().setAutoCommit(streamId, batchId, enabled);
+}
+
+export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
+  return desktopApi().setStreamPrompt(streamId, prompt);
+}
+
+export async function setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Promise<Batch[]> {
+  return desktopApi().setBatchPrompt(streamId, batchId, prompt);
 }
 
 export async function getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState> {

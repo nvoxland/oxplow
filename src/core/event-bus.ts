@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type BatchLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed";
+export type BatchLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed" | "prompt-changed";
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 export type PaneKind = "working" | "talking";
 
@@ -83,7 +83,8 @@ export interface GitRefsChangedEvent {
 
 export interface StreamChangedEvent {
   type: "stream.changed";
-  kind: "reordered";
+  kind: "reordered" | "prompt-changed";
+  streamId?: string;
 }
 
 export interface ConfigChangedEvent {

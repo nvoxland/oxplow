@@ -97,6 +97,10 @@ export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
     if (item.kind === "epic") continue;
     if (item.parent_id && epicIdSet.has(item.parent_id)) {
       epicChildrenMap.get(item.parent_id)!.push(item);
+      // in_progress children also surface in the top-level In Progress section
+      // so they're visible without expanding the epic. All other statuses stay
+      // exclusively inside the epic pane.
+      if (item.status === "in_progress") rootItems.push(item);
     } else {
       rootItems.push(item);
     }

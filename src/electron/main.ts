@@ -142,6 +142,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:completeBatch", (_event, streamId: string, batchId: string) => currentRuntime.completeBatch(streamId, batchId));
   handle("newde:renameBatch", (_event, streamId: string, batchId: string, title: string) => currentRuntime.renameBatch(streamId, batchId, title));
   handle("newde:setAutoCommit", (_event, streamId: string, batchId: string, enabled: boolean) => currentRuntime.setAutoCommit(streamId, batchId, enabled));
+  handle("newde:setStreamPrompt", (_event, streamId: string, prompt: string | null) => currentRuntime.setStreamPrompt(streamId, prompt));
+  handle("newde:setBatchPrompt", (_event, streamId: string, batchId: string, prompt: string | null) => currentRuntime.setBatchPrompt(streamId, batchId, prompt));
   handle("newde:getBatchWorkState", (_event, streamId: string, batchId: string) => currentRuntime.workItemApi.getBatchWorkState(streamId, batchId));
   handle("newde:createWorkItem", (_event, streamId: string, batchId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, batchId, input));
   handle("newde:updateWorkItem", (_event, streamId: string, batchId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, batchId, itemId, changes));

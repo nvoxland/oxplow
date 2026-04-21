@@ -323,6 +323,17 @@ persist back to YAML.
 A new value applies to **agent sessions started after Save** — existing
 sessions keep the prompt they launched with.
 
+After `agentPromptAppend`, `buildBatchAgentPrompt` also appends:
+- `# Stream instructions` + `stream.custom_prompt` if the stream has a
+  non-empty custom prompt (set via the StreamRail right-click Settings modal,
+  persisted to `streams.custom_prompt` — see data-model.md v18).
+- `# Batch instructions` + `batch.custom_prompt` if the batch has a
+  non-empty custom prompt (set via the BatchRail right-click Settings modal,
+  persisted to `batches.custom_prompt` — see data-model.md v18).
+
+These are the last sections before the prompt is finalized, so they can
+provide finer-grained overrides without displacing earlier context.
+
 ## Agent status
 
 `deriveBatchAgentStatus` (`src/session/agent-status.ts`) reduces a stream

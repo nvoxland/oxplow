@@ -20,6 +20,7 @@ export interface Batch {
   pane_target: string;
   resume_session_id: string;
   auto_commit: boolean;
+  custom_prompt: string | null;
 }
 
 export interface BatchState {
@@ -28,7 +29,7 @@ export interface BatchState {
   batches: Batch[];
 }
 
-export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "auto-commit-changed";
+export type BatchChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "auto-commit-changed" | "prompt-changed";
 
 export interface BatchChange {
   streamId: string;
@@ -86,6 +87,7 @@ export class BatchStore {
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
       auto_commit: false,
+      custom_prompt: null,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
@@ -143,6 +145,7 @@ export class BatchStore {
       pane_target: `${paneSessionName(stream)}:batch-${createWindowName()}`,
       resume_session_id: "",
       auto_commit: false,
+      custom_prompt: null,
     };
     this.insertBatch(batch);
     this.setSelected(stream.id, batch.id);
@@ -271,6 +274,19 @@ export class BatchStore {
     return this.fetchBatches(batch.stream_id);
   }
 
+  setBatchPrompt(batchId: string, prompt: string | null): Batch[] {
+    const batch = this.findById(batchId);
+    if (!batch) throw new Error(`unknown batch: ${batchId}`);
+    this.stateDb.run(
+      "UPDATE batches SET custom_prompt = ?, updated_at = ? WHERE id = ?",
+      prompt,
+      new Date().toISOString(),
+      batchId,
+    );
+    this.emitChange({ streamId: batch.stream_id, batchId, kind: "prompt-changed" });
+    return this.fetchBatches(batch.stream_id);
+  }
+
   private fetchBatches(streamId: string): Batch[] {
     return this.stateDb
       .all<Record<string, unknown>>(
@@ -385,6 +401,7 @@ function rowToBatch(row: Record<string, unknown>): Batch {
     pane_target: String(row.pane_target ?? ""),
     resume_session_id: String(row.resume_session_id ?? ""),
     auto_commit: row.auto_commit === 1 || row.auto_commit === true,
+    custom_prompt: row.custom_prompt != null ? String(row.custom_prompt) : null,
   };
 }
 

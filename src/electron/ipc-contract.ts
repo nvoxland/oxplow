@@ -143,6 +143,8 @@ export interface DesktopApi {
   completeBatch(streamId: string, batchId: string): Promise<BatchState>;
   renameBatch(streamId: string, batchId: string, title: string): Promise<Batch>;
   setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]>;
+  setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]>;
+  setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Promise<Batch[]>;
   getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState>;
   createWorkItem(
     streamId: string,

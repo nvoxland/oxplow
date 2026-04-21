@@ -459,6 +459,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 18,
+    name: "custom_prompt_on_streams_and_batches",
+    up: (db) => {
+      // Per-stream and per-batch custom prompts. When set, these are appended
+      // to the agent's system prompt so teams can give stream- or batch-level
+      // standing instructions without touching the global agentPromptAppend.
+      db.exec(`
+        ALTER TABLE streams ADD COLUMN custom_prompt TEXT;
+        ALTER TABLE batches ADD COLUMN custom_prompt TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

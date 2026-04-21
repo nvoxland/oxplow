@@ -18,6 +18,7 @@ export interface Stream {
   worktree_path: string;
   created_at: string;
   updated_at: string;
+  custom_prompt: string | null;
   panes: {
     working: string;
     talking: string;
@@ -29,7 +30,8 @@ export interface Stream {
 }
 
 export interface StreamChange {
-  kind: "reordered";
+  kind: "reordered" | "prompt-changed";
+  streamId?: string;
 }
 
 export class StreamStore {
@@ -131,6 +133,7 @@ export class StreamStore {
       worktree_path: input.worktreePath,
       created_at: now,
       updated_at: now,
+      custom_prompt: null,
       panes: {
         working: `newde-${input.projectBase}:working-${id}`,
         talking: `newde-${input.projectBase}:talking-${id}`,
@@ -220,6 +223,19 @@ export class StreamStore {
     this.emitter.emit({ kind: "reordered" });
   }
 
+  setStreamPrompt(streamId: string, prompt: string | null): Stream[] {
+    const stream = this.get(streamId);
+    if (!stream) throw new Error(`unknown stream: ${streamId}`);
+    this.stateDb.run(
+      "UPDATE streams SET custom_prompt = ?, updated_at = ? WHERE id = ?",
+      prompt,
+      new Date().toISOString(),
+      streamId,
+    );
+    this.emitter.emit({ kind: "prompt-changed", streamId });
+    return this.list();
+  }
+
   private migrateLegacyIfNeeded(): void {
     const row = this.stateDb.get<{ c: number }>("SELECT COUNT(*) AS c FROM streams");
     if ((row?.c ?? 0) > 0) return;
@@ -271,6 +287,7 @@ function rowToStream(row: Record<string, unknown>): Stream {
     worktree_path: String(row.worktree_path ?? ""),
     created_at: String(row.created_at ?? new Date(0).toISOString()),
     updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
+    custom_prompt: row.custom_prompt != null ? String(row.custom_prompt) : null,
     panes: {
       working: String(row.working_pane ?? ""),
       talking: String(row.talking_pane ?? ""),
@@ -321,6 +338,7 @@ function withDefaults(stream: Partial<Stream>, projectDir: string): Stream {
     worktree_path: stream.worktree_path ?? projectDir,
     created_at: stream.created_at ?? new Date(0).toISOString(),
     updated_at: stream.updated_at ?? stream.created_at ?? new Date(0).toISOString(),
+    custom_prompt: stream.custom_prompt ?? null,
     panes: {
       working: stream.panes?.working ?? "",
       talking: stream.panes?.talking ?? "",

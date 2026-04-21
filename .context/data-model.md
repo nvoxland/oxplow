@@ -29,6 +29,12 @@ Each stream owns:
   `reorderStreams(orderedStreamIds)` which reassigns sequential indexes.
   Emits a `stream.changed` event (kind: "reordered") so the UI can
   refresh.
+- a `custom_prompt` column (migration v18, nullable TEXT) — per-stream
+  standing instructions appended to the agent's system prompt after the
+  global `agentPromptAppend` section. Set via `setStreamPrompt(streamId,
+  prompt)` on `StreamStore`; IPC-exposed as `setStreamPrompt(streamId,
+  prompt)`. Emits a `stream.changed` event (kind: "prompt-changed") so
+  the UI re-fetches the full stream list.
 
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
@@ -53,6 +59,13 @@ pending commit point is already in the queue. Toggled via
 `setAutoCommit(streamId, batchId, enabled)`. Surfaced in the Plan pane as an
 "Auto-commit" toggle button next to the queue marker bar; while on, the
 "+ Commit Point" button is hidden.
+
+`custom_prompt` (migration v18, nullable TEXT) — per-batch standing
+instructions appended to the agent's system prompt after the stream-level
+`custom_prompt`. Set via `setBatchPrompt(batchId, prompt)` on `BatchStore`;
+IPC-exposed as `setBatchPrompt(streamId, batchId, prompt)`. Emits a
+`batch.changed` event (kind: "prompt-changed") so the UI refreshes batch
+state.
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 

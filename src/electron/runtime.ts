@@ -291,7 +291,7 @@ export class ElectronRuntime {
       });
     });
     this.store.subscribe((change) => {
-      this.events.publish({ type: "stream.changed", kind: change.kind });
+      this.events.publish({ type: "stream.changed", kind: change.kind, streamId: change.streamId });
     });
     this.fileChangeStore.subscribe((change) => {
       const batch = this.batchStore.findById(change.batch_id);
@@ -757,6 +757,15 @@ export class ElectronRuntime {
   setAutoCommit(streamId: string, batchId: string, enabled: boolean): Batch[] {
     this.resolveBatch(streamId, batchId);
     return this.batchStore.setAutoCommit(batchId, enabled);
+  }
+
+  setStreamPrompt(streamId: string, prompt: string | null): Stream[] {
+    return this.store.setStreamPrompt(streamId, prompt);
+  }
+
+  setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Batch[] {
+    this.resolveBatch(streamId, batchId);
+    return this.batchStore.setBatchPrompt(batchId, prompt);
   }
 
   listWorkspaceEntries(streamId: string, path = "") {
@@ -1862,6 +1871,14 @@ function buildBatchAgentPrompt(
   const userAppend = agentPromptAppend.trim();
   if (userAppend) {
     lines.push("", "USER CUSTOM PROMPT:", userAppend);
+  }
+  const streamPrompt = stream.custom_prompt?.trim();
+  if (streamPrompt) {
+    lines.push("", "# Stream instructions", "", streamPrompt);
+  }
+  const batchPrompt = batch.custom_prompt?.trim();
+  if (batchPrompt) {
+    lines.push("", "# Batch instructions", "", batchPrompt);
   }
   return lines.join("\n");
 }

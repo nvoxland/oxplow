@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createStream, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
+import { createStream, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
@@ -30,6 +30,9 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
+  const [settingsStream, setSettingsStream] = useState<Stream | null>(null);
+  const [settingsPrompt, setSettingsPrompt] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -41,6 +44,25 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
   const [newBranch, setNewBranch] = useState("");
   const [startPointRef, setStartPointRef] = useState("");
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  function openStreamSettings(candidate: Stream) {
+    setSettingsStream(candidate);
+    setSettingsPrompt(candidate.custom_prompt ?? "");
+    setSettingsSaving(false);
+  }
+
+  async function saveStreamSettings() {
+    if (!settingsStream) return;
+    setSettingsSaving(true);
+    try {
+      await setStreamPrompt(settingsStream.id, settingsPrompt.trim() || null);
+      setSettingsStream(null);
+    } catch (e) {
+      logUi("error", "failed to save stream prompt", { streamId: settingsStream.id, error: String(e) });
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!showCreate) return;
@@ -314,6 +336,12 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
               run: () => onRenameStream?.(contextMenu.stream.id, contextMenu.stream.title),
             },
             {
+              id: "stream.settings",
+              label: "Settings",
+              enabled: true,
+              run: () => openStreamSettings(contextMenu.stream),
+            },
+            {
               id: "stream.add-stream",
               label: "Add stream",
               enabled: gitEnabled,
@@ -330,6 +358,37 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
           onClose={() => setContextMenu(null)}
           minWidth={180}
         />
+      ) : null}
+      {settingsStream ? (
+        <div style={backdropStyle} onMouseDown={() => setSettingsStream(null)}>
+          <div onMouseDown={(e) => e.stopPropagation()} style={modalStyle}>
+            <div style={modalHeaderStyle}>
+              <span>Stream settings — {settingsStream.title}</span>
+              <button type="button" onClick={() => setSettingsStream(null)} style={closeBtnStyle} aria-label="Close">×</button>
+            </div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={labelStyle}>
+                <span>Custom prompt</span>
+                <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                  This prompt is appended to the agent's system prompt for this stream.
+                </span>
+                <textarea
+                  value={settingsPrompt}
+                  onChange={(e) => setSettingsPrompt(e.target.value)}
+                  rows={6}
+                  style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+                  placeholder="Enter standing instructions for this stream…"
+                />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setSettingsStream(null)} style={buttonStyle}>Cancel</button>
+                <button type="button" onClick={() => void saveStreamSettings()} style={buttonStyle} disabled={settingsSaving}>
+                  {settingsSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

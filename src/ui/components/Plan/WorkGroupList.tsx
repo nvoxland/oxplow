@@ -2,7 +2,6 @@ import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
-import { CommitPointRow } from "./CommitPointRow.js";
 import {
   classifyWorkItem,
   sectionDefaultStatus,
@@ -242,7 +241,6 @@ export function WorkGroupList({
     const isOver = overKey === key && draggingKey !== key;
     const isDragging = draggingKey === key;
     if (row.kind === "commit") {
-      const isExpanded = expandedId === key;
       return (
         <div key={key}>
           <div
@@ -261,18 +259,14 @@ export function WorkGroupList({
             }}
             onDragLeave={() => { if (overKey === key) setOverKey(null); }}
             onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
-            onClick={() => onToggleExpand(key)}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onDoubleClickCommitPoint?.(row.cp);
-            }}
+            onClick={() => onDoubleClickCommitPoint?.(row.cp)}
             style={{
               ...commitDividerStyle,
               cursor: isDragging ? "grabbing" : "pointer",
               borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
               background: isDragging ? "rgba(74,158,255,0.08)" : "transparent",
             }}
-            title="Commit point — double-click to edit, drag to reposition"
+            title="Commit point — click to edit, drag to reposition"
           >
             <span style={commitDividerBadgeStyle(row.cp.status)}>
               commit
@@ -283,7 +277,6 @@ export function WorkGroupList({
               {row.cp.mode === "auto" ? "Auto" : "Approve"}
             </span>
           </div>
-          {isExpanded ? <CommitPointRow cp={row.cp} /> : null}
         </div>
       );
     }

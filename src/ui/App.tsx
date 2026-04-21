@@ -882,6 +882,22 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeNewdeEvents((event) => {
+      if (event.type !== "stream.changed" || event.kind !== "prompt-changed" || !event.streamId) return;
+      void listStreams()
+        .then((updated) => {
+          setStreams(updated);
+          const updatedStream = updated.find((s) => s.id === event.streamId);
+          if (updatedStream) setStream((prev) => (prev?.id === updatedStream.id ? updatedStream : prev));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh streams after prompt change", { error: String(error) });
+        });
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const reload = () => {
       void getConfig()
@@ -1379,6 +1395,7 @@ export function App() {
         />
         {stream ? (
           <BatchRail
+            streamId={stream.id}
             batches={currentBatchState.batches}
             activeBatchId={currentBatchState.activeBatchId}
             selectedBatchId={currentBatchState.selectedBatchId}

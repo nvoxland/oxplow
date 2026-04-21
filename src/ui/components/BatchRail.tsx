@@ -7,11 +7,14 @@ import type {
   BatchFileChange,
   BatchWorkState,
 } from "../api.js";
+import { setBatchPrompt } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
 import type { MenuItem } from "../menu.js";
+import { logUi } from "../logger.js";
 
 interface Props {
+  streamId: string;
   batches: Batch[];
   activeBatchId: string | null;
   selectedBatchId: string | null;
@@ -37,6 +40,7 @@ export const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
 export const BATCH_DRAG_MIME = "application/x-newde-batch";
 
 export function BatchRail({
+  streamId,
   batches,
   activeBatchId,
   selectedBatchId,
@@ -58,6 +62,28 @@ export function BatchRail({
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overBatchId, setOverBatchId] = useState<string | null>(null);
+  const [settingsBatch, setSettingsBatch] = useState<Batch | null>(null);
+  const [settingsPrompt, setSettingsPrompt] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  function openBatchSettings(batch: Batch) {
+    setSettingsBatch(batch);
+    setSettingsPrompt(batch.custom_prompt ?? "");
+    setSettingsSaving(false);
+  }
+
+  async function saveBatchSettings() {
+    if (!settingsBatch) return;
+    setSettingsSaving(true);
+    try {
+      await setBatchPrompt(streamId, settingsBatch.id, settingsPrompt.trim() || null);
+      setSettingsBatch(null);
+    } catch (e) {
+      logUi("error", "failed to save batch prompt", { batchId: settingsBatch.id, error: String(e) });
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   const { ordered, completed } = useMemo(() => {
     const active = batches.find((b) => b.id === activeBatchId && b.status !== "completed");
@@ -106,6 +132,12 @@ export function BatchRail({
           label: "Rename…",
           enabled: !!onRenameBatch,
           run: () => setRenamingId(contextMenu.batch.id),
+        },
+        {
+          id: "batch.settings",
+          label: "Settings",
+          enabled: true,
+          run: () => openBatchSettings(contextMenu.batch),
         },
         {
           id: "batch.add-batch",
@@ -221,6 +253,37 @@ export function BatchRail({
           onClose={() => setContextMenu(null)}
           minWidth={180}
         />
+      ) : null}
+      {settingsBatch ? (
+        <div style={backdropStyle} onMouseDown={() => setSettingsBatch(null)}>
+          <div onMouseDown={(e) => e.stopPropagation()} style={settingsModalStyle}>
+            <div style={settingsModalHeaderStyle}>
+              <span>Batch settings — {settingsBatch.title}</span>
+              <button type="button" onClick={() => setSettingsBatch(null)} style={closeBtnStyle} aria-label="Close">×</button>
+            </div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={settingsLabelStyle}>
+                <span>Custom prompt</span>
+                <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                  This prompt is appended to the agent's system prompt for this batch.
+                </span>
+                <textarea
+                  value={settingsPrompt}
+                  onChange={(e) => setSettingsPrompt(e.target.value)}
+                  rows={6}
+                  style={{ ...settingsInputStyle, resize: "vertical", fontFamily: "inherit" }}
+                  placeholder="Enter standing instructions for this batch…"
+                />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setSettingsBatch(null)} style={settingsBtnStyle}>Cancel</button>
+                <button type="button" onClick={() => void saveBatchSettings()} style={settingsBtnStyle} disabled={settingsSaving}>
+                  {settingsSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -767,3 +830,68 @@ const inputStyle: CSSProperties = {
   fontFamily: "inherit",
   fontSize: 12,
 };
+
+const backdropStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1100,
+};
+
+const settingsModalStyle: CSSProperties = {
+  background: "var(--bg)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: 8,
+  boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+  minWidth: 480,
+  maxWidth: 640,
+  maxHeight: "80vh",
+  display: "flex",
+  flexDirection: "column",
+};
+
+const settingsModalHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "10px 14px",
+  borderBottom: "1px solid var(--border)",
+  fontSize: 13,
+  fontWeight: 600,
+  background: "var(--bg-1, var(--bg-2))",
+};
+
+const settingsInputStyle: CSSProperties = {
+  background: "var(--bg)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "6px 8px",
+  fontSize: 12,
+  width: "100%",
+  boxSizing: "border-box",
+};
+
+const settingsBtnStyle: CSSProperties = {
+  background: "var(--bg-2)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  padding: "6px 12px",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
+
+const closeBtnStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "var(--muted)",
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+const settingsLabelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
