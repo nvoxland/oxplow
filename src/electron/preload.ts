@@ -68,6 +68,7 @@ const api: DesktopApi = {
   getWorkNotes: (itemId) => ipcRenderer.invoke("newde:getWorkNotes", itemId),
   listAgentTurns: (streamId, batchId, limit) => ipcRenderer.invoke("newde:listAgentTurns", streamId, batchId, limit),
   listBatchFileChanges: (streamId, batchId, limit) => ipcRenderer.invoke("newde:listBatchFileChanges", streamId, batchId, limit),
+  listWorkItemFileChanges: (itemId, limit) => ipcRenderer.invoke("newde:listWorkItemFileChanges", itemId, limit),
   getTurnFileDiff: (turnId, path) => ipcRenderer.invoke("newde:getTurnFileDiff", turnId, path),
   listSnapshots: (streamId, limit) => ipcRenderer.invoke("newde:listSnapshots", streamId, limit),
   getSnapshotSummary: (snapshotId) => ipcRenderer.invoke("newde:getSnapshotSummary", snapshotId),

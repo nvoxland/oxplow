@@ -651,6 +651,13 @@ export async function listBatchFileChanges(
   return desktopApi().listBatchFileChanges(streamId, batchId, limit);
 }
 
+export async function listWorkItemFileChanges(
+  itemId: string,
+  limit?: number,
+): Promise<BatchFileChange[]> {
+  return desktopApi().listWorkItemFileChanges(itemId, limit);
+}
+
 export async function getTurnFileDiff(
   turnId: string,
   path: string,

@@ -10,6 +10,7 @@ import {
   listAgentStatuses,
   listAgentTurns,
   listBatchFileChanges,
+  listWorkItemFileChanges,
   reorderWorkItems,
   moveWorkItemToBatch,
   getBacklogState,
@@ -179,6 +180,7 @@ export function App() {
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{ path: string; basename: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
+  const [snapshotsReveal, setSnapshotsReveal] = useState<{ turnId: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [batchCreateRequest, setBatchCreateRequest] = useState(0);
@@ -1355,6 +1357,23 @@ export function App() {
     setBottomActivate({ id: "history", token });
   };
 
+  const handleShowWorkItemInHistory = async (itemId: string) => {
+    const token = Date.now();
+    // Open the Local History panel regardless of whether we find a turn — the
+    // user asked to see history, so get them there.
+    setBottomActivate({ id: "snapshots", token });
+    try {
+      const changes = await listWorkItemFileChanges(itemId);
+      // Pick the most recent change with a turn_id (list is DESC by created_at).
+      const withTurn = changes.find((c) => c.turn_id);
+      if (withTurn?.turn_id) {
+        setSnapshotsReveal({ turnId: withTurn.turn_id, token });
+      }
+    } catch (err) {
+      logUi("warn", "show work item in history failed", { error: String(err) });
+    }
+  };
+
   const closeDiffTab = (id: string) => {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
     setCenterActive("agent");
@@ -1455,6 +1474,8 @@ export function App() {
           onReorderBacklog={handleReorderBacklog}
           onMoveItemToBacklog={handleMoveItemToBacklog}
           openNewRequest={planNewRequest}
+          onOpenFile={handleOpenFile}
+          onShowInHistory={handleShowWorkItemInHistory}
         />
       ),
     },
@@ -1517,7 +1538,7 @@ export function App() {
     {
       id: "snapshots",
       label: "Local history",
-      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} />,
+      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealTurnId={snapshotsReveal} />,
     },
   ];
 

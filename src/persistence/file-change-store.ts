@@ -32,7 +32,7 @@ export class FileChangeStore {
   private readonly stateDb;
   private readonly emitter: StoreEmitter<BatchFileChange>;
 
-  constructor(projectDir: string, private readonly logger?: Logger) {
+  constructor(projectDir: string, logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
     this.emitter = new StoreEmitter("file change", logger);
   }
@@ -99,6 +99,16 @@ export class FileChangeStore {
       .all<Record<string, unknown>>(
         `SELECT * FROM batch_file_change WHERE turn_id = ? ORDER BY created_at DESC, rowid DESC`,
         turnId,
+      )
+      .map(rowToChange);
+  }
+
+  listForWorkItem(workItemId: string, limit = 500): BatchFileChange[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM batch_file_change WHERE work_item_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+        workItemId,
+        limit,
       )
       .map(rowToChange);
   }

@@ -66,6 +66,7 @@ export interface WorkItemApi {
   getWorkNotes(itemId: string): WorkNote[];
   listAgentTurns(streamId: string, batchId: string, limit?: number): AgentTurn[];
   listFileChanges(streamId: string, batchId: string, limit?: number): BatchFileChange[];
+  listWorkItemFileChanges(itemId: string, limit?: number): BatchFileChange[];
 }
 
 function buildBacklogState(store: WorkItemStore): BacklogState {
@@ -229,6 +230,10 @@ export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, file
     listFileChanges(streamId, batchId, limit) {
       resolveBatch(streamId, batchId);
       return fileChangeStore.listForBatch(batchId, limit);
+    },
+
+    listWorkItemFileChanges(itemId, limit) {
+      return fileChangeStore.listForWorkItem(itemId, limit);
     },
   };
 }

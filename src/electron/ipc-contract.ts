@@ -203,6 +203,7 @@ export interface DesktopApi {
   getWorkNotes(itemId: string): Promise<WorkNote[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
+  listWorkItemFileChanges(itemId: string, limit?: number): Promise<BatchFileChange[]>;
   getTurnFileDiff(turnId: string, path: string): Promise<SnapshotDiffResult>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
   getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null>;

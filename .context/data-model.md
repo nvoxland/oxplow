@@ -142,6 +142,12 @@ the project pane and the per-turn file filter. Each row gets a nullable
 `snapshot_id` pointing at the `file_snapshot` that absorbed the change
 (backfilled when a turn-start or turn-end snapshot flushes).
 
+Read API: `listForBatch(batchId)`, `listForTurn(turnId)`, and
+`listForWorkItem(itemId)` (used by the Work Item edit modal's
+"Files changed" section + "Show in history" button — the latter opens
+the Local History bottom panel and selects the snapshot matching the
+most recent turn that touched files for the item).
+
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
 Metadata for content-addressed file snapshots. `file_snapshot` holds

@@ -233,6 +233,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
   handle("newde:listAgentTurns", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, batchId, limit));
   handle("newde:listBatchFileChanges", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listFileChanges(streamId, batchId, limit));
+  handle("newde:listWorkItemFileChanges", (_event, itemId: string, limit?: number) => currentRuntime.workItemApi.listWorkItemFileChanges(itemId, limit));
   handle("newde:getTurnFileDiff", (_event, turnId: string, path: string) => currentRuntime.getTurnFileDiff(turnId, path));
   handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
   handle("newde:getSnapshotSummary", (_event, snapshotId: string) => currentRuntime.getSnapshotSummary(snapshotId));

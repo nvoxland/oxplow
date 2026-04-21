@@ -18,9 +18,12 @@ import { ConfirmDialog } from "../ConfirmDialog.js";
 interface Props {
   stream: Stream | null;
   onOpenDiff?(spec: DiffSpec): void;
+  /** When set, the panel selects the snapshot whose turn_id matches. Change
+   *  the token to request a new selection even if the id repeats. */
+  revealTurnId?: { turnId: string; token: number } | null;
 }
 
-export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
+export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +90,16 @@ export function SnapshotsPanel({ stream, onOpenDiff }: Props) {
       cancelled = true;
     };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!revealTurnId) return;
+    // Prefer the turn-end snapshot (that's what "changed files for this turn"
+    // represents). Fall back to any snapshot with the matching turn_id.
+    const target =
+      snapshots.find((s) => s.turn_id === revealTurnId.turnId && s.kind === "turn-end")
+      ?? snapshots.find((s) => s.turn_id === revealTurnId.turnId);
+    if (target) setSelectedId(target.id);
+  }, [revealTurnId?.turnId, revealTurnId?.token, snapshots]);
 
   useEffect(() => {
     if (!dragging) return;

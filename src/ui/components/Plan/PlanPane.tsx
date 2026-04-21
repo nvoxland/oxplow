@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BacklogState,
   Batch,
+  BatchFileChange,
   BatchWorkState,
   CommitPoint,
   WaitPoint,
@@ -18,6 +19,7 @@ import {
   getWorkNotes,
   listCommitPoints,
   listWaitPoints,
+  listWorkItemFileChanges,
   reorderBatchQueue,
   setAutoCommit,
   subscribeNewdeEvents,
@@ -81,6 +83,8 @@ interface Props {
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
   onMoveItemToBacklog(itemId: string, fromBatchId: string): Promise<void>;
   openNewRequest?: number;
+  onOpenFile?(path: string): void | Promise<void>;
+  onShowInHistory?(itemId: string): void;
 }
 
 interface ContextMenuState {
@@ -106,6 +110,8 @@ export function PlanPane({
   onReorderBacklog,
   onMoveItemToBacklog,
   openNewRequest,
+  onOpenFile,
+  onShowInHistory,
 }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -142,6 +148,8 @@ export function PlanPane({
   const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
   // Notes for the currently-open edit modal.
   const [editingItemNotes, setEditingItemNotes] = useState<WorkNote[]>([]);
+  // File changes attributed to the currently-open edit modal's work item.
+  const [editingItemFileChanges, setEditingItemFileChanges] = useState<BatchFileChange[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -353,9 +361,13 @@ export function PlanPane({
     setEditingItemId(item.id);
     setEditingItem(item);
     setEditingItemNotes([]);
+    setEditingItemFileChanges([]);
     setModalMode("edit");
     void getWorkNotes(item.id)
       .then((notes) => setEditingItemNotes(notes))
+      .catch(() => { /* non-fatal */ });
+    void listWorkItemFileChanges(item.id)
+      .then((changes) => setEditingItemFileChanges(changes))
       .catch(() => { /* non-fatal */ });
   };
 
@@ -364,6 +376,7 @@ export function PlanPane({
     setEditingItemId(null);
     setEditingItem(null);
     setEditingItemNotes([]);
+    setEditingItemFileChanges([]);
     paneRef.current?.focus();
   };
 
@@ -447,9 +460,12 @@ export function PlanPane({
           setPriority={setPriority}
           showSaveAndAnother={modalMode === "create"}
           notes={modalMode === "edit" ? editingItemNotes : []}
+          fileChanges={modalMode === "edit" ? editingItemFileChanges : []}
           item={modalMode === "edit" ? editingItem : null}
           epics={batchWork?.epics ?? []}
           onOpenItem={(target) => openEditModal(target)}
+          onOpenFile={onOpenFile}
+          onShowInHistory={onShowInHistory}
           modalTitle={
             modalMode === "edit"
               ? "Edit work item"
@@ -924,9 +940,12 @@ function NewWorkItemModal({
   setPriority,
   showSaveAndAnother = true,
   notes = [],
+  fileChanges = [],
   item = null,
   epics = [],
   onOpenItem,
+  onOpenFile,
+  onShowInHistory,
   modalTitle = "New work item",
   onClose,
   onSubmit,
@@ -941,9 +960,12 @@ function NewWorkItemModal({
   setPriority(value: WorkItemPriority): void;
   showSaveAndAnother?: boolean;
   notes?: WorkNote[];
+  fileChanges?: BatchFileChange[];
   item?: WorkItem | null;
   epics?: WorkItem[];
   onOpenItem?(item: WorkItem): void;
+  onOpenFile?(path: string): void | Promise<void>;
+  onShowInHistory?(itemId: string): void;
   modalTitle?: string;
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
@@ -1119,6 +1141,12 @@ function NewWorkItemModal({
                   {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
                   {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
                 </div>
+                <FileChangesSection
+                  item={item}
+                  fileChanges={fileChanges}
+                  onOpenFile={onOpenFile}
+                  onShowInHistory={onShowInHistory}
+                />
               </>
             ) : null}
           </div>
@@ -1154,6 +1182,131 @@ function NewWorkItemModal({
     </div>
   );
 }
+
+function FileChangesSection({
+  item,
+  fileChanges,
+  onOpenFile,
+  onShowInHistory,
+}: {
+  item: WorkItem;
+  fileChanges: BatchFileChange[];
+  onOpenFile?(path: string): void | Promise<void>;
+  onShowInHistory?(itemId: string): void;
+}) {
+  // Dedupe by path — a file can change across multiple turns; keep the most
+  // recent change_kind (list is DESC by created_at) and count occurrences.
+  const grouped = (() => {
+    const map = new Map<string, { path: string; kind: string; count: number }>();
+    for (const change of fileChanges) {
+      const existing = map.get(change.path);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(change.path, { path: change.path, kind: change.change_kind, count: 1 });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+  })();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={modalFieldLabelStyle}>
+        Files changed {grouped.length > 0 ? `(${grouped.length})` : ""}
+      </div>
+      {grouped.length === 0 ? (
+        <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
+          No file changes attributed to this item.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 160, overflowY: "auto" }}>
+          {grouped.map((row) => (
+            <div
+              key={row.path}
+              title={row.path}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}
+            >
+              <span style={{ ...fileKindBadgeStyle, color: fileKindColor(row.kind) }}>
+                {fileKindLabel(row.kind)}
+              </span>
+              {onOpenFile ? (
+                <button
+                  type="button"
+                  onClick={() => void onOpenFile(row.path)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    color: "var(--accent)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    font: "inherit",
+                    textDecoration: "underline",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: 1,
+                    minWidth: 0,
+                  }}
+                >
+                  {row.path}
+                </button>
+              ) : (
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {row.path}
+                </span>
+              )}
+              {row.count > 1 ? (
+                <span style={{ color: "var(--muted)", flexShrink: 0 }}>×{row.count}</span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+      {onShowInHistory ? (
+        <button
+          type="button"
+          data-testid="work-item-show-in-history"
+          onClick={() => onShowInHistory(item.id)}
+          style={{ ...miniButtonStyle, alignSelf: "flex-start", marginTop: 4 }}
+          disabled={grouped.length === 0}
+          title={grouped.length === 0 ? "No file changes to show" : "Open Local History and select this work item's snapshot"}
+        >
+          Show in history
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function fileKindLabel(kind: string): string {
+  switch (kind) {
+    case "created": return "A";
+    case "deleted": return "D";
+    case "updated": return "M";
+    default: return "·";
+  }
+}
+
+function fileKindColor(kind: string): string {
+  switch (kind) {
+    case "created": return "#86efac";
+    case "deleted": return "#f87171";
+    case "updated": return "#e5a06a";
+    default: return "var(--muted)";
+  }
+}
+
+const fileKindBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 14,
+  fontFamily: "var(--mono, monospace)",
+  fontSize: 10,
+  fontWeight: 600,
+  flexShrink: 0,
+};
 
 const modalFieldLabelStyle: CSSProperties = {
   textTransform: "uppercase",
