@@ -856,7 +856,7 @@ const settingsModalStyle: CSSProperties = {
   background: "var(--bg)",
   border: "1px solid var(--border-strong)",
   borderRadius: 8,
-  boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
   minWidth: 480,
   maxWidth: 640,
   maxHeight: "80vh",

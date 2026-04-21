@@ -185,7 +185,7 @@ const panelStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 8,
   background: "var(--bg)",
-  boxShadow: "0 16px 40px rgba(0, 0, 0, 0.45)",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 16px 40px rgba(0, 0, 0, 0.45)",
 };
 
 const inputStyle: CSSProperties = {

@@ -999,7 +999,7 @@ function NewWorkItemModal({
           display: "flex",
           flexDirection: "column",
           gap: 8,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1359,7 +1359,7 @@ function CommitPointModal({
           display: "flex",
           flexDirection: "column",
           gap: 10,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

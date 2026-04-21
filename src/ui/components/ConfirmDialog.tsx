@@ -92,7 +92,7 @@ const panelStyle: CSSProperties = {
   border: "1px solid var(--border-strong)",
   borderRadius: 8,
   padding: 16,
-  boxShadow: "0 16px 40px rgba(0, 0, 0, 0.5)",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 16px 40px rgba(0, 0, 0, 0.5)",
   display: "flex",
   flexDirection: "column",
   gap: 14,

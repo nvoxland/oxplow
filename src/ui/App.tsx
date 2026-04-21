@@ -1717,7 +1717,7 @@ function DaemonDownDialog() {
           border: "1px solid var(--border)",
           borderRadius: 8,
           padding: 20,
-          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.4)",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 40px rgba(0, 0, 0, 0.4)",
         }}
       >
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Backend daemon disconnected</div>
@@ -1773,7 +1773,7 @@ function ExternalFileChangedDialog({
           border: "1px solid var(--border)",
           borderRadius: 8,
           padding: 20,
-          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.4)",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 40px rgba(0, 0, 0, 0.4)",
           display: "flex",
           flexDirection: "column",
           gap: 16,
