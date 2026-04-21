@@ -322,4 +322,39 @@ describe("decideStopDirective", () => {
     expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
   });
 
+  test("auto_commit=true snapshot with no commit points falls through to ready-work handling", () => {
+    // Contract: the runtime auto-commit pre-pass runs BEFORE decideStopDirective
+    // and never creates a commit_point row. So the pipeline sees the batch with
+    // `autoCommit: true` but an empty commitPoints list and must not invent any
+    // commit directive from the flag itself — it should just handle whatever
+    // work remains. Here: no ready items, no commits, so allow stop.
+    const settled = workItem("w1", 0, "human_check");
+    const out = decideStopDirective(
+      snapshot({
+        batch: batch({ auto_commit: true }),
+        workItems: [settled],
+        autoCommit: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+    expect(out.sideEffects).toEqual([]);
+  });
+
+  test("auto_commit=true with a ready work item: pipeline still fires the next-item directive", () => {
+    // Pre-pass already ran (or had nothing settled), but more work remains.
+    // The pipeline must keep auto-progressing through the queue.
+    const ready = workItem("w2", 1, "ready");
+    const out = decideStopDirective(
+      snapshot({
+        batch: batch({ auto_commit: true }),
+        workItems: [ready],
+        readyWorkItems: [ready],
+        autoCommit: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toEqual({ decision: "block", reason: "next: w2" });
+  });
+
 });

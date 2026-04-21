@@ -4,6 +4,7 @@ import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus
 import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
 import {
   classifyWorkItem,
+  finalizeReorderIds,
   sectionDefaultStatus,
   sectionHeaderStyle,
   statusIcon,
@@ -139,7 +140,13 @@ export function WorkGroupList({
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
     for (const { kind, label } of SECTION_ORDER) {
-      buckets[kind].sort((a, b) => a.sortIndex - b.sortIndex);
+      // Human Check is the only section that renders descending by sort_index
+      // — newest-finished items surface at the top so the user can triage them
+      // without scrolling. `finalizeReorderIds` unwinds this when we persist a
+      // reorder so the underlying sort_index space stays ascending.
+      buckets[kind].sort((a, b) =>
+        kind === "humanCheck" ? b.sortIndex - a.sortIndex : a.sortIndex - b.sortIndex,
+      );
       // Keep empty sections in the list while a drag is active so the user
       // can drop into an empty "Done" / "Human check" to create the first
       // item there. When nothing is dragging, empty sections are suppressed
@@ -210,10 +217,29 @@ export function WorkGroupList({
       next.splice(to, 0, moved!);
     }
     resetDrag();
+    // `next` is in visual order (Human Check descending). Convert to
+    // persistence order before writing — finalizeReorderIds flips the
+    // humanCheck run so sort_index ends up ascending in the store, which
+    // keeps the next render's visual order stable.
+    const workRowsInVisualOrder = next
+      .filter((row): row is Extract<QueueRow, { kind: "work" }> => row.kind === "work")
+      .map((row) => ({ id: row.id, status: row.item.status }));
+    const persistedWorkIds = finalizeReorderIds(workRowsInVisualOrder);
     if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
-      onReorderMixed(next.map((row) => ({ kind: row.kind, id: row.id })));
+      // Rebuild the mixed entries list using the persisted work-item order.
+      // Non-work rows stay in their `next` positions; work rows are replaced
+      // in-order with the finalized id sequence.
+      let workCursor = 0;
+      const entries: Array<{ kind: "work" | "commit" | "wait"; id: string }> = next.map((row) => {
+        if (row.kind === "work") {
+          const id = persistedWorkIds[workCursor++]!;
+          return { kind: "work" as const, id };
+        }
+        return { kind: row.kind, id: row.id };
+      });
+      onReorderMixed(entries);
     } else {
-      void onReorderWorkItems(next.filter((row) => row.kind === "work").map((row) => row.id));
+      void onReorderWorkItems(persistedWorkIds);
     }
   };
 

@@ -102,6 +102,60 @@ import { logUi } from "./logger.js";
 // closed automatically via enforceOpenFileLimit. Dirty tabs stay pinned.
 const MAX_OPEN_FILE_TABS = 10;
 
+// Persists which file tabs are open (per stream) across app restarts. Only the
+// paths are saved — dirty state and scroll position are intentionally dropped.
+const FILE_SESSIONS_STORAGE_KEY = "newde.layout.v1.fileSessions";
+// Persists which center pane was last active ("agent", "file:<path>", or a
+// diff tab id). Restored after file sessions are rebuilt; falls back to
+// "agent" if the saved id is no longer resolvable (diff tabs never persist,
+// and a file tab may have failed to reopen).
+const CENTER_ACTIVE_STORAGE_KEY = "newde.layout.v1.centerActive";
+
+function readPersistedFileSessionPaths(): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(FILE_SESSIONS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string[]> = {};
+    for (const [streamId, paths] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof streamId !== "string") continue;
+      if (!Array.isArray(paths)) continue;
+      const clean = paths.filter((p): p is string => typeof p === "string");
+      if (clean.length > 0) out[streamId] = clean;
+    }
+    return out;
+  } catch (err) {
+    logUi("warn", "failed to parse persisted file sessions", { error: String(err) });
+    return {};
+  }
+}
+
+function writePersistedFileSessionPaths(sessions: Record<string, FileSessionState>): void {
+  try {
+    const out: Record<string, string[]> = {};
+    for (const [streamId, session] of Object.entries(sessions)) {
+      if (session.openOrder.length > 0) out[streamId] = session.openOrder;
+    }
+    window.localStorage.setItem(FILE_SESSIONS_STORAGE_KEY, JSON.stringify(out));
+  } catch {}
+}
+
+function readPersistedCenterActive(): string | null {
+  try {
+    const raw = window.localStorage.getItem(CENTER_ACTIVE_STORAGE_KEY);
+    return typeof raw === "string" && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedCenterActive(value: string): void {
+  try {
+    window.localStorage.setItem(CENTER_ACTIVE_STORAGE_KEY, value);
+  } catch {}
+}
+
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
@@ -111,11 +165,13 @@ export function App() {
   const [fileChanges, setFileChanges] = useState<Record<string, BatchFileChange[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
-  const [centerActive, setCenterActive] = useState<string>("agent");
+  const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
+  const restoredStreamsRef = useRef<Set<string>>(new Set());
+  const centerActiveValidatedRef = useRef(false);
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
@@ -715,6 +771,97 @@ export function App() {
   useEffect(() => {
     setExternalFilePrompt(null);
   }, [stream?.id, selectedFilePath]);
+
+  // Persist the list of open file paths per stream on every session change.
+  // We write the keys of openOrder only — dirty state, draft content, and
+  // scroll position are intentionally dropped.
+  useEffect(() => {
+    writePersistedFileSessionPaths(fileSessions);
+  }, [fileSessions]);
+
+  // Persist the active center tab id so the user lands on the same tab next
+  // restart. Diff tabs don't persist (their id includes ephemeral data), so
+  // restoration validates the id against available tabs and falls back.
+  useEffect(() => {
+    writePersistedCenterActive(centerActive);
+  }, [centerActive]);
+
+  // After the first stream has had its file sessions rebuilt, verify the
+  // initial (localStorage-seeded) centerActive is still resolvable. If it
+  // points to a file that didn't come back or a diff tab (which never
+  // persist), snap back to "agent". This runs once per mount — subsequent
+  // stream switches have their own centerActive logic in handleSwitch.
+  useEffect(() => {
+    if (centerActiveValidatedRef.current) return;
+    if (!stream) return;
+    if (!restoredStreamsRef.current.has(stream.id)) return;
+    centerActiveValidatedRef.current = true;
+    const session = fileSessions[stream.id];
+    if (centerActive === "agent") return;
+    if (centerActive.startsWith("file:")) {
+      const path = centerActive.slice("file:".length);
+      if (!session || !session.files[path]) {
+        setCenterActive("agent");
+      }
+      return;
+    }
+    if (centerActive.startsWith("diff:")) {
+      if (!diffTabs.some((tab) => tab.id === centerActive)) {
+        setCenterActive("agent");
+      }
+      return;
+    }
+    // Unknown id shape — fall back defensively.
+    setCenterActive("agent");
+  }, [stream, fileSessions, centerActive, diffTabs]);
+
+  // Restore previously-open file tabs the first time each stream becomes
+  // active. We add the paths to the session in openOrder, mark each as
+  // loading, then fetch content individually. Using the session helpers
+  // directly (not handleOpenFile) avoids clobbering centerActive during
+  // restore so the saved centerActive remains in effect.
+  useEffect(() => {
+    if (!stream) return;
+    if (restoredStreamsRef.current.has(stream.id)) return;
+    restoredStreamsRef.current.add(stream.id);
+    const persisted = readPersistedFileSessionPaths();
+    const paths = persisted[stream.id];
+    if (!paths || paths.length === 0) return;
+    const streamId = stream.id;
+    // Seed the session with placeholder loading entries so the tabs render
+    // immediately.
+    setFileSessions((prev) => {
+      let base = prev[streamId] ?? createEmptyFileSession();
+      for (const path of paths) {
+        if (base.files[path]) continue;
+        base = setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
+      }
+      // Drop the selection that openFileInSession implicitly set — we want
+      // the persisted centerActive, not the last restored file, to decide.
+      base = { ...base, selectedPath: null };
+      return { ...prev, [streamId]: enforceOpenFileLimit(base, MAX_OPEN_FILE_TABS) };
+    });
+    // Fire content fetches in parallel.
+    for (const path of paths) {
+      void (async () => {
+        try {
+          const file = await readWorkspaceFile(streamId, path);
+          setFileSessions((prev) => ({
+            ...prev,
+            [streamId]: setLoadedFileContent(prev[streamId] ?? createEmptyFileSession(), file.path, file.content),
+          }));
+        } catch (err) {
+          logUi("warn", "failed to restore open file tab", { streamId, path, error: String(err) });
+          setFileSessions((prev) => ({
+            ...prev,
+            [streamId]: closeOpenFile(prev[streamId] ?? createEmptyFileSession(), path),
+          }));
+        }
+      })();
+    }
+    // Intentionally only depends on stream — we gate re-runs via the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream?.id]);
 
   useEffect(() => {
     if (!stream || !selectedBatch || batchWorkStates[selectedBatch.id]) return;

@@ -1147,25 +1147,28 @@ export class ElectronRuntime {
     const currentTurnFilePaths = openTurn
       ? this.fileChangeStore.listForTurn(openTurn.id).map((row) => row.path)
       : [];
-    // When auto-commit is on and the batch is the writer, synthesize a commit
-    // point if settled work exists but no pending commit point is in the queue.
-    // This lets the normal pipeline fire the commit directive without the user
-    // having to place a commit point manually.
+    // When auto-commit is on and the batch is the writer, run the commit
+    // directly without synthesizing a commit_point row. No DB row means no
+    // "Commit · Auto" noise in the queue UI; manually-placed auto-mode
+    // commit points are handled by the branch below.
     if (batch?.auto_commit && batch.status === "active") {
-      const existingCommits = this.commitPointStore.listForBatch(batchId);
-      const hasPendingCommit = existingCommits.some((cp) => cp.status !== "done");
-      if (!hasPendingCommit) {
-        const workItems = this.workItemStore.listItems(batchId);
-        const hasSettledWork = workItems.some(
-          (item) => item.status === "human_check" || item.status === "done",
-        );
-        if (hasSettledWork) {
-          try { this.batchQueue.createCommitPoint(batchId, "auto"); } catch (err) {
-            this.logger.warn("auto-commit: failed to create commit point", {
-              batchId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+      const workItems = this.workItemStore.listItems(batchId);
+      const hasSettledWork = workItems.some(
+        (item) => item.status === "human_check" || item.status === "done",
+      );
+      if (hasSettledWork) {
+        const result = this.runAutoCommit(batch, workItems);
+        if (result) {
+          // Notify the UI that a commit landed in this batch's worktree so
+          // downstream views (git log, Files panel) know to refresh. The
+          // fs-watcher will also fire git-refs.changed, but surfacing it as
+          // a batch-scoped lifecycle event keeps the batch UI responsive.
+          this.events.publish({
+            type: "batch.changed",
+            streamId: batch.stream_id,
+            batchId: batch.id,
+            kind: "auto-committed",
+          });
         }
       }
     }
@@ -1634,35 +1637,49 @@ export class ElectronRuntime {
   }
 
   /**
-   * Execute an auto-mode commit point: generate a commit message from settled
-   * work items, run `git commit`, and mark the point done — all without
-   * blocking the agent. Called from computeStopDirective before the snapshot
-   * is built so the point is already `done` when decideStopDirective runs.
+   * Core "commit now" helper shared by the auto-commit-mode path (no DB row)
+   * and the manually-placed auto-mode commit point path (row exists, caller
+   * flips it to done). Generates a message from settled work items, runs
+   * `git commit`, returns sha+message on success or null on any failure. All
+   * errors are logged here so callers can stay simple.
    */
-  private executeAutoCommitPoint(cp: CommitPoint, batch: Batch, workItems: WorkItem[]): void {
+  private runAutoCommit(batch: Batch, workItems: WorkItem[]): { sha: string; message: string } | null {
     const stream = this.store.get(batch.stream_id);
     if (!stream) {
-      this.logger.warn("auto-commit-point: stream not found", { cpId: cp.id, batchId: batch.id });
-      return;
+      this.logger.warn("auto-commit: stream not found", { batchId: batch.id });
+      return null;
     }
     const message = buildAutoCommitMessage(workItems);
     try {
       const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
       if (!result.ok || !result.sha) {
-        this.logger.warn("auto-commit-point: git commit failed", {
-          cpId: cp.id,
+        this.logger.warn("auto-commit: git commit failed", {
+          batchId: batch.id,
           stderr: result.stderr,
         });
-        return;
+        return null;
       }
-      this.commitPointStore.markCommitted(cp.id, message, result.sha);
-      this.logger.info("auto-commit-point: committed", { cpId: cp.id, sha: result.sha, message });
+      this.logger.info("auto-commit: committed", { batchId: batch.id, sha: result.sha, message });
+      return { sha: result.sha, message };
     } catch (err) {
-      this.logger.warn("auto-commit-point: execution error", {
-        cpId: cp.id,
+      this.logger.warn("auto-commit: execution error", {
+        batchId: batch.id,
         error: err instanceof Error ? err.message : String(err),
       });
+      return null;
     }
+  }
+
+  /**
+   * Execute an auto-mode commit point: run the shared `runAutoCommit`, then
+   * mark the commit point done so decideStopDirective sees it as terminal.
+   * Used for manually-placed commit points with mode="auto". The no-row
+   * auto-commit-mode path calls `runAutoCommit` directly.
+   */
+  private executeAutoCommitPoint(cp: CommitPoint, batch: Batch, workItems: WorkItem[]): void {
+    const result = this.runAutoCommit(batch, workItems);
+    if (!result) return;
+    this.commitPointStore.markCommitted(cp.id, result.message, result.sha);
   }
 
   reorderBatchQueue(

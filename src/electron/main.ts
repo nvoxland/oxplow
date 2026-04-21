@@ -82,10 +82,49 @@ async function main() {
   mainWindow = createWindow(openDevTools, `NewDE: ${runtime.config.projectName}`);
 }
 
+function getWindowBoundsPath(): string {
+  return join(app.getPath("userData"), "window-bounds.json");
+}
+
+function loadSavedBounds(): { x: number; y: number; width: number; height: number } | null {
+  try {
+    const path = getWindowBoundsPath();
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.x === "number" &&
+      typeof parsed.y === "number" &&
+      typeof parsed.width === "number" &&
+      typeof parsed.height === "number"
+    ) {
+      return { x: parsed.x, y: parsed.y, width: parsed.width, height: parsed.height };
+    }
+    return null;
+  } catch (error) {
+    console.warn("[newde] failed to load window bounds:", error);
+    return null;
+  }
+}
+
+function saveBounds(window: BrowserWindow): void {
+  try {
+    const dir = app.getPath("userData");
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const bounds = window.getBounds();
+    writeFileSync(getWindowBoundsPath(), JSON.stringify(bounds), "utf8");
+  } catch (error) {
+    console.warn("[newde] failed to save window bounds:", error);
+  }
+}
+
 function createWindow(openDevTools: boolean, title: string) {
+  const savedBounds = loadSavedBounds();
   const window = new BrowserWindow({
-    width: 1440,
-    height: 960,
+    ...(savedBounds ?? { width: 1440, height: 960 }),
     minWidth: 1000,
     minHeight: 700,
     backgroundColor: "#0e0e0e",
@@ -96,6 +135,25 @@ function createWindow(openDevTools: boolean, title: string) {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  let saveTimer: NodeJS.Timeout | null = null;
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      saveBounds(window);
+    }, 500);
+  };
+
+  window.on("move", scheduleSave);
+  window.on("resize", scheduleSave);
+  window.on("close", () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    saveBounds(window);
   });
 
   window.on("closed", () => {

@@ -73,6 +73,49 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   return sections;
 }
 
+/**
+ * The Human Check section renders descending (newest / highest sort_index on
+ * top) so recent candidates for review stay visible without scrolling. Every
+ * other section renders ascending. Persistence is a single ascending
+ * sort_index space per batch, so when we flatten the visual order into an id
+ * list for the store we need to flip the humanCheck run back to ascending —
+ * otherwise the store's "rewrite sort_index = position" rule would invert
+ * humanCheck on the next render and drag-reorders inside the section would
+ * visually jump in the opposite direction.
+ *
+ * This helper takes a flat list of rows in **visual** order and returns the
+ * list of ids in **persistence** order. Rows outside the humanCheck run are
+ * kept in place; the humanCheck run is reversed in situ.
+ */
+export function finalizeReorderIds(
+  rows: ReadonlyArray<{ id: string; status: WorkItemStatus }>,
+): string[] {
+  const ids = rows.map((row) => row.id);
+  let runStart = -1;
+  const flipRun = (end: number) => {
+    if (runStart < 0) return;
+    // Reverse ids between runStart (inclusive) and end (exclusive).
+    let lo = runStart;
+    let hi = end - 1;
+    while (lo < hi) {
+      const tmp = ids[lo]!;
+      ids[lo] = ids[hi]!;
+      ids[hi] = tmp;
+      lo++; hi--;
+    }
+    runStart = -1;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i]!.status === "human_check") {
+      if (runStart < 0) runStart = i;
+    } else {
+      flipRun(i);
+    }
+  }
+  flipRun(rows.length);
+  return ids;
+}
+
 export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] {
   if (!state) return [];
   const items = [...state.waiting, ...state.inProgress, ...state.done];

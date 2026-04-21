@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import type { WorkItem, WorkItemStatus } from "../../api.js";
-import { classifyWorkItem, sectionDefaultStatus, splitIntoSections } from "./plan-utils.js";
+import {
+  classifyWorkItem,
+  finalizeReorderIds,
+  sectionDefaultStatus,
+  splitIntoSections,
+} from "./plan-utils.js";
 
 function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem {
   return {
@@ -18,6 +23,7 @@ function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem 
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     completed_at: null,
+    note_count: 0,
   };
 }
 
@@ -70,6 +76,52 @@ test("sectionDefaultStatus maps drop-target sections to landing statuses; in-pro
   expect(sectionDefaultStatus("done")).toBe("done");
   // The agent owns in_progress and its items are drag-locked — reject drops.
   expect(sectionDefaultStatus("inProgress")).toBeNull();
+});
+
+test("splitIntoSections sorts humanCheck descending so newest (highest sort_index) appears first", () => {
+  const sections = splitIntoSections([
+    item("c1", "human_check", 5),
+    item("c2", "human_check", 20),
+    item("c3", "human_check", 10),
+  ]);
+  const humanCheck = sections.find((s) => s.kind === "humanCheck");
+  expect(humanCheck?.items.map((i) => i.id)).toEqual(["c2", "c3", "c1"]);
+});
+
+test("finalizeReorderIds reverses the humanCheck subsequence so descending visual order persists correctly", () => {
+  // Visual order (what the user sees top-to-bottom):
+  //   to-do: t1, t2
+  //   human-check (displayed descending): h3, h2, h1
+  //   done: d1
+  // The persisted order must be ascending-sort_index for every section, which
+  // means the humanCheck run in the id list needs to be reversed before it
+  // hits the store (which rewrites sort_index = position).
+  const visualRows = [
+    { id: "t1", status: "ready" as const },
+    { id: "t2", status: "ready" as const },
+    { id: "h3", status: "human_check" as const },
+    { id: "h2", status: "human_check" as const },
+    { id: "h1", status: "human_check" as const },
+    { id: "d1", status: "done" as const },
+  ];
+  expect(finalizeReorderIds(visualRows)).toEqual(["t1", "t2", "h1", "h2", "h3", "d1"]);
+});
+
+test("finalizeReorderIds is a no-op when there are no humanCheck rows", () => {
+  const visualRows = [
+    { id: "a", status: "ready" as const },
+    { id: "b", status: "done" as const },
+  ];
+  expect(finalizeReorderIds(visualRows)).toEqual(["a", "b"]);
+});
+
+test("finalizeReorderIds handles a single humanCheck item (trivial reverse)", () => {
+  const visualRows = [
+    { id: "a", status: "ready" as const },
+    { id: "h", status: "human_check" as const },
+    { id: "b", status: "done" as const },
+  ];
+  expect(finalizeReorderIds(visualRows)).toEqual(["a", "h", "b"]);
 });
 
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {

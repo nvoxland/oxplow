@@ -52,9 +52,10 @@ MCP tool were removed in v13 — use the work-item log as the source of
 truth instead.
 
 `auto_commit` (migration v15, `INTEGER NOT NULL DEFAULT 0`) — when `true` on
-the active batch, the stop-hook pipeline automatically synthesizes a commit
-point whenever settled work (`human_check`/`done` items) exists and no
-pending commit point is already in the queue. Toggled via
+the active batch, the stop-hook pipeline runs `git commit` directly whenever
+settled work (`human_check`/`done` items) exists and no pending commit point
+is already in the queue. No `commit_point` row is created; the UI is
+notified via a `batch.changed`/`auto-committed` lifecycle event. Toggled via
 `setAutoCommit(batchId, enabled)` on `BatchStore`; IPC-exposed as
 `setAutoCommit(streamId, batchId, enabled)`. Surfaced in the Plan pane as an
 "Auto-commit" toggle button next to the queue marker bar; while on, the
@@ -230,6 +231,17 @@ There is **no foreign key** linking commit/wait points to specific work
 items. Reordering the queue immediately changes which work items a marker
 "covers" (everything before it, not yet covered by an earlier marker),
 with no migration step.
+
+**Visual vs persistence order for Human Check.** Every section in
+`WorkGroupList` renders ascending by `sort_index` *except* Human Check,
+which renders descending (newest-finished items surface on top). The
+underlying `sort_index` space is still a single ascending line — the
+section is only flipped at render time. When a drag-reorder persists a
+new order, `finalizeReorderIds` in `plan-utils.ts` reverses the
+humanCheck subsequence so the `reorderItems` / `reorderBatchQueue`
+"sort_index = position" rule produces the intended visual result. Any
+new section with a non-ascending display must either do the same
+reversal dance or get its own flat list.
 
 Constraint: commit and wait points cannot be the very first queue entry —
 they have nothing to fire after. Enforced both in the runtime

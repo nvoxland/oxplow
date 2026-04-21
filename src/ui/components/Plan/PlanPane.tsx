@@ -119,6 +119,7 @@ export function PlanPane({
   // "change work item editing UI" task).
   const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
@@ -347,6 +348,7 @@ export function PlanPane({
     setAcceptance(item.acceptance_criteria ?? "");
     setPriority(item.priority);
     setEditingItemId(item.id);
+    setEditingItem(item);
     setEditingItemNotes([]);
     setModalMode("edit");
     void getWorkNotes(item.id)
@@ -357,6 +359,7 @@ export function PlanPane({
   const closeModal = () => {
     setModalMode(null);
     setEditingItemId(null);
+    setEditingItem(null);
     setEditingItemNotes([]);
     paneRef.current?.focus();
   };
@@ -441,6 +444,9 @@ export function PlanPane({
           setPriority={setPriority}
           showSaveAndAnother={modalMode === "create"}
           notes={modalMode === "edit" ? editingItemNotes : []}
+          item={modalMode === "edit" ? editingItem : null}
+          epics={batchWork?.epics ?? []}
+          onOpenItem={(target) => openEditModal(target)}
           modalTitle={
             modalMode === "edit"
               ? "Edit work item"
@@ -917,6 +923,9 @@ function NewWorkItemModal({
   setPriority,
   showSaveAndAnother = true,
   notes = [],
+  item = null,
+  epics = [],
+  onOpenItem,
   modalTitle = "New work item",
   onClose,
   onSubmit,
@@ -931,6 +940,9 @@ function NewWorkItemModal({
   setPriority(value: WorkItemPriority): void;
   showSaveAndAnother?: boolean;
   notes?: WorkNote[];
+  item?: WorkItem | null;
+  epics?: WorkItem[];
+  onOpenItem?(item: WorkItem): void;
   modalTitle?: string;
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
@@ -947,6 +959,9 @@ function NewWorkItemModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const parentEpic = item?.parent_id ? epics.find((e) => e.id === item.parent_id) ?? null : null;
+  const updatedDiffers = item && item.updated_at && item.updated_at !== item.created_at;
 
   return (
     <div
@@ -973,9 +988,13 @@ function NewWorkItemModal({
           border: "1px solid var(--border)",
           borderRadius: 8,
           padding: 16,
-          width: "min(520px, 90vw)",
-          maxHeight: "90vh",
-          overflow: "auto",
+          width: "75vw",
+          maxWidth: 1100,
+          minWidth: 600,
+          height: "75vh",
+          maxHeight: 800,
+          minHeight: 500,
+          overflow: "hidden",
           display: "flex",
           flexDirection: "column",
           gap: 8,
@@ -986,59 +1005,119 @@ function NewWorkItemModal({
           <div style={{ fontWeight: 600 }}>{modalTitle}</div>
           <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
         </div>
-        <label htmlFor="work-item-title" style={srOnlyStyle}>Title</label>
-        <input
-          autoFocus
-          id="work-item-title"
-          data-testid="work-item-title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Title (required)"
-          style={inputStyle}
-        />
-        <label htmlFor="work-item-priority" style={srOnlyStyle}>Priority</label>
-        <select id="work-item-priority" data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="urgent">Urgent</option>
-        </select>
-        <label htmlFor="work-item-description" style={srOnlyStyle}>Description</label>
-        <textarea
-          id="work-item-description"
-          data-testid="work-item-description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description"
-          style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
-        />
-        <label htmlFor="work-item-acceptance" style={srOnlyStyle}>Acceptance criteria</label>
-        <textarea
-          id="work-item-acceptance"
-          data-testid="work-item-acceptance"
-          value={acceptance}
-          onChange={(e) => setAcceptance(e.target.value)}
-          placeholder="Acceptance criteria, one per line"
-          style={{ ...inputStyle, minHeight: 64, resize: "vertical" }}
-        />
-        {notes.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)" }}>
-              Notes ({notes.length})
+        <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
+          {/* Left column: editable fields + notes */}
+          <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: 10, minWidth: 0, overflow: "auto" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label htmlFor="work-item-title" style={modalFieldLabelStyle}>Title</label>
+              <input
+                autoFocus
+                id="work-item-title"
+                data-testid="work-item-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Title (required)"
+                style={inputStyle}
+              />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-              {notes.map((note) => (
-                <div key={note.id} style={{ fontSize: 11, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 2 }}>
-                    <span style={{ fontWeight: 600, color: "var(--fg)" }}>{note.author}</span>
-                    <span style={{ color: "var(--muted)" }}>{formatNoteDate(note.created_at)}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label htmlFor="work-item-description" style={modalFieldLabelStyle}>Description</label>
+              <textarea
+                id="work-item-description"
+                data-testid="work-item-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Description"
+                style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label htmlFor="work-item-acceptance" style={modalFieldLabelStyle}>Acceptance Criteria</label>
+              <textarea
+                id="work-item-acceptance"
+                data-testid="work-item-acceptance"
+                value={acceptance}
+                onChange={(e) => setAcceptance(e.target.value)}
+                placeholder="Acceptance criteria, one per line"
+                style={{ ...inputStyle, minHeight: 100, resize: "vertical" }}
+              />
+            </div>
+            {item ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
+                <div style={modalFieldLabelStyle}>Notes {notes.length > 0 ? `(${notes.length})` : ""}</div>
+                {notes.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}>
+                    {notes.map((note) => (
+                      <div key={note.id} style={{ fontSize: 12, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
+                          <span style={{ fontWeight: 600, color: "var(--accent)" }}>{note.author}</span>
+                          <span style={{ color: "var(--muted)", fontSize: 11 }}>{formatNoteDate(note.created_at)}</span>
+                        </div>
+                        <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{note.body}</div>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{note.body}</div>
-                </div>
-              ))}
-            </div>
+                ) : (
+                  <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>No notes yet.</div>
+                )}
+              </div>
+            ) : null}
           </div>
-        ) : null}
+          {/* Right column: metadata */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label htmlFor="work-item-priority" style={modalFieldLabelStyle}>Priority</label>
+              <select id="work-item-priority" data-testid="work-item-priority" value={priority} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            {item ? (
+              <>
+                {parentEpic ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={modalFieldLabelStyle}>Inside</div>
+                    {onOpenItem ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenItem(parentEpic)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          color: "var(--accent)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          font: "inherit",
+                          textDecoration: "underline",
+                          fontSize: 12,
+                        }}
+                      >{parentEpic.title}</button>
+                    ) : (
+                      <div style={{ fontSize: 12 }}>{parentEpic.title}</div>
+                    )}
+                  </div>
+                ) : item.parent_id ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={modalFieldLabelStyle}>Inside</div>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>Parent epic</div>
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={modalFieldLabelStyle}>Author</div>
+                  <span style={authorBadgeStyle}>{item.created_by}</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--muted)", fontSize: 11 }}>
+                  <div>Created {formatNoteDate(item.created_at)}</div>
+                  {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
+                  {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
           <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>Cancel</button>
           {showSaveAndAnother ? (
@@ -1061,6 +1140,25 @@ function NewWorkItemModal({
     </div>
   );
 }
+
+const modalFieldLabelStyle: CSSProperties = {
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+  fontSize: 10,
+  color: "var(--muted)",
+  fontWeight: 600,
+};
+
+const authorBadgeStyle: CSSProperties = {
+  display: "inline-block",
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: "var(--bg-2)",
+  border: "1px solid var(--border)",
+  color: "var(--fg)",
+  fontSize: 11,
+  alignSelf: "flex-start",
+};
 
 function formatNoteDate(isoString: string): string {
   try {
@@ -1161,18 +1259,6 @@ const labelStyle: CSSProperties = {
   gap: 4,
   fontSize: 12,
   color: "var(--muted)",
-};
-
-const srOnlyStyle: CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: "hidden",
-  clip: "rect(0,0,0,0)",
-  whiteSpace: "nowrap",
-  border: 0,
 };
 
 const queueMarkerBarStyle: CSSProperties = {

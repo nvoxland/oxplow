@@ -128,9 +128,15 @@ For epics, acceptance criteria describe the initiative's done bar, not
 
 - New items default to \`ready\`. Don't pre-mark \`in_progress\` on
   creation unless you're literally about to start it this turn.
-- **Set \`in_progress\` the moment you start.** The Stop hook uses the
-  sole-in-progress item to attribute file changes correctly, so don't
-  leave old items in_progress while you work on a new one.
+- **Set \`in_progress\` BEFORE any other work on the item.** Your first
+  tool call when picking up an item must be \`update_work_item\` with
+  \`status: "in_progress"\` — *before* any Read, Grep, Bash, or Edit.
+  If you do the work first and only flip the status right before
+  \`human_check\`, the item visibly skips the In Progress section in the
+  UI (ready → human_check in a blink) and the user loses visibility
+  into what you're doing. The Stop hook also uses the
+  sole-in-progress item to attribute file changes, so leaving an old
+  item in_progress while you work on a new one misattributes changes.
 - **Never self-mark \`done\`.** Push to \`human_check\` when you
   believe the acceptance criteria are met. The user marks done after
   reviewing. If you set done, you will be corrected.
@@ -195,11 +201,33 @@ have no visibility.
    - \`{ mode: "empty" }\` — nothing left; allow stop.
 
 2. Assemble a subagent brief containing: item ids, titles, descriptions,
-   acceptance criteria, and these standing instructions:
-   - Work through items sequentially. For each item: mark it \`in_progress\`
-     via \`mcp__newde__update_work_item\` immediately before starting it, do the
-     work, then mark it \`human_check\` before moving to the next. Never mark
-     multiple items \`in_progress\` simultaneously.
+   acceptance criteria, and these standing instructions (copy them into
+   the brief **verbatim**, including the "CRITICAL" section — do not
+   paraphrase or shorten):
+
+   > ### CRITICAL: Mark in_progress BEFORE doing any work
+   >
+   > **Your very first action for each work item must be to call
+   > \`mcp__newde__update_work_item\` with \`status: "in_progress"\`.**
+   > Do this BEFORE any Read, Grep, Bash, Edit, or other tool call
+   > related to the item. The user watches the "In Progress" section in
+   > the UI — if you do all the work first and only flip the status at
+   > the end, the item visibly skips the In Progress section entirely
+   > (ready → human_check in one blink) and the user has no visibility
+   > into what you're doing.
+   >
+   > Concretely, for each item, the order is:
+   > 1. Call \`update_work_item\` with \`status: "in_progress"\`. (No
+   >    other work yet.)
+   > 2. Do the investigation / edits / tests.
+   > 3. Call \`update_work_item\` with \`status: "human_check"\` once
+   >    the acceptance criteria are met.
+   >
+   > Never mark multiple items \`in_progress\` simultaneously — finish
+   > (or mark \`human_check\` / \`blocked\`) the current one before
+   > starting the next.
+
+   - Work through items sequentially, following the CRITICAL rule above.
    - Mark \`human_check\` when acceptance criteria are met.
    - When dispatched as an epic unit: after all child tasks are marked
      \`human_check\`, mark the epic itself \`human_check\` too.
