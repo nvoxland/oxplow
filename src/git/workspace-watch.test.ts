@@ -47,6 +47,7 @@ test("workspace watcher emits events for filesystem changes", async () => {
     worktree_path: root,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
+    custom_prompt: null,
     panes: { working: "a:1.0", talking: "a:1.1" },
     resume: { working_session_id: "", talking_session_id: "" },
   });
@@ -62,7 +63,21 @@ test("workspace watcher ignores internal runtime paths", () => {
   expect(shouldIgnoreWorkspaceWatchPath(".git/index")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath(".newde/logs/system.log")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath(".newde/worktrees/feature/src/app.ts")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".newde/state.db")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".newde/snapshots/objects/ab/cd")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
+});
+
+test("workspace watcher ignores editor/agent temp files", () => {
+  expect(shouldIgnoreWorkspaceWatchPath(".context/foo.md.tmp.18726.1776752930633")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("foo.md~")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".foo.swp")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("src/foo.swo")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("src/foo.swx")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("#foo#")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath("dir/foo.tmp")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".context/foo.md")).toBe(false);
+  expect(shouldIgnoreWorkspaceWatchPath("src/index.ts")).toBe(false);
 });
 
 test("workspace watcher ignores additional directory names from extras", () => {

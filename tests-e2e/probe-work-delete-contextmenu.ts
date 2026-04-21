@@ -22,7 +22,7 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    const planNewBtn = window.getByTestId("plan-new-work-item");
+    const planNewBtn = window.getByTestId("plan-new-task");
     await planNewBtn.waitFor({ timeout: 10_000 });
 
     const title = `delete-ctx-probe-${Date.now()}`;

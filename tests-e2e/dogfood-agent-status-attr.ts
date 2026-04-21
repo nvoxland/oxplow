@@ -45,7 +45,7 @@ async function main() {
     await window.waitForTimeout(400);
     probeLog("[as] + Commit when done");
 
-    await window.getByTestId("plan-new-work-item").click();
+    await window.getByTestId("plan-new-task").click();
     await window.waitForTimeout(400);
     await window.getByTestId("work-item-title").fill(WORK_ITEM_TITLE);
     await window.getByTestId("work-item-description").fill(WORK_ITEM_BODY);

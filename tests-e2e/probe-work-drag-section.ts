@@ -27,7 +27,7 @@ async function main() {
     await window.waitForTimeout(3_000);
 
     // Plan is the default left dock tab; confirm it's visible.
-    const planNewBtn = window.getByTestId("plan-new-work-item");
+    const planNewBtn = window.getByTestId("plan-new-task");
     await planNewBtn.waitFor({ timeout: 10_000 });
 
     // Create a work item titled "drag-section-probe".

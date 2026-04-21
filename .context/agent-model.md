@@ -286,7 +286,13 @@ in-progress changes.
 
 - **Hook enforcement.** `buildWriteGuardResponse`
   (`src/electron/write-guard.ts`) returns a `PreToolUse` deny for `Write`,
-  `Edit`, `MultiEdit`, `NotebookEdit` from any non-`active` batch.
+  `Edit`, `MultiEdit`, `NotebookEdit` from any non-`active` batch. When
+  the tool's target path resolves OUTSIDE the project root AND outside
+  the project's `.newde/`, the call is allowed (e.g. writing to
+  `~/.claude/plans/foo.md`); the deny message names the specific
+  absolute path. Containment checks use `isInsideWorktree` from
+  `src/electron/runtime-paths.ts`, shared with the runtime's hook-path
+  filter.
 - **Prompt enforcement.** `NON_WRITER_PROMPT_BLOCK` (same file) is
   appended to the system prompt for non-writer batches, telling the agent
   to avoid Bash mutations too (the hook can't reliably classify shell

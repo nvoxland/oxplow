@@ -38,6 +38,24 @@ describe("BatchStore", () => {
     expect(store.findById("b-does-not-exist")).toBeNull();
   });
 
+  test("reorderBatches writes sort_index in the provided order", () => {
+    const dir = mkdtempSync(join(tmpdir(), "newde-batches-"));
+    const stream = makeStream();
+    const store = new BatchStore(dir);
+    store.ensureStream(stream);
+    store.create(stream, { title: "Second" });
+    const state0 = store.create(stream, { title: "Third" });
+    const ids = state0.batches.map((b) => b.id);
+    expect(ids.length).toBe(3);
+
+    // Reverse the order.
+    const reversed = ids.slice().reverse();
+    store.reorderBatches(stream.id, reversed);
+    const state1 = store.list(stream.id);
+    expect(state1.batches.map((b) => b.id)).toEqual(reversed);
+    expect(state1.batches.map((b) => b.sort_index)).toEqual([0, 1, 2]);
+  });
+
   test("creates, reorders, promotes, and completes batches", () => {
     const dir = mkdtempSync(join(tmpdir(), "newde-batches-"));
     const stream = makeStream();
@@ -55,9 +73,12 @@ describe("BatchStore", () => {
     state = store.reorder(stream.id, followUp!.id, 1);
     expect(state.batches[1]?.id).toBe(followUp?.id);
 
+    // Promote changes status but preserves sort order (no auto-reorder-to-front).
+    const orderBeforePromote = state.batches.map((b) => b.id);
     state = store.promote(stream.id, queued!.id);
     expect(state.activeBatchId).toBe(queued?.id);
-    expect(state.batches[0]?.id).toBe(queued?.id);
+    expect(state.batches.map((b) => b.id)).toEqual(orderBeforePromote);
+    expect(state.batches.find((batch) => batch.id === queued!.id)?.status).toBe("active");
 
     state = store.complete(stream.id, queued!.id);
     expect(state.batches.find((batch) => batch.id === queued!.id)?.status).toBe("completed");
@@ -76,6 +97,7 @@ function makeStream(): Stream {
     worktree_path: "/tmp/demo",
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
+    custom_prompt: null,
     panes: {
       working: "newde-demo:working-s-1",
       talking: "newde-demo:talking-s-1",

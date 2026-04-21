@@ -6,6 +6,7 @@ import {
   classifyWorkItem,
   finalizeReorderIds,
   sectionDefaultStatus,
+  miniButtonStyle,
   sectionHeaderStyle,
   statusIcon,
   statusLabel,
@@ -80,6 +81,7 @@ export function WorkGroupList({
   onDoubleClickCommitPoint,
   epicChildrenMap,
   onReparentWorkItem,
+  onAddChildTask,
   isActive,
 }: {
   group: WorkItemGroup;
@@ -100,6 +102,7 @@ export function WorkGroupList({
   onDoubleClickCommitPoint?(cp: CommitPoint): void;
   epicChildrenMap: Map<string, WorkItem[]>;
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
+  onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
 }) {
   // When the batch is not the active writer, in_progress items are not agent-owned
@@ -428,6 +431,7 @@ export function WorkGroupList({
               selectedId={selectedId}
               markedIds={markedIds}
               onSelect={onSelect}
+              onAddChildTask={onAddChildTask}
             />
           ) : null}
         </div>
@@ -703,7 +707,7 @@ function EpicInlineRow({
 function EpicChildrenPane({
   epicId, children, onReorderWorkItems, onReparentWorkItem,
   onUpdateWorkItem, onContextMenu, scopeBatchId, onRequestEdit,
-  selectedId, markedIds, onSelect,
+  selectedId, markedIds, onSelect, onAddChildTask,
 }: {
   epicId: string;
   children: WorkItem[];
@@ -716,6 +720,7 @@ function EpicChildrenPane({
   selectedId?: string | null;
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onAddChildTask?: (epicId: string) => void;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -811,6 +816,19 @@ function EpicChildrenPane({
       >
         {children.length === 0 ? "Drop items here to add to epic" : ""}
       </div>
+      {onAddChildTask ? (
+        <div style={{ padding: "4px 8px 6px" }}>
+          <button
+            type="button"
+            data-testid={`plan-add-child-task-${epicId}`}
+            onClick={() => onAddChildTask(epicId)}
+            style={{ ...miniButtonStyle, fontSize: 11, padding: "2px 8px", color: "var(--muted)" }}
+            title="Add a new task inside this epic"
+          >
+            + Task
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

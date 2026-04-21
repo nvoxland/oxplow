@@ -138,9 +138,21 @@ export class SnapshotStore {
     const unique = Array.from(new Set(input.dirtyPaths)).sort();
     const entries: Array<[string, SnapshotEntry]> = [];
 
+    // Resolve parent manifest once so we can skip "tombstone of nothing"
+    // rows: a `deleted` entry for a path the parent never had, or that the
+    // parent already marks deleted. These rows cost DB space and make
+    // snapshot diffs noisier without encoding new information.
+    const parentEntries = input.parentSnapshotId
+      ? this.resolveEntries(input.parentSnapshotId)
+      : {};
+
     for (const relpath of unique) {
       const abs = resolve(input.worktreePath, relpath);
       if (!existsSync(abs)) {
+        const parentEntry = parentEntries[relpath];
+        if (!parentEntry || parentEntry.state === "deleted") {
+          continue;
+        }
         entries.push([relpath, { hash: "", mtime_ms: 0, size: 0, state: "deleted" }]);
         continue;
       }

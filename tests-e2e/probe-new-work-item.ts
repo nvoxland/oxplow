@@ -27,8 +27,8 @@ async function main() {
     });
     console.log("[probe] pre-click button counts:", JSON.stringify(pre));
 
-    // Try to find and click "+ New work item" by text.
-    const btn = window.getByText("+ New work item", { exact: true }).first();
+    // Try to find and click "+ New Task" by text.
+    const btn = window.getByText("+ New Task", { exact: true }).first();
     console.log("[probe] visible?", await btn.isVisible().catch(() => false));
     console.log("[probe] count:", await btn.count());
     await btn.scrollIntoViewIfNeeded().catch(() => {});

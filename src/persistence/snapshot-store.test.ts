@@ -616,6 +616,100 @@ describe("SnapshotStore", () => {
     expect(snap2.turn_prompt).toBe("the agent prompt text");
   });
 
+  test("flushSnapshot skips tombstone for a path the parent never had", () => {
+    const { store, worktreePath, streamId } = seed();
+    writeFileSync(join(worktreePath, "real.txt"), "real content");
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["real.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    // "ghost.txt" doesn't exist on disk and wasn't in the parent. A hook
+    // reporting a delete for a never-existed path would otherwise write an
+    // empty tombstone row; we want it skipped entirely.
+    const s2 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["ghost.txt"],
+      parentSnapshotId: s1,
+      turnId: null,
+      batchId: null,
+    });
+    // Only "ghost.txt" was dirty, and it should be skipped → no snapshot.
+    expect(s2).toBeNull();
+  });
+
+  test("flushSnapshot skips redundant tombstone when parent already has one", () => {
+    const { store, worktreePath, streamId } = seed();
+    writeFileSync(join(worktreePath, "gone.txt"), "doomed");
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["gone.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    rmSync(join(worktreePath, "gone.txt"));
+    // First deletion — parent has "present" entry, tombstone should be kept.
+    const s2 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["gone.txt"],
+      parentSnapshotId: s1,
+      turnId: null,
+      batchId: null,
+    })!;
+    expect(store.loadManifestEntries(s2)["gone.txt"]!.state).toBe("deleted");
+    // Second flush claiming same path is still deleted. Parent already has
+    // a tombstone → should skip; with nothing else dirty, snapshot is null.
+    const s3 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["gone.txt"],
+      parentSnapshotId: s2,
+      turnId: null,
+      batchId: null,
+    });
+    expect(s3).toBeNull();
+  });
+
+  test("flushSnapshot keeps other entries when a sibling tombstone is filtered out", () => {
+    const { store, worktreePath, streamId } = seed();
+    writeFileSync(join(worktreePath, "keeper.txt"), "stays");
+    const s1 = store.flushSnapshot({
+      kind: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["keeper.txt"],
+      parentSnapshotId: null,
+      turnId: null,
+      batchId: null,
+    })!;
+    // One real change, plus a bogus delete of a never-existed path.
+    writeFileSync(join(worktreePath, "keeper.txt"), "stays v2");
+    const s2 = store.flushSnapshot({
+      kind: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["keeper.txt", "phantom.txt"],
+      parentSnapshotId: s1,
+      turnId: null,
+      batchId: null,
+    })!;
+    const entries = store.loadManifestEntries(s2);
+    expect(Object.keys(entries).sort()).toEqual(["keeper.txt"]);
+    expect(entries["keeper.txt"]!.state).toBe("present");
+  });
+
   test("getSnapshotPairDiff diffs arbitrary snapshots", () => {
     const { store, worktreePath, streamId } = seed();
     writeFileSync(join(worktreePath, "f.txt"), "first");

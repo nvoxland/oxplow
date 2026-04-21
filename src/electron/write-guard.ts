@@ -1,4 +1,6 @@
+import { resolve } from "node:path";
 import type { Batch } from "../persistence/batch-store.js";
+import { isInsideWorktree } from "./runtime-paths.js";
 
 /**
  * Tools that mutate the shared worktree. Every batch in a stream checks out
@@ -27,6 +29,30 @@ export interface WriteGuardDenyBody {
   };
 }
 
+export interface WriteGuardContext {
+  /** Absolute path to the project root (i.e. the shared worktree root). */
+  projectDir?: string;
+  /** Raw `tool_input` from the PreToolUse payload. */
+  toolInput?: unknown;
+}
+
+/**
+ * Extract the absolute target path for a Write/Edit/MultiEdit/NotebookEdit
+ * tool call. Returns null if no path was provided (in which case we can't
+ * prove it's safe, so we fall back to deny behaviour).
+ */
+function extractAbsTargetPath(toolInput: unknown, projectDir: string): string | null {
+  if (!toolInput || typeof toolInput !== "object") return null;
+  const obj = toolInput as Record<string, unknown>;
+  const raw =
+    (typeof obj.file_path === "string" && obj.file_path) ||
+    (typeof obj.notebook_path === "string" && obj.notebook_path) ||
+    (typeof obj.path === "string" && obj.path) ||
+    null;
+  if (!raw) return null;
+  return resolve(projectDir, raw);
+}
+
 /**
  * Returns a Claude Code PreToolUse deny response when the batch is not the
  * stream's writer and the tool would mutate the shared worktree. Returns
@@ -35,8 +61,18 @@ export interface WriteGuardDenyBody {
  * The caller reads `batch` fresh on every invocation so promoting another
  * batch to writer takes effect immediately on the next tool call — no agent
  * restart required.
+ *
+ * For Write/Edit/MultiEdit/NotebookEdit, agent-private paths outside the
+ * shared worktree AND outside the project's `.newde/` are allowed even on
+ * read-only batches (e.g. writing to `~/.claude/plans/foo.md`). Bash stays
+ * conservatively allowed regardless — the write guard doesn't try to parse
+ * shell commands.
  */
-export function buildWriteGuardResponse(batch: Batch | null, toolName: string): WriteGuardDenyBody | null {
+export function buildWriteGuardResponse(
+  batch: Batch | null,
+  toolName: string,
+  context: WriteGuardContext = {},
+): WriteGuardDenyBody | null {
   if (!batch) return null;
   if (batch.status === "active") return null;
   if (!toolName) return null;
@@ -44,6 +80,34 @@ export function buildWriteGuardResponse(batch: Batch | null, toolName: string): 
   // worktree — always allowed.
   if (toolName.startsWith("mcp__")) return null;
   if (!WORKTREE_MUTATING_TOOLS.has(toolName)) return null;
+
+  // When we know the project root, allow writes to agent-private paths that
+  // don't touch the shared worktree (e.g. ~/.claude/plans/foo.md). A path
+  // inside the project's .newde/ is still blocked — that's shared state.
+  const { projectDir, toolInput } = context;
+  if (projectDir) {
+    const abs = extractAbsTargetPath(toolInput, projectDir);
+    if (abs) {
+      const newdeDir = resolve(projectDir, ".newde");
+      const insideProject = isInsideWorktree(abs, projectDir);
+      const insideNewde = isInsideWorktree(abs, newdeDir);
+      if (!insideProject && !insideNewde) {
+        return null;
+      }
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason:
+            `path \`${abs}\` is inside the shared worktree and this batch is read-only — ` +
+            "only the stream's writer batch may mutate the worktree. " +
+            "Record the change as a note on the current work item via mcp__newde tools (or stop this turn). " +
+            "Promote this batch to writer from the batch rail if you need to edit.",
+        },
+      };
+    }
+  }
+
   return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

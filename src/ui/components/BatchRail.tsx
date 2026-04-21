@@ -86,21 +86,17 @@ export function BatchRail({
   }
 
   const { ordered, completed } = useMemo(() => {
-    const active = batches.find((b) => b.id === activeBatchId && b.status !== "completed");
-    const queued = batches
-      .filter((b) => b.status === "queued" && b.id !== activeBatchId)
+    // All non-completed batches share a single sort_index sequence and are
+    // user-orderable via drag. The writer batch gets a visible badge (see
+    // BatchChip) but its position is whatever the user chose.
+    const ordered = batches
+      .filter((b) => b.status !== "completed")
       .sort((a, b) => a.sort_index - b.sort_index);
-    const other = batches
-      .filter((b) => b.status === "active" && b.id !== activeBatchId)
-      .sort((a, b) => a.sort_index - b.sort_index);
-    const ordered: Batch[] = [];
-    if (active) ordered.push(active);
-    ordered.push(...other, ...queued);
     const completed = batches
       .filter((b) => b.status === "completed")
       .sort((a, b) => b.sort_index - a.sort_index);
     return { ordered, completed };
-  }, [batches, activeBatchId]);
+  }, [batches]);
 
   const hasQueued = batches.some((b) => b.status === "queued");
   const [showOverflow, setShowOverflow] = useState(false);
@@ -336,7 +332,9 @@ function BatchChip({
 }) {
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
   }, []);
@@ -420,23 +418,36 @@ function BatchChip({
   return (
     <div
       data-testid={`batch-chip-${batch.id}`}
-      draggable={!!onDragStart}
       style={{ position: "relative", flexShrink: 0, borderLeft: isDragTarget ? "2px solid var(--accent)" : undefined }}
       onMouseEnter={scheduleShow}
       onMouseLeave={cancelShow}
-      onDragStart={(event) => {
-        event.dataTransfer.setData(BATCH_DRAG_MIME, JSON.stringify({ batchId: batch.id }));
-        event.dataTransfer.effectAllowed = "move";
-        onDragStart?.();
-      }}
-      onDragEnd={() => onDragEnd?.()}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <div
+        ref={tabRef}
         role="button"
         tabIndex={0}
+        draggable={!!onDragStart}
+        onDragStart={onDragStart ? (event) => {
+          event.dataTransfer.setData(BATCH_DRAG_MIME, JSON.stringify({ batchId: batch.id }));
+          event.dataTransfer.effectAllowed = "move";
+          // Force the drag image to just the tab element — otherwise the
+          // browser captures the wrapper (including the absolutely-positioned
+          // hover card region), producing a "detached square" artifact.
+          if (tabRef.current) {
+            const rect = tabRef.current.getBoundingClientRect();
+            event.dataTransfer.setDragImage(
+              tabRef.current,
+              event.clientX - rect.left,
+              event.clientY - rect.top,
+            );
+          }
+          setIsDragging(true);
+          onDragStart();
+        } : undefined}
+        onDragEnd={onDragEnd ? () => { setIsDragging(false); onDragEnd(); } : undefined}
         onClick={isRenaming ? undefined : onSelect}
         onKeyDown={isRenaming ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
         onContextMenu={onContextMenu}
@@ -520,7 +531,7 @@ function BatchChip({
           </span>
         ) : null}
       </div>
-      {hovered ? (
+      {hovered && !isDragging ? (
         <HoverCard
           batch={batch}
           isActive={isActive}

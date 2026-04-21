@@ -52,7 +52,7 @@ async function main() {
     probeLog("[dogfood] Work panel active");
 
     // Step 2: create ONE work item (allowed single-item exception)
-    await window.getByTestId("plan-new-work-item").click();
+    await window.getByTestId("plan-new-task").click();
     await window.waitForTimeout(400);
     await window.getByTestId("work-item-title").fill(WORK_ITEM_TITLE);
     await window.getByTestId("work-item-description").fill(WORK_ITEM_BODY);

@@ -36,7 +36,7 @@ async function main() {
     await window.waitForTimeout(3_000);
 
     // Create a fresh work item to edit.
-    const planNewBtn = window.getByTestId("plan-new-work-item");
+    const planNewBtn = window.getByTestId("plan-new-task");
     await planNewBtn.waitFor({ timeout: 10_000 });
     await planNewBtn.click();
     await window.getByTestId("work-item-title").fill(probeTitle);

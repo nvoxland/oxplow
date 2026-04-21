@@ -119,6 +119,9 @@ export function PlanPane({
   // "change work item editing UI" task).
   const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  // When opening the create modal from an epic's "+ Task" button, remember
+  // the epic id so the new item gets filed as a child. Null means top-level.
+  const [createParentId, setCreateParentId] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -335,10 +338,11 @@ export function PlanPane({
     return () => el.removeEventListener("keydown", handler);
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
-  const openCreateModal = () => {
+  const openCreateModal = (parentId: string | null = null) => {
     setTitle(""); setDescription(""); setAcceptance("");
     setPriority("medium");
     setEditingItemId(null);
+    setCreateParentId(parentId);
     setModalMode("create");
   };
 
@@ -424,8 +428,8 @@ export function PlanPane({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" data-testid="plan-new-work-item" onClick={openCreateModal} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
-            + New work item
+          <button type="button" data-testid="plan-new-task" onClick={() => openCreateModal()} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
+            + New Task
           </button>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
             {mode === "backlog" ? "Backlog" : ""}
@@ -473,6 +477,7 @@ export function PlanPane({
               acceptanceCriteria: acceptance || null,
               priority,
               status: "ready",
+              parentId: createParentId,
             });
             setTitle(""); setDescription(""); setAcceptance("");
             if (!andAnother) {
@@ -575,6 +580,7 @@ export function PlanPane({
                 onDoubleClickCommitPoint={(cp) => setEditingCommitPoint(cp)}
                 epicChildrenMap={group.epicChildren}
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
+                onAddChildTask={(epicId) => openCreateModal(epicId)}
                 isActive={isActive}
               />
             );

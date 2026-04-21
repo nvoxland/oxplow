@@ -39,7 +39,7 @@ async function main() {
     await window.waitForTimeout(3_000);
 
     // Make sure the Plan panel is visible (default, but be safe).
-    await window.getByTestId("plan-new-work-item").waitFor({ timeout: 10_000 });
+    await window.getByTestId("plan-new-task").waitFor({ timeout: 10_000 });
 
     // Create the target batch via the "+ New batch" button.
     await window.getByTestId("batch-rail-new").click();
@@ -69,7 +69,7 @@ async function main() {
     const targetBatchId = targetChip.id;
 
     // Create a work item in the currently-selected batch.
-    await window.getByTestId("plan-new-work-item").click();
+    await window.getByTestId("plan-new-task").click();
     await window.getByTestId("work-item-title").fill(itemTitle);
     await window.getByTestId("work-item-save").click();
     await window.waitForTimeout(500);

@@ -69,7 +69,7 @@ Things I keep forgetting. Read this before adding any UI.
   - `file-tree-entry-<path>` on FileTree nodes (plus `data-kind` and,
     for dirs, `data-expanded`)
   - `monaco-host` on the editor container, `data-file-path=<path>`
-  - `plan-new-work-item`, `work-item-title`, `work-item-priority`,
+  - `plan-new-task`, `work-item-title`, `work-item-priority`,
     `work-item-description`, `work-item-acceptance`, `work-item-save`,
     `work-item-save-another`, `work-item-cancel`
   - `command-palette-input`

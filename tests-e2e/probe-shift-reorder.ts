@@ -34,11 +34,11 @@ async function main() {
   const fails: string[] = [];
   try {
     await window.waitForTimeout(3_000);
-    await window.getByTestId("plan-new-work-item").waitFor({ timeout: 10_000 });
+    await window.getByTestId("plan-new-task").waitFor({ timeout: 10_000 });
 
     // Create A, then B. Default status "ready" → both land in "To do".
     for (const title of [titleA, titleB]) {
-      await window.getByTestId("plan-new-work-item").click();
+      await window.getByTestId("plan-new-task").click();
       await window.getByTestId("work-item-title").fill(title);
       await window.getByTestId("work-item-save").click();
       await window.waitForTimeout(300);

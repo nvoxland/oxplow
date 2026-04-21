@@ -51,7 +51,7 @@ async function main() {
     await window.screenshot({ path: resolve(outDir, "cv-01-commit-point-added.png") });
 
     // Step 2: create one work item for Plan UI visibility
-    await window.getByTestId("plan-new-work-item").click();
+    await window.getByTestId("plan-new-task").click();
     await window.waitForTimeout(400);
     await window.getByTestId("work-item-title").fill(WORK_ITEM_TITLE);
     await window.getByTestId("work-item-description").fill(WORK_ITEM_BODY);

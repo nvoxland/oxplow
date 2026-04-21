@@ -238,14 +238,28 @@ const IGNORED_DIR_NAMES = new Set([
   ".tox",
 ]);
 
+export function isTempFilename(name: string): boolean {
+  if (!name) return false;
+  // Patterns like `foo.md.tmp.18726.1776752930633`
+  if (/\.tmp\.\d+\.\d+$/.test(name)) return true;
+  if (name.endsWith(".tmp")) return true;
+  if (name.endsWith("~")) return true;
+  if (name.endsWith(".swp") || name.endsWith(".swx") || name.endsWith(".swo")) return true;
+  // Emacs lock/autosave: `#foo#`
+  if (name.startsWith("#") && name.endsWith("#") && name.length >= 2) return true;
+  return false;
+}
+
 export function shouldIgnoreWorkspaceWatchPath(path: string, extraIgnoreDirs: string[] = []): boolean {
-  if (path === ".newde/logs" || path.startsWith(".newde/logs/")) return true;
-  if (path === ".newde/worktrees" || path.startsWith(".newde/worktrees/")) return true;
+  if (path === ".newde" || path.startsWith(".newde/")) return true;
   const extras = extraIgnoreDirs.length > 0 ? new Set(extraIgnoreDirs) : null;
-  for (const segment of path.split("/")) {
+  const segments = path.split("/");
+  for (const segment of segments) {
     if (IGNORED_DIR_NAMES.has(segment)) return true;
     if (extras && extras.has(segment)) return true;
   }
+  const basename = segments[segments.length - 1] ?? "";
+  if (isTempFilename(basename)) return true;
   return false;
 }
 

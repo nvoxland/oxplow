@@ -257,7 +257,7 @@ export async function dogfoodInnerAgent(
 
   // Create one work item for Plan-UI visibility (the allowed
   // single-item exception to "don't pre-queue").
-  await window.getByTestId("plan-new-work-item").click();
+  await window.getByTestId("plan-new-task").click();
   await window.waitForTimeout(400);
   await window.getByTestId("work-item-title").fill(opts.workItemTitle);
   await window.getByTestId("work-item-description").fill(opts.workItemBody);

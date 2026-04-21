@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
@@ -68,6 +68,7 @@ import {
   type SnapshotKind,
   type SnapshotSummary,
 } from "../persistence/snapshot-store.js";
+import { isInsideWorktree } from "./runtime-paths.js";
 import { shouldIgnoreWorkspaceWatchPath } from "../git/workspace-watch.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
 import { EventBus, type NewdeEvent } from "../core/event-bus.js";
@@ -1080,7 +1081,10 @@ export class ElectronRuntime {
       const toolName = typeof (envelope.payload as { tool_name?: unknown })?.tool_name === "string"
         ? (envelope.payload as { tool_name: string }).tool_name
         : "";
-      const deny = buildWriteGuardResponse(batch, toolName);
+      const deny = buildWriteGuardResponse(batch, toolName, {
+        projectDir: this.projectDir,
+        toolInput: (envelope.payload as { tool_input?: unknown })?.tool_input,
+      });
       if (deny) return { body: deny };
     }
     if (envelope.event === "UserPromptSubmit") {
@@ -1358,6 +1362,17 @@ export class ElectronRuntime {
     source: FileChangeSource,
     toolName: string | null,
   ): void {
+    const batch = this.batchStore.findById(batchId);
+    // Filter hook-reported paths that don't belong to the stream's worktree
+    // or match the same ignore rules the fs watcher uses. We drop both the
+    // file_change row and the dirty-path marker so bad hook data can't leak
+    // into snapshots or the Changes panel.
+    if (batch) {
+      const stream = this.store.get(batch.stream_id);
+      if (stream && !shouldAcceptHookFilePath(path, stream.worktree_path, this.config.generatedDirs)) {
+        return;
+      }
+    }
     const turn = this.turnStore.currentOpenTurn(batchId);
     const workItemId = this.soleInProgressWorkItem(batchId);
     this.fileChangeStore.record({
@@ -1369,7 +1384,6 @@ export class ElectronRuntime {
       source,
       toolName,
     });
-    const batch = this.batchStore.findById(batchId);
     if (batch) this.markDirty(batch.stream_id, path);
   }
 
@@ -1392,7 +1406,16 @@ export class ElectronRuntime {
     if (!stream) return null;
     const dirty = this.dirtyPathsByStream.get(streamId);
     if (!dirty || dirty.size === 0) return null;
-    const dirtyPaths = Array.from(dirty);
+    const allDirty = Array.from(dirty);
+    // Defense-in-depth: drop any dirty entries that don't actually belong to
+    // the stream's worktree before handing them to the snapshot store. Bad
+    // data from a hook or a race with a worktree move could otherwise cause
+    // the snapshot to contain tombstones for unrelated paths.
+    const dirtyPaths = allDirty.filter((relpath) => isInsideWorktree(relpath, stream.worktree_path));
+    if (dirtyPaths.length === 0) {
+      dirty.clear();
+      return null;
+    }
     const parent = this.store.getCurrentSnapshotId(streamId);
     const snapshotId = this.snapshotStore.flushSnapshot({
       kind,
@@ -1982,11 +2005,29 @@ function extractEditedFilePath(input: unknown): string | null {
   return null;
 }
 
+export { isInsideWorktree } from "./runtime-paths.js";
+
+/**
+ * Decide whether a hook-reported path should produce a file_change row +
+ * dirty-path marker. Extracted for testability; mirrors the branch in
+ * ElectronRuntime.persistFileChange.
+ */
+export function shouldAcceptHookFilePath(
+  path: string,
+  worktreeRoot: string,
+  extraIgnoreDirs: string[] = [],
+): boolean {
+  if (!isInsideWorktree(path, worktreeRoot)) return false;
+  const rel = toWorktreeRelativePath(path, worktreeRoot);
+  if (shouldIgnoreWorkspaceWatchPath(rel, extraIgnoreDirs)) return false;
+  return true;
+}
+
 function toWorktreeRelativePath(absOrRel: string, worktreePath: string): string {
   const normalizedRoot = resolve(worktreePath);
   const candidate = resolve(normalizedRoot, absOrRel);
   if (candidate === normalizedRoot) return "";
-  if (candidate.startsWith(normalizedRoot + "/")) {
+  if (candidate.startsWith(normalizedRoot + sep)) {
     return candidate.slice(normalizedRoot.length + 1);
   }
   return absOrRel;

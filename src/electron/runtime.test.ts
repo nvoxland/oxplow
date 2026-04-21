@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, describeHookHealth } from "./runtime.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, describeHookHealth, isInsideWorktree, shouldAcceptHookFilePath } from "./runtime.js";
 import type { McpServerHandle } from "../mcp/mcp-server.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
 import type { BatchStatus } from "../persistence/batch-store.js";
@@ -198,12 +201,70 @@ test("buildAutoCommitMessage: more than 5 settled items truncates with ellipsis"
 
 // ---- stop-hook pipeline: approve-mode commit point blocks; auto-mode is handled by runtime before pipeline ----
 
+// ---- isInsideWorktree / shouldAcceptHookFilePath: hook path filtering ----
+
+test("isInsideWorktree: absolute path inside the worktree is accepted", () => {
+  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  try {
+    expect(isInsideWorktree(resolve(root, "src/index.ts"), root)).toBe(true);
+    expect(isInsideWorktree(root, root)).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("isInsideWorktree: path that resolves outside the worktree is rejected", () => {
+  const parent = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  try {
+    const root = join(parent, "worktree");
+    // ../ escape from within root
+    expect(isInsideWorktree("../escaped.ts", root)).toBe(false);
+    // Entirely different absolute path
+    expect(isInsideWorktree("/etc/passwd", root)).toBe(false);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("shouldAcceptHookFilePath: accepts a normal in-tree source file", () => {
+  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  try {
+    expect(shouldAcceptHookFilePath(resolve(root, "src/index.ts"), root)).toBe(true);
+    // Works with a relative path too.
+    expect(shouldAcceptHookFilePath("src/index.ts", root)).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shouldAcceptHookFilePath: rejects in-tree paths that match workspace ignore rules", () => {
+  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  try {
+    expect(shouldAcceptHookFilePath(resolve(root, ".newde/state.db"), root)).toBe(false);
+    expect(shouldAcceptHookFilePath(resolve(root, "node_modules/x/index.js"), root)).toBe(false);
+    expect(shouldAcceptHookFilePath(resolve(root, ".context/foo.md.tmp.1.2"), root)).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shouldAcceptHookFilePath: rejects paths that resolve outside the worktree", () => {
+  const parent = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  try {
+    const root = join(parent, "worktree");
+    expect(shouldAcceptHookFilePath("/tmp/elsewhere/file.ts", root)).toBe(false);
+    expect(shouldAcceptHookFilePath("../escaped.ts", root)).toBe(false);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit point blocks", async () => {
   // Import the pure pipeline function directly — no need for the full runtime.
   const { decideStopDirective } = await import("./stop-hook-pipeline.js");
   const { default: batchFactory } = await Promise.resolve({ default: (overrides = {}) => ({
     id: "b1", stream_id: "s1", title: "B", status: "active" as BatchStatus, sort_index: 0,
-    pane_target: "p", resume_session_id: "", auto_commit: false,
+    pane_target: "p", resume_session_id: "", auto_commit: false, custom_prompt: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
   }) });
