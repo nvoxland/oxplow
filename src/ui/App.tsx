@@ -9,8 +9,8 @@ import {
   createWorkspaceDirectory,
   listAgentStatuses,
   listAgentTurns,
-  listBatchFileChanges,
-  listWorkItemFileChanges,
+  listWorkItemEfforts,
+  getSnapshotPairDiff,
   reorderWorkItems,
   moveWorkItemToBatch,
   getBacklogState,
@@ -22,11 +22,9 @@ import {
   moveBacklogItemToBatch,
   subscribeBacklogEvents,
   subscribeAgentStatus,
-  subscribeFileChangeEvents,
   subscribeTurnEvents,
   type AgentStatus,
   type AgentTurn,
-  type BatchFileChange,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -42,7 +40,6 @@ import {
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   getConfig,
-  getTurnFileDiff,
   setGeneratedDirs,
   selectBatch,
   promoteBatch,
@@ -163,7 +160,6 @@ export function App() {
   const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentTurns, setAgentTurns] = useState<Record<string, AgentTurn[]>>({});
-  const [fileChanges, setFileChanges] = useState<Record<string, BatchFileChange[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
@@ -180,7 +176,7 @@ export function App() {
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{ path: string; basename: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
-  const [snapshotsReveal, setSnapshotsReveal] = useState<{ turnId: string; token: number } | null>(null);
+  const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [batchCreateRequest, setBatchCreateRequest] = useState(0);
@@ -738,7 +734,7 @@ export function App() {
   const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
   const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
   const selectedBatchTurns = selectedBatch ? agentTurns[selectedBatch.id] ?? null : null;
-  const selectedBatchFileChanges = selectedBatch ? fileChanges[selectedBatch.id] ?? null : null;
+  const selectedBatchFileChanges = null;
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -914,38 +910,6 @@ export function App() {
         });
       });
   }, [agentTurns, selectedBatch, stream]);
-
-  useEffect(() => {
-    if (!stream || !selectedBatch || fileChanges[selectedBatch.id]) return;
-    void listBatchFileChanges(stream.id, selectedBatch.id)
-      .then((changes) => {
-        setFileChanges((prev) => ({ ...prev, [selectedBatch.id]: changes }));
-      })
-      .catch((e) => {
-        logUi("warn", "failed to load batch file changes", {
-          streamId: stream.id,
-          batchId: selectedBatch.id,
-          error: String(e),
-        });
-      });
-  }, [fileChanges, selectedBatch, stream]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeFileChangeEvents("all", (event) => {
-      void listBatchFileChanges(event.streamId, event.batchId)
-        .then((changes) => {
-          setFileChanges((prev) => ({ ...prev, [event.batchId]: changes }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh batch file changes", {
-            streamId: event.streamId,
-            batchId: event.batchId,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeTurnEvents("all", (event) => {
@@ -1330,9 +1294,13 @@ export function App() {
     setCenterActive(id);
   };
 
-  const handleOpenTurnDiff = async (turnId: string, path: string) => {
+  const handleOpenTurnDiff = async (turn: AgentTurn, path: string) => {
     try {
-      const diff = await getTurnFileDiff(turnId, path);
+      if (!turn.end_snapshot_id) {
+        setError(`Turn has no end snapshot yet for ${path}`);
+        return;
+      }
+      const diff = await getSnapshotPairDiff(turn.start_snapshot_id, turn.end_snapshot_id, path);
       if (diff.beforeState === "absent" && diff.afterState === "absent") {
         setError(`No snapshot diff available for ${path} in this turn`);
         return;
@@ -1341,10 +1309,10 @@ export function App() {
         path,
         leftRef: "",
         rightKind: "working",
-        baseLabel: `turn ${turnId.slice(-6)}`,
+        baseLabel: `turn ${turn.id.slice(-6)}`,
         leftContent: renderDiffSide(diff.before, diff.beforeState),
         rightContent: renderDiffSide(diff.after, diff.afterState),
-        labelOverride: `turn ${turnId.slice(-6)}`,
+        labelOverride: `turn ${turn.id.slice(-6)}`,
       });
     } catch (err) {
       setError(`Open turn diff failed: ${String(err)}`);
@@ -1359,15 +1327,16 @@ export function App() {
 
   const handleShowWorkItemInHistory = async (itemId: string) => {
     const token = Date.now();
-    // Open the Local History panel regardless of whether we find a turn — the
-    // user asked to see history, so get them there.
+    // Open the Local History panel regardless of whether we find an effort —
+    // the user asked to see history, so get them there.
     setBottomActivate({ id: "snapshots", token });
     try {
-      const changes = await listWorkItemFileChanges(itemId);
-      // Pick the most recent change with a turn_id (list is DESC by created_at).
-      const withTurn = changes.find((c) => c.turn_id);
-      if (withTurn?.turn_id) {
-        setSnapshotsReveal({ turnId: withTurn.turn_id, token });
+      const efforts = await listWorkItemEfforts(itemId);
+      // Newest effort with an end snapshot wins.
+      const newest = [...efforts].reverse().find((e) => e.effort.end_snapshot_id);
+      const snapshotId = newest?.effort.end_snapshot_id ?? null;
+      if (snapshotId) {
+        setSnapshotsReveal({ snapshotId, token });
       }
     } catch (err) {
       logUi("warn", "show work item in history failed", { error: String(err) });
@@ -1488,7 +1457,6 @@ export function App() {
           gitEnabled={workspaceContext.gitEnabled}
           selectedFilePath={selectedFilePath}
           currentBatchTurns={selectedBatchTurns}
-          currentBatchFileChanges={selectedBatchFileChanges}
           generatedDirs={generatedDirs}
           onOpenFile={handleOpenFile}
           onOpenDiff={handleOpenDiff}
@@ -1507,7 +1475,6 @@ export function App() {
       render: () => (
         <Activity
           agentTurns={selectedBatchTurns}
-          batchFileChanges={selectedBatchFileChanges}
           workItems={selectedBatchWork?.items ?? []}
           onOpenFile={handleOpenFile}
           onOpenTurnDiff={handleOpenTurnDiff}
@@ -1521,7 +1488,6 @@ export function App() {
     selectedBatch,
     selectedBatchWork,
     selectedBatchTurns,
-    selectedBatchFileChanges,
   ]);
 
   const bottomToolWindows: ToolWindow[] = [
@@ -1538,7 +1504,7 @@ export function App() {
     {
       id: "snapshots",
       label: "Local history",
-      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealTurnId={snapshotsReveal} />,
+      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} />,
     },
   ];
 
@@ -1570,7 +1536,6 @@ export function App() {
             agentStatuses={agentStatuses}
             batchWorkStates={batchWorkStates}
             agentTurns={agentTurns}
-            fileChanges={fileChanges}
             onSelectBatch={handleSelectBatch}
             onCreateBatch={handleCreateBatch}
             onPromoteBatch={handlePromoteBatch}

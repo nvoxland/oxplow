@@ -4,7 +4,6 @@ import type {
   AgentStatus,
   AgentTurn,
   Batch,
-  BatchFileChange,
   BatchWorkState,
 } from "../api.js";
 import { setBatchPrompt } from "../api.js";
@@ -21,7 +20,6 @@ interface Props {
   agentStatuses: Record<string, AgentStatus>;
   batchWorkStates: Record<string, BatchWorkState>;
   agentTurns: Record<string, AgentTurn[]>;
-  fileChanges: Record<string, BatchFileChange[]>;
   onSelectBatch(batchId: string): void | Promise<void>;
   onCreateBatch(title: string): Promise<void>;
   onPromoteBatch(batchId: string): void | Promise<void>;
@@ -47,7 +45,6 @@ export function BatchRail({
   agentStatuses,
   batchWorkStates,
   agentTurns,
-  fileChanges,
   onSelectBatch,
   onCreateBatch,
   onPromoteBatch,
@@ -165,7 +162,6 @@ export function BatchRail({
             agentStatus={agentStatuses[batch.id] ?? "idle"}
             workState={batchWorkStates[batch.id]}
             turns={agentTurns[batch.id]}
-            fileChangeCount={fileChanges[batch.id]?.length}
             hasQueued={hasQueued}
             isRenaming={renamingId === batch.id}
             isDragTarget={overBatchId === batch.id && draggingId !== null && draggingId !== batch.id}
@@ -292,7 +288,6 @@ function BatchChip({
   agentStatus,
   workState,
   turns,
-  fileChangeCount,
   hasQueued,
   onSelect,
   onPromote,
@@ -314,7 +309,6 @@ function BatchChip({
   agentStatus: AgentStatus;
   workState: BatchWorkState | undefined;
   turns: AgentTurn[] | undefined;
-  fileChangeCount: number | undefined;
   hasQueued: boolean;
   onSelect(): void;
   onPromote(): void;
@@ -538,7 +532,6 @@ function BatchChip({
           agentStatus={agentStatus}
           workState={workState}
           turns={turns}
-          fileChangeCount={fileChangeCount}
           hasQueued={hasQueued}
           onPromote={onPromote}
           onComplete={onComplete}
@@ -554,7 +547,6 @@ function HoverCard({
   agentStatus,
   workState,
   turns,
-  fileChangeCount,
   hasQueued,
   onPromote,
   onComplete,
@@ -564,7 +556,6 @@ function HoverCard({
   agentStatus: AgentStatus;
   workState: BatchWorkState | undefined;
   turns: AgentTurn[] | undefined;
-  fileChangeCount: number | undefined;
   hasQueued: boolean;
   onPromote(): void;
   onComplete(): void;
@@ -614,7 +605,6 @@ function HoverCard({
         </span>
         <span>{waiting} waiting</span>
         <span>turns: {turnCount}</span>
-        {fileChangeCount != null ? <span>files: {fileChangeCount}</span> : null}
       </div>
       {lastTurn ? (
         <div style={{ fontSize: 11, color: "var(--muted)" }}>

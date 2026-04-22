@@ -13,7 +13,13 @@ import { createId } from "../core/ids.js";
 import type { Logger } from "../core/logger.js";
 import { getStateDatabase } from "./state-db.js";
 
-export type SnapshotKind = "turn-start" | "turn-end";
+export type SnapshotSource =
+  | "task-start"
+  | "task-end"
+  | "turn-start"
+  | "turn-end"
+  | "startup"
+  | "external";
 
 /**
  * `state` discriminates how the entry was captured:
@@ -39,6 +45,7 @@ export interface SnapshotFileRow {
 
 export interface SnapshotSummary {
   snapshot: FileSnapshot;
+  previousSnapshotId: string | null;
   files: Record<string, SnapshotFileRow>;
   counts: { created: number; updated: number; deleted: number };
 }
@@ -47,17 +54,14 @@ export interface FileSnapshot {
   id: string;
   stream_id: string;
   worktree_path: string;
-  kind: SnapshotKind;
-  turn_id: string | null;
-  batch_id: string | null;
-  parent_snapshot_id: string | null;
+  version_hash: string;
+  source: SnapshotSource;
   created_at: string;
-  turn_prompt: string | null;
 }
 
 /**
- * "absent" means the path wasn't found in the chain at all (never tracked).
- * Other values mirror `SnapshotEntryState`.
+ * "absent" means the path wasn't found at that snapshot. Other values mirror
+ * `SnapshotEntryState`.
  */
 export type DiffSide = "absent" | SnapshotEntryState;
 
@@ -68,14 +72,26 @@ export interface SnapshotDiffResult {
   afterState: DiffSide;
 }
 
+/**
+ * Inputs to `flushSnapshot`. `dirtyPaths` is an optimizer hint: when provided,
+ * only those paths are re-scanned (their entries are copied from the previous
+ * snapshot otherwise). When null/undefined the full worktree is walked.
+ */
 export interface FlushInput {
-  kind: SnapshotKind;
+  source: SnapshotSource;
   streamId: string;
   worktreePath: string;
-  dirtyPaths: string[];
-  parentSnapshotId: string | null;
-  turnId: string | null;
-  batchId: string | null;
+  /** Optional — when set, only these relative paths are re-scanned and all
+   *  other entries are carried forward from the previous snapshot. */
+  dirtyPaths?: string[] | null;
+  /** Ignore filter, consulted during full walks. */
+  ignore?: (relpath: string) => boolean;
+}
+
+export interface FlushResult {
+  id: string;
+  created: boolean;
+  versionHash: string;
 }
 
 const DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -85,12 +101,6 @@ export class SnapshotStore {
   private readonly rootDir: string;
   private readonly objectsDir: string;
   private maxFileBytes: number = DEFAULT_MAX_FILE_BYTES;
-  // LRU-ish cache of resolved entry maps per snapshot so repeat UI calls
-  // (summary, diff, reconcile) don't re-walk the parent chain each time.
-  // Insertion-order iteration gives us FIFO eviction; cacheGet reinserts
-  // to convert that into LRU. Cleared on cleanup.
-  private readonly resolveCache = new Map<string, Record<string, SnapshotEntry>>();
-  private static readonly RESOLVE_CACHE_MAX = 32;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
@@ -100,10 +110,6 @@ export class SnapshotStore {
   }
 
   setMaxFileBytes(bytes: number): void {
-    // Config validates the realistic floor (>=1024); this setter accepts
-    // anything > 0 so tests can exercise the oversize branch with small
-    // fixtures. Ignore non-positive values to avoid disabling blobbing
-    // entirely by accident.
     if (bytes > 0) this.maxFileBytes = Math.floor(bytes);
   }
 
@@ -131,68 +137,37 @@ export class SnapshotStore {
     return existsSync(join(this.objectsDir, hash.slice(0, 2), hash.slice(2)));
   }
 
-  flushSnapshot(input: FlushInput): string | null {
-    if (input.dirtyPaths.length === 0) return null;
-    const id = createId("snap");
-    const now = new Date().toISOString();
-    const unique = Array.from(new Set(input.dirtyPaths)).sort();
-    const entries: Array<[string, SnapshotEntry]> = [];
+  /**
+   * Capture a new snapshot of the stream's worktree. If `dirtyPaths` is
+   * provided, only those are re-scanned and other entries carry forward from
+   * the previous snapshot; otherwise the entire worktree is walked.
+   *
+   * Computes a `version_hash` over the final entry set; if it matches the
+   * newest existing snapshot for this stream, the existing id is returned
+   * with `created: false` (no new row).
+   */
+  flushSnapshot(input: FlushInput): FlushResult {
+    const latest = this.getLatestSnapshot(input.streamId);
+    const baselineEntries = latest ? this.loadManifestEntries(latest.id) : {};
+    const ignore = input.ignore ?? (() => false);
+    const entries = this.buildEntries(input, baselineEntries, ignore);
+    const versionHash = computeVersionHash(entries);
 
-    // Resolve parent manifest once so we can skip "tombstone of nothing"
-    // rows: a `deleted` entry for a path the parent never had, or that the
-    // parent already marks deleted. These rows cost DB space and make
-    // snapshot diffs noisier without encoding new information.
-    const parentEntries = input.parentSnapshotId
-      ? this.resolveEntries(input.parentSnapshotId)
-      : {};
-
-    for (const relpath of unique) {
-      const abs = resolve(input.worktreePath, relpath);
-      if (!existsSync(abs)) {
-        const parentEntry = parentEntries[relpath];
-        if (!parentEntry || parentEntry.state === "deleted") {
-          continue;
-        }
-        entries.push([relpath, { hash: "", mtime_ms: 0, size: 0, state: "deleted" }]);
-        continue;
-      }
-      let st;
-      try {
-        st = statSync(abs);
-      } catch {
-        continue;
-      }
-      if (!st.isFile()) continue;
-      if (st.size > this.maxFileBytes) {
-        entries.push([
-          relpath,
-          { hash: "", mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "oversize" },
-        ]);
-        continue;
-      }
-      const content = readFileSync(abs);
-      const hash = this.writeBlob(content);
-      entries.push([
-        relpath,
-        { hash, mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "present" },
-      ]);
+    if (latest && latest.version_hash === versionHash) {
+      return { id: latest.id, created: false, versionHash };
     }
 
-    if (entries.length === 0) return null;
-
+    const id = createId("snap");
+    const now = new Date().toISOString();
     this.stateDb.transaction(() => {
       this.stateDb.run(
-        `INSERT INTO file_snapshot (
-          id, stream_id, worktree_path, kind, turn_id, batch_id,
-          parent_snapshot_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO file_snapshot (id, stream_id, worktree_path, version_hash, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         id,
         input.streamId,
         input.worktreePath,
-        input.kind,
-        input.turnId,
-        input.batchId,
-        input.parentSnapshotId,
+        versionHash,
+        input.source,
         now,
       );
       for (const [path, entry] of entries) {
@@ -208,12 +183,111 @@ export class SnapshotStore {
         );
       }
     });
-    return id;
+    return { id, created: true, versionHash };
+  }
+
+  private buildEntries(
+    input: FlushInput,
+    baseline: Record<string, SnapshotEntry>,
+    ignore: (relpath: string) => boolean,
+  ): Array<[string, SnapshotEntry]> {
+    if (input.dirtyPaths && input.dirtyPaths.length > 0) {
+      // Optimizer hint path: only rescan the dirty set, carry everything else
+      // forward from the previous snapshot.
+      const merged: Record<string, SnapshotEntry> = { ...baseline };
+      const unique = Array.from(new Set(input.dirtyPaths)).sort();
+      for (const rel of unique) {
+        const entry = this.captureEntry(input.worktreePath, rel);
+        const prev = baseline[rel];
+        if (entry) {
+          merged[rel] = entry;
+        } else if (prev && prev.state !== "deleted") {
+          // Tracked file disappeared: emit tombstone against the previous
+          // snapshot so the diff reads as a deletion. A stale tombstone (file
+          // was already gone) is dropped so snapshots don't carry ancient
+          // ghosts forever.
+          merged[rel] = { hash: "", mtime_ms: 0, size: 0, state: "deleted" };
+        } else {
+          delete merged[rel];
+        }
+      }
+      return toSortedEntryList(merged);
+    }
+    if (input.dirtyPaths && input.dirtyPaths.length === 0) {
+      // Explicit "nothing changed" hint — carry baseline forward; dedup will
+      // catch an unchanged version_hash.
+      return toSortedEntryList(baseline);
+    }
+    // Full walk.
+    const captured: Record<string, SnapshotEntry> = {};
+    walkAll(input.worktreePath, "", ignore, (rel, st) => {
+      const entry = this.captureEntryFromStat(input.worktreePath, rel, st);
+      if (entry) captured[rel] = entry;
+    });
+    return toSortedEntryList(captured);
+  }
+
+  /**
+   * Capture a single entry from disk. Returns null if the file doesn't exist
+   * on disk (or isn't a regular file) — callers decide whether to emit a
+   * tombstone or skip the path based on the baseline.
+   */
+  private captureEntry(worktreePath: string, relpath: string): SnapshotEntry | null {
+    const abs = resolve(worktreePath, relpath);
+    if (!existsSync(abs)) return null;
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      return null;
+    }
+    if (!st.isFile()) return null;
+    return this.captureEntryFromStat(worktreePath, relpath, st);
+  }
+
+  private captureEntryFromStat(
+    worktreePath: string,
+    relpath: string,
+    st: import("node:fs").Stats,
+  ): SnapshotEntry | null {
+    const abs = resolve(worktreePath, relpath);
+    if (!st.isFile()) return null;
+    if (st.size > this.maxFileBytes) {
+      return { hash: "", mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "oversize" };
+    }
+    const content = readFileSync(abs);
+    const hash = this.writeBlob(content);
+    return { hash, mtime_ms: Math.floor(st.mtimeMs), size: st.size, state: "present" };
   }
 
   getSnapshot(id: string): FileSnapshot | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       "SELECT * FROM file_snapshot WHERE id = ? LIMIT 1",
+      id,
+    );
+    return row ? rowToSnapshot(row) : null;
+  }
+
+  getLatestSnapshot(streamId: string): FileSnapshot | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT * FROM file_snapshot WHERE stream_id = ?
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      streamId,
+    );
+    return row ? rowToSnapshot(row) : null;
+  }
+
+  /** The snapshot immediately preceding `id` for its stream (by time), or null. */
+  getPreviousSnapshot(id: string): FileSnapshot | null {
+    const snap = this.getSnapshot(id);
+    if (!snap) return null;
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT * FROM file_snapshot
+       WHERE stream_id = ? AND (created_at < ? OR (created_at = ? AND rowid < (SELECT rowid FROM file_snapshot WHERE id = ?)))
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      snap.stream_id,
+      snap.created_at,
+      snap.created_at,
       id,
     );
     return row ? rowToSnapshot(row) : null;
@@ -231,66 +305,16 @@ export class SnapshotStore {
     return out;
   }
 
-  /** Merge entries walking the parent chain (newest wins). Tombstones kept. */
-  resolveEntries(id: string): Record<string, SnapshotEntry> {
-    const cached = this.cacheGet(id);
-    if (cached) return cached;
-    const merged: Record<string, SnapshotEntry> = {};
-    const visited = new Set<string>();
-    const chain: string[] = [];
-    let cursor: string | null = id;
-    while (cursor) {
-      if (visited.has(cursor)) {
-        // Defensive: broken chain (shouldn't happen given FK semantics).
-        // Stop walking rather than loop forever.
-        this.logger?.warn("snapshot parent chain cycle detected", { snapshotId: cursor });
-        break;
-      }
-      visited.add(cursor);
-      chain.push(cursor);
-      const snap = this.getSnapshot(cursor);
-      cursor = snap?.parent_snapshot_id ?? null;
-    }
-    // Walk oldest → newest so newer entries overwrite older ones.
-    for (let i = chain.length - 1; i >= 0; i--) {
-      const entries = this.loadManifestEntries(chain[i]!);
-      for (const [path, entry] of Object.entries(entries)) {
-        merged[path] = entry;
-      }
-    }
-    this.cacheSet(id, merged);
-    return merged;
-  }
-
-  private cacheGet(id: string): Record<string, SnapshotEntry> | undefined {
-    const hit = this.resolveCache.get(id);
-    if (hit) {
-      // Re-insert to move the key to the end (most-recent) of the
-      // insertion-order Map — cheap LRU.
-      this.resolveCache.delete(id);
-      this.resolveCache.set(id, hit);
-    }
-    return hit;
-  }
-
-  private cacheSet(id: string, value: Record<string, SnapshotEntry>): void {
-    if (this.resolveCache.size >= SnapshotStore.RESOLVE_CACHE_MAX) {
-      const first = this.resolveCache.keys().next().value;
-      if (first !== undefined) this.resolveCache.delete(first);
-    }
-    this.resolveCache.set(id, value);
-  }
-
   /** Resolved hash for `relpath` at snapshot `id`, or null if deleted/absent. */
   resolvePath(id: string, relpath: string): string | null {
-    const entry = this.resolveEntries(id)[relpath];
+    const entry = this.loadManifestEntries(id)[relpath];
     if (!entry || entry.state !== "present" || !entry.hash) return null;
     return entry.hash;
   }
 
   /** Resolved entry (with state) for `relpath` at `id`, or null if absent. */
   resolveEntry(id: string, relpath: string): SnapshotEntry | null {
-    return this.resolveEntries(id)[relpath] ?? null;
+    return this.loadManifestEntries(id)[relpath] ?? null;
   }
 
   diffPath(beforeId: string | null, afterId: string, relpath: string): SnapshotDiffResult {
@@ -314,8 +338,6 @@ export class SnapshotStore {
     if (entry.state === "present") {
       return { content: this.readBlobAsText(entry.hash), state: "present" };
     }
-    // deleted / oversize: no content to show, but signal the state so the UI
-    // can render an explanation rather than a blank pane.
     return { content: null, state: entry.state };
   }
 
@@ -329,57 +351,58 @@ export class SnapshotStore {
   }
 
   /**
-   * Summary for the UI: row + per-file entries + A/M/D classification.
-   * Oversize entries stay in `files` (visible) but they don't participate
-   * in the add/update/delete counters — there's no real content churn to
-   * report, just a stat delta.
+   * Summary for the UI: row + per-file entries + A/M/D classification
+   * relative to `previousSnapshotId` (defaults to the preceding snapshot in
+   * time for this stream).
    */
-  getSnapshotSummary(snapshotId: string): SnapshotSummary | null {
+  getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): SnapshotSummary | null {
     const snap = this.getSnapshot(snapshotId);
     if (!snap) return null;
     const entries = this.loadManifestEntries(snapshotId);
-    const parentEntries = snap.parent_snapshot_id
-      ? this.resolveEntries(snap.parent_snapshot_id)
-      : {};
+    const previousId = previousSnapshotId === undefined
+      ? this.getPreviousSnapshot(snapshotId)?.id ?? null
+      : previousSnapshotId;
+    const previousEntries = previousId ? this.loadManifestEntries(previousId) : {};
     const files: Record<string, SnapshotFileRow> = {};
     let created = 0;
     let updated = 0;
     let deleted = 0;
-    for (const [path, entry] of Object.entries(entries)) {
-      let kind: "created" | "updated" | "deleted";
-      if (entry.state === "deleted") {
-        kind = "deleted";
-        deleted++;
-      } else if (!parentEntries[path] || parentEntries[path].state === "deleted") {
-        kind = "created";
-        if (entry.state !== "oversize") created++;
-      } else {
-        kind = "updated";
-        const parent = parentEntries[path];
-        // Only count as "updated" if something actually changed. For present
-        // entries that's hash inequality; for oversize it's mtime or size.
-        const parentIsPresent = parent.state === "present";
-        const entryIsPresent = entry.state === "present";
-        const hashChanged = entryIsPresent && parentIsPresent && parent.hash !== entry.hash;
-        const statChanged = parent.mtime_ms !== entry.mtime_ms || parent.size !== entry.size;
-        const stateChanged = parent.state !== entry.state;
-        if (hashChanged || statChanged || stateChanged) updated++;
+    const allPaths = new Set<string>([
+      ...Object.keys(entries),
+      ...Object.keys(previousEntries),
+    ]);
+    for (const path of allPaths) {
+      const entry = entries[path];
+      const prev = previousEntries[path];
+      if (!entry || entry.state === "deleted") {
+        if (prev && prev.state !== "deleted") {
+          deleted++;
+          files[path] = {
+            entry: entry ?? { hash: "", mtime_ms: 0, size: 0, state: "deleted" },
+            kind: "deleted",
+          };
+        }
+        continue;
       }
-      files[path] = { entry, kind };
+      if (!prev || prev.state === "deleted") {
+        if (entry.state !== "oversize") created++;
+        files[path] = { entry, kind: "created" };
+        continue;
+      }
+      const hashChanged = prev.state === "present" && entry.state === "present" && prev.hash !== entry.hash;
+      const statChanged = prev.mtime_ms !== entry.mtime_ms || prev.size !== entry.size;
+      const stateChanged = prev.state !== entry.state;
+      if (hashChanged || statChanged || stateChanged) {
+        updated++;
+        files[path] = { entry, kind: "updated" };
+      }
     }
     return {
       snapshot: snap,
+      previousSnapshotId: previousId,
       files,
       counts: { created, updated, deleted },
     };
-  }
-
-  getSnapshotFileDiff(snapshotId: string, path: string): SnapshotDiffResult {
-    const snap = this.getSnapshot(snapshotId);
-    if (!snap) {
-      return { before: null, after: null, beforeState: "absent", afterState: "absent" };
-    }
-    return this.diffPath(snap.parent_snapshot_id ?? null, snapshotId, path);
   }
 
   getSnapshotPairDiff(
@@ -391,18 +414,16 @@ export class SnapshotStore {
   }
 
   /**
-   * Walk the worktree and compare (mtime_ms, size) against the resolved
-   * entry map for `snapshotId`. Returned paths are the ones whose stat
-   * differs, or that exist on disk but not in the manifest, or vice versa.
-   * Oversize-on-disk files are surfaced too — they get a stat-only entry
-   * when next flushed.
+   * Walk the worktree and compare (mtime_ms, size) against the entry map for
+   * `snapshotId`. Returns paths whose stat differs, or that exist on disk
+   * but not in the manifest, or vice versa.
    */
   reconcileWorktree(
     snapshotId: string,
     worktreePath: string,
     ignore: (relpath: string) => boolean,
   ): string[] {
-    const entries = this.resolveEntries(snapshotId);
+    const entries = this.loadManifestEntries(snapshotId);
     const dirty = new Set<string>();
     const seen = new Set<string>();
 
@@ -427,12 +448,22 @@ export class SnapshotStore {
     return Array.from(dirty).sort();
   }
 
+  listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM file_snapshot
+         WHERE stream_id = ?
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        streamId,
+        limit,
+      )
+      .map(rowToSnapshot);
+  }
+
   /**
-   * Drop snapshots older than `retentionDays` while preserving each
-   * stream's most recent snapshot (and anything `streams.current_snapshot_id`
-   * points at) no matter its age. After deleting snapshot rows (cascades
-   * remove their `snapshot_entry` rows), sweep `objects/` for blobs that
-   * are no longer referenced. `retentionDays === 0` disables pruning.
+   * Drop snapshots older than `retentionDays`. Always keeps the most recent
+   * snapshot per stream. `retentionDays === 0` disables pruning.
    */
   cleanupOldSnapshots(retentionDays: number): { snapshotsDeleted: number; blobsDeleted: number } {
     if (retentionDays <= 0) return { snapshotsDeleted: 0, blobsDeleted: 0 };
@@ -447,13 +478,6 @@ export class SnapshotStore {
     );
     for (const row of latestRows) keep.add(row.id);
 
-    const pointedRows = this.stateDb.all<{ current_snapshot_id: string | null }>(
-      `SELECT current_snapshot_id FROM streams WHERE current_snapshot_id IS NOT NULL`,
-    );
-    for (const row of pointedRows) {
-      if (row.current_snapshot_id) keep.add(row.current_snapshot_id);
-    }
-
     const staleRows = this.stateDb.all<{ id: string }>(
       `SELECT id FROM file_snapshot WHERE created_at < ?`,
       cutoff,
@@ -466,16 +490,11 @@ export class SnapshotStore {
         this.stateDb.run("DELETE FROM file_snapshot WHERE id = ?", row.id);
       }
     });
-    this.resolveCache.clear();
 
     const blobsDeleted = this.gcBlobs();
     return { snapshotsDeleted: toDelete.length, blobsDeleted };
   }
 
-  /**
-   * Sweep `objects/` for blobs whose sha is not referenced by any
-   * surviving `snapshot_entry` row. Returns the count removed.
-   */
   gcBlobs(): number {
     const referenced = new Set<string>();
     const rows = this.stateDb.all<{ hash: string }>(
@@ -516,33 +535,33 @@ export class SnapshotStore {
     }
     return removed;
   }
+}
 
-  listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
-    return this.stateDb
-      .all<Record<string, unknown>>(
-        `SELECT fs.*, at.prompt AS turn_prompt
-         FROM file_snapshot fs
-         LEFT JOIN agent_turn at ON fs.turn_id = at.id
-         WHERE fs.stream_id = ?
-         ORDER BY fs.created_at DESC, fs.rowid DESC
-         LIMIT ?`,
-        streamId,
-        limit,
-      )
-      .map(rowToSnapshotWithPrompt);
-  }
+function toSortedEntryList(map: Record<string, SnapshotEntry>): Array<[string, SnapshotEntry]> {
+  return Object.keys(map)
+    .sort()
+    .map((path) => [path, map[path]!] as [string, SnapshotEntry]);
+}
 
-  getTurnSnapshots(turnId: string): { start: FileSnapshot | null; end: FileSnapshot | null } {
-    const rows = this.stateDb.all<Record<string, unknown>>(
-      "SELECT * FROM file_snapshot WHERE turn_id = ? ORDER BY created_at ASC",
-      turnId,
-    );
-    const snaps = rows.map(rowToSnapshot);
-    return {
-      start: snaps.find((s) => s.kind === "turn-start") ?? null,
-      end: snaps.find((s) => s.kind === "turn-end") ?? null,
-    };
+/**
+ * SHA-256 over a canonical encoding of the entry set. The encoding is a
+ * newline-separated list of `path\thash\tsize\tstate` tuples sorted by path.
+ * `mtime_ms` is deliberately excluded so touching a file without changing its
+ * content doesn't produce a new snapshot.
+ */
+export function computeVersionHash(entries: Array<[string, SnapshotEntry]>): string {
+  const h = createHash("sha256");
+  for (const [path, entry] of entries) {
+    h.update(path);
+    h.update("\t");
+    h.update(entry.hash);
+    h.update("\t");
+    h.update(String(entry.size));
+    h.update("\t");
+    h.update(entry.state);
+    h.update("\n");
   }
+  return h.digest("hex");
 }
 
 function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
@@ -550,19 +569,9 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
     id: String(row.id ?? ""),
     stream_id: String(row.stream_id ?? ""),
     worktree_path: String(row.worktree_path ?? ""),
-    kind: String(row.kind ?? "turn-end") as SnapshotKind,
-    turn_id: row.turn_id == null ? null : String(row.turn_id),
-    batch_id: row.batch_id == null ? null : String(row.batch_id),
-    parent_snapshot_id: row.parent_snapshot_id == null ? null : String(row.parent_snapshot_id),
+    version_hash: String(row.version_hash ?? ""),
+    source: String(row.source ?? "external") as SnapshotSource,
     created_at: String(row.created_at ?? ""),
-    turn_prompt: null,
-  };
-}
-
-function rowToSnapshotWithPrompt(row: Record<string, unknown>): FileSnapshot {
-  return {
-    ...rowToSnapshot(row),
-    turn_prompt: row.turn_prompt == null ? null : String(row.turn_prompt),
   };
 }
 
@@ -576,12 +585,6 @@ function rowToEntry(row: Record<string, unknown>): SnapshotEntry {
   };
 }
 
-/**
- * Walks every file under `root`, calling `onFile` for each one — including
- * files that would be too big to blob. The callback receives the stat so the
- * caller can decide how to classify (present vs oversize). Ignore function
- * is consulted per path segment.
- */
 function walkAll(
   root: string,
   rel: string,

@@ -56,7 +56,10 @@ function seed() {
     workItemStore,
     commitPointStore: null as never,
     turnStore: null as never,
-    fileChangeStore: null as never,
+    effortStore: null as never,
+    snapshotStore: null as never,
+    waitPointStore: null as never,
+    executeCommit: (() => { throw new Error("not used"); }) as never,
   });
   return { tools, batchStore, workItemStore, streamA, streamB, batchA, batchB };
 }

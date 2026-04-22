@@ -99,22 +99,11 @@ export interface WaitPointChangedEvent {
   kind: "created" | "updated" | "deleted";
 }
 
-export interface FileChangeRecordedEvent {
-  type: "file-change.recorded";
-  streamId: string;
-  batchId: string;
-  turnId: string | null;
-  changeId: string;
-  path: string;
-  kind: "created" | "updated" | "deleted";
-  source: "hook" | "fs-watch";
-}
-
 export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
   snapshotId: string;
-  kind: "turn-start" | "turn-end";
+  kind: "task-start" | "task-end" | "turn-start" | "turn-end" | "startup" | "external";
   turnId: string | null;
   batchId: string | null;
 }
@@ -127,7 +116,6 @@ export type NewdeEvent =
   | BatchChangedEvent
   | AgentStatusChangedEvent
   | TurnChangedEvent
-  | FileChangeRecordedEvent
   | FileSnapshotCreatedEvent
   | WorkspaceContextChangedEvent
   | CommitPointChangedEvent

@@ -1,6 +1,10 @@
 import type { Batch } from "../persistence/batch-store.js";
 import type { AgentTurn, TurnStore } from "../persistence/turn-store.js";
-import type { BatchFileChange, FileChangeStore } from "../persistence/file-change-store.js";
+import type {
+  WorkItemEffort,
+  WorkItemEffortStore,
+} from "../persistence/work-item-effort-store.js";
+import type { FileSnapshot, SnapshotStore } from "../persistence/snapshot-store.js";
 import type {
   BatchWorkState,
   WorkItem,
@@ -24,7 +28,8 @@ export interface WorkItemApiDeps {
   resolveBatch(streamId: string, batchId: string): Batch;
   workItemStore: WorkItemStore;
   turnStore: TurnStore;
-  fileChangeStore: FileChangeStore;
+  effortStore: WorkItemEffortStore;
+  snapshotStore: SnapshotStore;
 }
 
 export interface CreateWorkItemInput {
@@ -46,6 +51,16 @@ export interface UpdateWorkItemChanges {
   priority?: WorkItemPriority;
 }
 
+export interface EffortDetail {
+  effort: WorkItemEffort;
+  start_snapshot: FileSnapshot | null;
+  end_snapshot: FileSnapshot | null;
+  turn_ids: string[];
+  /** Paths that differ between start and end snapshots (empty when either
+   *  side is null or hashes are identical). */
+  changed_paths: string[];
+}
+
 export interface WorkItemApi {
   getBatchWorkState(streamId: string, batchId: string): BatchWorkState;
   getWorkItem(streamId: string, batchId: string, itemId: string): WorkItemDetail | null;
@@ -65,8 +80,7 @@ export interface WorkItemApi {
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
   getWorkNotes(itemId: string): WorkNote[];
   listAgentTurns(streamId: string, batchId: string, limit?: number): AgentTurn[];
-  listFileChanges(streamId: string, batchId: string, limit?: number): BatchFileChange[];
-  listWorkItemFileChanges(itemId: string, limit?: number): BatchFileChange[];
+  listWorkItemEfforts(itemId: string): EffortDetail[];
 }
 
 function buildBacklogState(store: WorkItemStore): BacklogState {
@@ -79,7 +93,44 @@ function buildBacklogState(store: WorkItemStore): BacklogState {
   };
 }
 
-export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, fileChangeStore }: WorkItemApiDeps): WorkItemApi {
+function computeChangedPaths(
+  snapshotStore: SnapshotStore,
+  startId: string | null,
+  endId: string | null,
+): string[] {
+  if (!startId || !endId || startId === endId) return [];
+  const summary = snapshotStore.getSnapshotSummary(endId, startId);
+  if (!summary) return [];
+  return Object.keys(summary.files).sort();
+}
+
+function buildEffortDetail(
+  effort: WorkItemEffort,
+  effortStore: WorkItemEffortStore,
+  snapshotStore: SnapshotStore,
+): EffortDetail {
+  const start_snapshot = effort.start_snapshot_id
+    ? snapshotStore.getSnapshot(effort.start_snapshot_id)
+    : null;
+  const end_snapshot = effort.end_snapshot_id
+    ? snapshotStore.getSnapshot(effort.end_snapshot_id)
+    : null;
+  return {
+    effort,
+    start_snapshot,
+    end_snapshot,
+    turn_ids: effortStore.listTurnsForEffort(effort.id),
+    changed_paths: computeChangedPaths(snapshotStore, effort.start_snapshot_id, effort.end_snapshot_id),
+  };
+}
+
+export function createWorkItemApi({
+  resolveBatch,
+  workItemStore,
+  turnStore,
+  effortStore,
+  snapshotStore,
+}: WorkItemApiDeps): WorkItemApi {
   return {
     getBatchWorkState(streamId, batchId) {
       resolveBatch(streamId, batchId);
@@ -227,13 +278,10 @@ export function createWorkItemApi({ resolveBatch, workItemStore, turnStore, file
       return turnStore.listForBatch(batchId, limit);
     },
 
-    listFileChanges(streamId, batchId, limit) {
-      resolveBatch(streamId, batchId);
-      return fileChangeStore.listForBatch(batchId, limit);
-    },
-
-    listWorkItemFileChanges(itemId, limit) {
-      return fileChangeStore.listForWorkItem(itemId, limit);
+    listWorkItemEfforts(itemId) {
+      return effortStore
+        .listEffortsForWorkItem(itemId)
+        .map((effort) => buildEffortDetail(effort, effortStore, snapshotStore));
     },
   };
 }

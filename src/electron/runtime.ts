@@ -56,16 +56,14 @@ import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import {
-  FileChangeStore,
-  type BatchFileChange,
-  type FileChangeKind,
-  type FileChangeSource,
-} from "../persistence/file-change-store.js";
+  WorkItemEffortStore,
+  type WorkItemEffort,
+} from "../persistence/work-item-effort-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
   type SnapshotDiffResult,
-  type SnapshotKind,
+  type SnapshotSource,
   type SnapshotSummary,
 } from "../persistence/snapshot-store.js";
 import { isInsideWorktree } from "./runtime-paths.js";
@@ -103,7 +101,7 @@ export class ElectronRuntime {
   readonly waitPointStore: WaitPointStore;
   readonly batchQueue: BatchQueueOrchestrator;
   readonly turnStore: TurnStore;
-  readonly fileChangeStore: FileChangeStore;
+  readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
@@ -150,14 +148,15 @@ export class ElectronRuntime {
       logger.child({ subsystem: "batch-queue" }),
     );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
-    this.fileChangeStore = new FileChangeStore(projectDir, logger.child({ subsystem: "file-change-store" }));
+    this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
       resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
       workItemStore: this.workItemStore,
       turnStore: this.turnStore,
-      fileChangeStore: this.fileChangeStore,
+      effortStore: this.effortStore,
+      snapshotStore: this.snapshotStore,
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
@@ -233,7 +232,7 @@ export class ElectronRuntime {
       this.batchStore.ensureStream(existingStream);
       this.workspaceWatchers.ensureWatching(existingStream);
       this.gitRefsWatchers.ensureWatching(existingStream);
-      this.seedSnapshotTracking(existingStream.id);
+      this.takeStartupSnapshot(existingStream.id);
     }
 
     this.workspaceWatchers.subscribe((event) => {
@@ -249,7 +248,6 @@ export class ElectronRuntime {
       // edits between turns still need to show up in the next turn-start
       // snapshot so the agent's "before" is accurate.
       this.markDirty(event.streamId, event.path);
-      this.recordFsWatchChange(event.streamId, event.path, event.kind, event.t);
     });
     this.gitRefsWatchers.subscribe((change) => {
       this.events.publish({
@@ -279,6 +277,15 @@ export class ElectronRuntime {
       }
       const batch = this.batchStore.findById(change.batchId);
       if (!batch) return;
+      if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
+        this.handleStatusTransition(
+          batch.stream_id,
+          change.batchId,
+          change.itemId,
+          change.previousStatus,
+          change.nextStatus,
+        );
+      }
       this.events.publish({
         type: "work-item.changed",
         streamId: batch.stream_id,
@@ -297,20 +304,6 @@ export class ElectronRuntime {
     });
     this.store.subscribe((change) => {
       this.events.publish({ type: "stream.changed", kind: change.kind, streamId: change.streamId });
-    });
-    this.fileChangeStore.subscribe((change) => {
-      const batch = this.batchStore.findById(change.batch_id);
-      if (!batch) return;
-      this.events.publish({
-        type: "file-change.recorded",
-        streamId: batch.stream_id,
-        batchId: change.batch_id,
-        turnId: change.turn_id,
-        changeId: change.id,
-        path: change.path,
-        kind: change.change_kind,
-        source: change.source,
-      });
     });
     this.waitPointStore.subscribe((change) => {
       const batch = this.batchStore.findById(change.batchId);
@@ -399,7 +392,8 @@ export class ElectronRuntime {
           commitPointStore: this.commitPointStore,
           executeCommit: (cpId, message) => this.batchQueue.executeCommit(cpId, message),
           turnStore: this.turnStore,
-          fileChangeStore: this.fileChangeStore,
+          effortStore: this.effortStore,
+          snapshotStore: this.snapshotStore,
           waitPointStore: this.waitPointStore,
         }),
         ...buildLspMcpTools({
@@ -1164,8 +1158,8 @@ export class ElectronRuntime {
     // triage during the turn. A missing/closed turn falls back to the
     // pre-fix behaviour.
     const openTurn = this.turnStore.currentOpenTurn(batchId);
-    const currentTurnFilePaths = openTurn
-      ? this.fileChangeStore.listForTurn(openTurn.id).map((row) => row.path)
+    const currentTurnFilePaths = openTurn?.start_snapshot_id
+      ? this.computeTurnFilePaths(openTurn)
       : [];
     // When auto-commit is on and the batch is the writer, run the commit
     // directly without synthesizing a commit_point row. No DB row means no
@@ -1248,59 +1242,19 @@ export class ElectronRuntime {
         const payload = (envelope.payload ?? {}) as { prompt?: unknown };
         const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
         if (!prompt.trim()) return;
-        // Defensive: if a prior turn never saw Stop, close it out with no answer
-        // so every open turn corresponds to the latest prompt.
+        // Defensive: if a prior turn never saw Stop, close it out so every
+        // open turn corresponds to the latest prompt.
         const stillOpen = this.turnStore.currentOpenTurn(batchId);
         if (stillOpen) {
-          this.turnStore.closeTurn(stillOpen.id, { workItemId: null, answer: null });
+          this.turnStore.closeTurn(stillOpen.id, { answer: null });
         }
         const turn = this.turnStore.openTurn({ batchId, prompt, sessionId });
         const batch = this.batchStore.findById(batchId);
         if (batch) {
-          try {
-            this.flushSnapshotForStream(batch.stream_id, "turn-start", turn.id, batchId);
-          } catch (error) {
-            this.logger.warn("turn-start snapshot flush failed", {
-              batchId,
-              turnId: turn.id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
+          const startSnapshotId = this.safeFlushSnapshot(batch.stream_id, "turn-start");
+          if (startSnapshotId) this.turnStore.setStartSnapshot(turn.id, startSnapshotId);
+          this.linkOpenEffortsToTurn(turn.id);
         }
-        return;
-      }
-      case "Stop": {
-        const open = this.turnStore.currentOpenTurn(batchId);
-        if (!open) return;
-        const batch = this.batchStore.findById(batchId);
-        const workItemId = this.soleInProgressWorkItem(batchId);
-        this.turnStore.closeTurn(open.id, { workItemId, answer: null });
-        const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
-          ? (envelope.payload as { transcript_path: string }).transcript_path
-          : null;
-        if (transcriptPath) {
-          const usage = readTurnUsage(transcriptPath, open.started_at, this.logger);
-          if (usage && (usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadInputTokens !== null)) {
-            this.turnStore.setTurnUsage(open.id, usage);
-          }
-        }
-        if (batch) {
-          try {
-            this.flushSnapshotForStream(batch.stream_id, "turn-end", open.id, batchId);
-          } catch (error) {
-            this.logger.warn("turn-end snapshot flush failed", {
-              batchId,
-              turnId: open.id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-        return;
-      }
-      case "SessionEnd": {
-        const open = this.turnStore.currentOpenTurn(batchId);
-        if (!open) return;
-        this.turnStore.closeTurn(open.id, { workItemId: null, answer: null });
         return;
       }
       case "PostToolUse": {
@@ -1320,8 +1274,36 @@ export class ElectronRuntime {
         const normalizedPath = stream
           ? toWorktreeRelativePath(extractedPath, stream.worktree_path)
           : extractedPath;
-        const kind = this.classifyHookChangeKind(batchId, stream, normalizedPath, toolName);
-        this.recordHookFileChange(batchId, normalizedPath, kind, toolName);
+        if (stream && !shouldAcceptHookFilePath(normalizedPath, stream.worktree_path, this.config.generatedDirs)) {
+          return;
+        }
+        if (batch) this.markDirty(batch.stream_id, normalizedPath);
+        return;
+      }
+      case "Stop": {
+        const open = this.turnStore.currentOpenTurn(batchId);
+        if (!open) return;
+        const batch = this.batchStore.findById(batchId);
+        this.turnStore.closeTurn(open.id, { answer: null });
+        const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
+          ? (envelope.payload as { transcript_path: string }).transcript_path
+          : null;
+        if (transcriptPath) {
+          const usage = readTurnUsage(transcriptPath, open.started_at, this.logger);
+          if (usage && (usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadInputTokens !== null)) {
+            this.turnStore.setTurnUsage(open.id, usage);
+          }
+        }
+        if (batch) {
+          const endSnapshotId = this.safeFlushSnapshot(batch.stream_id, "turn-end");
+          if (endSnapshotId) this.turnStore.setEndSnapshot(open.id, endSnapshotId);
+        }
+        return;
+      }
+      case "SessionEnd": {
+        const open = this.turnStore.currentOpenTurn(batchId);
+        if (!open) return;
+        this.turnStore.closeTurn(open.id, { answer: null });
         return;
       }
       default:
@@ -1329,78 +1311,63 @@ export class ElectronRuntime {
     }
   }
 
-  private recordFsWatchChange(streamId: string, path: string, kind: FileChangeKind, t: number): void {
-    const stamp = this.recentUiWrites.get(path);
-    if (stamp !== undefined && t - stamp < UI_WRITE_ECHO_WINDOW_MS) {
-      return;
-    }
-    const activeBatchId = this.batchStore.list(streamId).activeBatchId;
-    if (!activeBatchId) return;
-    if (this.agentStatusByBatch.get(activeBatchId) !== "working") return;
-    this.persistFileChange(activeBatchId, path, kind, "fs-watch", null);
-  }
-
-  private classifyHookChangeKind(
+  /**
+   * Auto-snapshot + effort bookkeeping for a work item status change.
+   * `in_progress` opens a new effort with a start snapshot; any transition
+   * out of `in_progress` closes it with an end snapshot.
+   */
+  private handleStatusTransition(
+    streamId: string,
     batchId: string,
-    stream: Stream | null,
-    path: string,
-    toolName: string,
-  ): FileChangeKind {
-    // Edit/MultiEdit/NotebookEdit require a pre-existing file by contract, so
-    // the post-hook state is always "updated". Only Write can introduce a
-    // brand-new file.
-    if (toolName !== "Write") return "updated";
-    // If we've already recorded a change for this path in this batch, it's no
-    // longer the first write — classify as an update regardless of file state.
-    if (this.fileChangeStore.hasChangeForPath(batchId, path)) return "updated";
-    const worktreePath = stream?.worktree_path;
-    if (!worktreePath) return "updated";
-    // On PostToolUse the write has already landed, so a non-existent file here
-    // would be unusual; default to "updated" in that case rather than lying
-    // about a create.
-    const exists = existsSync(resolve(worktreePath, path));
-    return exists ? "created" : "updated";
-  }
-
-  private recordHookFileChange(
-    batchId: string,
-    path: string,
-    kind: FileChangeKind,
-    toolName: string,
+    workItemId: string,
+    previous: WorkItem["status"] | undefined,
+    next: WorkItem["status"] | undefined,
   ): void {
-    this.persistFileChange(batchId, path, kind, "hook", toolName);
+    if (!next) return;
+    if (next === "in_progress" && previous !== "in_progress") {
+      const startSnapshotId = this.safeFlushSnapshot(streamId, "task-start");
+      const effort = this.effortStore.openEffort({ workItemId, startSnapshotId });
+      const openTurn = this.turnStore.currentOpenTurn(batchId);
+      if (openTurn) this.effortStore.linkEffortTurn(effort.id, openTurn.id);
+    } else if (previous === "in_progress" && next !== "in_progress") {
+      const endSnapshotId = this.safeFlushSnapshot(streamId, "task-end");
+      this.effortStore.closeEffort({ workItemId, endSnapshotId });
+    }
   }
 
-  private persistFileChange(
-    batchId: string,
-    path: string,
-    kind: FileChangeKind,
-    source: FileChangeSource,
-    toolName: string | null,
-  ): void {
-    const batch = this.batchStore.findById(batchId);
-    // Filter hook-reported paths that don't belong to the stream's worktree
-    // or match the same ignore rules the fs watcher uses. We drop both the
-    // file_change row and the dirty-path marker so bad hook data can't leak
-    // into snapshots or the Changes panel.
-    if (batch) {
-      const stream = this.store.get(batch.stream_id);
-      if (stream && !shouldAcceptHookFilePath(path, stream.worktree_path, this.config.generatedDirs)) {
-        return;
-      }
+  private linkOpenEffortsToTurn(turnId: string): void {
+    for (const effort of this.effortStore.listOpenEfforts()) {
+      this.effortStore.linkEffortTurn(effort.id, turnId);
     }
-    const turn = this.turnStore.currentOpenTurn(batchId);
-    const workItemId = this.soleInProgressWorkItem(batchId);
-    this.fileChangeStore.record({
-      batchId,
-      turnId: turn?.id ?? null,
-      workItemId,
-      path,
-      changeKind: kind,
-      source,
-      toolName,
-    });
-    if (batch) this.markDirty(batch.stream_id, path);
+  }
+
+  private safeFlushSnapshot(streamId: string, source: SnapshotSource): string | null {
+    try {
+      return this.flushSnapshotForStream(streamId, source);
+    } catch (error) {
+      this.logger.warn("snapshot flush failed", {
+        streamId,
+        source,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Returns paths that differ between the current open turn's start snapshot
+   * and the current worktree state (used by the Stop-hook pipeline to know
+   * which files the agent touched during this turn).
+   */
+  private computeTurnFilePaths(openTurn: AgentTurn): string[] {
+    if (!openTurn.start_snapshot_id) return [];
+    const batch = this.batchStore.findById(openTurn.batch_id);
+    if (!batch) return [];
+    const stream = this.store.get(batch.stream_id);
+    if (!stream) return [];
+    const ignore = (relpath: string) =>
+      shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
+    return this.snapshotStore.reconcileWorktree(openTurn.start_snapshot_id, stream.worktree_path, ignore);
   }
 
   private markDirty(streamId: string, path: string): void {
@@ -1412,147 +1379,75 @@ export class ElectronRuntime {
     set.add(path);
   }
 
-  private flushSnapshotForStream(
-    streamId: string,
-    kind: SnapshotKind,
-    turnId: string | null,
-    batchId: string | null,
-  ): string | null {
+  /**
+   * Capture a snapshot for `streamId` using the accumulated dirty-path set
+   * as an optimizer hint. If the snapshot content matches the most recent
+   * snapshot (version_hash equal), the existing id is returned with no new
+   * row created. Returns null if no stream is found.
+   */
+  private flushSnapshotForStream(streamId: string, source: SnapshotSource): string | null {
     const stream = this.store.get(streamId);
     if (!stream) return null;
     const dirty = this.dirtyPathsByStream.get(streamId);
-    if (!dirty || dirty.size === 0) return null;
-    const allDirty = Array.from(dirty);
-    // Defense-in-depth: drop any dirty entries that don't actually belong to
-    // the stream's worktree before handing them to the snapshot store. Bad
-    // data from a hook or a race with a worktree move could otherwise cause
-    // the snapshot to contain tombstones for unrelated paths.
+    const allDirty = dirty ? Array.from(dirty) : [];
     const dirtyPaths = allDirty.filter((relpath) => isInsideWorktree(relpath, stream.worktree_path));
-    if (dirtyPaths.length === 0) {
-      dirty.clear();
-      return null;
-    }
-    const parent = this.store.getCurrentSnapshotId(streamId);
-    const snapshotId = this.snapshotStore.flushSnapshot({
-      kind,
+    const ignore = (relpath: string) =>
+      shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
+    const result = this.snapshotStore.flushSnapshot({
+      source,
       streamId,
       worktreePath: stream.worktree_path,
-      dirtyPaths,
-      parentSnapshotId: parent,
-      turnId,
-      batchId,
+      dirtyPaths: dirty ? dirtyPaths : null,
+      ignore,
     });
-    if (!snapshotId) return null;
-    dirty.clear();
-    this.store.setCurrentSnapshotId(streamId, snapshotId);
-    // Backfill any pending batch_file_change rows for this stream that
-    // haven't been attached to a snapshot yet.
-    const placeholders = dirtyPaths.map(() => "?").join(",");
-    getStateDatabase(this.projectDir).run(
-      `UPDATE batch_file_change SET snapshot_id = ?
-       WHERE snapshot_id IS NULL
-         AND path IN (${placeholders})
-         AND batch_id IN (SELECT id FROM batches WHERE stream_id = ?)`,
-      snapshotId,
-      ...dirtyPaths,
-      streamId,
-    );
-    this.events.publish({
-      type: "file-snapshot.created",
-      streamId,
-      snapshotId,
-      kind,
-      turnId,
-      batchId,
-    });
-    return snapshotId;
+    if (dirty) dirty.clear();
+    if (result.created) {
+      this.events.publish({
+        type: "file-snapshot.created",
+        streamId,
+        snapshotId: result.id,
+        kind: source,
+        turnId: null,
+        batchId: null,
+      });
+    }
+    return result.id;
   }
 
   /**
-   * Walk the worktree in chunks to seed the dirty set. Two modes, unified
-   * under one walker so large monorepos don't block the event loop either
-   * way:
-   *   - Cold start (no `current_snapshot_id`): mark every file dirty.
-   *   - Reconcile (have a current snapshot): mark files whose disk stat
-   *     differs from the resolved manifest entry, plus files that exist in
-   *     the manifest but not on disk (deletions).
-   *
-   * Runs under `setImmediate` chunks of SEED_CHUNK_SIZE files; disposal
-   * short-circuits further ticks via the `disposed` flag.
+   * Take a startup snapshot for `streamId` so any changes that happened
+   * while the app was down land in history with `source="startup"`. Uses a
+   * full worktree walk (no dirty-path optimizer hint — the fs watcher
+   * didn't see anything while we were off); `version_hash` dedup means we
+   * don't insert a row when nothing actually changed.
    */
-  private seedSnapshotTracking(streamId: string): void {
+  private takeStartupSnapshot(streamId: string): void {
     const stream = this.store.get(streamId);
     if (!stream) return;
-    const ignore = (relpath: string) => shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
     setImmediate(() => {
       if (this.disposed) return;
       try {
-        const current = this.store.getCurrentSnapshotId(streamId);
-        const entries = current ? this.snapshotStore.resolveEntries(current) : null;
-        const seen = entries ? new Set<string>() : null;
-        const stack: string[] = [""];
-        let counter = 0;
-        const step = () => {
-          if (this.disposed) return;
-          while (stack.length > 0 && counter < SEED_CHUNK_SIZE) {
-            const rel = stack.pop()!;
-            const abs = rel ? resolve(stream.worktree_path, rel) : stream.worktree_path;
-            let children;
-            try {
-              children = readdirSync(abs, { withFileTypes: true });
-            } catch {
-              continue;
-            }
-            for (const child of children) {
-              const childRel = rel ? `${rel}/${child.name}` : child.name;
-              if (ignore(childRel)) continue;
-              if (child.isDirectory()) {
-                stack.push(childRel);
-                continue;
-              }
-              if (!child.isFile()) continue;
-              counter++;
-              if (!entries) {
-                this.markDirty(streamId, childRel);
-                continue;
-              }
-              seen!.add(childRel);
-              const entry = entries[childRel];
-              if (!entry || entry.state === "deleted") {
-                this.markDirty(streamId, childRel);
-                continue;
-              }
-              let st;
-              try {
-                st = statSync(abs === stream.worktree_path ? resolve(stream.worktree_path, childRel) : resolve(abs, child.name));
-              } catch {
-                continue;
-              }
-              const size = st.size;
-              const mtime = Math.floor(st.mtimeMs);
-              if (entry.size !== size || entry.mtime_ms !== mtime) {
-                this.markDirty(streamId, childRel);
-              }
-            }
-          }
-          if (stack.length > 0) {
-            counter = 0;
-            setImmediate(step);
-            return;
-          }
-          // Walk finished. In reconcile mode, mark anything in the manifest
-          // that disappeared from disk as dirty (the flush will record a
-          // tombstone).
-          if (entries && seen) {
-            for (const [rel, entry] of Object.entries(entries)) {
-              if (entry.state === "deleted") continue;
-              if (!seen.has(rel)) this.markDirty(streamId, rel);
-            }
-          }
-        };
-        step();
+        const ignore = (relpath: string) =>
+          shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
+        const result = this.snapshotStore.flushSnapshot({
+          source: "startup",
+          streamId,
+          worktreePath: stream.worktree_path,
+          dirtyPaths: null,
+          ignore,
+        });
+        if (result.created) {
+          this.events.publish({
+            type: "file-snapshot.created",
+            streamId,
+            snapshotId: result.id,
+            kind: "startup",
+            turnId: null,
+            batchId: null,
+          });
+        }
       } catch (error) {
-        this.logger.warn("seed snapshot tracking failed", {
+        this.logger.warn("startup snapshot failed", {
           streamId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1570,31 +1465,12 @@ export class ElectronRuntime {
     }
   }
 
-  private soleInProgressWorkItem(batchId: string): string | null {
-    const inProgress = this.workItemStore
-      .listItems(batchId)
-      .filter((item) => item.status === "in_progress");
-    return inProgress.length === 1 ? inProgress[0]!.id : null;
-  }
-
   listAgentTurns(batchId: string, limit?: number): AgentTurn[] {
     return this.turnStore.listForBatch(batchId, limit);
   }
 
-  listFileChanges(batchId: string, limit?: number): BatchFileChange[] {
-    return this.fileChangeStore.listForBatch(batchId, limit);
-  }
-
-  /**
-   * Returns before/after contents for a single path within one turn.
-   * "before" is the turn-start snapshot (or its parent if only an end
-   * exists); "after" is the turn-end snapshot.
-   */
-  getTurnFileDiff(turnId: string, path: string): SnapshotDiffResult {
-    const { start, end } = this.snapshotStore.getTurnSnapshots(turnId);
-    if (!end) return { before: null, after: null, beforeState: "absent", afterState: "absent" };
-    const beforeId = start?.parent_snapshot_id ?? end.parent_snapshot_id ?? null;
-    return this.snapshotStore.diffPath(beforeId, end.id, path);
+  listWorkItemEfforts(itemId: string): WorkItemEffort[] {
+    return this.effortStore.listEffortsForWorkItem(itemId);
   }
 
   listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
@@ -1603,10 +1479,6 @@ export class ElectronRuntime {
 
   getSnapshotSummary(snapshotId: string): SnapshotSummary | null {
     return this.snapshotStore.getSnapshotSummary(snapshotId);
-  }
-
-  getSnapshotFileDiff(snapshotId: string, path: string): SnapshotDiffResult {
-    return this.snapshotStore.getSnapshotFileDiff(snapshotId, path);
   }
 
   getSnapshotPairDiff(

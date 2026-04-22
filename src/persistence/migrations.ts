@@ -487,6 +487,84 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 20,
+    name: "rethink_history_tracking",
+    up: (db) => {
+      // Rebuilds the history-tracking subsystem. Drops batch_file_change
+      // entirely (per-file logs now derived from snapshot diffs), flattens
+      // file_snapshot (no more parent chain; time-ordered with a version hash
+      // for dedup), drops agent_turn.work_item_id in favour of a many-to-many
+      // join through work_item_effort, and introduces work_item_effort +
+      // work_item_effort_turn. All prior snapshot/turn/file-change rows are
+      // wiped — history is not preserved across this migration.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        DROP TABLE IF EXISTS batch_file_change;
+
+        DELETE FROM file_snapshot;
+        DELETE FROM snapshot_entry;
+        DELETE FROM agent_turn;
+        UPDATE streams SET current_snapshot_id = NULL;
+
+        CREATE TABLE file_snapshot_new (
+          id TEXT PRIMARY KEY,
+          stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+          worktree_path TEXT NOT NULL,
+          version_hash TEXT NOT NULL,
+          source TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        DROP TABLE file_snapshot;
+        ALTER TABLE file_snapshot_new RENAME TO file_snapshot;
+
+        CREATE INDEX idx_file_snapshot_stream ON file_snapshot(stream_id, created_at DESC);
+        CREATE INDEX idx_file_snapshot_stream_hash ON file_snapshot(stream_id, version_hash);
+
+        CREATE TABLE agent_turn_new (
+          id TEXT PRIMARY KEY,
+          batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+          prompt TEXT NOT NULL,
+          answer TEXT,
+          session_id TEXT,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          cache_read_input_tokens INTEGER,
+          start_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL,
+          end_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL
+        );
+
+        DROP TABLE agent_turn;
+        ALTER TABLE agent_turn_new RENAME TO agent_turn;
+
+        CREATE INDEX idx_agent_turn_batch ON agent_turn(batch_id, started_at DESC);
+
+        CREATE TABLE work_item_effort (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          start_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL,
+          end_snapshot_id TEXT REFERENCES file_snapshot(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX idx_work_item_effort_item ON work_item_effort(work_item_id, started_at DESC);
+        CREATE INDEX idx_work_item_effort_open ON work_item_effort(work_item_id) WHERE ended_at IS NULL;
+
+        CREATE TABLE work_item_effort_turn (
+          effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+          turn_id TEXT NOT NULL REFERENCES agent_turn(id) ON DELETE CASCADE,
+          PRIMARY KEY (effort_id, turn_id)
+        );
+
+        CREATE INDEX idx_work_item_effort_turn_turn ON work_item_effort_turn(turn_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

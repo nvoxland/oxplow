@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BacklogState,
   Batch,
-  BatchFileChange,
   BatchWorkState,
   CommitPoint,
+  EffortDetail,
   WaitPoint,
   WorkItem,
   WorkItemKind,
@@ -19,7 +19,7 @@ import {
   getWorkNotes,
   listCommitPoints,
   listWaitPoints,
-  listWorkItemFileChanges,
+  listWorkItemEfforts,
   reorderBatchQueue,
   setAutoCommit,
   subscribeNewdeEvents,
@@ -149,8 +149,9 @@ export function PlanPane({
   const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
   // Notes for the currently-open edit modal.
   const [editingItemNotes, setEditingItemNotes] = useState<WorkNote[]>([]);
-  // File changes attributed to the currently-open edit modal's work item.
-  const [editingItemFileChanges, setEditingItemFileChanges] = useState<BatchFileChange[]>([]);
+  // Efforts (in_progress → human_check cycles) for the currently-open edit
+  // modal's work item; each carries its own start/end snapshot pair.
+  const [editingItemEfforts, setEditingItemEfforts] = useState<EffortDetail[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const batchId = batch?.id ?? null;
@@ -365,13 +366,13 @@ export function PlanPane({
     setEditingItemId(item.id);
     setEditingItem(item);
     setEditingItemNotes([]);
-    setEditingItemFileChanges([]);
+    setEditingItemEfforts([]);
     setModalMode("edit");
     void getWorkNotes(item.id)
       .then((notes) => setEditingItemNotes(notes))
       .catch(() => { /* non-fatal */ });
-    void listWorkItemFileChanges(item.id)
-      .then((changes) => setEditingItemFileChanges(changes))
+    void listWorkItemEfforts(item.id)
+      .then((efforts) => setEditingItemEfforts(efforts))
       .catch(() => { /* non-fatal */ });
   };
 
@@ -380,7 +381,7 @@ export function PlanPane({
     setEditingItemId(null);
     setEditingItem(null);
     setEditingItemNotes([]);
-    setEditingItemFileChanges([]);
+    setEditingItemEfforts([]);
     paneRef.current?.focus();
   };
 
@@ -484,7 +485,7 @@ export function PlanPane({
           })() : false}
           showSaveAndAnother={modalMode === "create"}
           notes={modalMode === "edit" ? editingItemNotes : []}
-          fileChanges={modalMode === "edit" ? editingItemFileChanges : []}
+          efforts={modalMode === "edit" ? editingItemEfforts : []}
           item={modalMode === "edit" ? editingItem : null}
           epics={batchWork?.epics ?? []}
           onOpenItem={(target) => openEditModal(target)}
@@ -970,7 +971,7 @@ function NewWorkItemModal({
   canNavigateNext = false,
   showSaveAndAnother = true,
   notes = [],
-  fileChanges = [],
+  efforts = [],
   item = null,
   epics = [],
   onOpenItem,
@@ -995,7 +996,7 @@ function NewWorkItemModal({
   canNavigateNext?: boolean;
   showSaveAndAnother?: boolean;
   notes?: WorkNote[];
-  fileChanges?: BatchFileChange[];
+  efforts?: EffortDetail[];
   item?: WorkItem | null;
   epics?: WorkItem[];
   onOpenItem?(item: WorkItem): void;
@@ -1196,9 +1197,9 @@ function NewWorkItemModal({
                   {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
                   {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
                 </div>
-                <FileChangesSection
+                <EffortsSection
                   item={item}
-                  fileChanges={fileChanges}
+                  efforts={efforts}
                   onOpenFile={onOpenFile}
                   onShowInHistory={onShowInHistory}
                 />
@@ -1259,81 +1260,58 @@ function NewWorkItemModal({
   );
 }
 
-function FileChangesSection({
+function EffortsSection({
   item,
-  fileChanges,
+  efforts,
   onOpenFile,
   onShowInHistory,
 }: {
   item: WorkItem;
-  fileChanges: BatchFileChange[];
+  efforts: EffortDetail[];
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(itemId: string): void;
 }) {
-  // Dedupe by path — a file can change across multiple turns; keep the most
-  // recent change_kind (list is DESC by created_at) and count occurrences.
-  const grouped = (() => {
-    const map = new Map<string, { path: string; kind: string; count: number }>();
-    for (const change of fileChanges) {
-      const existing = map.get(change.path);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        map.set(change.path, { path: change.path, kind: change.change_kind, count: 1 });
-      }
-    }
-    return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
-  })();
-
+  const totalPaths = new Set<string>();
+  for (const effort of efforts) {
+    for (const path of effort.changed_paths) totalPaths.add(path);
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={modalFieldLabelStyle}>
-        Files changed {grouped.length > 0 ? `(${grouped.length})` : ""}
+        Efforts {efforts.length > 0 ? `(${efforts.length}, ${totalPaths.size} file${totalPaths.size === 1 ? "" : "s"})` : ""}
       </div>
-      {grouped.length === 0 ? (
+      {efforts.length === 0 ? (
         <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
-          No file changes attributed to this item.
+          No efforts yet — moving this item to "in progress" starts one.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 160, overflowY: "auto" }}>
-          {grouped.map((row) => (
-            <div
-              key={row.path}
-              title={row.path}
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}
-            >
-              <span style={{ ...fileKindBadgeStyle, color: fileKindColor(row.kind) }}>
-                {fileKindLabel(row.kind)}
-              </span>
-              {onOpenFile ? (
-                <button
-                  type="button"
-                  onClick={() => void onOpenFile(row.path)}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    color: "var(--accent)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    font: "inherit",
-                    textDecoration: "underline",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                    minWidth: 0,
-                  }}
-                >
-                  {row.path}
-                </button>
-              ) : (
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {row.path}
-                </span>
-              )}
-              {row.count > 1 ? (
-                <span style={{ color: "var(--muted)", flexShrink: 0 }}>×{row.count}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
+          {efforts.map((detail, i) => (
+            <div key={detail.effort.id} style={{ display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "baseline" }}>
+                <span>Effort {i + 1}</span>
+                <span>· {formatNoteDate(detail.effort.started_at)}</span>
+                {detail.effort.ended_at ? <span>→ {formatNoteDate(detail.effort.ended_at)}</span> : <span style={{ color: "var(--accent)" }}>· open</span>}
+                <span style={{ marginLeft: "auto" }}>{detail.changed_paths.length} file{detail.changed_paths.length === 1 ? "" : "s"}</span>
+              </div>
+              {detail.changed_paths.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  {detail.changed_paths.map((path) => (
+                    <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                      {onOpenFile ? (
+                        <button
+                          type="button"
+                          onClick={() => void onOpenFile(path)}
+                          style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
+                        >
+                          {path}
+                        </button>
+                      ) : (
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               ) : null}
             </div>
           ))}
@@ -1345,8 +1323,8 @@ function FileChangesSection({
           data-testid="work-item-show-in-history"
           onClick={() => onShowInHistory(item.id)}
           style={{ ...miniButtonStyle, alignSelf: "flex-start", marginTop: 4 }}
-          disabled={grouped.length === 0}
-          title={grouped.length === 0 ? "No file changes to show" : "Open Local History and select this work item's snapshot"}
+          disabled={efforts.length === 0}
+          title={efforts.length === 0 ? "No efforts yet" : "Open Local History and select this work item's most recent snapshot"}
         >
           Show in history
         </button>

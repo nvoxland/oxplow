@@ -126,80 +126,87 @@ past, so prompting the agent at all resumes auto-progression. There is no
 
 ### `agent_turn` — `TurnStore` (`src/persistence/turn-store.ts`)
 
-One row per agent turn (UserPromptSubmit → Stop). Captures the prompt, the
-sole-in-progress work item if any, and the Claude session id. The Stop
-handler also sums assistant-message `usage` from the session's jsonl
-transcript for the turn's time window and stores `input_tokens`,
-`output_tokens`, and `cache_read_input_tokens`. Used by the Activity tab
-and by file-change attribution.
+One row per agent turn (UserPromptSubmit → Stop). Captures the prompt,
+answer, Claude session id, token usage, and the `start_snapshot_id` +
+`end_snapshot_id` taken at the turn boundaries. The Activity tab builds
+its per-turn file-change list by diffing those two snapshots. A turn has
+no direct work-item FK anymore — efforts connect work items to turns via
+the `work_item_effort_turn` join table (see below).
 
-### `batch_file_change` — `FileChangeStore` (`src/persistence/file-change-store.ts`)
+### `work_item_effort` + `work_item_effort_turn` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
 
-Per-batch log of file mutations attributed to either a hook (Write/Edit/
-MultiEdit/NotebookEdit PostToolUse) or fs-watch (anything else). Carries
-turn_id and work_item_id when known. Drives the file-change indicators in
-the project pane and the per-turn file filter. Each row gets a nullable
-`snapshot_id` pointing at the `file_snapshot` that absorbed the change
-(backfilled when a turn-start or turn-end snapshot flushes).
+An **effort** is one `in_progress → human_check` (or done/canceled) cycle
+of a work item. Columns: `work_item_id`, `started_at`, `ended_at`,
+`start_snapshot_id`, `end_snapshot_id`. Auto-managed by the runtime on
+`work-item.changed` status transitions:
 
-Read API: `listForBatch(batchId)`, `listForTurn(turnId)`, and
-`listForWorkItem(itemId)` (used by the Work Item edit modal's
-"Files changed" section + "Show in history" button — the latter opens
-the Local History bottom panel and selects the snapshot matching the
-most recent turn that touched files for the item).
+- `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
+  and linked to `start_snapshot_id`.
+- `in_progress → {human_check, done, canceled}` closes the effort; a
+  `task-end` snapshot is flushed and linked to `end_snapshot_id`.
+
+Re-opening a task (human_check → ready → in_progress) produces a second
+effort. At most one open effort per work item at a time.
+
+`work_item_effort_turn` is a many-to-many join so a single effort can
+span multiple turns. The runtime writes a link row (a) for every
+currently-open effort when a turn opens and (b) for the currently-open
+turn when an effort opens mid-turn.
+
+Read API: `listEffortsForWorkItem(itemId)`, `listOpenEfforts()`,
+`listEffortsForSnapshot(snapshotId)`, `listTurnsForEffort(effortId)`,
+`listEffortsForTurn(turnId)`. `createWorkItemApi` exposes
+`listWorkItemEfforts(itemId)` which returns per-effort rows with
+pre-joined start/end snapshot metadata and the list of changed paths
+(computed from the pair diff).
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
-Metadata for content-addressed file snapshots. `file_snapshot` holds
-one row per flush (kind, turn/batch fk, parent pointer, timestamp).
-`snapshot_entry` holds the per-path rows for each snapshot: `path`,
-`hash`, `mtime_ms`, `size`, `state`. Cascades from `file_snapshot`
-delete entries automatically. Walking the parent chain reconstructs
-the full file set.
+Time-ordered, self-contained snapshots. `file_snapshot` columns:
+`id, stream_id, worktree_path, version_hash, source, created_at`.
+`snapshot_entry` holds the per-path rows: `path, hash, mtime_ms, size,
+state`.
+
+`source` is one of `task-start | task-end | turn-start | turn-end |
+startup | external`. `version_hash` is a SHA-256 over the canonical
+`(path, hash, size, state)` entry set — `mtime_ms` is deliberately
+excluded so touching a file without changing its bytes doesn't produce
+a new snapshot.
+
+**Dedup on flush.** `flushSnapshot()` computes the next snapshot's
+`version_hash` (reusing the most recent snapshot's entries for any path
+not listed in `dirtyPaths`), and if that hash matches the newest
+existing snapshot for the stream, it returns `{ created: false, id:
+<existing> }` instead of inserting a new row. `dirtyPaths` is an
+optimizer hint — when null the entire worktree is walked.
+
+**No parent chain.** Snapshots have no `parent_snapshot_id`; the
+"previous" snapshot for diff purposes is just the most recent
+`file_snapshot` row with `created_at < target.created_at` for the same
+stream. `getSnapshotSummary(id, previousId?)` returns created/updated/
+deleted counts relative to that previous snapshot (or an explicit one
+if provided); `getSnapshotPairDiff(beforeId, afterId, path)` serves
+arbitrary pair diffs.
 
 Blobs live on disk at `.newde/snapshots/objects/xx/yyyy…` (sha256
-addressed, shared across streams for dedup). Kinds: `turn-start` or
-`turn-end`; the first turn-start on a stream doubles as its baseline.
+addressed, shared across streams for dedup).
 
 Entry states:
 - `present`: file captured, `hash` points at a real blob.
-- `deleted`: tombstone — file was gone at flush time.
-- `oversize`: file existed but exceeded `snapshotMaxFileBytes`; no
-  blob, but `mtime_ms` and `size` are tracked so diffs still report
-  "it changed (by this much)" even without content.
-
-The `streams.current_snapshot_id` column holds the stream's latest
-snapshot — it's the parent for the next flush.
-
-Read API (surfaced via IPC — see `ipc-and-stores.md`):
-
-- `listSnapshotsForStream(streamId, limit)` — newest-first.
-- `getSnapshotSummary(id)` → `{ snapshot, files: {path: {entry,
-  kind}}, counts }`; classifies each manifest entry as
-  created/updated/deleted relative to the parent chain.
-- `getSnapshotFileDiff(id, path)` — resolves "before" from the
-  parent chain and "after" from this snapshot.
-- `getSnapshotPairDiff(beforeId, afterId, path)` — arbitrary pair.
-- `getTurnSnapshots(turnId)` — `{ start, end }` for a turn, used by
-  `runtime.getTurnFileDiff`.
+- `deleted`: tombstone — file was gone at flush time. Emitted once after
+  a file disappears; dropped on the next flush so snapshots don't carry
+  ancient ghosts forever.
+- `oversize`: file existed but exceeded `snapshotMaxFileBytes`; no blob,
+  but `mtime_ms` and `size` are tracked.
 
 **Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
 deletes snapshots older than the cutoff (default 7 days, configurable
-via `newde.yaml`'s `snapshotRetentionDays`; `0` disables pruning),
-except:
-
-- the most recent snapshot per stream is always kept;
-- anything `streams.current_snapshot_id` points at is always kept.
-
-After snapshot deletion, `gcBlobs()` sweeps `.newde/snapshots/objects/`
-and removes any blob whose sha isn't referenced by a surviving
-manifest. Descendants whose parent was deleted keep pointing at a
-missing id — `resolvePath` simply stops walking there, so the oldest
-surviving snapshot effectively becomes a new baseline for files it
-touches. The trade-off: ancient history drops; recent diffs stay
-intact. The blob store is shared across all streams in the project
-(`.newde/snapshots/objects/`), so GC runs at the project level and
-naturally dedupes identical content across branches.
+via `newde.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
+most recent snapshot per stream is always kept. `gcBlobs()` then sweeps
+`.newde/snapshots/objects/` and removes any blob whose sha isn't
+referenced by a surviving manifest. The blob store is shared across all
+streams (`.newde/snapshots/objects/`), so GC runs at the project level
+and dedupes identical content across branches.
 
 Cleanup runs at runtime startup and again once every 24 hours via
 `runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in
@@ -280,7 +287,7 @@ The runtime relays each store's changes onto the typed EventBus
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
 - `work-item.changed`, `backlog.changed`, `batch.changed`, `turn.changed`
-- `file-change.recorded`, `file-snapshot.created`, `agent-status.changed`
+- `file-snapshot.created`, `agent-status.changed`
 - `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`
 

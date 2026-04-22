@@ -123,6 +123,10 @@ export interface WorkItemChange {
   batchId: string;
   kind: WorkItemChangeKind;
   itemId: string | null;
+  /** Only populated for `updated` events when the status changed. */
+  previousStatus?: WorkItemStatus;
+  /** Only populated for `updated` events when the status changed. */
+  nextStatus?: WorkItemStatus;
 }
 
 export interface BatchWorkState {
@@ -377,7 +381,14 @@ export class WorkItemStore {
         payload: snapshotWorkItem(existing, updated),
       });
     });
-    this.emitChange({ batchId: input.batchId, kind: "updated", itemId: input.itemId });
+    const statusChanged = existing.status !== nextStatus;
+    this.emitChange({
+      batchId: input.batchId,
+      kind: "updated",
+      itemId: input.itemId,
+      previousStatus: statusChanged ? existing.status : undefined,
+      nextStatus: statusChanged ? nextStatus : undefined,
+    });
     return updated;
   }
 

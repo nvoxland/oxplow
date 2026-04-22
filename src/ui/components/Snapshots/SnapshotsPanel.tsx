@@ -1,13 +1,13 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
-  getSnapshotFileDiff,
   getSnapshotPairDiff,
   getSnapshotSummary,
   listSnapshots,
   restoreFileFromSnapshot,
   subscribeSnapshotEvents,
   type FileSnapshot,
+  type SnapshotSource,
   type SnapshotSummary,
   type Stream,
 } from "../../api.js";
@@ -18,12 +18,12 @@ import { ConfirmDialog } from "../ConfirmDialog.js";
 interface Props {
   stream: Stream | null;
   onOpenDiff?(spec: DiffSpec): void;
-  /** When set, the panel selects the snapshot whose turn_id matches. Change
+  /** When set, the panel selects the snapshot with the matching id. Change
    *  the token to request a new selection even if the id repeats. */
-  revealTurnId?: { turnId: string; token: number } | null;
+  revealSnapshotId?: { snapshotId: string; token: number } | null;
 }
 
-export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
+export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,14 +92,10 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
   }, [selectedId]);
 
   useEffect(() => {
-    if (!revealTurnId) return;
-    // Prefer the turn-end snapshot (that's what "changed files for this turn"
-    // represents). Fall back to any snapshot with the matching turn_id.
-    const target =
-      snapshots.find((s) => s.turn_id === revealTurnId.turnId && s.kind === "turn-end")
-      ?? snapshots.find((s) => s.turn_id === revealTurnId.turnId);
+    if (!revealSnapshotId) return;
+    const target = snapshots.find((s) => s.id === revealSnapshotId.snapshotId);
     if (target) setSelectedId(target.id);
-  }, [revealTurnId?.turnId, revealTurnId?.token, snapshots]);
+  }, [revealSnapshotId?.snapshotId, revealSnapshotId?.token, snapshots]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -137,17 +133,13 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
   };
 
   const handleOpenFileDiff = async (path: string) => {
-    if (!stream || !onOpenDiff || !selectedId) return;
+    if (!stream || !onOpenDiff || !selectedId || !summary) return;
     try {
-      let result;
-      let label: string;
-      if (compareMode && compareBaseId) {
-        result = await getSnapshotPairDiff(compareBaseId, selectedId, path);
-        label = `${compareBaseId.slice(-6)} → ${selectedId.slice(-6)}`;
-      } else {
-        result = await getSnapshotFileDiff(selectedId, path);
-        label = "parent → snapshot";
-      }
+      const baseId = compareMode && compareBaseId ? compareBaseId : summary.previousSnapshotId;
+      const result = await getSnapshotPairDiff(baseId, selectedId, path);
+      const label = baseId
+        ? `${baseId.slice(-6)} → ${selectedId.slice(-6)}`
+        : `initial → ${selectedId.slice(-6)}`;
       onOpenDiff({
         path,
         leftRef: "",
@@ -179,12 +171,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
 
   const filterLower = filter.trim().toLowerCase();
   const filteredSnapshots = filterLower
-    ? snapshots.filter((snap) => {
-        const description = snap.turn_id
-          ? (snap.turn_prompt ?? `turn ${snap.turn_id.slice(-6)}`)
-          : "External";
-        return description.toLowerCase().includes(filterLower);
-      })
+    ? snapshots.filter((snap) => snapshotLabel(snap).toLowerCase().includes(filterLower))
     : snapshots;
 
   return (
@@ -277,6 +264,28 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealTurnId }: Props) {
   );
 }
 
+function snapshotLabel(snap: FileSnapshot): string {
+  switch (snap.source) {
+    case "task-start":
+      return "Task started";
+    case "task-end":
+      return "Task ended";
+    case "turn-start":
+      return "Turn started";
+    case "turn-end":
+      return "Turn ended";
+    case "startup":
+      return "App startup";
+    case "external":
+    default:
+      return "External";
+  }
+}
+
+function isAgentSource(source: SnapshotSource): boolean {
+  return source === "task-start" || source === "task-end" || source === "turn-start" || source === "turn-end";
+}
+
 function SnapshotRow({
   snap,
   selected,
@@ -289,10 +298,8 @@ function SnapshotRow({
   onClick(): void;
 }) {
   const date = formatRelative(snap.created_at);
-  const isAgent = snap.kind === "turn-end" && snap.turn_id != null;
-  const description = isAgent
-    ? (snap.turn_prompt ?? "(agent turn)").replace(/\n/g, " ")
-    : "External";
+  const isAgent = isAgentSource(snap.source);
+  const description = snapshotLabel(snap);
   return (
     <div
       onClick={onClick}
@@ -363,14 +370,8 @@ function DetailPane({
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", color: "var(--muted)", fontSize: 11 }}>
         <span>Created</span>
         <span>{formatAbsolute(summary.snapshot.created_at)}</span>
-        {summary.snapshot.turn_id ? (
-          <>
-            <span style={{ alignSelf: "start" }}>Prompt</span>
-            <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {summary.snapshot.turn_prompt ?? summary.snapshot.turn_id}
-            </span>
-          </>
-        ) : null}
+        <span>Source</span>
+        <span>{snapshotLabel(summary.snapshot)}</span>
       </div>
       <div>
         <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>

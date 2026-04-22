@@ -2,7 +2,8 @@ import type { ToolDef } from "./mcp-server.js";
 import type { BatchStore, Batch } from "../persistence/batch-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
 import type { TurnStore } from "../persistence/turn-store.js";
-import type { FileChangeStore } from "../persistence/file-change-store.js";
+import type { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
+import type { SnapshotStore } from "../persistence/snapshot-store.js";
 import type {
   WorkItemKind,
   WorkItemPriority,
@@ -28,7 +29,8 @@ export interface McpToolDeps {
    *  orchestrator; thrown errors bubble back to the agent so it can retry. */
   executeCommit(cpId: string, message: string): CommitPoint;
   turnStore: TurnStore;
-  fileChangeStore: FileChangeStore;
+  effortStore: WorkItemEffortStore;
+  snapshotStore: SnapshotStore;
   waitPointStore: WaitPointStore;
 }
 
@@ -71,7 +73,9 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore, fileChangeStore } = deps;
+  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore, effortStore, snapshotStore } = deps;
+  void effortStore;
+  void snapshotStore;
 
   // Prefer the batch row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { batch, stream } — both guaranteed to agree
@@ -510,24 +514,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
         resolveBatchAndStream(args);
         return turnStore.listForBatch(args.batchId, args.limit);
-      },
-    },
-    {
-      name: "newde__list_batch_file_change",
-      description:
-        "List recent file changes recorded for a batch (newest first). Each row shows path, change_kind (created/updated/deleted), source (hook or fs-watch), and optional turn_id / work_item_id attribution.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id." },
-          limit: { type: "number", description: "Optional cap (default 200)." },
-        },
-        required: ["batchId"],
-      },
-      handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
-        resolveBatchAndStream(args);
-        return fileChangeStore.listForBatch(args.batchId, args.limit);
       },
     },
     {

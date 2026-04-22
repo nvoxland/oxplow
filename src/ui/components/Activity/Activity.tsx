@@ -1,28 +1,15 @@
-import { useMemo, useState } from "react";
-import type { AgentTurn, BatchFileChange, WorkItem } from "../../api.js";
-import { netFileChanges, fileChangeKindColor } from "../../file-change-net.js";
+import { useEffect, useState } from "react";
+import type { AgentTurn, WorkItem } from "../../api.js";
+import { getSnapshotSummary } from "../../api.js";
 
 interface Props {
   agentTurns: AgentTurn[] | null;
-  batchFileChanges: BatchFileChange[] | null;
   workItems: WorkItem[];
   onOpenFile(path: string): void;
-  onOpenTurnDiff?(turnId: string, path: string): void;
+  onOpenTurnDiff?(turn: AgentTurn, path: string): void;
 }
 
-export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile, onOpenTurnDiff }: Props) {
-  const itemById = useMemo(() => new Map(workItems.map((item) => [item.id, item] as const)), [workItems]);
-  const changesByTurn = useMemo(() => {
-    const out = new Map<string, BatchFileChange[]>();
-    for (const change of batchFileChanges ?? []) {
-      if (!change.turn_id) continue;
-      const list = out.get(change.turn_id) ?? [];
-      list.push(change);
-      out.set(change.turn_id, list);
-    }
-    return out;
-  }, [batchFileChanges]);
-
+export function Activity({ agentTurns, onOpenFile, onOpenTurnDiff }: Props) {
   if (agentTurns === null) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;
   }
@@ -35,8 +22,6 @@ export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile, 
         <TurnCard
           key={turn.id}
           turn={turn}
-          linkedItem={turn.work_item_id ? itemById.get(turn.work_item_id) ?? null : null}
-          fileChanges={changesByTurn.get(turn.id) ?? []}
           onOpenFile={onOpenFile}
           onOpenTurnDiff={onOpenTurnDiff}
         />
@@ -46,10 +31,6 @@ export function Activity({ agentTurns, batchFileChanges, workItems, onOpenFile, 
 }
 
 function TokenBadge({ turn }: { turn: AgentTurn }) {
-  // The transcript parse runs on the Stop hook — before that, or if the
-  // parse returned no matching assistant entries, all three counters are
-  // null and we show nothing. Cache-read is billed at ~10x less than input,
-  // so it gets its own compact ticker instead of being folded into `in`.
   const { input_tokens, output_tokens, cache_read_input_tokens } = turn;
   if (input_tokens === null && output_tokens === null && cache_read_input_tokens === null) {
     return null;
@@ -76,33 +57,57 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+interface TurnChange {
+  path: string;
+  kind: "created" | "updated" | "deleted";
+}
+
 function TurnCard({
   turn,
-  linkedItem,
-  fileChanges,
   onOpenFile,
   onOpenTurnDiff,
 }: {
   turn: AgentTurn;
-  linkedItem: WorkItem | null;
-  fileChanges: BatchFileChange[];
   onOpenFile(path: string): void;
-  onOpenTurnDiff?(turnId: string, path: string): void;
+  onOpenTurnDiff?(turn: AgentTurn, path: string): void;
 }) {
   const open = turn.ended_at == null;
   const [filesOpen, setFilesOpen] = useState(false);
-  const deduped = netFileChanges(fileChanges);
+  const [changes, setChanges] = useState<TurnChange[]>([]);
+
+  useEffect(() => {
+    // Build the per-turn changed-files list by diffing the turn's
+    // start and end snapshots. Nothing to show until both exist.
+    if (!turn.start_snapshot_id || !turn.end_snapshot_id) {
+      setChanges([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const summary = await getSnapshotSummary(turn.end_snapshot_id!);
+        if (cancelled || !summary) return;
+        const list: TurnChange[] = Object.entries(summary.files).map(([path, row]) => ({
+          path,
+          kind: row.kind,
+        }));
+        list.sort((a, b) => a.path.localeCompare(b.path));
+        setChanges(list);
+      } catch {
+        if (!cancelled) setChanges([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [turn.start_snapshot_id, turn.end_snapshot_id]);
+
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-2)", padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11, color: "var(--muted)" }}>
         <span>{new Date(turn.started_at).toLocaleString()}</span>
         {open ? <span style={{ color: "var(--accent)" }}>· in progress</span> : null}
         <TokenBadge turn={turn} />
-        {linkedItem ? (
-          <span style={{ marginLeft: "auto", padding: "1px 6px", border: "1px solid var(--border)", borderRadius: 999 }}>
-            {linkedItem.title}
-          </span>
-        ) : null}
       </div>
       <div style={{ fontSize: 13, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
         {turn.prompt}
@@ -112,19 +117,19 @@ function TurnCard({
           ↳ {turn.answer}
         </div>
       ) : null}
-      {deduped.length > 0 ? (
+      {changes.length > 0 ? (
         <div style={{ marginTop: 4 }}>
           <button type="button"
             onClick={() => setFilesOpen((v) => !v)}
             style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 11, fontFamily: "inherit" }}
           >
-            {filesOpen ? "▾" : "▸"} {deduped.length} file{deduped.length === 1 ? "" : "s"} touched
+            {filesOpen ? "▾" : "▸"} {changes.length} file{changes.length === 1 ? "" : "s"} touched
           </button>
           {filesOpen ? (
             <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-              {deduped.map((change) => (
+              {changes.map((change) => (
                 <button type="button"
-                  key={change.id}
+                  key={change.path}
                   onClick={() => onOpenFile(change.path)}
                   style={{ background: "transparent", border: "none", padding: 0, fontSize: 11, display: "flex", gap: 6, alignItems: "baseline", cursor: "pointer", textAlign: "left", color: "inherit", fontFamily: "inherit" }}
                   title={`Open ${change.path}`}
@@ -137,12 +142,12 @@ function TurnCard({
                       borderRadius: 3,
                       background: "var(--bg)",
                       border: "1px solid var(--border)",
-                      color: fileChangeKindColor(change.change_kind),
+                      color: fileChangeKindColor(change.kind),
                       minWidth: 52,
                       textAlign: "center",
                     }}
                   >
-                    {change.change_kind}
+                    {change.kind}
                   </span>
                   <span style={{ fontFamily: "ui-monospace, monospace", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2 }}>{change.path}</span>
                   {onOpenTurnDiff ? (
@@ -150,7 +155,7 @@ function TurnCard({
                       role="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onOpenTurnDiff(turn.id, change.path);
+                        onOpenTurnDiff(turn, change.path);
                       }}
                       title="Open turn diff"
                       style={{ fontSize: 10, padding: "0 4px", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", color: "var(--muted)" }}
@@ -158,10 +163,6 @@ function TurnCard({
                       diff
                     </span>
                   ) : null}
-                  <span style={{ color: "var(--muted)", marginLeft: "auto" }}>
-                    {change.source}
-                    {change.tool_name ? ` · ${change.tool_name}` : ""}
-                  </span>
                 </button>
               ))}
             </div>
@@ -170,4 +171,12 @@ function TurnCard({
       ) : null}
     </div>
   );
+}
+
+function fileChangeKindColor(kind: "created" | "updated" | "deleted"): string {
+  switch (kind) {
+    case "created": return "var(--accent)";
+    case "deleted": return "#d66";
+    default: return "var(--fg)";
+  }
 }

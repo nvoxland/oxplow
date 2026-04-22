@@ -18,7 +18,6 @@ import {
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
   type AgentTurn,
-  type BatchFileChange,
   type ChangeScopes,
   type GitLogCommit,
   type GitOpResult,
@@ -42,7 +41,6 @@ interface Props {
   gitEnabled: boolean;
   selectedFilePath: string | null;
   currentBatchTurns: AgentTurn[] | null;
-  currentBatchFileChanges: BatchFileChange[] | null;
   generatedDirs: string[];
   onOpenFile(path: string): void;
   onOpenDiff?(request: DiffRequest): void;
@@ -59,7 +57,6 @@ export function ProjectPanel({
   gitEnabled,
   selectedFilePath,
   currentBatchTurns,
-  currentBatchFileChanges,
   generatedDirs,
   onOpenFile,
   onOpenDiff,
@@ -74,6 +71,7 @@ export function ProjectPanel({
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
+  const [selectedTurnChanges, setSelectedTurnChanges] = useState<Array<{ path: string; kind: "created" | "updated" | "deleted" }>>([]);
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
@@ -210,6 +208,26 @@ export function ProjectPanel({
   // Default the selected turn when the user picks the Turn mode.
   useEffect(() => {
     if (filterMode !== "turn") return;
+    // Recompute the per-turn changed files whenever the selection moves.
+    const selected = selectedTurnId ? recentTurns.find((t) => t.id === selectedTurnId) : null;
+    if (!selected || !selected.start_snapshot_id || !selected.end_snapshot_id) {
+      setSelectedTurnChanges([]);
+    } else {
+      let cancelled = false;
+      void import("../../api.js").then(({ getSnapshotSummary }) =>
+        getSnapshotSummary(selected.end_snapshot_id!).then((summary) => {
+          if (cancelled || !summary) return;
+          setSelectedTurnChanges(
+            Object.entries(summary.files).map(([path, row]) => ({ path, kind: row.kind })),
+          );
+        }).catch(() => {
+          if (!cancelled) setSelectedTurnChanges([]);
+        }),
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
     if (selectedTurnId && recentTurns.some((t) => t.id === selectedTurnId)) return;
     setSelectedTurnId(recentTurns[0]?.id ?? null);
   }, [filterMode, recentTurns, selectedTurnId]);
@@ -254,15 +272,10 @@ export function ProjectPanel({
       return;
     }
     if (filterMode === "turn") {
-      const changes = (currentBatchFileChanges ?? []).filter((c) => c.turn_id === selectedTurnId);
-      // A single turn can write a file multiple times — collapse to the last
-      // recorded kind per path (we assume the change log is ordered by time).
-      const kindByPath = new Map<string, BatchFileChange["change_kind"]>();
-      for (const change of changes) kindByPath.set(change.path, change.change_kind);
-      setScopedPaths([...kindByPath.keys()]);
-      setScopedDeletions(new Set(
-        [...kindByPath.entries()].filter(([, kind]) => kind === "deleted").map(([path]) => path),
-      ));
+      // Per-turn file filter: compute from the selected turn's start/end
+      // snapshots. Synchronous placeholder — see selectedTurnChanges below.
+      setScopedPaths(selectedTurnChanges.map((c) => c.path));
+      setScopedDeletions(new Set(selectedTurnChanges.filter((c) => c.kind === "deleted").map((c) => c.path)));
       return;
     }
     if (!gitEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
@@ -281,7 +294,7 @@ export function ProjectPanel({
         setScopedDeletions(new Set());
       });
     return () => { cancelled = true; };
-  }, [stream?.id, gitEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles, selectedTurnId, currentBatchFileChanges]);
+  }, [stream?.id, gitEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles, selectedTurnId, selectedTurnChanges]);
 
   const changedPathSet = useMemo(() => {
     const paths = scopedPaths ?? [];
@@ -649,7 +662,7 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [{ id: "files.find-usages", label: "Find Usages", enabled: true, run: () => handleContextAction("find-usages") }]
         : []),
-      { id: "files.agent-history", label: "Agent History", enabled: !!currentBatchFileChanges, run: () => handleContextAction("agent-history") },
+      { id: "files.agent-history", label: "Agent History", enabled: (currentBatchTurns ?? []).length > 0, run: () => handleContextAction("agent-history") },
       ...(gitEnabled ? [{
         id: "files.git",
         label: "Git",
@@ -824,7 +837,6 @@ export function ProjectPanel({
         <AgentHistoryModal
           path={agentHistoryState.path}
           turns={currentBatchTurns ?? []}
-          fileChanges={currentBatchFileChanges ?? []}
           onClose={() => setAgentHistoryState(null)}
         />
       ) : null}
@@ -1089,46 +1101,56 @@ function CompareWithModal({
 function AgentHistoryModal({
   path,
   turns,
-  fileChanges,
   onClose,
 }: {
   path: string;
   turns: AgentTurn[];
-  fileChanges: BatchFileChange[];
   onClose(): void;
 }) {
   useEscape(onClose);
-  const turnsById = new Map(turns.map((t) => [t.id, t]));
-  // Keep only changes for this path, and collapse to (turn, latest-kind).
-  const rows = fileChanges
-    .filter((c) => c.path === path && c.turn_id)
-    .map((c) => ({ turnId: c.turn_id!, kind: c.change_kind, at: c.created_at }))
-    .sort((a, b) => (a.at < b.at ? 1 : -1));
-  const seen = new Set<string>();
-  const collapsed = rows.filter((r) => {
-    if (seen.has(r.turnId)) return false;
-    seen.add(r.turnId);
-    return true;
-  });
+  const [matchingTurns, setMatchingTurns] = useState<AgentTurn[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { getSnapshotSummary } = await import("../../api.js");
+      const matches: AgentTurn[] = [];
+      for (const turn of turns) {
+        if (!turn.end_snapshot_id) continue;
+        try {
+          const summary = await getSnapshotSummary(turn.end_snapshot_id);
+          if (cancelled) return;
+          if (summary && Object.hasOwn(summary.files, path)) matches.push(turn);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!cancelled) {
+        setMatchingTurns(matches);
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, turns]);
   return (
     <ModalShell onClose={onClose} title={`Agent history · ${path}`}>
-      {collapsed.length === 0 ? (
+      {loading ? (
+        <div style={modalEmptyStyle}>Loading…</div>
+      ) : matchingTurns.length === 0 ? (
         <div style={modalEmptyStyle}>No agent turns touched this path.</div>
       ) : (
-        collapsed.map((row) => {
-          const turn = turnsById.get(row.turnId);
-          return (
-            <div key={row.turnId} style={{ ...modalRowStyle, cursor: "default" }}>
-              <span style={{ ...modalStatusPillStyle, color: statusColor(row.kind) }}>{statusLabel(row.kind)}</span>
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {truncate(turn?.prompt ?? "(no prompt)", 90)}
-              </span>
-              <span style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-                {new Date(row.at).toLocaleString()}
-              </span>
-            </div>
-          );
-        })
+        matchingTurns.map((turn) => (
+          <div key={turn.id} style={{ ...modalRowStyle, cursor: "default" }}>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {truncate(turn.prompt, 90)}
+            </span>
+            <span style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
+              {new Date(turn.started_at).toLocaleString()}
+            </span>
+          </div>
+        ))
       )}
     </ModalShell>
   );

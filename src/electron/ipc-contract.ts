@@ -1,7 +1,7 @@
 import type {
   AgentTurn,
   BacklogState,
-  BatchFileChange,
+  EffortDetail,
   FileSnapshot,
   SnapshotDiffResult,
   SnapshotSummary,
@@ -43,7 +43,7 @@ import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 export type {
   AgentTurn,
   BacklogState,
-  BatchFileChange,
+  EffortDetail,
   FileSnapshot,
   SnapshotDiffResult,
   SnapshotSummary,
@@ -202,12 +202,9 @@ export interface DesktopApi {
   listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
   getWorkNotes(itemId: string): Promise<WorkNote[]>;
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
-  listBatchFileChanges(streamId: string, batchId: string, limit?: number): Promise<BatchFileChange[]>;
-  listWorkItemFileChanges(itemId: string, limit?: number): Promise<BatchFileChange[]>;
-  getTurnFileDiff(turnId: string, path: string): Promise<SnapshotDiffResult>;
+  listWorkItemEfforts(itemId: string): Promise<EffortDetail[]>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
   getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null>;
-  getSnapshotFileDiff(snapshotId: string, path: string): Promise<SnapshotDiffResult>;
   getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<SnapshotDiffResult>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;

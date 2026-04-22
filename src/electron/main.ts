@@ -232,12 +232,9 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));
   handle("newde:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
   handle("newde:listAgentTurns", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, batchId, limit));
-  handle("newde:listBatchFileChanges", (_event, streamId: string, batchId: string, limit?: number) => currentRuntime.workItemApi.listFileChanges(streamId, batchId, limit));
-  handle("newde:listWorkItemFileChanges", (_event, itemId: string, limit?: number) => currentRuntime.workItemApi.listWorkItemFileChanges(itemId, limit));
-  handle("newde:getTurnFileDiff", (_event, turnId: string, path: string) => currentRuntime.getTurnFileDiff(turnId, path));
+  handle("newde:listWorkItemEfforts", (_event, itemId: string) => currentRuntime.workItemApi.listWorkItemEfforts(itemId));
   handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
   handle("newde:getSnapshotSummary", (_event, snapshotId: string) => currentRuntime.getSnapshotSummary(snapshotId));
-  handle("newde:getSnapshotFileDiff", (_event, snapshotId: string, path: string) => currentRuntime.getSnapshotFileDiff(snapshotId, path));
   handle("newde:getSnapshotPairDiff", (_event, beforeSnapshotId: string | null, afterSnapshotId: string, path: string) => currentRuntime.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path));
   handle("newde:restoreFileFromSnapshot", (_event, streamId: string, snapshotId: string, path: string) => currentRuntime.restoreFileFromSnapshot(streamId, snapshotId, path));
   handle("newde:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
