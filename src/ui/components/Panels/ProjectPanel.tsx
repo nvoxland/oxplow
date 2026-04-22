@@ -1114,21 +1114,22 @@ function AgentHistoryModal({
     let cancelled = false;
     (async () => {
       const { getSnapshotSummary } = await import("../../api.js");
-      const matches: AgentTurn[] = [];
-      for (const turn of turns) {
-        if (!turn.end_snapshot_id) continue;
-        try {
-          const summary = await getSnapshotSummary(turn.end_snapshot_id);
-          if (cancelled) return;
-          if (summary && Object.hasOwn(summary.files, path)) matches.push(turn);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (!cancelled) {
-        setMatchingTurns(matches);
-        setLoading(false);
-      }
+      // Parallelize the per-turn summary fetches. Sequential awaits here
+      // meant a 50-turn batch took 50 IPC round-trips in series.
+      const results = await Promise.all(
+        turns.map(async (turn) => {
+          if (!turn.end_snapshot_id) return null;
+          try {
+            const summary = await getSnapshotSummary(turn.end_snapshot_id, turn.start_snapshot_id);
+            return summary && Object.hasOwn(summary.files, path) ? turn : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (cancelled) return;
+      setMatchingTurns(results.filter((t): t is AgentTurn => t !== null));
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -1381,24 +1382,6 @@ function useEscape(handler: () => void) {
   }, [handler]);
 }
 
-function statusLabel(kind: string): string {
-  switch (kind) {
-    case "created": return "A";
-    case "updated": return "M";
-    case "deleted": return "D";
-    default: return "·";
-  }
-}
-
-function statusColor(kind: string): string {
-  switch (kind) {
-    case "created": return "#86efac";
-    case "updated": return "#e5a06a";
-    case "deleted": return "#f87171";
-    default: return "var(--muted)";
-  }
-}
-
 const modalEmptyStyle = { padding: 14, color: "var(--muted)", fontSize: 12 } as const;
 const modalRowStyle = {
   display: "flex",
@@ -1423,16 +1406,6 @@ const modalInputStyle = {
   font: "inherit",
   padding: "4px 6px",
   fontSize: 12,
-} as const;
-const modalStatusPillStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 16,
-  fontFamily: "var(--mono, monospace)",
-  fontSize: 10,
-  fontWeight: 600,
-  flexShrink: 0,
 } as const;
 const modalCheckboxStyle = { display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" } as const;
 const modalBtnStyle = {

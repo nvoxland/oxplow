@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { watch, type FSWatcher } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
@@ -55,10 +55,7 @@ import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work
 import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
-import {
-  WorkItemEffortStore,
-  type WorkItemEffort,
-} from "../persistence/work-item-effort-store.js";
+import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -392,8 +389,6 @@ export class ElectronRuntime {
           commitPointStore: this.commitPointStore,
           executeCommit: (cpId, message) => this.batchQueue.executeCommit(cpId, message),
           turnStore: this.turnStore,
-          effortStore: this.effortStore,
-          snapshotStore: this.snapshotStore,
           waitPointStore: this.waitPointStore,
         }),
         ...buildLspMcpTools({
@@ -1323,22 +1318,18 @@ export class ElectronRuntime {
     previous: WorkItem["status"] | undefined,
     next: WorkItem["status"] | undefined,
   ): void {
-    if (!next) return;
-    if (next === "in_progress" && previous !== "in_progress") {
-      const startSnapshotId = this.safeFlushSnapshot(streamId, "task-start");
-      const effort = this.effortStore.openEffort({ workItemId, startSnapshotId });
-      const openTurn = this.turnStore.currentOpenTurn(batchId);
-      if (openTurn) this.effortStore.linkEffortTurn(effort.id, openTurn.id);
-    } else if (previous === "in_progress" && next !== "in_progress") {
-      const endSnapshotId = this.safeFlushSnapshot(streamId, "task-end");
-      this.effortStore.closeEffort({ workItemId, endSnapshotId });
-    }
+    applyStatusTransition(
+      {
+        effortStore: this.effortStore,
+        turnStore: this.turnStore,
+        flushSnapshot: (source) => this.safeFlushSnapshot(streamId, source),
+      },
+      { batchId, workItemId, previous, next },
+    );
   }
 
   private linkOpenEffortsToTurn(turnId: string): void {
-    for (const effort of this.effortStore.listOpenEfforts()) {
-      this.effortStore.linkEffortTurn(effort.id, turnId);
-    }
+    linkOpenEffortsToTurn(this.effortStore, turnId);
   }
 
   private safeFlushSnapshot(streamId: string, source: SnapshotSource): string | null {
@@ -1469,16 +1460,12 @@ export class ElectronRuntime {
     return this.turnStore.listForBatch(batchId, limit);
   }
 
-  listWorkItemEfforts(itemId: string): WorkItemEffort[] {
-    return this.effortStore.listEffortsForWorkItem(itemId);
-  }
-
   listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
     return this.snapshotStore.listSnapshotsForStream(streamId, limit);
   }
 
-  getSnapshotSummary(snapshotId: string): SnapshotSummary | null {
-    return this.snapshotStore.getSnapshotSummary(snapshotId);
+  getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): SnapshotSummary | null {
+    return this.snapshotStore.getSnapshotSummary(snapshotId, previousSnapshotId);
   }
 
   getSnapshotPairDiff(
@@ -1867,9 +1854,6 @@ function parseLogLevel(value: unknown): LogLevel {
 
 const UI_WRITE_ECHO_WINDOW_MS = 1000;
 const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
-// Yield back to the event loop after this many files during snapshot seed.
-// Keeps large monorepos from blocking UI startup; exact value isn't critical.
-const SEED_CHUNK_SIZE = 2000;
 
 function extractEditedFilePath(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
@@ -1906,6 +1890,51 @@ function toWorktreeRelativePath(absOrRel: string, worktreePath: string): string 
     return candidate.slice(normalizedRoot.length + 1);
   }
   return absOrRel;
+}
+
+/**
+ * Effort bookkeeping for a work-item status change. Exported so tests can
+ * exercise the logic without constructing a full `ElectronRuntime`.
+ *
+ * - `→ in_progress` (from anything else): flush a `task-start` snapshot,
+ *   open an effort linked to it, and attach any currently-open turn.
+ * - `in_progress → anything else`: flush a `task-end` snapshot and close
+ *   the effort.
+ * - Same-status "transitions" (no-op): nothing happens.
+ */
+export interface StatusTransitionDeps {
+  effortStore: WorkItemEffortStore;
+  turnStore: TurnStore;
+  flushSnapshot: (source: SnapshotSource) => string | null;
+}
+
+export function applyStatusTransition(
+  deps: StatusTransitionDeps,
+  params: {
+    batchId: string;
+    workItemId: string;
+    previous: WorkItem["status"] | undefined;
+    next: WorkItem["status"] | undefined;
+  },
+): void {
+  const { previous, next, batchId, workItemId } = params;
+  if (!next) return;
+  if (next === "in_progress" && previous !== "in_progress") {
+    const startSnapshotId = deps.flushSnapshot("task-start");
+    const effort = deps.effortStore.openEffort({ workItemId, startSnapshotId });
+    const openTurn = deps.turnStore.currentOpenTurn(batchId);
+    if (openTurn) deps.effortStore.linkEffortTurn(effort.id, openTurn.id);
+  } else if (previous === "in_progress" && next !== "in_progress") {
+    const endSnapshotId = deps.flushSnapshot("task-end");
+    deps.effortStore.closeEffort({ workItemId, endSnapshotId });
+  }
+}
+
+/** Attach every currently-open effort to `turnId`. No-op when there are none. */
+export function linkOpenEffortsToTurn(effortStore: WorkItemEffortStore, turnId: string): void {
+  for (const effort of effortStore.listOpenEfforts()) {
+    effortStore.linkEffortTurn(effort.id, turnId);
+  }
 }
 
 function derivePostToolStatus(resp: unknown): "ok" | "error" {

@@ -734,7 +734,6 @@ export function App() {
   const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
   const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
   const selectedBatchTurns = selectedBatch ? agentTurns[selectedBatch.id] ?? null : null;
-  const selectedBatchFileChanges = null;
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};

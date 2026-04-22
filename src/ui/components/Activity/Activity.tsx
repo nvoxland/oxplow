@@ -85,7 +85,13 @@ function TurnCard({
     let cancelled = false;
     (async () => {
       try {
-        const summary = await getSnapshotSummary(turn.end_snapshot_id!);
+        // Explicit baseline: this turn's start snapshot, not "whatever
+        // snapshot happened to land most recently in the stream." Without
+        // this, a turn that didn't change any files would attribute another
+        // turn's or task's changes to itself because the dedup'd
+        // end_snapshot_id equals some older snapshot whose implicit
+        // "previous" is a sibling, not turn-local.
+        const summary = await getSnapshotSummary(turn.end_snapshot_id!, turn.start_snapshot_id);
         if (cancelled || !summary) return;
         const list: TurnChange[] = Object.entries(summary.files).map(([path, row]) => ({
           path,

@@ -276,9 +276,8 @@ function snapshotLabel(snap: FileSnapshot): string {
       return "Turn ended";
     case "startup":
       return "App startup";
-    case "external":
     default:
-      return "External";
+      return "Snapshot";
   }
 }
 

@@ -18,8 +18,7 @@ export type SnapshotSource =
   | "task-end"
   | "turn-start"
   | "turn-end"
-  | "startup"
-  | "external";
+  | "startup";
 
 /**
  * `state` discriminates how the entry was captured:
@@ -165,13 +164,27 @@ export class SnapshotStore {
       return { id: latest.id, created: false, versionHash };
     }
 
-    const id = createId("snap");
+    const newId = createId("snap");
     const now = new Date().toISOString();
+    let resultId = newId;
+    let created = true;
+    // Re-check `latest` *inside* the transaction and skip the insert if
+    // another flush landed a matching-hash row after our initial read. The
+    // pre-transaction check above stays as a fast path; this one closes the
+    // read-then-write window against a concurrent writer (the bun:sqlite
+    // writer lock serializes the bodies of transactions, so only one of two
+    // racing flushes can be inside the critical section at a time).
     this.stateDb.transaction(() => {
+      const latestInTx = this.getLatestSnapshot(input.streamId);
+      if (latestInTx && latestInTx.version_hash === versionHash) {
+        resultId = latestInTx.id;
+        created = false;
+        return;
+      }
       this.stateDb.run(
         `INSERT INTO file_snapshot (id, stream_id, worktree_path, version_hash, source, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        id,
+        newId,
         input.streamId,
         input.worktreePath,
         versionHash,
@@ -182,7 +195,7 @@ export class SnapshotStore {
         this.stateDb.run(
           `INSERT INTO snapshot_entry (snapshot_id, path, hash, mtime_ms, size, state)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          id,
+          newId,
           path,
           entry.hash,
           entry.mtime_ms,
@@ -191,7 +204,7 @@ export class SnapshotStore {
         );
       }
     });
-    return { id, created: true, versionHash };
+    return { id: resultId, created, versionHash };
   }
 
   private buildEntries(
@@ -473,19 +486,35 @@ export class SnapshotStore {
    * effort side is the one users navigate here to see.
    */
   listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
+    // Correlated subqueries (rather than LEFT JOIN + GROUP BY) so that when
+    // multiple efforts or turns reference the same snapshot, the picked title
+    // / prompt is deterministic: most recent effort or turn wins. Ties
+    // broken by rowid for reproducibility.
     const rows = this.stateDb.all<Record<string, unknown>>(
       `SELECT f.*,
-              effort_end_item.title AS effort_end_title,
-              effort_start_item.title AS effort_start_title,
-              turn_end.prompt AS turn_end_prompt,
-              turn_start.prompt AS turn_start_prompt
+              (
+                SELECT wi.title FROM work_item_effort e
+                JOIN work_items wi ON wi.id = e.work_item_id
+                WHERE e.end_snapshot_id = f.id
+                ORDER BY COALESCE(e.ended_at, '') DESC, e.rowid DESC LIMIT 1
+              ) AS effort_end_title,
+              (
+                SELECT wi.title FROM work_item_effort e
+                JOIN work_items wi ON wi.id = e.work_item_id
+                WHERE e.start_snapshot_id = f.id
+                ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1
+              ) AS effort_start_title,
+              (
+                SELECT t.prompt FROM agent_turn t
+                WHERE t.end_snapshot_id = f.id
+                ORDER BY COALESCE(t.ended_at, '') DESC, t.rowid DESC LIMIT 1
+              ) AS turn_end_prompt,
+              (
+                SELECT t.prompt FROM agent_turn t
+                WHERE t.start_snapshot_id = f.id
+                ORDER BY t.started_at DESC, t.rowid DESC LIMIT 1
+              ) AS turn_start_prompt
        FROM file_snapshot f
-       LEFT JOIN work_item_effort effort_end ON effort_end.end_snapshot_id = f.id
-       LEFT JOIN work_items effort_end_item ON effort_end_item.id = effort_end.work_item_id
-       LEFT JOIN work_item_effort effort_start ON effort_start.start_snapshot_id = f.id
-       LEFT JOIN work_items effort_start_item ON effort_start_item.id = effort_start.work_item_id
-       LEFT JOIN agent_turn turn_end ON turn_end.end_snapshot_id = f.id
-       LEFT JOIN agent_turn turn_start ON turn_start.start_snapshot_id = f.id
        WHERE f.stream_id = ?
          AND EXISTS (
            SELECT 1 FROM file_snapshot earlier
@@ -493,7 +522,6 @@ export class SnapshotStore {
              AND (earlier.created_at < f.created_at
                   OR (earlier.created_at = f.created_at AND earlier.rowid < f.rowid))
          )
-       GROUP BY f.id
        ORDER BY f.created_at DESC, f.rowid DESC
        LIMIT ?`,
       streamId,
@@ -643,7 +671,7 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
     stream_id: String(row.stream_id ?? ""),
     worktree_path: String(row.worktree_path ?? ""),
     version_hash: String(row.version_hash ?? ""),
-    source: String(row.source ?? "external") as SnapshotSource,
+    source: String(row.source ?? "startup") as SnapshotSource,
     created_at: String(row.created_at ?? ""),
   };
 }

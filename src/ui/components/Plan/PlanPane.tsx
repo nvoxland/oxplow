@@ -1333,35 +1333,6 @@ function EffortsSection({
   );
 }
 
-function fileKindLabel(kind: string): string {
-  switch (kind) {
-    case "created": return "A";
-    case "deleted": return "D";
-    case "updated": return "M";
-    default: return "·";
-  }
-}
-
-function fileKindColor(kind: string): string {
-  switch (kind) {
-    case "created": return "#86efac";
-    case "deleted": return "#f87171";
-    case "updated": return "#e5a06a";
-    default: return "var(--muted)";
-  }
-}
-
-const fileKindBadgeStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 14,
-  fontFamily: "var(--mono, monospace)",
-  fontSize: 10,
-  fontWeight: 600,
-  flexShrink: 0,
-};
-
 const modalFieldLabelStyle: CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: 0.4,

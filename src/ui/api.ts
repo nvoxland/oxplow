@@ -86,8 +86,7 @@ export type SnapshotSource =
   | "task-end"
   | "turn-start"
   | "turn-end"
-  | "startup"
-  | "external";
+  | "startup";
 
 export interface FileSnapshot {
   id: string;
@@ -660,8 +659,11 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<F
   return desktopApi().listSnapshots(streamId, limit);
 }
 
-export async function getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null> {
-  return desktopApi().getSnapshotSummary(snapshotId);
+export async function getSnapshotSummary(
+  snapshotId: string,
+  previousSnapshotId?: string | null,
+): Promise<SnapshotSummary | null> {
+  return desktopApi().getSnapshotSummary(snapshotId, previousSnapshotId);
 }
 
 export async function getSnapshotPairDiff(

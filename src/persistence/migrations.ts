@@ -504,8 +504,7 @@ export const MIGRATIONS: Migration[] = [
         DROP TABLE IF EXISTS batch_file_change;
 
         DELETE FROM file_snapshot;
-        DELETE FROM snapshot_entry;
-        DELETE FROM agent_turn;
+        -- snapshot_entry rows cascade from file_snapshot via the v9 FK.
         UPDATE streams SET current_snapshot_id = NULL;
 
         CREATE TABLE file_snapshot_new (
@@ -562,6 +561,22 @@ export const MIGRATIONS: Migration[] = [
         );
 
         CREATE INDEX idx_work_item_effort_turn_turn ON work_item_effort_turn(turn_id);
+      `);
+    },
+  },
+  {
+    version: 21,
+    name: "work_item_effort_unique_open",
+    up: (db) => {
+      // Enforce the "at most one open effort per work_item at a time"
+      // invariant at the DB layer. `openEffort`'s in-code guard is still
+      // the normal path; this makes a direct insert or a race impossible
+      // to leave behind two open rows silently. The v20 partial index was
+      // not UNIQUE.
+      db.exec(`
+        DROP INDEX IF EXISTS idx_work_item_effort_open;
+        CREATE UNIQUE INDEX idx_work_item_effort_open
+          ON work_item_effort(work_item_id) WHERE ended_at IS NULL;
       `);
     },
   },

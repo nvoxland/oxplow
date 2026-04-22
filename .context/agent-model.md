@@ -400,36 +400,54 @@ shows it as a colored dot on each batch tab.
 ## Snapshot tracking
 
 The runtime keeps a content-addressed history of worktree files so the
-UI (and future tooling) can render turn-level diffs without relying on
-git. Mechanics:
+UI (and future tooling) can render turn- and effort-level diffs without
+relying on git. Snapshots are **time-ordered** and deduplicated by a
+`version_hash` over `(path, hash, size, state)` tuples — there is no
+parent chain, and two flushes of an unchanged worktree return the same
+snapshot id. Mechanics:
 
 - A per-stream in-memory **dirty set** accumulates relative paths. It
   is populated by the workspace fs-watcher (always, regardless of
-  batch state) and by the PostToolUse hook (`persistFileChange`).
+  batch state) and by the PostToolUse hook's `markDirty` branch in
+  `applyTurnTracking`. No separate per-path log is kept — the dirty
+  set is passed to `SnapshotStore.flushSnapshot` as an optimizer hint
+  so only changed paths need restat, and every other entry carries
+  forward from the previous snapshot.
 - On `UserPromptSubmit`, after the new `agent_turn` row is opened,
-  `flushSnapshotForStream(streamId, "turn-start", turnId, batchId)` is
-  called. If the dirty set is non-empty it writes blobs + a manifest
-  under `.newde/snapshots/`, inserts a `file_snapshot` row, updates
-  `streams.current_snapshot_id`, and backfills `snapshot_id` on the
-  `batch_file_change` rows whose paths match. The dirty set is then
-  cleared.
-- On `Stop`, after the turn is closed, `flushSnapshotForStream` is
-  called again with `kind: "turn-end"`.
-- On project open, `seedSnapshotTracking` runs once per stream. If the
-  stream has no `current_snapshot_id`, every file in the worktree is
-  marked dirty (the baseline case). Otherwise `reconcileWorktree`
-  walks the tree and compares `(mtime_ms, size)` against the resolved
-  entry map from the parent chain; drifted paths plus tombstone
-  mismatches (file deleted / created while the app was closed) go
-  into the dirty set so the next turn-start captures them.
-- `runtime.getTurnFileDiff(turnId, path)` returns `{ before, after }`
-  strings by resolving the turn-start snapshot's parent (the "before")
-  and the turn-end snapshot (the "after") through `SnapshotStore.diffPath`.
+  `flushSnapshotForStream(streamId, "turn-start")` runs. The returned
+  id (whether freshly created or a dedup match against the latest
+  existing snapshot for the stream) is stored on
+  `agent_turn.start_snapshot_id`, and `linkOpenEffortsToTurn` attaches
+  every currently-open `work_item_effort` to the new turn via
+  `work_item_effort_turn`.
+- On `Stop`, after the turn is closed, `flushSnapshotForStream` runs
+  again with `source: "turn-end"`; the id is written to
+  `agent_turn.end_snapshot_id`.
+- On project open, `takeStartupSnapshot` runs once per stream — a full
+  worktree walk that emits `source: "startup"`. If nothing changed
+  while the app was down, `version_hash` dedup returns the existing
+  snapshot and no new row is written; otherwise a fresh one is
+  recorded so the "changes during downtime" are visible.
+- On work-item status transitions, `handleStatusTransition` (and the
+  pure `applyStatusTransition` helper it delegates to) runs. A
+  transition *into* `in_progress` flushes `source: "task-start"` and
+  opens a new `work_item_effort` row pointing at it; a transition
+  *out of* `in_progress` (to `human_check`, `done`, `canceled`,
+  `blocked`, etc.) flushes `source: "task-end"` and closes the effort.
+  Re-entering `in_progress` creates a second effort — efforts are a
+  per-cycle record, not a single lifetime span. A DB-level UNIQUE
+  partial index on `work_item_effort(work_item_id) WHERE ended_at IS
+  NULL` enforces "at most one open effort per item."
+- Turn-level diffs come from
+  `getSnapshotPairDiff(turn.start_snapshot_id, turn.end_snapshot_id,
+  path)` and `getSnapshotSummary(endId, startId)`; effort-level diffs
+  are the analogous pair on `work_item_effort.start_snapshot_id` /
+  `end_snapshot_id`, exposed to the UI via `workItemApi.listWorkItemEfforts`.
 
-See [data-model.md](./data-model.md) for the `file_snapshot` schema
-and manifest layout, and [ipc-and-stores.md](./ipc-and-stores.md) for
-the `file-snapshot.created` EventBus event and the `getTurnFileDiff`
-IPC method.
+See [data-model.md](./data-model.md) for the `file_snapshot`,
+`work_item_effort`, and `work_item_effort_turn` schemas, and
+[ipc-and-stores.md](./ipc-and-stores.md) for the `file-snapshot.created`
+EventBus event and the snapshot/effort IPC methods.
 
 ## Related
 

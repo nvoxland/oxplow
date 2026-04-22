@@ -79,6 +79,28 @@ describe("WorkItemEffortStore", () => {
     expect(all).toHaveLength(2);
   });
 
+  test("direct insert of a second open effort fails (UNIQUE partial index)", async () => {
+    const { efforts, itemId, dir } = seed();
+    efforts.openEffort({ workItemId: itemId, startSnapshotId: null });
+    // Try to bypass the store's idempotent openEffort by talking to the DB
+    // directly. Migration v21 should reject this with UNIQUE constraint.
+    const { getStateDatabase } = await import("./state-db.js");
+    const db = getStateDatabase(dir);
+    let threw = false;
+    try {
+      db.run(
+        `INSERT INTO work_item_effort (id, work_item_id, started_at) VALUES (?, ?, ?)`,
+        "eff-duplicate",
+        itemId,
+        new Date().toISOString(),
+      );
+    } catch (err) {
+      threw = true;
+      expect(String(err)).toMatch(/UNIQUE/i);
+    }
+    expect(threw).toBe(true);
+  });
+
   test("linkEffortTurn + listTurnsForEffort + listEffortsForTurn", () => {
     const { efforts, turns, itemId, batchId } = seed();
     const effort = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });

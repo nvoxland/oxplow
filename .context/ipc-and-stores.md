@@ -144,27 +144,36 @@ expected schema.
 
 `SnapshotStore` (`src/persistence/snapshot-store.ts`) is a hybrid: a
 SQLite-indexed table (`file_snapshot`) plus an on-disk content-
-addressed blob store at `.newde/snapshots/` (`objects/xx/yyyy…` +
-`manifests/<id>.json`). Unlike other stores it doesn't expose a
-`subscribe()`; the runtime publishes `file-snapshot.created` on the
-EventBus after each successful flush.
+addressed blob store at `.newde/snapshots/objects/xx/yyyy…`. Snapshots
+are time-ordered and deduplicated on a `version_hash` (no parent
+chain). Rows returned by `listSnapshotsForStream` are pre-enriched
+with `label` + `label_kind` joined from `work_item_effort` and
+`agent_turn`, and exclude the first-ever baseline (nothing to diff
+against). Unlike other stores it doesn't expose a `subscribe()`; the
+runtime publishes `file-snapshot.created` on the EventBus after each
+successful flush that actually inserted a row.
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 `preload.ts` → `src/ui/api.ts`):
 
-- `getTurnFileDiff(turnId, path)` — before/after for a path within a
-  single turn.
-- `listSnapshots(streamId, limit?)` — snapshot rows newest-first.
-- `getSnapshotSummary(snapshotId)` — snapshot row, manifest entries
-  joined with A/M/D kind against the parent chain, plus counts.
-- `getSnapshotFileDiff(snapshotId, path)` — before/after for a path
-  between a snapshot and its parent.
+- `listSnapshots(streamId, limit?)` — snapshot rows newest-first,
+  baseline excluded, each with `label`/`label_kind`.
+- `getSnapshotSummary(snapshotId, previousSnapshotId?)` — snapshot
+  row, manifest entries joined with A/M/D kind against the given
+  baseline (defaults to the preceding snapshot in time for the
+  stream), plus counts.
 - `getSnapshotPairDiff(beforeId, afterId, path)` — arbitrary-pair
-  diff, used by the Snapshots panel's compare mode.
+  diff, used by the Snapshots panel, the Activity tab's per-turn
+  view, and the Plan modal's per-effort view.
 - `restoreFileFromSnapshot(streamId, snapshotId, path)` — overwrites
   the worktree file with the snapshot's content via the existing
-  `writeWorkspaceFile` path (so the UI-echo filter and file-change
+  `writeWorkspaceFile` path (so the UI-echo filter and workspace
   event bus behave the same as a UI edit).
+- `listWorkItemEfforts(itemId)` — returns per-effort rows (one per
+  `in_progress → human_check` cycle) with pre-joined start/end
+  snapshot metadata, linked turn ids, and the changed-paths list
+  computed from the pair summary. Used by the Plan modal's Efforts
+  section and the "Show in history" jump.
 
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.

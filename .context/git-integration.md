@@ -21,11 +21,12 @@ Drives `workspace.changed` events. Consumed by:
 
 - `ProjectPanel` to refresh the file tree.
 - `EditorPane` for external-file-changed prompts.
-- `runtime.recordFsWatchChange` to attribute writes to batches in
-  `batch_file_change`.
+- `runtime.markDirty` (invoked from the watcher callback) to add the
+  path to the per-stream in-memory dirty set, which the next snapshot
+  flush reads as its optimizer hint.
 
 Source files mutate constantly; this watcher's job is to keep the
-file-tree current and to log changes for the batch.
+file-tree current and to feed the snapshot dirty set.
 
 ### 2. Git root watcher
 

@@ -2,8 +2,6 @@ import type { ToolDef } from "./mcp-server.js";
 import type { BatchStore, Batch } from "../persistence/batch-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
 import type { TurnStore } from "../persistence/turn-store.js";
-import type { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
-import type { SnapshotStore } from "../persistence/snapshot-store.js";
 import type {
   WorkItemKind,
   WorkItemPriority,
@@ -29,8 +27,6 @@ export interface McpToolDeps {
    *  orchestrator; thrown errors bubble back to the agent so it can retry. */
   executeCommit(cpId: string, message: string): CommitPoint;
   turnStore: TurnStore;
-  effortStore: WorkItemEffortStore;
-  snapshotStore: SnapshotStore;
   waitPointStore: WaitPointStore;
 }
 
@@ -73,9 +69,7 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore, effortStore, snapshotStore } = deps;
-  void effortStore;
-  void snapshotStore;
+  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore } = deps;
 
   // Prefer the batch row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { batch, stream } — both guaranteed to agree

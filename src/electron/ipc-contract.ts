@@ -204,7 +204,7 @@ export interface DesktopApi {
   listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
   listWorkItemEfforts(itemId: string): Promise<EffortDetail[]>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
-  getSnapshotSummary(snapshotId: string): Promise<SnapshotSummary | null>;
+  getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): Promise<SnapshotSummary | null>;
   getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<SnapshotDiffResult>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;

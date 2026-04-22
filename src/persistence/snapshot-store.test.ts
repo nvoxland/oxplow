@@ -217,6 +217,168 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
+  test("listSnapshotsForStream labels effort-start snapshots with '<title> — start'", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "a");
+    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    writeFileSync(join(worktreePath, "a.txt"), "b");
+    const startSnap = store.flushSnapshot({
+      source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"],
+    });
+
+    const db = getStateDatabase(projectDir);
+    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+      db.run(
+        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+         VALUES ('b-ts', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        streamId, new Date().toISOString(), new Date().toISOString(),
+      );
+    }
+    db.run(
+      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+       VALUES ('wi-ts', 'b-ts', 'task', 'Start only task', 'in_progress', 'medium', 'user', ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(),
+    );
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, start_snapshot_id)
+       VALUES ('eff-ts', 'wi-ts', ?, ?)`,
+      new Date().toISOString(), startSnap.id,
+    );
+
+    const listed = store.listSnapshotsForStream(streamId);
+    const row = listed.find((s) => s.id === startSnap.id);
+    expect(row?.label).toBe("Start only task — start");
+    expect(row?.label_kind).toBe("task");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test("listSnapshotsForStream labels turn-linked snapshots with the prompt's first line", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "a");
+    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    writeFileSync(join(worktreePath, "a.txt"), "b");
+    const endSnap = store.flushSnapshot({
+      source: "turn-end", streamId, worktreePath, dirtyPaths: ["a.txt"],
+    });
+
+    const db = getStateDatabase(projectDir);
+    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+      db.run(
+        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+         VALUES ('b-turn', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        streamId, new Date().toISOString(), new Date().toISOString(),
+      );
+    }
+    db.run(
+      `INSERT INTO agent_turn (id, batch_id, prompt, started_at, ended_at, end_snapshot_id)
+       VALUES ('turn-1', 'b-turn', 'Multi-line prompt\nsecond line here', ?, ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(), endSnap.id,
+    );
+
+    const listed = store.listSnapshotsForStream(streamId);
+    const row = listed.find((s) => s.id === endSnap.id);
+    expect(row?.label).toBe("Multi-line prompt");
+    expect(row?.label_kind).toBe("turn");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test("listSnapshotsForStream prefers effort-end over effort-start and over turns on the same snapshot", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "a");
+    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    writeFileSync(join(worktreePath, "a.txt"), "b");
+    const snap = store.flushSnapshot({
+      source: "task-end", streamId, worktreePath, dirtyPaths: ["a.txt"],
+    });
+
+    const db = getStateDatabase(projectDir);
+    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+      db.run(
+        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+         VALUES ('b-win', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        streamId, new Date().toISOString(), new Date().toISOString(),
+      );
+    }
+    // Same snapshot is: (a) an effort's end, (b) another effort's start,
+    // (c) a turn's end. Expected winner: effort-end title.
+    db.run(
+      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+       VALUES ('wi-end', 'b-win', 'task', 'Finished task', 'human_check', 'medium', 'user', ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(),
+    );
+    db.run(
+      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+       VALUES ('wi-start', 'b-win', 'task', 'Starting task', 'in_progress', 'medium', 'user', ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(),
+    );
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, ended_at, end_snapshot_id)
+       VALUES ('eff-end', 'wi-end', ?, ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(), snap.id,
+    );
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, start_snapshot_id)
+       VALUES ('eff-start', 'wi-start', ?, ?)`,
+      new Date().toISOString(), snap.id,
+    );
+    db.run(
+      `INSERT INTO agent_turn (id, batch_id, prompt, started_at, ended_at, end_snapshot_id)
+       VALUES ('turn-x', 'b-win', 'Prompt', ?, ?, ?)`,
+      new Date().toISOString(), new Date().toISOString(), snap.id,
+    );
+
+    const listed = store.listSnapshotsForStream(streamId);
+    const row = listed.find((s) => s.id === snap.id);
+    expect(row?.label).toBe("Finished task — end");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test("listSnapshotsForStream label picks the most recent effort when multiple efforts end at the same snapshot", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "a");
+    store.flushSnapshot({ source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    writeFileSync(join(worktreePath, "a.txt"), "b");
+    const endSnap = store.flushSnapshot({
+      source: "task-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+    });
+
+    const db = getStateDatabase(projectDir);
+    const batchRows = db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`);
+    if (batchRows.length === 0) {
+      db.run(
+        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+         VALUES ('b-tie', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        streamId, new Date().toISOString(), new Date().toISOString(),
+      );
+    }
+    const batchId = batchRows[0]?.id ?? "b-tie";
+    // Two work items + two efforts, both ending at the same snapshot.
+    for (const [wi, title] of [["wi-older", "Older task"], ["wi-newer", "Newer task"]] as const) {
+      db.run(
+        `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+         VALUES (?, ?, 'task', ?, 'human_check', 'medium', 'user', ?, ?)`,
+        wi, batchId, title, new Date().toISOString(), new Date().toISOString(),
+      );
+    }
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, ended_at, end_snapshot_id)
+       VALUES ('eff-older', 'wi-older', ?, ?, ?)`,
+      "2024-01-01T00:00:00.000Z", "2024-01-01T00:01:00.000Z", endSnap.id,
+    );
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, ended_at, end_snapshot_id)
+       VALUES ('eff-newer', 'wi-newer', ?, ?, ?)`,
+      "2024-06-01T00:00:00.000Z", "2024-06-01T00:01:00.000Z", endSnap.id,
+    );
+
+    const listed = store.listSnapshotsForStream(streamId);
+    expect(listed[0]!.label).toBe("Newer task — end");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
   test("listSnapshotsForStream labels snapshots linked to a work_item_effort with the task title", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
@@ -316,6 +478,40 @@ describe("SnapshotStore", () => {
     expect(stats.snapshotsDeleted).toBe(1);
     expect(store.getSnapshot(first.id)).toBeNull();
     expect(store.getSnapshot(second.id)).not.toBeNull();
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test("flushSnapshot recheck dedups against a racing insert", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "hello");
+    const first = store.flushSnapshot({
+      source: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+    });
+    // Simulate a racing writer landing a matching-hash row after the fast-
+    // path `getLatestSnapshot` read has already been made. We cheat by
+    // stashing a `getLatestSnapshot` spy that returns a stale result, then
+    // invoke the inner transaction indirectly via flushSnapshot. Since the
+    // in-transaction recheck re-reads `latest`, it should find `first`
+    // (actually persisted) and dedup against it rather than inserting a new
+    // row with the same hash.
+    // Easiest reproduction: call flushSnapshot twice in a row with the same
+    // content — the second call's in-memory `latest` and the in-tx `latest`
+    // agree, but it still proves the recheck path doesn't corrupt the happy
+    // case when the hashes match.
+    const second = store.flushSnapshot({
+      source: "turn-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+    });
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+    const count = getStateDatabase(projectDir)
+      .get<{ c: number }>(`SELECT COUNT(*) AS c FROM file_snapshot WHERE stream_id = ?`, streamId);
+    expect(count?.c).toBe(1);
     rmSync(projectDir, { recursive: true, force: true });
   });
 

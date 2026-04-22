@@ -103,7 +103,7 @@ export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
   snapshotId: string;
-  kind: "task-start" | "task-end" | "turn-start" | "turn-end" | "startup" | "external";
+  kind: "task-start" | "task-end" | "turn-start" | "turn-end" | "startup";
   turnId: string | null;
   batchId: string | null;
 }
