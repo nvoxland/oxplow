@@ -57,6 +57,28 @@ describe("CommitPointStore", () => {
     expect(() => store.markCommitted(cp.id, "x", "def")).toThrow();
   });
 
+  test("getLatestDoneForThread returns the most recently completed commit_point (by completed_at DESC)", async () => {
+    const { store, threadId } = seed();
+    expect(store.getLatestDoneForThread(threadId)).toBeNull();
+    const a = store.create({ threadId, sortIndex: 1 });
+    const b = store.create({ threadId, sortIndex: 2 });
+    store.markCommitted(a.id, "first", "sha-a");
+    await new Promise((r) => setTimeout(r, 5));
+    store.markCommitted(b.id, "second", "sha-b");
+    const latest = store.getLatestDoneForThread(threadId);
+    expect(latest?.id).toBe(b.id);
+    expect(latest?.commit_sha).toBe("sha-b");
+  });
+
+  test("getLatestDoneForThread ignores pending commit points", () => {
+    const { store, threadId } = seed();
+    const a = store.create({ threadId, sortIndex: 1 });
+    store.markCommitted(a.id, "first", "sha-a");
+    store.create({ threadId, sortIndex: 2 }); // still pending
+    const latest = store.getLatestDoneForThread(threadId);
+    expect(latest?.id).toBe(a.id);
+  });
+
   test("delete refuses on completed commit points", () => {
     const { store, threadId } = seed();
     const cp = store.create({ threadId, sortIndex: 1 });

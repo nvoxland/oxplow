@@ -97,4 +97,59 @@ describe("TurnStore", () => {
     expect(open.prompt.length).toBe(20_000);
     expect(open.prompt.endsWith("…")).toBe(true);
   });
+
+  test("getLastClosedTurnCacheRead returns null when no turn has closed", () => {
+    const { turns, threadId } = seed();
+    expect(turns.getLastClosedTurnCacheRead(threadId)).toBeNull();
+    // Open-but-not-closed turns don't count either.
+    turns.openTurn({ threadId, prompt: "still running" });
+    expect(turns.getLastClosedTurnCacheRead(threadId)).toBeNull();
+  });
+
+  test("getLastClosedTurnCacheRead returns the cache_read_input_tokens of the most recent closed turn", () => {
+    const { turns, threadId } = seed();
+    const a = turns.openTurn({ threadId, prompt: "first" });
+    turns.setTurnUsage(a.id, { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 1_200_000 });
+    turns.closeTurn(a.id, { answer: "ok" });
+
+    expect(turns.getLastClosedTurnCacheRead(threadId)).toBe(1_200_000);
+
+    // A newer closed turn supersedes it.
+    const b = turns.openTurn({ threadId, prompt: "second" });
+    turns.setTurnUsage(b.id, { inputTokens: 20, outputTokens: 10, cacheReadInputTokens: 5_000_000 });
+    turns.closeTurn(b.id, { answer: "ok" });
+    expect(turns.getLastClosedTurnCacheRead(threadId)).toBe(5_000_000);
+  });
+
+  test("getLastClosedTurnCacheRead returns null when the latest closed turn has no usage set", () => {
+    const { turns, threadId } = seed();
+    const a = turns.openTurn({ threadId, prompt: "no usage" });
+    turns.closeTurn(a.id, { answer: "ok" });
+    // No setTurnUsage call — cache_read_input_tokens stays null.
+    expect(turns.getLastClosedTurnCacheRead(threadId)).toBeNull();
+  });
+
+  test("getCumulativeCacheRead returns 0 for a thread with no closed turns", () => {
+    const { turns, threadId } = seed();
+    expect(turns.getCumulativeCacheRead(threadId)).toBe(0);
+    turns.openTurn({ threadId, prompt: "still running" });
+    expect(turns.getCumulativeCacheRead(threadId)).toBe(0);
+  });
+
+  test("getCumulativeCacheRead sums cache_read_input_tokens across closed turns", () => {
+    const { turns, threadId } = seed();
+    const a = turns.openTurn({ threadId, prompt: "a" });
+    turns.setTurnUsage(a.id, { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 1_000_000 });
+    turns.closeTurn(a.id, { answer: "a" });
+
+    const b = turns.openTurn({ threadId, prompt: "b" });
+    turns.setTurnUsage(b.id, { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 3_500_000 });
+    turns.closeTurn(b.id, { answer: "b" });
+
+    // Null-usage turn contributes 0 (COALESCE).
+    const c = turns.openTurn({ threadId, prompt: "c" });
+    turns.closeTurn(c.id, { answer: "c" });
+
+    expect(turns.getCumulativeCacheRead(threadId)).toBe(4_500_000);
+  });
 });

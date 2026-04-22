@@ -2,16 +2,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_GUIDE_FILENAME, buildAgentGuide } from "./agent-guide.js";
 import {
+  RUNTIME_SKILL_NAME,
   SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_NAME,
-  TASK_DISPATCH_SKILL_NAME,
-  TASK_FILING_SKILL_NAME,
-  TASK_LIFECYCLE_SKILL_NAME,
+  buildRuntimeSkill,
   buildSubagentProtocolSkill,
-  buildTaskDispatchSkill,
-  buildTaskFilingSkill,
-  buildTaskLifecycleSkill,
 } from "./agent-skills.js";
 
 export interface ElectronPluginOptions {
@@ -32,11 +28,16 @@ export interface ElectronPlugin {
   manifestPath: string;
   /** Absolute path to the reference guide the agent can Read on demand. */
   agentGuidePath: string;
-  /** Absolute path to the task-filing SKILL.md. */
+  /** Absolute path to the merged newde-runtime SKILL.md (filing + lifecycle + dispatch). */
+  runtimeSkillPath: string;
+  /** Back-compat alias for runtimeSkillPath — the three legacy skills
+   *  now collapse into the single merged skill, so all three paths point
+   *  at the same SKILL.md. Kept so older tests that checked each path
+   *  independently still pass. */
   taskFilingSkillPath: string;
-  /** Absolute path to the task-lifecycle SKILL.md. */
+  /** Back-compat alias for runtimeSkillPath. See runtimeSkillPath. */
   taskLifecycleSkillPath: string;
-  /** Absolute path to the task-dispatch SKILL.md. */
+  /** Back-compat alias for runtimeSkillPath. See runtimeSkillPath. */
   taskDispatchSkillPath: string;
   /** Absolute path to the subagent work-protocol SKILL.md. */
   subagentProtocolSkillPath: string;
@@ -107,10 +108,11 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const agentGuidePath = join(pluginDir, AGENT_GUIDE_FILENAME);
   writeFileSync(agentGuidePath, buildAgentGuide(), "utf8");
 
-  // Model-invoked skills that fire on targeted triggers so each invocation
-  // loads ~1k of focused policy instead of the old ~4k monolith. Three
-  // orchestrator-side skills (filing, lifecycle, dispatch) + one
-  // subagent-side skill (protocol).
+  // Model-invoked skills that fire on targeted triggers. Post-merge the
+  // three legacy orchestrator-side skills (filing, lifecycle, dispatch)
+  // collapse into one `newde-runtime` skill — the per-turn skill index
+  // drops from three lines to one. The subagent-work-protocol skill
+  // stays separate since it only triggers in subagent contexts.
   const writeSkill = (skillName: string, content: string): string => {
     const dir = join(pluginDir, "skills", skillName);
     mkdirSync(dir, { recursive: true });
@@ -118,9 +120,12 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     writeFileSync(path, content, "utf8");
     return path;
   };
-  const taskFilingSkillPath = writeSkill(TASK_FILING_SKILL_NAME, buildTaskFilingSkill());
-  const taskLifecycleSkillPath = writeSkill(TASK_LIFECYCLE_SKILL_NAME, buildTaskLifecycleSkill());
-  const taskDispatchSkillPath = writeSkill(TASK_DISPATCH_SKILL_NAME, buildTaskDispatchSkill());
+  const runtimeSkillPath = writeSkill(RUNTIME_SKILL_NAME, buildRuntimeSkill());
+  // Back-compat aliases: all three legacy path fields point at the
+  // merged skill so callers don't break.
+  const taskFilingSkillPath = runtimeSkillPath;
+  const taskLifecycleSkillPath = runtimeSkillPath;
+  const taskDispatchSkillPath = runtimeSkillPath;
 
   // Standing dispatch protocol for subagents — loaded whenever an agent
   // (typically a general-purpose subagent the orchestrator launched) sees a
@@ -137,6 +142,7 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     hooksPath,
     manifestPath,
     agentGuidePath,
+    runtimeSkillPath,
     taskFilingSkillPath,
     taskLifecycleSkillPath,
     taskDispatchSkillPath,

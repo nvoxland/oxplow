@@ -167,6 +167,37 @@ export class TurnStore {
     );
     return row ? rowToTurn(row) : null;
   }
+
+  /** Return `cache_read_input_tokens` from the most recently CLOSED turn in
+   *  this thread, or null if no turn has closed yet (or the latest closed
+   *  turn never had usage recorded). Used by the session-context block to
+   *  surface a rough cost signal so the orchestrator can notice when
+   *  inline-compounding cache reads should be dispatched to subagents. */
+  getLastClosedTurnCacheRead(threadId: string): number | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT cache_read_input_tokens FROM agent_turn
+       WHERE thread_id = ? AND ended_at IS NOT NULL
+       ORDER BY ended_at DESC, rowid DESC LIMIT 1`,
+      threadId,
+    );
+    if (!row) return null;
+    return toNumber(row.cache_read_input_tokens);
+  }
+
+  /** Sum `cache_read_input_tokens` across every CLOSED turn in this thread.
+   *  Returns 0 when there are no closed turns or every closed turn has a
+   *  null value. Used by the Stop-hook directive to emit a fork_thread
+   *  hint once the thread's cache-read has accumulated past a threshold. */
+  getCumulativeCacheRead(threadId: string): number {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT COALESCE(SUM(cache_read_input_tokens), 0) AS total FROM agent_turn
+       WHERE thread_id = ? AND ended_at IS NOT NULL`,
+      threadId,
+    );
+    if (!row) return 0;
+    const total = toNumber(row.total);
+    return total ?? 0;
+  }
 }
 
 function rowToTurn(row: Record<string, unknown>): AgentTurn {

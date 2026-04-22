@@ -14,6 +14,15 @@ export type WorkItemLinkType =
   | "supersedes"
   | "replies_to";
 export type WorkItemActorKind = "user" | "agent" | "system";
+/** Semantic origin of a work-item row — distinct from `created_by` (the
+ *  writer). 'agent-auto' marks rows synthesized by the runtime on the first
+ *  write-intent tool call of a turn; an explicit create_work_item later in
+ *  the same turn adopts the row and flips author to 'agent'. */
+export type WorkItemAuthor = "user" | "agent" | "agent-auto";
+
+const WORK_ITEM_AUTHORS: ReadonlySet<WorkItemAuthor> = new Set([
+  "user", "agent", "agent-auto",
+]);
 
 const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
   "epic", "task", "subtask", "bug", "note",
@@ -57,11 +66,20 @@ export interface WorkItem {
   completed_at: string | null;
   deleted_at: string | null;
   note_count: number;
+  /** Semantic origin — see `WorkItemAuthor`. Null for legacy rows. */
+  author: WorkItemAuthor | null;
 }
 
 export interface WorkNote {
   id: string;
-  work_item_id: string;
+  /** Non-null when this note is attached to an individual work item. Mutually
+   *  exclusive with `thread_id` (enforced by a CHECK at the DB layer in
+   *  migration v25). */
+  work_item_id: string | null;
+  /** Non-null when this is a thread-scoped note (not attached to any work
+   *  item) — typically findings from `newde__delegate_query` Explore-subagent
+   *  runs landed here via `newde__record_query_finding`. */
+  thread_id: string | null;
   body: string;
   author: string;
   created_at: string;
@@ -156,6 +174,44 @@ interface CreateWorkItemInput {
   priority?: WorkItemPriority;
   createdBy: WorkItemActorKind;
   actorId: string;
+  /** Optional semantic origin. See WorkItemAuthor. */
+  author?: WorkItemAuthor | null;
+}
+
+export interface FileEpicWithChildrenInput {
+  threadId: string;
+  epic: {
+    title: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    priority?: WorkItemPriority;
+  };
+  children: Array<{
+    title: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    priority?: WorkItemPriority;
+    kind?: WorkItemKind;
+  }>;
+  createdBy: WorkItemActorKind;
+  actorId: string;
+  /** When set, re-use this existing auto-filed work item's id as the epic
+   *  (via `adoptAutoItem` semantics: title/description/kind/priority
+   *  overwritten, author flipped to 'agent'). Children are created fresh
+   *  under the adopted row's id. Used by the auto-file → explicit
+   *  adoption flow in MCP `file_epic_with_children`. */
+  adoptItemId?: string;
+}
+
+export interface CompleteTaskInput {
+  threadId: string;
+  itemId: string;
+  note: string;
+  /** Defaults to `human_check`. Only `human_check` and `blocked` are valid
+   *  finishers — callers must not self-mark `done`. */
+  status?: "human_check" | "blocked";
+  actorKind: WorkItemActorKind;
+  actorId: string;
 }
 
 interface UpdateWorkItemInput {
@@ -167,6 +223,9 @@ interface UpdateWorkItemInput {
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
   parentId?: string | null;
+  /** Optional author change. Used by the auto-file → explicit-adoption flow
+   *  to flip 'agent-auto' → 'agent' in place. */
+  author?: WorkItemAuthor | null;
   actorKind: WorkItemActorKind;
   actorId: string;
   /**
@@ -220,6 +279,91 @@ export class WorkItemStore {
       .map(toWorkItem);
   }
 
+  /** Adopt an existing open auto-filed item: overwrite its title /
+   *  description / acceptance_criteria / kind / priority in place, flip
+   *  `author` to 'agent', and keep the same id and sort_index so downstream
+   *  references (efforts, notes, UI state) stay intact. Used by MCP
+   *  `create_work_item` / `file_epic_with_children` when they're called
+   *  during a turn that already has an auto-filed row. */
+  adoptAutoItem(input: {
+    threadId: string;
+    itemId: string;
+    title: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
+    kind?: WorkItemKind;
+    priority?: WorkItemPriority;
+    actorKind: WorkItemActorKind;
+    actorId: string;
+  }): WorkItem {
+    const existing = this.getItem(input.threadId, input.itemId);
+    if (!existing) throw new Error(`unknown work item: ${input.itemId}`);
+    const title = requireTitle(input.title);
+    const description = input.description !== undefined ? clampDescription(input.description) : existing.description;
+    const acceptance = input.acceptanceCriteria !== undefined ? clampAcceptanceCriteria(input.acceptanceCriteria) : existing.acceptance_criteria;
+    const kind = input.kind ? requireWorkItemKind(input.kind) : existing.kind;
+    const priority = input.priority ? requireWorkItemPriority(input.priority) : existing.priority;
+    const actorKind = requireWorkItemActorKind(input.actorKind);
+    const now = new Date().toISOString();
+    const updated: WorkItem = {
+      ...existing,
+      title,
+      description,
+      acceptance_criteria: acceptance,
+      kind,
+      priority,
+      author: "agent",
+      updated_at: now,
+    };
+    this.stateDb.transaction(() => {
+      this.stateDb.run(
+        `UPDATE work_items
+         SET title = ?, description = ?, acceptance_criteria = ?, kind = ?, priority = ?, author = ?, updated_at = ?
+         WHERE thread_id = ? AND id = ?`,
+        updated.title,
+        updated.description,
+        updated.acceptance_criteria,
+        updated.kind,
+        updated.priority,
+        updated.author,
+        updated.updated_at,
+        updated.thread_id,
+        updated.id,
+      );
+      this.recordEvent({
+        threadId: input.threadId,
+        itemId: input.itemId,
+        eventType: "adopted",
+        actorKind,
+        actorId: input.actorId,
+        payload: { before: existing, after: updated },
+      });
+    });
+    this.emitChange({ threadId: input.threadId, kind: "updated", itemId: input.itemId });
+    return updated;
+  }
+
+  /** Find the currently-open runtime-auto-filed work item for a thread, if
+   *  any. Returns the in_progress item authored by 'agent-auto' with the
+   *  earliest created_at (there should be at most one by convention; we
+   *  take the oldest so a duplicate doesn't hide the adopted row). Used by
+   *  the auto-file / auto-complete runtime hooks. */
+  findOpenAutoItemForThread(threadId: string): WorkItem | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT work_items.*,
+              (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
+       FROM work_items
+       WHERE thread_id = ?
+         AND status = 'in_progress'
+         AND author = 'agent-auto'
+         AND deleted_at IS NULL
+       ORDER BY created_at, id
+       LIMIT 1`,
+      threadId,
+    );
+    return row ? toWorkItem(row) : null;
+  }
+
   getItem(threadId: string, itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       `SELECT work_items.*,
@@ -242,6 +386,7 @@ export class WorkItemStore {
     const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
     const createdBy = requireWorkItemActorKind(input.createdBy);
     const parentId = input.parentId ?? null;
+    const author = input.author === undefined ? null : requireOptionalWorkItemAuthor(input.author);
     const now = new Date().toISOString();
     const id = createId("wi");
 
@@ -262,50 +407,11 @@ export class WorkItemStore {
       completed_at: status === "done" ? now : null,
       deleted_at: null,
       note_count: 0,
+      author,
     };
 
     this.stateDb.transaction(() => {
-      if (parentId) this.requireItemInThread(input.threadId, parentId, "parent");
-
-      // Compute sort_index atomically inside the INSERT so concurrent creates
-      // under the same parent can't collide on MAX+1.
-      const parentClause = parentId ? "parent_id = ?" : "parent_id IS NULL";
-      const sortParams: [string, ...(string[])] = parentId ? [input.threadId, parentId] : [input.threadId];
-      this.stateDb.run(
-        `INSERT INTO work_items (
-          id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
-          sort_index, created_by, created_at, updated_at, completed_at
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE thread_id = ? AND ${parentClause}),
-          ?, ?, ?, ?
-        )`,
-        item.id,
-        item.thread_id,
-        item.parent_id,
-        item.kind,
-        item.title,
-        item.description,
-        item.acceptance_criteria,
-        item.status,
-        item.priority,
-        ...sortParams,
-        item.created_by,
-        item.created_at,
-        item.updated_at,
-        item.completed_at,
-      );
-      const stored = this.getItem(input.threadId, item.id);
-      if (!stored) throw new Error("work item was not persisted");
-      item.sort_index = stored.sort_index;
-      this.recordEvent({
-        threadId: input.threadId,
-        itemId: item.id,
-        eventType: "created",
-        actorKind: createdBy,
-        actorId: input.actorId,
-        payload: item,
-      });
+      this.insertItemRow(item, input.actorId);
     });
     this.logger?.info("created work item", {
       threadId: item.thread_id,
@@ -315,6 +421,53 @@ export class WorkItemStore {
     });
     this.emitChange({ threadId: item.thread_id ?? BACKLOG_SCOPE, kind: "created", itemId: item.id });
     return item;
+  }
+
+  /** Insert a fully-built item row + record the "created" event. Assumes the
+   *  caller has opened (or is outside) a transaction — does NOT open its own.
+   *  Mutates `item.sort_index` to the DB-assigned value. */
+  private insertItemRow(item: WorkItem, actorId: string): void {
+    if (item.parent_id) this.requireItemInThread(item.thread_id!, item.parent_id, "parent");
+    const parentClause = item.parent_id ? "parent_id = ?" : "parent_id IS NULL";
+    const sortParams: [string, ...(string[])] = item.parent_id
+      ? [item.thread_id!, item.parent_id]
+      : [item.thread_id!];
+    this.stateDb.run(
+      `INSERT INTO work_items (
+        id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
+        sort_index, created_by, created_at, updated_at, completed_at, author
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE thread_id = ? AND ${parentClause}),
+        ?, ?, ?, ?, ?
+      )`,
+      item.id,
+      item.thread_id,
+      item.parent_id,
+      item.kind,
+      item.title,
+      item.description,
+      item.acceptance_criteria,
+      item.status,
+      item.priority,
+      ...sortParams,
+      item.created_by,
+      item.created_at,
+      item.updated_at,
+      item.completed_at,
+      item.author,
+    );
+    const stored = this.getItem(item.thread_id!, item.id);
+    if (!stored) throw new Error("work item was not persisted");
+    item.sort_index = stored.sort_index;
+    this.recordEvent({
+      threadId: item.thread_id!,
+      itemId: item.id,
+      eventType: "created",
+      actorKind: item.created_by,
+      actorId,
+      payload: item,
+    });
   }
 
   updateItem(input: UpdateWorkItemInput): WorkItem {
@@ -331,6 +484,9 @@ export class WorkItemStore {
       ? clampAcceptanceCriteria(input.acceptanceCriteria)
       : existing.acceptance_criteria;
 
+    const nextAuthor: WorkItem["author"] = input.author !== undefined
+      ? (input.author === null ? null : requireOptionalWorkItemAuthor(input.author))
+      : existing.author;
     const updated: WorkItem = {
       ...existing,
       parent_id: nextParentId,
@@ -345,6 +501,7 @@ export class WorkItemStore {
         : existing.status === "done"
           ? null
           : existing.completed_at,
+      author: nextAuthor,
     };
     if (nextParentId && nextParentId === input.itemId) {
       throw new Error("work item cannot be its own parent");
@@ -372,7 +529,7 @@ export class WorkItemStore {
       }
       this.stateDb.run(
         `UPDATE work_items
-         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, sort_index = ?, updated_at = ?, completed_at = ?
+         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, sort_index = ?, updated_at = ?, completed_at = ?, author = ?
          WHERE thread_id = ? AND id = ?`,
         updated.parent_id,
         updated.title,
@@ -383,6 +540,7 @@ export class WorkItemStore {
         updated.sort_index,
         updated.updated_at,
         updated.completed_at,
+        updated.author,
         updated.thread_id,
         updated.id,
       );
@@ -430,8 +588,166 @@ export class WorkItemStore {
         actorId,
         payload: { note: trimmed },
       });
+      // Also land the note in the structured `work_note` table so the UI's
+      // getWorkNotes reader surfaces it (the historical event stream alone
+      // isn't queried by the Work panel's note list).
+      if (itemId) {
+        this.stateDb.run(
+          `INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at)
+           VALUES (?, ?, NULL, ?, ?, ?)`,
+          createId("note"),
+          itemId,
+          trimmed,
+          String(actorId || kind),
+          new Date().toISOString(),
+        );
+      }
     });
     this.emitChange({ threadId, kind: "note", itemId });
+  }
+
+  /** Atomically create an epic plus N child items in a single transaction.
+   *  Rejects empty children — the whole point of this entry point is to
+   *  prevent the epic-without-children footgun. Children default to
+   *  `kind: "task"` if unspecified. All rows share the same transaction: a
+   *  validation failure on the Nth child rolls back the epic too, so no
+   *  partial-creation state is possible. */
+  fileEpicWithChildren(input: FileEpicWithChildrenInput): { epicId: string; childIds: string[] } {
+    if (!Array.isArray(input.children) || input.children.length === 0) {
+      throw new Error("file_epic_with_children requires at least one child — an epic without children is a bug");
+    }
+    const now = new Date().toISOString();
+    const createdBy = requireWorkItemActorKind(input.createdBy);
+    const buildItem = (
+      opts: {
+        kind: WorkItemKind;
+        title: string;
+        description?: string;
+        acceptanceCriteria?: string | null;
+        priority?: WorkItemPriority;
+        parentId: string | null;
+      },
+    ): WorkItem => ({
+      id: createId("wi"),
+      thread_id: input.threadId,
+      parent_id: opts.parentId,
+      kind: requireWorkItemKind(opts.kind),
+      title: requireTitle(opts.title),
+      description: clampDescription(opts.description),
+      acceptance_criteria: clampAcceptanceCriteria(opts.acceptanceCriteria),
+      status: "ready",
+      priority: opts.priority ? requireWorkItemPriority(opts.priority) : "medium",
+      sort_index: 0,
+      created_by: createdBy,
+      created_at: now,
+      updated_at: now,
+      completed_at: null,
+      deleted_at: null,
+      note_count: 0,
+      author: null,
+    });
+
+    // When adopting an existing auto-filed row as the epic, reuse its id
+    // so effort/note attribution stays intact. Otherwise mint a fresh id.
+    // All rows (epic/adopt + children) live in ONE transaction so a
+    // validation failure on any child rolls back the epic too.
+    let epicId: string;
+    const children: WorkItem[] = [];
+    this.stateDb.transaction(() => {
+      if (input.adoptItemId) {
+        const existing = this.getItem(input.threadId, input.adoptItemId);
+        if (!existing) throw new Error(`unknown work item: ${input.adoptItemId}`);
+        const title = requireTitle(input.epic.title);
+        const description = input.epic.description !== undefined ? clampDescription(input.epic.description) : existing.description;
+        const acceptance = input.epic.acceptanceCriteria !== undefined
+          ? clampAcceptanceCriteria(input.epic.acceptanceCriteria)
+          : existing.acceptance_criteria;
+        const priority = input.epic.priority ? requireWorkItemPriority(input.epic.priority) : existing.priority;
+        const updatedAt = new Date().toISOString();
+        this.stateDb.run(
+          `UPDATE work_items
+           SET title = ?, description = ?, acceptance_criteria = ?, kind = 'epic', priority = ?, author = 'agent', updated_at = ?
+           WHERE thread_id = ? AND id = ?`,
+          title,
+          description,
+          acceptance,
+          priority,
+          updatedAt,
+          input.threadId,
+          input.adoptItemId,
+        );
+        this.recordEvent({
+          threadId: input.threadId,
+          itemId: input.adoptItemId,
+          eventType: "adopted",
+          actorKind: createdBy,
+          actorId: input.actorId,
+          payload: { before: existing, via: "file_epic_with_children" },
+        });
+        epicId = input.adoptItemId;
+      } else {
+        const epic = buildItem({
+          kind: "epic",
+          title: input.epic.title,
+          description: input.epic.description,
+          acceptanceCriteria: input.epic.acceptanceCriteria,
+          priority: input.epic.priority,
+          parentId: null,
+        });
+        this.insertItemRow(epic, input.actorId);
+        epicId = epic.id;
+      }
+      for (const childInput of input.children) {
+        const child = buildItem({
+          kind: childInput.kind ?? "task",
+          title: childInput.title,
+          description: childInput.description,
+          acceptanceCriteria: childInput.acceptanceCriteria,
+          priority: childInput.priority,
+          parentId: epicId,
+        });
+        this.insertItemRow(child, input.actorId);
+        children.push(child);
+      }
+    });
+    this.emitChange({ threadId: input.threadId, kind: input.adoptItemId ? "updated" : "created", itemId: epicId! });
+    for (const child of children) {
+      this.emitChange({ threadId: input.threadId, kind: "created", itemId: child.id });
+    }
+    return { epicId: epicId!, childIds: children.map((c) => c.id) };
+  }
+
+  /** Collapse add_work_note + updateItem(status) into one transaction.
+   *  `status` defaults to `human_check`. Rejects `done` (callers must not
+   *  self-mark) and rejects if the current status is already terminal
+   *  (done/canceled/archived) — those should go through update_work_item. */
+  completeTask(input: CompleteTaskInput): WorkItem {
+    const status = input.status ?? "human_check";
+    if (status !== "human_check" && status !== "blocked") {
+      throw new Error(
+        `complete_task: status must be 'human_check' or 'blocked' (callers must not self-mark 'done')`,
+      );
+    }
+    const existing = this.getItem(input.threadId, input.itemId);
+    if (!existing) throw new Error(`unknown work item: ${input.itemId}`);
+    if (existing.status === "done" || existing.status === "canceled" || existing.status === "archived") {
+      throw new Error(
+        `complete_task: item ${input.itemId} is already in terminal status '${existing.status}' — use update_work_item to change it`,
+      );
+    }
+    // `addNote` and `updateItem` each open their own transaction (and bun:sqlite
+    // doesn't support nested BEGIN). Call them sequentially here rather than
+    // wrapping in an outer transaction. Worst case: note write succeeds and the
+    // status transition fails, leaving an extra note on the item — acceptable.
+    this.addNote(input.threadId, input.itemId, input.note, input.actorKind, input.actorId);
+    const updated = this.updateItem({
+      threadId: input.threadId,
+      itemId: input.itemId,
+      status,
+      actorKind: input.actorKind,
+      actorId: input.actorId,
+    });
+    return updated;
   }
 
   deleteItem(threadId: string, itemId: string, actorKind: WorkItemActorKind, actorId: string): void {
@@ -679,6 +995,115 @@ export class WorkItemStore {
       .all<Record<string, unknown>>(
         `SELECT * FROM work_note WHERE work_item_id = ? ORDER BY created_at ASC`,
         itemId,
+      )
+      .map(toWorkNote);
+  }
+
+  /**
+   * Copy the last `limit` notes of `itemId` (ordered by `created_at DESC`,
+   * then re-inserted chronologically so the new rows land in original
+   * order) as fresh rows attached to the same item id. Used by
+   * `fork_thread` to carry per-item note history into the new thread —
+   * the moved item's history continues to be readable after the fork.
+   *
+   * - Returns the number of rows inserted.
+   * - Source rows are never modified.
+   * - Fresh ids and fresh `created_at` timestamps; body+author preserved.
+   * - No-op and returns 0 when the item has no notes or when `limit <= 0`.
+   */
+  copyLastItemNotes(itemId: string, limit: number): number {
+    const cap = Math.max(0, Math.floor(Number(limit) || 0));
+    if (cap === 0) return 0;
+    const recent = this.stateDb.all<Record<string, unknown>>(
+      `SELECT body, author FROM work_note
+       WHERE work_item_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      itemId,
+      cap,
+    );
+    if (recent.length === 0) return 0;
+    // Re-insert oldest-first so the copies' created_at ordering matches
+    // the originals' chronology.
+    const ordered = recent.slice().reverse();
+    this.stateDb.transaction(() => {
+      for (const row of ordered) {
+        const id = createId("note");
+        const now = new Date().toISOString();
+        this.stateDb.run(
+          `INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at)
+           VALUES (?, ?, NULL, ?, ?, ?)`,
+          id,
+          itemId,
+          String(row.body ?? ""),
+          String(row.author ?? "agent"),
+          now,
+        );
+      }
+    });
+    return ordered.length;
+  }
+
+  /** Insert a thread-scoped note row (no work item). Returns the inserted
+   *  row's id. Used by `newde__delegate_query` to pre-allocate a landing
+   *  slot for Explore-subagent findings, and by `record_query_finding` to
+   *  fill the body in once the subagent returns. Pass `body = ""` at
+   *  allocation time and update it later via `updateThreadNoteBody`. */
+  addThreadNote(threadId: string, body: string, author: string): string {
+    const trimmedAuthor = String(author ?? "").trim();
+    if (!trimmedAuthor) throw new Error("thread note author is required");
+    if (body != null && body.length > NOTE_MAX_LEN) {
+      throw new Error(`note too long: max ${NOTE_MAX_LEN} chars`);
+    }
+    const id = createId("note");
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      `INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at)
+       VALUES (?, NULL, ?, ?, ?, ?)`,
+      id,
+      threadId,
+      String(body ?? ""),
+      trimmedAuthor,
+      now,
+    );
+    return id;
+  }
+
+  /** Overwrite the `body` of an existing thread-scoped note. Used by
+   *  `newde__record_query_finding` to fill in a pre-allocated row once the
+   *  Explore subagent returns its finding. Throws if the note doesn't
+   *  exist or isn't thread-scoped (belongs to a work item instead). */
+  updateThreadNoteBody(noteId: string, body: string): void {
+    if (body == null) throw new Error("body is required");
+    if (body.length > NOTE_MAX_LEN) {
+      throw new Error(`note too long: max ${NOTE_MAX_LEN} chars`);
+    }
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT thread_id FROM work_note WHERE id = ?`,
+      noteId,
+    );
+    if (!row) throw new Error(`unknown thread note: ${noteId}`);
+    if (row.thread_id == null) {
+      throw new Error(`note ${noteId} is item-scoped, not thread-scoped`);
+    }
+    this.stateDb.run(
+      `UPDATE work_note SET body = ? WHERE id = ?`,
+      body,
+      noteId,
+    );
+  }
+
+  /** Return up to `limit` most-recent thread-scoped notes (reverse chronological). */
+  listThreadNotes(threadId: string, limit = 5): WorkNote[] {
+    const cap = Math.max(1, Math.min(Number(limit) || 5, 100));
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM work_note
+         WHERE thread_id = ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+        threadId,
+        cap,
       )
       .map(toWorkNote);
   }
@@ -1075,13 +1500,15 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
     acceptance_criteria: row.acceptance_criteria == null ? null : String(row.acceptance_criteria),
     note_count: Number(row.note_count ?? 0),
+    author: row.author == null ? null : requireOptionalWorkItemAuthor(String(row.author)),
   };
 }
 
 function toWorkNote(row: Record<string, unknown>): WorkNote {
   return {
     id: requireString(row, "id"),
-    work_item_id: requireString(row, "work_item_id"),
+    work_item_id: row.work_item_id == null ? null : String(row.work_item_id),
+    thread_id: row.thread_id == null ? null : String(row.thread_id),
     body: String(row.body ?? ""),
     author: String(row.author ?? ""),
     created_at: requireString(row, "created_at"),
@@ -1177,6 +1604,13 @@ function requireWorkItemLinkType(value: string): WorkItemLinkType {
     throw new Error(`invalid work item link type: ${value}`);
   }
   return value as WorkItemLinkType;
+}
+
+function requireOptionalWorkItemAuthor(value: string | null): WorkItemAuthor {
+  if (!WORK_ITEM_AUTHORS.has(value as WorkItemAuthor)) {
+    throw new Error(`invalid work item author: ${value}`);
+  }
+  return value as WorkItemAuthor;
 }
 
 function requireWorkItemActorKind(value: string): WorkItemActorKind {

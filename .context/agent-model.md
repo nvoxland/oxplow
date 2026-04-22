@@ -182,28 +182,43 @@ from the side effects lets every branch be unit-tested with a fixture.
 
 The pipeline runs in priority order:
 
-0. **Auto-commit pre-pass (writer thread only, no DB row).** Before
-   `decideStopDirective` runs, `computeStopDirective` in the runtime checks
-   whether `thread.auto_commit` is true, the thread is `active`, and settled
-   work (`human_check`/`done` items) is present. If so, it calls
-   `runAutoCommit(thread, workItems)` directly —
-   that generates a message from settled titles, runs `git commit`, and
-   emits a `thread.changed` event with kind `auto-committed`. **No
-   commit_point row is created** in auto-commit mode (the "Commit · Auto"
-   row in the queue UI was pure noise). Manually-placed commit points with
-   mode=auto still go through `executeAutoCommitPoint`, which calls the
-   same `runAutoCommit` helper and then flips its own DB row to `done`.
-1. **Pending commit point (writer thread only).** Block with a directive
-   built by `buildCommitPointStopReason` telling the agent to inspect the
-   diff, draft a concise commit message in its chat reply, and ask the
-   user to approve. On approval the agent calls
-   `mcp__newde__commit({ commit_point_id, message })` which runs
-   `gitCommitAll` and flips the point to `done`. The drafted message
-   lives only in chat — there is no DB column for it. **Gated on
-   `thread.status === "active"`**: only the writer thread ever commits.
-   Non-active threads fall through so the commit point stays pending
-   until that thread is promoted to writer.
-2. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
+1. **Pending commit point (writer thread only).** Block with an
+   agent-drafted commit directive. Two shapes:
+   - `mode="approve"` (default) → `buildCommitPointStopReason`: agent
+     inspects the diff, drafts a message in chat, asks the user to
+     approve, then calls `mcp__newde__commit({ commit_point_id, message })`.
+   - `mode="auto"` → `buildAutoCommitStopReason` (same directive text
+     used for the no-row ad-hoc case below): agent inspects the diff,
+     drafts a message, and commits **in the same turn without asking**.
+     Same tool call with the commit_point_id — the runtime flips the
+     row to `done`.
+   **Gated on `thread.status === "active"`**: only the writer thread
+   ever commits. Non-active threads fall through so the commit point
+   stays pending until that thread is promoted to writer.
+2. **Ad-hoc auto-commit (writer thread only, no DB row).** When
+   `thread.auto_commit` is true AND settled work (`human_check`/`done`
+   items) is present AND no pending commit_point is queued, the pipeline
+   emits `buildAutoCommitStopReason(null)`. Agent drafts a message from
+   the diff and calls `mcp__newde__commit({ auto: true, threadId, message })`,
+   which routes to `executeAutoCommitForThread` — runs `git commit`,
+   links contributing work items to the new sha via the
+   `work_item_commit` junction (see `linkCommitToContributingItems` and
+   data-model.md), and publishes a `thread.changed`/`auto-committed`
+   event. **No commit_point row is created.** This is the unified-flow endpoint: auto
+   and approve modes now only differ in whether the agent asks the user
+   first.
+   - Supplementary context tool: `mcp__newde__tasks_since_last_commit`
+     returns work items whose efforts closed after the most recent done
+     commit_point (or all closed efforts when the thread has never
+     committed). The agent uses it when it's lost memory of earlier
+     completed tasks; the diff is still the primary source of truth.
+   - Fallback: if the agent calls `newde__commit` with `auto: true` but
+     an empty `message`, the runtime falls back to `buildAutoCommitMessage`
+     — now filtered by the latest done commit_point's `completed_at`
+     (items whose `updated_at` is strictly after it), so the body
+     reflects *this* commit's changes rather than every settled item
+     ever.
+3. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
    UI shows "agent stopped here"; the user resumes by prompting the agent
    directly (`triggered` points are skipped on subsequent Stop hooks, so
    one prompt is enough — no "continue" button). A marker (commit or wait)
@@ -211,10 +226,10 @@ The pipeline runs in priority order:
    includes `human_check` — agents never self-mark `done`, so demanding
    `done` would let the agent march past the line indefinitely while the
    user catches up on verification.
-3. **Writer thread with a ready work item.** Block with a terse directive
+4. **Writer thread with a ready work item.** Block with a terse directive
    built by `buildNextWorkItemStopReason` — a one-liner pointing at
    `mcp__newde__read_work_options` (with the embedded threadId) and the
-   `newde-task-dispatch` + `newde-task-lifecycle` skills. Protocol
+   merged `newde-runtime` skill. Protocol
    (mark `in_progress` before work, `human_check` after, one-at-a-time
    attribution) lives in those skills, not the directive — keep the
    stop-hook message stable and cheap. Items the
@@ -225,12 +240,73 @@ The pipeline runs in priority order:
    invert the user's "leave in waiting" intent. "Queue" here means
    waiting + ready items only — `human_check` belongs to the user's
    review queue and is terminal from the pipeline's perspective.
-4. **Otherwise.** Allow stop.
 
-Auto-mode commit points are handled by the runtime's Stop-hook pre-pass
-before the pipeline runs: `runAutoCommit` generates a message from the
-settled work items, `gitCommitAll` runs, and the point flips straight to
-`done`. No human in the loop and no agent chat round-trip.
+   **Ready-work suppression rules** (apply to this branch only — commit /
+   wait / auto-commit are unaffected):
+
+   - **Conversational-prompt suppression.** When the current user prompt
+     starts with one of a small allowlist of starter words
+     (`why|how|explain|what|look|tell|show|can you|does|is|should|could|would`,
+     case-insensitive, leading whitespace trimmed), the ready-work
+     directive is skipped. Rationale: the user is asking a question, not
+     commanding queue-driven execution; force-marching the agent to the
+     next ready item inverts that intent.
+   - **Just-read suppression.** The runtime keeps a per-thread record
+     (`lastReadWorkOptionsByThread`) of the ready-item ids the agent saw
+     in its most recent `read_work_options` call. On the next Stop, if
+     the current ready-set is identical, the directive is suppressed and
+     the record is cleared — the agent already has the list; re-emitting
+     it would waste a turn.
+
+5. **Otherwise.** Allow stop.
+
+### fork_thread + high-cache-read hint
+
+At scale a single thread accumulates cache-read cost across its
+lifetime; once it's climbed past ~20M the replay-on-every-turn tax
+starts to dominate. To let the orchestrator shed the tail, the runtime
+exposes `mcp__newde__fork_thread({ sourceThreadId, title, summary,
+moveItemIds? })` — one transaction that:
+
+1. Creates a new thread on the same stream, status `queued` (never
+   auto-writer — promote explicitly if you want it to commit).
+2. Seeds the new thread with a single `note`-kind work item titled
+   "Context from fork" whose description is the caller-supplied
+   `summary` (no schema change — the `note` kind already exists on
+   `work_items`).
+3. Optionally moves each `moveItemIds` entry over via
+   `WorkItemStore.moveItemToThread`. Items must currently be `ready` or
+   `blocked` on the source thread; `in_progress` / `human_check` /
+   terminal items are rejected with an error listing the offenders so
+   the caller can settle them first.
+4. For each moved item, copies its last 3 notes (by `created_at DESC`,
+   re-inserted in chronological order) as fresh rows on the same item
+   id via `WorkItemStore.copyLastItemNotes`. Source rows are untouched.
+   Items with fewer than 3 notes copy all; items with none are no-ops.
+   The user landing in the forked thread sees decisions/rationale
+   carried over rather than a bare title.
+
+Returns `{ newThreadId }`. Implementation lives on
+`ElectronRuntime.forkThread` (`src/electron/runtime.ts`); the MCP tool
+is just a thin surface.
+
+**Cumulative cache-read hint.** `TurnStore.getCumulativeCacheRead(threadId)`
+sums `cache_read_input_tokens` across every closed turn on the thread.
+When ≥20M AND the ready-work directive is about to be emitted (i.e.
+not suppressed by the rules above), the directive text has a
+trailing line appended:
+
+> `note: this thread has burned <N.N>M cache-read. If upcoming work is unrelated, consider newde__fork_thread({ sourceThreadId: "<id>", title: "...", summary: "short carry-over context" })`
+
+The hint is a nudge, not a requirement — the orchestrator decides
+whether the tail really is unrelated. Commit-point and wait-point
+directives don't carry the hint; only the ready-work branch does.
+
+Numbering note: ad-hoc auto-commit (no DB row) runs *after* the
+commit_point branch because a pending commit_point always wins — if the
+user has explicitly queued a commit marker, honour it; ad-hoc
+auto-commit is the "draft me something" catch-all that fires only when
+nothing more specific is in the queue.
 
 ## BatchQueueOrchestrator
 
@@ -265,10 +341,10 @@ that, the orchestrator has two modes:
 
 The dispatch protocol (mark `in_progress` before work, `human_check`
 after, never two items `in_progress` at once, blocked + note on
-stuck) is identical for both modes and lives in the
-`newde-task-lifecycle` skill (orchestrator side) plus the
-`newde-subagent-work-protocol` skill (scoped to subagents). Briefs no
-longer need to repeat it.
+stuck) is identical for both modes and lives in the merged
+`newde-runtime` skill (orchestrator side — filing + lifecycle +
+dispatch combined) plus the `newde-subagent-work-protocol` skill
+(scoped to subagents). Briefs no longer need to repeat it.
 
 Related small fixes get batched into one task ("fix 4 test fixtures" =
 one item, not four). Claude Code's built-in `TaskCreate` is a
@@ -300,8 +376,28 @@ primary tool for queue-driven dispatch.
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
   `get_work_item`, `delete_work_item`, `reorder_work_items`,
-  `link_work_items`, `add_work_note`, `list_recent_file_changes`
-- `commit(commit_point_id, message)`, `list_commit_points(threadId)`
+  `link_work_items`, `add_work_note`, `list_recent_file_changes`,
+  `dispatch_work_item`, `file_epic_with_children`, `complete_task`,
+  `transition_work_items`
+- `dispatch_work_item({ threadId, itemId, extraContext?, autoStart? })` composes
+  a subagent brief server-side (preamble + item fields + children + last notes
+  + optional extra context) so the orchestrator doesn't have to Read the item
+  description/AC/notes into chat context. Default `autoStart=true` atomically
+  transitions `ready`/`blocked` items to `in_progress`; other statuses are
+  left alone. Callers pass the returned `prompt` directly to Agent(prompt=…).
+  Pure composition lives in `composeDispatchBrief` (same file) so tests can
+  exercise it without spinning up MCP.
+- `commit({ commit_point_id, message } | { auto: true, threadId, message })`,
+  `list_commit_points(threadId)`, `tasks_since_last_commit(threadId)`.
+- `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
+  "fork_thread + high-cache-read hint" above. Creates a new queued
+  thread on the same stream, seeds a note item, optionally moves ready/
+  blocked items across in one transaction.
+  The auto shape is used for ad-hoc commits when `thread.auto_commit=true`
+  and no commit_point row is queued — it just runs `git commit` on the
+  thread's worktree and publishes `auto-committed`. `tasks_since_last_commit`
+  is supplementary context for the auto-commit draft (not the primary
+  source — the diff is).
 
 `buildLspMcpTools` (`src/mcp/lsp-mcp-tools.ts`) adds language-server
 queries (definition, references, hover) the agent can use without
@@ -328,6 +424,28 @@ in-progress changes.
   commands, so the prompt is the only line of defence there).
 - MCP tools (`mcp__newde__*`) are always allowed: they write to the state
   DB, not the worktree.
+
+## Dev-time MCP live-reload (opt-in)
+
+Set `NEWDE_DEV_RELOAD=1` before launching the runtime to watch
+`src/mcp/` and `src/persistence/` recursively. On any `.ts`/`.tsx`
+change, a debounced (250ms) restart stops the current MCP server and
+calls `startMcpServer` again so the rebuilt tool registrations and a
+fresh TCP port + lockfile are live.
+
+**Known limitation.** ESM caches imported modules by URL, so
+re-invoking `buildWorkItemMcpTools` returns the *same* in-memory
+module graph — an edit to handler source still needs a full runtime
+restart to actually pick up new logic. The watcher still has value: it
+logs the triggering file loudly so the dev knows a restart is due,
+and it rebinds the port + lockfile (useful after a stale lockfile
+survives a crash). Full hot-reload would require either a child-
+process MCP model or a `bun --hot`-style process reload, both bigger
+changes than this dev convenience warrants. Tracked on
+wi-4c3a6289871f.
+
+Zero runtime cost when the env var is unset; the source-root probe
+doesn't run at all in that case.
 
 ## MCP tool deferral is a harness decision
 
@@ -394,18 +512,46 @@ across subsequent turns. Both directions are covered:
 No banner is emitted when the role has not changed, so steady-state
 turns don't grow.
 
+### last_turn_cache_read cost hint
+
+`buildSessionContextBlock` also accepts an optional `lastTurnCacheRead`
+input — populated by `buildRefreshedSessionContext` via
+`TurnStore.getLastClosedTurnCacheRead(threadId)` (the most recent
+`agent_turn` row for the thread with `ended_at IS NOT NULL`, returning
+its `cache_read_input_tokens` or null). When ≥1000 it renders a
+`last_turn_cache_read: <N>K` line; ≥1,000,000 flips to `<N.N>M`. Values
+below 1000 are omitted as noise. When the value hits ≥10,000,000 a
+separate `tip: dispatch new work to subagents — inline turns compound
+cache-read cost` line is appended before `</session-context>` — at
+that scale the cache-read cost of replaying conversation history on
+every inline tool call starts to dominate, and dispatching to a
+subagent amortizes the replay. The hint is a nudge, not a hard rule;
+the orchestrator decides based on the work shape.
+
+`buildSessionContextBlock` also accepts an optional `currentTurnBytes`
+— a rough running estimate of the current turn's tool-result bytes so
+far, accumulated by the runtime in a per-thread
+`currentTurnBytesByThread` Map on each `PostToolUse` envelope
+(`estimateToolResponseBytes` just measures the serialized
+`tool_response`). When non-trivial it's rendered as a suffix on the
+`last_turn_cache_read` line, e.g. `last_turn_cache_read: 19.3M (this
+turn: ~2.0M so far)`, so a mid-turn session-context refresh surfaces a
+non-stale cost signal. The map is cleared on `UserPromptSubmit` (new
+turn) and `Stop` (turn closed). First turn of a session renders only
+the last-turn value, since `currentTurnBytes` is undefined.
+
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
-flag, and a pointer to the skills. Procedural policy is split across
-three focused orchestrator-side skills (all in
-`src/session/agent-skills.ts`):
-`newde-task-filing` (when to file, how to shape items,
-acceptance-criteria style, epic-with-children rule),
-`newde-task-lifecycle` (status conventions, epic rollup, notes), and
-`newde-task-dispatch` (orchestrator vs subagent execution mode,
-brief composition). Each skill has a targeted description so only
-the relevant one loads per turn.
+flag, and a pointer to the skills. Procedural policy is consolidated in
+one orchestrator-side skill (`src/session/agent-skills.ts`):
+`newde-runtime` merges filing (when to file, how to shape items,
+acceptance-criteria style, epic-with-children rule), lifecycle
+(status conventions, epic rollup, notes), and dispatch (orchestrator
+vs subagent execution mode, brief composition). Its description
+combines all trigger contexts so it still loads when any of the
+legacy invocation paths apply, but contributes a single index line
+per turn instead of three.
 Reason: the preamble is replayed via cache-read on every turn; skills
 load only when the agent needs them. Keep additions to the preamble
 situational (what changes per thread), not educational (how to use the
@@ -532,6 +678,66 @@ snapshot `S`:
 `getEffortFiles` is exported from `runtime.ts` as `computeEffortFiles`
 (pure helper over the two stores) for test reuse, and wired to IPC via
 the same pattern as `getSnapshotSummary`.
+
+## Auto-file / auto-complete (observational)
+
+Newde auto-synthesizes a work-item record from the agent's natural
+signals so the Work panel stays populated even when the agent didn't
+explicitly file a ticket.
+
+- **Auto-file** (runtime hook, fires on first write-intent PostToolUse
+  after no open agent-auto row exists for the thread): the runtime
+  creates a `work_items` row with `author='agent-auto'`,
+  `status='in_progress'`, title derived from the first ~60 chars of the
+  current turn's prompt. The gate is **thread-wide via
+  `WorkItemStore.findOpenAutoItemForThread`**, not per-turn — a second
+  turn/session firing PostToolUse while the first auto-filed row is
+  still open is a no-op. No in-memory per-turn Map is kept. See
+  `runtime.autoFileWorkItem` + the PostToolUse branch of
+  `applyTurnTracking`. Write-intent = `{Write, Edit, MultiEdit,
+  NotebookEdit}` always; `Bash` is write-intent unless the command
+  starts with a readonly verb (`ls`, `cat`, `grep`, `find`, `git log`,
+  `git diff`, `git status`, `bun test`, `bunx tsc --noEmit`).
+
+- **Override adoption**: if the agent then calls `create_work_item` or
+  `file_epic_with_children` during the same turn, the MCP handler
+  updates the existing auto-filed row in place (same id) rather than
+  creating a duplicate, and flips `author` to `'agent'`.
+  `WorkItemStore.findOpenAutoItemForThread(threadId)` is the lookup.
+
+- **Auto-complete** (runtime hook, fires at Stop, after the turn-end
+  snapshot is flushed): `autoCompleteOpenAutoItems` (exported from
+  `runtime.ts`) looks up the open `author='agent-auto'` item for the
+  thread, confirms it has an effort row linked to the closing turn,
+  composes a summary note via `composeAutoCompleteNote` (diff-derived
+  file-change count + first 5 paths, optional signals leader built from
+  structured heuristics run over captured Bash output), **rewrites the
+  item's title via `deriveAutoItemTitleFromDiff(filePaths)`** (heuristic —
+  `Edit foo.ts` / `Edit src: a.ts, b.ts, +N more`, capped at 60 chars) so
+  the prompt-prefix title doesn't linger in blame / Work-panel UX, and
+  transitions the item to `human_check`. No-op if no auto-filed item
+  exists or if it has no effort in the current turn (so user- or
+  explicitly-agent-authored items are never auto-closed). The full note
+  body is clamped to `AUTO_COMPLETE_NOTE_MAX_LEN` (400 chars).
+
+  **Signal detection (heuristic-only, no LLM).** Runtime buffers raw
+  PostToolUse `tool_response` stdout/stderr from Bash calls per
+  (threadId, turnId) in `bashOutputsByTurn`. At Stop,
+  `detectTestResultFromBashOutput`, `detectTscErrorsFromBashOutput`, and
+  `detectCommitShasFromBashOutput` (all in `runtime.ts`) scan the
+  concatenated buffer and return null when their pattern is absent.
+  Absent signals stay absent; present ones render as
+  `Tests: 484/0. tsc: clean. commits: abc1234. Auto-summary: …`.
+
+- **Task-list bridge** (Claude Code TodoWrite → work-item note). When
+  Claude uses the built-in `TodoWrite` during a turn, the runtime's
+  PostToolUse handler mirrors the declarative todo list into
+  `todoStateByTurn` (last-write-wins — TodoWrite payloads are already
+  final-state). At Stop, if the buffer is non-empty,
+  `composeTaskListNote` (`runtime.ts`) serializes it as
+  `TaskCreate breakdown: ☑ step / ☑ step / ☐ step` and adds it as a note
+  on the open `agent-auto` work item. No note written when TodoWrite
+  wasn't used. Buffers are cleared at Stop regardless.
 
 ## Related
 

@@ -153,6 +153,48 @@ describe("WorkItemEffortStore", () => {
     expect(efforts.listEffortsForPath("open.txt")).toHaveLength(0);
   });
 
+  test("listClosedEffortsForThreadAfter returns closed efforts newer than the cutoff, null cutoff = all", async () => {
+    const { efforts, workItems, threadId } = seed();
+    const a = workItems.createItem({
+      threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const b = workItems.createItem({
+      threadId, kind: "bug", title: "B", createdBy: "user", actorId: "test",
+    });
+    efforts.openEffort({ workItemId: a.id, startSnapshotId: null });
+    efforts.closeEffort({ workItemId: a.id, endSnapshotId: null });
+    await new Promise((r) => setTimeout(r, 5));
+    const cutoff = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 5));
+    efforts.openEffort({ workItemId: b.id, startSnapshotId: null });
+    efforts.closeEffort({ workItemId: b.id, endSnapshotId: null });
+
+    const all = efforts.listClosedEffortsForThreadAfter(threadId, null);
+    expect(all.map((r) => r.title).sort()).toEqual(["A", "B"]);
+
+    const afterCutoff = efforts.listClosedEffortsForThreadAfter(threadId, cutoff);
+    expect(afterCutoff.map((r) => r.title)).toEqual(["B"]);
+    expect(afterCutoff[0]!.kind).toBe("bug");
+  });
+
+  test("listClosedEffortsForThreadAfter excludes open efforts and soft-deleted work items", () => {
+    const { efforts, workItems, threadId } = seed();
+    const open = workItems.createItem({
+      threadId, kind: "task", title: "Open", createdBy: "user", actorId: "test",
+    });
+    efforts.openEffort({ workItemId: open.id, startSnapshotId: null });
+    // deletedItem is closed but its work_item is soft-deleted — join must skip.
+    const gone = workItems.createItem({
+      threadId, kind: "task", title: "Deleted", createdBy: "user", actorId: "test",
+    });
+    efforts.openEffort({ workItemId: gone.id, startSnapshotId: null });
+    efforts.closeEffort({ workItemId: gone.id, endSnapshotId: null });
+    workItems.deleteItem(threadId, gone.id, "user", "test");
+
+    const rows = efforts.listClosedEffortsForThreadAfter(threadId, null);
+    expect(rows.map((r) => r.title)).toEqual([]);
+  });
+
   test("linkEffortTurn + listTurnsForEffort + listEffortsForTurn", () => {
     const { efforts, turns, itemId, threadId } = seed();
     const effort = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });

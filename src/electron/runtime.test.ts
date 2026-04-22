@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, autoCompleteOpenAutoItems, autoFileWorkItemIfNeeded, AUTO_COMPLETE_NOTE_MAX_LEN, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, composeAutoCompleteNote, composeTaskListNote, computeEffortFiles, deriveAutoItemTitleFromDiff, deriveAutoItemTitleFromPrompt, describeHookHealth, detectCommitShasFromBashOutput, detectTestResultFromBashOutput, detectTscErrorsFromBashOutput, extractBashStdout, extractTodoList, isInsideWorktree, isWriteIntentTool, linkCommitToContributingItems, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { WorkItemCommitStore } from "../persistence/work-item-commit-store.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -177,6 +178,93 @@ test("buildSessionContextBlock omits ROLE CHANGE when initialRole is not supplie
   expect(out).not.toContain("ROLE CHANGE");
 });
 
+test("buildSessionContextBlock omits last_turn_cache_read line when no prior turn exists", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+  });
+  expect(out).not.toContain("last_turn_cache_read");
+});
+
+test("buildSessionContextBlock omits last_turn_cache_read line for tiny values (<1000)", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 500,
+  });
+  expect(out).not.toContain("last_turn_cache_read");
+});
+
+test("buildSessionContextBlock formats last_turn_cache_read in K for mid-sized values", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 120_000,
+  });
+  expect(out).toContain("last_turn_cache_read: 120K");
+  expect(out).not.toContain("dispatch new work to subagents");
+});
+
+test("buildSessionContextBlock formats last_turn_cache_read in M for ≥1M and omits hint below 10M", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 6_600_000,
+  });
+  expect(out).toContain("last_turn_cache_read: 6.6M");
+  expect(out).not.toContain("dispatch new work to subagents");
+});
+
+test("buildSessionContextBlock renders currentTurnBytes alongside last_turn_cache_read when provided", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 19_300_000,
+    currentTurnBytes: 2_000_000,
+  });
+  expect(out).toContain("last_turn_cache_read: 19.3M (this turn: ~2.0M so far)");
+});
+
+test("buildSessionContextBlock omits this-turn suffix when currentTurnBytes is absent or tiny", () => {
+  const outNone = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 19_300_000,
+  });
+  expect(outNone).toContain("last_turn_cache_read: 19.3M");
+  expect(outNone).not.toContain("this turn:");
+
+  const outTiny = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 19_300_000,
+    currentTurnBytes: 500,
+  });
+  expect(outTiny).not.toContain("this turn:");
+});
+
+test("buildSessionContextBlock appends dispatch-to-subagent hint once last_turn_cache_read crosses 10M", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
+    lastTurnCacheRead: 15_000_000,
+  });
+  expect(out).toContain("last_turn_cache_read: 15.0M");
+  expect(out).toContain("dispatch new work to subagents");
+  // Hint sits before the closing tag.
+  const hintIdx = out.indexOf("dispatch new work to subagents");
+  const closeIdx = out.indexOf("</session-context>");
+  expect(hintIdx).toBeLessThan(closeIdx);
+});
+
 test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context.uiChangeNudge is true", () => {
   const text = buildNextWorkItemStopReason(
     { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
@@ -210,8 +298,8 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   // thread_id is embedded in the read_work_options call so the agent can pass the right threadId.
   expect(text).toMatch(/threadId="b-xyz"/);
   // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
-  // newde-task-dispatch skill — the directive just points at it to stay terse.
-  expect(text).toContain("newde-task-dispatch");
+  // merged newde-runtime skill — the directive just points at it to stay terse.
+  expect(text).toContain("newde-runtime");
   // Trimmed: directive should be a single line / well under 400 tokens.
   expect(text.length).toBeLessThan(400);
 });
@@ -254,6 +342,75 @@ test("buildAutoCommitMessage: more than 5 settled items truncates with ellipsis"
   expect(msg).toContain("- Task 1");
   expect(msg).toContain("- Task 5");
   expect(msg).not.toContain("- Task 6");
+});
+
+test("buildAutoCommitMessage: previousCommitCompletedAt filters out items updated before the prior commit", () => {
+  // The monotonically-growing-count bug: items settled BEFORE the previous
+  // commit re-appeared in every subsequent auto-commit message. Fix:
+  // filter by `updated_at > previousCommitCompletedAt`.
+  const older = { ...workItem("w1", "done", "Older done task"), updated_at: "2024-01-01T00:00:00Z" };
+  const newer = { ...workItem("w2", "human_check", "Fresh settled task"), updated_at: "2024-02-01T00:00:00Z" };
+  const msg = buildAutoCommitMessage([older, newer], "2024-01-15T00:00:00Z");
+  expect(msg).toBe("chore: Fresh settled task");
+  expect(msg).not.toContain("Older done task");
+});
+
+test("buildAutoCommitMessage: null previousCommitCompletedAt includes everything (first-commit case)", () => {
+  const a = { ...workItem("w1", "done", "A"), updated_at: "2024-01-01T00:00:00Z" };
+  const b = { ...workItem("w2", "human_check", "B"), updated_at: "2024-02-01T00:00:00Z" };
+  const msg = buildAutoCommitMessage([a, b], null);
+  expect(msg).toMatch(/complete 2 work items/);
+});
+
+test("buildAutoCommitMessage: no items survive the filter → fallback text", () => {
+  const older = { ...workItem("w1", "done", "Ancient"), updated_at: "2024-01-01T00:00:00Z" };
+  const msg = buildAutoCommitMessage([older], "2024-02-01T00:00:00Z");
+  expect(msg).toBe("chore: auto-commit at queue commit point");
+});
+
+test("buildAutoCommitStopReason: ad-hoc (cp=null) directive asks for auto shape without commit_point_id", () => {
+  const text = buildAutoCommitStopReason(null);
+  expect(text).toMatch(/auto: true, message/);
+  expect(text).not.toMatch(/commit_point_id/);
+  expect(text).toContain("tasks_since_last_commit");
+  // No approval gate: should explicitly forbid asking, not request it.
+  expect(text).toMatch(/do NOT ask the user to approve/i);
+  expect(text).not.toMatch(/(^|\s)ask the user to approve(?! first; commit)/i);
+  // Attribution ban preserved.
+  expect(text).toMatch(/Co-Authored-By/);
+});
+
+test("buildAutoCommitStopReason: with a commit_point (auto-mode row) includes the id", () => {
+  const text = buildAutoCommitStopReason({
+    id: "cp-xyz",
+    thread_id: "b1",
+    sort_index: 0,
+    mode: "auto",
+    status: "pending",
+    commit_sha: null,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+    completed_at: null,
+  });
+  expect(text).toContain("cp-xyz");
+  expect(text).toContain("commit_point_id");
+  expect(text).not.toMatch(/auto: true/);
+});
+
+test("buildCommitPointStopReason: approve-mode directive keeps the user-approval gate", () => {
+  const text = buildCommitPointStopReason({
+    id: "cp-1",
+    thread_id: "b1",
+    sort_index: 0,
+    mode: "approve",
+    status: "pending",
+    commit_sha: null,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+    completed_at: null,
+  });
+  expect(text).toMatch(/ask the user to approve/i);
+  expect(text).toContain("cp-1");
 });
 
 // ---- stop-hook pipeline: approve-mode commit point blocks; auto-mode is handled by runtime before pipeline ----
@@ -711,6 +868,456 @@ describe("computeEffortFiles", () => {
     );
     const effA = h.effortStore.getOpenEffort(a.id)!;
     expect(computeEffortFiles(h.effortStore, h.snapshotStore, effA.id)).toBeNull();
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("composeAutoCompleteNote", () => {
+  test("lists all paths when 5 or fewer", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts", "b.ts"] }))
+      .toBe("Auto-summary: touched 2 files: a.ts, b.ts.");
+  });
+  test("truncates to first 5 with `…and M more` when >5", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a", "b", "c", "d", "e", "f", "g"] }))
+      .toBe("Auto-summary: touched 7 files: a, b, c, d, e …and 2 more.");
+  });
+  test("handles empty list", () => {
+    expect(composeAutoCompleteNote({ filePaths: [] }))
+      .toBe("Auto-summary: no file changes detected.");
+  });
+  test("prepends test-result when present (clean run)", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"], testResult: { pass: 12, fail: 0 } }))
+      .toBe("Tests: 12/0. Auto-summary: touched 1 file: a.ts.");
+  });
+  test("prepends test-result with failing count when fail > 0", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"], testResult: { pass: 12, fail: 3 } }))
+      .toBe("Tests: 12/3 (3 failing). Auto-summary: touched 1 file: a.ts.");
+  });
+  test("prepends tsc: clean when tscErrors=0", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"], tscErrors: 0 }))
+      .toBe("tsc: clean. Auto-summary: touched 1 file: a.ts.");
+  });
+  test("prepends TS errors when tscErrors>0", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"], tscErrors: 7 }))
+      .toBe("TS errors: 7. Auto-summary: touched 1 file: a.ts.");
+  });
+  test("includes commit shas when present", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"], commitShas: ["abc1234"] }))
+      .toBe("commits: abc1234. Auto-summary: touched 1 file: a.ts.");
+  });
+  test("combines signals in order: tests, tsc, commits", () => {
+    expect(composeAutoCompleteNote({
+      filePaths: ["a.ts"],
+      testResult: { pass: 484, fail: 0 },
+      tscErrors: 0,
+      commitShas: ["abc1234"],
+    })).toBe("Tests: 484/0. tsc: clean. commits: abc1234. Auto-summary: touched 1 file: a.ts.");
+  });
+  test("clamps total to AUTO_COMPLETE_NOTE_MAX_LEN chars", () => {
+    const many = Array.from({ length: 200 }, (_, i) => `very/long/path/to/file-${i}.ts`);
+    const out = composeAutoCompleteNote({ filePaths: many });
+    expect(out.length).toBeLessThanOrEqual(AUTO_COMPLETE_NOTE_MAX_LEN);
+  });
+  test("signals-absent falls back to file-list format unchanged", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a.ts"] }))
+      .toBe("Auto-summary: touched 1 file: a.ts.");
+  });
+  test("dedupes paths", () => {
+    expect(composeAutoCompleteNote({ filePaths: ["a", "a", "b"] }))
+      .toBe("Auto-summary: touched 2 files: a, b.");
+  });
+});
+
+describe("detectTscErrorsFromBashOutput", () => {
+  test("counts `error TSxxxx` occurrences", () => {
+    const out = "src/foo.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.\n"
+      + "src/bar.ts(10,1): error TS2304: Cannot find name 'baz'.";
+    expect(detectTscErrorsFromBashOutput(out)).toBe(2);
+  });
+  test("returns 0 when tsc runs clean (tsc mentioned but no errors)", () => {
+    expect(detectTscErrorsFromBashOutput("$ bunx tsc --noEmit\n(exit 0)")).toBe(0);
+    expect(detectTscErrorsFromBashOutput("Found 0 errors. Watching for file changes.")).toBe(0);
+  });
+  test("returns null when output is not a tsc run", () => {
+    expect(detectTscErrorsFromBashOutput("hello world")).toBeNull();
+    expect(detectTscErrorsFromBashOutput(null)).toBeNull();
+    expect(detectTscErrorsFromBashOutput("")).toBeNull();
+  });
+});
+
+describe("extractBashStdout", () => {
+  test("returns stdout field when object has one", () => {
+    expect(extractBashStdout({ stdout: "hello", stderr: "" })).toBe("hello");
+  });
+  test("concatenates stdout + stderr when both present", () => {
+    expect(extractBashStdout({ stdout: "a", stderr: "b" })).toBe("a\nb");
+  });
+  test("returns null for malformed responses", () => {
+    expect(extractBashStdout(null)).toBeNull();
+    expect(extractBashStdout(undefined)).toBeNull();
+    expect(extractBashStdout({})).toBeNull();
+  });
+});
+
+describe("extractTodoList", () => {
+  test("extracts todos array from TodoWrite payload", () => {
+    const out = extractTodoList({
+      todos: [
+        { content: "step 1", status: "completed" },
+        { content: "step 2", status: "in_progress" },
+      ],
+    });
+    expect(out).toEqual([
+      { content: "step 1", status: "completed" },
+      { content: "step 2", status: "in_progress" },
+    ]);
+  });
+  test("defaults missing status to pending", () => {
+    const out = extractTodoList({ todos: [{ content: "x" }] });
+    expect(out).toEqual([{ content: "x", status: "pending" }]);
+  });
+  test("returns null for malformed payload", () => {
+    expect(extractTodoList(null)).toBeNull();
+    expect(extractTodoList({})).toBeNull();
+    expect(extractTodoList({ todos: "not array" })).toBeNull();
+  });
+});
+
+describe("composeTaskListNote", () => {
+  test("formats one line per step with final-status glyphs", () => {
+    const out = composeTaskListNote([
+      { content: "Read runtime.ts", status: "completed" },
+      { content: "Write failing test", status: "completed" },
+      { content: "Fix bug", status: "pending" },
+    ]);
+    expect(out).toBe("TaskCreate breakdown: ☑ Read runtime.ts / ☑ Write failing test / ☐ Fix bug");
+  });
+  test("marks in_progress with ▶", () => {
+    const out = composeTaskListNote([
+      { content: "a", status: "in_progress" },
+    ]);
+    expect(out).toContain("▶ a");
+  });
+  test("returns null for empty list", () => {
+    expect(composeTaskListNote([])).toBeNull();
+  });
+  test("caps to AUTO_COMPLETE_NOTE_MAX_LEN", () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({ content: `step number ${i} with some words`, status: "completed" }));
+    const out = composeTaskListNote(many);
+    expect(out).not.toBeNull();
+    expect(out!.length).toBeLessThanOrEqual(AUTO_COMPLETE_NOTE_MAX_LEN);
+  });
+});
+
+describe("detectCommitShasFromBashOutput", () => {
+  test("extracts sha from `[branch abc1234]` git commit line", () => {
+    expect(detectCommitShasFromBashOutput("[main abc1234] fix bug"))
+      .toEqual(["abc1234"]);
+  });
+  test("dedupes multiple matches, keeps order", () => {
+    const out = "[main abc1234] first\n[main def5678] second\n[main abc1234] noop";
+    expect(detectCommitShasFromBashOutput(out)).toEqual(["abc1234", "def5678"]);
+  });
+  test("returns null when no sha found", () => {
+    expect(detectCommitShasFromBashOutput("nothing here")).toBeNull();
+    expect(detectCommitShasFromBashOutput(null)).toBeNull();
+  });
+});
+
+describe("detectTestResultFromBashOutput", () => {
+  test("matches bun test summary line", () => {
+    const output = "bun test v1.3.9\n...\n 27 pass\n 0 fail\n 63 expect() calls";
+    expect(detectTestResultFromBashOutput(output)).toEqual({ pass: 27, fail: 0 });
+  });
+  test("matches embedded pass/fail combined on one line", () => {
+    expect(detectTestResultFromBashOutput(" 5 pass  2 fail"))
+      .toEqual({ pass: 5, fail: 2 });
+  });
+  test("returns null when no match", () => {
+    expect(detectTestResultFromBashOutput("hello world")).toBeNull();
+    expect(detectTestResultFromBashOutput(null)).toBeNull();
+    expect(detectTestResultFromBashOutput("")).toBeNull();
+  });
+});
+
+describe("isWriteIntentTool", () => {
+  test("Write/Edit/MultiEdit/NotebookEdit are always write-intent", () => {
+    expect(isWriteIntentTool("Write", null)).toBe(true);
+    expect(isWriteIntentTool("Edit", null)).toBe(true);
+    expect(isWriteIntentTool("MultiEdit", null)).toBe(true);
+    expect(isWriteIntentTool("NotebookEdit", null)).toBe(true);
+  });
+  test("read-only tools aren't write-intent", () => {
+    expect(isWriteIntentTool("Read", null)).toBe(false);
+    expect(isWriteIntentTool("Grep", null)).toBe(false);
+  });
+  test("Bash with read-only command is not write-intent", () => {
+    expect(isWriteIntentTool("Bash", { command: "ls -la" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "cat src/foo.ts" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "git status" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "bun test src/foo.test.ts" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "bunx tsc --noEmit" })).toBe(false);
+  });
+  test("Bash with other/unknown command is write-intent (err toward auto-file)", () => {
+    expect(isWriteIntentTool("Bash", { command: "npm install foo" })).toBe(true);
+    expect(isWriteIntentTool("Bash", { command: "rm -rf dist" })).toBe(true);
+  });
+});
+
+describe("deriveAutoItemTitleFromPrompt", () => {
+  test("takes first 60 chars of prompt, trimmed", () => {
+    expect(deriveAutoItemTitleFromPrompt("  fix bar in foo.ts  "))
+      .toBe("fix bar in foo.ts");
+  });
+  test("truncates at 60 chars with ellipsis", () => {
+    const long = "a".repeat(80);
+    const out = deriveAutoItemTitleFromPrompt(long);
+    expect(out.length).toBeLessThanOrEqual(60);
+  });
+  test("collapses newlines to spaces", () => {
+    expect(deriveAutoItemTitleFromPrompt("line one\nline two"))
+      .toBe("line one line two");
+  });
+  test("falls back when prompt is empty/null", () => {
+    expect(deriveAutoItemTitleFromPrompt(null)).toBe("agent work");
+    expect(deriveAutoItemTitleFromPrompt("")).toBe("agent work");
+  });
+});
+
+describe("deriveAutoItemTitleFromDiff", () => {
+  test("returns null when no files touched", () => {
+    expect(deriveAutoItemTitleFromDiff([])).toBeNull();
+  });
+  test("single file → Edit <basename>", () => {
+    expect(deriveAutoItemTitleFromDiff(["src/foo.ts"])).toBe("Edit foo.ts");
+  });
+  test("2-3 files → Edit <list of basenames>", () => {
+    expect(deriveAutoItemTitleFromDiff(["src/a.ts", "src/b.ts"])).toBe("Edit src: a.ts, b.ts");
+    expect(deriveAutoItemTitleFromDiff(["src/a.ts", "src/b.ts", "src/c.ts"])).toBe("Edit src: a.ts, b.ts, c.ts");
+  });
+  test("4+ files → includes +N more", () => {
+    const out = deriveAutoItemTitleFromDiff(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"]);
+    expect(out).toBe("Edit src: a.ts, b.ts, +3 more");
+  });
+  test("common top-level dir is prefixed", () => {
+    const out = deriveAutoItemTitleFromDiff(["src/ui/App.tsx", "src/ui/api.ts", "src/ui/components/X.tsx", "src/ui/components/Y.tsx"]);
+    expect(out).toBe("Edit src: App.tsx, api.ts, +2 more");
+  });
+  test("no common top-level dir uses bare basenames", () => {
+    const out = deriveAutoItemTitleFromDiff(["src/a.ts", "other/b.ts"]);
+    expect(out).toBe("Edit a.ts, b.ts");
+  });
+  test("output capped at 60 chars", () => {
+    const files = Array.from({ length: 10 }, (_, i) => `src/extremely-long-filename-number-${i}.ts`);
+    const out = deriveAutoItemTitleFromDiff(files);
+    expect(out!.length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("autoFileWorkItemIfNeeded", () => {
+  test("creates an agent-auto in_progress item when none exists", () => {
+    const h = seedHistoryHarness();
+    const id = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "rename foo to bar in baz.ts" },
+    );
+    expect(id).toBeTruthy();
+    const item = h.workItems.getItem(h.threadId, id!)!;
+    expect(item.author).toBe("agent-auto");
+    expect(item.status).toBe("in_progress");
+    expect(item.title).toBe("rename foo to bar in baz.ts");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("no-op when an open agent-auto item already exists", () => {
+    const h = seedHistoryHarness();
+    const first = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "first" },
+    );
+    const second = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "second" },
+    );
+    expect(first).toBeTruthy();
+    expect(second).toBeNull();
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("guard is thread-wide, not per-turn — two prompts, one auto item", () => {
+    const h = seedHistoryHarness();
+    // Turn A prompt → first write-intent fires auto-file.
+    const a = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "turn A prompt" },
+    );
+    expect(a).toBeTruthy();
+    // Turn A "ends" (we simulate a fresh turn without closing the auto item —
+    // matches subagent / cross-turn cases where Stop hasn't yet auto-completed).
+    // Turn B prompt → second write-intent must NOT create a duplicate.
+    const b = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "turn B prompt" },
+    );
+    expect(b).toBeNull();
+    // Sanity: only one agent-auto row exists for the thread.
+    const all = h.workItems.listItems(h.threadId)
+      .filter((it) => it.author === "agent-auto");
+    expect(all).toHaveLength(1);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("adoptAutoItem flips author to 'agent' and overwrites fields in place", () => {
+    const h = seedHistoryHarness();
+    const id = autoFileWorkItemIfNeeded(
+      { workItemStore: h.workItems },
+      { threadId: h.threadId, prompt: "initial prompt" },
+    )!;
+    const adopted = h.workItems.adoptAutoItem({
+      threadId: h.threadId,
+      itemId: id,
+      title: "new title",
+      description: "new desc",
+      kind: "task",
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+    expect(adopted.id).toBe(id);
+    expect(adopted.author).toBe("agent");
+    expect(adopted.title).toBe("new title");
+    // The finder should no longer return it — it's been adopted.
+    expect(h.workItems.findOpenAutoItemForThread(h.threadId)).toBeNull();
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("autoCompleteOpenAutoItems", () => {
+  test("flips the open agent-auto item to human_check and adds an auto-summary note", () => {
+    const h = seedHistoryHarness();
+    const item = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "auto row",
+      status: "in_progress", createdBy: "agent", actorId: "runtime",
+      author: "agent-auto",
+    });
+    // Open effort + link to a turn so the turn-effort check passes.
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    // A fresh opening effort to match the in_progress state.
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "fix foo" });
+    const eff = h.effortStore.getOpenEffort(item.id)!;
+    h.effortStore.linkEffortTurn(eff.id, turn.id);
+
+    const closedId = autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      { threadId: h.threadId, turnId: turn.id, filePaths: ["a.ts", "b.ts"] },
+    );
+    expect(closedId).toBe(item.id);
+    const after = h.workItems.getItem(h.threadId, item.id)!;
+    expect(after.status).toBe("human_check");
+    const notes = h.workItems.getWorkNotes(item.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.body).toBe("Auto-summary: touched 2 files: a.ts, b.ts.");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("rewrites prompt-derived title using diff paths", () => {
+    const h = seedHistoryHarness();
+    const item = h.workItems.createItem({
+      threadId: h.threadId, kind: "task",
+      title: "please look at the failing test and fix it thanks",
+      status: "in_progress", createdBy: "agent", actorId: "runtime",
+      author: "agent-auto",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "please..." });
+    const eff = h.effortStore.getOpenEffort(item.id)!;
+    h.effortStore.linkEffortTurn(eff.id, turn.id);
+    autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      { threadId: h.threadId, turnId: turn.id, filePaths: ["src/foo.ts", "src/bar.ts", "src/baz.ts"] },
+    );
+    const after = h.workItems.getItem(h.threadId, item.id)!;
+    expect(after.title).not.toBe("please look at the failing test and fix it thanks");
+    expect(after.title.length).toBeLessThanOrEqual(60);
+    expect(after.title).toContain("foo.ts");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("no-op when no agent-auto item exists", () => {
+    const h = seedHistoryHarness();
+    const item = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "manual",
+      status: "in_progress", createdBy: "user", actorId: "ui",
+    });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "x" });
+    expect(autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      { threadId: h.threadId, turnId: turn.id, filePaths: ["a.ts"] },
+    )).toBeNull();
+    const after = h.workItems.getItem(h.threadId, item.id)!;
+    expect(after.status).toBe("in_progress");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("no-op when the auto item has no effort linked to the current turn", () => {
+    const h = seedHistoryHarness();
+    const item = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "old auto row",
+      status: "in_progress", createdBy: "agent", actorId: "runtime",
+      author: "agent-auto",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
+    // Intentionally open a turn but DO NOT link the effort to it.
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "x" });
+    expect(autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      { threadId: h.threadId, turnId: turn.id, filePaths: ["a.ts"] },
+    )).toBeNull();
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("linkCommitToContributingItems", () => {
+  test("inserts one work_item_commit row per item closed since latest done commit", () => {
+    const h = seedHistoryHarness();
+    const commitJunction = new WorkItemCommitStore(h.dir);
+    const a = h.workItems.createItem({ threadId: h.threadId, kind: "task", title: "A", status: "in_progress", createdBy: "user", actorId: "t" });
+    const b = h.workItems.createItem({ threadId: h.threadId, kind: "task", title: "B", status: "in_progress", createdBy: "user", actorId: "t" });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    // Open + close efforts so `listClosedEffortsForThreadAfter` sees both.
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+
+    const inserted = linkCommitToContributingItems(
+      { effortStore: h.effortStore, workItemCommitStore: commitJunction },
+      { threadId: h.threadId, sha: "sha-xyz", latestDoneCompletedAt: null },
+    );
+    expect(inserted.sort()).toEqual([a.id, b.id].sort());
+    const rows = commitJunction.listItemsForSha("sha-xyz").map((r) => r.work_item_id).sort();
+    expect(rows).toEqual([a.id, b.id].sort());
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("filters efforts by latestDoneCompletedAt cutoff", () => {
+    const h = seedHistoryHarness();
+    const commitJunction = new WorkItemCommitStore(h.dir);
+    const a = h.workItems.createItem({ threadId: h.threadId, kind: "task", title: "A", status: "in_progress", createdBy: "user", actorId: "t" });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+
+    // Future cutoff → no items qualify.
+    const futureIso = "2099-01-01T00:00:00Z";
+    const inserted = linkCommitToContributingItems(
+      { effortStore: h.effortStore, workItemCommitStore: commitJunction },
+      { threadId: h.threadId, sha: "sha-nope", latestDoneCompletedAt: futureIso },
+    );
+    expect(inserted).toEqual([]);
+    expect(commitJunction.listItemsForSha("sha-nope")).toEqual([]);
     rmSync(h.dir, { recursive: true, force: true });
   });
 });

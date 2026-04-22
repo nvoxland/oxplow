@@ -96,6 +96,132 @@ describe("runMigrations", () => {
     expect(threadSelCols).toContain("selected_thread_id");
   });
 
+  test("removes state='deleted' snapshot_entry tombstones while keeping siblings and enclosing snapshot", () => {
+    const driver = freshDriver();
+    // Apply migrations up to v23 only (the pre-tombstone-removal schema),
+    // seed a deleted-state row + a present sibling, then run remaining
+    // migrations and assert the tombstone is gone.
+    const preTarget = 23;
+    for (const migration of MIGRATIONS) {
+      if (migration.version > preTarget) break;
+      driver.transaction(() => {
+        migration.up(driver);
+        driver.exec(`PRAGMA user_version = ${migration.version}`);
+      });
+    }
+    const now = "2024-01-01T00:00:00Z";
+    driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'p1:w', 'p1:t', '', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO file_snapshot (id, stream_id, worktree_path, version_hash, source, created_at) VALUES ('snap-1', 's1', '/tmp/s1', 'h', 'turn-end', '${now}')`);
+    driver.exec(`INSERT INTO snapshot_entry (snapshot_id, path, hash, mtime_ms, size, state) VALUES ('snap-1', 'gone.txt', '', 0, 0, 'deleted')`);
+    driver.exec(`INSERT INTO snapshot_entry (snapshot_id, path, hash, mtime_ms, size, state) VALUES ('snap-1', 'keep.txt', 'abc', 1, 5, 'present')`);
+
+    runMigrations(driver);
+
+    const rows = driver.all<{ path: string; state: string }>(
+      `SELECT path, state FROM snapshot_entry WHERE snapshot_id = 'snap-1' ORDER BY path`,
+    );
+    expect(rows).toEqual([{ path: "keep.txt", state: "present" }]);
+    const snapRow = driver.get<{ id: string }>(`SELECT id FROM file_snapshot WHERE id = 'snap-1'`);
+    expect(snapRow?.id).toBe("snap-1");
+  });
+
+  test("v25 broadens work_note for thread-scoped notes without losing existing item-scoped rows", () => {
+    // Apply migrations up to v24, seed an item-scoped work_note at the
+    // pre-v25 schema (NOT NULL work_item_id, no thread_id column), then run
+    // remaining migrations and assert the row still exists plus new
+    // thread-scoped writes are accepted.
+    const driver = freshDriver();
+    const preTarget = 24;
+    for (const migration of MIGRATIONS) {
+      if (migration.version > preTarget) break;
+      driver.transaction(() => {
+        migration.up(driver);
+        driver.exec(`PRAGMA user_version = ${migration.version}`);
+      });
+    }
+    const now = "2024-01-01T00:00:00Z";
+    driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'p1:w', 'p1:t', '', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b1', 's1', 'T', 'active', 0, 'working', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, status, priority, sort_index, created_by, created_at, updated_at) VALUES ('wi-1', 'b1', NULL, 'task', 'x', '', 'ready', 'medium', 0, 'user', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_note (id, work_item_id, body, author, created_at) VALUES ('note-pre', 'wi-1', 'legacy', 'user', '${now}')`);
+
+    runMigrations(driver);
+
+    // Existing row preserved with NULL thread_id.
+    const legacy = driver.get<{ id: string; work_item_id: string; thread_id: string | null; body: string }>(
+      `SELECT id, work_item_id, thread_id, body FROM work_note WHERE id = 'note-pre'`,
+    );
+    expect(legacy?.id).toBe("note-pre");
+    expect(legacy?.work_item_id).toBe("wi-1");
+    expect(legacy?.thread_id).toBeNull();
+    expect(legacy?.body).toBe("legacy");
+
+    // New thread-scoped row allowed.
+    driver.exec(`INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at) VALUES ('note-thread', NULL, 'b1', 'finding', 'explore', '${now}')`);
+    const threadNote = driver.get<{ id: string; work_item_id: string | null; thread_id: string }>(
+      `SELECT id, work_item_id, thread_id FROM work_note WHERE id = 'note-thread'`,
+    );
+    expect(threadNote?.thread_id).toBe("b1");
+    expect(threadNote?.work_item_id).toBeNull();
+
+    // CHECK constraint rejects a row with both fields set or both NULL.
+    expect(() =>
+      driver.exec(`INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at) VALUES ('note-bad', 'wi-1', 'b1', 'bad', 'x', '${now}')`),
+    ).toThrow();
+    expect(() =>
+      driver.exec(`INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at) VALUES ('note-bad2', NULL, NULL, 'bad', 'x', '${now}')`),
+    ).toThrow();
+  });
+
+  test("v27 creates the work_item_commit junction table", () => {
+    const driver = freshDriver();
+    runMigrations(driver);
+    const tables = driver
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .map((row) => row.name);
+    expect(tables).toContain("work_item_commit");
+    const cols = driver
+      .all<{ name: string }>(`PRAGMA table_info(work_item_commit)`)
+      .map((r) => r.name)
+      .sort();
+    expect(cols).toEqual(["committed_at", "sha", "work_item_id"]);
+    // Composite primary key allows multiple items per sha and multiple shas per item.
+    const now = "2024-01-01T00:00:00Z";
+    driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'p1:w', 'p1:t', '', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b1', 's1', 'T', 'active', 0, 'pt1', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority, sort_index, created_by, created_at, updated_at) VALUES ('wi-a', 'b1', NULL, 'task', 'A', '', NULL, 'done', 'medium', 0, 'user', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority, sort_index, created_by, created_at, updated_at) VALUES ('wi-b', 'b1', NULL, 'task', 'B', '', NULL, 'done', 'medium', 1, 'user', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-a', 'abc123', '${now}')`);
+    driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-b', 'abc123', '${now}')`);
+    expect(() =>
+      driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-a', 'abc123', '${now}')`),
+    ).toThrow();
+    const rows = driver.all<{ work_item_id: string; sha: string }>(`SELECT work_item_id, sha FROM work_item_commit ORDER BY work_item_id`);
+    expect(rows).toEqual([
+      { work_item_id: "wi-a", sha: "abc123" },
+      { work_item_id: "wi-b", sha: "abc123" },
+    ]);
+  });
+
+  test("v27 applies cleanly on a DB already at v26", () => {
+    const driver = freshDriver();
+    // Stop at v26 by running only migrations ≤ 26.
+    for (const m of MIGRATIONS) {
+      if (m.version > 26) continue;
+      driver.transaction(() => {
+        m.up(driver);
+        driver.exec(`PRAGMA user_version = ${m.version}`);
+      });
+    }
+    expect(driver.get<{ user_version: number }>("PRAGMA user_version")?.user_version).toBe(26);
+    runMigrations(driver);
+    expect(driver.get<{ user_version: number }>("PRAGMA user_version")?.user_version).toBe(MIGRATIONS.at(-1)!.version);
+    const tables = driver
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .map((r) => r.name);
+    expect(tables).toContain("work_item_commit");
+  });
+
   test("refuses to open a database at a higher version than this build knows", () => {
     const driver = freshDriver();
     runMigrations(driver);

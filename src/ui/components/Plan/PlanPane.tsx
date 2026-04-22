@@ -137,6 +137,13 @@ export function PlanPane({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
   const [mode, setMode] = useState<"thread" | "backlog">("thread");
+  // "Hide auto" filter toggle — collapses agent-auto rows out of the
+  // visible queue without touching the store. Local state only; the
+  // preference resets when the user reloads the pane. Rationale: agent-
+  // auto rows are runtime observations, not human-directed work, so
+  // some users prefer to see only the latter. Persistence is deferred
+  // to a follow-up — the user can still bulk-change view today.
+  const [hideAuto, setHideAuto] = useState(false);
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
@@ -180,9 +187,23 @@ export function PlanPane({
   }, [threadId]);
 
   const groups = useMemo(() => {
-    if (mode === "backlog") return buildBacklogGroups(backlog);
-    return buildGroups(threadWork);
-  }, [mode, threadWork, backlog]);
+    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    if (!hideAuto) return raw;
+    // Hide rows whose author === "agent-auto". Legacy rows (author = null)
+    // and human/explicit-agent rows are always shown. epicChildren is
+    // filtered to match so collapsed epics don't still report hidden kids.
+    return raw
+      .map((group) => {
+        const filteredItems = group.items.filter((item) => item.author !== "agent-auto");
+        const filteredChildren = new Map<string, WorkItem[]>();
+        for (const [epicId, kids] of group.epicChildren) {
+          const keep = kids.filter((kid) => kid.author !== "agent-auto");
+          if (keep.length > 0) filteredChildren.set(epicId, keep);
+        }
+        return { ...group, items: filteredItems, epicChildren: filteredChildren };
+      })
+      .filter((group) => group.items.length > 0 || (group.epic != null));
+  }, [mode, threadWork, backlog, hideAuto]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
@@ -466,6 +487,23 @@ export function PlanPane({
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
             {mode === "backlog" ? "Backlog" : ""}
           </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            type="button"
+            data-testid="plan-toggle-hide-auto"
+            onClick={() => setHideAuto((prev) => !prev)}
+            style={{
+              ...miniButtonStyle,
+              padding: "3px 8px",
+              fontSize: 11,
+              background: hideAuto ? "var(--accent)" : "var(--bg-2)",
+              color: hideAuto ? "#fff" : "var(--fg)",
+            }}
+            title={hideAuto ? "Showing only human/agent-authored items. Click to show auto-filed items." : "Click to hide runtime auto-filed items."}
+          >
+            {hideAuto ? "Show auto" : "Hide auto"}
+          </button>
         </div>
       </div>
       {modalMode ? (
@@ -870,7 +908,7 @@ function CommitModeDropdown({
 }
 
 const KB_STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
+  "blocked", "ready", "human_check", "done", "archived", "canceled",
 ];
 const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -891,7 +929,11 @@ function KeyboardValuePicker({
   onPick(value: string): void;
   onClose(): void;
 }) {
-  const options: readonly string[] = kind === "status" ? KB_STATUS_OPTIONS : KB_PRIORITY_OPTIONS;
+  const baseOptions = kind === "status" ? KB_STATUS_OPTIONS : KB_PRIORITY_OPTIONS;
+  const options: readonly string[] =
+    kind === "status" && item.status === "in_progress"
+      ? [...baseOptions, "in_progress"]
+      : baseOptions;
   const current = kind === "status" ? item.status : item.priority;
   const initialIdx = Math.max(0, options.indexOf(current as string));
   const [idx, setIdx] = useState(initialIdx);
@@ -1152,7 +1194,9 @@ function NewWorkItemModal({
                   style={inputStyle}
                 >
                   <option value="ready">ready</option>
-                  <option value="in_progress">in_progress</option>
+                  {item?.status === "in_progress" ? (
+                    <option value="in_progress">in_progress</option>
+                  ) : null}
                   <option value="blocked">blocked</option>
                   <option value="human_check">human_check</option>
                   <option value="done">done</option>

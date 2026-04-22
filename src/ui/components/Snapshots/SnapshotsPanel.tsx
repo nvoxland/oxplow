@@ -597,8 +597,11 @@ function DetailPane({
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {paths.map((path) => {
             const row = summary.files[path]!;
-            const oversize = row.entry.state === "oversize";
-            const canRestore = row.entry.state === "present";
+            // Deleted rows have a placeholder entry (the file isn't in the
+            // current snapshot) — treat them as non-oversize and non-
+            // restorable regardless of the placeholder's state field.
+            const oversize = row.kind !== "deleted" && row.entry.state === "oversize";
+            const canRestore = row.kind !== "deleted" && row.entry.state === "present";
             const hint = oversize
               ? `Oversize (${formatBytes(row.entry.size)}) — no content diff available.`
               : "Click to open diff. Right-click to restore this version.";
@@ -669,14 +672,12 @@ function statusColor(kind: "created" | "updated" | "deleted"): string {
 
 function renderDiffSide(
   content: string | null,
-  state: "absent" | "present" | "deleted" | "oversize",
+  state: "absent" | "present" | "oversize",
 ): string {
   if (content !== null) return content;
   switch (state) {
     case "absent":
       return "// (file not tracked at this snapshot)";
-    case "deleted":
-      return "// (file did not exist at this snapshot)";
     case "oversize":
       return "// (file too large to snapshot — size/mtime tracked only)";
     case "present":

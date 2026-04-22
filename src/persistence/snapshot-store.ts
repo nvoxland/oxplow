@@ -23,12 +23,14 @@ export type SnapshotSource =
 /**
  * `state` discriminates how the entry was captured:
  * - `present`: file exists and was blobbed. `hash` points at a real blob.
- * - `deleted`: file was gone at flush time. No blob; hash is empty.
  * - `oversize`: file existed but exceeded `snapshotMaxFileBytes`. `mtime_ms`
  *    and `size` are recorded so diffs can still say "it changed (by this
  *    much)" even when content isn't available. `hash` is empty.
+ *
+ * A file that's absent from the worktree has no `snapshot_entry` row at all —
+ * readers treat "entry missing" as the deletion signal.
  */
-export type SnapshotEntryState = "present" | "deleted" | "oversize";
+export type SnapshotEntryState = "present" | "oversize";
 
 export interface SnapshotEntry {
   hash: string;
@@ -219,16 +221,11 @@ export class SnapshotStore {
       const unique = Array.from(new Set(input.dirtyPaths)).sort();
       for (const rel of unique) {
         const entry = this.captureEntry(input.worktreePath, rel);
-        const prev = baseline[rel];
         if (entry) {
           merged[rel] = entry;
-        } else if (prev && prev.state !== "deleted") {
-          // Tracked file disappeared: emit tombstone against the previous
-          // snapshot so the diff reads as a deletion. A stale tombstone (file
-          // was already gone) is dropped so snapshots don't carry ancient
-          // ghosts forever.
-          merged[rel] = { hash: "", mtime_ms: 0, size: 0, state: "deleted" };
         } else {
+          // Not on disk: drop from the manifest. Readers treat a missing
+          // entry as a deletion relative to a predecessor that had it.
           delete merged[rel];
         }
       }
@@ -395,17 +392,19 @@ export class SnapshotStore {
     for (const path of allPaths) {
       const entry = entries[path];
       const prev = previousEntries[path];
-      if (!entry || entry.state === "deleted") {
-        if (prev && prev.state !== "deleted") {
+      if (!entry) {
+        if (prev) {
           deleted++;
           files[path] = {
-            entry: entry ?? { hash: "", mtime_ms: 0, size: 0, state: "deleted" },
+            // Placeholder entry for the "deleted" row: the file is gone
+            // from the current manifest, so there's nothing to show.
+            entry: { hash: "", mtime_ms: 0, size: 0, state: "present" },
             kind: "deleted",
           };
         }
         continue;
       }
-      if (!prev || prev.state === "deleted") {
+      if (!prev) {
         if (entry.state !== "oversize") created++;
         files[path] = { entry, kind: "created" };
         continue;
@@ -453,7 +452,7 @@ export class SnapshotStore {
       const entry = entries[rel];
       const size = st.size;
       const mtime = Math.floor(st.mtimeMs);
-      if (!entry || entry.state === "deleted") {
+      if (!entry) {
         dirty.add(rel);
         return;
       }
@@ -462,8 +461,7 @@ export class SnapshotStore {
       }
     });
 
-    for (const [rel, entry] of Object.entries(entries)) {
-      if (entry.state === "deleted") continue;
+    for (const rel of Object.keys(entries)) {
       if (!seen.has(rel)) dirty.add(rel);
     }
     return Array.from(dirty).sort();
@@ -668,7 +666,12 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
 }
 
 function rowToEntry(row: Record<string, unknown>): SnapshotEntry {
-  const state = String(row.state ?? "present") as SnapshotEntryState;
+  const raw = String(row.state ?? "present");
+  // Legacy rows may still have state="deleted" until the migration drops them;
+  // tests or cross-version reads should never observe a tombstone, so normalize
+  // to "present" (hash empty → readBlobAsText returns null → diff reads as
+  // absent for that side, matching the old collapse semantics).
+  const state = (raw === "present" || raw === "oversize" ? raw : "present") as SnapshotEntryState;
   return {
     hash: String(row.hash ?? ""),
     mtime_ms: Number(row.mtime_ms ?? 0),

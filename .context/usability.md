@@ -131,6 +131,15 @@ Things I keep forgetting. Read this before adding any UI.
 - **Non-destructive empty states:** "No commits match." rather than hiding the
   filter bar.
 
+## Author badges
+
+- **Runtime auto-filed rows carry a muted `auto` tag** before the title
+  (see `AutoAuthorBadge` in `WorkGroupList.tsx`). Human / explicit-agent
+  rows render no badge — silence is the dominant path. The Work panel
+  header has a `Hide auto` toggle (`data-testid="plan-toggle-hide-auto"`)
+  that filters those rows out client-side. Preference is local state;
+  no DB persistence today.
+
 ## Context menus (right-click)
 
 - **Right-click is preferred over visible icons** for per-item destructive

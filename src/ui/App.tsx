@@ -1682,14 +1682,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function renderDiffSide(
   content: string | null,
-  state: "absent" | "present" | "deleted" | "oversize",
+  state: "absent" | "present" | "oversize",
 ): string {
   if (content !== null) return content;
   switch (state) {
     case "absent":
       return "// (file not tracked at this snapshot)";
-    case "deleted":
-      return "// (file did not exist at this snapshot)";
     case "oversize":
       return "// (file too large to snapshot — size/mtime tracked only)";
     case "present":

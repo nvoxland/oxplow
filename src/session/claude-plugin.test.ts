@@ -67,34 +67,29 @@ test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand
   expect(text).toContain("note");
 });
 
-test("createElectronPlugin writes the three task-management skills Claude Code can model-invoke", () => {
+test("createElectronPlugin writes the merged newde-runtime skill Claude Code can model-invoke", () => {
+  // Post-merge: the three legacy skills (filing/lifecycle/dispatch)
+  // collapse into a single `newde-runtime` SKILL.md. The legacy path
+  // fields still exist as back-compat aliases and point at the same
+  // file. Net effect: one fewer index line per turn.
   const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
   const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
 
-  expect(plugin.taskFilingSkillPath).toBe(
-    join(plugin.pluginDir, "skills", "newde-task-filing", "SKILL.md"),
-  );
-  expect(plugin.taskLifecycleSkillPath).toBe(
-    join(plugin.pluginDir, "skills", "newde-task-lifecycle", "SKILL.md"),
-  );
-  expect(plugin.taskDispatchSkillPath).toBe(
-    join(plugin.pluginDir, "skills", "newde-task-dispatch", "SKILL.md"),
-  );
+  const expectedPath = join(plugin.pluginDir, "skills", "newde-runtime", "SKILL.md");
+  expect(plugin.runtimeSkillPath).toBe(expectedPath);
+  expect(plugin.taskFilingSkillPath).toBe(expectedPath);
+  expect(plugin.taskLifecycleSkillPath).toBe(expectedPath);
+  expect(plugin.taskDispatchSkillPath).toBe(expectedPath);
 
-  // Each skill file exists with the frontmatter Claude Code's skill loader
-  // keys off of (name + description).
-  for (const path of [plugin.taskFilingSkillPath, plugin.taskLifecycleSkillPath, plugin.taskDispatchSkillPath]) {
-    expect(existsSync(path)).toBe(true);
-    const body = readFileSync(path, "utf8");
-    expect(body.startsWith("---\n")).toBe(true);
-    expect(body).toContain("description:");
-  }
-
-  // Filing skill owns the epic/acceptance-criteria policy; lifecycle owns
-  // status/human_check; dispatch owns read_work_options/general-purpose.
-  expect(readFileSync(plugin.taskFilingSkillPath, "utf8")).toMatch(/epic|acceptance criteria/i);
-  expect(readFileSync(plugin.taskLifecycleSkillPath, "utf8")).toMatch(/human_check/i);
-  expect(readFileSync(plugin.taskDispatchSkillPath, "utf8")).toMatch(/read_work_options|general-purpose/i);
+  expect(existsSync(plugin.runtimeSkillPath)).toBe(true);
+  const body = readFileSync(plugin.runtimeSkillPath, "utf8");
+  expect(body.startsWith("---\n")).toBe(true);
+  expect(body).toContain("description:");
+  // The merged body retains every original topic's load-bearing text so
+  // none of the three legacy surfaces regresses.
+  expect(body).toMatch(/epic|acceptance criteria/i);
+  expect(body).toMatch(/human_check/i);
+  expect(body).toMatch(/read_work_options|dispatch_work_item|general-purpose/i);
 });
 
 test("createElectronPlugin is idempotent across calls", () => {

@@ -60,6 +60,12 @@ export interface WorkItem {
   updated_at: string;
   completed_at: string | null;
   note_count: number;
+  /** Semantic origin of the row: `"agent-auto"` for runtime auto-filed
+   *  items, `"agent"` for items the agent explicitly created (including
+   *  auto-filed rows later adopted via `create_work_item`), `"user"` for
+   *  items the human filed, or `null` for legacy rows pre-dating the
+   *  author column. See `WorkItemAuthor` in the persistence store. */
+  author: "user" | "agent" | "agent-auto" | null;
 }
 
 export interface WorkNote {
@@ -99,7 +105,7 @@ export interface FileSnapshot {
   label_kind?: "task" | "turn" | "system" | null;
 }
 
-export type SnapshotEntryState = "present" | "deleted" | "oversize";
+export type SnapshotEntryState = "present" | "oversize";
 
 export interface SnapshotEntry {
   hash: string;

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SnapshotStore, computeVersionHash } from "./snapshot-store.js";
 import { StreamStore } from "./stream-store.js";
+import { shouldIgnoreWorkspaceWatchPath } from "../git/workspace-watch.js";
 import { getStateDatabase } from "./state-db.js";
 
 function backdateSnapshot(projectDir: string, snapshotId: string, daysAgo: number) {
@@ -123,14 +124,15 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  test("flushSnapshot drops entries whose files were deleted", () => {
+  test("flushSnapshot drops entries whose files were deleted (no tombstone persisted)", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
-    store.flushSnapshot({
+    writeFileSync(join(worktreePath, "b.txt"), "stable");
+    const first = store.flushSnapshot({
       source: "turn-start",
       streamId,
       worktreePath,
-      dirtyPaths: ["a.txt"],
+      dirtyPaths: ["a.txt", "b.txt"],
     });
     unlinkSync(join(worktreePath, "a.txt"));
     const second = store.flushSnapshot({
@@ -141,11 +143,17 @@ describe("SnapshotStore", () => {
     });
     expect(second.created).toBe(true);
     const entries = store.loadManifestEntries(second.id);
-    expect(entries["a.txt"]?.state).toBe("deleted");
+    // No tombstone entry: the deleted path is simply absent from the manifest.
+    expect(entries["a.txt"]).toBeUndefined();
+    expect(entries["b.txt"]?.state).toBe("present");
+    // But the summary still classifies it as a deletion relative to first.
+    const summary = store.getSnapshotSummary(second.id, first.id);
+    expect(summary?.counts).toEqual({ created: 0, updated: 0, deleted: 1 });
+    expect(summary?.files["a.txt"]?.kind).toBe("deleted");
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  test("a deleted file stays tombstoned only in the first snapshot after deletion", () => {
+  test("dropping a stale tombstone dedups against the previous snapshot", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     store.flushSnapshot({
@@ -155,21 +163,43 @@ describe("SnapshotStore", () => {
       dirtyPaths: ["a.txt"],
     });
     unlinkSync(join(worktreePath, "a.txt"));
-    const second = store.flushSnapshot({
+    const withTombstone = store.flushSnapshot({
       source: "turn-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
-    expect(store.loadManifestEntries(second.id)["a.txt"]?.state).toBe("deleted");
-    writeFileSync(join(worktreePath, "b.txt"), "other");
-    const third = store.flushSnapshot({
+    expect(withTombstone.created).toBe(true);
+    const droppedTombstone = store.flushSnapshot({
+      source: "startup",
+      streamId,
+      worktreePath,
+      dirtyPaths: null,
+      ignore: (p) => shouldIgnoreWorkspaceWatchPath(p),
+    });
+    expect(droppedTombstone.created).toBe(false);
+    expect(droppedTombstone.id).toBe(withTombstone.id);
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test("a real deletion still produces a new snapshot", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "hello");
+    const withFile = store.flushSnapshot({
+      source: "turn-start",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+    });
+    unlinkSync(join(worktreePath, "a.txt"));
+    const afterDelete = store.flushSnapshot({
       source: "turn-end",
       streamId,
       worktreePath,
-      dirtyPaths: ["a.txt", "b.txt"],
+      dirtyPaths: ["a.txt"],
     });
-    expect(store.loadManifestEntries(third.id)["a.txt"]).toBeUndefined();
+    expect(afterDelete.created).toBe(true);
+    expect(afterDelete.id).not.toBe(withFile.id);
     rmSync(projectDir, { recursive: true, force: true });
   });
 

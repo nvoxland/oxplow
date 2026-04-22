@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import { watch, type FSWatcher } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { existsSync, watch, type FSWatcher } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
@@ -56,6 +56,7 @@ import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
+import { WorkItemCommitStore } from "../persistence/work-item-commit-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -100,6 +101,7 @@ export class ElectronRuntime {
   readonly threadQueue: ThreadQueueOrchestrator;
   readonly turnStore: TurnStore;
   readonly effortStore: WorkItemEffortStore;
+  readonly workItemCommitStore: WorkItemCommitStore;
   readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
@@ -127,10 +129,43 @@ export class ElectronRuntime {
    *  loud banner superseding the frozen NON_WRITER block in the agent's
    *  initial system prompt. Keyed by Claude session id. */
   private readonly initialRoleBySessionId = new Map<string, "writer" | "read-only">();
+  /** Per-thread record of the most recent `read_work_options` call: the set
+   *  of ready-item ids the agent saw. Consumed by the next Stop-hook
+   *  decision (then cleared) so the ready-work directive doesn't echo the
+   *  list the agent already has. Populated through the
+   *  markReadWorkOptions callback wired into the MCP tool surface. */
+  private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
+  /** Per-turn buffers used to derive richer auto-complete summaries at Stop.
+   *  Keyed by `${threadId}\0${turnId}`; entries are populated on
+   *  PostToolUse (Bash tool_response captured for signal detection;
+   *  TodoWrite payload captured for task-list bridging) and cleared at
+   *  Stop after the auto-complete note is composed. See
+   *  `composeAutoCompleteNote` and the task-list bridge in the Stop
+   *  branch of `applyTurnTracking`. */
+  private readonly bashOutputsByTurn = new Map<string, string[]>();
+  private readonly todoStateByTurn = new Map<string, Array<{ content: string; status: string }>>();
+  /** Running per-thread running sum of tool-result bytes observed during
+   *  the currently open turn. Populated on each PostToolUse envelope and
+   *  cleared on UserPromptSubmit (new turn) and Stop. Fed into
+   *  buildSessionContextBlock so mid-turn dispatch decisions have a
+   *  non-stale cost signal alongside `last_turn_cache_read`. Within 20%
+   *  is fine per the work item — we just sum stringified tool_response
+   *  length without any token conversion. */
+  private readonly currentTurnBytesByThread = new Map<string, number>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
   private snapshotCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /** Dev-time watchers for src/mcp and src/persistence; created only when
+   *  `NEWDE_DEV_RELOAD=1` AND the runtime can resolve a source tree
+   *  (checked via `findSourceRoot`). Close in dispose(). */
+  private devReloadWatchers: FSWatcher[] = [];
+  /** Coalesces bursty fs events (save-on-build, git checkout) into a
+   *  single restart attempt. */
+  private devReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Guards against overlapping restarts — fs events keep firing while
+   *  the restart is in-flight. */
+  private devReloadInFlight = false;
   private disposed = false;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
@@ -153,6 +188,7 @@ export class ElectronRuntime {
     );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
+    this.workItemCommitStore = new WorkItemCommitStore(projectDir, logger.child({ subsystem: "work-item-commit-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
@@ -396,8 +432,12 @@ export class ElectronRuntime {
           workItemStore: this.workItemStore,
           commitPointStore: this.commitPointStore,
           executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
+          executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
           turnStore: this.turnStore,
           waitPointStore: this.waitPointStore,
+          effortStore: this.effortStore,
+          markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+          forkThread: (input) => this.forkThread(input),
         }),
         ...buildLspMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
@@ -407,12 +447,134 @@ export class ElectronRuntime {
       onHook: (envelope) => this.handleHookEnvelope(envelope),
     });
     this.logger.info("started mcp server", { port: this.mcp.port, lockfilePath: this.mcp.lockfilePath });
+
+    this.maybeStartDevReloadWatchers();
+  }
+
+  /**
+   * Dev-only: when `NEWDE_DEV_RELOAD=1` and a source tree is resolvable
+   * from `process.cwd()`, watch `src/mcp/` and `src/persistence/` and
+   * restart the MCP server on change. The restart re-runs
+   * `buildWorkItemMcpTools` / `buildLspMcpTools` and rebinds the TCP
+   * port + lockfile so Claude Code's next `tools/list` sees whatever
+   * was rebuilt.
+   *
+   * **Known limitation (tracked on this task):** ESM module caching
+   * means the re-imports inside `buildWorkItemMcpTools` return the
+   * *same* in-memory module graph as before the change — so a dev
+   * editing tool logic still needs a full process restart to actually
+   * pick up new handler code. What this does buy you: rebinding the
+   * port after the lockfile goes stale, and a loud "source touched"
+   * log so the dev knows a full restart is due. Full hot-reload
+   * requires either a child-process MCP model or bun --hot style
+   * process reload; both are bigger changes than this QoL hook
+   * warrants. See wi-4c3a6289871f for context.
+   *
+   * Zero runtime cost when the env var is unset — we don't even
+   * resolve the source root in that case.
+   */
+  private maybeStartDevReloadWatchers(): void {
+    if (process.env.NEWDE_DEV_RELOAD !== "1") return;
+    const sourceRoot = findSourceRoot();
+    if (!sourceRoot) {
+      this.logger.warn("NEWDE_DEV_RELOAD=1 but no source tree found; dev-reload disabled");
+      return;
+    }
+    const watched = [join(sourceRoot, "src", "mcp"), join(sourceRoot, "src", "persistence")];
+    for (const dir of watched) {
+      try {
+        const w = watch(dir, { recursive: true }, (_eventType, filename) => {
+          if (!filename) return;
+          // Ignore vim swap/save-through noise. Only .ts/.tsx changes
+          // could plausibly affect handler behaviour.
+          const name = String(filename);
+          if (!(name.endsWith(".ts") || name.endsWith(".tsx"))) return;
+          this.scheduleDevReload(name);
+        });
+        w.on("error", (error) => {
+          this.logger.warn("dev-reload watcher error", {
+            dir,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+        this.devReloadWatchers.push(w);
+        this.logger.info("dev-reload watcher started", { dir });
+      } catch (error) {
+        this.logger.warn("failed to start dev-reload watcher", {
+          dir,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /** Debounced restart scheduler — coalesces bursty save events. */
+  private scheduleDevReload(trigger: string): void {
+    if (this.devReloadTimer) clearTimeout(this.devReloadTimer);
+    this.devReloadTimer = setTimeout(() => {
+      this.devReloadTimer = null;
+      void this.runDevReload(trigger);
+    }, 250);
+  }
+
+  private async runDevReload(trigger: string): Promise<void> {
+    if (this.disposed) return;
+    if (this.devReloadInFlight) return;
+    this.devReloadInFlight = true;
+    try {
+      this.logger.warn("dev-reload triggered; restarting MCP server", { trigger });
+      if (this.mcp) {
+        await this.mcp.stop();
+        this.mcp = null;
+      }
+      this.mcp = await startMcpServer({
+        workspaceFolders: this.store.list().map((candidate) => candidate.worktree_path),
+        logger: this.logger.child({ subsystem: "mcp" }),
+        extraTools: [
+          ...buildWorkItemMcpTools({
+            resolveStream: (streamId) => this.resolveStream(streamId),
+            resolveThreadById: (threadId) => this.resolveThreadById(threadId),
+            threadStore: this.threadStore,
+            streamStore: this.store,
+            workItemStore: this.workItemStore,
+            commitPointStore: this.commitPointStore,
+            executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
+            executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
+            turnStore: this.turnStore,
+            waitPointStore: this.waitPointStore,
+            effortStore: this.effortStore,
+            markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+            forkThread: (input) => this.forkThread(input),
+          }),
+          ...buildLspMcpTools({
+            resolveStream: (streamId) => this.resolveStream(streamId),
+            lspManager: this.lspManager,
+          }),
+        ],
+        onHook: (envelope) => this.handleHookEnvelope(envelope),
+      });
+      this.logger.info("dev-reload complete", { port: this.mcp.port, lockfilePath: this.mcp.lockfilePath });
+    } catch (error) {
+      this.logger.warn("dev-reload failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      this.devReloadInFlight = false;
+    }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
     this.gitRootWatcher?.close();
     this.gitRootWatcher = null;
+    for (const w of this.devReloadWatchers) {
+      try { w.close(); } catch { /* ignore */ }
+    }
+    this.devReloadWatchers = [];
+    if (this.devReloadTimer) {
+      clearTimeout(this.devReloadTimer);
+      this.devReloadTimer = null;
+    }
     if (this.snapshotCleanupTimer) {
       clearInterval(this.snapshotCleanupTimer);
       this.snapshotCleanupTimer = null;
@@ -1036,7 +1198,16 @@ export class ElectronRuntime {
       }
       initialRole = this.initialRoleBySessionId.get(sessionId);
     }
-    return buildSessionContextBlock({ stream, thread, activeThread, initialRole });
+    const lastTurnCacheRead = this.turnStore.getLastClosedTurnCacheRead(thread.id) ?? undefined;
+    const currentTurnBytes = this.currentTurnBytesByThread.get(thread.id);
+    return buildSessionContextBlock({
+      stream,
+      thread,
+      activeThread,
+      initialRole,
+      lastTurnCacheRead,
+      currentTurnBytes,
+    });
   }
 
   private resolveActiveThreadForPrompt(streamId: string): Thread | null {
@@ -1088,6 +1259,91 @@ export class ElectronRuntime {
       stream.worktree_path,
       resumeSessionId,
     );
+  }
+
+  /**
+   * Called by the `newde__read_work_options` MCP handler so the runtime
+   * can suppress the ready-work Stop directive on the very next Stop
+   * when the set the agent just saw is unchanged. The record is
+   * consumed (deleted) by the first Stop hook that reads it — a second
+   * Stop on the same thread without a fresh read_work_options call
+   * fires normally.
+   */
+  markReadWorkOptions(threadId: string, readyIds: string[]): void {
+    this.lastReadWorkOptionsByThread.set(threadId, [...readyIds]);
+  }
+
+  /**
+   * fork_thread MCP tool implementation. Creates a new thread on the
+   * same stream as `sourceThreadId`, seeds it with a `note`-kind work
+   * item carrying `summary` (no schema change — avoids a new table),
+   * and optionally moves the listed ready/blocked work items across.
+   * Returns the new thread id.
+   *
+   * Validation errors (non-existent thread, non-movable item statuses)
+   * throw before any DB mutation so the caller sees the problem.
+   */
+  forkThread(input: {
+    sourceThreadId: string;
+    title: string;
+    summary: string;
+    moveItemIds?: string[];
+  }): { newThreadId: string } {
+    const source = this.threadStore.findById(input.sourceThreadId);
+    if (!source) throw new Error(`unknown thread: ${input.sourceThreadId}`);
+    const title = input.title?.trim();
+    if (!title) throw new Error("fork_thread: `title` is required");
+    const stream = this.store.get(source.stream_id);
+    if (!stream) throw new Error(`source thread has no stream: ${input.sourceThreadId}`);
+    const movableStatuses = new Set(["ready", "blocked"]);
+    const toMove = (input.moveItemIds ?? [])
+      .map((id) => this.workItemStore.getItem(input.sourceThreadId, id));
+    const offenders: Array<{ id: string; status: string }> = [];
+    for (const [i, item] of toMove.entries()) {
+      const id = (input.moveItemIds ?? [])[i]!;
+      if (!item) throw new Error(`fork_thread: unknown item: ${id}`);
+      if (item.thread_id !== input.sourceThreadId) {
+        throw new Error(`fork_thread: item ${id} belongs to a different thread`);
+      }
+      if (!movableStatuses.has(item.status)) {
+        offenders.push({ id, status: item.status });
+      }
+    }
+    if (offenders.length > 0) {
+      const desc = offenders.map((o) => `${o.id} (${o.status})`).join(", ");
+      throw new Error(`fork_thread: cannot move items not in ready/blocked: ${desc}`);
+    }
+    const beforeIds = new Set(this.threadStore.list(stream.id).threads.map((t) => t.id));
+    const afterState = this.threadStore.create(stream, { title });
+    const created = afterState.threads.find((t) => !beforeIds.has(t.id));
+    if (!created) throw new Error("fork_thread: failed to create new thread");
+    const newThreadId = created.id;
+    // Seed note on the new thread.
+    this.workItemStore.createItem({
+      threadId: newThreadId,
+      kind: "note",
+      title: "Context from fork",
+      description: input.summary,
+      createdBy: "agent",
+      actorId: "fork_thread",
+    });
+    // Move items across. For each moved item, carry its last 3 notes over
+    // as fresh rows on the same item id so the user landing in the new
+    // thread sees recent rationale/decisions rather than a bare title.
+    // Copies are additive — source rows are never touched (see
+    // WorkItemStore.copyLastItemNotes).
+    for (const id of input.moveItemIds ?? []) {
+      this.workItemStore.moveItemToThread(input.sourceThreadId, id, newThreadId, "agent", "fork_thread");
+      try {
+        this.workItemStore.copyLastItemNotes(id, 3);
+      } catch (err) {
+        this.logger.warn("fork_thread: copyLastItemNotes failed", {
+          itemId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { newThreadId };
   }
 
   private handleHookEnvelope(envelope: HookEnvelope): { body?: unknown } | void {
@@ -1202,44 +1458,26 @@ export class ElectronRuntime {
     const currentTurnFilePaths = openTurn?.start_snapshot_id
       ? this.computeTurnFilePaths(openTurn)
       : [];
-    // When auto-commit is on and the thread is the writer, run the commit
-    // directly without synthesizing a commit_point row. No DB row means no
-    // "Commit · Auto" noise in the queue UI; manually-placed auto-mode
-    // commit points are handled by the branch below.
-    if (thread?.auto_commit && thread.status === "active") {
-      const workItems = this.workItemStore.listItems(threadId);
-      const hasSettledWork = workItems.some(
-        (item) => item.status === "human_check" || item.status === "done",
-      );
-      if (hasSettledWork) {
-        const result = this.runAutoCommit(thread, workItems);
-        if (result) {
-          // Notify the UI that a commit landed in this thread's worktree so
-          // downstream views (git log, Files panel) know to refresh. The
-          // fs-watcher will also fire git-refs.changed, but surfacing it as
-          // a thread-scoped lifecycle event keeps the thread UI responsive.
-          this.events.publish({
-            type: "thread.changed",
-            streamId: thread.stream_id,
-            threadId: thread.id,
-            kind: "auto-committed",
-          });
-        }
-      }
-    }
-    // Auto-mode commit points: commit immediately without blocking the agent.
-    // If the active commit point has mode="auto" and is still pending, generate
-    // a message from settled work items and commit right now. After committing
-    // the point becomes "done", so the snapshot built below sees it as done
-    // and decideStopDirective falls through to the next pipeline step.
-    if (thread?.status === "active") {
-      const commitPoints = this.commitPointStore.listForThread(threadId);
-      const workItems = this.workItemStore.listItems(threadId);
-      const autoCommitPoint = findActiveAutoCommitPoint(commitPoints, workItems);
-      if (autoCommitPoint) {
-        this.executeAutoCommitPoint(autoCommitPoint, thread, workItems);
-      }
-    }
+    // Auto-commit (both ad-hoc via thread.auto_commit and manually-placed
+    // mode=auto commit points) is now routed through the agent via a
+    // Stop-hook directive — see buildAutoCommitStopReason. The runtime no
+    // longer generates a message mechanically; the agent inspects the diff
+    // and calls `mcp__newde__commit`. That unifies the approve-mode and
+    // auto-mode flows: the only remaining distinction is "ask the user
+    // first, yes/no." See .context/agent-model.md for the flow.
+    // Consume the just-read record (once per call). If the agent called
+    // read_work_options during the turn we're closing and the set matches
+    // what's currently ready, the pipeline suppresses the ready-work
+    // directive — the agent already has the list.
+    const justReadReadySet = this.lastReadWorkOptionsByThread.get(threadId);
+    this.lastReadWorkOptionsByThread.delete(threadId);
+    // The Stop hook runs after applyTurnTracking closes the turn, so
+    // currentOpenTurn is typically null by now. Fall back to the
+    // most-recent turn row to read the prompt for conversational-suppression.
+    const currentTurnPrompt = openTurn?.prompt
+      ?? this.turnStore.listForThread(threadId, 1)[0]?.prompt
+      ?? null;
+    const cumulativeCacheRead = this.turnStore.getCumulativeCacheRead(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1249,6 +1487,9 @@ export class ElectronRuntime {
       currentTurnStartedAt: openTurn?.started_at ?? null,
       currentTurnFilePaths,
       autoCommit: thread?.auto_commit ?? false,
+      currentTurnPrompt,
+      justReadReadySet,
+      cumulativeCacheRead,
     };
     // The item's own thread_id is what matters for the directive text (not
     // `threadId` — they agree today but could diverge if listReady ever
@@ -1256,6 +1497,7 @@ export class ElectronRuntime {
     const streamId = thread?.stream_id ?? "";
     const outcome = decideStopDirective(snapshot, {
       buildCommitPointReason: buildCommitPointStopReason,
+      buildAutoCommitReason: buildAutoCommitStopReason,
       // item.thread_id is typed nullable (WorkItem covers backlog items too),
       // but decideStopDirective only emits this reason for in-thread rows, so
       // a fall-back to `threadId` keeps the directive stable.
@@ -1290,6 +1532,9 @@ export class ElectronRuntime {
         if (stillOpen) {
           this.turnStore.closeTurn(stillOpen.id, { answer: null });
         }
+        // Reset the running-turn tool-byte estimate so the next session
+        // context block starts from zero for this turn.
+        this.currentTurnBytesByThread.delete(threadId);
         const turn = this.turnStore.openTurn({ threadId, prompt, sessionId });
         const thread = this.threadStore.findById(threadId);
         if (thread) {
@@ -1306,9 +1551,75 @@ export class ElectronRuntime {
           tool_response?: unknown;
         };
         const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+        const toolStatus = derivePostToolStatus(payload.tool_response);
+        // Running cost estimate: sum the serialized tool_response length
+        // into a per-thread counter. Cheap and within ~20% of token
+        // weight at the scale we care about (multi-M turns). Cleared on
+        // UserPromptSubmit (new turn) and Stop.
+        try {
+          const bytes = estimateToolResponseBytes(payload.tool_response);
+          if (bytes > 0) {
+            const prev = this.currentTurnBytesByThread.get(threadId) ?? 0;
+            this.currentTurnBytesByThread.set(threadId, prev + bytes);
+          }
+        } catch {
+          // Never let estimation failures disrupt hook handling.
+        }
+        // Auto-file path: on the first write-intent tool call of a turn, the
+        // runtime synthesizes an agent-auto work item so the Work panel
+        // populates without Claude having to call create_work_item. Fires
+        // for successful write-intent tools only — we don't want to file a
+        // ticket for a failed Bash call. See autoFileWorkItemIfNeeded.
+        if (toolStatus !== "error" && isWriteIntentTool(toolName, payload.tool_input)) {
+          try {
+            const openTurn = this.turnStore.currentOpenTurn(threadId);
+            const prompt = openTurn?.prompt ?? null;
+            autoFileWorkItemIfNeeded(
+              { workItemStore: this.workItemStore },
+              { threadId, prompt },
+            );
+          } catch (err) {
+            this.logger.warn("auto-file on PostToolUse failed", {
+              threadId, toolName,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        // Capture Bash stdout for signal detection at Stop (test counts, tsc
+        // errors, commit shas). The HookEventStore normalized form drops
+        // stdout, so we buffer raw tool_response text per (thread, turn)
+        // and flush at Stop. See `composeAutoCompleteNote`.
+        if (toolStatus !== "error" && toolName === "Bash") {
+          const openTurn = this.turnStore.currentOpenTurn(threadId);
+          if (openTurn) {
+            const out = extractBashStdout(payload.tool_response);
+            if (out) {
+              const key = `${threadId}\0${openTurn.id}`;
+              const buf = this.bashOutputsByTurn.get(key) ?? [];
+              buf.push(out);
+              // Cap per-turn memory — keep the last ~20 commands (summary
+              // lines are short, but some outputs are long).
+              if (buf.length > 20) buf.splice(0, buf.length - 20);
+              this.bashOutputsByTurn.set(key, buf);
+            }
+          }
+        }
+        // Capture TodoWrite state (Claude Code's built-in within-turn task
+        // list) for the task-list bridge. The last call wins — TodoWrite
+        // payloads are declarative (the full list of todos in final shape),
+        // so we just keep the most recent.
+        if (toolStatus !== "error" && toolName === "TodoWrite") {
+          const openTurn = this.turnStore.currentOpenTurn(threadId);
+          if (openTurn) {
+            const todos = extractTodoList(payload.tool_input);
+            if (todos && todos.length > 0) {
+              const key = `${threadId}\0${openTurn.id}`;
+              this.todoStateByTurn.set(key, todos);
+            }
+          }
+        }
         if (!FILE_EDIT_TOOLS.has(toolName)) return;
-        const status = derivePostToolStatus(payload.tool_response);
-        if (status === "error") return;
+        if (toolStatus === "error") return;
         const extractedPath = extractEditedFilePath(payload.tool_input);
         if (!extractedPath) return;
         const thread = this.threadStore.findById(threadId);
@@ -1342,6 +1653,68 @@ export class ElectronRuntime {
         if (thread) {
           const endSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-end");
           if (endSnapshotId) this.turnStore.setEndSnapshot(open.id, endSnapshotId);
+          // Auto-complete the runtime-filed "agent-auto" work item, if any,
+          // using the turn's file-change set as the note body. Only fires
+          // when a matching item exists and has an effort linked to THIS
+          // turn — explicitly agent-created items are left alone. See
+          // autoCompleteOpenAutoItems + the plan in .context/agent-model.md.
+          try {
+            const filePaths = endSnapshotId && open.start_snapshot_id
+              ? Object.keys(this.snapshotStore.getSnapshotSummary(endSnapshotId, open.start_snapshot_id)?.files ?? {})
+              : [];
+            // Drain the per-turn Bash output buffer and scan for structured
+            // signals (test counts, tsc error totals, commit shas). Each
+            // detector returns non-null only when its pattern is found, so
+            // absent signals stay absent.
+            const bufKey = `${threadId}\0${open.id}`;
+            const joinedBash = (this.bashOutputsByTurn.get(bufKey) ?? []).join("\n");
+            let testResult: { pass: number; fail: number } | null = null;
+            let tscErrors: number | null = null;
+            let commitShas: string[] | null = null;
+            if (joinedBash) {
+              testResult = detectTestResultFromBashOutput(joinedBash);
+              tscErrors = detectTscErrorsFromBashOutput(joinedBash);
+              commitShas = detectCommitShasFromBashOutput(joinedBash);
+            }
+            autoCompleteOpenAutoItems(
+              { workItemStore: this.workItemStore, effortStore: this.effortStore },
+              {
+                threadId, turnId: open.id, filePaths,
+                testResult, tscErrors, commitShas,
+                actorId: "runtime-auto",
+              },
+            );
+            // Task-list bridge: if Claude Code's within-turn TodoWrite was
+            // used this turn, serialize the final state as a note on the
+            // active in_progress item. No note when TodoWrite wasn't used.
+            const todos = this.todoStateByTurn.get(bufKey);
+            if (todos && todos.length > 0) {
+              try {
+                const target = this.workItemStore.findOpenAutoItemForThread(threadId);
+                const note = composeTaskListNote(todos);
+                if (target && note) {
+                  this.workItemStore.addNote(threadId, target.id, note, "system", "runtime-auto");
+                }
+              } catch (err) {
+                this.logger.warn("task-list bridge note failed", {
+                  threadId, turnId: open.id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+            this.bashOutputsByTurn.delete(bufKey);
+            this.todoStateByTurn.delete(bufKey);
+            // The next UserPromptSubmit will reset this too, but clear
+            // on Stop so any context block rendered between Stop and the
+            // next prompt (e.g. from the next UserPromptSubmit hook)
+            // starts cleanly.
+            this.currentTurnBytesByThread.delete(threadId);
+          } catch (err) {
+            this.logger.warn("auto-complete on Stop failed", {
+              threadId, turnId: open.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         return;
       }
@@ -1602,49 +1975,55 @@ export class ElectronRuntime {
   }
 
   /**
-   * Core "commit now" helper shared by the auto-commit-mode path (no DB row)
-   * and the manually-placed auto-mode commit point path (row exists, caller
-   * flips it to done). Generates a message from settled work items, runs
-   * `git commit`, returns sha+message on success or null on any failure. All
-   * errors are logged here so callers can stay simple.
+   * Execute an agent-drafted auto-commit for a thread (no commit_point
+   * row). Called from the `mcp__newde__commit` tool when the agent
+   * passes `{ auto: true, message }`. Runs `git commit` synchronously,
+   * publishes the `auto-committed` thread lifecycle event, and throws
+   * on failure so the agent sees the stderr and can retry. Falls back
+   * to `buildAutoCommitMessage` when `message` is empty/missing.
    */
-  private runAutoCommit(thread: Thread, workItems: WorkItem[]): { sha: string; message: string } | null {
+  executeAutoCommitForThread(threadId: string, message: string | undefined): { sha: string; message: string } {
+    const thread = this.threadStore.findById(threadId);
+    if (!thread) throw new Error(`unknown thread: ${threadId}`);
+    if (thread.status !== "active") throw new Error(`thread ${threadId} is not the writer; only active threads can commit`);
     const stream = this.store.get(thread.stream_id);
-    if (!stream) {
-      this.logger.warn("auto-commit: stream not found", { threadId: thread.id });
-      return null;
+    if (!stream) throw new Error(`thread ${threadId} has no stream`);
+    const finalMessage = (message && message.trim().length > 0)
+      ? message
+      : (() => {
+          const workItems = this.workItemStore.listItems(threadId);
+          const latestDone = this.commitPointStore.getLatestDoneForThread(threadId);
+          return buildAutoCommitMessage(workItems, latestDone?.completed_at ?? null);
+        })();
+    const result = gitCommitAll(stream.worktree_path, finalMessage, { includeUntracked: true });
+    if (!result.ok || !result.sha) {
+      throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
     }
-    const message = buildAutoCommitMessage(workItems);
+    this.logger.info("auto-commit: committed", { threadId, sha: result.sha, message: finalMessage });
+    // Attribute the sha back to the contributing work items via the
+    // `work_item_commit` junction (migration v27). Uses the same
+    // "tasks since last commit" cutoff `mcp__newde__tasks_since_last_commit`
+    // uses. Guarded so a junction-insert blip doesn't fail the commit.
     try {
-      const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
-      if (!result.ok || !result.sha) {
-        this.logger.warn("auto-commit: git commit failed", {
-          threadId: thread.id,
-          stderr: result.stderr,
-        });
-        return null;
-      }
-      this.logger.info("auto-commit: committed", { threadId: thread.id, sha: result.sha, message });
-      return { sha: result.sha, message };
+      const latestDone = this.commitPointStore.getLatestDoneForThread(threadId);
+      linkCommitToContributingItems(
+        { effortStore: this.effortStore, workItemCommitStore: this.workItemCommitStore },
+        { threadId, sha: result.sha, latestDoneCompletedAt: latestDone?.completed_at ?? null },
+      );
     } catch (err) {
-      this.logger.warn("auto-commit: execution error", {
-        threadId: thread.id,
+      this.logger.warn("work_item_commit junction insert failed", {
+        threadId,
+        sha: result.sha,
         error: err instanceof Error ? err.message : String(err),
       });
-      return null;
     }
-  }
-
-  /**
-   * Execute an auto-mode commit point: run the shared `runAutoCommit`, then
-   * mark the commit point done so decideStopDirective sees it as terminal.
-   * Used for manually-placed commit points with mode="auto". The no-row
-   * auto-commit-mode path calls `runAutoCommit` directly.
-   */
-  private executeAutoCommitPoint(cp: CommitPoint, thread: Thread, workItems: WorkItem[]): void {
-    const result = this.runAutoCommit(thread, workItems);
-    if (!result) return;
-    this.commitPointStore.markCommitted(cp.id, result.message, result.sha);
+    this.events.publish({
+      type: "thread.changed",
+      streamId: thread.stream_id,
+      threadId: thread.id,
+      kind: "auto-committed",
+    });
+    return { sha: result.sha, message: finalMessage };
   }
 
   reorderThreadQueue(
@@ -1727,49 +2106,41 @@ export function buildNextWorkItemStopReason(
     );
   }
   lines.push(
-    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-dispatch skill.`,
+    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-runtime skill.`,
   );
   return lines.join("\n");
 }
 
 /**
- * Find the lowest-sort_index commit point with mode="auto" and status="pending"
- * whose preceding work items are all terminal. Returns null if none qualifies.
- * Mirrors the logic in `decideStopDirective`'s findActiveMarker helper.
+ * Fallback auto-commit message builder used only when the agent-drafted
+ * path fails (no message provided to `mcp__newde__commit`). The primary
+ * path is agent-drafted via the Stop-hook directive — this keeps the
+ * runtime able to land *something* rather than stall.
+ *
+ * `previousCommitCompletedAt` bounds the set of work items to those
+ * whose `updated_at` is strictly after that moment — i.e., items that
+ * settled since the previous commit landed. Passing `null` disables the
+ * filter (first-commit case). Without this bound the message
+ * monotonically re-counted every settled item in the thread, so each
+ * auto-commit produced "complete N work items" with N climbing forever
+ * and a body of whichever titles sorted first, regardless of what
+ * actually changed.
  */
-function findActiveAutoCommitPoint(
-  commitPoints: CommitPoint[],
+export function buildAutoCommitMessage(
   workItems: WorkItem[],
-): CommitPoint | null {
-  // Sort ascending by sort_index so we pick the first eligible one.
-  const sorted = [...commitPoints].sort((a, b) => a.sort_index - b.sort_index);
-  for (const cp of sorted) {
-    if (cp.status !== "pending" || cp.mode !== "auto") continue;
-    const preceding = workItems.filter((item) => item.sort_index < cp.sort_index);
-    const allTerminal = preceding.every(
-      (item) =>
-        item.status === "done" ||
-        item.status === "canceled" ||
-        item.status === "archived" ||
-        item.status === "human_check",
-    );
-    if (allTerminal) return cp;
-  }
-  return null;
-}
-
-/**
- * Build an auto-generated commit message from settled work items. Uses the
- * titles of all human_check/done/canceled work items in the thread as the
- * body of a "chore:" conventional commit.
- */
-export function buildAutoCommitMessage(workItems: WorkItem[]): string {
-  const settled = workItems.filter(
-    (item) =>
-      item.status === "human_check" ||
-      item.status === "done" ||
-      item.status === "canceled",
-  );
+  previousCommitCompletedAt: string | null = null,
+): string {
+  const settled = workItems.filter((item) => {
+    if (
+      item.status !== "human_check" &&
+      item.status !== "done" &&
+      item.status !== "canceled"
+    ) {
+      return false;
+    }
+    if (!previousCommitCompletedAt) return true;
+    return item.updated_at > previousCommitCompletedAt;
+  });
   if (settled.length === 0) {
     return "chore: auto-commit at queue commit point";
   }
@@ -1791,6 +2162,31 @@ export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
     `If its acceptance criteria are met, call \`mcp__newde__update_work_item\` with \`status: "human_check"\` — don't leave finished work parked in IN PROGRESS.`,
     ``,
     `If the work isn't done, either: (a) call \`mcp__newde__add_work_note\` summarizing what's still needed (this suppresses the nudge), or (b) call \`update_work_item\` with \`status: "blocked"\` if you're stuck and a user decision is required.`,
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Directive text for auto-commit — identical to the approve-mode variant
+ * minus the "ask the user to approve" gate. The agent inspects the diff,
+ * drafts a message, and commits in one turn. Used both when
+ * `thread.auto_commit=true` triggers an ad-hoc commit (no DB row) and
+ * when a manually-placed commit_point row has `mode="auto"`.
+ *
+ * Passing `commit_point_id: null` selects the no-row shape; the agent
+ * calls `mcp__newde__commit` with `{ auto: true, message }`. With a
+ * commit point id, the agent passes it so the row flips to done.
+ */
+export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
+  const commitArgs = cp
+    ? `{ commit_point_id: "${cp.id}", message: "<final message>" }`
+    : `{ auto: true, message: "<final message>" }`;
+  const lines = [
+    `Auto-commit is due in this thread${cp ? ` (commit_point_id=${cp.id}, mode=auto)` : ""}. Inspect the unstaged/staged changes with read-only git commands (\`git status\`, \`git diff\`, \`git diff --staged\`), draft a concise commit message from what you see, then call \`mcp__newde__commit\` with ${commitArgs}.`,
+    ``,
+    `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__newde__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
+    ``,
+    `Keep the subject terse and descriptive — no Conventional-Commits prefixes like \`feat(scope):\` or \`fix:\`. Do NOT add Co-Authored-By or self-attribution lines. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
   ];
   return lines.join("\n");
 }
@@ -1836,16 +2232,16 @@ function buildThreadAgentPrompt(
   activeThread?: Thread | null,
 ): string {
   // Keep this preamble SITUATIONAL only — procedural "how to use the work-item
-  // tools" policy lives in the `newde-task-filing` / `newde-task-lifecycle` /
-  // `newde-task-dispatch` skills so it's only loaded when the agent actually
-  // needs the relevant slice. Every line here is replayed via cache-read on
-  // every turn; treat additions as expensive.
+  // tools" policy lives in the `newde-runtime` skill (merged: filing +
+  // lifecycle + dispatch) so it's only loaded when the agent actually
+  // needs it. Every line here is replayed via cache-read on every turn;
+  // treat additions as expensive.
   const lines = [
     `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), thread "${thread.title}" (id: ${thread.id}). Pass threadId="${thread.id}" to all newde work-item tools.`,
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `Start each session by calling \`newde__read_work_options\`; the newde-task-filing, newde-task-lifecycle, and newde-task-dispatch skills cover the orchestrator/subagent pattern, filing conventions, status transitions, and how to reference items in user-facing text.`,
+    `Newde auto-tracks your work (first write-intent tool call auto-files, Stop auto-summarizes). The newde-runtime skill loads on-demand when you want to override.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -1883,8 +2279,26 @@ export function buildSessionContextBlock(input: {
    * sites keep the original single-line writer: rendering.
    */
   initialRole?: "writer" | "read-only";
+  /**
+   * cache_read_input_tokens from the most recent closed agent_turn for this
+   * thread. When provided and ≥1000, a `last_turn_cache_read: <N>K|<N.N>M`
+   * line is rendered; values <1000 are omitted (noise floor). Once the value
+   * reaches 10M, a short hint suggesting dispatch-to-subagent is appended
+   * before </session-context> — at that scale inline turns are compounding
+   * cache-read cost that subagents would amortize.
+   */
+  lastTurnCacheRead?: number;
+  /**
+   * Rough running estimate of the current turn's tool-result bytes so far,
+   * accumulated per-thread from PostToolUse payloads. When set and ≥1000,
+   * rendered as a `(this turn: ~N.NM so far)` suffix on the
+   * `last_turn_cache_read` line so mid-turn dispatch decisions see a
+   * non-stale cost signal. Omitted on the first turn of a session (no
+   * prior close) and for tiny values.
+   */
+  currentTurnBytes?: number;
 }): string {
-  const { stream, thread, activeThread, initialRole } = input;
+  const { stream, thread, activeThread, initialRole, lastTurnCacheRead, currentTurnBytes } = input;
   const currentRole: "writer" | "read-only" =
     activeThread && activeThread.id !== thread.id ? "read-only" : "writer";
   const lines = [
@@ -1895,6 +2309,8 @@ export function buildSessionContextBlock(input: {
       ? `writer: "${activeThread.title}" (id: ${activeThread.id}) — your thread is read-only`
       : `writer: (you) — your thread is the active writer`,
   ];
+  const cacheLine = formatLastTurnCacheRead(lastTurnCacheRead, currentTurnBytes);
+  if (cacheLine) lines.push(cacheLine);
   if (initialRole && initialRole !== currentRole) {
     if (currentRole === "writer") {
       lines.push(
@@ -1906,8 +2322,33 @@ export function buildSessionContextBlock(input: {
       );
     }
   }
+  if (typeof lastTurnCacheRead === "number" && lastTurnCacheRead >= 10_000_000) {
+    lines.push("tip: dispatch new work to subagents — inline turns compound cache-read cost");
+  }
   lines.push(`</session-context>`);
   return lines.join("\n");
+}
+
+function formatLastTurnCacheRead(
+  value: number | undefined,
+  currentTurnBytes: number | undefined,
+): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 1000) return null; // noise floor
+  const base = value >= 1_000_000
+    ? `last_turn_cache_read: ${(value / 1_000_000).toFixed(1)}M`
+    : `last_turn_cache_read: ${Math.round(value / 1000)}K`;
+  const suffix = formatCurrentTurnSuffix(currentTurnBytes);
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+function formatCurrentTurnSuffix(bytes: number | undefined): string | null {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return null;
+  if (bytes < 1000) return null; // noise floor, also covers first-turn (0)
+  const rendered = bytes >= 1_000_000
+    ? `${(bytes / 1_000_000).toFixed(1)}M`
+    : `${Math.round(bytes / 1000)}K`;
+  return `(this turn: ~${rendered} so far)`;
 }
 
 export function buildThreadMcpConfig(mcp: McpServerHandle | null): string {
@@ -2114,10 +2555,458 @@ export function computeEffortFiles(
   };
 }
 
+/** Soft cap for the full auto-complete note body (see composeAutoCompleteNote). */
+export const AUTO_COMPLETE_NOTE_MAX_LEN = 400;
+
+/**
+ * Build the auto-complete note body from the turn's file-change set and any
+ * structured signals detected from recent Bash tool output. The
+ * resulting note is what the runtime attaches to an auto-filed work item
+ * when transitioning it to `human_check` at Stop — see
+ * `autoCompleteOpenAutoItems` below and the plan in
+ * `.context/agent-model.md`.
+ *
+ * Structured signals are heuristic-only (no LLM call) — grep test counts,
+ * tsc error totals, and commit shas out of captured Bash stdout and
+ * prepend them before the file-list summary. The design is deliberately
+ * cheap: signals-present produces a concise leader line; signals-absent
+ * falls back to the file list.
+ *
+ * Format:
+ *   `Auto-summary: touched N files: <a>, <b>, …and M more`  (when N > 5)
+ *   `Auto-summary: touched N files: <a>, <b>`                (when N ≤ 5)
+ *   `Auto-summary: no file changes detected.`                (when N = 0)
+ *
+ * When `testResult`, `tscErrors`, or `commitShas` are non-null, a signals
+ * leader is prepended (e.g. `Tests: 484/0. tsc: clean. `). Total note
+ * length is clamped to `AUTO_COMPLETE_NOTE_MAX_LEN` chars.
+ */
+export function composeAutoCompleteNote(input: {
+  filePaths: string[];
+  testResult?: { pass: number; fail: number } | null;
+  tscErrors?: number | null;
+  commitShas?: string[] | null;
+}): string {
+  const unique = Array.from(new Set(input.filePaths.filter((p) => typeof p === "string" && p.length > 0)));
+  const head = unique.length === 0
+    ? "Auto-summary: no file changes detected."
+    : (() => {
+      const preview = unique.slice(0, 5).join(", ");
+      const more = unique.length > 5 ? ` …and ${unique.length - 5} more` : "";
+      return `Auto-summary: touched ${unique.length} file${unique.length === 1 ? "" : "s"}: ${preview}${more}.`;
+    })();
+  const signalParts: string[] = [];
+  if (input.testResult) {
+    const { pass, fail } = input.testResult;
+    signalParts.push(
+      fail === 0
+        ? `Tests: ${pass}/0`
+        : `Tests: ${pass}/${fail} (${fail} failing)`,
+    );
+  }
+  if (input.tscErrors != null) {
+    signalParts.push(input.tscErrors === 0 ? "tsc: clean" : `TS errors: ${input.tscErrors}`);
+  }
+  if (input.commitShas && input.commitShas.length > 0) {
+    signalParts.push(`commits: ${input.commitShas.slice(0, 3).join(", ")}`);
+  }
+  const signalPrefix = signalParts.length > 0 ? `${signalParts.join(". ")}. ` : "";
+  const full = `${signalPrefix}${head}`;
+  if (full.length <= AUTO_COMPLETE_NOTE_MAX_LEN) return full;
+  return full.slice(0, AUTO_COMPLETE_NOTE_MAX_LEN - 1) + "…";
+}
+
+/**
+ * Count `error TSxxxx` occurrences in a Bash output string — the shape
+ * `tsc --noEmit` prints for each type error. Returns null when the
+ * output contains no tsc-style line at all (so the caller knows tsc
+ * wasn't run). Returns `0` when a tsc run is detected (the output
+ * mentions "tsc" or "tsconfig") but no errors were printed — useful
+ * for the "tsc: clean" signal.
+ */
+export function detectTscErrorsFromBashOutput(output: string | null | undefined): number | null {
+  if (typeof output !== "string" || output.length === 0) return null;
+  const errorRe = /error TS\d+/g;
+  const errorMatches = output.match(errorRe);
+  if (errorMatches && errorMatches.length > 0) return errorMatches.length;
+  // No error lines — only signal "clean" when we're confident this was a tsc run.
+  if (/\btsc\b|tsconfig|Found \d+ errors?/i.test(output)) return 0;
+  return null;
+}
+
+/**
+ * Extract short git commit shas from Bash output — matches the
+ * `[branch abcdef1]` shape `git commit` prints on success. Returns a
+ * deduped list of sha prefixes (7-10 hex chars) or null when nothing
+ * matches. Caller prepends to the auto-complete note as
+ * `commits: <sha>[, <sha>...]`.
+ */
+export function detectCommitShasFromBashOutput(output: string | null | undefined): string[] | null {
+  if (typeof output !== "string" || output.length === 0) return null;
+  // `[main 1a2b3c4]` or `[detached HEAD 1a2b3c4]`
+  const shaRe = /\[(?:[^\]]+?\s)?([0-9a-f]{7,10})\]/g;
+  const found: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = shaRe.exec(output)) !== null) {
+    if (m[1] && !found.includes(m[1])) found.push(m[1]);
+  }
+  return found.length > 0 ? found : null;
+}
+
+/**
+ * Parse a Bash tool output string for the bun-test / jest-style summary
+ * line `N pass\s+M fail`. Returns the first match or null. Only looks at
+ * the last ~50 lines (the summary line is at the very end by convention).
+ */
+export function detectTestResultFromBashOutput(output: string | null | undefined): { pass: number; fail: number } | null {
+  if (typeof output !== "string" || output.length === 0) return null;
+  const lines = output.split(/\r?\n/);
+  const tail = lines.slice(-80);
+  // Case 1: `N pass M fail` on a single line (other test runners).
+  const combined = /^\s*(\d+)\s+pass\s+(\d+)\s+fail/;
+  // Case 2: bun-test splits across two lines (` N pass` then ` M fail`).
+  const passRe = /^\s*(\d+)\s+pass\s*$/;
+  const failRe = /^\s*(\d+)\s+fail\s*$/;
+  let lastPass: number | null = null;
+  let lastFail: number | null = null;
+  for (const line of tail) {
+    const combinedMatch = combined.exec(line);
+    if (combinedMatch) return { pass: Number(combinedMatch[1]), fail: Number(combinedMatch[2]) };
+    const p = passRe.exec(line);
+    if (p) lastPass = Number(p[1]);
+    const f = failRe.exec(line);
+    if (f) lastFail = Number(f[1]);
+  }
+  if (lastPass !== null && lastFail !== null) return { pass: lastPass, fail: lastFail };
+  return null;
+}
+
+export interface AutoCompleteDeps {
+  workItemStore: WorkItemStore;
+  effortStore: WorkItemEffortStore;
+}
+
+/** Tool names that always count as write-intent. */
+const ALWAYS_WRITE_INTENT_TOOLS: ReadonlySet<string> = new Set([
+  "Write", "Edit", "MultiEdit", "NotebookEdit",
+]);
+
+/** Leading tokens that mark a Bash command as read-only. Matched case-sensitively
+ *  against the first non-whitespace word of the command (`git log`, `git diff`,
+ *  etc. are handled with a second token). */
+const READONLY_BASH_LEADING: ReadonlySet<string> = new Set([
+  "ls", "cat", "grep", "find", "head", "tail", "wc", "rg", "pwd", "echo", "which",
+]);
+const READONLY_BASH_TWO_WORD: ReadonlySet<string> = new Set([
+  "git log", "git diff", "git status", "git show", "git blame",
+  "bun test", "bunx tsc",
+]);
+
+/**
+ * Decide whether a tool call should trigger the auto-file path. The
+ * whitelist in ALWAYS_WRITE_INTENT_TOOLS is hard; Bash is write-intent
+ * unless its command starts with an obvious read-only verb. False
+ * positives are cheap (an extra auto-filed item) — we err toward
+ * write-intent when unsure so we don't miss genuine edits.
+ */
+export function isWriteIntentTool(toolName: string, toolInput: unknown): boolean {
+  if (ALWAYS_WRITE_INTENT_TOOLS.has(toolName)) return true;
+  if (toolName !== "Bash") return false;
+  const cmd = (toolInput && typeof toolInput === "object"
+    && typeof (toolInput as { command?: unknown }).command === "string")
+    ? (toolInput as { command: string }).command.trim()
+    : "";
+  if (!cmd) return true; // empty-shaped bash call defaults to write-intent
+  const firstSpace = cmd.indexOf(" ");
+  const firstWord = firstSpace === -1 ? cmd : cmd.slice(0, firstSpace);
+  if (READONLY_BASH_LEADING.has(firstWord)) return false;
+  const twoWordKey = firstSpace === -1 ? firstWord : cmd.slice(0, cmd.indexOf(" ", firstSpace + 1) === -1 ? cmd.length : cmd.indexOf(" ", firstSpace + 1));
+  if (READONLY_BASH_TWO_WORD.has(twoWordKey)) return false;
+  return true;
+}
+
+/** Build the auto-filed work-item's title from the turn prompt: first 60
+ *  chars, newlines collapsed, trimmed. Falls back to "agent work". */
+export function deriveAutoItemTitleFromPrompt(prompt: string | null | undefined): string {
+  if (!prompt || typeof prompt !== "string") return "agent work";
+  const collapsed = prompt.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "agent work";
+  if (collapsed.length <= 60) return collapsed;
+  return collapsed.slice(0, 57) + "...";
+}
+
+/**
+ * Heuristic title derived from the set of files touched during an auto-
+ * filed item's lifecycle. Used to rewrite the prompt-prefix title at
+ * auto-complete time so local blame reads a useful label rather than
+ * the first 60 chars of the original user prompt.
+ *
+ * - 0 files → null (caller keeps existing title)
+ * - 1 file  → `Edit <basename>`
+ * - 2–3 files without common dir → `Edit a, b[, c]`
+ * - 2–3 files sharing a top-level dir → `Edit <dir>: a, b[, c]`
+ * - 4+ files → `Edit [<dir>: ]a, b, +N more`
+ *
+ * Result is always trimmed to ≤60 chars.
+ */
+export function deriveAutoItemTitleFromDiff(filePaths: string[]): string | null {
+  const unique = Array.from(new Set(
+    (filePaths ?? []).filter((p): p is string => typeof p === "string" && p.length > 0),
+  ));
+  if (unique.length === 0) return null;
+  const basename = (p: string): string => {
+    const slash = p.lastIndexOf("/");
+    return slash === -1 ? p : p.slice(slash + 1);
+  };
+  const topDir = (p: string): string | null => {
+    const slash = p.indexOf("/");
+    return slash === -1 ? null : p.slice(0, slash);
+  };
+  // Single file always uses `Edit <basename>` — no dir prefix.
+  if (unique.length === 1) {
+    const out = `Edit ${basename(unique[0]!)}`;
+    return out.length <= 60 ? out : out.slice(0, 60);
+  }
+
+  const dirs = unique.map(topDir);
+  const firstDir = dirs[0];
+  const allShareDir = firstDir !== null && dirs.every((d) => d === firstDir);
+  const prefix = allShareDir ? `Edit ${firstDir}: ` : "Edit ";
+
+  let body: string;
+  if (unique.length <= 3) {
+    body = unique.map(basename).join(", ");
+  } else {
+    const head = [basename(unique[0]!), basename(unique[1]!)];
+    body = `${head.join(", ")}, +${unique.length - 2} more`;
+  }
+
+  const out = `${prefix}${body}`;
+  if (out.length <= 60) return out;
+  return out.slice(0, 60);
+}
+
+/**
+ * Insert one `work_item_commit` junction row per contributing work item
+ * for the given sha. "Contributing" is defined as the items returned by
+ * `listClosedEffortsForThreadAfter(threadId, latestDoneCompletedAt)` —
+ * the same set the `mcp__newde__tasks_since_last_commit` MCP tool
+ * exposes. Deduped by itemId so an item with multiple closed efforts
+ * in the window gets one row. Uses `INSERT OR IGNORE`, so re-running
+ * against the same (item, sha) pair is a no-op.
+ */
+export function linkCommitToContributingItems(
+  deps: { effortStore: WorkItemEffortStore; workItemCommitStore: WorkItemCommitStore },
+  input: { threadId: string; sha: string; latestDoneCompletedAt: string | null },
+): string[] {
+  const closed = deps.effortStore.listClosedEffortsForThreadAfter(
+    input.threadId,
+    input.latestDoneCompletedAt,
+  );
+  const seen = new Set<string>();
+  const committedAt = new Date().toISOString();
+  for (const entry of closed) {
+    if (seen.has(entry.itemId)) continue;
+    seen.add(entry.itemId);
+    deps.workItemCommitStore.insert(entry.itemId, input.sha, committedAt);
+  }
+  return Array.from(seen);
+}
+
+export interface AutoFileDeps {
+  workItemStore: WorkItemStore;
+}
+
+/**
+ * If the thread has no open `author='agent-auto'` work item, create one
+ * (in_progress, title derived from the turn prompt) and return its id.
+ * Otherwise returns null (the runtime has already filed the auto-item
+ * for this turn — subsequent write-intent calls don't stack).
+ */
+export function autoFileWorkItemIfNeeded(
+  deps: AutoFileDeps,
+  input: { threadId: string; prompt: string | null | undefined },
+): string | null {
+  const existing = deps.workItemStore.findOpenAutoItemForThread(input.threadId);
+  if (existing) return null;
+  const title = deriveAutoItemTitleFromPrompt(input.prompt);
+  const item = deps.workItemStore.createItem({
+    threadId: input.threadId,
+    kind: "task",
+    title,
+    status: "in_progress",
+    createdBy: "system",
+    actorId: "runtime-auto",
+    author: "agent-auto",
+  });
+  return item.id;
+}
+
+/**
+ * At Stop time, if an auto-filed in_progress item (author='agent-auto')
+ * exists in this thread AND has effort rows linked to the just-closed
+ * turn, emit an auto-summary note and flip the item to human_check. The
+ * note body comes from `composeAutoCompleteNote`. Idempotent: a thread
+ * without an auto-filed item is a no-op.
+ *
+ * Returns the item id that was auto-completed, or null.
+ */
+export function autoCompleteOpenAutoItems(
+  deps: AutoCompleteDeps,
+  input: {
+    threadId: string;
+    turnId: string;
+    filePaths: string[];
+    testResult?: { pass: number; fail: number } | null;
+    tscErrors?: number | null;
+    commitShas?: string[] | null;
+    actorId?: string;
+  },
+): string | null {
+  const item = deps.workItemStore.findOpenAutoItemForThread(input.threadId);
+  if (!item) return null;
+  const effortsForTurn = deps.effortStore.listEffortsForTurn(input.turnId);
+  const hasEffortInThisTurn = effortsForTurn.some((e) => e.work_item_id === item.id);
+  if (!hasEffortInThisTurn) return null;
+  const note = composeAutoCompleteNote({
+    filePaths: input.filePaths,
+    testResult: input.testResult ?? null,
+    tscErrors: input.tscErrors ?? null,
+    commitShas: input.commitShas ?? null,
+  });
+  const actorId = input.actorId ?? "runtime-auto";
+  deps.workItemStore.addNote(input.threadId, item.id, note, "system", actorId);
+  // Rewrite the prompt-prefix title with a diff-derived label so blame
+  // and the Work panel read something specific. Only rewrites when we
+  // have at least one file path; otherwise keep the existing title.
+  const rewrittenTitle = deriveAutoItemTitleFromDiff(input.filePaths);
+  deps.workItemStore.updateItem({
+    threadId: input.threadId,
+    itemId: item.id,
+    status: "human_check",
+    ...(rewrittenTitle ? { title: rewrittenTitle } : {}),
+    actorKind: "system",
+    actorId,
+  });
+  return item.id;
+}
+
+/**
+ * Pull a best-effort stdout string out of a PostToolUse `tool_response`.
+ * Claude Code's Bash tool response shape is `{ stdout, stderr, interrupted, ... }`
+ * or a raw string in older builds. We concatenate stdout + stderr when
+ * both are present so signal detectors can match on either channel
+ * (e.g. tsc emits errors on stdout, bun-test on either).
+ */
+/**
+ * Rough byte-size of a PostToolUse tool_response payload for the
+ * running-turn cost estimator. String-serializes once per call; within
+ * 20% of token weight at the multi-M scale we actually care about (the
+ * work item explicitly scopes the estimate that loosely). Returns 0 on
+ * anything unrecognisable so the hook never throws on weird payloads.
+ */
+export function estimateToolResponseBytes(resp: unknown): number {
+  if (resp == null) return 0;
+  if (typeof resp === "string") return resp.length;
+  try {
+    return JSON.stringify(resp).length;
+  } catch {
+    return 0;
+  }
+}
+
+export function extractBashStdout(resp: unknown): string | null {
+  if (resp == null) return null;
+  if (typeof resp === "string") return resp;
+  if (typeof resp === "object") {
+    const obj = resp as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof obj.stdout === "string") parts.push(obj.stdout);
+    if (typeof obj.stderr === "string" && obj.stderr.length > 0) parts.push(obj.stderr);
+    if (typeof obj.output === "string" && parts.length === 0) parts.push(obj.output);
+    if (parts.length === 0) return null;
+    return parts.join("\n");
+  }
+  return null;
+}
+
+/**
+ * Parse a TodoWrite `tool_input` payload into the final todo list shape
+ * the task-list bridge needs. TodoWrite is declarative: the full list is
+ * sent on each call with per-item `{ content, status }` (statuses are
+ * `pending`, `in_progress`, `completed`). Returns null for malformed
+ * payloads.
+ */
+export function extractTodoList(input: unknown): Array<{ content: string; status: string }> | null {
+  if (!input || typeof input !== "object") return null;
+  const todos = (input as { todos?: unknown }).todos;
+  if (!Array.isArray(todos)) return null;
+  const out: Array<{ content: string; status: string }> = [];
+  for (const entry of todos) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const content = typeof e.content === "string" ? e.content : null;
+    const status = typeof e.status === "string" ? e.status : "pending";
+    if (content) out.push({ content, status });
+  }
+  return out;
+}
+
+/**
+ * Serialize a TodoWrite final-state list into a one-line-per-step note
+ * body. Format: `☑ completed step / ☐ pending step / ▶ in-progress step`.
+ * Truncates each step's content to keep the note readable; full note
+ * caps out at AUTO_COMPLETE_NOTE_MAX_LEN chars. Returns null when the
+ * list is empty (caller treats null as "skip the note").
+ */
+export function composeTaskListNote(
+  todos: Array<{ content: string; status: string }>,
+): string | null {
+  if (!Array.isArray(todos) || todos.length === 0) return null;
+  const glyph = (status: string): string => {
+    if (status === "completed") return "☑";
+    if (status === "in_progress") return "▶";
+    return "☐";
+  };
+  const trim = (s: string): string => {
+    const collapsed = String(s).replace(/\s+/g, " ").trim();
+    return collapsed.length > 80 ? collapsed.slice(0, 79) + "…" : collapsed;
+  };
+  const lines = todos.map((t) => `${glyph(t.status)} ${trim(t.content)}`);
+  const head = "TaskCreate breakdown:";
+  const full = `${head} ${lines.join(" / ")}`;
+  if (full.length <= AUTO_COMPLETE_NOTE_MAX_LEN) return full;
+  return full.slice(0, AUTO_COMPLETE_NOTE_MAX_LEN - 1) + "…";
+}
+
 function derivePostToolStatus(resp: unknown): "ok" | "error" {
   if (!resp || typeof resp !== "object") return "ok";
   const obj = resp as Record<string, unknown>;
   if (obj.error != null && obj.error !== "") return "error";
   if (obj.is_error === true) return "error";
   return "ok";
+}
+
+/**
+ * Walk up from `process.cwd()` looking for a directory that contains
+ * both `src/mcp` and `src/persistence` — the two trees the dev-reload
+ * watcher observes. Returns null when not found (production Electron
+ * installs, tests with a fresh mkdtemp project dir, etc.) — callers
+ * are expected to no-op cleanly in that case. Bounded to 8 levels so
+ * we never scan past a sensible repo root.
+ */
+function findSourceRoot(): string | null {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    if (
+      existsSync(join(dir, "src", "mcp")) &&
+      existsSync(join(dir, "src", "persistence"))
+    ) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
 }

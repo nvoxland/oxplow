@@ -662,6 +662,102 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 24,
+    name: "drop_snapshot_entry_deleted_tombstones",
+    up: (db) => {
+      // Tombstones (state='deleted' rows) are no longer persisted. Readers
+      // already treat "entry missing" and "state='deleted'" identically;
+      // collapsing to a single case removes the computeVersionHash carve-out
+      // that excluded tombstones. No schema change — the state column has
+      // always been plain TEXT with no CHECK constraint.
+      db.exec(`DELETE FROM snapshot_entry WHERE state = 'deleted';`);
+    },
+  },
+  {
+    version: 25,
+    name: "work_note_thread_scoped",
+    up: (db) => {
+      // Broaden `work_note` so it can hold thread-scoped rows (not attached
+      // to any individual work item). This is the durable landing spot for
+      // `newde__delegate_query` Explore-subagent findings: the orchestrator
+      // can fetch them via `get_thread_notes` only when it actually needs
+      // the content, keeping its own cached context small.
+      //
+      // Schema changes:
+      //   - `work_item_id` relaxed to NULLABLE (was NOT NULL).
+      //   - New nullable `thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE`.
+      //   - CHECK: exactly one of `work_item_id`, `thread_id` is non-NULL.
+      //
+      // Existing rows (if any) are item-scoped so they satisfy the CHECK
+      // with thread_id = NULL unchanged.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        CREATE TABLE work_note_new (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
+          thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          CHECK (
+            (work_item_id IS NOT NULL AND thread_id IS NULL)
+            OR (work_item_id IS NULL AND thread_id IS NOT NULL)
+          )
+        );
+
+        INSERT INTO work_note_new (id, work_item_id, thread_id, body, author, created_at)
+          SELECT id, work_item_id, NULL, body, author, created_at FROM work_note;
+
+        DROP TABLE work_note;
+        ALTER TABLE work_note_new RENAME TO work_note;
+
+        CREATE INDEX idx_work_note_item ON work_note(work_item_id, created_at);
+        CREATE INDEX idx_work_note_thread ON work_note(thread_id, created_at DESC);
+      `);
+    },
+  },
+  {
+    version: 26,
+    name: "work_items.author",
+    up: (db) => {
+      // Add a nullable `author` column to `work_items` that distinguishes
+      // the semantic origin of the row (as opposed to `created_by` which
+      // classifies the writer: user/agent/system). Values:
+      //   'user'       — explicit user-initiated create
+      //   'agent'      — explicit agent-initiated create (via MCP tool)
+      //   'agent-auto' — runtime-synthesized on first write-intent tool call
+      //   NULL         — legacy rows / not classified
+      // The auto-file → explicit adoption flow flips 'agent-auto' → 'agent'
+      // when the agent calls create_work_item during the same turn.
+      db.exec(`
+        ALTER TABLE work_items ADD COLUMN author TEXT;
+        CREATE INDEX idx_work_items_thread_author_status
+          ON work_items(thread_id, author, status);
+      `);
+    },
+  },
+  {
+    version: 27,
+    name: "work_item_commit junction",
+    up: (db) => {
+      // Junction linking work items to the git commits that landed them.
+      // Populated by the runtime's auto-commit path after a successful
+      // `gitCommitAll`, using the same "tasks since last commit" cutoff
+      // the MCP tool uses. Enables a local-history / blame view that
+      // attributes a commit sha back to the contributing work items.
+      db.exec(`
+        CREATE TABLE work_item_commit (
+          work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+          sha TEXT NOT NULL,
+          committed_at TEXT NOT NULL,
+          PRIMARY KEY (work_item_id, sha)
+        );
+        CREATE INDEX idx_work_item_commit_sha ON work_item_commit(sha);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

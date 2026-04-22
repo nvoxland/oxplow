@@ -12,10 +12,14 @@ export interface WorkItemDetailChanges {
   priority?: WorkItemPriority;
 }
 
-const STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
+const STATUS_OPTIONS_BASE: WorkItemStatus[] = [
+  "blocked", "ready", "human_check", "done", "archived", "canceled",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
+
+function statusOptionsFor(current: WorkItemStatus): WorkItemStatus[] {
+  return current === "in_progress" ? [...STATUS_OPTIONS_BASE, "in_progress"] : STATUS_OPTIONS_BASE;
+}
 
 /**
  * Expanded view of a work-item row — inline edit of title / description /
@@ -41,7 +45,7 @@ export function WorkItemDetail({
         <span style={{ color: "var(--muted)" }}>·</span>
         <InlineSelect
           value={item.status}
-          options={STATUS_OPTIONS}
+          options={statusOptionsFor(item.status)}
           onChange={(value) => void onUpdateWorkItem(item.id, { status: value as WorkItemStatus })}
         />
         <span style={{ color: "var(--muted)" }}>·</span>

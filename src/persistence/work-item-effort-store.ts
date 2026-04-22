@@ -252,6 +252,62 @@ export class WorkItemEffortStore {
     }));
   }
 
+  /**
+   * Closed efforts in a thread whose `ended_at` is strictly after
+   * `afterIso` (or all closed efforts when `afterIso` is null, for the
+   * first-commit case). Joined to `work_items` so the caller gets the
+   * item title/kind/status without a second round-trip. Ordered by
+   * `ended_at ASC` — earliest first — so the agent sees the work in
+   * chronological order. Used by `mcp__newde__tasks_since_last_commit`.
+   */
+  listClosedEffortsForThreadAfter(
+    threadId: string,
+    afterIso: string | null,
+  ): Array<{ itemId: string; title: string; kind: string; status: string; endedAt: string }> {
+    const rows = afterIso
+      ? this.stateDb.all<{
+          work_item_id: string;
+          ended_at: string;
+          title: string | null;
+          kind: string | null;
+          status: string | null;
+        }>(
+          `SELECT e.work_item_id, e.ended_at, wi.title, wi.kind, wi.status
+           FROM work_item_effort e
+           JOIN work_items wi ON wi.id = e.work_item_id
+           WHERE wi.thread_id = ?
+             AND wi.deleted_at IS NULL
+             AND e.ended_at IS NOT NULL
+             AND e.ended_at > ?
+           ORDER BY e.ended_at ASC, e.rowid ASC`,
+          threadId,
+          afterIso,
+        )
+      : this.stateDb.all<{
+          work_item_id: string;
+          ended_at: string;
+          title: string | null;
+          kind: string | null;
+          status: string | null;
+        }>(
+          `SELECT e.work_item_id, e.ended_at, wi.title, wi.kind, wi.status
+           FROM work_item_effort e
+           JOIN work_items wi ON wi.id = e.work_item_id
+           WHERE wi.thread_id = ?
+             AND wi.deleted_at IS NULL
+             AND e.ended_at IS NOT NULL
+           ORDER BY e.ended_at ASC, e.rowid ASC`,
+          threadId,
+        );
+    return rows.map((row) => ({
+      itemId: row.work_item_id,
+      title: row.title ?? "(untitled)",
+      kind: row.kind ?? "task",
+      status: row.status ?? "",
+      endedAt: row.ended_at,
+    }));
+  }
+
   linkEffortTurn(effortId: string, turnId: string): void {
     this.stateDb.run(
       `INSERT OR IGNORE INTO work_item_effort_turn (effort_id, turn_id) VALUES (?, ?)`,

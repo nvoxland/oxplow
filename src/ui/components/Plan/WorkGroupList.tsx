@@ -738,6 +738,7 @@ function EpicInlineRow({
         {isExpanded ? "\u25BC" : "\u25B6"}
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+        <AutoAuthorBadge author={item.author} />
         {item.title}
         {item.note_count > 0 ? (
           <span style={{
@@ -1002,6 +1003,7 @@ function InlineItemRow({
           whiteSpace: "nowrap",
         }}
       >
+        <AutoAuthorBadge author={item.author} />
         {item.title}
         {item.note_count > 0 ? (
           <span style={{
@@ -1019,6 +1021,38 @@ function InlineItemRow({
         onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
       />
     </div>
+  );
+}
+
+/**
+ * Muted "auto" tag rendered inline before the title when a row was
+ * filed by the runtime's first-write-intent auto-file hook
+ * (author === "agent-auto"). Human-filed, explicitly-agent-filed, and
+ * legacy (author=null) rows render nothing — avoids visual noise on
+ * the dominant path.
+ */
+function AutoAuthorBadge({ author }: { author: WorkItem["author"] }) {
+  if (author !== "agent-auto") return null;
+  return (
+    <span
+      data-testid="work-item-auto-badge"
+      style={{
+        display: "inline-block",
+        padding: "0 4px",
+        marginRight: 4,
+        borderRadius: 3,
+        background: "var(--bg-2)",
+        color: "var(--muted)",
+        fontSize: 9,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+        verticalAlign: "middle",
+      }}
+      title="Auto-filed by the runtime from the first write-intent tool call of a turn."
+    >
+      auto
+    </span>
   );
 }
 

@@ -61,6 +61,23 @@ export class CommitPointStore {
       .map(toCommitPoint);
   }
 
+  /**
+   * Most recently completed commit_point for a thread (by `completed_at`
+   * DESC). Returns null when the thread has never committed. Used by the
+   * `tasks_since_last_commit` MCP tool and by the auto-commit fallback
+   * message builder to bound "what changed since last commit."
+   */
+  getLatestDoneForThread(threadId: string): CommitPoint | null {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      `SELECT * FROM commit_point
+       WHERE thread_id = ? AND status = 'done' AND completed_at IS NOT NULL
+       ORDER BY completed_at DESC, rowid DESC
+       LIMIT 1`,
+      threadId,
+    );
+    return row ? toCommitPoint(row) : null;
+  }
+
   get(id: string): CommitPoint | null {
     const row = this.stateDb.get<Record<string, unknown>>(`SELECT * FROM commit_point WHERE id = ?`, id);
     return row ? toCommitPoint(row) : null;

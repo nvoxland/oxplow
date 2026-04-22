@@ -274,3 +274,204 @@ describe("WorkItemStore.readWorkOptions", () => {
     expect(result.mode).toBe("empty");
   });
 });
+
+describe("WorkItemStore thread-scoped notes", () => {
+  test("addThreadNote allocates an empty-body note attached to the thread, not any work item", () => {
+    const { workItems, threadId } = seedThread();
+    const id = workItems.addThreadNote(threadId, "", "explore-subagent");
+    expect(id).toMatch(/^note-/);
+    const notes = workItems.listThreadNotes(threadId, 5);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.id).toBe(id);
+    expect(notes[0]!.thread_id).toBe(threadId);
+    expect(notes[0]!.work_item_id).toBeNull();
+    expect(notes[0]!.body).toBe("");
+    expect(notes[0]!.author).toBe("explore-subagent");
+  });
+
+  test("updateThreadNoteBody fills in a pre-allocated row", () => {
+    const { workItems, threadId } = seedThread();
+    const id = workItems.addThreadNote(threadId, "", "explore-subagent");
+    workItems.updateThreadNoteBody(id, "The finding: foo calls bar via baz().");
+    const notes = workItems.listThreadNotes(threadId, 5);
+    expect(notes[0]!.body).toBe("The finding: foo calls bar via baz().");
+  });
+
+  test("updateThreadNoteBody rejects unknown note id", () => {
+    const { workItems } = seedThread();
+    expect(() => workItems.updateThreadNoteBody("note-nope", "x")).toThrow(/unknown thread note/);
+  });
+
+  test("listThreadNotes returns newest first and caps limit", async () => {
+    const { workItems, threadId } = seedThread();
+    const a = workItems.addThreadNote(threadId, "a", "explore-subagent");
+    // Sleep to ensure distinct created_at at ms resolution.
+    await new Promise((r) => setTimeout(r, 5));
+    const b = workItems.addThreadNote(threadId, "b", "explore-subagent");
+    const notes = workItems.listThreadNotes(threadId, 5);
+    expect(notes.map((n) => n.id)).toEqual([b, a]);
+  });
+
+  test("thread notes are isolated from other threads", () => {
+    const { workItems, threadId } = seedThread();
+    // A thread-scoped note on the wrong thread id just returns no rows.
+    workItems.addThreadNote(threadId, "mine", "explore-subagent");
+    const other = workItems.listThreadNotes("b-other", 5);
+    expect(other).toHaveLength(0);
+  });
+});
+
+describe("WorkItemStore author column", () => {
+  test("createItem accepts an author and roundtrips it", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "auto-filed item",
+      createdBy: "agent",
+      actorId: "mcp",
+      author: "agent-auto",
+    });
+    expect(item.author).toBe("agent-auto");
+    const fetched = workItems.getItem(threadId, item.id);
+    expect(fetched?.author).toBe("agent-auto");
+  });
+
+  test("createItem defaults author to null when not provided", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "no author",
+      createdBy: "agent",
+      actorId: "mcp",
+    });
+    expect(item.author).toBeNull();
+  });
+
+  test("updateItem can change author in place", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "start",
+      createdBy: "agent",
+      actorId: "mcp",
+      author: "agent-auto",
+    });
+    workItems.updateItem({
+      threadId,
+      itemId: item.id,
+      author: "agent",
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+    const fetched = workItems.getItem(threadId, item.id);
+    expect(fetched?.author).toBe("agent");
+  });
+});
+
+describe("WorkItemStore.findOpenAutoItemForThread", () => {
+  test("returns in_progress item authored by 'agent-auto'", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "auto",
+      status: "in_progress",
+      createdBy: "agent",
+      actorId: "mcp",
+      author: "agent-auto",
+    });
+    const found = workItems.findOpenAutoItemForThread(threadId);
+    expect(found?.id).toBe(item.id);
+  });
+
+  test("ignores items that aren't in_progress", () => {
+    const { workItems, threadId } = seedThread();
+    workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "ready",
+      createdBy: "agent",
+      actorId: "mcp",
+      author: "agent-auto",
+    });
+    expect(workItems.findOpenAutoItemForThread(threadId)).toBeNull();
+  });
+
+  test("ignores items without agent-auto author", () => {
+    const { workItems, threadId } = seedThread();
+    workItems.createItem({
+      threadId,
+      kind: "task",
+      title: "user",
+      status: "in_progress",
+      createdBy: "user",
+      actorId: "ui",
+      author: "user",
+    });
+    expect(workItems.findOpenAutoItemForThread(threadId)).toBeNull();
+  });
+});
+
+describe("copyLastItemNotes (used by fork_thread)", () => {
+  test("copies last N notes in chronological order, source untouched", async () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui",
+    });
+    // Add 5 notes with small delays so created_at ordering is stable.
+    for (let i = 1; i <= 5; i++) {
+      workItems.addNote(threadId, item.id, `note ${i}`, "agent", "mcp");
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const before = workItems.getWorkNotes(item.id);
+    expect(before).toHaveLength(5);
+    const copied = workItems.copyLastItemNotes(item.id, 3);
+    expect(copied).toBe(3);
+    const after = workItems.getWorkNotes(item.id);
+    // 5 originals + 3 copies = 8
+    expect(after).toHaveLength(8);
+    // Newest rows (the copies) carry bodies of the last 3 originals in
+    // chronological order.
+    const tail = after.slice(-3).map((n) => n.body);
+    expect(tail).toEqual(["note 3", "note 4", "note 5"]);
+    // Source rows are untouched: original ids and bodies still present.
+    for (const orig of before) {
+      const match = after.find((n) => n.id === orig.id);
+      expect(match?.body).toBe(orig.body);
+      expect(match?.author).toBe(orig.author);
+    }
+  });
+
+  test("copies all notes when fewer than N exist", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui",
+    });
+    workItems.addNote(threadId, item.id, "only", "agent", "mcp");
+    expect(workItems.copyLastItemNotes(item.id, 3)).toBe(1);
+    expect(workItems.getWorkNotes(item.id)).toHaveLength(2);
+  });
+
+  test("no-op when item has no notes", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui",
+    });
+    expect(workItems.copyLastItemNotes(item.id, 3)).toBe(0);
+    expect(workItems.getWorkNotes(item.id)).toHaveLength(0);
+  });
+
+  test("limit<=0 is a no-op", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui",
+    });
+    workItems.addNote(threadId, item.id, "x", "agent", "mcp");
+    expect(workItems.copyLastItemNotes(item.id, 0)).toBe(0);
+    expect(workItems.copyLastItemNotes(item.id, -1)).toBe(0);
+    expect(workItems.getWorkNotes(item.id)).toHaveLength(1);
+  });
+});

@@ -88,33 +88,72 @@ join table.
 `BACKLOG_SCOPE` as a sentinel string in event payloads so listeners can
 distinguish backlog changes from in-thread changes.
 
+`author` (migration v26, nullable TEXT) — semantic origin of the row,
+distinct from `created_by` (which just classifies the SQL writer as
+`user`/`agent`/`system`). Values: `'user'` (explicit user-initiated
+create), `'agent'` (explicit agent `create_work_item` / `file_epic_with_children`
+call), `'agent-auto'` (runtime-synthesized on the first write-intent
+tool call of a turn — see agent-model.md's "Auto-file / auto-complete"
+section), or `NULL` (legacy rows). The auto-file → explicit adoption
+flow flips `'agent-auto'` → `'agent'` in place when the agent calls
+`create_work_item` during the same turn. `WorkItemStore.findOpenAutoItemForThread(threadId)`
+returns the oldest `status='in_progress' AND author='agent-auto'` row
+for a thread; the runtime uses it from both hooks to detect "already
+have an open auto-filed item."
+
 `note_count` is a computed column added to every `WorkItem` returned by the
 store (via COUNT subquery over `work_note`). It drives the note badge on
 list rows and is always 0 when no notes exist.
 
-### `work_note` — `WorkItemStore.getWorkNotes()` (`src/persistence/work-item-store.ts`)
+### `work_note` — `WorkItemStore.getWorkNotes()` / `listThreadNotes()` (`src/persistence/work-item-store.ts`)
 
-Structured notes attached to individual work items. Each row has `id`,
-`work_item_id`, `body`, `author` (free-form string, e.g. "agent", "user"),
-and `created_at`. Created via migration v17. The store exposes
-`getWorkNotes(itemId)` returning rows sorted by `created_at ASC`. The UI
-calls `getWorkNotes` via the `getWorkNotes(itemId)` IPC method when the
-edit modal opens; the modal renders a read-only "Notes" section. Agent and
-user note writes go through `work_item_events` (event_type = 'note') for
-now — `work_note` is the dedicated query-friendly table for structured note
-display.
+Structured notes, either item-scoped or thread-scoped. Each row has `id`,
+nullable `work_item_id`, nullable `thread_id`, `body`, `author` (free-form
+string, e.g. "agent", "user", "explore-subagent"), and `created_at`. A
+CHECK enforces that **exactly one** of `work_item_id` / `thread_id` is
+non-NULL. Created via migration v17 (item-scoped rows) and broadened in
+migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
+`thread_id` column).
+
+- **Item-scoped rows** (`work_item_id` set, `thread_id` NULL) back
+  `getWorkNotes(itemId)` returning rows sorted by `created_at ASC`. The UI
+  calls this via the `getWorkNotes(itemId)` IPC method when the edit modal
+  opens; the modal renders a read-only "Notes" section. Agent and user
+  note writes today still also fan out through `work_item_events`
+  (event_type = 'note') — `work_note` is the dedicated query-friendly
+  table for structured note display.
+
+- **Thread-scoped rows** (`thread_id` set, `work_item_id` NULL) are the
+  landing spot for `newde__delegate_query` Explore-subagent findings. The
+  delegate tool pre-allocates a row with empty body (via
+  `addThreadNote`), passes the id into the subagent prompt, and the
+  subagent fills the body by calling `newde__record_query_finding` (store
+  method `updateThreadNoteBody`). The orchestrator reads them back via
+  `newde__get_thread_notes` / `listThreadNotes(threadId, limit)` —
+  reverse-chronological, capped at 100.
 
 ### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
 
 Markers in the queue that say "commit at this point." Status:
-`pending → done`. `mode` is `approve` (default) or `auto`. In approve
-mode the agent inspects the diff, drafts a message in its chat reply,
-asks the user to approve, and calls `newde__commit` once they do —
-that runs `git commit` synchronously and flips the point to `done`. In
-auto mode the runtime commits immediately with a generated message.
-Drafted messages live only in chat; the row just stores mode, status,
-and (once committed) the sha. See [agent-model.md](./agent-model.md)
-for the Stop-hook flow.
+`pending → done`. `mode` is `approve` (default) or `auto`. Both modes
+now route through the agent: the Stop-hook directive asks the agent to
+inspect the diff and draft a message. The only difference is the user-
+approval gate — approve mode asks, auto mode commits in the same turn.
+Either way the agent calls `newde__commit({ commit_point_id, message })`,
+`git commit` runs synchronously, and the row flips to `done`. Drafted
+messages live only in chat; the row stores mode, status, and (once
+committed) the sha. See [agent-model.md](./agent-model.md) for the
+Stop-hook flow.
+
+`completed_at` (set when the row flips to `done`) is the cutoff for two
+downstream queries:
+
+- `CommitPointStore.getLatestDoneForThread(threadId)` — used by the
+  `mcp__newde__tasks_since_last_commit` MCP tool to bound "what's
+  changed since last commit?" for auto-commit drafting.
+- The `buildAutoCommitMessage` fallback filters settled work items by
+  `updated_at > completed_at` so its body reflects this commit's
+  changes, not every settled item in the thread's history.
 
 ### `wait_point` — `WaitPointStore` (`src/persistence/wait-point-store.ts`)
 
@@ -177,6 +216,29 @@ the local-blame overlay described in `.context/editor-and-monaco.md`).
 per-effort rows with pre-joined start/end snapshot metadata and the
 list of changed paths (computed from the pair diff).
 
+### `work_item_commit` — `WorkItemCommitStore` (`src/persistence/work-item-commit-store.ts`)
+
+Junction linking work items to the git commits that landed their
+changes. Columns: `work_item_id`, `sha`, `committed_at`. Composite
+primary key `(work_item_id, sha)` (an item may have multiple shas; a
+sha may cover multiple items). Created in migration v27.
+
+Populated by the runtime's `executeAutoCommitForThread` path after a
+successful `gitCommitAll`, via the pure helper `linkCommitToContributingItems`
+(`src/electron/runtime.ts`). Contributing items = whatever
+`WorkItemEffortStore.listClosedEffortsForThreadAfter(threadId,
+latestDoneCompletedAt)` returns — i.e. the same set the
+`mcp__newde__tasks_since_last_commit` MCP tool exposes — deduped by
+`itemId`. Inserts use `INSERT OR IGNORE`, so re-running against the
+same pair is a no-op. A junction-insert failure is logged but does
+**not** fail the commit (the sha has already landed; losing attribution
+is strictly less bad than a phantom "commit failed" error).
+
+Read API: `listShasForItem(itemId)` returns the commits attributed to
+one item (newest-first); `listItemsForSha(sha)` returns every item
+attributed to one commit (stable by itemId). Consumers: future
+GitHistory / Activity-panel UX.
+
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
 Time-ordered, self-contained snapshots. `file_snapshot` columns:
@@ -188,7 +250,9 @@ state`.
 startup | external`. `version_hash` is a SHA-256 over the canonical
 `(path, hash, size, state)` entry set — `mtime_ms` is deliberately
 excluded so touching a file without changing its bytes doesn't produce
-a new snapshot.
+a new snapshot. Deleted files have no `snapshot_entry` row at all (the
+"entry missing" case is the deletion signal); readers collapse
+"absent" and the old `state="deleted"` cases into one branch.
 
 **Dedup on flush.** `flushSnapshot()` computes the next snapshot's
 `version_hash` (reusing the most recent snapshot's entries for any path
@@ -225,11 +289,12 @@ addressed, shared across streams for dedup).
 
 Entry states:
 - `present`: file captured, `hash` points at a real blob.
-- `deleted`: tombstone — file was gone at flush time. Emitted once after
-  a file disappears; dropped on the next flush so snapshots don't carry
-  ancient ghosts forever.
 - `oversize`: file existed but exceeded `snapshotMaxFileBytes`; no blob,
   but `mtime_ms` and `size` are tracked.
+
+A deleted file has no `snapshot_entry` row — readers treat a missing
+entry as the deletion signal. Migration v24 drops any legacy
+`state='deleted'` tombstones.
 
 **Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
 deletes snapshots older than the cutoff (default 7 days, configurable

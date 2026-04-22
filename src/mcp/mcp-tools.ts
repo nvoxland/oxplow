@@ -10,6 +10,7 @@ import type {
 } from "../persistence/work-item-store.js";
 import type { CommitPoint, CommitPointStore } from "../persistence/commit-point-store.js";
 import type { WaitPointStore } from "../persistence/wait-point-store.js";
+import type { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
@@ -26,8 +27,29 @@ export interface McpToolDeps {
    *  text the user approved). Wired by the runtime to the thread queue
    *  orchestrator; thrown errors bubble back to the agent so it can retry. */
   executeCommit(cpId: string, message: string): CommitPoint;
+  /** Synchronously run `git commit` for an ad-hoc auto-commit (no
+   *  commit_point row). Called when the agent passes `{ auto: true }` to
+   *  `mcp__newde__commit` — the Stop-hook directive for auto_commit
+   *  threads asks for this shape. Throws on any git failure so the
+   *  agent can read the stderr and retry. */
+  executeAutoCommit(threadId: string, message: string): { sha: string; message: string };
   turnStore: TurnStore;
   waitPointStore: WaitPointStore;
+  effortStore: WorkItemEffortStore;
+  /** Notify the runtime that the agent just called read_work_options, so
+   *  the Stop-hook pipeline can suppress the ready-work directive on the
+   *  next Stop when the set is unchanged. Optional — tests that don't
+   *  spin up a runtime can omit it. */
+  markReadWorkOptions?: (threadId: string, readyIds: string[]) => void;
+  /** Fork a thread on the same stream: seed with a note item from
+   *  `summary`, optionally move `moveItemIds` across. Returns the new
+   *  thread id. Optional for tests that don't wire the runtime. */
+  forkThread?: (input: {
+    sourceThreadId: string;
+    title: string;
+    summary: string;
+    moveItemIds?: string[];
+  }) => { newThreadId: string };
 }
 
 // Strip noisy fields off audit events before handing them to the agent.
@@ -57,6 +79,139 @@ export function hasAcceptanceCriteria(raw: string | null | undefined): boolean {
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
+/** Standing preamble for `dispatch_work_item`. The essentials of the
+ *  subagent-protocol skill are embedded here so the brief is
+ *  self-contained and token-predictable, even if the subagent hasn't
+ *  auto-loaded the SKILL yet. */
+const DISPATCH_PREAMBLE = [
+  "You are executing newde work item. Follow the subagent-protocol:",
+  "1. Mark the item `in_progress` via `mcp__newde__update_work_item` if it is not already.",
+  "2. Use red/green TDD. Do not self-mark `done` — use `human_check` when acceptance criteria are met.",
+  "3. End by calling `mcp__newde__complete_task({ threadId, itemId, note: \"<detailed summary>\" })`. The detailed work summary lives in the note.",
+  "4. Your final returned text must be ONE line:",
+  "   newde-result: {\"ok\":true,\"itemId\":\"wi-...\",\"status\":\"human_check\",\"tscClean\":true,\"testsPass\":\"N/0\",\"filesChanged\":N}",
+  "   No prose — the orchestrator parses the header and fetches the note only if it needs detail.",
+].join("\n");
+
+const DISPATCH_CONSTRAINTS = [
+  "Constraints:",
+  "- No Co-Authored-By / Claude attribution on commits.",
+  "- No `git commit --amend`. Create new commits.",
+  "- No new runtime dependencies.",
+  "- No DB mocks in tests — use `mkdtempSync`.",
+  "- Singular table names on any new tables.",
+].join("\n");
+
+export interface DispatchBriefInputs {
+  threadId: string;
+  item: {
+    id: string;
+    title: string;
+    kind: string;
+    priority: string;
+    description: string | null;
+    acceptance_criteria: string | null;
+  };
+  children?: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    description: string | null;
+    acceptance_criteria: string | null;
+  }>;
+  /** Most-recent-first list of up to N recent notes. */
+  recentNotes?: Array<{ author: string; createdAt: string; body: string }>;
+  extraContext?: string;
+}
+
+/** Pure composition — no DB access — so unit tests and the MCP
+ *  handler can both exercise it without spinning up a server. */
+export function composeDispatchBrief(input: DispatchBriefInputs): string {
+  const parts: string[] = [];
+  parts.push(DISPATCH_PREAMBLE);
+  parts.push("");
+  parts.push(`threadId: ${input.threadId}`);
+  parts.push("");
+  parts.push(`## Work item ${input.item.id}`);
+  parts.push(`- title: ${input.item.title}`);
+  parts.push(`- kind: ${input.item.kind}`);
+  parts.push(`- priority: ${input.item.priority}`);
+  if (input.item.description && input.item.description.trim().length > 0) {
+    parts.push("");
+    parts.push("### Description");
+    parts.push(input.item.description);
+  }
+  if (input.item.acceptance_criteria && input.item.acceptance_criteria.trim().length > 0) {
+    parts.push("");
+    parts.push("### Acceptance criteria");
+    parts.push(input.item.acceptance_criteria);
+  }
+  if (input.children && input.children.length > 0) {
+    parts.push("");
+    parts.push("## Children");
+    for (const child of input.children) {
+      parts.push("");
+      parts.push(`### ${child.id} — ${child.title} (${child.kind})`);
+      if (child.description && child.description.trim().length > 0) {
+        parts.push(child.description);
+      }
+      if (child.acceptance_criteria && child.acceptance_criteria.trim().length > 0) {
+        parts.push("Acceptance criteria:");
+        parts.push(child.acceptance_criteria);
+      }
+    }
+  }
+  if (input.recentNotes && input.recentNotes.length > 0) {
+    parts.push("");
+    parts.push("## Recent notes (most-recent first)");
+    for (const note of input.recentNotes) {
+      parts.push(`- [${note.author} @ ${note.createdAt}] ${note.body}`);
+    }
+  }
+  if (input.extraContext && input.extraContext.trim().length > 0) {
+    parts.push("");
+    parts.push("## Additional context");
+    parts.push(input.extraContext.trim());
+  }
+  parts.push("");
+  parts.push(DISPATCH_CONSTRAINTS);
+  return parts.join("\n");
+}
+
+/** Pure composition for `newde__delegate_query`. The orchestrator passes the
+ *  returned string to `Agent(subagent_type='Explore', prompt=…)`. The prompt
+ *  tells the subagent what to investigate and how to report findings (a
+ *  single `newde__record_query_finding` call against the pre-allocated
+ *  `noteId`). Pure so it's unit-testable without an MCP server. */
+export function composeDelegateQueryPrompt(input: {
+  threadId: string;
+  question: string;
+  focus: string;
+  noteId: string;
+}): string {
+  const parts: string[] = [];
+  parts.push("You are an Explore subagent answering one focused exploration question for the orchestrator.");
+  parts.push("");
+  parts.push(`threadId: ${input.threadId}`);
+  parts.push(`noteId: ${input.noteId}`);
+  parts.push("");
+  parts.push("## Question");
+  parts.push(input.question);
+  if (input.focus && input.focus.length > 0) {
+    parts.push("");
+    parts.push("## Focus");
+    parts.push(input.focus);
+  }
+  parts.push("");
+  parts.push("## How to report");
+  parts.push(
+    "When done, call `mcp__newde__record_query_finding({ noteId, body })` ONCE with your complete finding. " +
+    "The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. " +
+    "Do not make code changes. Do not create work items. Read/Grep/Glob only.",
+  );
+  return parts.join("\n");
+}
+
 // Returns true when the description reads like it's hiding the acceptance
 // checklist — specifically the literal phrase "acceptance criteria" AND at
 // least one bullet-looking line. The second gate keeps legitimate
@@ -69,7 +224,7 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, turnStore, effortStore, markReadWorkOptions, forkThread } = deps;
 
   // Prefer the thread row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
@@ -199,6 +354,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           .map((wp) => wp.sort_index)[0] ?? Infinity;
         const cutoff = Math.min(commitCutoff, waitCutoff);
         const result = workItemStore.readWorkOptions(args.threadId, cutoff < Infinity ? cutoff : undefined);
+        // Notify the runtime so the next Stop-hook can suppress the
+        // ready-work directive when the set hasn't changed. Use the raw
+        // ready list (not the post-cutoff cluster) — the Stop-hook sees the
+        // same listReady output and compares against that.
+        if (markReadWorkOptions) {
+          const readyIds = workItemStore.listReady(args.threadId).map((i) => i.id);
+          markReadWorkOptions(args.threadId, readyIds);
+        }
         if (result.mode === "empty") return { mode: "empty" };
         const full = args.full === true;
         if (result.mode === "epic") {
@@ -323,20 +486,39 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call newde__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
           };
         }
-        const item = workItemStore.createItem({
-          threadId: args.threadId,
-          parentId: args.parentId,
-          kind: args.kind,
-          title: args.title,
-          description: args.description,
-          acceptanceCriteria: args.acceptanceCriteria,
-          status: args.status,
-          priority: args.priority,
-          createdBy: "agent",
-          actorId: "mcp",
-        });
+        // Auto-file adoption: if the runtime filed an 'agent-auto' item
+        // during this turn, update that row in place rather than creating
+        // a duplicate — keeps effort attribution and the UI row stable.
+        // Only adopts for root-level filings (no parentId) so epic-child
+        // creations under a user-filed epic stay independent.
+        const openAuto = args.parentId ? null : workItemStore.findOpenAutoItemForThread(args.threadId);
+        const item = openAuto
+          ? workItemStore.adoptAutoItem({
+              threadId: args.threadId,
+              itemId: openAuto.id,
+              title: args.title,
+              description: args.description,
+              acceptanceCriteria: args.acceptanceCriteria,
+              kind: args.kind,
+              priority: args.priority,
+              actorKind: "agent",
+              actorId: "mcp",
+            })
+          : workItemStore.createItem({
+              threadId: args.threadId,
+              parentId: args.parentId,
+              kind: args.kind,
+              title: args.title,
+              description: args.description,
+              acceptanceCriteria: args.acceptanceCriteria,
+              status: args.status,
+              priority: args.priority,
+              createdBy: "agent",
+              actorId: "mcp",
+              author: "agent",
+            });
         // Epics filed without children render as one opaque IN PROGRESS row in
-        // the UI and defeat the purpose of the rollup. The newde-task-filing
+        // the UI and defeat the purpose of the rollup. The newde-runtime
         // skill already says "file children in the same turn"; surfacing it on
         // the tool response keeps the rule on the critical path instead of
         // shelved in a skill doc. Non-epic responses stay terse — no field is
@@ -347,10 +529,213 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             id: item.id,
             sort_index: item.sort_index,
             reminder:
-              "Epic filed with 0 children. Per newde-task-filing, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
+              "Epic filed with 0 children. Per newde-runtime, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
           };
         }
         return { ok: true, id: item.id, sort_index: item.sort_index };
+      },
+    },
+    {
+      name: "newde__file_epic_with_children",
+      description:
+        "Atomically create an epic plus its child work items in one call. Preferred over " +
+        "calling create_work_item N+1 times because (a) the epic can't end up in the UI " +
+        "without children if a follow-up call fails, and (b) sort_index + audit events fire " +
+        "in one transaction. Children default kind=\"task\" if unspecified. Server rejects " +
+        "empty children arrays — an epic without children is a bug.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
+          epic: {
+            type: "object",
+            description: "Fields for the parent epic row.",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              acceptance_criteria: { type: "string" },
+              priority: { type: "string", description: "One of low, medium, high, urgent." },
+            },
+            required: ["title"],
+          },
+          children: {
+            type: "array",
+            description: "Non-empty list of child items to create under the epic. Each child defaults kind=\"task\".",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                acceptance_criteria: { type: "string" },
+                priority: { type: "string" },
+                kind: { type: "string", description: "One of task, subtask, bug, note. Defaults to task." },
+              },
+              required: ["title"],
+            },
+          },
+        },
+        required: ["threadId", "epic", "children"],
+      },
+      handler: (args: {
+        streamId?: string;
+        threadId: string;
+        epic: {
+          title: string;
+          description?: string;
+          acceptance_criteria?: string | null;
+          priority?: WorkItemPriority;
+        };
+        children: Array<{
+          title: string;
+          description?: string;
+          acceptance_criteria?: string | null;
+          priority?: WorkItemPriority;
+          kind?: WorkItemKind;
+        }>;
+      }) => {
+        resolveThreadAndStream(args);
+        // Auto-file adoption: if the runtime filed an 'agent-auto' item
+        // earlier in this turn, adopt its id as the epic (title/desc/AC/
+        // kind/priority overwritten, author flipped to 'agent'). Children
+        // are created fresh under the adopted epic id.
+        const openAuto = workItemStore.findOpenAutoItemForThread(args.threadId);
+        const result = workItemStore.fileEpicWithChildren({
+          threadId: args.threadId,
+          epic: {
+            title: args.epic.title,
+            description: args.epic.description,
+            acceptanceCriteria: args.epic.acceptance_criteria,
+            priority: args.epic.priority,
+          },
+          children: args.children.map((c) => ({
+            title: c.title,
+            description: c.description,
+            acceptanceCriteria: c.acceptance_criteria,
+            priority: c.priority,
+            kind: c.kind,
+          })),
+          createdBy: "agent",
+          actorId: "mcp",
+          adoptItemId: openAuto?.id,
+        });
+        return { ok: true, epicId: result.epicId, childIds: result.childIds };
+      },
+    },
+    {
+      name: "newde__dispatch_work_item",
+      description:
+        "Compose a subagent dispatch brief server-side from the work item's own fields, " +
+        "so the orchestrator doesn't have to Read its description/acceptance criteria/notes " +
+        "into chat context. Returns `{ prompt, itemId }`; pass `prompt` directly to the " +
+        "general-purpose Agent tool. When `autoStart !== false` (default true) the item is " +
+        "atomically transitioned to `in_progress` if currently `ready` or `blocked`; other " +
+        "statuses are left alone. For epics, the brief includes each child's title + AC.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id." },
+          itemId: { type: "string", description: "Required id of the work item to dispatch." },
+          extraContext: { type: "string", description: "Optional free-form context to append under `## Additional context`. Use for cross-item coordination or decisions the user made in chat that aren't captured in the item itself." },
+          autoStart: { type: "boolean", description: "When true (default) transition the item to in_progress if currently ready/blocked. Skipped silently for terminal/human_check/in_progress." },
+        },
+        required: ["threadId", "itemId"],
+      },
+      handler: (args: { streamId?: string; threadId: string; itemId: string; extraContext?: string; autoStart?: boolean }) => {
+        resolveThreadAndStream(args);
+        const item = workItemStore.getItem(args.threadId, args.itemId);
+        if (!item) throw new Error(`unknown work item: ${args.itemId}`);
+
+        const autoStart = args.autoStart !== false;
+        if (autoStart && (item.status === "ready" || item.status === "blocked")) {
+          workItemStore.updateItem({
+            threadId: args.threadId,
+            itemId: args.itemId,
+            status: "in_progress",
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+        }
+
+        // Gather children if this is an epic.
+        let children: DispatchBriefInputs["children"] = undefined;
+        if (item.kind === "epic") {
+          const siblings = workItemStore.listItems(args.threadId)
+            .filter((c) => c.parent_id === item.id);
+          children = siblings.map((c) => ({
+            id: c.id,
+            title: c.title,
+            kind: c.kind,
+            description: c.description,
+            acceptance_criteria: c.acceptance_criteria,
+          }));
+        }
+
+        // Gather last 3 notes (most-recent first). Notes live in the
+        // work_item_events table as event_type="note".
+        const recentNotes = workItemStore.listEvents(args.threadId, args.itemId)
+          .filter((e) => e.event_type === "note")
+          .slice(0, 3)
+          .map((e) => {
+            let body = "";
+            try { body = (JSON.parse(e.payload_json) as { note?: string }).note ?? ""; } catch { body = ""; }
+            return { author: e.actor_kind, createdAt: e.created_at, body };
+          });
+
+        const prompt = composeDispatchBrief({
+          threadId: args.threadId,
+          item: {
+            id: item.id,
+            title: item.title,
+            kind: item.kind,
+            priority: item.priority,
+            description: item.description,
+            acceptance_criteria: item.acceptance_criteria,
+          },
+          children,
+          recentNotes,
+          extraContext: args.extraContext,
+        });
+        return { prompt, itemId: item.id };
+      },
+    },
+    {
+      name: "newde__complete_task",
+      description:
+        "Collapse the final add_work_note + status transition into one call. Default " +
+        "`status` is `human_check` (callers must not self-mark `done`). Pass `status: \"blocked\"` " +
+        "instead when you're signalling you can't finish and need user input. Rejects items " +
+        "whose current status is already terminal (done/canceled/archived) — use update_work_item " +
+        "for those.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id." },
+          itemId: { type: "string", description: "Required id of the work item to complete." },
+          note: { type: "string", description: "Required summary note — what shipped, what's left, where to look." },
+          status: { type: "string", description: "Optional. One of `human_check` (default) or `blocked`. `done` is rejected." },
+        },
+        required: ["threadId", "itemId", "note"],
+      },
+      handler: (args: {
+        streamId?: string;
+        threadId: string;
+        itemId: string;
+        note: string;
+        status?: "human_check" | "blocked";
+      }) => {
+        resolveThreadAndStream(args);
+        const item = workItemStore.completeTask({
+          threadId: args.threadId,
+          itemId: args.itemId,
+          note: args.note,
+          status: args.status,
+          actorKind: "agent",
+          actorId: "mcp",
+        });
+        return { ok: true, id: item.id, status: item.status };
       },
     },
     {
@@ -596,18 +981,191 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     {
       name: "newde__commit",
       description:
-        "Run the git commit for an active commit point. Only call this AFTER the user has explicitly approved your drafted message in chat. The `message` you pass here is the final message that will be committed. Throws on git failure; read the error, fix the underlying issue, and call again.",
+        "Run git commit for this thread. Two shapes:\n" +
+        "  (1) Approve/auto mode with a queued commit_point row: pass `{ commit_point_id, message }`. For approve mode only call this AFTER the user approves the drafted message in chat; for auto mode (the row already has mode=auto) commit in the same turn without asking.\n" +
+        "  (2) Ad-hoc auto-commit (no commit_point row, used when thread.auto_commit=true): pass `{ auto: true, threadId, message }`. Commit immediately without asking the user — the auto-commit Stop-hook directive selects this shape.\n" +
+        "Throws on git failure; read the error, fix the underlying issue, and call again.",
       inputSchema: {
         type: "object",
         properties: {
-          commit_point_id: { type: "string", description: "Required id of the commit_point to execute." },
+          commit_point_id: { type: "string", description: "Id of the commit_point to execute. Omit when `auto: true`." },
+          auto: { type: "boolean", description: "When true, commit without a commit_point row. Requires `threadId`. Used for thread-level auto_commit." },
+          threadId: { type: "string", description: "Required when `auto: true`. Ignored otherwise (the commit point carries its own thread)." },
           message: { type: "string", description: "Required final commit message." },
         },
-        required: ["commit_point_id", "message"],
+        required: ["message"],
       },
-      handler: (args: { commit_point_id: string; message: string }) => {
+      handler: (args: { commit_point_id?: string; auto?: boolean; threadId?: string; message: string }) => {
+        if (typeof args.message !== "string" || args.message.trim().length === 0) {
+          throw new Error("newde__commit: `message` is required and must be non-empty");
+        }
+        if (args.auto === true) {
+          if (args.commit_point_id) {
+            throw new Error("newde__commit: pass either `commit_point_id` OR `auto: true`, not both");
+          }
+          if (!args.threadId) {
+            throw new Error("newde__commit: `threadId` is required when `auto: true`");
+          }
+          resolveThreadAndStream({ threadId: args.threadId });
+          const result = executeAutoCommit(args.threadId, args.message);
+          return { ok: true, commitSha: result.sha, message: result.message };
+        }
+        if (!args.commit_point_id) {
+          throw new Error("newde__commit: pass either `commit_point_id` or `auto: true`");
+        }
         const updated = executeCommit(args.commit_point_id, args.message);
         return { ok: true, commitPoint: updated, commitSha: updated.commit_sha };
+      },
+    },
+    {
+      name: "newde__tasks_since_last_commit",
+      description:
+        "Return work items whose efforts closed after the most recent completed commit_point for this thread. Supplementary context for drafting an auto-commit message when the agent has lost memory of earlier completed tasks; the diff is still the primary source of truth. Always pass the threadId from your session context.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id." },
+        },
+        required: ["threadId"],
+      },
+      handler: (args: { streamId?: string; threadId: string }) => {
+        resolveThreadAndStream(args);
+        const latest = commitPointStore.getLatestDoneForThread(args.threadId);
+        const items = effortStore.listClosedEffortsForThreadAfter(
+          args.threadId,
+          latest?.completed_at ?? null,
+        );
+        // Deduplicate by work item id, keeping the latest endedAt (a single
+        // item can have multiple efforts — re-opened tasks produce extras).
+        const byItem = new Map<string, { id: string; title: string; kind: string; status: string; ended_at: string }>();
+        for (const row of items) {
+          const existing = byItem.get(row.itemId);
+          if (!existing || row.endedAt > existing.ended_at) {
+            byItem.set(row.itemId, {
+              id: row.itemId,
+              title: row.title,
+              kind: row.kind,
+              status: row.status,
+              ended_at: row.endedAt,
+            });
+          }
+        }
+        return {
+          previousCommit: latest
+            ? { sha: latest.commit_sha, completed_at: latest.completed_at }
+            : null,
+          items: Array.from(byItem.values()),
+        };
+      },
+    },
+    {
+      name: "newde__fork_thread",
+      description:
+        "Create a new thread on the same stream as `sourceThreadId`, seeded with a single " +
+        "`note`-kind work item carrying the `summary` you supply as context. Optionally moves " +
+        "the listed `moveItemIds` across (each must currently be `ready` or `blocked` on the " +
+        "source thread — in-progress / human_check / terminal items are rejected). Returns " +
+        "`{ newThreadId }`. The new thread starts queued (never auto-writer); promote it " +
+        "explicitly if you want it to take over the worktree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sourceThreadId: { type: "string", description: "Thread to fork from." },
+          title: { type: "string", description: "Title for the new thread." },
+          summary: { type: "string", description: "Carry-over context — stored as the description of a single seeded `note` work item on the new thread." },
+          moveItemIds: {
+            type: "array",
+            description: "Optional list of work item ids to move from source to new thread. Each must currently be `ready` or `blocked`.",
+            items: { type: "string" },
+          },
+        },
+        required: ["sourceThreadId", "title", "summary"],
+      },
+      handler: (args: {
+        sourceThreadId: string;
+        title: string;
+        summary: string;
+        moveItemIds?: string[];
+      }) => {
+        if (!forkThread) throw new Error("newde__fork_thread: runtime not wired");
+        const result = forkThread({
+          sourceThreadId: args.sourceThreadId,
+          title: args.title,
+          summary: args.summary,
+          moveItemIds: args.moveItemIds,
+        });
+        return { ok: true, newThreadId: result.newThreadId };
+      },
+    },
+    {
+      name: "newde__delegate_query",
+      description:
+        "Prepare an exploration query for an Explore subagent. Use when you need to understand a codebase area before dispatching real work and would otherwise read 5+ files inline — offloading the reads keeps your own cached context small. " +
+        "Returns `{ prompt, provisionalNoteId }`. The orchestrator then calls `Agent(subagent_type='Explore', prompt=<prompt>)`; the prompt already instructs the subagent to call `newde__record_query_finding({ noteId: <provisionalNoteId>, body })` with its findings. Read the finding later via `newde__get_thread_notes` only when you need the content.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id — the finding note is scoped to this thread." },
+          question: { type: "string", description: "The exploration question to answer. Be specific about what you need to know." },
+          focus: { type: "string", description: "Optional focus hint (file paths, module names, areas of the codebase) to narrow the subagent's search." },
+        },
+        required: ["threadId", "question"],
+      },
+      handler: (args: { streamId?: string; threadId: string; question: string; focus?: string }) => {
+        resolveThreadAndStream(args);
+        const question = String(args.question ?? "").trim();
+        if (!question) throw new Error("newde__delegate_query: `question` is required");
+        const focus = typeof args.focus === "string" ? args.focus.trim() : "";
+        const provisionalNoteId = workItemStore.addThreadNote(args.threadId, "", "explore-subagent");
+        const prompt = composeDelegateQueryPrompt({
+          threadId: args.threadId,
+          question,
+          focus,
+          noteId: provisionalNoteId,
+        });
+        return { ok: true, prompt, provisionalNoteId };
+      },
+    },
+    {
+      name: "newde__record_query_finding",
+      description:
+        "Write the Explore subagent's finding into a pre-allocated thread-scoped note (id returned by `newde__delegate_query`). Call this once at the end of the exploration — the orchestrator reads it later via `newde__get_thread_notes`.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          noteId: { type: "string", description: "Provisional thread-note id returned by `newde__delegate_query`." },
+          body: { type: "string", description: "Finding content. Structured prose is fine — it gets stored verbatim." },
+        },
+        required: ["noteId", "body"],
+      },
+      handler: (args: { noteId: string; body: string }) => {
+        if (!args.noteId) throw new Error("newde__record_query_finding: `noteId` is required");
+        if (typeof args.body !== "string") {
+          throw new Error("newde__record_query_finding: `body` must be a string");
+        }
+        workItemStore.updateThreadNoteBody(args.noteId, args.body);
+        return { ok: true, noteId: args.noteId };
+      },
+    },
+    {
+      name: "newde__get_thread_notes",
+      description:
+        "Return recent thread-scoped notes (reverse chronological). Thread-scoped notes are findings from `newde__delegate_query` Explore subagents and any other thread-level context not attached to a specific work item.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id." },
+          limit: { type: "number", description: "Optional cap on rows returned (default 5, max 100)." },
+        },
+        required: ["threadId"],
+      },
+      handler: (args: { streamId?: string; threadId: string; limit?: number }) => {
+        resolveThreadAndStream(args);
+        const notes = workItemStore.listThreadNotes(args.threadId, args.limit ?? 5);
+        return { notes };
       },
     },
     {

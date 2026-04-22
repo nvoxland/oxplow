@@ -57,6 +57,22 @@ export interface ThreadSnapshot {
    *  proposes a commit whenever settled work (human_check/done) exists
    *  but no commit point is in the queue. */
   autoCommit?: boolean;
+  /** The raw user prompt for the current turn, if known. Used ONLY by the
+   *  ready-work directive to suppress conversational-starter prompts
+   *  (why/how/explain/…) — agents shouldn't be force-marched to the next
+   *  ready item when the user is asking a question. Optional; absent means
+   *  "no conversational suppression." */
+  currentTurnPrompt?: string | null;
+  /** Work-item ids the agent saw in the most recent `read_work_options` call
+   *  during the immediately-preceding turn. When the current ready-set is
+   *  identical, the ready-work directive is suppressed — the agent already
+   *  has the list. Optional; absent means "no just-read suppression." */
+  justReadReadySet?: string[];
+  /** Cumulative `cache_read_input_tokens` across all closed turns for this
+   *  thread. When ≥20M, the emitted ready-work directive carries a
+   *  fork_thread hint so the orchestrator can shed the tail. Optional;
+   *  absent / 0 means "no hint." */
+  cumulativeCacheRead?: number;
 }
 
 export interface NextWorkItemContext {
@@ -85,6 +101,11 @@ export function decideStopDirective(
     buildCommitPointReason: (cp: CommitPoint) => string;
     buildNextWorkItemReason: (item: WorkItem, context: NextWorkItemContext) => string;
     buildHumanCheckNudgeReason?: (item: WorkItem) => string;
+    /** Emitted for auto-commit: either a manually-placed commit_point row
+     *  with mode="auto", OR the no-row auto_commit=true path (then `cp`
+     *  is null). Optional so callers that don't route through the
+     *  runtime (some unit tests) still work. */
+    buildAutoCommitReason?: (cp: CommitPoint | null) => string;
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
@@ -94,8 +115,30 @@ export function decideStopDirective(
   // read-only, so we must not prompt them to propose a commit; leave the
   // commit point pending for the thread that eventually becomes writer.
   if (activeCommit && activeCommit.status === "pending" && snapshot.thread?.status === "active") {
+    if (activeCommit.mode === "auto" && builders.buildAutoCommitReason) {
+      return {
+        directive: { decision: "block", reason: builders.buildAutoCommitReason(activeCommit) },
+        sideEffects,
+      };
+    }
     return {
       directive: { decision: "block", reason: builders.buildCommitPointReason(activeCommit) },
+      sideEffects,
+    };
+  }
+
+  // No commit_point row queued, but the thread is in auto_commit mode with
+  // settled work — fire the auto-commit directive with cp=null. The agent
+  // runs `mcp__newde__commit` with { auto: true } and the runtime commits
+  // without touching a commit_point row. Only the writer thread commits.
+  if (
+    snapshot.autoCommit &&
+    snapshot.thread?.status === "active" &&
+    builders.buildAutoCommitReason &&
+    hasSettledWork(snapshot.workItems)
+  ) {
+    return {
+      directive: { decision: "block", reason: builders.buildAutoCommitReason(null) },
       sideEffects,
     };
   }
@@ -112,12 +155,20 @@ export function decideStopDirective(
 
   const next = pickNextReadyItem(snapshot.readyWorkItems, snapshot.currentTurnStartedAt);
   if (next) {
+    // Suppression rules (ready-work directive only — commit/wait are
+    // unaffected and ran above).
+    if (shouldSuppressReadyWorkForPrompt(snapshot.currentTurnPrompt)) {
+      return { directive: null, sideEffects };
+    }
+    if (shouldSuppressReadyWorkForJustRead(snapshot.readyWorkItems, snapshot.justReadReadySet)) {
+      return { directive: null, sideEffects };
+    }
     const uiChangeNudge = turnTouchedUi(snapshot.currentTurnFilePaths);
+    const baseReason = builders.buildNextWorkItemReason(next, { uiChangeNudge });
+    const forkHint = buildForkHint(snapshot);
+    const reason = forkHint ? `${baseReason}\n\n${forkHint}` : baseReason;
     return {
-      directive: {
-        decision: "block",
-        reason: builders.buildNextWorkItemReason(next, { uiChangeNudge }),
-      },
+      directive: { decision: "block", reason },
       sideEffects,
     };
   }
@@ -219,6 +270,76 @@ function findActiveMarker<T extends { sort_index: number }>(
     return marker;
   }
   return null;
+}
+
+function hasSettledWork(workItems: WorkItem[]): boolean {
+  return workItems.some((item) => item.status === "human_check" || item.status === "done");
+}
+
+/**
+ * Classifier for the ready-work directive. Three layers, evaluated in
+ * order:
+ *
+ * 1. **Conversational-starter** — prompt begins with a question/lookup
+ *    verb (why/how/explain/what/look/tell/show/can you/does/is/should/
+ *    could/would). Case-insensitive, leading whitespace trimmed, word
+ *    boundary required so `whyever` doesn't match.
+ * 2. **Imperative-question** — anywhere in the prompt, patterns like
+ *    `help me …`, `tell me about …`, `walk me through …` that read as
+ *    directive-shaped but ask for explanation, not mutation.
+ * 3. **No-change-verb default** — if neither (1) nor (2) fired AND the
+ *    prompt contains no change-verb (fix/add/change/rename/delete/
+ *    implement/build/remove/update/refactor/create/write), default to
+ *    suppressed. Rationale: a turn that has no imperative verb of
+ *    mutation is almost always discussion / planning / review; the
+ *    ready-work force-march inverts the user's intent. Presence of a
+ *    change-verb re-arms the directive.
+ *
+ * Kept as regex — an LLM classifier is a follow-up if this still
+ * misfires. Anchoring with \b on both sides keeps noun forms ("a
+ * change") from tripping the verb match.
+ */
+const CONVERSATIONAL_STARTER_RE =
+  /^(why|how|explain|what|look|tell|show|can you|does|is|should|could|would)\b/i;
+
+const IMPERATIVE_QUESTION_RE =
+  /\b(help me|tell me|walk me through|show me)\b/i;
+
+const CHANGE_VERB_RE =
+  /\b(fix|add|change|rename|delete|implement|build|remove|update|refactor|create|write)\b/i;
+
+function shouldSuppressReadyWorkForPrompt(prompt: string | null | undefined): boolean {
+  if (typeof prompt !== "string") return false;
+  const trimmed = prompt.replace(/^\s+/, "");
+  if (trimmed.length === 0) return false;
+  if (CONVERSATIONAL_STARTER_RE.test(trimmed)) return true;
+  if (IMPERATIVE_QUESTION_RE.test(trimmed)) return true;
+  // No change-verb default: if the prompt lacks any recognisable
+  // mutation verb, treat it as discussion and suppress.
+  if (!CHANGE_VERB_RE.test(trimmed)) return true;
+  return false;
+}
+
+function shouldSuppressReadyWorkForJustRead(
+  ready: WorkItem[],
+  justRead: string[] | undefined,
+): boolean {
+  if (!justRead || justRead.length === 0) return false;
+  const readySet = new Set(ready.map((item) => item.id));
+  const readSet = new Set(justRead);
+  if (readySet.size !== readSet.size) return false;
+  for (const id of readSet) if (!readySet.has(id)) return false;
+  return true;
+}
+
+const FORK_HINT_THRESHOLD = 20_000_000;
+
+function buildForkHint(snapshot: ThreadSnapshot): string | null {
+  const cum = snapshot.cumulativeCacheRead;
+  if (typeof cum !== "number" || cum < FORK_HINT_THRESHOLD) return null;
+  const mStr = (cum / 1_000_000).toFixed(1);
+  const threadId = snapshot.thread?.id ?? "<threadId>";
+  return `note: this thread has burned ${mStr}M cache-read. If upcoming work is unrelated, consider newde__fork_thread({ sourceThreadId: "${threadId}", title: "...", summary: "short carry-over context" })`;
 }
 
 function isTerminalStatus(item: WorkItem): boolean {

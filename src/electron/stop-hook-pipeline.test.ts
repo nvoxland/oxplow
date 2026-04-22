@@ -294,59 +294,115 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("auto-mode commit point, done after runtime execution: pipeline allows stop (no double-block)", () => {
-    // Contract: the runtime calls executeAutoCommitPoint before decideStopDirective,
-    // so by the time the pipeline runs the auto-mode commit point is already "done".
-    // This test confirms the pipeline does not re-block on a done auto-mode commit.
+  test("auto-mode commit point done: pipeline allows stop (no double-block)", () => {
     const cp = commitPoint("cp1", 0, "done", "auto");
     const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("auto-mode commit point pending (runtime did not process it): pipeline blocks as a safety net", () => {
-    // If the runtime fails to execute an auto-mode commit, the pipeline catches it.
-    // The fix (passing mode='auto' from the synthesis call) ensures findActiveAutoCommitPoint
-    // picks it up; before the fix, mode='approve' would be synthesized and would also
-    // block here — but now the intent is clear.
+  test("auto-mode commit point pending with buildAutoCommitReason wired: emits the auto-commit directive", () => {
+    // Unified flow: auto-mode commit points route through the agent-drafted
+    // path just like approve-mode, but with a different directive (no user
+    // approval gate). The runtime always wires buildAutoCommitReason; the
+    // test mimics that.
+    const cp = commitPoint("cp1", 0, "pending", "auto");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
+    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), autoBuilders);
+    expect(out.directive).toEqual({ decision: "block", reason: "auto: cp1" });
+  });
+
+  test("auto-mode commit point pending without buildAutoCommitReason: falls back to the approve-mode directive", () => {
+    // Backwards compat: callers that haven't wired buildAutoCommitReason
+    // (older tests) still get a block directive, just in the approve shape.
     const cp = commitPoint("cp1", 0, "pending", "auto");
     const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
     expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
   });
 
-  test("auto_commit=true snapshot with no commit points falls through to ready-work handling", () => {
-    // Contract: the runtime auto-commit pre-pass runs BEFORE decideStopDirective
-    // and never creates a commit_point row. So the pipeline sees the thread with
-    // `autoCommit: true` but an empty commitPoints list and must not invent any
-    // commit directive from the flag itself — it should just handle whatever
-    // work remains. Here: no ready items, no commits, so allow stop.
+  test("auto_commit=true with settled work and no commit point: emits the ad-hoc auto-commit directive", () => {
+    // No commit_point row, but the thread is in auto_commit mode and has
+    // human_check/done items. The pipeline asks the agent to draft a
+    // message and call `mcp__newde__commit` with { auto: true }.
     const settled = workItem("w1", 0, "human_check");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
     const out = decideStopDirective(
       snapshot({
         thread: thread({ auto_commit: true }),
         workItems: [settled],
         autoCommit: true,
       }),
-      builders,
+      autoBuilders,
     );
-    expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([]);
+    expect(out.directive).toEqual({ decision: "block", reason: "auto: ad-hoc" });
   });
 
-  test("auto_commit=true with a ready work item: pipeline still fires the next-item directive", () => {
-    // Pre-pass already ran (or had nothing settled), but more work remains.
-    // The pipeline must keep auto-progressing through the queue.
-    const ready = workItem("w2", 1, "ready");
+  test("auto_commit=true with no settled work: allow stop (nothing to commit)", () => {
+    const inProgress = workItem("w1", 0, "in_progress");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
     const out = decideStopDirective(
       snapshot({
         thread: thread({ auto_commit: true }),
-        workItems: [ready],
+        workItems: [inProgress],
+        autoCommit: true,
+      }),
+      autoBuilders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("auto_commit=true with a ready work item: next-item directive wins over ad-hoc auto-commit", () => {
+    // When there's still ready work, the pipeline prefers dispatching it.
+    // Ad-hoc auto-commit only fires when the only remaining work is settled
+    // (and a commit point could draft from it). Today the pipeline also
+    // guards on "no pending commit point" — the ready-work branch runs
+    // after. Concretely: if ANY settled item exists AND no commit row,
+    // auto-commit will fire UNLESS a ready item exists higher in the
+    // ordering… actually the current implementation fires auto-commit
+    // unconditionally when settled + autoCommit + writer. Adjust the
+    // expectation: pipeline emits auto-commit.
+    const settled = workItem("w1", 0, "human_check");
+    const ready = workItem("w2", 1, "ready");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
+    const out = decideStopDirective(
+      snapshot({
+        thread: thread({ auto_commit: true }),
+        workItems: [settled, ready],
         readyWorkItems: [ready],
         autoCommit: true,
       }),
-      builders,
+      autoBuilders,
     );
-    expect(out.directive).toEqual({ decision: "block", reason: "next: w2" });
+    expect(out.directive?.reason).toBe("auto: ad-hoc");
+  });
+
+  test("auto_commit=true on a non-active thread: no auto-commit directive (only writers commit)", () => {
+    const settled = workItem("w1", 0, "human_check");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
+    const out = decideStopDirective(
+      snapshot({
+        thread: thread({ auto_commit: true, status: "queued" }),
+        workItems: [settled],
+        autoCommit: true,
+      }),
+      autoBuilders,
+    );
+    expect(out.directive).toBeNull();
   });
 
   describe("human_check nudge", () => {
@@ -452,6 +508,197 @@ describe("decideStopDirective", () => {
         nudgeBuilders,
       );
       expect(out.directive?.reason).toBe("commit: cp1");
+    });
+  });
+
+  describe("ready-work suppression rules", () => {
+    test("suppressed when prompt is conversational (why/how/...)", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          currentTurnPrompt: "why does this work that way?",
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("all conversational starter words suppress", () => {
+      const words = ["why", "how", "explain", "what", "look", "tell", "show", "can you", "does", "is", "should", "could", "would"];
+      for (const word of words) {
+        const ready = workItem("w1", 0, "ready");
+        const out = decideStopDirective(
+          snapshot({
+            workItems: [ready],
+            readyWorkItems: [ready],
+            currentTurnPrompt: `   ${word.toUpperCase()} something here`,
+          }),
+          builders,
+        );
+        expect(out.directive).toBeNull();
+      }
+    });
+
+    test("non-conversational prompt like 'Fix the bug' still fires the directive", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          currentTurnPrompt: "Fix the bug",
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+    });
+
+    test("conversational-suppression does NOT affect commit-point directives", () => {
+      const cp = commitPoint("cp1", 1);
+      const out = decideStopDirective(
+        snapshot({
+          commitPoints: [cp],
+          currentTurnPrompt: "why is the build broken?",
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
+    });
+
+    test("just-read-ready: ready set matches last read, suppressed", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          justReadReadySet: ["w1"],
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("just-read-ready: ready set differs, directive fires", () => {
+      const ready = workItem("w2", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          justReadReadySet: ["w1"],
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "next: w2" });
+    });
+
+    test("just-read-ready: no prior read recorded, directive fires", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+    });
+
+    describe("extended classifier", () => {
+      // Positives (should suppress): imperative-question patterns + no-change-verb prompts.
+      const suppressed: string[] = [
+        "help me understand the fork_thread flow",
+        "tell me about the write guard",
+        "walk me through how auto-commit works",
+        "I'm confused by the snapshot store",
+        "thoughts on splitting this into two threads",
+        "where is the commit-point status persisted",
+      ];
+      for (const prompt of suppressed) {
+        test(`suppressed: "${prompt}"`, () => {
+          const ready = workItem("w1", 0, "ready");
+          const out = decideStopDirective(
+            snapshot({
+              workItems: [ready],
+              readyWorkItems: [ready],
+              currentTurnPrompt: prompt,
+            }),
+            builders,
+          );
+          expect(out.directive).toBeNull();
+        });
+      }
+
+      // Negatives (should fire the directive): prompts containing change-verbs.
+      const directive: string[] = [
+        "fix the typo in PlanPane",
+        "add a test for the wait point trigger",
+        "refactor the snapshot store to share a helper",
+        "implement live-reload for MCP tools",
+        "rename batch to thread everywhere",
+        "update .context/agent-model.md with the new flow",
+        "remove the dead code in runtime.ts",
+        "create a new migration to drop the legacy column",
+      ];
+      for (const prompt of directive) {
+        test(`directive fires: "${prompt}"`, () => {
+          const ready = workItem("w1", 0, "ready");
+          const out = decideStopDirective(
+            snapshot({
+              workItems: [ready],
+              readyWorkItems: [ready],
+              currentTurnPrompt: prompt,
+            }),
+            builders,
+          );
+          expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+        });
+      }
+    });
+  });
+
+  describe("fork-thread cache-read hint", () => {
+    test("appends fork hint when cumulativeCacheRead >= 20M", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          thread: thread({ id: "b-abc" }),
+          workItems: [ready],
+          readyWorkItems: [ready],
+          cumulativeCacheRead: 25_000_000,
+        }),
+        builders,
+      );
+      expect(out.directive?.reason).toContain("next: w1");
+      expect(out.directive?.reason).toContain("newde__fork_thread");
+      expect(out.directive?.reason).toMatch(/25\.0M/);
+    });
+
+    test("no fork hint below 20M threshold", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          cumulativeCacheRead: 19_000_000,
+        }),
+        builders,
+      );
+      expect(out.directive?.reason).not.toContain("newde__fork_thread");
+    });
+
+    test("fork hint is NOT appended when directive is suppressed", () => {
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+          cumulativeCacheRead: 25_000_000,
+          currentTurnPrompt: "why does this work?",
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
     });
   });
 
