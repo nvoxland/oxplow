@@ -19,7 +19,11 @@ import type { WorkItem } from "../persistence/work-item-store.js";
  *      user resumes by prompting the agent directly.
  *   3. Writer batch with a ready work item: block, ask the agent to
  *      pick it up (auto-progression).
- *   4. Allow stop.
+ *   4. Writer batch with a still-in_progress work item the agent didn't
+ *      touch this turn (and no blocker raised): block and nudge the
+ *      agent to either move it to `human_check` or leave a note
+ *      explaining what's left.
+ *   5. Allow stop.
  *
  * `directive` of `null` lets Claude stop normally; otherwise it's the
  * hook body (typically `{ decision: "block", reason: string }`).
@@ -80,6 +84,7 @@ export function decideStopDirective(
   builders: {
     buildCommitPointReason: (cp: CommitPoint) => string;
     buildNextWorkItemReason: (item: WorkItem, context: NextWorkItemContext) => string;
+    buildHumanCheckNudgeReason?: (item: WorkItem) => string;
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
@@ -106,16 +111,64 @@ export function decideStopDirective(
   }
 
   const next = pickNextReadyItem(snapshot.readyWorkItems, snapshot.currentTurnStartedAt);
-  if (!next) return { directive: null, sideEffects };
+  if (next) {
+    const uiChangeNudge = turnTouchedUi(snapshot.currentTurnFilePaths);
+    return {
+      directive: {
+        decision: "block",
+        reason: builders.buildNextWorkItemReason(next, { uiChangeNudge }),
+      },
+      sideEffects,
+    };
+  }
 
-  const uiChangeNudge = turnTouchedUi(snapshot.currentTurnFilePaths);
-  return {
-    directive: {
-      decision: "block",
-      reason: builders.buildNextWorkItemReason(next, { uiChangeNudge }),
-    },
-    sideEffects,
-  };
+  // No ready items left. If there's a still-in_progress item the agent
+  // didn't touch this turn (and no blocker raised anywhere in the batch
+  // this turn), nudge toward human_check so a forgotten settle doesn't
+  // silently park the item. Opt-in via the builder — callers that don't
+  // need the nudge can omit `buildHumanCheckNudgeReason`.
+  if (builders.buildHumanCheckNudgeReason) {
+    const stale = pickHumanCheckNudge(snapshot);
+    if (stale) {
+      return {
+        directive: { decision: "block", reason: builders.buildHumanCheckNudgeReason(stale) },
+        sideEffects,
+      };
+    }
+  }
+
+  return { directive: null, sideEffects };
+}
+
+/**
+ * Pick the work item (if any) the Stop hook should nudge the agent to
+ * settle. Fires only when:
+ *   - the current turn has a known `started_at` (we can tell "touched this
+ *     turn" from `updated_at`);
+ *   - exactly one item is `in_progress` (the "sole in-progress" convention);
+ *   - that item wasn't touched during the current turn (updated_at <
+ *     turnStart); and
+ *   - no item in the batch is `blocked` with an update timestamp ≥ the
+ *     turn start (an agent-raised blocker suppresses the nudge — "not
+ *     done yet, here's why" is the correct state, not a forgotten settle).
+ */
+function pickHumanCheckNudge(snapshot: BatchSnapshot): WorkItem | null {
+  const turnStartedAtIso = snapshot.currentTurnStartedAt;
+  if (!turnStartedAtIso) return null;
+  const turnStartMs = Date.parse(turnStartedAtIso);
+  if (!Number.isFinite(turnStartMs)) return null;
+  const inProgress = snapshot.workItems.filter((item) => item.status === "in_progress");
+  if (inProgress.length !== 1) return null;
+  const candidate = inProgress[0]!;
+  const updatedMs = Date.parse(candidate.updated_at);
+  if (Number.isFinite(updatedMs) && updatedMs >= turnStartMs) return null;
+  const blockerRaisedThisTurn = snapshot.workItems.some((item) => {
+    if (item.status !== "blocked") return false;
+    const itemUpdated = Date.parse(item.updated_at);
+    return Number.isFinite(itemUpdated) && itemUpdated >= turnStartMs;
+  });
+  if (blockerRaisedThisTurn) return null;
+  return candidate;
 }
 
 function turnTouchedUi(paths: string[] | undefined): boolean {

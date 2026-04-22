@@ -161,8 +161,8 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   // batch_id is embedded in the read_work_options call so the agent can pass the right batchId.
   expect(text).toMatch(/batchId="b-xyz"/);
   // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
-  // newde-task-management skill — the directive just points at it to stay terse.
-  expect(text).toContain("newde-task-management");
+  // newde-task-dispatch skill — the directive just points at it to stay terse.
+  expect(text).toContain("newde-task-dispatch");
   // Trimmed: directive should be a single line / well under 400 tokens.
   expect(text.length).toBeLessThan(400);
 });

@@ -67,22 +67,34 @@ test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand
   expect(text).toContain("note");
 });
 
-test("createElectronPlugin writes the task-management skill Claude Code can model-invoke", () => {
+test("createElectronPlugin writes the three task-management skills Claude Code can model-invoke", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
   const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
-  expect(plugin.taskManagementSkillPath).toBe(
-    join(plugin.pluginDir, "skills", "newde-task-management", "SKILL.md"),
+
+  expect(plugin.taskFilingSkillPath).toBe(
+    join(plugin.pluginDir, "skills", "newde-task-filing", "SKILL.md"),
   );
-  expect(existsSync(plugin.taskManagementSkillPath)).toBe(true);
-  const body = readFileSync(plugin.taskManagementSkillPath, "utf8");
-  // Frontmatter — Claude Code's skill loader keys off name + description.
-  expect(body.startsWith("---\n")).toBe(true);
-  expect(body).toContain("name: newde-task-management");
-  expect(body).toContain("description:");
-  // Policy content the skill owns (distinct from the MCP tool descriptions).
-  expect(body).toContain("epic");
-  expect(body).toContain("acceptance criteria");
-  expect(body).toContain("human_check");
+  expect(plugin.taskLifecycleSkillPath).toBe(
+    join(plugin.pluginDir, "skills", "newde-task-lifecycle", "SKILL.md"),
+  );
+  expect(plugin.taskDispatchSkillPath).toBe(
+    join(plugin.pluginDir, "skills", "newde-task-dispatch", "SKILL.md"),
+  );
+
+  // Each skill file exists with the frontmatter Claude Code's skill loader
+  // keys off of (name + description).
+  for (const path of [plugin.taskFilingSkillPath, plugin.taskLifecycleSkillPath, plugin.taskDispatchSkillPath]) {
+    expect(existsSync(path)).toBe(true);
+    const body = readFileSync(path, "utf8");
+    expect(body.startsWith("---\n")).toBe(true);
+    expect(body).toContain("description:");
+  }
+
+  // Filing skill owns the epic/acceptance-criteria policy; lifecycle owns
+  // status/human_check; dispatch owns read_work_options/general-purpose.
+  expect(readFileSync(plugin.taskFilingSkillPath, "utf8")).toMatch(/epic|acceptance criteria/i);
+  expect(readFileSync(plugin.taskLifecycleSkillPath, "utf8")).toMatch(/human_check/i);
+  expect(readFileSync(plugin.taskDispatchSkillPath, "utf8")).toMatch(/read_work_options|general-purpose/i);
 });
 
 test("createElectronPlugin is idempotent across calls", () => {

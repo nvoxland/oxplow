@@ -349,4 +349,110 @@ describe("decideStopDirective", () => {
     expect(out.directive).toEqual({ decision: "block", reason: "next: w2" });
   });
 
+  describe("human_check nudge", () => {
+    const nudgeBuilders = {
+      ...builders,
+      buildHumanCheckNudgeReason: (item: WorkItem) => `nudge: ${item.id}`,
+    };
+
+    test("fires when an in_progress item wasn't touched this turn and no blocker was raised", () => {
+      const stale = workItem("w-stale", 0, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [stale],
+          readyWorkItems: [],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "nudge: w-stale" });
+    });
+
+    test("suppresses when the in_progress item was updated during this turn", () => {
+      const fresh = workItem("w-fresh", 0, "in_progress", { updated_at: "2024-06-01T00:05:30Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [fresh],
+          readyWorkItems: [],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("suppresses when another item was flagged `blocked` during this turn", () => {
+      const stale = workItem("w-stale", 0, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const blocker = workItem("w-block", 1, "blocked", { updated_at: "2024-06-01T00:05:30Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [stale, blocker],
+          readyWorkItems: [],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("suppresses when there's no current turn (no anchor to compare against)", () => {
+      const stale = workItem("w-stale", 0, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [stale],
+          readyWorkItems: [],
+          currentTurnStartedAt: null,
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("suppresses when two or more items are in_progress (convention: one at a time)", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const b = workItem("w-b", 1, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [a, b],
+          readyWorkItems: [],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("is opt-in — omitting the builder never fires the nudge", () => {
+      const stale = workItem("w-stale", 0, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [stale],
+          readyWorkItems: [],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("commit point still takes priority over the nudge", () => {
+      // Commit point sits at the front of the queue with no preceding
+      // items (so it's "active"), followed by the stale in_progress item.
+      // The pipeline's commit-point branch should fire first and the
+      // nudge branch should never be evaluated.
+      const cp = commitPoint("cp1", 0);
+      const stale = workItem("w-stale", 1, "in_progress", { updated_at: "2024-06-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [stale],
+          readyWorkItems: [],
+          commitPoints: [cp],
+          currentTurnStartedAt: "2024-06-01T00:05:00Z",
+        }),
+        nudgeBuilders,
+      );
+      expect(out.directive?.reason).toBe("commit: cp1");
+    });
+  });
+
 });

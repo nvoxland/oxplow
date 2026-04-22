@@ -1215,6 +1215,7 @@ export class ElectronRuntime {
       // a fall-back to `batchId` keeps the directive stable.
       buildNextWorkItemReason: (item, context) =>
         buildNextWorkItemStopReason({ ...item, batch_id: item.batch_id ?? batchId }, streamId, context),
+      buildHumanCheckNudgeReason: buildHumanCheckNudgeStopReason,
     });
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "trigger-wait-point") {
@@ -1659,7 +1660,7 @@ export function buildNextWorkItemStopReason(
     );
   }
   lines.push(
-    `The batch queue has ready work (batchId="${item.batch_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-management skill.`,
+    `The batch queue has ready work (batchId="${item.batch_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-dispatch skill.`,
   );
   return lines.join("\n");
 }
@@ -1716,6 +1717,17 @@ export function buildAutoCommitMessage(workItems: WorkItem[]): string {
   return `chore: complete ${settled.length} work items\n\n${items}${suffix}`;
 }
 
+export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
+  const lines = [
+    `You have one work item still \`in_progress\` but you didn't update it during this turn: "${item.title}" (id=${item.id}).`,
+    ``,
+    `If its acceptance criteria are met, call \`mcp__newde__update_work_item\` with \`status: "human_check"\` — don't leave finished work parked in IN PROGRESS.`,
+    ``,
+    `If the work isn't done, either: (a) call \`mcp__newde__add_work_note\` summarizing what's still needed (this suppresses the nudge), or (b) call \`update_work_item\` with \`status: "blocked"\` if you're stuck and a user decision is required.`,
+  ];
+  return lines.join("\n");
+}
+
 export function buildCommitPointStopReason(cp: CommitPoint): string {
   const lines = [
     `A commit point is due in this batch's work queue (commit_point_id=${cp.id}).`,
@@ -1757,15 +1769,16 @@ function buildBatchAgentPrompt(
   activeBatch?: Batch | null,
 ): string {
   // Keep this preamble SITUATIONAL only — procedural "how to use the work-item
-  // tools" policy lives in the `newde-task-management` skill so it's only
-  // loaded when the agent actually needs it. Every line here is replayed via
-  // cache-read on every turn; treat additions as expensive.
+  // tools" policy lives in the `newde-task-filing` / `newde-task-lifecycle` /
+  // `newde-task-dispatch` skills so it's only loaded when the agent actually
+  // needs the relevant slice. Every line here is replayed via cache-read on
+  // every turn; treat additions as expensive.
   const lines = [
     `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}). Pass batchId="${batch.id}" to all newde work-item tools.`,
     activeBatch && activeBatch.id !== batch.id
       ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
       : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
-    `Start each session by calling \`newde__read_work_options\`; see the \`newde-task-management\` skill for the orchestrator/subagent pattern, filing conventions, and how to reference items in user-facing text.`,
+    `Start each session by calling \`newde__read_work_options\`; the newde-task-filing, newde-task-lifecycle, and newde-task-dispatch skills cover the orchestrator/subagent pattern, filing conventions, status transitions, and how to reference items in user-facing text.`,
   ];
   if (batch.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

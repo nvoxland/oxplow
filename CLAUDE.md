@@ -105,4 +105,6 @@ CHECK sections as the canonical record of agent activity; skipping the
 ticket because a change "feels small" erases that visibility. The only
 things that don't need a ticket are pure Q&A, read-only investigation,
 and discussion that doesn't result in file changes. Load the
-`newde-task-management` skill for the full filing protocol.
+`newde-task-filing`, `newde-task-lifecycle`, and `newde-task-dispatch`
+skills for the full filing/status/execution protocols (each fires on
+its own trigger so only the relevant one loads per turn).

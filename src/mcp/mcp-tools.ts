@@ -80,20 +80,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     return { batch, stream };
   }
 
-  // Mutation tools return this instead of the full BatchWorkState to keep
-  // agent context lean — a full state dump per call was burning tokens for
-  // data the agent already has (it just did the mutation).
-  function counts(batchId: string): { waiting: number; inProgress: number; done: number; ready: number } {
-    const state = workItemStore.getState(batchId);
-    const ready = state.waiting.filter((item) => item.status === "ready").length;
-    return {
-      waiting: state.waiting.length,
-      inProgress: state.inProgress.length,
-      done: state.done.length,
-      ready,
-    };
-  }
-
   return [
     {
       name: "newde__get_batch_context",
@@ -349,7 +335,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           createdBy: "agent",
           actorId: "mcp",
         });
-        return { ok: true, id: item.id, sort_index: item.sort_index, counts: counts(args.batchId) };
+        return { ok: true, id: item.id, sort_index: item.sort_index };
       },
     },
     {
@@ -394,7 +380,63 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           actorKind: "agent",
           actorId: "mcp",
         });
-        return { ok: true, id: item.id, status: item.status, counts: counts(args.batchId) };
+        return { ok: true, id: item.id, status: item.status };
+      },
+    },
+    {
+      name: "newde__transition_work_items",
+      description:
+        "Flip the status of multiple work items in one call. Useful at phase boundaries " +
+        "(e.g., moving several subtasks from `ready` to `in_progress`, or rolling an epic " +
+        "and its children to `human_check` together). Each transition fires the same side " +
+        "effects as an individual `update_work_item` call — effort open/close, work-item.changed " +
+        "events, audit log entries — so downstream subscribers don't need to special-case batching.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          transitions: {
+            type: "array",
+            description: "List of status transitions to apply. Each entry names one item and its new status.",
+            items: {
+              type: "object",
+              properties: {
+                batchId: { type: "string", description: "Batch that owns the item. Usually the same for every entry." },
+                itemId: { type: "string", description: "Id of the item to transition." },
+                status: { type: "string", description: "New status. Same enum as update_work_item.status." },
+              },
+              required: ["batchId", "itemId", "status"],
+            },
+          },
+        },
+        required: ["transitions"],
+      },
+      handler: (args: {
+        transitions: Array<{ batchId: string; itemId: string; status: WorkItemStatus }>;
+      }) => {
+        if (!Array.isArray(args.transitions) || args.transitions.length === 0) {
+          throw new Error("transition_work_items: `transitions` must be a non-empty array");
+        }
+        // Resolve each batch once up front so an invalid batchId fails the
+        // whole call before any side effects. Cache validated batches.
+        const validatedBatches = new Set<string>();
+        for (const t of args.transitions) {
+          if (!validatedBatches.has(t.batchId)) {
+            resolveBatchAndStream({ batchId: t.batchId });
+            validatedBatches.add(t.batchId);
+          }
+        }
+        const results: Array<{ id: string; status: WorkItemStatus }> = [];
+        for (const t of args.transitions) {
+          const item = workItemStore.updateItem({
+            batchId: t.batchId,
+            itemId: t.itemId,
+            status: t.status,
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+          results.push({ id: item.id, status: item.status });
+        }
+        return { ok: true, results };
       },
     },
     {
@@ -434,7 +476,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
         resolveBatchAndStream(args);
         workItemStore.deleteItem(args.batchId, args.itemId, "agent", "mcp");
-        return { ok: true, counts: counts(args.batchId) };
+        return { ok: true };
       },
     },
     {
@@ -456,7 +498,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       handler: (args: { streamId?: string; batchId: string; orderedItemIds: string[] }) => {
         resolveBatchAndStream(args);
         workItemStore.reorderItems(args.batchId, args.orderedItemIds, "agent", "mcp");
-        return { ok: true, counts: counts(args.batchId) };
+        return { ok: true };
       },
     },
     {

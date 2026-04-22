@@ -190,4 +190,57 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
     await expect(async () => t.handler({ batchId: "b-does-not-exist" } as never))
       .toThrow(/unknown batch/);
   });
+
+  test("transition_work_items flips multiple items, fires events per item, same effect as individual calls", async () => {
+    const { tools, workItemStore, batchB } = seed();
+    const create = tool(tools, "newde__create_work_item");
+    const a = (await create.handler({ batchId: batchB.id, kind: "task", title: "A" } as never)) as { id: string };
+    const b = (await create.handler({ batchId: batchB.id, kind: "task", title: "B" } as never)) as { id: string };
+    const c = (await create.handler({ batchId: batchB.id, kind: "task", title: "C" } as never)) as { id: string };
+
+    const changes: Array<{ itemId: string | null; kind: string }> = [];
+    workItemStore.subscribe((change) => changes.push({ itemId: change.itemId, kind: change.kind }));
+
+    const t = tool(tools, "newde__transition_work_items");
+    const result = (await t.handler({
+      transitions: [
+        { batchId: batchB.id, itemId: a.id, status: "in_progress" },
+        { batchId: batchB.id, itemId: b.id, status: "in_progress" },
+        { batchId: batchB.id, itemId: c.id, status: "human_check" },
+      ],
+    } as never)) as { ok: boolean; results: Array<{ id: string; status: string }> };
+    expect(result.ok).toBe(true);
+    expect(result.results).toHaveLength(3);
+    expect(result.results.map((r) => r.status)).toEqual(["in_progress", "in_progress", "human_check"]);
+
+    // One `updated` event per transitioned item, same as three individual
+    // update_work_item calls would have emitted.
+    const updatedFor = new Set(changes.filter((c) => c.kind === "updated").map((c) => c.itemId));
+    expect(updatedFor.has(a.id)).toBe(true);
+    expect(updatedFor.has(b.id)).toBe(true);
+    expect(updatedFor.has(c.id)).toBe(true);
+
+    // Store state reflects the final status of each item.
+    expect(workItemStore.getItem(batchB.id, a.id)!.status).toBe("in_progress");
+    expect(workItemStore.getItem(batchB.id, b.id)!.status).toBe("in_progress");
+    expect(workItemStore.getItem(batchB.id, c.id)!.status).toBe("human_check");
+  });
+
+  test("transition_work_items rejects an unknown batchId before firing any side effects", async () => {
+    const { tools, workItemStore, batchB } = seed();
+    const create = tool(tools, "newde__create_work_item");
+    const a = (await create.handler({ batchId: batchB.id, kind: "task", title: "A" } as never)) as { id: string };
+
+    const t = tool(tools, "newde__transition_work_items");
+    await expect(async () =>
+      t.handler({
+        transitions: [
+          { batchId: batchB.id, itemId: a.id, status: "in_progress" },
+          { batchId: "b-does-not-exist", itemId: "wi-nope", status: "in_progress" },
+        ],
+      } as never),
+    ).toThrow(/unknown batch/);
+    // `a` was never flipped — validation happens up front.
+    expect(workItemStore.getItem(batchB.id, a.id)!.status).toBe("ready");
+  });
 });

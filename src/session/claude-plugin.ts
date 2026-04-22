@@ -2,12 +2,16 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_GUIDE_FILENAME, buildAgentGuide } from "./agent-guide.js";
 import {
+  SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_NAME,
-  TASK_MANAGEMENT_SKILL_FILE,
-  TASK_MANAGEMENT_SKILL_NAME,
+  TASK_DISPATCH_SKILL_NAME,
+  TASK_FILING_SKILL_NAME,
+  TASK_LIFECYCLE_SKILL_NAME,
   buildSubagentProtocolSkill,
-  buildTaskManagementSkill,
+  buildTaskDispatchSkill,
+  buildTaskFilingSkill,
+  buildTaskLifecycleSkill,
 } from "./agent-skills.js";
 
 export interface ElectronPluginOptions {
@@ -28,8 +32,12 @@ export interface ElectronPlugin {
   manifestPath: string;
   /** Absolute path to the reference guide the agent can Read on demand. */
   agentGuidePath: string;
-  /** Absolute path to the task-management SKILL.md. */
-  taskManagementSkillPath: string;
+  /** Absolute path to the task-filing SKILL.md. */
+  taskFilingSkillPath: string;
+  /** Absolute path to the task-lifecycle SKILL.md. */
+  taskLifecycleSkillPath: string;
+  /** Absolute path to the task-dispatch SKILL.md. */
+  taskDispatchSkillPath: string;
   /** Absolute path to the subagent work-protocol SKILL.md. */
   subagentProtocolSkillPath: string;
 }
@@ -99,13 +107,20 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const agentGuidePath = join(pluginDir, AGENT_GUIDE_FILENAME);
   writeFileSync(agentGuidePath, buildAgentGuide(), "utf8");
 
-  // Model-invoked skill that fires whenever the agent is about to file or
-  // manage newde work items. Keeps task-filing policy out of the always-on
-  // system prompt without losing it.
-  const skillsDir = join(pluginDir, "skills", TASK_MANAGEMENT_SKILL_NAME);
-  mkdirSync(skillsDir, { recursive: true });
-  const taskManagementSkillPath = join(skillsDir, TASK_MANAGEMENT_SKILL_FILE);
-  writeFileSync(taskManagementSkillPath, buildTaskManagementSkill(), "utf8");
+  // Model-invoked skills that fire on targeted triggers so each invocation
+  // loads ~1k of focused policy instead of the old ~4k monolith. Three
+  // orchestrator-side skills (filing, lifecycle, dispatch) + one
+  // subagent-side skill (protocol).
+  const writeSkill = (skillName: string, content: string): string => {
+    const dir = join(pluginDir, "skills", skillName);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, SKILL_FILE);
+    writeFileSync(path, content, "utf8");
+    return path;
+  };
+  const taskFilingSkillPath = writeSkill(TASK_FILING_SKILL_NAME, buildTaskFilingSkill());
+  const taskLifecycleSkillPath = writeSkill(TASK_LIFECYCLE_SKILL_NAME, buildTaskLifecycleSkill());
+  const taskDispatchSkillPath = writeSkill(TASK_DISPATCH_SKILL_NAME, buildTaskDispatchSkill());
 
   // Standing dispatch protocol for subagents — loaded whenever an agent
   // (typically a general-purpose subagent the orchestrator launched) sees a
@@ -122,7 +137,9 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     hooksPath,
     manifestPath,
     agentGuidePath,
-    taskManagementSkillPath,
+    taskFilingSkillPath,
+    taskLifecycleSkillPath,
+    taskDispatchSkillPath,
     subagentProtocolSkillPath,
   };
 }

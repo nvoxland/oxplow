@@ -23,6 +23,19 @@ the agent are:
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
 
+### What we can't do from newde hooks
+
+Claude Code inserts its own `<system-reminder>` blocks into user
+messages — for example, the periodic "The task tools haven't been used
+recently; consider using TaskCreate" nudge. **Hooks can add context to
+a prompt but cannot edit existing system-reminders out**, so newde has
+no way to suppress these from the agent's view. Related asks (e.g.
+"don't nag about TaskCreate while a newde work item is in_progress")
+require upstream Claude Code support; a newde-side "just inject a
+counter-instruction" workaround would leave both the nag and the
+counter-nag visible, which is worse than the status quo. If Claude
+Code ever ships a hook-surface knob for this, revisit.
+
 **Caveat — the first turn still needs a user prompt.** "Runtime never
 prompts" is about auto-progression, not cold-start. When the agent is
 sitting idle at its shell prompt (e.g. just after `newde` opens a
@@ -201,9 +214,10 @@ The pipeline runs in priority order:
 3. **Writer batch with a ready work item.** Block with a terse directive
    built by `buildNextWorkItemStopReason` — a one-liner pointing at
    `mcp__newde__read_work_options` (with the embedded batchId) and the
-   `newde-task-management` skill. Protocol (mark `in_progress` before work,
-   `human_check` after, one-at-a-time attribution) lives in the skill, not
-   the directive — keep the stop-hook message stable and cheap. Items the
+   `newde-task-dispatch` + `newde-task-lifecycle` skills. Protocol
+   (mark `in_progress` before work, `human_check` after, one-at-a-time
+   attribution) lives in those skills, not the directive — keep the
+   stop-hook message stable and cheap. Items the
    agent itself filed during the *current* turn
    are skipped (ready-list filtered by `created_by="agent"` AND
    `created_at >= currentTurnStartedAt`). Those are triage-inbox entries
@@ -252,8 +266,9 @@ that, the orchestrator has two modes:
 The dispatch protocol (mark `in_progress` before work, `human_check`
 after, never two items `in_progress` at once, blocked + note on
 stuck) is identical for both modes and lives in the
-`newde-task-management` skill plus the `newde-subagent-work-protocol`
-skill (scoped to subagents). Briefs no longer need to repeat it.
+`newde-task-lifecycle` skill (orchestrator side) plus the
+`newde-subagent-work-protocol` skill (scoped to subagents). Briefs no
+longer need to repeat it.
 
 Related small fixes get batched into one task ("fix 4 test fixtures" =
 one item, not four). Claude Code's built-in `TaskCreate` is a
@@ -358,10 +373,15 @@ entirely, set `injectSessionContext: false` in `newde.yaml` — default is
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
-flag, and a pointer to the skill. Procedural policy (when to file,
-how to shape items, acceptance-criteria style, status conventions,
-orchestrator/subagent pattern, item-referencing conventions) all lives
-in the `newde-task-management` skill (`src/session/agent-skills.ts`).
+flag, and a pointer to the skills. Procedural policy is split across
+three focused orchestrator-side skills (all in
+`src/session/agent-skills.ts`):
+`newde-task-filing` (when to file, how to shape items,
+acceptance-criteria style, epic-with-children rule),
+`newde-task-lifecycle` (status conventions, epic rollup, notes), and
+`newde-task-dispatch` (orchestrator vs subagent execution mode,
+brief composition). Each skill has a targeted description so only
+the relevant one loads per turn.
 Reason: the preamble is replayed via cache-read on every turn; skills
 load only when the agent needs them. Keep additions to the preamble
 situational (what changes per batch), not educational (how to use the
