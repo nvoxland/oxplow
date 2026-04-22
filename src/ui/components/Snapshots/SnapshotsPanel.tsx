@@ -168,10 +168,38 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
     }
   };
 
+  // Snapshots are newest-first. For each `-end` snapshot, a matching `-start`
+  // of the same family appears *later* in the array (since it happened
+  // earlier in time). If no such `-start` exists, the end is orphaned — the
+  // file changed outside a task/turn, so we relabel it "External Change".
+  const orphanEndIds = new Set<string>();
+  for (let i = 0; i < snapshots.length; i++) {
+    const snap = snapshots[i]!;
+    const family = endFamily(snap.source);
+    if (!family) continue;
+    const startSource = family === "task" ? "task-start" : "turn-start";
+    let found = false;
+    for (let j = i + 1; j < snapshots.length; j++) {
+      if (snapshots[j]!.source === startSource) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) orphanEndIds.add(snap.id);
+  }
+
+  const labelFor = (snap: FileSnapshot): string =>
+    orphanEndIds.has(snap.id) ? "External Change" : snapshotLabel(snap);
+
+  // Hide `-start` rows: they're only shown via their paired `-end`.
+  const visibleSnapshots = snapshots.filter(
+    (snap) => snap.source !== "task-start" && snap.source !== "turn-start",
+  );
+
   const filterLower = filter.trim().toLowerCase();
   const filteredSnapshots = filterLower
-    ? snapshots.filter((snap) => snapshotLabel(snap).toLowerCase().includes(filterLower))
-    : snapshots;
+    ? visibleSnapshots.filter((snap) => labelFor(snap).toLowerCase().includes(filterLower))
+    : visibleSnapshots;
 
   return (
     <div id="snapshots-panel-root" style={containerStyle}>
@@ -205,7 +233,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
               </span>
             ) : null}
             <div style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)" }}>
-              {loading ? "loading…" : filterLower ? `${filteredSnapshots.length} / ${snapshots.length}` : `${snapshots.length}`}
+              {loading ? "loading…" : filterLower ? `${filteredSnapshots.length} / ${visibleSnapshots.length}` : `${visibleSnapshots.length}`}
             </div>
           </div>
           <div style={listStyle}>
@@ -213,7 +241,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
               <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
             ) : !stream ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
-            ) : snapshots.length === 0 ? (
+            ) : visibleSnapshots.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots yet.</div>
             ) : filteredSnapshots.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots match filter.</div>
@@ -222,6 +250,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
                 <SnapshotRow
                   key={snap.id}
                   snap={snap}
+                  label={labelFor(snap)}
                   selected={selectedId === snap.id}
                   compareBase={compareBaseId === snap.id}
                   onClick={() => handleRowClick(snap.id)}
@@ -281,6 +310,12 @@ function snapshotLabel(snap: FileSnapshot): string {
   }
 }
 
+function endFamily(source: string): "task" | "turn" | null {
+  if (source === "task-end") return "task";
+  if (source === "turn-end") return "turn";
+  return null;
+}
+
 function snapshotIconKind(snap: FileSnapshot): "task" | "turn" | "system" {
   if (snap.label_kind) return snap.label_kind;
   switch (snap.source) {
@@ -297,11 +332,13 @@ function snapshotIconKind(snap: FileSnapshot): "task" | "turn" | "system" {
 
 function SnapshotRow({
   snap,
+  label,
   selected,
   compareBase,
   onClick,
 }: {
   snap: FileSnapshot;
+  label: string;
   selected: boolean;
   compareBase: boolean;
   onClick(): void;
@@ -309,7 +346,7 @@ function SnapshotRow({
   const date = formatRelative(snap.created_at);
   const iconKind = snapshotIconKind(snap);
   const isAgent = iconKind !== "system";
-  const description = snapshotLabel(snap);
+  const description = label;
   return (
     <div
       onClick={onClick}
@@ -380,8 +417,6 @@ function DetailPane({
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", color: "var(--muted)", fontSize: 11 }}>
         <span>Created</span>
         <span>{formatAbsolute(summary.snapshot.created_at)}</span>
-        <span>Source</span>
-        <span>{snapshotLabel(summary.snapshot)}</span>
       </div>
       <div>
         <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>

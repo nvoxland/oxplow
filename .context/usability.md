@@ -14,7 +14,15 @@ Things I keep forgetting. Read this before adding any UI.
   you. For multi-line textareas, Enter inserts a newline and Cmd/Ctrl+Enter
   submits.
 - **Escape cancels.** Modals close on Escape. Inline edit fields (click-to-edit)
-  revert on Escape. When the pattern is "Escape → set a cancel latch →
+  revert on Escape.
+- **Modals close via their buttons (and Escape), not backdrop click.** A
+  click on the dimmed overlay behind a modal is a no-op — only the modal's
+  own OK / Cancel / Close / ✕ buttons (and the Escape key) dismiss it.
+  This prevents losing in-progress form state to a stray click outside
+  the panel. Lightweight popup palettes that are not modal dialogs
+  (command palette, quick-open, inline status/priority pickers) still
+  close on outside click — that rule is specific to modal panels with
+  action buttons. When the pattern is "Escape → set a cancel latch →
   blur() → onBlur decides commit-vs-revert," the latch **must be a
   `useRef`, not `useState`**. React state updates are async; the blur
   fires synchronously on the same tick and the onBlur closure will still

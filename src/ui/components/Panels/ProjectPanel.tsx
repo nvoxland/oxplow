@@ -941,7 +941,6 @@ function FindUsagesModal({
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
@@ -953,7 +952,6 @@ function FindUsagesModal({
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
           background: "var(--bg)",
           border: "1px solid var(--border)",
@@ -1335,7 +1333,6 @@ function GitOpResultModal({ title, result, onClose }: { title: string; result: G
 function ModalShell({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }) {
   return (
     <div
-      onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
@@ -1347,7 +1344,6 @@ function ModalShell({ title, onClose, children }: { title: string; onClose(): vo
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
           background: "var(--bg)",
           border: "1px solid var(--border)",

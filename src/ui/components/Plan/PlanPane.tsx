@@ -1034,10 +1034,8 @@ function NewWorkItemModal({
         justifyContent: "center",
         zIndex: 2000,
       }}
-      onClick={onClose}
     >
       <form
-        onClick={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();
           if (!canSubmit) return;
@@ -1535,10 +1533,8 @@ function CommitPointModal({
         justifyContent: "center",
         zIndex: 2000,
       }}
-      onClick={onClose}
     >
       <div
-        onClick={(event) => event.stopPropagation()}
         style={{
           background: "var(--bg)",
           border: "1px solid var(--border)",
