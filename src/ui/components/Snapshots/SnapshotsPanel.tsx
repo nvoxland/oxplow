@@ -33,7 +33,7 @@ interface Props {
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
-    Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>
+    Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,12 +143,12 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
 
   const handleChangeStatus = async (
     workItemId: string,
-    batchId: string,
+    threadId: string,
     status: WorkItemStatus,
   ) => {
-    if (!stream || !batchId) return;
+    if (!stream || !threadId) return;
     try {
-      await updateWorkItem(stream.id, batchId, workItemId, { status });
+      await updateWorkItem(stream.id, threadId, workItemId, { status });
       // Optimistic local update; the snapshot-event subscription refreshes.
       setEffortsBySnapshot((prev) => {
         const next: typeof prev = {};
@@ -258,7 +258,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     label: string;
     effortId: string | null;
     workItemId: string | null;
-    batchId: string | null;
+    threadId: string | null;
     status: WorkItemStatus | null;
     isExternal: boolean;
   };
@@ -272,7 +272,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         label: labelFor(snap),
         effortId: null,
         workItemId: null,
-        batchId: null,
+        threadId: null,
         status: null,
         isExternal: orphanEndIds.has(snap.id),
       });
@@ -285,7 +285,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         label: e.title,
         effortId: e.effortId,
         workItemId: e.workItemId,
-        batchId: e.batchId,
+        threadId: e.threadId,
         status: e.status,
         isExternal: false,
       });
@@ -354,8 +354,8 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
                   workItemId={row.workItemId}
                   isExternal={row.isExternal}
                   onChangeStatus={
-                    row.workItemId && row.batchId
-                      ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.batchId!, nextStatus); }
+                    row.workItemId && row.threadId
+                      ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.threadId!, nextStatus); }
                       : undefined
                   }
                   onDoubleClick={

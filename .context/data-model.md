@@ -39,33 +39,33 @@ Each stream owns:
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
 
-### `batches` — `BatchStore` (`src/persistence/batch-store.ts`)
+### `threads` — `BatchStore` (`src/persistence/thread-store.ts`)
 
 Units of work *within* a stream. Statuses: `active` (writer — may mutate the
 worktree), `queued` (read-only, agents can run but writes are denied — see
 [agent-model.md](./agent-model.md)'s write-guard section), `completed`
-(archived). Exactly one batch per stream is `active`; the others are
-`queued` or `completed`. A newly-seeded stream ships with one batch titled
-`Default` (pre-v12 DBs called it `Current Batch`; migration v12 renames
+(archived). Exactly one thread per stream is `active`; the others are
+`queued` or `completed`. A newly-seeded stream ships with one thread titled
+`Default` (pre-v12 DBs called it `Current Thread`; migration v12 renames
 the sort_index=0 row). The rolling `summary` field + `record_batch_summary`
 MCP tool were removed in v13 — use the work-item log as the source of
 truth instead.
 
 `auto_commit` (migration v15, `INTEGER NOT NULL DEFAULT 0`) — when `true` on
-the active batch, the stop-hook pipeline runs `git commit` directly whenever
+the active thread, the stop-hook pipeline runs `git commit` directly whenever
 settled work (`human_check`/`done` items) exists and no pending commit point
 is already in the queue. No `commit_point` row is created; the UI is
-notified via a `batch.changed`/`auto-committed` lifecycle event. Toggled via
-`setAutoCommit(batchId, enabled)` on `BatchStore`; IPC-exposed as
-`setAutoCommit(streamId, batchId, enabled)`. Surfaced in the Plan pane as an
+notified via a `thread.changed`/`auto-committed` lifecycle event. Toggled via
+`setAutoCommit(threadId, enabled)` on `BatchStore`; IPC-exposed as
+`setAutoCommit(streamId, threadId, enabled)`. Surfaced in the Plan pane as an
 "Auto-commit" toggle button next to the queue marker bar; while on, the
 "+ Commit Point" button is hidden.
 
-`custom_prompt` (migration v18, nullable TEXT) — per-batch standing
+`custom_prompt` (migration v18, nullable TEXT) — per-thread standing
 instructions appended to the agent's system prompt after the stream-level
-`custom_prompt`. Set via `setBatchPrompt(batchId, prompt)` on `BatchStore`;
-IPC-exposed as `setBatchPrompt(streamId, batchId, prompt)`. Emits a
-`batch.changed` event (kind: "prompt-changed") so the UI refreshes batch
+`custom_prompt`. Set via `setBatchPrompt(threadId, prompt)` on `BatchStore`;
+IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
+`thread.changed` event (kind: "prompt-changed") so the UI refreshes thread
 state.
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
@@ -83,10 +83,10 @@ plain text (one criterion per line). Work-item links express dependencies
 (`blocks`, `discovered_from`, `relates_to`, …) via the `work_item_links`
 join table.
 
-`batch_id` is nullable — items with `batch_id IS NULL` belong to the
+`thread_id` is nullable — items with `thread_id IS NULL` belong to the
 **backlog** (a global, stream-less queue). The store API uses the constant
 `BACKLOG_SCOPE` as a sentinel string in event payloads so listeners can
-distinguish backlog changes from in-batch changes.
+distinguish backlog changes from in-thread changes.
 
 `note_count` is a computed column added to every `WorkItem` returned by the
 store (via COUNT subquery over `work_note`). It drives the note badge on
@@ -152,7 +152,7 @@ effort. At most one open effort per work item at a time.
 span multiple turns.
 
 `work_item_effort_file` (v22) records per-effort write paths so parallel
-subagents in one batch get distinct file lists instead of the union via
+subagents in one thread get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `first_seen_at`,
 primary key `(effort_id, path)`. Rows come from the `touchedFiles`
 payload on the `update_work_item` transition to `human_check`, not
@@ -260,9 +260,9 @@ appearing in future dirty sets.
 
 The most important invariant in the data model: **`work_items.sort_index`,
 `commit_point.sort_index`, and `wait_point.sort_index` all live in the
-same numeric space, scoped per batch.**
+same numeric space, scoped per thread.**
 
-- `runtime.reorderBatchQueue(streamId, batchId, entries)` rewrites all
+- `runtime.reorderBatchQueue(streamId, threadId, entries)` rewrites all
   three tables' `sort_index` values in one operation. Each entry is
   `{ kind: "work" | "commit" | "wait", id }` and gets `sort_index = position`.
 - The UI merges work items + commit points + wait points by `sort_index`
@@ -299,7 +299,7 @@ its own flat list.
 
 Constraint: commit and wait points cannot be the very first queue entry —
 they have nothing to fire after. Enforced both in the runtime
-(`createCommitPoint` / `createWaitPoint` throw if the batch has zero work
+(`createCommitPoint` / `createWaitPoint` throw if the thread has zero work
 items) and in the UI (buttons are disabled with an explanatory tooltip).
 
 ## Status diagrams (text)
@@ -327,7 +327,7 @@ The runtime relays each store's changes onto the typed EventBus
 (`src/core/event-bus.ts`) as `*.changed` events:
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
-- `work-item.changed`, `backlog.changed`, `batch.changed`, `turn.changed`
+- `work-item.changed`, `backlog.changed`, `thread.changed`, `turn.changed`
 - `file-snapshot.created`, `agent-status.changed`
 - `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`

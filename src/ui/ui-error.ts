@@ -2,7 +2,7 @@ import { logUi } from "./logger.js";
 
 /**
  * Lightweight pub/sub for surfacing user-facing IPC failures. Components
- * call `runWithError("Save batch", promise)` instead of `void
+ * call `runWithError("Save thread", promise)` instead of `void
  * promise.catch(() => {})`; the App subscribes once and routes the message
  * to its visible error banner.
  *

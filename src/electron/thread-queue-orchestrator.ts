@@ -1,5 +1,5 @@
 import type { Logger } from "../core/logger.js";
-import type { Batch, BatchStore } from "../persistence/batch-store.js";
+import type { Thread, ThreadStore } from "../persistence/thread-store.js";
 import {
   type CommitPoint,
   type CommitPointMode,
@@ -11,15 +11,15 @@ import type { WorkItemStore } from "../persistence/work-item-store.js";
 import { gitCommitAll } from "../git/git.js";
 
 /**
- * Owns the parts of the batch queue that span multiple stores: commit
+ * Owns the parts of the thread queue that span multiple stores: commit
  * points, wait points, the shared sort_index space they occupy alongside
  * work items, and the synchronous execution of a commit once the agent
  * calls `newde__commit` (after the user approves in chat).
  */
-export class BatchQueueOrchestrator {
+export class ThreadQueueOrchestrator {
   constructor(
     private readonly streamStore: StreamStore,
-    private readonly batchStore: BatchStore,
+    private readonly threadStore: ThreadStore,
     private readonly workItemStore: WorkItemStore,
     private readonly commitPointStore: CommitPointStore,
     private readonly waitPointStore: WaitPointStore,
@@ -28,31 +28,31 @@ export class BatchQueueOrchestrator {
 
   // -------- commit points --------
 
-  listCommitPoints(batchId: string): CommitPoint[] {
-    return this.commitPointStore.listForBatch(batchId);
+  listCommitPoints(threadId: string): CommitPoint[] {
+    return this.commitPointStore.listForThread(threadId);
   }
 
-  createCommitPoint(batchId: string, mode: CommitPointMode = "approve"): CommitPoint {
+  createCommitPoint(threadId: string, mode: CommitPointMode = "approve"): CommitPoint {
     // A commit point with no preceding work items has nothing to commit;
     // refuse to create one as the very first queue entry. The mixed reorder
     // still lets users drag a point above all work items if they really
     // insist.
-    if (this.workItemStore.listItems(batchId).length === 0) {
+    if (this.workItemStore.listItems(threadId).length === 0) {
       throw new Error("cannot add a commit point before any work items exist");
     }
     return this.commitPointStore.create({
-      batchId,
-      sortIndex: this.nextQueueSortIndex(batchId),
+      threadId,
+      sortIndex: this.nextQueueSortIndex(threadId),
       mode,
     });
   }
 
   /** Update mutable fields on a commit point (currently only `mode`).
-   *  Returns the updated list of commit points for the batch so the UI can
+   *  Returns the updated list of commit points for the thread so the UI can
    *  refresh in one round-trip. */
   updateCommitPoint(id: string, changes: { mode?: CommitPointMode }): CommitPoint[] {
     const updated = this.commitPointStore.update(id, changes);
-    return this.commitPointStore.listForBatch(updated.batch_id);
+    return this.commitPointStore.listForThread(updated.thread_id);
   }
 
   deleteCommitPoint(id: string): void {
@@ -61,17 +61,17 @@ export class BatchQueueOrchestrator {
 
   // -------- wait points --------
 
-  listWaitPoints(batchId: string): WaitPoint[] {
-    return this.waitPointStore.listForBatch(batchId);
+  listWaitPoints(threadId: string): WaitPoint[] {
+    return this.waitPointStore.listForThread(threadId);
   }
 
-  createWaitPoint(batchId: string, note: string | null): WaitPoint {
-    if (this.workItemStore.listItems(batchId).length === 0) {
+  createWaitPoint(threadId: string, note: string | null): WaitPoint {
+    if (this.workItemStore.listItems(threadId).length === 0) {
       throw new Error("cannot add a wait point before any work items exist");
     }
     return this.waitPointStore.create({
-      batchId,
-      sortIndex: this.nextQueueSortIndex(batchId),
+      threadId,
+      sortIndex: this.nextQueueSortIndex(threadId),
       note,
     });
   }
@@ -87,13 +87,13 @@ export class BatchQueueOrchestrator {
   // -------- mixed reorder --------
 
   /**
-   * Reorder the mixed batch queue (work items + commit points + wait
+   * Reorder the mixed thread queue (work items + commit points + wait
    * points). `entries` is the desired top-to-bottom order; sort_indexes
    * are rewritten to match so the Stop-hook pipeline sees the new
    * positions immediately.
    */
-  reorderBatchQueue(
-    batchId: string,
+  reorderThreadQueue(
+    threadId: string,
     entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
   ): void {
     const workEntries: Array<{ id: string; sortIndex: number }> = [];
@@ -104,7 +104,7 @@ export class BatchQueueOrchestrator {
       else if (entry.kind === "commit") commitEntries.push({ id: entry.id, sortIndex: index });
       else waitEntries.push({ id: entry.id, sortIndex: index });
     });
-    this.workItemStore.setItemSortIndexes(batchId, workEntries);
+    this.workItemStore.setItemSortIndexes(threadId, workEntries);
     this.commitPointStore.setSortIndexes(commitEntries);
     this.waitPointStore.setSortIndexes(waitEntries);
   }
@@ -121,9 +121,9 @@ export class BatchQueueOrchestrator {
     const cp = this.commitPointStore.get(cpId);
     if (!cp) throw new Error(`commit point ${cpId} not found`);
     if (cp.status === "done") throw new Error(`commit point ${cpId} already committed`);
-    const batch = this.batchStore.findById(cp.batch_id);
-    if (!batch) throw new Error(`commit point ${cpId} has no batch`);
-    const stream = this.streamStore.get(batch.stream_id);
+    const thread = this.threadStore.findById(cp.thread_id);
+    if (!thread) throw new Error(`commit point ${cpId} has no thread`);
+    const stream = this.streamStore.get(thread.stream_id);
     if (!stream) throw new Error(`commit point ${cpId} has no stream`);
     // The agent that authored the queue is the only writer in its worktree,
     // so picking up untracked files is the intent here. The Files-commit
@@ -144,10 +144,10 @@ export class BatchQueueOrchestrator {
    * through the work-item-api (today work items go via a different
    * path; this is here for symmetry as the orchestrator grows).
    */
-  nextQueueSortIndex(batchId: string): number {
-    const items = this.workItemStore.listItems(batchId);
-    const commits = this.commitPointStore.listForBatch(batchId);
-    const waits = this.waitPointStore.listForBatch(batchId);
+  nextQueueSortIndex(threadId: string): number {
+    const items = this.workItemStore.listItems(threadId);
+    const commits = this.commitPointStore.listForThread(threadId);
+    const waits = this.waitPointStore.listForThread(threadId);
     const maxItem = items.reduce((m, item) => Math.max(m, item.sort_index), -1);
     const maxCommit = commits.reduce((m, p) => Math.max(m, p.sort_index), -1);
     const maxWait = waits.reduce((m, p) => Math.max(m, p.sort_index), -1);
@@ -156,4 +156,4 @@ export class BatchQueueOrchestrator {
 }
 
 // Re-exports to keep imports simple at call sites.
-export type { Batch, Stream };
+export type { Thread, Stream };

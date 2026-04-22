@@ -1,15 +1,15 @@
 /**
- * Probe: drag a work item from its current batch onto another batch's
- * chip in the BatchRail. Verifies Scenario 5.
+ * Probe: drag a work item from its current thread onto another thread's
+ * chip in the ThreadRail. Verifies Scenario 5.
  *
  * Flow:
- *   1. Capture which batch is initially active.
- *   2. Create a second batch ("drop-target-<ts>").
- *   3. Create a work item in the initial batch.
+ *   1. Capture which thread is initially active.
+ *   2. Create a second thread ("drop-target-<ts>").
+ *   3. Create a work item in the initial thread.
  *   4. Synthesize an HTML5 drag from the work-item row onto the new
- *      batch's chip. The chip only accepts drops with the
+ *      thread's chip. The chip only accepts drops with the
  *      WORK_ITEM_DRAG_MIME type on the DataTransfer.
- *   5. Click the new batch's chip and verify the work item is now
+ *   5. Click the new thread's chip and verify the work item is now
  *      rendered there.
  *
  * Uses the repo dir as the project. Work-item title is timestamped so
@@ -30,8 +30,8 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   const stamp = Date.now();
-  const itemTitle = `drag-batch-probe-${stamp}`;
-  const batchTitle = `drop-target-${stamp}`;
+  const itemTitle = `drag-thread-probe-${stamp}`;
+  const threadTitle = `drop-target-${stamp}`;
 
   const { window, close } = await launchNewde(projectDir);
   const fails: string[] = [];
@@ -41,34 +41,34 @@ async function main() {
     // Make sure the Plan panel is visible (default, but be safe).
     await window.getByTestId("plan-new-task").waitFor({ timeout: 10_000 });
 
-    // Create the target batch via the "+ New batch" button.
-    await window.getByTestId("batch-rail-new").click();
+    // Create the target thread via the "+ New thread" button.
+    await window.getByTestId("thread-rail-new").click();
     await window.waitForTimeout(150);
-    const batchInput = window.locator('input[placeholder="Batch title"]');
-    await batchInput.fill(batchTitle);
-    await batchInput.press("Enter");
+    const threadInput = window.locator('input[placeholder="Thread title"]');
+    await threadInput.fill(threadTitle);
+    await threadInput.press("Enter");
     await window.waitForTimeout(500);
-    await window.screenshot({ path: resolve(outDir, "drag-batch-01-created-batch.png") });
+    await window.screenshot({ path: resolve(outDir, "drag-thread-01-created-thread.png") });
 
-    // Capture batch chip info via the `batch-chip-<id>` testid seam.
-    const batchInfo = await window.evaluate(() => {
+    // Capture thread chip info via the `thread-chip-<id>` testid seam.
+    const threadInfo = await window.evaluate(() => {
       const chips = Array.from(
-        document.querySelectorAll<HTMLElement>('[data-testid^="batch-chip-"]'),
+        document.querySelectorAll<HTMLElement>('[data-testid^="thread-chip-"]'),
       );
       return chips.map((el) => ({
-        id: el.dataset.testid?.replace("batch-chip-", "") ?? null,
+        id: el.dataset.testid?.replace("thread-chip-", "") ?? null,
         text: el.textContent?.trim().slice(0, 60),
       }));
     });
-    console.log("[probe] batches after create:", JSON.stringify(batchInfo));
-    const targetChip = batchInfo.find((b) => (b.text ?? "").includes(batchTitle));
+    console.log("[probe] threads after create:", JSON.stringify(threadInfo));
+    const targetChip = threadInfo.find((b) => (b.text ?? "").includes(threadTitle));
     if (!targetChip?.id) {
-      fails.push(`batch "${batchTitle}" not found after create`);
+      fails.push(`thread "${threadTitle}" not found after create`);
       return;
     }
-    const targetBatchId = targetChip.id;
+    const targetThreadId = targetChip.id;
 
-    // Create a work item in the currently-selected batch.
+    // Create a work item in the currently-selected thread.
     await window.getByTestId("plan-new-task").click();
     await window.getByTestId("work-item-title").fill(itemTitle);
     await window.getByTestId("work-item-save").click();
@@ -88,7 +88,7 @@ async function main() {
     // we build the DataTransfer by hand and seed the payload before firing
     // dragover/drop on the chip.
     const dragResult = await window.evaluate(
-      ({ itemId, targetBatchId, mime }) => {
+      ({ itemId, targetThreadId, mime }) => {
         const row = document.querySelector<HTMLElement>(
           `[data-testid="work-item-row-${itemId}"]`,
         );
@@ -97,14 +97,14 @@ async function main() {
         // The chip testid is on the outer wrapper that owns the drop
         // handlers — exactly what we need. No DOM walking.
         const chip = document.querySelector<HTMLElement>(
-          `[data-testid="batch-chip-${targetBatchId}"]`,
+          `[data-testid="thread-chip-${targetThreadId}"]`,
         );
         if (!chip) return { ok: false, reason: "target chip not found" };
 
         const dt = new DataTransfer();
         // Seed exactly what WorkGroupList's onDragStart sets.
         dt.setData("text/plain", itemId);
-        dt.setData(mime, JSON.stringify({ itemId, fromBatchId: null }));
+        dt.setData(mime, JSON.stringify({ itemId, fromThreadId: null }));
 
         const dragStart = new DragEvent("dragstart", {
           bubbles: true, cancelable: true, dataTransfer: dt,
@@ -132,33 +132,33 @@ async function main() {
           dragOverDefaultPrevented: dragOver.defaultPrevented,
         };
       },
-      { itemId, targetBatchId, mime: WORK_ITEM_DRAG_MIME },
+      { itemId, targetThreadId, mime: WORK_ITEM_DRAG_MIME },
     );
     console.log("[probe] drag result:", JSON.stringify(dragResult));
 
     await window.waitForTimeout(600);
-    await window.screenshot({ path: resolve(outDir, "drag-batch-02-after-drop.png") });
+    await window.screenshot({ path: resolve(outDir, "drag-thread-02-after-drop.png") });
 
-    // Click the target batch chip to select it and check the row is there.
-    await window.getByTestId(`batch-chip-${targetBatchId}`).click();
+    // Click the target thread chip to select it and check the row is there.
+    await window.getByTestId(`thread-chip-${targetThreadId}`).click();
     await window.waitForTimeout(400);
-    await window.screenshot({ path: resolve(outDir, "drag-batch-03-target-selected.png") });
+    await window.screenshot({ path: resolve(outDir, "drag-thread-03-target-selected.png") });
 
     const rowPresent = await window.evaluate((id) => {
       return !!document.querySelector(`[data-testid="work-item-row-${id}"]`);
     }, itemId);
-    console.log("[probe] row present in target batch view?", rowPresent);
-    if (!rowPresent) fails.push("work item row is not visible after switching to target batch");
+    console.log("[probe] row present in target thread view?", rowPresent);
+    if (!rowPresent) fails.push("work item row is not visible after switching to target thread");
 
     if (fails.length) {
       console.log("[probe] FAILURES:");
       for (const f of fails) console.log("  -", f);
       process.exit(2);
     }
-    console.log("[probe] OK: work item moved to target batch via drag");
+    console.log("[probe] OK: work item moved to target thread via drag");
   } finally {
     await close();
   }
 }
 
-runProbe("probe-work-drag-batch", main).catch(() => process.exit(1));
+runProbe("probe-work-drag-thread", main).catch(() => process.exit(1));

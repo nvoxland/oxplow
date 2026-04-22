@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BatchStore } from "./batch-store.js";
+import { ThreadStore } from "./thread-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import { StreamStore } from "./stream-store.js";
 import { TurnStore } from "./turn-store.js";
@@ -18,12 +18,12 @@ function seed() {
     worktreePath: dir,
     projectBase: "demo",
   });
-  const batchStore = new BatchStore(dir);
-  const state = batchStore.ensureStream(stream);
-  const batchId = state.batches[0]!.id;
+  const threadStore = new ThreadStore(dir);
+  const state = threadStore.ensureStream(stream);
+  const threadId = state.threads[0]!.id;
   const workItems = new WorkItemStore(dir);
   const item = workItems.createItem({
-    batchId,
+    threadId,
     kind: "task",
     title: "T",
     createdBy: "user",
@@ -32,7 +32,7 @@ function seed() {
   const turns = new TurnStore(dir);
   const snapshots = new SnapshotStore(dir);
   const efforts = new WorkItemEffortStore(dir);
-  return { dir, workItems, turns, snapshots, efforts, batchId, itemId: item.id, streamId: stream.id };
+  return { dir, workItems, turns, snapshots, efforts, threadId, itemId: item.id, streamId: stream.id };
 }
 
 function createSnapshot(dir: string, snapshots: SnapshotStore, streamId: string, name: string, content: string): string {
@@ -102,13 +102,13 @@ describe("WorkItemEffortStore", () => {
   });
 
   test("listEffortsForPath returns closed efforts ordered by ended_at DESC, with work-item title", () => {
-    const { efforts, workItems, batchId, snapshots, dir, streamId } = seed();
+    const { efforts, workItems, threadId, snapshots, dir, streamId } = seed();
     // Three tasks, each touching a common path via work_item_effort_file, each
     // with distinct ended_at timestamps. listEffortsForPath should return them
     // in newest-first order and include the work-item title.
     const items = [0, 1, 2].map((i) =>
       workItems.createItem({
-        batchId,
+        threadId,
         kind: "task",
         title: `Task ${i}`,
         createdBy: "user",
@@ -140,9 +140,9 @@ describe("WorkItemEffortStore", () => {
   });
 
   test("listEffortsForPath excludes still-open efforts", () => {
-    const { efforts, workItems, batchId } = seed();
+    const { efforts, workItems, threadId } = seed();
     const item = workItems.createItem({
-      batchId,
+      threadId,
       kind: "task",
       title: "Open",
       createdBy: "user",
@@ -154,10 +154,10 @@ describe("WorkItemEffortStore", () => {
   });
 
   test("linkEffortTurn + listTurnsForEffort + listEffortsForTurn", () => {
-    const { efforts, turns, itemId, batchId } = seed();
+    const { efforts, turns, itemId, threadId } = seed();
     const effort = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });
-    const turnA = turns.openTurn({ batchId, prompt: "A" });
-    const turnB = turns.openTurn({ batchId, prompt: "B" });
+    const turnA = turns.openTurn({ threadId, prompt: "A" });
+    const turnB = turns.openTurn({ threadId, prompt: "B" });
     efforts.linkEffortTurn(effort.id, turnA.id);
     efforts.linkEffortTurn(effort.id, turnB.id);
     efforts.linkEffortTurn(effort.id, turnA.id); // duplicate — ignored

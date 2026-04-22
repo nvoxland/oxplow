@@ -21,10 +21,10 @@ async function main() {
     await window.getByTestId("files-commit-message").fill(`Surface "no active commit point" state in Work panel
 
 Adds a noCommitPointHint memo to PlanPane that detects the state
-"batch has at least one human_check/done item but no live commit
+"thread has at least one human_check/done item but no live commit
 points remaining" and renders an inline nudge above the bottom bar
 (data-testid="plan-no-commit-point-hint"). Derived purely on the
-client from batchWork + commitPoints state; no new store/IPC.
+client from threadWork + commitPoints state; no new store/IPC.
 
 Closes the dogfood-loop gap where propose_commit silently no-op'd
 without giving the outer user any Work-panel signal that a commit

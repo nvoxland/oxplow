@@ -8,7 +8,7 @@
  * Steps:
  *   1. Cmd+K → "history" → Enter → bottom panel shows History.
  *   2. Cmd+K → "snapshot" → Enter → bottom panel shows Snapshots.
- *   3. Cmd+K → "batch new" → Enter → inline batch-create input appears.
+ *   3. Cmd+K → "thread new" → Enter → inline thread-create input appears.
  */
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,22 +63,22 @@ async function main() {
       process.exit(3);
     }
 
-    // Step 3: batch.new. Queries like "batch new" (label-first) used
-    // to fail against "Work › New Batch" because the fuzzy match is
+    // Step 3: thread.new. Queries like "thread new" (label-first) used
+    // to fail against "Work › New Thread" because the fuzzy match is
     // order-sensitive and the group was prefixed. The alt search key
     // ("label group") should now catch it.
-    await runPaletteEntry("batch new", "03-batch-new");
-    // The BatchRail surfaces the create input either inline or via a dialog.
+    await runPaletteEntry("thread new", "03-thread-new");
+    // The ThreadRail surfaces the create input either inline or via a dialog.
     // We check for a focused text input that wasn't there before; the
-    // BatchRail create-request counter routes to an input.
+    // ThreadRail create-request counter routes to an input.
     await window.waitForTimeout(400);
-    const batchCreateVisible = await window.evaluate(() => {
-      const input = document.querySelector('[data-testid="batch-rail-create-input"]');
+    const threadCreateVisible = await window.evaluate(() => {
+      const input = document.querySelector('[data-testid="thread-rail-create-input"]');
       return !!input && (input as HTMLElement).offsetParent !== null;
     });
-    probeLog(`[probe] batch create input visible: ${batchCreateVisible}`);
-    if (!batchCreateVisible) {
-      probeLog("[probe] FAIL: batch.new did not surface the create input");
+    probeLog(`[probe] thread create input visible: ${threadCreateVisible}`);
+    if (!threadCreateVisible) {
+      probeLog("[probe] FAIL: thread.new did not surface the create input");
       process.exit(4);
     }
 

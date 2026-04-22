@@ -22,7 +22,7 @@ export function ensureAgentPane(
   ensureSession(session, cwd);
   // Signature detects "launcher config actually changed" — stuff that would
   // warrant killing a live agent and respawning. Callers can pass a stripped
-  // form (e.g. without --resume <id>) so reconnecting to a batch whose live
+  // form (e.g. without --resume <id>) so reconnecting to a thread whose live
   // agent published a new resume id doesn't look like a config change.
   const signature = launcherSignature(opts.signatureSource ?? agentCommand);
   const created = ensureWindow(target, cwd, agentCommand, cols, rows, signature);

@@ -38,7 +38,7 @@ export interface NewdeConfig {
   snapshotMaxFileBytes: number;
   /** When true (default), the UserPromptSubmit hook injects a
    *  <session-context> block into every agent prompt. Users who trust the
-   *  agent to track stream/batch ids on its own can turn this off to save
+   *  agent to track stream/thread ids on its own can turn this off to save
    *  a few tokens per turn. */
   injectSessionContext: boolean;
 }

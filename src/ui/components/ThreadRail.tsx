@@ -3,10 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentStatus,
   AgentTurn,
-  Batch,
-  BatchWorkState,
+  Thread,
+  ThreadWorkState,
 } from "../api.js";
-import { setBatchPrompt } from "../api.js";
+import { setThreadPrompt } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
 import type { MenuItem } from "../menu.js";
@@ -14,91 +14,91 @@ import { logUi } from "../logger.js";
 
 interface Props {
   streamId: string;
-  batches: Batch[];
-  activeBatchId: string | null;
-  selectedBatchId: string | null;
+  threads: Thread[];
+  activeThreadId: string | null;
+  selectedThreadId: string | null;
   agentStatuses: Record<string, AgentStatus>;
-  batchWorkStates: Record<string, BatchWorkState>;
+  threadWorkStates: Record<string, ThreadWorkState>;
   agentTurns: Record<string, AgentTurn[]>;
-  onSelectBatch(batchId: string): void | Promise<void>;
-  onCreateBatch(title: string): Promise<void>;
-  onPromoteBatch(batchId: string): void | Promise<void>;
-  onCompleteBatch(batchId: string): void | Promise<void>;
-  onMoveWorkItem?(itemId: string, fromBatchId: string, toBatchId: string): Promise<void>;
-  onMoveBacklogItemToBatch?(itemId: string, toBatchId: string): Promise<void>;
-  onRenameBatch?(batchId: string, newTitle: string): Promise<void> | void;
-  onReorderBatches?(orderedBatchIds: string[]): Promise<void> | void;
+  onSelectThread(threadId: string): void | Promise<void>;
+  onCreateThread(title: string): Promise<void>;
+  onPromoteThread(threadId: string): void | Promise<void>;
+  onCompleteThread(threadId: string): void | Promise<void>;
+  onMoveWorkItem?(itemId: string, fromThreadId: string, toThreadId: string): Promise<void>;
+  onMoveBacklogItemToThread?(itemId: string, toThreadId: string): Promise<void>;
+  onRenameThread?(threadId: string, newTitle: string): Promise<void> | void;
+  onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
-  onRequestCreateBatch?(): void;
-  /** Bumping this number opens the inline "new batch" form. */
+  onRequestCreateThread?(): void;
+  /** Bumping this number opens the inline "new thread" form. */
   createRequest?: number;
 }
 
 export const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
-export const BATCH_DRAG_MIME = "application/x-newde-batch";
+export const THREAD_DRAG_MIME = "application/x-newde-thread";
 
-export function BatchRail({
+export function ThreadRail({
   streamId,
-  batches,
-  activeBatchId,
-  selectedBatchId,
+  threads,
+  activeThreadId,
+  selectedThreadId,
   agentStatuses,
-  batchWorkStates,
+  threadWorkStates,
   agentTurns,
-  onSelectBatch,
-  onCreateBatch,
-  onPromoteBatch,
-  onCompleteBatch,
+  onSelectThread,
+  onCreateThread,
+  onPromoteThread,
+  onCompleteThread,
   onMoveWorkItem,
-  onMoveBacklogItemToBatch,
-  onRenameBatch,
-  onReorderBatches,
+  onMoveBacklogItemToThread,
+  onRenameThread,
+  onReorderThreads,
   onRequestCreateStream,
-  onRequestCreateBatch,
+  onRequestCreateThread,
   createRequest,
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overBatchId, setOverBatchId] = useState<string | null>(null);
-  const [settingsBatch, setSettingsBatch] = useState<Batch | null>(null);
+  const [overThreadId, setOverThreadId] = useState<string | null>(null);
+  const [settingsThread, setSettingsThread] = useState<Thread | null>(null);
   const [settingsPrompt, setSettingsPrompt] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  function openBatchSettings(batch: Batch) {
-    setSettingsBatch(batch);
-    setSettingsPrompt(batch.custom_prompt ?? "");
+  function openThreadSettings(thread: Thread) {
+    setSettingsThread(thread);
+    setSettingsPrompt(thread.custom_prompt ?? "");
     setSettingsSaving(false);
   }
 
-  async function saveBatchSettings() {
-    if (!settingsBatch) return;
+  async function saveThreadSettings() {
+    if (!settingsThread) return;
     setSettingsSaving(true);
     try {
-      await setBatchPrompt(streamId, settingsBatch.id, settingsPrompt.trim() || null);
-      setSettingsBatch(null);
+      await setThreadPrompt(streamId, settingsThread.id, settingsPrompt.trim() || null);
+      setSettingsThread(null);
     } catch (e) {
-      logUi("error", "failed to save batch prompt", { batchId: settingsBatch.id, error: String(e) });
+      logUi("error", "failed to save thread prompt", { threadId: settingsThread.id, error: String(e) });
     } finally {
       setSettingsSaving(false);
     }
   }
 
   const { ordered, completed } = useMemo(() => {
-    // All non-completed batches share a single sort_index sequence and are
-    // user-orderable via drag. The writer batch gets a visible badge (see
-    // BatchChip) but its position is whatever the user chose.
-    const ordered = batches
+    // All non-completed threads share a single sort_index sequence and are
+    // user-orderable via drag. The writer thread gets a visible badge (see
+    // ThreadChip) but its position is whatever the user chose.
+    const ordered = threads
       .filter((b) => b.status !== "completed")
       .sort((a, b) => a.sort_index - b.sort_index);
-    const completed = batches
+    const completed = threads
       .filter((b) => b.status === "completed")
       .sort((a, b) => b.sort_index - a.sort_index);
     return { ordered, completed };
-  }, [batches]);
+  }, [threads]);
 
-  const hasQueued = batches.some((b) => b.status === "queued");
+  const hasQueued = threads.some((b) => b.status === "queued");
   const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; batch: Batch } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; thread: Thread } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,37 +109,37 @@ export function BatchRail({
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
         {
-          id: "batch.promote",
+          id: "thread.promote",
           label: "Promote to writer",
-          enabled: contextMenu.batch.id !== activeBatchId,
-          run: () => onPromoteBatch(contextMenu.batch.id),
+          enabled: contextMenu.thread.id !== activeThreadId,
+          run: () => onPromoteThread(contextMenu.thread.id),
         },
         {
-          id: "batch.complete",
+          id: "thread.complete",
           label: "Mark complete",
           enabled: hasQueued,
-          run: () => onCompleteBatch(contextMenu.batch.id),
+          run: () => onCompleteThread(contextMenu.thread.id),
         },
         {
-          id: "batch.rename",
+          id: "thread.rename",
           label: "Rename…",
-          enabled: !!onRenameBatch,
-          run: () => setRenamingId(contextMenu.batch.id),
+          enabled: !!onRenameThread,
+          run: () => setRenamingId(contextMenu.thread.id),
         },
         {
-          id: "batch.settings",
+          id: "thread.settings",
           label: "Settings",
           enabled: true,
-          run: () => openBatchSettings(contextMenu.batch),
+          run: () => openThreadSettings(contextMenu.thread),
         },
         {
-          id: "batch.add-batch",
-          label: "Add batch",
-          enabled: !!onRequestCreateBatch,
-          run: () => (onRequestCreateBatch ? onRequestCreateBatch() : setShowCreate(true)),
+          id: "thread.add-thread",
+          label: "Add thread",
+          enabled: !!onRequestCreateThread,
+          run: () => (onRequestCreateThread ? onRequestCreateThread() : setShowCreate(true)),
         },
         {
-          id: "batch.add-stream",
+          id: "thread.add-stream",
           label: "Add stream",
           enabled: !!onRequestCreateStream,
           run: () => onRequestCreateStream?.(),
@@ -151,63 +151,63 @@ export function BatchRail({
     <div style={railStyle}>
       <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "flex-end", gap: 2, flex: 1, minWidth: 0, overflowX: "auto" }}>
         {ordered.length === 0 && completed.length === 0 ? (
-          <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No batches yet.</span>
+          <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No threads yet.</span>
         ) : null}
-        {ordered.map((batch) => (
-          <BatchChip
-            key={batch.id}
-            batch={batch}
-            isActive={batch.id === activeBatchId}
-            isSelected={batch.id === selectedBatchId}
-            agentStatus={agentStatuses[batch.id] ?? "idle"}
-            workState={batchWorkStates[batch.id]}
-            turns={agentTurns[batch.id]}
+        {ordered.map((thread) => (
+          <ThreadChip
+            key={thread.id}
+            thread={thread}
+            isActive={thread.id === activeThreadId}
+            isSelected={thread.id === selectedThreadId}
+            agentStatus={agentStatuses[thread.id] ?? "idle"}
+            workState={threadWorkStates[thread.id]}
+            turns={agentTurns[thread.id]}
             hasQueued={hasQueued}
-            isRenaming={renamingId === batch.id}
-            isDragTarget={overBatchId === batch.id && draggingId !== null && draggingId !== batch.id}
-            onSelect={() => void onSelectBatch(batch.id)}
-            onPromote={() => void onPromoteBatch(batch.id)}
-            onComplete={() => void onCompleteBatch(batch.id)}
+            isRenaming={renamingId === thread.id}
+            isDragTarget={overThreadId === thread.id && draggingId !== null && draggingId !== thread.id}
+            onSelect={() => void onSelectThread(thread.id)}
+            onPromote={() => void onPromoteThread(thread.id)}
+            onComplete={() => void onCompleteThread(thread.id)}
             onCancelRename={() => setRenamingId(null)}
             onSubmitRename={async (newTitle) => {
               const trimmed = newTitle.trim();
               setRenamingId(null);
-              if (!trimmed || trimmed === batch.title) return;
-              await onRenameBatch?.(batch.id, trimmed);
+              if (!trimmed || trimmed === thread.title) return;
+              await onRenameThread?.(thread.id, trimmed);
             }}
             onContextMenu={(event) => {
               event.preventDefault();
-              setContextMenu({ x: event.clientX, y: event.clientY, batch });
+              setContextMenu({ x: event.clientX, y: event.clientY, thread });
             }}
-            onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToBatch) ? (payload) => {
-              if (payload.fromBatchId === null) {
-                if (onMoveBacklogItemToBatch) void onMoveBacklogItemToBatch(payload.itemId, batch.id);
+            onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToThread) ? (payload) => {
+              if (payload.fromThreadId === null) {
+                if (onMoveBacklogItemToThread) void onMoveBacklogItemToThread(payload.itemId, thread.id);
               } else {
-                if (onMoveWorkItem) void onMoveWorkItem(payload.itemId, payload.fromBatchId, batch.id);
+                if (onMoveWorkItem) void onMoveWorkItem(payload.itemId, payload.fromThreadId, thread.id);
               }
             } : undefined}
-            onDragStart={onReorderBatches ? () => setDraggingId(batch.id) : undefined}
-            onDragEnd={onReorderBatches ? () => { setDraggingId(null); setOverBatchId(null); } : undefined}
-            onDragOver={onReorderBatches ? () => setOverBatchId(batch.id) : undefined}
-            onDrop={onReorderBatches ? () => {
-              if (!draggingId || draggingId === batch.id) return;
+            onDragStart={onReorderThreads ? () => setDraggingId(thread.id) : undefined}
+            onDragEnd={onReorderThreads ? () => { setDraggingId(null); setOverThreadId(null); } : undefined}
+            onDragOver={onReorderThreads ? () => setOverThreadId(thread.id) : undefined}
+            onDrop={onReorderThreads ? () => {
+              if (!draggingId || draggingId === thread.id) return;
               const ids = ordered.map((b) => b.id);
               const fromIdx = ids.indexOf(draggingId);
-              const toIdx = ids.indexOf(batch.id);
+              const toIdx = ids.indexOf(thread.id);
               if (fromIdx < 0 || toIdx < 0) return;
               const next = ids.slice();
               const [moved] = next.splice(fromIdx, 1);
               next.splice(toIdx, 0, moved);
-              void onReorderBatches(next);
+              void onReorderThreads(next);
               setDraggingId(null);
-              setOverBatchId(null);
+              setOverThreadId(null);
             } : undefined}
           />
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
-        <button type="button" data-testid="batch-rail-new" style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create batch">
-          {showCreate ? "Cancel" : "+ New batch"}
+        <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate((v) => !v)} title="Create thread">
+          {showCreate ? "Cancel" : "+ New thread"}
         </button>
         {completed.length > 0 ? (
           <div style={{ position: "relative" }}>
@@ -216,11 +216,11 @@ export function BatchRail({
             </button>
             {showOverflow ? (
               <OverflowDropdown
-                batches={completed}
-                selectedBatchId={selectedBatchId}
+                threads={completed}
+                selectedThreadId={selectedThreadId}
                 onSelect={(id) => {
                   setShowOverflow(false);
-                  void onSelectBatch(id);
+                  void onSelectThread(id);
                 }}
                 onClose={() => setShowOverflow(false)}
               />
@@ -229,11 +229,11 @@ export function BatchRail({
         ) : null}
       </div>
       {showCreate ? (
-        <CreateBatchInput
-          nextIndex={batches.length + 1}
+        <CreateThreadInput
+          nextIndex={threads.length + 1}
           onCancel={() => setShowCreate(false)}
           onSubmit={async (title) => {
-            await onCreateBatch(title);
+            await onCreateThread(title);
             setShowCreate(false);
           }}
         />
@@ -246,30 +246,30 @@ export function BatchRail({
           minWidth={180}
         />
       ) : null}
-      {settingsBatch ? (
+      {settingsThread ? (
         <div style={backdropStyle}>
           <div style={settingsModalStyle}>
             <div style={settingsModalHeaderStyle}>
-              <span>Batch settings — {settingsBatch.title}</span>
-              <button type="button" onClick={() => setSettingsBatch(null)} style={closeBtnStyle} aria-label="Close">×</button>
+              <span>Thread settings — {settingsThread.title}</span>
+              <button type="button" onClick={() => setSettingsThread(null)} style={closeBtnStyle} aria-label="Close">×</button>
             </div>
             <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
               <label style={settingsLabelStyle}>
                 <span>Custom prompt</span>
                 <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                  This prompt is appended to the agent's system prompt for this batch.
+                  This prompt is appended to the agent's system prompt for this thread.
                 </span>
                 <textarea
                   value={settingsPrompt}
                   onChange={(e) => setSettingsPrompt(e.target.value)}
                   rows={6}
                   style={{ ...settingsInputStyle, resize: "vertical", fontFamily: "inherit" }}
-                  placeholder="Enter standing instructions for this batch…"
+                  placeholder="Enter standing instructions for this thread…"
                 />
               </label>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setSettingsBatch(null)} style={settingsBtnStyle}>Cancel</button>
-                <button type="button" onClick={() => void saveBatchSettings()} style={settingsBtnStyle} disabled={settingsSaving}>
+                <button type="button" onClick={() => setSettingsThread(null)} style={settingsBtnStyle}>Cancel</button>
+                <button type="button" onClick={() => void saveThreadSettings()} style={settingsBtnStyle} disabled={settingsSaving}>
                   {settingsSaving ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -281,8 +281,8 @@ export function BatchRail({
   );
 }
 
-function BatchChip({
-  batch,
+function ThreadChip({
+  thread,
   isActive,
   isSelected,
   agentStatus,
@@ -303,18 +303,18 @@ function BatchChip({
   onDragOver,
   onDrop,
 }: {
-  batch: Batch;
+  thread: Thread;
   isActive: boolean;
   isSelected: boolean;
   agentStatus: AgentStatus;
-  workState: BatchWorkState | undefined;
+  workState: ThreadWorkState | undefined;
   turns: AgentTurn[] | undefined;
   hasQueued: boolean;
   onSelect(): void;
   onPromote(): void;
   onComplete(): void;
   onContextMenu?(event: React.MouseEvent): void;
-  onDropWorkItem?(payload: { itemId: string; fromBatchId: string | null }): void;
+  onDropWorkItem?(payload: { itemId: string; fromThreadId: string | null }): void;
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
   onCancelRename?(): void;
@@ -351,17 +351,17 @@ function BatchChip({
     : 0;
   // Two orthogonal states on each tab:
   //  - `isSelected`: what the user is viewing (main bg, accent underline)
-  //  - `isActive`:   the designated *writer* batch (the one allowed to write
-  //                  to disk). All queued batches can have agents running;
+  //  - `isActive`:   the designated *writer* thread (the one allowed to write
+  //                  to disk). All queued threads can have agents running;
   //                  only the writer can commit changes.
   // The writer is visualised with a pencil badge so it's obvious even when
-  // another batch is selected.
+  // another thread is selected.
   const background = isSelected ? "var(--bg)" : "var(--bg-tab-inactive)";
   const color = isSelected ? "var(--fg)" : "var(--muted)";
 
   const handleDragOver = (event: React.DragEvent) => {
     const types = Array.from(event.dataTransfer.types);
-    if (types.includes(BATCH_DRAG_MIME)) {
+    if (types.includes(THREAD_DRAG_MIME)) {
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       onDragOver?.();
@@ -377,7 +377,7 @@ function BatchChip({
     if (dragOver) setDragOver(false);
   };
   const handleDrop = (event: React.DragEvent) => {
-    if (event.dataTransfer.types && Array.from(event.dataTransfer.types).includes(BATCH_DRAG_MIME)) {
+    if (event.dataTransfer.types && Array.from(event.dataTransfer.types).includes(THREAD_DRAG_MIME)) {
       event.preventDefault();
       onDrop?.();
       return;
@@ -391,10 +391,10 @@ function BatchChip({
       const payload = JSON.parse(raw) as {
         itemId?: string;
         itemIds?: string[];
-        fromBatchId?: string | null;
+        fromThreadId?: string | null;
       };
-      const fromBatchId = payload.fromBatchId ?? null;
-      if (fromBatchId === batch.id) return;
+      const fromThreadId = payload.fromThreadId ?? null;
+      if (fromThreadId === thread.id) return;
       // `itemIds` carries the full mark set when the drag originated on a
       // marked row; fall back to the single `itemId` for regular drags so
       // older payloads still work.
@@ -402,7 +402,7 @@ function BatchChip({
         ? payload.itemIds
         : payload.itemId ? [payload.itemId] : [];
       for (const id of ids) {
-        onDropWorkItem({ itemId: id, fromBatchId });
+        onDropWorkItem({ itemId: id, fromThreadId });
       }
     } catch {
       // ignore malformed payload
@@ -411,7 +411,7 @@ function BatchChip({
 
   return (
     <div
-      data-testid={`batch-chip-${batch.id}`}
+      data-testid={`thread-chip-${thread.id}`}
       style={{ position: "relative", flexShrink: 0, borderLeft: isDragTarget ? "2px solid var(--accent)" : undefined }}
       onMouseEnter={scheduleShow}
       onMouseLeave={cancelShow}
@@ -425,7 +425,7 @@ function BatchChip({
         tabIndex={0}
         draggable={!!onDragStart}
         onDragStart={onDragStart ? (event) => {
-          event.dataTransfer.setData(BATCH_DRAG_MIME, JSON.stringify({ batchId: batch.id }));
+          event.dataTransfer.setData(THREAD_DRAG_MIME, JSON.stringify({ threadId: thread.id }));
           event.dataTransfer.effectAllowed = "move";
           // Force the drag image to just the tab element — otherwise the
           // browser captures the wrapper (including the absolutely-positioned
@@ -469,13 +469,13 @@ function BatchChip({
           marginBottom: -1, // overlap the rail's bottom border so the tab looks connected to the content below when selected
           boxShadow: dragOver ? "inset 0 0 0 2px var(--accent)" : undefined,
         }}
-        title={isActive ? `${batch.title} · writer (can commit)` : `${batch.title} (read-only)`}
+        title={isActive ? `${thread.title} · writer (can commit)` : `${thread.title} (read-only)`}
       >
         <AgentStatusDot status={agentStatus} />
         {isActive ? (
           <span
-            aria-label="Writer batch"
-            title="Writer batch — only this one can commit changes"
+            aria-label="Writer thread"
+            title="Writer thread — only this one can commit changes"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -493,8 +493,8 @@ function BatchChip({
         {isRenaming ? (
           <input
             autoFocus
-            defaultValue={batch.title}
-            data-testid={`batch-chip-rename-input-${batch.id}`}
+            defaultValue={thread.title}
+            data-testid={`thread-chip-rename-input-${thread.id}`}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
@@ -517,7 +517,7 @@ function BatchChip({
             }}
           />
         ) : (
-          <span style={{ fontWeight: isSelected ? 600 : isActive ? 500 : 400 }}>{batch.title}</span>
+          <span style={{ fontWeight: isSelected ? 600 : isActive ? 500 : 400 }}>{thread.title}</span>
         )}
         {total > 0 ? (
           <span style={{ fontSize: 10, opacity: 0.75 }}>
@@ -527,7 +527,7 @@ function BatchChip({
       </div>
       {hovered && !isDragging ? (
         <HoverCard
-          batch={batch}
+          thread={thread}
           isActive={isActive}
           agentStatus={agentStatus}
           workState={workState}
@@ -542,7 +542,7 @@ function BatchChip({
 }
 
 function HoverCard({
-  batch,
+  thread,
   isActive,
   agentStatus,
   workState,
@@ -551,10 +551,10 @@ function HoverCard({
   onPromote,
   onComplete,
 }: {
-  batch: Batch;
+  thread: Thread;
   isActive: boolean;
   agentStatus: AgentStatus;
-  workState: BatchWorkState | undefined;
+  workState: ThreadWorkState | undefined;
   turns: AgentTurn[] | undefined;
   hasQueued: boolean;
   onPromote(): void;
@@ -566,16 +566,16 @@ function HoverCard({
   const done = workState?.done.length ?? 0;
   const turnCount = turns?.length ?? 0;
   const lastTurn = turns && turns.length > 0 ? turns[turns.length - 1] : null;
-  // "writer" means this batch is the one allowed to commit changes; every
-  // other live batch stays read-only. "completed" batches are archived.
-  const statusLabel = isActive ? "writer" : batch.status === "completed" ? "completed" : "read-only";
+  // "writer" means this thread is the one allowed to commit changes; every
+  // other live thread stays read-only. "completed" threads are archived.
+  const statusLabel = isActive ? "writer" : thread.status === "completed" ? "completed" : "read-only";
   const statusColor =
     statusLabel === "writer" ? "#86efac" : statusLabel === "read-only" ? "#7dd3fc" : "#c4b5fd";
 
   return (
     <div style={hoverCardStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <strong style={{ fontSize: 13 }}>{batch.title}</strong>
+        <strong style={{ fontSize: 13 }}>{thread.title}</strong>
         <span
           style={{
             fontSize: 10,
@@ -613,11 +613,11 @@ function HoverCard({
       ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
-          <button type="button" data-testid={`batch-chip-complete-${batch.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this batch done and hand the writer role to the next queued batch">
-            Complete batch
+          <button type="button" data-testid={`thread-chip-complete-${thread.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this thread done and hand the writer role to the next queued thread">
+            Complete thread
           </button>
-        ) : batch.status !== "completed" ? (
-          <button type="button" data-testid={`batch-chip-promote-${batch.id}`} style={smallBtn} onClick={onPromote} title="Make this batch the writer — only one batch can write at a time">
+        ) : thread.status !== "completed" ? (
+          <button type="button" data-testid={`thread-chip-promote-${thread.id}`} style={smallBtn} onClick={onPromote} title="Make this thread the writer — only one thread can write at a time">
             Make writer
           </button>
         ) : null}
@@ -627,38 +627,38 @@ function HoverCard({
 }
 
 function OverflowDropdown({
-  batches,
-  selectedBatchId,
+  threads,
+  selectedThreadId,
   onSelect,
   onClose,
 }: {
-  batches: Batch[];
-  selectedBatchId: string | null;
+  threads: Thread[];
+  selectedThreadId: string | null;
   onSelect(id: string): void;
   onClose(): void;
 }) {
   useEffect(() => {
     function handler(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
-      if (target && target.closest("[data-batch-overflow]")) return;
+      if (target && target.closest("[data-thread-overflow]")) return;
       onClose();
     }
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, [onClose]);
   return (
-    <div data-batch-overflow style={overflowStyle}>
-      {batches.map((batch) => (
+    <div data-thread-overflow style={overflowStyle}>
+      {threads.map((thread) => (
         <button type="button"
-          key={batch.id}
-          onClick={() => onSelect(batch.id)}
+          key={thread.id}
+          onClick={() => onSelect(thread.id)}
           style={{
             ...overflowItemStyle,
-            background: batch.id === selectedBatchId ? "rgba(74, 158, 255, 0.18)" : "transparent",
+            background: thread.id === selectedThreadId ? "rgba(74, 158, 255, 0.18)" : "transparent",
           }}
         >
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {batch.title}
+            {thread.title}
           </span>
           <span style={{ color: "var(--muted)", fontSize: 10 }}>completed</span>
         </button>
@@ -667,7 +667,7 @@ function OverflowDropdown({
   );
 }
 
-function CreateBatchInput({
+function CreateThreadInput({
   nextIndex,
   onSubmit,
   onCancel,
@@ -676,7 +676,7 @@ function CreateBatchInput({
   onSubmit(title: string): Promise<void>;
   onCancel(): void;
 }) {
-  const [title, setTitle] = useState(`Batch ${nextIndex}`);
+  const [title, setTitle] = useState(`Thread ${nextIndex}`);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -708,10 +708,10 @@ function CreateBatchInput({
           if (e.key === "Escape") onCancel();
         }}
         style={inputStyle}
-        placeholder="Batch title"
-        data-testid="batch-rail-create-input"
+        placeholder="Thread title"
+        data-testid="thread-rail-create-input"
       />
-      <button type="button" data-testid="batch-rail-create-submit" style={smallBtn} onClick={() => void submit()} disabled={submitting}>
+      <button type="button" data-testid="thread-rail-create-submit" style={smallBtn} onClick={() => void submit()} disabled={submitting}>
         {submitting ? "Creating…" : "Create"}
       </button>
       {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}

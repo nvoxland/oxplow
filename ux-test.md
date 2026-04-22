@@ -17,7 +17,7 @@ Each task is written so the agent can:
 
 ## How to use this list
 
-Feed tasks one at a time (or in small batches). For each:
+Feed tasks one at a time (or in small threads). For each:
 
 1. **Setup**: launch newde against a throwaway project dir (see Verification).
 2. **Execute the task** via Playwright, narrating each step.
@@ -51,18 +51,18 @@ Ordered roughly by risk surface — earlier tasks hit the newest/roughest code.
 4. **Reorder items within a status section using Shift+↑/↓** keyboard nav.
    Confirm selection moves as expected and `sort_index` updates visibly.
 
-5. **Move a work item between batches** by dragging it onto another batch tab
-   in the BatchRail. Then drag an item from the backlog into the active batch.
+5. **Move a work item between threads** by dragging it onto another thread tab
+   in the ThreadRail. Then drag an item from the backlog into the active thread.
    Verify it appears in the queue immediately.
 
 6. **Delete a work item** via right-click (per usability.md's destructive-
    actions convention). Confirm the confirmation UX is clear and undo/recovery
    options (if any) are obvious.
 
-### Batch & stream lifecycle
+### Thread & stream lifecycle
 
-7. **Create a new batch**, rename it, promote it to writer, then mark it
-   complete. Watch for stale UI state when the active batch changes mid-flow.
+7. **Create a new thread**, rename it, promote it to writer, then mark it
+   complete. Watch for stale UI state when the active thread changes mid-flow.
 
 8. **Switch streams** via the StreamRail. Confirm the editor, work queue, and
    agent pane all update to the new stream's state. Switch back and verify
@@ -104,7 +104,7 @@ Keep this pinned — friction usually traces back to one of these:
 
 - `src/ui/components/Plan/PlanPane.tsx`, `WorkGroupList.tsx`,
   `WorkItemDetail.tsx` — work panel, inline edit, drag-to-status
-- `src/ui/components/BatchRail.tsx`, `StreamRail.tsx` — batch/stream tabs
+- `src/ui/components/ThreadRail.tsx`, `StreamRail.tsx` — thread/stream tabs
 - `src/ui/components/LeftPanel/FileTree.tsx` — file tree
 - `src/ui/components/EditorPane.tsx` — Monaco host
 - `src/ui/components/History/HistoryPanel.tsx`,

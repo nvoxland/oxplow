@@ -601,6 +601,67 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 23,
+    name: "rename_batch_to_thread",
+    up: (db) => {
+      // Global concept rename: "batch" → "thread". SQLite >= 3.25 supports
+      // ALTER TABLE RENAME TO and ALTER TABLE RENAME COLUMN, which preserves
+      // row ids and foreign-key relationships automatically. Indexes must be
+      // dropped and recreated under their new names — SQLite has no RENAME
+      // INDEX.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        -- Tables
+        ALTER TABLE batches RENAME TO threads;
+        ALTER TABLE batch_selection RENAME TO thread_selection;
+
+        -- Columns on thread_selection
+        ALTER TABLE thread_selection RENAME COLUMN selected_batch_id TO selected_thread_id;
+
+        -- Columns on child tables (batch_id → thread_id)
+        ALTER TABLE work_items RENAME COLUMN batch_id TO thread_id;
+        ALTER TABLE work_item_links RENAME COLUMN batch_id TO thread_id;
+        ALTER TABLE work_item_events RENAME COLUMN batch_id TO thread_id;
+        ALTER TABLE agent_turn RENAME COLUMN batch_id TO thread_id;
+        ALTER TABLE commit_point RENAME COLUMN batch_id TO thread_id;
+        ALTER TABLE wait_point RENAME COLUMN batch_id TO thread_id;
+
+        -- Drop old indexes (named after the old concept).
+        DROP INDEX IF EXISTS idx_batches_stream_sort;
+        DROP INDEX IF EXISTS idx_work_items_batch_parent;
+        DROP INDEX IF EXISTS idx_work_items_batch_status;
+        DROP INDEX IF EXISTS idx_work_items_batch_deleted;
+        DROP INDEX IF EXISTS idx_work_items_backlog;
+        DROP INDEX IF EXISTS idx_work_links_batch_from;
+        DROP INDEX IF EXISTS idx_work_links_batch_to;
+        DROP INDEX IF EXISTS idx_work_events_batch_item;
+        DROP INDEX IF EXISTS idx_work_events_item;
+        DROP INDEX IF EXISTS idx_agent_turn_batch;
+        DROP INDEX IF EXISTS idx_commit_point_batch_sort;
+        DROP INDEX IF EXISTS idx_commit_point_batch_status;
+        DROP INDEX IF EXISTS idx_wait_point_batch_sort;
+        DROP INDEX IF EXISTS idx_wait_point_batch_status;
+
+        -- Recreate with the new names.
+        CREATE INDEX idx_threads_stream_sort ON threads(stream_id, sort_index);
+        CREATE INDEX idx_work_items_thread_parent ON work_items(thread_id, parent_id, sort_index);
+        CREATE INDEX idx_work_items_thread_status ON work_items(thread_id, status, sort_index);
+        CREATE INDEX idx_work_items_thread_deleted ON work_items(thread_id, deleted_at, sort_index);
+        CREATE INDEX idx_work_items_backlog ON work_items(deleted_at, sort_index) WHERE thread_id IS NULL;
+        CREATE INDEX idx_work_links_thread_from ON work_item_links(thread_id, from_item_id);
+        CREATE INDEX idx_work_links_thread_to ON work_item_links(thread_id, to_item_id);
+        CREATE INDEX idx_work_events_thread_item ON work_item_events(thread_id, item_id, created_at);
+        CREATE INDEX idx_work_events_item ON work_item_events(item_id, created_at);
+        CREATE INDEX idx_agent_turn_thread ON agent_turn(thread_id, started_at DESC);
+        CREATE INDEX idx_commit_point_thread_sort ON commit_point(thread_id, sort_index);
+        CREATE INDEX idx_commit_point_thread_status ON commit_point(thread_id, status);
+        CREATE INDEX idx_wait_point_thread_sort ON wait_point(thread_id, sort_index);
+        CREATE INDEX idx_wait_point_thread_status ON wait_point(thread_id, status);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

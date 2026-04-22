@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type BatchLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed" | "auto-committed" | "prompt-changed";
+export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed" | "auto-committed" | "prompt-changed";
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 export type PaneKind = "working" | "talking";
 
@@ -18,7 +18,7 @@ export interface WorkspaceChangedEvent {
 export interface HookRecordedEvent {
   type: "hook.recorded";
   streamId: string;
-  batchId?: string;
+  threadId?: string;
   pane?: PaneKind;
   // Kept opaque at the bus level; the UI re-hydrates via the `StoredEvent`
   // type exported from the hook-ingest module. Using `unknown` here avoids a
@@ -29,7 +29,7 @@ export interface HookRecordedEvent {
 export interface WorkItemChangedEvent {
   type: "work-item.changed";
   streamId: string;
-  batchId: string;
+  threadId: string;
   kind: WorkItemChangeKind;
   itemId: string | null;
 }
@@ -40,24 +40,24 @@ export interface BacklogChangedEvent {
   itemId: string | null;
 }
 
-export interface BatchChangedEvent {
-  type: "batch.changed";
+export interface ThreadChangedEvent {
+  type: "thread.changed";
   streamId: string;
-  batchId: string;
-  kind: BatchLifecycleKind;
+  threadId: string;
+  kind: ThreadLifecycleKind;
 }
 
 export interface AgentStatusChangedEvent {
   type: "agent-status.changed";
   streamId: string;
-  batchId: string;
+  threadId: string;
   status: AgentStatus;
 }
 
 export interface TurnChangedEvent {
   type: "turn.changed";
   streamId: string;
-  batchId: string;
+  threadId: string;
   turnId: string;
   kind: "opened" | "closed";
 }
@@ -70,7 +70,7 @@ export interface WorkspaceContextChangedEvent {
 export interface CommitPointChangedEvent {
   type: "commit-point.changed";
   streamId: string | null;
-  batchId: string;
+  threadId: string;
   id: string | null;
   kind: "created" | "updated" | "deleted" | "reordered";
 }
@@ -94,7 +94,7 @@ export interface ConfigChangedEvent {
 export interface WaitPointChangedEvent {
   type: "wait-point.changed";
   streamId: string | null;
-  batchId: string;
+  threadId: string;
   id: string | null;
   kind: "created" | "updated" | "deleted";
 }
@@ -105,7 +105,7 @@ export interface FileSnapshotCreatedEvent {
   snapshotId: string;
   kind: "task-start" | "task-end" | "turn-start" | "turn-end" | "startup";
   turnId: string | null;
-  batchId: string | null;
+  threadId: string | null;
 }
 
 export type NewdeEvent =
@@ -113,7 +113,7 @@ export type NewdeEvent =
   | HookRecordedEvent
   | WorkItemChangedEvent
   | BacklogChangedEvent
-  | BatchChangedEvent
+  | ThreadChangedEvent
   | AgentStatusChangedEvent
   | TurnChangedEvent
   | FileSnapshotCreatedEvent

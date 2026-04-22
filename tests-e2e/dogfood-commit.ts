@@ -38,7 +38,7 @@ async function main() {
 
 Adds Rename… / Change status… / Change priority… entries alongside
 Delete, mirroring the inline click and s/p keyboard shortcuts so
-keyboard-first users don't have to hover. Follows the BatchRail
+keyboard-first users don't have to hover. Follows the ThreadRail
 context-menu expansion in 7cc3302.
 
 .context/usability.md updated with the new menu-item-workitem.*

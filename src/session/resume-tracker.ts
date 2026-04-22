@@ -4,7 +4,7 @@
 // shows up on *any* hook that carries one (UserPromptSubmit, PreToolUse,
 // Stop, SessionEnd, …). `decideResumeUpdate` returns a directive when the
 // observed id is new or different from the one already persisted for the
-// batch, and null otherwise so callers avoid a no-op DB write.
+// thread, and null otherwise so callers avoid a no-op DB write.
 export type ResumeUpdate = { type: "set"; sessionId: string };
 
 export function decideResumeUpdate(

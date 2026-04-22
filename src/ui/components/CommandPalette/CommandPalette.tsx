@@ -56,8 +56,8 @@ export function CommandPalette({
     if (!q) return entries;
     // Split the query on whitespace and require each token to
     // fuzzy-match independently. This lets users type the label and
-    // group in any order — "batch new" finds "Work › New Batch" just
-    // as well as "new batch" does. Within a token, the subsequence
+    // group in any order — "thread new" finds "Work › New Thread" just
+    // as well as "new thread" does. Within a token, the subsequence
     // match is still order-sensitive, so "bn" still needs b-then-n.
     const tokens = q.split(/\s+/).filter(Boolean);
     return entries.filter((entry) => tokens.every((tok) => fuzzyMatches(entry.searchKey, tok)));

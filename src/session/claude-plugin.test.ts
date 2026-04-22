@@ -35,12 +35,12 @@ test("createElectronPlugin writes a valid Claude Code plugin under .newde/runtim
     expect(entry.url).toBe(`http://127.0.0.1:12345/hook/${event}`);
     expect(entry.headers.Authorization).toBe("Bearer $NEWDE_HOOK_TOKEN");
     expect(entry.headers["X-Newde-Stream"]).toBe("$NEWDE_STREAM_ID");
-    expect(entry.headers["X-Newde-Batch"]).toBe("$NEWDE_BATCH_ID");
+    expect(entry.headers["X-Newde-Thread"]).toBe("$NEWDE_THREAD_ID");
     expect(entry.headers["X-Newde-Pane"]).toBe("$NEWDE_PANE");
     expect(entry.allowedEnvVars).toEqual(expect.arrayContaining([
       "NEWDE_HOOK_TOKEN",
       "NEWDE_STREAM_ID",
-      "NEWDE_BATCH_ID",
+      "NEWDE_THREAD_ID",
       "NEWDE_PANE",
     ]));
   }

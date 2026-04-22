@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { Batch } from "../persistence/batch-store.js";
+import type { Thread } from "../persistence/thread-store.js";
 import { buildWriteGuardResponse } from "./write-guard.js";
 
-function makeBatch(overrides: Partial<Batch> = {}): Batch {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "b1",
     stream_id: "s1",
-    title: "Batch 1",
+    title: "Thread 1",
     status: "queued",
     sort_index: 0,
     pane_target: "newde:0",
@@ -23,39 +23,39 @@ function makeBatch(overrides: Partial<Batch> = {}): Batch {
 }
 
 describe("buildWriteGuardResponse", () => {
-  test("denies Write on a non-writer batch", () => {
-    const result = buildWriteGuardResponse(makeBatch({ status: "queued" }), "Write");
+  test("denies Write on a non-writer thread", () => {
+    const result = buildWriteGuardResponse(makeThread({ status: "queued" }), "Write");
     expect(result?.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(result?.hookSpecificOutput.hookEventName).toBe("PreToolUse");
     expect(result?.hookSpecificOutput.permissionDecisionReason).toContain("read-only");
   });
 
-  test("denies Edit / MultiEdit / NotebookEdit on a non-writer batch", () => {
+  test("denies Edit / MultiEdit / NotebookEdit on a non-writer thread", () => {
     for (const tool of ["Edit", "MultiEdit", "NotebookEdit"]) {
-      expect(buildWriteGuardResponse(makeBatch({ status: "queued" }), tool)).not.toBeNull();
+      expect(buildWriteGuardResponse(makeThread({ status: "queued" }), tool)).not.toBeNull();
     }
   });
 
-  test("allows Bash on a non-writer batch (prompt-gated only)", () => {
-    expect(buildWriteGuardResponse(makeBatch({ status: "queued" }), "Bash")).toBeNull();
+  test("allows Bash on a non-writer thread (prompt-gated only)", () => {
+    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "Bash")).toBeNull();
   });
 
-  test("allows Write on the writer batch", () => {
-    expect(buildWriteGuardResponse(makeBatch({ status: "active" }), "Write")).toBeNull();
+  test("allows Write on the writer thread", () => {
+    expect(buildWriteGuardResponse(makeThread({ status: "active" }), "Write")).toBeNull();
   });
 
-  test("allows MCP tools from any batch", () => {
-    expect(buildWriteGuardResponse(makeBatch({ status: "queued" }), "mcp__newde__add_work_note")).toBeNull();
-    expect(buildWriteGuardResponse(makeBatch({ status: "queued" }), "mcp__newde__create_work_item")).toBeNull();
+  test("allows MCP tools from any thread", () => {
+    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__newde__add_work_note")).toBeNull();
+    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__newde__create_work_item")).toBeNull();
   });
 
   test("allows read-only tools (Read, Grep, Glob)", () => {
     for (const tool of ["Read", "Grep", "Glob"]) {
-      expect(buildWriteGuardResponse(makeBatch({ status: "queued" }), tool)).toBeNull();
+      expect(buildWriteGuardResponse(makeThread({ status: "queued" }), tool)).toBeNull();
     }
   });
 
-  test("returns null when batch is not found", () => {
+  test("returns null when thread is not found", () => {
     expect(buildWriteGuardResponse(null, "Write")).toBeNull();
   });
 
@@ -65,7 +65,7 @@ describe("buildWriteGuardResponse", () => {
       const projectDir = join(parent, "project");
       const outside = join(parent, "elsewhere", "plans", "foo.md");
       const result = buildWriteGuardResponse(
-        makeBatch({ status: "queued" }),
+        makeThread({ status: "queued" }),
         "Write",
         { projectDir, toolInput: { file_path: outside } },
       );
@@ -81,7 +81,7 @@ describe("buildWriteGuardResponse", () => {
       const projectDir = join(parent, "project");
       const inside = join(projectDir, "src", "index.ts");
       const result = buildWriteGuardResponse(
-        makeBatch({ status: "queued" }),
+        makeThread({ status: "queued" }),
         "Write",
         { projectDir, toolInput: { file_path: inside } },
       );
@@ -101,7 +101,7 @@ describe("buildWriteGuardResponse", () => {
       const projectDir = join(parent, "project");
       const newdePath = join(projectDir, ".newde", "shared-state.json");
       const result = buildWriteGuardResponse(
-        makeBatch({ status: "queued" }),
+        makeThread({ status: "queued" }),
         "Write",
         { projectDir, toolInput: { file_path: newdePath } },
       );
@@ -116,7 +116,7 @@ describe("buildWriteGuardResponse", () => {
     try {
       const projectDir = join(parent, "project");
       const result = buildWriteGuardResponse(
-        makeBatch({ status: "queued" }),
+        makeThread({ status: "queued" }),
         "Edit",
         { projectDir, toolInput: { file_path: "src/app.ts" } },
       );
@@ -126,10 +126,10 @@ describe("buildWriteGuardResponse", () => {
     }
   });
 
-  test("flipping batch.status from queued to active flips the decision", () => {
-    // Simulates the runtime reading batch fresh on each PreToolUse call —
+  test("flipping thread.status from queued to active flips the decision", () => {
+    // Simulates the runtime reading thread fresh on each PreToolUse call —
     // after a promotion, the next call sees the new status and allows.
-    const queued = makeBatch({ status: "queued" });
+    const queued = makeThread({ status: "queued" });
     expect(buildWriteGuardResponse(queued, "Write")).not.toBeNull();
 
     const promoted = { ...queued, status: "active" as const };

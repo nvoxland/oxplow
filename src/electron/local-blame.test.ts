@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BatchStore } from "../persistence/batch-store.js";
+import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
@@ -19,13 +19,13 @@ function seed() {
     worktreePath: dir,
     projectBase: "demo",
   });
-  const batchStore = new BatchStore(dir);
-  const state = batchStore.ensureStream(stream);
-  const batchId = state.batches[0]!.id;
+  const threadStore = new ThreadStore(dir);
+  const state = threadStore.ensureStream(stream);
+  const threadId = state.threads[0]!.id;
   const workItems = new WorkItemStore(dir);
   const snapshots = new SnapshotStore(dir);
   const efforts = new WorkItemEffortStore(dir);
-  return { dir, workItems, snapshots, efforts, batchId, streamId: stream.id };
+  return { dir, workItems, snapshots, efforts, threadId, streamId: stream.id };
 }
 
 function flushWith(dir: string, snapshots: SnapshotStore, streamId: string, path: string, content: string): string {
@@ -41,7 +41,7 @@ function flushWith(dir: string, snapshots: SnapshotStore, streamId: string, path
 
 describe("computeLocalBlame", () => {
   test("attributes lines to the effort that last changed them, newest wins", () => {
-    const { dir, workItems, snapshots, efforts, batchId, streamId } = seed();
+    const { dir, workItems, snapshots, efforts, threadId, streamId } = seed();
     const path = "hello.txt";
     // Initial empty baseline (for snapshot dedup to work).
     writeFileSync(join(dir, path), "");
@@ -54,7 +54,7 @@ describe("computeLocalBlame", () => {
 
     // Effort A: creates lines ["a1", "a2", "a3"]
     const itemA = workItems.createItem({
-      batchId, kind: "task", title: "A", createdBy: "user", actorId: "t",
+      threadId, kind: "task", title: "A", createdBy: "user", actorId: "t",
     });
     const aStart = baseline.id;
     const aEnd = flushWith(dir, snapshots, streamId, path, "a1\na2\na3\n");
@@ -66,7 +66,7 @@ describe("computeLocalBlame", () => {
 
     // Effort B: modifies middle line -> ["a1", "b2", "a3"]
     const itemB = workItems.createItem({
-      batchId, kind: "task", title: "B", createdBy: "user", actorId: "t",
+      threadId, kind: "task", title: "B", createdBy: "user", actorId: "t",
     });
     const bStart = aEnd;
     const bEnd = flushWith(dir, snapshots, streamId, path, "a1\nb2\na3\n");
@@ -77,7 +77,7 @@ describe("computeLocalBlame", () => {
 
     // Effort C: appends a new line -> ["a1", "b2", "a3", "c4"]
     const itemC = workItems.createItem({
-      batchId, kind: "task", title: "C", createdBy: "user", actorId: "t",
+      threadId, kind: "task", title: "C", createdBy: "user", actorId: "t",
     });
     const cStart = bEnd;
     const cEnd = flushWith(dir, snapshots, streamId, path, "a1\nb2\na3\nc4\n");
@@ -112,7 +112,7 @@ describe("computeLocalBlame", () => {
   });
 
   test("disk edits after last effort surface as uncommitted", () => {
-    const { dir, workItems, snapshots, efforts, batchId, streamId } = seed();
+    const { dir, workItems, snapshots, efforts, threadId, streamId } = seed();
     const path = "hello.txt";
     writeFileSync(join(dir, path), "");
     const baseline = snapshots.flushSnapshot({
@@ -120,7 +120,7 @@ describe("computeLocalBlame", () => {
     });
 
     const item = workItems.createItem({
-      batchId, kind: "task", title: "A", createdBy: "user", actorId: "t",
+      threadId, kind: "task", title: "A", createdBy: "user", actorId: "t",
     });
     const end = flushWith(dir, snapshots, streamId, path, "a1\na2\n");
     const eff = efforts.openEffort({ workItemId: item.id, startSnapshotId: baseline.id });
@@ -172,14 +172,14 @@ describe("computeLocalBlame", () => {
   });
 
   test("skips efforts whose snapshots are pruned (snapshot missing)", () => {
-    const { dir, workItems, snapshots, efforts, batchId, streamId } = seed();
+    const { dir, workItems, snapshots, efforts, threadId, streamId } = seed();
     const path = "hello.txt";
     writeFileSync(join(dir, path), "");
     const baseline = snapshots.flushSnapshot({
       source: "task-start", streamId, worktreePath: dir, dirtyPaths: [path],
     });
     const item = workItems.createItem({
-      batchId, kind: "task", title: "A", createdBy: "user", actorId: "t",
+      threadId, kind: "task", title: "A", createdBy: "user", actorId: "t",
     });
     const eff = efforts.openEffort({ workItemId: item.id, startSnapshotId: baseline.id });
     efforts.recordEffortFile(eff.id, path);

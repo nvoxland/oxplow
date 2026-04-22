@@ -2,8 +2,8 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BacklogState,
-  Batch,
-  BatchWorkState,
+  Thread,
+  ThreadWorkState,
   CommitPoint,
   EffortDetail,
   WaitPoint,
@@ -20,12 +20,12 @@ import {
   listCommitPoints,
   listWaitPoints,
   listWorkItemEfforts,
-  reorderBatchQueue,
+  reorderThreadQueue,
   setAutoCommit,
   subscribeNewdeEvents,
   updateCommitPoint,
 } from "../../api.js";
-import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
+import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import type { MenuItem } from "../../menu.js";
@@ -69,9 +69,9 @@ interface CreateInput {
 }
 
 interface Props {
-  batch: Batch | null;
-  activeBatchId: string | null;
-  batchWork: BatchWorkState | null;
+  thread: Thread | null;
+  activeThreadId: string | null;
+  threadWork: ThreadWorkState | null;
   backlog: BacklogState | null;
   onCreateWorkItem(input: CreateInput): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
@@ -81,7 +81,7 @@ interface Props {
   onUpdateBacklogItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onDeleteBacklogItem(itemId: string): Promise<void>;
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
-  onMoveItemToBacklog(itemId: string, fromBatchId: string): Promise<void>;
+  onMoveItemToBacklog(itemId: string, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
   /** Open the edit modal for the specified work item. Change the token to
    *  request again even if the itemId repeats. */
@@ -99,9 +99,9 @@ interface ContextMenuState {
 }
 
 export function PlanPane({
-  batch,
-  activeBatchId,
-  batchWork,
+  thread,
+  activeThreadId,
+  threadWork,
   backlog,
   onCreateWorkItem,
   onUpdateWorkItem,
@@ -136,7 +136,7 @@ export function PlanPane({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
-  const [mode, setMode] = useState<"batch" | "backlog">("batch");
+  const [mode, setMode] = useState<"thread" | "backlog">("thread");
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
@@ -144,7 +144,7 @@ export function PlanPane({
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
   // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
   // drag starts on any of the effectiveMarkedIds, the drag payload carries the
-  // whole set so drop targets (BatchRail, backlog chip, stream chip) can move
+  // whole set so drop targets (ThreadRail, backlog chip, stream chip) can move
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
@@ -158,31 +158,31 @@ export function PlanPane({
   const [editingItemEfforts, setEditingItemEfforts] = useState<EffortDetail[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
-  const batchId = batch?.id ?? null;
-  const streamId = batch?.stream_id ?? null;
+  const threadId = thread?.id ?? null;
+  const streamId = thread?.stream_id ?? null;
 
   useEffect(() => {
-    if (!batchId) { setCommitPoints([]); setWaitPoints([]); return; }
+    if (!threadId) { setCommitPoints([]); setWaitPoints([]); return; }
     let cancelled = false;
-    const refreshCommits = () => void listCommitPoints(batchId)
+    const refreshCommits = () => void listCommitPoints(threadId)
       .then((points) => { if (!cancelled) setCommitPoints(points); })
       .catch((err) => reportUiError("Load commit points", err));
-    const refreshWaits = () => void listWaitPoints(batchId)
+    const refreshWaits = () => void listWaitPoints(threadId)
       .then((points) => { if (!cancelled) setWaitPoints(points); })
       .catch((err) => reportUiError("Load wait points", err));
     refreshCommits();
     refreshWaits();
     const off = subscribeNewdeEvents((event) => {
-      if (event.type === "commit-point.changed" && event.batchId === batchId) refreshCommits();
-      if (event.type === "wait-point.changed" && event.batchId === batchId) refreshWaits();
+      if (event.type === "commit-point.changed" && event.threadId === threadId) refreshCommits();
+      if (event.type === "wait-point.changed" && event.threadId === threadId) refreshWaits();
     });
     return () => { cancelled = true; off(); };
-  }, [batchId]);
+  }, [threadId]);
 
   const groups = useMemo(() => {
     if (mode === "backlog") return buildBacklogGroups(backlog);
-    return buildGroups(batchWork);
-  }, [mode, batchWork, backlog]);
+    return buildGroups(threadWork);
+  }, [mode, threadWork, backlog]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
@@ -281,7 +281,7 @@ export function PlanPane({
   const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
   const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
   const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;
-  const currentScopeBatchId = mode === "backlog" ? null : batch?.id ?? null;
+  const currentScopeThreadId = mode === "backlog" ? null : thread?.id ?? null;
 
   useEffect(() => {
     // Listen at the pane level (not window) so the Agent pane / editor don't
@@ -409,8 +409,8 @@ export function PlanPane({
   }, [editRequest?.token]);
 
 
-  if (mode === "batch" && !batch) {
-    return <div style={{ padding: 12, color: "var(--muted)" }}>No batch selected.</div>;
+  if (mode === "thread" && !thread) {
+    return <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>;
   }
 
   const handleBacklogChipDragOver = (event: React.DragEvent) => {
@@ -430,20 +430,20 @@ export function PlanPane({
       const payload = JSON.parse(raw) as {
         itemId?: string;
         itemIds?: string[];
-        fromBatchId?: string | null;
+        fromThreadId?: string | null;
       };
-      const fromBatchId = payload.fromBatchId;
-      if (!fromBatchId) return;
+      const fromThreadId = payload.fromThreadId;
+      if (!fromThreadId) return;
       const ids = payload.itemIds && payload.itemIds.length > 0
         ? payload.itemIds
         : payload.itemId ? [payload.itemId] : [];
       // Move each marked item in sequence — the store already serialises the
-      // batch mutations, and doing them one at a time keeps the failure mode
+      // thread mutations, and doing them one at a time keeps the failure mode
       // simple (a bad id throws, the rest keep going isn't worth the risk of
       // a partial state that surprises the user). If the first one fails the
       // later ones are skipped by Promise.allSettled semantics in the caller.
       for (const id of ids) {
-        void onMoveItemToBacklog(id, fromBatchId);
+        void onMoveItemToBacklog(id, fromThreadId);
       }
     } catch {
       // ignore malformed payload
@@ -502,7 +502,7 @@ export function PlanPane({
           notes={modalMode === "edit" ? editingItemNotes : []}
           efforts={modalMode === "edit" ? editingItemEfforts : []}
           item={modalMode === "edit" ? editingItem : null}
-          epics={batchWork?.epics ?? []}
+          epics={threadWork?.epics ?? []}
           onOpenItem={(target) => openEditModal(target)}
           onOpenFile={onOpenFile}
           onShowInHistory={onShowInHistory}
@@ -550,25 +550,25 @@ export function PlanPane({
           </div>
         ) : (
           groups.map((group) => {
-            const isRootBatch = mode === "batch";
-            const isActive = isRootBatch && batch?.id === activeBatchId;
-            const canAddPoints = isRootBatch && !!batchWork && batchWork.waiting.length > 0;
-            const autoCommitOn = batch?.auto_commit ?? false;
-            const addPointsSlot = isRootBatch && batch ? (
+            const isRootThread = mode === "thread";
+            const isActive = isRootThread && thread?.id === activeThreadId;
+            const canAddPoints = isRootThread && !!threadWork && threadWork.waiting.length > 0;
+            const autoCommitOn = thread?.auto_commit ?? false;
+            const addPointsSlot = isRootThread && thread ? (
               <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
                 <CommitModeDropdown
                   autoCommitOn={autoCommitOn}
                   onSelect={(auto) => {
-                    if (!streamId || !batchId) return;
-                    runWithError("Set commit mode", setAutoCommit(streamId, batchId, auto));
+                    if (!streamId || !threadId) return;
+                    runWithError("Set commit mode", setAutoCommit(streamId, threadId, auto));
                   }}
                 />
                 {!autoCommitOn ? (
                   <button type="button"
                     data-testid="plan-add-commit-point"
                     onClick={() => {
-                      if (!streamId || !batchId) return;
-                      runWithError("Add commit point", createCommitPoint(streamId, batchId));
+                      if (!streamId || !threadId) return;
+                      runWithError("Add commit point", createCommitPoint(streamId, threadId));
                     }}
                     disabled={!canAddPoints}
                     style={{
@@ -588,8 +588,8 @@ export function PlanPane({
                 <button type="button"
                   data-testid="plan-add-wait-point"
                   onClick={() => {
-                    if (!streamId || !batchId) return;
-                    runWithError("Add wait point", createWaitPoint(streamId, batchId, null));
+                    if (!streamId || !threadId) return;
+                    runWithError("Add wait point", createWaitPoint(streamId, threadId, null));
                   }}
                   disabled={!canAddPoints}
                   style={{
@@ -611,15 +611,15 @@ export function PlanPane({
               <WorkGroupList
                 key={group.epic?.id ?? "__root__"}
                 group={group}
-                scopeBatchId={currentScopeBatchId}
+                scopeThreadId={currentScopeThreadId}
                 expandedId={expandedId}
                 onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                 onUpdateWorkItem={activeUpdate}
                 onReorderWorkItems={activeReorder}
-                commitPoints={isRootBatch ? commitPoints : []}
-                waitPoints={isRootBatch ? waitPoints : []}
-                onReorderMixed={isRootBatch && streamId && batchId
-                  ? (entries) => runWithError("Reorder queue", reorderBatchQueue(streamId, batchId, entries))
+                commitPoints={isRootThread ? commitPoints : []}
+                waitPoints={isRootThread ? waitPoints : []}
+                onReorderMixed={isRootThread && streamId && threadId
+                  ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
                   : undefined}
                 onContextMenu={(event, item) => {
                   event.preventDefault();
@@ -645,7 +645,7 @@ export function PlanPane({
       </div>
       <div style={bottomBarStyle}>
         <button type="button"
-          onClick={() => setMode((prev) => (prev === "backlog" ? "batch" : "backlog"))}
+          onClick={() => setMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
           onDragOver={handleBacklogChipDragOver}
           onDragLeave={() => setBacklogChipDragOver(false)}
           onDrop={handleBacklogChipDrop}

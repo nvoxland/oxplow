@@ -166,8 +166,8 @@ export class WorkItemEffortStore {
    */
   listEffortsEndingAtSnapshots(
     snapshotIds: string[],
-  ): Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: string; priority: string }>> {
-    const out: Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: string; priority: string }>> = {};
+  ): Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: string; priority: string }>> {
+    const out: Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: string; priority: string }>> = {};
     for (const id of snapshotIds) out[id] = [];
     if (snapshotIds.length === 0) return out;
     const placeholders = snapshotIds.map(() => "?").join(",");
@@ -175,12 +175,12 @@ export class WorkItemEffortStore {
       id: string;
       work_item_id: string;
       end_snapshot_id: string;
-      batch_id: string | null;
+      thread_id: string | null;
       title: string | null;
       status: string | null;
       priority: string | null;
     }>(
-      `SELECT e.id, e.work_item_id, e.end_snapshot_id, wi.batch_id, wi.title, wi.status, wi.priority
+      `SELECT e.id, e.work_item_id, e.end_snapshot_id, wi.thread_id, wi.title, wi.status, wi.priority
        FROM work_item_effort e
        JOIN work_items wi ON wi.id = e.work_item_id
        WHERE e.end_snapshot_id IN (${placeholders})
@@ -193,7 +193,7 @@ export class WorkItemEffortStore {
       list.push({
         effortId: row.id,
         workItemId: row.work_item_id,
-        batchId: row.batch_id ?? "",
+        threadId: row.thread_id ?? "",
         title: row.title ?? "(untitled)",
         status: row.status ?? "ready",
         priority: row.priority ?? "medium",

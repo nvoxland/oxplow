@@ -89,7 +89,7 @@ different grains:
   the doc." Invisible to the user, discarded when the turn ends.
 
 Pick ONE surface per piece of work — never mirror. If you're reviewing
-batch history, that's where newde work items live; if you see
+thread history, that's where newde work items live; if you see
 TaskCreate referenced anywhere, it was a within-turn plan, not a
 deliverable.
 

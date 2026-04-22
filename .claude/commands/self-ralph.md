@@ -77,7 +77,7 @@ a license to pre-queue.)
   inner agent. You prompt it; you don't bypass it.
 - **Never write to `.newde/state.sqlite` with `sqlite3`** while
   newde is running. You're a user, not a DB admin.
-- **No reaching around newde.** When you need to look at a batch's
+- **No reaching around newde.** When you need to look at a thread's
   history, open it in newde's History panel. When you want to see
   what changed, open the diff in newde's editor. `git log` is fine
   for reading your own commit trail in the conversation; it is not
@@ -167,7 +167,7 @@ you noticed it under pressure). Log the near-miss.
   works well. Open it at least once per session.
 - **Files pane filter modes.** `ProjectPanel` surfaces filters
   along `branchBase`, `upstream`, `uncommitted`, and the current
-  batch's file changes. Try switching filters — they're the
+  thread's file changes. Try switching filters — they're the
   newde-native answer to `git diff --stat HEAD` and
   `git diff origin/main...HEAD`. Notice if a filter doesn't do
   what its label suggests.
@@ -553,8 +553,8 @@ at all.>
 ## Surprises (60-second exploration)
 <three things you poked at outside the task's direct path, with
 what was notable about each. Examples:
- - Right-clicked a completed batch chip: no "Reopen" option,
-   only Rename/Add-batch/Add-stream. Intentional or gap?
+ - Right-clicked a completed thread chip: no "Reopen" option,
+   only Rename/Add-thread/Add-stream. Intentional or gap?
  - Opened History panel while uncommitted: the timeline showed
    "working" state correctly but turn-diff loading spinner
    hung for 2+ seconds on a 12-file turn.

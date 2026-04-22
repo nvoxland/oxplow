@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { decideStopDirective, type BatchSnapshot } from "./stop-hook-pipeline.js";
-import type { Batch } from "../persistence/batch-store.js";
+import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
+import type { Thread } from "../persistence/thread-store.js";
 import type { CommitPoint, CommitPointStatus } from "../persistence/commit-point-store.js";
 import type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
@@ -11,7 +11,7 @@ const builders = {
     `next: ${item.id}${context.uiChangeNudge ? " [ui-nudge]" : ""}`,
 };
 
-function batch(overrides: Partial<Batch> = {}): Batch {
+function thread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "b1",
     stream_id: "s1",
@@ -31,7 +31,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
 function workItem(id: string, sort_index: number, status: WorkItemStatus = "ready", overrides: Partial<WorkItem> = {}): WorkItem {
   return {
     id,
-    batch_id: "b1",
+    thread_id: "b1",
     parent_id: null,
     kind: "task" as WorkItemKind,
     title: id,
@@ -53,7 +53,7 @@ function workItem(id: string, sort_index: number, status: WorkItemStatus = "read
 function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending", mode: import("../persistence/commit-point-store.js").CommitPointMode = "approve"): CommitPoint {
   return {
     id,
-    batch_id: "b1",
+    thread_id: "b1",
     sort_index,
     mode,
     status,
@@ -67,7 +67,7 @@ function commitPoint(id: string, sort_index: number, status: CommitPointStatus =
 function waitPoint(id: string, sort_index: number, status: WaitPointStatus = "pending"): WaitPoint {
   return {
     id,
-    batch_id: "b1",
+    thread_id: "b1",
     sort_index,
     status,
     note: null,
@@ -77,9 +77,9 @@ function waitPoint(id: string, sort_index: number, status: WaitPointStatus = "pe
   };
 }
 
-function snapshot(parts: Partial<BatchSnapshot>): BatchSnapshot {
+function snapshot(parts: Partial<ThreadSnapshot>): ThreadSnapshot {
   return {
-    batch: batch(),
+    thread: thread(),
     commitPoints: [],
     waitPoints: [],
     workItems: [],
@@ -129,7 +129,7 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("writer batch with ready work item: block with next-item reason", () => {
+  test("writer thread with ready work item: block with next-item reason", () => {
     const ready = workItem("w1", 0);
     const out = decideStopDirective(
       snapshot({ workItems: [ready], readyWorkItems: [ready] }),
@@ -219,7 +219,7 @@ describe("decideStopDirective", () => {
       snapshot({
         workItems: [ready],
         readyWorkItems: [ready],
-        currentTurnFilePaths: ["src/electron/runtime.ts", "src/persistence/batch-store.ts"],
+        currentTurnFilePaths: ["src/electron/runtime.ts", "src/persistence/thread-store.ts"],
       }),
       builders,
     );
@@ -252,10 +252,10 @@ describe("decideStopDirective", () => {
     expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
   });
 
-  test("non-writer batch with ready work item: allow stop (no auto-progression)", () => {
+  test("non-writer thread with ready work item: allow stop (no auto-progression)", () => {
     const ready = workItem("w1", 0);
     const out = decideStopDirective(
-      snapshot({ batch: batch({ status: "queued" }), workItems: [ready], readyWorkItems: [ready] }),
+      snapshot({ thread: thread({ status: "queued" }), workItems: [ready], readyWorkItems: [ready] }),
       builders,
     );
     expect(out.directive).toBeNull();
@@ -284,10 +284,10 @@ describe("decideStopDirective", () => {
     expect(out.directive?.reason).toContain("commit: cp1");
   });
 
-  test("non-writer batch with pending commit point: allow stop (only the active batch commits)", () => {
+  test("non-writer thread with pending commit point: allow stop (only the active thread commits)", () => {
     const cp = commitPoint("cp1", 1);
     const out = decideStopDirective(
-      snapshot({ batch: batch({ status: "queued" }), commitPoints: [cp] }),
+      snapshot({ thread: thread({ status: "queued" }), commitPoints: [cp] }),
       builders,
     );
     expect(out.directive).toBeNull();
@@ -316,14 +316,14 @@ describe("decideStopDirective", () => {
 
   test("auto_commit=true snapshot with no commit points falls through to ready-work handling", () => {
     // Contract: the runtime auto-commit pre-pass runs BEFORE decideStopDirective
-    // and never creates a commit_point row. So the pipeline sees the batch with
+    // and never creates a commit_point row. So the pipeline sees the thread with
     // `autoCommit: true` but an empty commitPoints list and must not invent any
     // commit directive from the flag itself — it should just handle whatever
     // work remains. Here: no ready items, no commits, so allow stop.
     const settled = workItem("w1", 0, "human_check");
     const out = decideStopDirective(
       snapshot({
-        batch: batch({ auto_commit: true }),
+        thread: thread({ auto_commit: true }),
         workItems: [settled],
         autoCommit: true,
       }),
@@ -339,7 +339,7 @@ describe("decideStopDirective", () => {
     const ready = workItem("w2", 1, "ready");
     const out = decideStopDirective(
       snapshot({
-        batch: batch({ auto_commit: true }),
+        thread: thread({ auto_commit: true }),
         workItems: [ready],
         readyWorkItems: [ready],
         autoCommit: true,

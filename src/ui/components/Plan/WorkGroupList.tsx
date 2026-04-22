@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
-import { WORK_ITEM_DRAG_MIME } from "../BatchRail.js";
+import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyWorkItem,
   finalizeReorderIds,
@@ -64,7 +64,7 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
 
 export function WorkGroupList({
   group,
-  scopeBatchId,
+  scopeThreadId,
   expandedId,
   onToggleExpand,
   onUpdateWorkItem,
@@ -85,7 +85,7 @@ export function WorkGroupList({
   isActive,
 }: {
   group: WorkItemGroup;
-  scopeBatchId: string | null;
+  scopeThreadId: string | null;
   expandedId: string | null;
   onToggleExpand(id: string): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
@@ -105,8 +105,8 @@ export function WorkGroupList({
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
 }) {
-  // When the batch is not the active writer, in_progress items are not agent-owned
-  // and can be freely reordered — only lock them when this batch is active.
+  // When the thread is not the active writer, in_progress items are not agent-owned
+  // and can be freely reordered — only lock them when this thread is active.
   const lockInProgress = isActive !== false;
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -414,7 +414,7 @@ export function WorkGroupList({
           JSON.stringify({
             itemId: row.item.id,
             itemIds: ids,
-            fromBatchId: scopeBatchId,
+            fromThreadId: scopeThreadId,
           }),
         );
       },
@@ -461,7 +461,7 @@ export function WorkGroupList({
             isMarked={isMarked}
             isOver={isOver}
             isDragging={isDragging}
-            scopeBatchId={scopeBatchId}
+            scopeThreadId={scopeThreadId}
             lockInProgress={lockInProgress}
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
@@ -477,7 +477,7 @@ export function WorkGroupList({
               onReparentWorkItem={onReparentWorkItem}
               onUpdateWorkItem={onUpdateWorkItem}
               onContextMenu={onContextMenu}
-              scopeBatchId={scopeBatchId}
+              scopeThreadId={scopeThreadId}
               onRequestEdit={onRequestEdit}
               selectedId={selectedId}
               markedIds={markedIds}
@@ -497,7 +497,7 @@ export function WorkGroupList({
         isMarked={isMarked}
         isOver={isOver}
         isDragging={isDragging}
-        scopeBatchId={scopeBatchId}
+        scopeThreadId={scopeThreadId}
         lockInProgress={lockInProgress}
         onRequestEdit={onRequestEdit}
         onSelect={onSelect}
@@ -671,7 +671,7 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"]
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
   isSelected, isMarked, isOver, isDragging,
-  scopeBatchId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
+  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
@@ -682,7 +682,7 @@ function EpicInlineRow({
   isMarked: boolean;
   isOver: boolean;
   isDragging: boolean;
-  scopeBatchId: string | null;
+  scopeThreadId: string | null;
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
@@ -696,7 +696,7 @@ function EpicInlineRow({
 }) {
   const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
   const locked = item.status === "in_progress" && (lockInProgress !== false);
-  void scopeBatchId;
+  void scopeThreadId;
   return (
     <div
       draggable={!locked}
@@ -757,7 +757,7 @@ function EpicInlineRow({
 
 function EpicChildrenPane({
   epicId, children, onReorderWorkItems, onReparentWorkItem,
-  onUpdateWorkItem, onContextMenu, scopeBatchId, onRequestEdit,
+  onUpdateWorkItem, onContextMenu, scopeThreadId, onRequestEdit,
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
   epicId: string;
@@ -766,7 +766,7 @@ function EpicChildrenPane({
   onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onContextMenu(event: React.MouseEvent, item: WorkItem): void;
-  scopeBatchId: string | null;
+  scopeThreadId: string | null;
   onRequestEdit?(item: WorkItem): void;
   selectedId?: string | null;
   markedIds?: ReadonlySet<string>;
@@ -796,7 +796,7 @@ function EpicChildrenPane({
     const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
     if (!raw) return;
     try {
-      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromBatchId?: string | null };
+      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromThreadId?: string | null };
       const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
       for (const id of ids) {
         if (!children.some((c) => c.id === id)) {
@@ -822,7 +822,7 @@ function EpicChildrenPane({
             isMarked={isMarked}
             isOver={isOver}
             isDragging={isDragging}
-            scopeBatchId={scopeBatchId}
+            scopeThreadId={scopeThreadId}
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
@@ -834,7 +834,7 @@ function EpicChildrenPane({
               const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
               event.dataTransfer.setData(
                 WORK_ITEM_DRAG_MIME,
-                JSON.stringify({ itemId: child.id, itemIds: ids, fromBatchId: scopeBatchId, parentEpicId: epicId }),
+                JSON.stringify({ itemId: child.id, itemIds: ids, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
             }}
             onDragEnd={resetDrag}
@@ -901,7 +901,7 @@ function InlineItemRow({
   isMarked,
   isOver,
   isDragging,
-  scopeBatchId,
+  scopeThreadId,
   lockInProgress,
   onSelect,
   onRequestEdit,
@@ -919,7 +919,7 @@ function InlineItemRow({
   isMarked: boolean;
   isOver: boolean;
   isDragging: boolean;
-  scopeBatchId: string | null;
+  scopeThreadId: string | null;
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
@@ -934,10 +934,10 @@ function InlineItemRow({
   const dimmed = item.status === "done" || item.status === "canceled" || item.status === "archived";
   const locked = item.status === "in_progress" && (lockInProgress !== false);
 
-  // scopeBatchId isn't used directly here, but the outer drag handler that
+  // scopeThreadId isn't used directly here, but the outer drag handler that
   // encoded it into dataTransfer was captured at onDragStart creation time —
   // suppress the unused-parameter lint without plumbing it away.
-  void scopeBatchId;
+  void scopeThreadId;
 
   return (
     <div

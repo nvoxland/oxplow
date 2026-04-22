@@ -4,7 +4,7 @@ import type { PaneKind } from "../persistence/stream-store.js";
 export interface StoredEvent {
   id: number;
   streamId: string;
-  batchId?: string;
+  threadId?: string;
   pane?: PaneKind;
   normalized: NormalizedEvent;
 }
@@ -15,9 +15,9 @@ export class HookEventStore {
   private subs = new Set<(e: StoredEvent) => void>();
   constructor(private capacity: number) {}
 
-  push(streamId: string, event: string, payload: any, pane?: PaneKind, batchId?: string): StoredEvent {
+  push(streamId: string, event: string, payload: any, pane?: PaneKind, threadId?: string): StoredEvent {
     const normalized = normalize(event, payload, Date.now());
-    const item: StoredEvent = { id: this.nextId++, streamId, batchId, pane, normalized };
+    const item: StoredEvent = { id: this.nextId++, streamId, threadId, pane, normalized };
     const bucket = this.buf.get(streamId) ?? [];
     bucket.push(item);
     if (bucket.length > this.capacity) {
@@ -49,7 +49,7 @@ export function ingestHookPayload(
   store: HookEventStore,
   event: string,
   payload: any,
-  context: { streamId?: string; pane?: PaneKind; batchId?: string } = {},
+  context: { streamId?: string; pane?: PaneKind; threadId?: string } = {},
 ): StoredEvent {
-  return store.push(context.streamId ?? "default", event, payload, context.pane, context.batchId);
+  return store.push(context.streamId ?? "default", event, payload, context.pane, context.threadId);
 }

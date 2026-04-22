@@ -106,14 +106,14 @@ savings are biggest when the summary is tight.
 export function buildTaskFilingSkill(): string {
   return `---
 name: ${TASK_FILING_SKILL_NAME}
-description: File newde work items — when to create one, how to pick kind/priority/acceptance-criteria, when to file as an epic with child tasks, and how to choose the right batch. Triggers on creating work items via mcp__newde__create_work_item, planning multi-step changes, being handed a new task by the user, or discovering follow-up work mid-turn.
+description: File newde work items — when to create one, how to pick kind/priority/acceptance-criteria, when to file as an epic with child tasks, and how to choose the right thread. Triggers on creating work items via mcp__newde__create_work_item, planning multi-step changes, being handed a new task by the user, or discovering follow-up work mid-turn.
 ---
 
 # Filing newde work items
 
 The mechanism is \`mcp__newde__create_work_item\` (and sibling tools).
 This skill is the **policy layer** — when to file, how to shape the
-item, which batch it belongs in. Argument details live in each tool's
+item, which thread it belongs in. Argument details live in each tool's
 own description; don't duplicate them here.
 
 ## Filing is ALWAYS inline. Never dispatch a subagent to file.
@@ -202,21 +202,21 @@ into one task:
 (Status transitions + epic rollup rules live in the
 \`newde-task-lifecycle\` skill.)
 
-## Choosing the batch and stream
+## Choosing the thread and stream
 
-Most of the time the right batch is the session's current one — the
-\`batchId\` shown in your session context. Two non-obvious cases:
+Most of the time the right thread is the session's current one — the
+\`threadId\` shown in your session context. Two non-obvious cases:
 
-- **Cross-batch filing.** If you're in an agent that isn't the writer
+- **Cross-thread filing.** If you're in an agent that isn't the writer
   (status != active) and you discover work that belongs to another
-  batch, call \`newde__get_batch_context\` with no args to list peer
-  batches, then \`create_work_item\` with that peer's \`batchId\`.
+  thread, call \`newde__get_thread_context\` with no args to list peer
+  threads, then \`create_work_item\` with that peer's \`threadId\`.
 - **Backlog (stream-less).** The UI surfaces a backlog for work that
   isn't yet committed to any stream. \`create_work_item\` always
-  requires a batchId; backlog filing is a UI action, not MCP.
+  requires a threadId; backlog filing is a UI action, not MCP.
 
-Don't move an item between batches yourself — the UI handles that via
-drag-and-drop. If you notice an item is in the wrong batch, add a
+Don't move an item between threads yourself — the UI handles that via
+drag-and-drop. If you notice an item is in the wrong thread, add a
 note (\`add_work_note\`) explaining why and let the user move it.
 
 ## Kind rubric
@@ -339,12 +339,12 @@ every child has reached \`human_check\` / \`done\` / \`canceled\` /
 turn — don't leave a settled epic parked in IN PROGRESS waiting for
 the user to notice.
 
-## Batch transitions
+## Thread transitions
 
 When you need to flip several items at once (e.g., rolling an epic
 and all its children to \`human_check\` at the end of a phase), use
 \`mcp__newde__transition_work_items\` with an array of
-\`{batchId, itemId, status}\`. It emits the same side effects (events,
+\`{threadId, itemId, status}\`. It emits the same side effects (events,
 effort open/close) as individual update_work_item calls but avoids N
 round trips.
 
@@ -420,7 +420,7 @@ visibility.
 
 ## For a subagent dispatch
 
-1. Call \`newde__read_work_options\` (batchId=your batch) to get the
+1. Call \`newde__read_work_options\` (threadId=your thread) to get the
    next dispatch unit:
    - \`{ mode: "epic", epic, children }\` — dispatch the whole epic.
    - \`{ mode: "standalone", items }\` — pick one item or a
@@ -446,7 +446,7 @@ visibility.
    - Task-specific context that is **not already in the item
      description** (cross-item coordination, a pointer to a doc the
      description doesn't mention, a decision the user made in chat).
-   - The batchId, so \`get_work_item\` calls have the right scope.
+   - The threadId, so \`get_work_item\` calls have the right scope.
 
    **Do NOT repeat** (a) the item description or acceptance criteria
    verbatim — the subagent pulls them via \`get_work_item\`; (b) the
@@ -459,7 +459,7 @@ visibility.
 
    Example brief (≈60 tokens):
 
-   > Work items in batchId=b-abc123, in order:
+   > Work items in threadId=b-abc123, in order:
    >   1. wi-111 — Slim read_work_options response
    >   2. wi-222 — Update task-management skill language
    >

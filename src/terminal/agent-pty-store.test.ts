@@ -85,7 +85,7 @@ afterEach(() => {
 });
 
 describe("AgentPtyStore", () => {
-  test("ensure spawns once per batch and returns the same pty on re-ensure", () => {
+  test("ensure spawns once per thread and returns the same pty on re-ensure", () => {
     const a = store.ensure("b-1", { command: "x", cwd: "/", cols: 80, rows: 24 });
     const b = store.ensure("b-1", { command: "x", cwd: "/", cols: 80, rows: 24 });
     expect(spawnCount).toBe(1);

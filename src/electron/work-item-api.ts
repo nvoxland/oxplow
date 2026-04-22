@@ -1,4 +1,4 @@
-import type { Batch } from "../persistence/batch-store.js";
+import type { Thread } from "../persistence/thread-store.js";
 import type { AgentTurn, TurnStore } from "../persistence/turn-store.js";
 import type {
   WorkItemEffort,
@@ -6,7 +6,7 @@ import type {
 } from "../persistence/work-item-effort-store.js";
 import type { FileSnapshot, SnapshotStore } from "../persistence/snapshot-store.js";
 import type {
-  BatchWorkState,
+  ThreadWorkState,
   WorkItem,
   WorkItemDetail,
   WorkItemEvent,
@@ -25,7 +25,7 @@ export interface BacklogState {
 }
 
 export interface WorkItemApiDeps {
-  resolveBatch(streamId: string, batchId: string): Batch;
+  resolveThread(streamId: string, threadId: string): Thread;
   workItemStore: WorkItemStore;
   turnStore: TurnStore;
   effortStore: WorkItemEffortStore;
@@ -62,24 +62,24 @@ export interface EffortDetail {
 }
 
 export interface WorkItemApi {
-  getBatchWorkState(streamId: string, batchId: string): BatchWorkState;
-  getWorkItem(streamId: string, batchId: string, itemId: string): WorkItemDetail | null;
-  createWorkItem(streamId: string, batchId: string, input: CreateWorkItemInput): BatchWorkState;
-  updateWorkItem(streamId: string, batchId: string, itemId: string, changes: UpdateWorkItemChanges): BatchWorkState;
-  deleteWorkItem(streamId: string, batchId: string, itemId: string): BatchWorkState;
-  reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): BatchWorkState;
-  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string, toStreamId?: string): { from: BatchWorkState; to: BatchWorkState };
+  getThreadWorkState(streamId: string, threadId: string): ThreadWorkState;
+  getWorkItem(streamId: string, threadId: string, itemId: string): WorkItemDetail | null;
+  createWorkItem(streamId: string, threadId: string, input: CreateWorkItemInput): ThreadWorkState;
+  updateWorkItem(streamId: string, threadId: string, itemId: string, changes: UpdateWorkItemChanges): ThreadWorkState;
+  deleteWorkItem(streamId: string, threadId: string, itemId: string): ThreadWorkState;
+  reorderWorkItems(streamId: string, threadId: string, orderedItemIds: string[]): ThreadWorkState;
+  moveWorkItemToThread(streamId: string, fromThreadId: string, itemId: string, toThreadId: string, toStreamId?: string): { from: ThreadWorkState; to: ThreadWorkState };
   getBacklogState(): BacklogState;
   createBacklogItem(input: CreateWorkItemInput): BacklogState;
   updateBacklogItem(itemId: string, changes: UpdateWorkItemChanges): BacklogState;
   deleteBacklogItem(itemId: string): BacklogState;
   reorderBacklog(orderedItemIds: string[]): BacklogState;
-  moveWorkItemToBacklog(streamId: string, fromBatchId: string, itemId: string): { from: BatchWorkState; backlog: BacklogState };
-  moveBacklogItemToBatch(streamId: string, itemId: string, toBatchId: string): { backlog: BacklogState; to: BatchWorkState };
-  addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): WorkItemEvent[];
-  listWorkItemEvents(streamId: string, batchId: string, itemId?: string): WorkItemEvent[];
+  moveWorkItemToBacklog(streamId: string, fromThreadId: string, itemId: string): { from: ThreadWorkState; backlog: BacklogState };
+  moveBacklogItemToThread(streamId: string, itemId: string, toThreadId: string): { backlog: BacklogState; to: ThreadWorkState };
+  addWorkItemNote(streamId: string, threadId: string, itemId: string, note: string): WorkItemEvent[];
+  listWorkItemEvents(streamId: string, threadId: string, itemId?: string): WorkItemEvent[];
   getWorkNotes(itemId: string): WorkNote[];
-  listAgentTurns(streamId: string, batchId: string, limit?: number): AgentTurn[];
+  listAgentTurns(streamId: string, threadId: string, limit?: number): AgentTurn[];
   listWorkItemEfforts(itemId: string): EffortDetail[];
 }
 
@@ -125,27 +125,27 @@ function buildEffortDetail(
 }
 
 export function createWorkItemApi({
-  resolveBatch,
+  resolveThread,
   workItemStore,
   turnStore,
   effortStore,
   snapshotStore,
 }: WorkItemApiDeps): WorkItemApi {
   return {
-    getBatchWorkState(streamId, batchId) {
-      resolveBatch(streamId, batchId);
-      return workItemStore.getState(batchId);
+    getThreadWorkState(streamId, threadId) {
+      resolveThread(streamId, threadId);
+      return workItemStore.getState(threadId);
     },
 
-    getWorkItem(streamId, batchId, itemId) {
-      resolveBatch(streamId, batchId);
-      return workItemStore.getItemDetail(batchId, itemId);
+    getWorkItem(streamId, threadId, itemId) {
+      resolveThread(streamId, threadId);
+      return workItemStore.getItemDetail(threadId, itemId);
     },
 
-    createWorkItem(streamId, batchId, input) {
-      resolveBatch(streamId, batchId);
+    createWorkItem(streamId, threadId, input) {
+      resolveThread(streamId, threadId);
       workItemStore.createItem({
-        batchId,
+        threadId,
         parentId: input.parentId,
         kind: input.kind,
         title: input.title,
@@ -156,13 +156,13 @@ export function createWorkItemApi({
         createdBy: "user",
         actorId: "ui",
       });
-      return workItemStore.getState(batchId);
+      return workItemStore.getState(threadId);
     },
 
-    updateWorkItem(streamId, batchId, itemId, changes) {
-      resolveBatch(streamId, batchId);
+    updateWorkItem(streamId, threadId, itemId, changes) {
+      resolveThread(streamId, threadId);
       workItemStore.updateItem({
-        batchId,
+        threadId,
         itemId,
         title: changes.title,
         description: changes.description,
@@ -173,28 +173,28 @@ export function createWorkItemApi({
         actorKind: "user",
         actorId: "ui",
       });
-      return workItemStore.getState(batchId);
+      return workItemStore.getState(threadId);
     },
 
-    deleteWorkItem(streamId, batchId, itemId) {
-      resolveBatch(streamId, batchId);
-      workItemStore.deleteItem(batchId, itemId, "user", "ui");
-      return workItemStore.getState(batchId);
+    deleteWorkItem(streamId, threadId, itemId) {
+      resolveThread(streamId, threadId);
+      workItemStore.deleteItem(threadId, itemId, "user", "ui");
+      return workItemStore.getState(threadId);
     },
 
-    reorderWorkItems(streamId, batchId, orderedItemIds) {
-      resolveBatch(streamId, batchId);
-      workItemStore.reorderItems(batchId, orderedItemIds, "user", "ui");
-      return workItemStore.getState(batchId);
+    reorderWorkItems(streamId, threadId, orderedItemIds) {
+      resolveThread(streamId, threadId);
+      workItemStore.reorderItems(threadId, orderedItemIds, "user", "ui");
+      return workItemStore.getState(threadId);
     },
 
-    moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId, toStreamId) {
-      resolveBatch(streamId, fromBatchId);
-      resolveBatch(toStreamId ?? streamId, toBatchId);
-      workItemStore.moveItemToBatch(fromBatchId, itemId, toBatchId, "user", "ui");
+    moveWorkItemToThread(streamId, fromThreadId, itemId, toThreadId, toStreamId) {
+      resolveThread(streamId, fromThreadId);
+      resolveThread(toStreamId ?? streamId, toThreadId);
+      workItemStore.moveItemToThread(fromThreadId, itemId, toThreadId, "user", "ui");
       return {
-        from: workItemStore.getState(fromBatchId),
-        to: workItemStore.getState(toBatchId),
+        from: workItemStore.getState(fromThreadId),
+        to: workItemStore.getState(toThreadId),
       };
     },
 
@@ -240,42 +240,42 @@ export function createWorkItemApi({
       return buildBacklogState(workItemStore);
     },
 
-    moveWorkItemToBacklog(streamId, fromBatchId, itemId) {
-      resolveBatch(streamId, fromBatchId);
-      workItemStore.moveItemToScope(fromBatchId, itemId, null, "user", "ui");
+    moveWorkItemToBacklog(streamId, fromThreadId, itemId) {
+      resolveThread(streamId, fromThreadId);
+      workItemStore.moveItemToScope(fromThreadId, itemId, null, "user", "ui");
       return {
-        from: workItemStore.getState(fromBatchId),
+        from: workItemStore.getState(fromThreadId),
         backlog: buildBacklogState(workItemStore),
       };
     },
 
-    moveBacklogItemToBatch(streamId, itemId, toBatchId) {
-      resolveBatch(streamId, toBatchId);
-      workItemStore.moveItemToScope(null, itemId, toBatchId, "user", "ui");
+    moveBacklogItemToThread(streamId, itemId, toThreadId) {
+      resolveThread(streamId, toThreadId);
+      workItemStore.moveItemToScope(null, itemId, toThreadId, "user", "ui");
       return {
         backlog: buildBacklogState(workItemStore),
-        to: workItemStore.getState(toBatchId),
+        to: workItemStore.getState(toThreadId),
       };
     },
 
-    addWorkItemNote(streamId, batchId, itemId, note) {
-      resolveBatch(streamId, batchId);
-      workItemStore.addNote(batchId, itemId, note, "user", "ui");
-      return workItemStore.listEvents(batchId, itemId);
+    addWorkItemNote(streamId, threadId, itemId, note) {
+      resolveThread(streamId, threadId);
+      workItemStore.addNote(threadId, itemId, note, "user", "ui");
+      return workItemStore.listEvents(threadId, itemId);
     },
 
-    listWorkItemEvents(streamId, batchId, itemId) {
-      resolveBatch(streamId, batchId);
-      return workItemStore.listEvents(batchId, itemId);
+    listWorkItemEvents(streamId, threadId, itemId) {
+      resolveThread(streamId, threadId);
+      return workItemStore.listEvents(threadId, itemId);
     },
 
     getWorkNotes(itemId) {
       return workItemStore.getWorkNotes(itemId);
     },
 
-    listAgentTurns(streamId, batchId, limit) {
-      resolveBatch(streamId, batchId);
-      return turnStore.listForBatch(batchId, limit);
+    listAgentTurns(streamId, threadId, limit) {
+      resolveThread(streamId, threadId);
+      return turnStore.listForThread(threadId, limit);
     },
 
     listWorkItemEfforts(itemId) {

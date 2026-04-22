@@ -62,7 +62,7 @@ export class AgentPty {
   private readonly maxBytes: number;
 
   constructor(
-    readonly batchId: string,
+    readonly threadId: string,
     private readonly pty: IPtyLike,
     opts: { ringBufferBytes?: number; logger?: Logger; onExit?: () => void } = {},
   ) {
@@ -181,31 +181,31 @@ export class AgentPtyStore {
     this.options = options;
   }
 
-  ensure(batchId: string, spec: AgentPtySpec, logger?: Logger): AgentPty {
-    const existing = this.ptys.get(batchId);
+  ensure(threadId: string, spec: AgentPtySpec, logger?: Logger): AgentPty {
+    const existing = this.ptys.get(threadId);
     if (existing && !existing.isClosed) return existing;
     const pty = this.spawn(spec);
-    const agent = new AgentPty(batchId, pty, {
+    const agent = new AgentPty(threadId, pty, {
       ringBufferBytes: this.options.ringBufferBytes,
       logger,
       onExit: () => {
-        this.ptys.delete(batchId);
+        this.ptys.delete(threadId);
       },
     });
-    this.ptys.set(batchId, agent);
+    this.ptys.set(threadId, agent);
     return agent;
   }
 
-  get(batchId: string): AgentPty | null {
-    const agent = this.ptys.get(batchId);
+  get(threadId: string): AgentPty | null {
+    const agent = this.ptys.get(threadId);
     if (!agent || agent.isClosed) return null;
     return agent;
   }
 
-  dispose(batchId: string): void {
-    const agent = this.ptys.get(batchId);
+  dispose(threadId: string): void {
+    const agent = this.ptys.get(threadId);
     if (!agent) return;
-    this.ptys.delete(batchId);
+    this.ptys.delete(threadId);
     agent.dispose();
   }
 

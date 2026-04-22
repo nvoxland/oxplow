@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { Batch, GitFileStatus } from "../../api.js";
+import type { Thread, GitFileStatus } from "../../api.js";
 
 export interface ContextMenuTarget {
   path: string;
@@ -20,7 +20,7 @@ export const smallButtonStyle = {
   fontSize: 12,
 } satisfies CSSProperties;
 
-export const batchInputStyle = {
+export const threadInputStyle = {
   border: "1px solid var(--border)",
   background: "var(--bg)",
   color: "inherit",
@@ -134,7 +134,7 @@ export function statusColor(status: GitFileStatus | null): string {
   }
 }
 
-export function batchStatusColor(status: Batch["status"]) {
+export function threadStatusColor(status: Thread["status"]) {
   switch (status) {
     case "active": return "#86efac";
     case "queued": return "#7dd3fc";

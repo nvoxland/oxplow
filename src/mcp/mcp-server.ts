@@ -15,7 +15,7 @@ const MAX_HTTP_BODY_BYTES = 1_000_000;
 export interface HookEnvelope {
   event: string;
   streamId?: string;
-  batchId?: string;
+  threadId?: string;
   pane?: string;
   payload: unknown;
 }
@@ -158,8 +158,8 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       return;
     }
 
-    const rawBatch = Array.isArray(payload) ? payload : [payload];
-    const candidates = rawBatch
+    const rawThread = Array.isArray(payload) ? payload : [payload];
+    const candidates = rawThread
       .map((entry) => entry as RpcRequest)
       .filter((entry): entry is RpcRequest => !!entry && typeof entry === "object");
     const responses: Array<Record<string, unknown>> = [];
@@ -223,7 +223,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
     const envelope: HookEnvelope = {
       event,
       streamId: readHeader(req, "x-newde-stream"),
-      batchId: readHeader(req, "x-newde-batch"),
+      threadId: readHeader(req, "x-newde-thread"),
       pane: readHeader(req, "x-newde-pane"),
       payload,
     };

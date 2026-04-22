@@ -227,15 +227,15 @@ describe("SnapshotStore", () => {
     });
 
     const db = getStateDatabase(projectDir);
-    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+    if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
       db.run(
-        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
          VALUES ('b-ts', ?, 'T', 'active', 0, '', 0, ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
     db.run(
-      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+      `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
        VALUES ('wi-ts', 'b-ts', 'task', 'Start only task', 'in_progress', 'medium', 'user', ?, ?)`,
       new Date().toISOString(), new Date().toISOString(),
     );
@@ -262,15 +262,15 @@ describe("SnapshotStore", () => {
     });
 
     const db = getStateDatabase(projectDir);
-    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+    if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
       db.run(
-        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
          VALUES ('b-turn', ?, 'T', 'active', 0, '', 0, ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
     db.run(
-      `INSERT INTO agent_turn (id, batch_id, prompt, started_at, ended_at, end_snapshot_id)
+      `INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, end_snapshot_id)
        VALUES ('turn-1', 'b-turn', 'Multi-line prompt\nsecond line here', ?, ?, ?)`,
       new Date().toISOString(), new Date().toISOString(), endSnap.id,
     );
@@ -292,9 +292,9 @@ describe("SnapshotStore", () => {
     });
 
     const db = getStateDatabase(projectDir);
-    if (db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`).length === 0) {
+    if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
       db.run(
-        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
          VALUES ('b-win', ?, 'T', 'active', 0, '', 0, ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
@@ -302,12 +302,12 @@ describe("SnapshotStore", () => {
     // Same snapshot is: (a) an effort's end, (b) another effort's start,
     // (c) a turn's end. Expected winner: effort-end title.
     db.run(
-      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+      `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
        VALUES ('wi-end', 'b-win', 'task', 'Finished task', 'human_check', 'medium', 'user', ?, ?)`,
       new Date().toISOString(), new Date().toISOString(),
     );
     db.run(
-      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+      `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
        VALUES ('wi-start', 'b-win', 'task', 'Starting task', 'in_progress', 'medium', 'user', ?, ?)`,
       new Date().toISOString(), new Date().toISOString(),
     );
@@ -322,7 +322,7 @@ describe("SnapshotStore", () => {
       new Date().toISOString(), snap.id,
     );
     db.run(
-      `INSERT INTO agent_turn (id, batch_id, prompt, started_at, ended_at, end_snapshot_id)
+      `INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, end_snapshot_id)
        VALUES ('turn-x', 'b-win', 'Prompt', ?, ?, ?)`,
       new Date().toISOString(), new Date().toISOString(), snap.id,
     );
@@ -346,21 +346,21 @@ describe("SnapshotStore", () => {
     });
 
     const db = getStateDatabase(projectDir);
-    const batchRows = db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`);
-    if (batchRows.length === 0) {
+    const threadRows = db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`);
+    if (threadRows.length === 0) {
       db.run(
-        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
          VALUES ('b-tie', ?, 'T', 'active', 0, '', 0, ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
-    const batchId = batchRows[0]?.id ?? "b-tie";
+    const threadId = threadRows[0]?.id ?? "b-tie";
     // Two work items + two efforts, both ending at the same snapshot.
     for (const [wi, title] of [["wi-older", "Older task"], ["wi-newer", "Newer task"]] as const) {
       db.run(
-        `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+        `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
          VALUES (?, ?, 'task', ?, 'human_check', 'medium', 'user', ?, ?)`,
-        wi, batchId, title, new Date().toISOString(), new Date().toISOString(),
+        wi, threadId, title, new Date().toISOString(), new Date().toISOString(),
       );
     }
     db.run(
@@ -393,24 +393,24 @@ describe("SnapshotStore", () => {
 
     // Simulate: an effort has this snapshot as its end_snapshot_id.
     const db = getStateDatabase(projectDir);
-    // Need a batch + work_item for the effort FK. Use the BatchStore API via
+    // Need a thread + work_item for the effort FK. Use the ThreadStore API via
     // direct SQL to keep the test independent of it.
-    const batchRows = db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`);
-    if (batchRows.length === 0) {
-      // The seed doesn't create a batch — insert a minimal one for the FK.
+    const threadRows = db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`);
+    if (threadRows.length === 0) {
+      // The seed doesn't create a thread — insert a minimal one for the FK.
       db.run(
-        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
          VALUES ('b-test', ?, 'T', 'active', 0, '', 0, ?, ?)`,
         streamId,
         new Date().toISOString(),
         new Date().toISOString(),
       );
     }
-    const batchId = batchRows[0]?.id ?? "b-test";
+    const threadId = threadRows[0]?.id ?? "b-test";
     db.run(
-      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+      `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
        VALUES ('wi-ship-it', ?, 'task', 'Ship the thing', 'human_check', 'medium', 'user', ?, ?)`,
-      batchId,
+      threadId,
       new Date().toISOString(),
       new Date().toISOString(),
     );

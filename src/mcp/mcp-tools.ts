@@ -1,5 +1,5 @@
 import type { ToolDef } from "./mcp-server.js";
-import type { BatchStore, Batch } from "../persistence/batch-store.js";
+import type { ThreadStore, Thread } from "../persistence/thread-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
 import type { TurnStore } from "../persistence/turn-store.js";
 import type {
@@ -13,17 +13,17 @@ import type { WaitPointStore } from "../persistence/wait-point-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
-  /** Batch-id-only lookup. Tools accept `batchId` alone; streamId is derived
-   *  from the batch row. Handles the case where the agent's prompt
-   *  streamId drifted out of sync with reality (the old `resolveBatch`
+  /** Thread-id-only lookup. Tools accept `threadId` alone; streamId is derived
+   *  from the thread row. Handles the case where the agent's prompt
+   *  streamId drifted out of sync with reality (the old `resolveThread`
    *  required both args and threw). */
-  resolveBatchById(batchId: string): Batch;
-  batchStore: BatchStore;
+  resolveThreadById(threadId: string): Thread;
+  threadStore: ThreadStore;
   streamStore: StreamStore;
   workItemStore: WorkItemStore;
   commitPointStore: CommitPointStore;
   /** Synchronously run `git commit` for a commit point (message is the final
-   *  text the user approved). Wired by the runtime to the batch queue
+   *  text the user approved). Wired by the runtime to the thread queue
    *  orchestrator; thrown errors bubble back to the agent so it can retry. */
   executeCommit(cpId: string, message: string): CommitPoint;
   turnStore: TurnStore;
@@ -69,103 +69,103 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveBatchById, batchStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, turnStore } = deps;
 
-  // Prefer the batch row's own stream_id over whatever streamId the caller
-  // passed (or didn't). Returns { batch, stream } — both guaranteed to agree
-  // on stream_id. Throws "unknown batch: …" if the batchId doesn't exist.
-  function resolveBatchAndStream(args: { streamId?: string; batchId: string }): { batch: Batch; stream: Stream } {
-    const batch = resolveBatchById(args.batchId);
-    const stream = resolveStream(batch.stream_id);
-    return { batch, stream };
+  // Prefer the thread row's own stream_id over whatever streamId the caller
+  // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
+  // on stream_id. Throws "unknown thread: …" if the threadId doesn't exist.
+  function resolveThreadAndStream(args: { streamId?: string; threadId: string }): { thread: Thread; stream: Stream } {
+    const thread = resolveThreadById(args.threadId);
+    const stream = resolveStream(thread.stream_id);
+    return { thread, stream };
   }
 
   return [
     {
-      name: "newde__get_batch_context",
-      description: "Return stream and batch context. Use this to confirm the active batch id before calling work-item tools.",
+      name: "newde__get_thread_context",
+      description: "Return stream and thread context. Use this to confirm the active thread id before calling work-item tools.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Optional batch id to resolve within the stream." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Optional thread id to resolve within the stream." },
         },
       },
-      handler: (args: { streamId?: string; batchId?: string }) => {
-        // When the caller names a batchId, derive stream from the batch row
+      handler: (args: { streamId?: string; threadId?: string }) => {
+        // When the caller names a threadId, derive stream from the thread row
         // itself — the agent's prompt streamId may have drifted. Without
-        // batchId, fall back to the current-stream default.
-        const { stream, batch: explicitBatch } = args.batchId
+        // threadId, fall back to the current-stream default.
+        const { stream, thread: explicitThread } = args.threadId
           ? (() => {
-              const b = resolveBatchById(args.batchId!);
-              return { stream: resolveStream(b.stream_id), batch: b };
+              const b = resolveThreadById(args.threadId!);
+              return { stream: resolveStream(b.stream_id), thread: b };
             })()
-          : { stream: resolveStream(args.streamId), batch: null as Batch | null };
-        const batchState = batchStore.list(stream.id);
-        const batch = explicitBatch
-          ?? batchState.batches.find((candidate) => candidate.id === batchState.selectedBatchId)
-          ?? batchState.batches[0]
+          : { stream: resolveStream(args.streamId), thread: null as Thread | null };
+        const threadState = threadStore.list(stream.id);
+        const thread = explicitThread
+          ?? threadState.threads.find((candidate) => candidate.id === threadState.selectedThreadId)
+          ?? threadState.threads[0]
           ?? null;
         // Cross-stream snapshot — lets the agent notice that "current
         // stream" may have drifted from where it actually writes. Each
-        // entry is the would-be active batch in a peer stream (falling
-        // back to the first batch if nothing's active yet).
-        const otherActiveBatches = streamStore.list()
+        // entry is the would-be active thread in a peer stream (falling
+        // back to the first thread if nothing's active yet).
+        const otherActiveThreads = streamStore.list()
           .filter((s) => s.id !== stream.id)
           .map((peer) => {
-            const peerState = batchStore.list(peer.id);
-            const peerActive = peerState.batches.find((b) => b.id === peerState.activeBatchId)
-              ?? peerState.batches[0]
+            const peerState = threadStore.list(peer.id);
+            const peerActive = peerState.threads.find((b) => b.id === peerState.activeThreadId)
+              ?? peerState.threads[0]
               ?? null;
             return {
               streamId: peer.id,
               streamTitle: peer.title,
-              batchId: peerActive?.id ?? null,
-              batchTitle: peerActive?.title ?? null,
-              activeBatchId: peerState.activeBatchId,
+              threadId: peerActive?.id ?? null,
+              threadTitle: peerActive?.title ?? null,
+              activeThreadId: peerState.activeThreadId,
             };
           });
         return {
           streamId: stream.id,
           streamTitle: stream.title,
-          batchId: batch?.id ?? null,
-          batchTitle: batch?.title ?? null,
-          activeBatchId: batchState.activeBatchId,
-          selectedBatchId: batchState.selectedBatchId,
-          otherActiveBatches,
+          threadId: thread?.id ?? null,
+          threadTitle: thread?.title ?? null,
+          activeThreadId: threadState.activeThreadId,
+          selectedThreadId: threadState.selectedThreadId,
+          otherActiveThreads,
         };
       },
     },
     {
-      name: "newde__list_batch_work",
-      description: "List all tracked work items for one batch, grouped by waiting/in progress/done. Always pass the batchId from your session context.",
+      name: "newde__list_thread_work",
+      description: "List all tracked work items for one thread, grouped by waiting/in progress/done. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
         },
-        required: ["batchId"],
+        required: ["threadId"],
       },
-      handler: (args: { streamId?: string; batchId: string }) => {
-        resolveBatchAndStream(args);
-        return workItemStore.getState(args.batchId);
+      handler: (args: { streamId?: string; threadId: string }) => {
+        resolveThreadAndStream(args);
+        return workItemStore.getState(args.threadId);
       },
     },
     {
       name: "newde__list_ready_work",
-      description: "List actionable work items in one batch that are not blocked by unfinished dependencies. Always pass the batchId from your session context.",
+      description: "List actionable work items in one thread that are not blocked by unfinished dependencies. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
         },
-        required: ["batchId"],
+        required: ["threadId"],
       },
-      handler: (args: { streamId?: string; batchId: string }) => {
-        resolveBatchAndStream(args);
-        return workItemStore.listReady(args.batchId).map((i) => ({
+      handler: (args: { streamId?: string; threadId: string }) => {
+        resolveThreadAndStream(args);
+        return workItemStore.listReady(args.threadId).map((i) => ({
           id: i.id,
           title: i.title,
           kind: i.kind,
@@ -177,28 +177,28 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__read_work_options",
-      description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items so you can pick one or a related cluster to dispatch. Always pass the batchId from your session context. By default returns a slim shape (id, title, kind, priority, parent_id, status, sort_index) for scanning — call `get_work_item` per id when composing a dispatch brief, or pass `full=true` for the verbose shape (adds description, acceptance_criteria, and link edges).",
+      description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items so you can pick one or a related cluster to dispatch. Always pass the threadId from your session context. By default returns a slim shape (id, title, kind, priority, parent_id, status, sort_index) for scanning — call `get_work_item` per id when composing a dispatch brief, or pass `full=true` for the verbose shape (adds description, acceptance_criteria, and link edges).",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           full: { type: "boolean", description: "Optional. When true, include description, acceptance_criteria, and link edges on every item. Default false returns the slim scanning shape." },
         },
-        required: ["batchId"],
+        required: ["threadId"],
       },
-      handler: (args: { streamId?: string; batchId: string; full?: boolean }) => {
-        resolveBatchAndStream(args);
+      handler: (args: { streamId?: string; threadId: string; full?: boolean }) => {
+        resolveThreadAndStream(args);
         // Stop the dispatch unit at the first pending commit or wait point so
         // the subagent never works across a queue boundary it shouldn't cross.
-        const commitCutoff = commitPointStore.listForBatch(args.batchId)
+        const commitCutoff = commitPointStore.listForThread(args.threadId)
           .filter((cp) => cp.status !== "done")
           .map((cp) => cp.sort_index)[0] ?? Infinity;
-        const waitCutoff = waitPointStore.listForBatch(args.batchId)
+        const waitCutoff = waitPointStore.listForThread(args.threadId)
           .filter((wp) => wp.status === "pending")
           .map((wp) => wp.sort_index)[0] ?? Infinity;
         const cutoff = Math.min(commitCutoff, waitCutoff);
-        const result = workItemStore.readWorkOptions(args.batchId, cutoff < Infinity ? cutoff : undefined);
+        const result = workItemStore.readWorkOptions(args.threadId, cutoff < Infinity ? cutoff : undefined);
         if (result.mode === "empty") return { mode: "empty" };
         const full = args.full === true;
         if (result.mode === "epic") {
@@ -284,13 +284,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__create_work_item",
-      description: "Create a new epic/task/subtask/bug/note within one batch. Always pass the batchId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags.",
+      description: "Create a new epic/task/subtask/bug/note within one thread. Always pass the threadId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
-          parentId: { type: "string", description: "Optional parent epic/task id in the same batch." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
+          parentId: { type: "string", description: "Optional parent epic/task id in the same thread." },
           kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
           title: { type: "string", description: "Short title for the work item." },
           description: { type: "string", description: "Optional longer description of the approach." },
@@ -298,11 +298,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           status: { type: "string", description: "Optional initial status. One of: ready, in_progress, human_check, blocked, done, canceled, archived." },
           priority: { type: "string", description: "Optional priority: low, medium, high, or urgent." },
         },
-        required: ["batchId", "kind", "title"],
+        required: ["threadId", "kind", "title"],
       },
       handler: (args: {
         streamId?: string;
-        batchId: string;
+        threadId: string;
         parentId?: string;
         kind: WorkItemKind;
         title: string;
@@ -311,7 +311,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
       }) => {
-        resolveBatchAndStream(args);
+        resolveThreadAndStream(args);
         // Silent-failure guard: agents sometimes cram the acceptance
         // checklist into `description` instead of the dedicated top-level
         // `acceptanceCriteria` field. The DB accepts it either way, so the
@@ -324,7 +324,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           };
         }
         const item = workItemStore.createItem({
-          batchId: args.batchId,
+          threadId: args.threadId,
           parentId: args.parentId,
           kind: args.kind,
           title: args.title,
@@ -355,12 +355,12 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__update_work_item",
-      description: "Update title, description, acceptance criteria, status, priority, or parent of an existing work item in one batch. Always pass the batchId from your session context.",
+      description: "Update title, description, acceptance criteria, status, priority, or parent of an existing work item in one thread. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           itemId: { type: "string", description: "Required id of the work item to update." },
           parentId: { type: "string", description: "Optional new parent epic/task id." },
           title: { type: "string", description: "Optional replacement title." },
@@ -374,11 +374,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             items: { type: "string" },
           },
         },
-        required: ["batchId", "itemId"],
+        required: ["threadId", "itemId"],
       },
       handler: (args: {
         streamId?: string;
-        batchId: string;
+        threadId: string;
         itemId: string;
         parentId?: string | null;
         title?: string;
@@ -388,9 +388,9 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         priority?: WorkItemPriority;
         touchedFiles?: string[];
       }) => {
-        resolveBatchAndStream(args);
+        resolveThreadAndStream(args);
         const item = workItemStore.updateItem({
-          batchId: args.batchId,
+          threadId: args.threadId,
           itemId: args.itemId,
           parentId: args.parentId,
           title: args.title,
@@ -422,35 +422,35 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             items: {
               type: "object",
               properties: {
-                batchId: { type: "string", description: "Batch that owns the item. Usually the same for every entry." },
+                threadId: { type: "string", description: "Thread that owns the item. Usually the same for every entry." },
                 itemId: { type: "string", description: "Id of the item to transition." },
                 status: { type: "string", description: "New status. Same enum as update_work_item.status." },
               },
-              required: ["batchId", "itemId", "status"],
+              required: ["threadId", "itemId", "status"],
             },
           },
         },
         required: ["transitions"],
       },
       handler: (args: {
-        transitions: Array<{ batchId: string; itemId: string; status: WorkItemStatus }>;
+        transitions: Array<{ threadId: string; itemId: string; status: WorkItemStatus }>;
       }) => {
         if (!Array.isArray(args.transitions) || args.transitions.length === 0) {
           throw new Error("transition_work_items: `transitions` must be a non-empty array");
         }
-        // Resolve each batch once up front so an invalid batchId fails the
-        // whole call before any side effects. Cache validated batches.
-        const validatedBatches = new Set<string>();
+        // Resolve each thread once up front so an invalid threadId fails the
+        // whole call before any side effects. Cache validated threads.
+        const validatedThreads = new Set<string>();
         for (const t of args.transitions) {
-          if (!validatedBatches.has(t.batchId)) {
-            resolveBatchAndStream({ batchId: t.batchId });
-            validatedBatches.add(t.batchId);
+          if (!validatedThreads.has(t.threadId)) {
+            resolveThreadAndStream({ threadId: t.threadId });
+            validatedThreads.add(t.threadId);
           }
         }
         const results: Array<{ id: string; status: WorkItemStatus }> = [];
         for (const t of args.transitions) {
           const item = workItemStore.updateItem({
-            batchId: t.batchId,
+            threadId: t.threadId,
             itemId: t.itemId,
             status: t.status,
             actorKind: "agent",
@@ -463,19 +463,19 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__get_work_item",
-      description: "Fetch one work item plus its links (incoming + outgoing) and recent audit events. Use when resuming work on an item and you need the full context without pulling the whole batch.",
+      description: "Fetch one work item plus its links (incoming + outgoing) and recent audit events. Use when resuming work on an item and you need the full context without pulling the whole thread.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id." },
           itemId: { type: "string", description: "Required id of the work item to fetch." },
         },
-        required: ["batchId", "itemId"],
+        required: ["threadId", "itemId"],
       },
-      handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
-        resolveBatchAndStream(args);
-        const detail = workItemStore.getItemDetail(args.batchId, args.itemId, 5);
+      handler: (args: { streamId?: string; threadId: string; itemId: string }) => {
+        resolveThreadAndStream(args);
+        const detail = workItemStore.getItemDetail(args.threadId, args.itemId, 5);
         if (!detail) throw new Error(`unknown work item: ${args.itemId}`);
         return {
           ...detail,
@@ -489,44 +489,44 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           itemId: { type: "string", description: "Required id of the work item to delete." },
         },
-        required: ["batchId", "itemId"],
+        required: ["threadId", "itemId"],
       },
-      handler: (args: { streamId?: string; batchId: string; itemId: string }) => {
-        resolveBatchAndStream(args);
-        workItemStore.deleteItem(args.batchId, args.itemId, "agent", "mcp");
+      handler: (args: { streamId?: string; threadId: string; itemId: string }) => {
+        resolveThreadAndStream(args);
+        workItemStore.deleteItem(args.threadId, args.itemId, "agent", "mcp");
         return { ok: true };
       },
     },
     {
       name: "newde__reorder_work_items",
-      description: "Reorder sibling work items within a batch. All ids must share the same parent.",
+      description: "Reorder sibling work items within a thread. All ids must share the same parent.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           orderedItemIds: {
             type: "array",
             description: "Full list of sibling work item ids in the desired new order.",
             items: { type: "string" },
           },
         },
-        required: ["batchId", "orderedItemIds"],
+        required: ["threadId", "orderedItemIds"],
       },
-      handler: (args: { streamId?: string; batchId: string; orderedItemIds: string[] }) => {
-        resolveBatchAndStream(args);
-        workItemStore.reorderItems(args.batchId, args.orderedItemIds, "agent", "mcp");
+      handler: (args: { streamId?: string; threadId: string; orderedItemIds: string[] }) => {
+        resolveThreadAndStream(args);
+        workItemStore.reorderItems(args.threadId, args.orderedItemIds, "agent", "mcp");
         return { ok: true };
       },
     },
     {
       name: "newde__link_work_items",
       description:
-        "Create a relationship between two work items in one batch. linkType is one of: " +
+        "Create a relationship between two work items in one thread. linkType is one of: " +
         "`blocks` (from-item must finish before to-item starts), " +
         "`relates_to` (general association), " +
         "`discovered_from` (from-item was uncovered while working on to-item; preferred for scope-creep escape), " +
@@ -536,60 +536,60 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           fromItemId: { type: "string", description: "Source work item id." },
           toItemId: { type: "string", description: "Target work item id." },
           linkType: { type: "string", description: "One of blocks, relates_to, discovered_from, duplicates, supersedes, replies_to." },
         },
-        required: ["batchId", "fromItemId", "toItemId", "linkType"],
+        required: ["threadId", "fromItemId", "toItemId", "linkType"],
       },
       handler: (args: {
         streamId?: string;
-        batchId: string;
+        threadId: string;
         fromItemId: string;
         toItemId: string;
         linkType: "blocks" | "relates_to" | "discovered_from" | "duplicates" | "supersedes" | "replies_to";
       }) => {
-        resolveBatchAndStream(args);
-        workItemStore.linkItems(args.batchId, args.fromItemId, args.toItemId, args.linkType);
+        resolveThreadAndStream(args);
+        workItemStore.linkItems(args.threadId, args.fromItemId, args.toItemId, args.linkType);
         return { ok: true };
       },
     },
     {
       name: "newde__list_agent_turn",
       description:
-        "List recent agent turns for a batch (newest first). Each turn represents one user prompt and the agent's Stop-terminated response, with the snapshot summary and optionally a single in-progress work item it was attributed to.",
+        "List recent agent turns for a thread (newest first). Each turn represents one user prompt and the agent's Stop-terminated response, with the snapshot summary and optionally a single in-progress work item it was attributed to.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id." },
           limit: { type: "number", description: "Optional cap on the number of turns returned (default 50)." },
         },
-        required: ["batchId"],
+        required: ["threadId"],
       },
-      handler: (args: { streamId?: string; batchId: string; limit?: number }) => {
-        resolveBatchAndStream(args);
-        return turnStore.listForBatch(args.batchId, args.limit);
+      handler: (args: { streamId?: string; threadId: string; limit?: number }) => {
+        resolveThreadAndStream(args);
+        return turnStore.listForThread(args.threadId, args.limit);
       },
     },
     {
       name: "newde__add_work_note",
-      description: "Append a note/history entry to a work item in one batch. Always pass the batchId from your session context.",
+      description: "Append a note/history entry to a work item in one thread. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id for the work you are managing." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id for the work you are managing." },
           itemId: { type: "string", description: "Optional work item id if the note belongs to one specific item." },
           note: { type: "string", description: "Required note content." },
         },
-        required: ["batchId", "note"],
+        required: ["threadId", "note"],
       },
-      handler: (args: { streamId?: string; batchId: string; itemId?: string; note: string }) => {
-        resolveBatchAndStream(args);
-        workItemStore.addNote(args.batchId, args.itemId ?? null, args.note, "agent", "mcp");
+      handler: (args: { streamId?: string; threadId: string; itemId?: string; note: string }) => {
+        resolveThreadAndStream(args);
+        workItemStore.addNote(args.threadId, args.itemId ?? null, args.note, "agent", "mcp");
         return { ok: true };
       },
     },
@@ -612,18 +612,18 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "newde__list_commit_points",
-      description: "List commit points for a batch, ordered by their position in the work queue.",
+      description: "List commit points for a thread, ordered by their position in the work queue.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from batchId when omitted; only passed explicitly for the no-batchId form of get_batch_context." },
-          batchId: { type: "string", description: "Required batch id." },
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
+          threadId: { type: "string", description: "Required thread id." },
         },
-        required: ["batchId"],
+        required: ["threadId"],
       },
-      handler: (args: { streamId?: string; batchId: string }) => {
-        resolveBatchAndStream(args);
-        return { commitPoints: commitPointStore.listForBatch(args.batchId) };
+      handler: (args: { streamId?: string; threadId: string }) => {
+        resolveThreadAndStream(args);
+        return { commitPoints: commitPointStore.listForThread(args.threadId) };
       },
     },
   ];

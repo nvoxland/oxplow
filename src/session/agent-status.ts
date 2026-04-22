@@ -2,7 +2,7 @@ import type { StoredEvent } from "./hook-ingest.js";
 
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 
-export function deriveBatchAgentStatus(events: readonly StoredEvent[]): AgentStatus {
+export function deriveThreadAgentStatus(events: readonly StoredEvent[]): AgentStatus {
   // Fold chronological events into a running status. We only care about the
   // last status-relevant event; any event of a given kind subsumes earlier
   // ones. `meta` events never change status.

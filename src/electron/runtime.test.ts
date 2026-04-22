@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
-import { BatchStore } from "../persistence/batch-store.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
 import { TurnStore } from "../persistence/turn-store.js";
@@ -11,12 +11,12 @@ import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
 import type { McpServerHandle } from "../mcp/mcp-server.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
-import type { BatchStatus } from "../persistence/batch-store.js";
+import type { ThreadStatus } from "../persistence/thread-store.js";
 
 function workItem(id: string, status: WorkItemStatus, title = id): WorkItem {
   return {
     id,
-    batch_id: "b1",
+    thread_id: "b1",
     parent_id: null,
     kind: "task" as WorkItemKind,
     title,
@@ -46,8 +46,8 @@ function fakeMcp(overrides: Partial<McpServerHandle> = {}): McpServerHandle {
   };
 }
 
-test("buildBatchMcpConfig points Claude at the shared HTTP MCP endpoint", () => {
-  const config = JSON.parse(buildBatchMcpConfig(fakeMcp()));
+test("buildThreadMcpConfig points Claude at the shared HTTP MCP endpoint", () => {
+  const config = JSON.parse(buildThreadMcpConfig(fakeMcp()));
   expect(config.mcpServers.newde).toEqual({
     type: "http",
     url: "http://127.0.0.1:43123/mcp",
@@ -57,18 +57,18 @@ test("buildBatchMcpConfig points Claude at the shared HTTP MCP endpoint", () => 
   });
 });
 
-test("buildBatchMcpConfig only declares the newde server", () => {
-  const config = JSON.parse(buildBatchMcpConfig(fakeMcp()));
+test("buildThreadMcpConfig only declares the newde server", () => {
+  const config = JSON.parse(buildThreadMcpConfig(fakeMcp()));
   expect(Object.keys(config.mcpServers)).toEqual(["newde"]);
 });
 
-test("buildBatchMcpConfig embeds the exact bearer format", () => {
-  const config = JSON.parse(buildBatchMcpConfig(fakeMcp({ authToken: "abc.def-ghi" })));
+test("buildThreadMcpConfig embeds the exact bearer format", () => {
+  const config = JSON.parse(buildThreadMcpConfig(fakeMcp({ authToken: "abc.def-ghi" })));
   expect(config.mcpServers.newde.headers.Authorization).toBe("Bearer abc.def-ghi");
 });
 
-test("buildBatchMcpConfig throws when the MCP server is not running", () => {
-  expect(() => buildBatchMcpConfig(null)).toThrow("mcp server not started");
+test("buildThreadMcpConfig throws when the MCP server is not running", () => {
+  expect(() => buildThreadMcpConfig(null)).toThrow("mcp server not started");
 });
 
 test("describeHookHealth emits nothing when every registered hook delivered", () => {
@@ -93,37 +93,37 @@ test("describeHookHealth emits the generic hint for other undelivered hooks", ()
   }
 });
 
-test("buildSessionContextBlock renders stream, batch, and writer distinction for a read-only batch", () => {
+test("buildSessionContextBlock renders stream, thread, and writer distinction for a read-only thread", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Bugfixes" },
-    batch: { id: "b-2", title: "Second" },
-    activeBatch: { id: "b-1", title: "Writer" },
+    thread: { id: "b-2", title: "Second" },
+    activeThread: { id: "b-1", title: "Writer" },
   });
   expect(out).toContain("stream: \"Bugfixes\" (id: s-1)");
-  expect(out).toContain("batch:  \"Second\" (id: b-2)");
-  expect(out).toContain("writer: \"Writer\" (id: b-1) — your batch is read-only");
+  expect(out).toContain("thread:  \"Second\" (id: b-2)");
+  expect(out).toContain("writer: \"Writer\" (id: b-1) — your thread is read-only");
   expect(out).toMatch(/^<session-context>/);
   expect(out).toMatch(/<\/session-context>$/);
 });
 
-test("buildSessionContextBlock tells the agent it IS the writer when its batch matches activeBatch", () => {
+test("buildSessionContextBlock tells the agent it IS the writer when its thread matches activeThread", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-1", title: "Default" },
-    activeBatch: { id: "b-1", title: "Default" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
   });
   expect(out).toContain("writer: (you)");
   expect(out).not.toContain("read-only");
 });
 
-test("buildSessionContextBlock treats a missing active batch as \"you're the writer\" (no active yet)", () => {
-  // Rationale: the stores always return some activeBatch today, but the
+test("buildSessionContextBlock treats a missing active thread as \"you're the writer\" (no active yet)", () => {
+  // Rationale: the stores always return some activeThread today, but the
   // prompt shouldn't break if one day they don't. "You're the writer" is
   // the safe fallback — same behaviour as the pre-fix system prompt used.
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-1", title: "Default" },
-    activeBatch: null,
+    thread: { id: "b-1", title: "Default" },
+    activeThread: null,
   });
   expect(out).toContain("writer: (you)");
 });
@@ -131,22 +131,22 @@ test("buildSessionContextBlock treats a missing active batch as \"you're the wri
 test("buildSessionContextBlock emits no ROLE CHANGE banner when initialRole matches current role", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-1", title: "Default" },
-    activeBatch: { id: "b-1", title: "Default" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
     initialRole: "writer",
   });
   expect(out).not.toContain("ROLE CHANGE");
 });
 
-test("buildSessionContextBlock emits a read-only → writer ROLE CHANGE banner when the batch was read-only at session start and is now the writer", () => {
+test("buildSessionContextBlock emits a read-only → writer ROLE CHANGE banner when the thread was read-only at session start and is now the writer", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-2", title: "Mine" },
-    activeBatch: { id: "b-2", title: "Mine" },
+    thread: { id: "b-2", title: "Mine" },
+    activeThread: { id: "b-2", title: "Mine" },
     initialRole: "read-only",
   });
   expect(out).toContain("ROLE CHANGE");
-  expect(out).toContain("this batch was read-only when the session started");
+  expect(out).toContain("this thread was read-only when the session started");
   expect(out).toContain("it is now the active writer");
   expect(out).toContain("NON_WRITER block in your initial system prompt is SUPERSEDED");
   // Banner sits before the closing tag.
@@ -155,15 +155,15 @@ test("buildSessionContextBlock emits a read-only → writer ROLE CHANGE banner w
   expect(bannerIdx).toBeLessThan(closeIdx);
 });
 
-test("buildSessionContextBlock emits a writer → read-only ROLE CHANGE banner when the batch was the writer at session start and is now read-only", () => {
+test("buildSessionContextBlock emits a writer → read-only ROLE CHANGE banner when the thread was the writer at session start and is now read-only", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-2", title: "Mine" },
-    activeBatch: { id: "b-1", title: "Other" },
+    thread: { id: "b-2", title: "Mine" },
+    activeThread: { id: "b-1", title: "Other" },
     initialRole: "writer",
   });
   expect(out).toContain("ROLE CHANGE");
-  expect(out).toContain("this batch was the active writer when the session started");
+  expect(out).toContain("this thread was the active writer when the session started");
   expect(out).toContain("it is now read-only");
   expect(out).toContain("NON_WRITER block applies now even though it wasn't in your initial system prompt");
 });
@@ -171,15 +171,15 @@ test("buildSessionContextBlock emits a writer → read-only ROLE CHANGE banner w
 test("buildSessionContextBlock omits ROLE CHANGE when initialRole is not supplied (backwards compatible)", () => {
   const out = buildSessionContextBlock({
     stream: { id: "s-1", title: "Main" },
-    batch: { id: "b-1", title: "Default" },
-    activeBatch: { id: "b-1", title: "Default" },
+    thread: { id: "b-1", title: "Default" },
+    activeThread: { id: "b-1", title: "Default" },
   });
   expect(out).not.toContain("ROLE CHANGE");
 });
 
 test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context.uiChangeNudge is true", () => {
   const text = buildNextWorkItemStopReason(
-    { id: "wi-x", title: "do", kind: "task", batch_id: "b-y" },
+    { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
     "s-z",
     { uiChangeNudge: true },
   );
@@ -192,23 +192,23 @@ test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context
 
 test("buildNextWorkItemStopReason omits the nudge banner when uiChangeNudge is false / absent", () => {
   const text = buildNextWorkItemStopReason(
-    { id: "wi-x", title: "do", kind: "task", batch_id: "b-y" },
+    { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
     "s-z",
     {},
   );
   expect(text).not.toContain("UI change detected");
-  expect(text).toMatch(/^The batch queue has ready work/);
+  expect(text).toMatch(/^The thread queue has ready work/);
 });
 
 test("buildNextWorkItemStopReason directs the agent to call read_work_options and dispatch a subagent", () => {
   const text = buildNextWorkItemStopReason(
-    { id: "wi-abc", title: "Do the thing", kind: "task", batch_id: "b-xyz" },
+    { id: "wi-abc", title: "Do the thing", kind: "task", thread_id: "b-xyz" },
     "s-123",
   );
   expect(text).toContain("read_work_options");
   expect(text).toContain("general-purpose");
-  // batch_id is embedded in the read_work_options call so the agent can pass the right batchId.
-  expect(text).toMatch(/batchId="b-xyz"/);
+  // thread_id is embedded in the read_work_options call so the agent can pass the right threadId.
+  expect(text).toMatch(/threadId="b-xyz"/);
   // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
   // newde-task-dispatch skill — the directive just points at it to stay terse.
   expect(text).toContain("newde-task-dispatch");
@@ -319,19 +319,19 @@ test("shouldAcceptHookFilePath: rejects paths that resolve outside the worktree"
 test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit point blocks", async () => {
   // Import the pure pipeline function directly — no need for the full runtime.
   const { decideStopDirective } = await import("./stop-hook-pipeline.js");
-  const { default: batchFactory } = await Promise.resolve({ default: (overrides = {}) => ({
-    id: "b1", stream_id: "s1", title: "B", status: "active" as BatchStatus, sort_index: 0,
+  const { default: threadFactory } = await Promise.resolve({ default: (overrides = {}) => ({
+    id: "b1", stream_id: "s1", title: "B", status: "active" as ThreadStatus, sort_index: 0,
     pane_target: "p", resume_session_id: "", auto_commit: false, custom_prompt: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
   }) });
   const cp = {
-    id: "cp1", batch_id: "b1", sort_index: 1, mode: "approve" as const,
+    id: "cp1", thread_id: "b1", sort_index: 1, mode: "approve" as const,
     status: "pending" as const, commit_sha: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", completed_at: null,
   };
   const out = decideStopDirective(
-    { batch: batchFactory(), commitPoints: [cp], waitPoints: [], workItems: [], readyWorkItems: [] },
+    { thread: threadFactory(), commitPoints: [cp], waitPoints: [], workItems: [], readyWorkItems: [] },
     { buildCommitPointReason: (c) => `commit: ${c.id}`, buildNextWorkItemReason: (i) => `next: ${i.id}` },
   );
   expect(out.directive?.decision).toBe("block");
@@ -347,9 +347,9 @@ function seedHistoryHarness() {
     worktreePath: dir,
     projectBase: "demo",
   });
-  const batchStore = new BatchStore(dir);
-  const state = batchStore.ensureStream(stream);
-  const batchId = state.batches[0]!.id;
+  const threadStore = new ThreadStore(dir);
+  const state = threadStore.ensureStream(stream);
+  const threadId = state.threads[0]!.id;
   const workItems = new WorkItemStore(dir);
   const turnStore = new TurnStore(dir);
   const effortStore = new WorkItemEffortStore(dir);
@@ -379,20 +379,20 @@ function seedHistoryHarness() {
     });
     return result.id;
   };
-  return { dir, stream, streamStore, batchStore, batchId, workItems, turnStore, effortStore, snapshotStore, flushSnapshot };
+  return { dir, stream, streamStore, threadStore, threadId, workItems, turnStore, effortStore, snapshotStore, flushSnapshot };
 }
 
 describe("history-tracking runtime wiring", () => {
   test("status → in_progress opens an effort with a start_snapshot_id", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" },
+      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
     const open = h.effortStore.getOpenEffort(item.id);
     expect(open).not.toBeNull();
@@ -404,18 +404,18 @@ describe("history-tracking runtime wiring", () => {
   test("in_progress → human_check closes the effort with an end_snapshot_id", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" },
+      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
     writeFileSync(join(h.dir, "a.txt"), "v2");
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: item.id, previous: "in_progress", next: "human_check" },
+      { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "human_check" },
     );
     expect(h.effortStore.getOpenEffort(item.id)).toBeNull();
     const all = h.effortStore.listEffortsForWorkItem(item.id);
@@ -428,17 +428,17 @@ describe("history-tracking runtime wiring", () => {
   test("reopening a task creates a second independent effort", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
     writeFileSync(join(h.dir, "a.txt"), "v1");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "v2");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "human_check" });
     writeFileSync(join(h.dir, "a.txt"), "v3");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "human_check", next: "ready" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "human_check", next: "ready" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
     expect(h.effortStore.listEffortsForWorkItem(item.id)).toHaveLength(2);
     expect(h.effortStore.getOpenEffort(item.id)).not.toBeNull();
     rmSync(h.dir, { recursive: true, force: true });
@@ -447,15 +447,15 @@ describe("history-tracking runtime wiring", () => {
   test("opening a turn after an effort opens attaches it via linkEffortTurn", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" },
+      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
-    const turn = h.turnStore.openTurn({ batchId: h.batchId, prompt: "P" });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "P" });
     linkOpenEffortsToTurn(h.effortStore, turn.id);
     const effort = h.effortStore.getOpenEffort(item.id)!;
     expect(h.effortStore.listTurnsForEffort(effort.id)).toEqual([turn.id]);
@@ -466,17 +466,17 @@ describe("history-tracking runtime wiring", () => {
   test("effort opening during an already-open turn links back to that turn", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     // Turn open first...
-    const turn = h.turnStore.openTurn({ batchId: h.batchId, prompt: "P" });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "P" });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     // ...then the task transitions to in_progress. applyStatusTransition
     // should see the open turn via currentOpenTurn and link itself.
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: item.id, previous: "ready", next: "in_progress" },
+      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
     const effort = h.effortStore.getOpenEffort(item.id)!;
     expect(h.effortStore.listTurnsForEffort(effort.id)).toEqual([turn.id]);
@@ -486,12 +486,12 @@ describe("history-tracking runtime wiring", () => {
   test("status changes with same-status or undefined-next are no-ops", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "T",
+      threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "ready", next: undefined });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: item.id, previous: "in_progress", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: undefined });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "in_progress" });
     expect(h.effortStore.listEffortsForWorkItem(item.id)).toHaveLength(0);
     rmSync(h.dir, { recursive: true, force: true });
   });
@@ -516,15 +516,15 @@ describe("touchedFiles payload on human_check transition", () => {
   test("update_work_item with touchedFiles populates work_item_effort_file on transition to human_check", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     writeFileSync(join(h.dir, "a.txt"), "v1");
     writeFileSync(join(h.dir, "b.txt"), "v1");
     applyStatusTransition(deps, {
-      batchId: h.batchId, workItemId: a.id,
+      threadId: h.threadId, workItemId: a.id,
       previous: "in_progress", next: "human_check",
       touchedFiles: ["a.txt", "b.txt", "a.txt"],
     });
@@ -535,23 +535,23 @@ describe("touchedFiles payload on human_check transition", () => {
   test("transitions to ready/blocked ignore touchedFiles", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     applyStatusTransition(deps, {
-      batchId: h.batchId, workItemId: a.id,
+      threadId: h.threadId, workItemId: a.id,
       previous: "in_progress", next: "blocked",
       touchedFiles: ["a.txt"],
     });
     expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
 
     // Re-open, then close to ready — also ignored.
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "blocked", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "blocked", next: "in_progress" });
     const secondEffort = h.effortStore.getOpenEffort(a.id)!;
     applyStatusTransition(deps, {
-      batchId: h.batchId, workItemId: a.id,
+      threadId: h.threadId, workItemId: a.id,
       previous: "in_progress", next: "ready",
       touchedFiles: ["b.txt"],
     });
@@ -562,15 +562,15 @@ describe("touchedFiles payload on human_check transition", () => {
   test("touchedFiles with >100 paths inserts nothing (server cap)", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     const many: string[] = [];
     for (let i = 0; i < 101; i++) many.push(`f${i}.txt`);
     applyStatusTransition(deps, {
-      batchId: h.batchId, workItemId: a.id,
+      threadId: h.threadId, workItemId: a.id,
       previous: "in_progress", next: "human_check",
       touchedFiles: many,
     });
@@ -583,14 +583,14 @@ describe("computeEffortFiles", () => {
   test("single-effort snapshot returns raw pair-diff even with empty write log", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     writeFileSync(join(h.dir, "b.txt"), "v1");
     // No recordEffortFile calls — log is empty for this effort.
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
     const open = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const summary = computeEffortFiles(h.effortStore, h.snapshotStore, open.id);
     expect(summary).not.toBeNull();
@@ -604,15 +604,15 @@ describe("computeEffortFiles", () => {
   test("two efforts ending at same snapshot filter by the write log", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const b = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
     // Both transitioning to in_progress, then each writes distinct files.
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
     const effA = h.effortStore.getOpenEffort(a.id)!;
     const effB = h.effortStore.getOpenEffort(b.id)!;
     writeFileSync(join(h.dir, "a.txt"), "by-a");
@@ -620,8 +620,8 @@ describe("computeEffortFiles", () => {
     writeFileSync(join(h.dir, "b.txt"), "by-b");
     h.effortStore.recordEffortFile(effB.id, "b.txt");
     // Both efforts close at the same flush point (end-snapshot is shared).
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
 
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
@@ -642,21 +642,21 @@ describe("computeEffortFiles", () => {
   test("overlap: same file written by both efforts appears in both filtered results", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const b = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
     const effA = h.effortStore.getOpenEffort(a.id)!;
     const effB = h.effortStore.getOpenEffort(b.id)!;
     writeFileSync(join(h.dir, "shared.txt"), "final");
     h.effortStore.recordEffortFile(effA.id, "shared.txt");
     h.effortStore.recordEffortFile(effB.id, "shared.txt");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
     if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
@@ -671,19 +671,19 @@ describe("computeEffortFiles", () => {
   test("two efforts ending at same snapshot with no write log fall back to raw pair-diff", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     const b = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "by-a");
     writeFileSync(join(h.dir, "b.txt"), "by-b");
     // Neither transition declares touchedFiles — effort_file log stays empty.
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
     if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
@@ -703,11 +703,11 @@ describe("computeEffortFiles", () => {
   test("open effort (no end snapshot) returns null", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     applyStatusTransition(
       { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" },
+      { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" },
     );
     const effA = h.effortStore.getOpenEffort(a.id)!;
     expect(computeEffortFiles(h.effortStore, h.snapshotStore, effA.id)).toBeNull();

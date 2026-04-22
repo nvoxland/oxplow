@@ -8,7 +8,7 @@ const ANSWER_MAX_LEN = 20_000;
 
 export interface AgentTurn {
   id: string;
-  batch_id: string;
+  thread_id: string;
   prompt: string;
   answer: string | null;
   session_id: string | null;
@@ -30,13 +30,13 @@ export interface TurnUsage {
 export type TurnChangeKind = "opened" | "closed";
 
 export interface TurnChange {
-  batchId: string;
+  threadId: string;
   turnId: string;
   kind: TurnChangeKind;
 }
 
 export interface OpenTurnInput {
-  batchId: string;
+  threadId: string;
   prompt: string;
   sessionId?: string | null;
 }
@@ -68,7 +68,7 @@ export class TurnStore {
     const now = new Date().toISOString();
     const turn: AgentTurn = {
       id: createId("turn"),
-      batch_id: input.batchId,
+      thread_id: input.threadId,
       prompt,
       answer: null,
       session_id: input.sessionId ?? null,
@@ -81,17 +81,17 @@ export class TurnStore {
       end_snapshot_id: null,
     };
     this.stateDb.run(
-      `INSERT INTO agent_turn (id, batch_id, prompt, answer, session_id, started_at, ended_at)
+      `INSERT INTO agent_turn (id, thread_id, prompt, answer, session_id, started_at, ended_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       turn.id,
-      turn.batch_id,
+      turn.thread_id,
       turn.prompt,
       turn.answer,
       turn.session_id,
       turn.started_at,
       turn.ended_at,
     );
-    this.emit({ batchId: turn.batch_id, turnId: turn.id, kind: "opened" });
+    this.emit({ threadId: turn.thread_id, turnId: turn.id, kind: "opened" });
     return turn;
   }
 
@@ -109,7 +109,7 @@ export class TurnStore {
     );
     const updated = this.getById(turnId);
     if (!updated) return null;
-    this.emit({ batchId: updated.batch_id, turnId: updated.id, kind: "closed" });
+    this.emit({ threadId: updated.thread_id, turnId: updated.id, kind: "closed" });
     return updated;
   }
 
@@ -142,19 +142,19 @@ export class TurnStore {
     );
   }
 
-  currentOpenTurn(batchId: string): AgentTurn | null {
+  currentOpenTurn(threadId: string): AgentTurn | null {
     const row = this.stateDb.get<Record<string, unknown>>(
-      `SELECT * FROM agent_turn WHERE batch_id = ? AND ended_at IS NULL ORDER BY started_at DESC, rowid DESC LIMIT 1`,
-      batchId,
+      `SELECT * FROM agent_turn WHERE thread_id = ? AND ended_at IS NULL ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+      threadId,
     );
     return row ? rowToTurn(row) : null;
   }
 
-  listForBatch(batchId: string, limit = 50): AgentTurn[] {
+  listForThread(threadId: string, limit = 50): AgentTurn[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM agent_turn WHERE batch_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`,
-        batchId,
+        `SELECT * FROM agent_turn WHERE thread_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`,
+        threadId,
         limit,
       )
       .map(rowToTurn);
@@ -172,7 +172,7 @@ export class TurnStore {
 function rowToTurn(row: Record<string, unknown>): AgentTurn {
   return {
     id: String(row.id ?? ""),
-    batch_id: String(row.batch_id ?? ""),
+    thread_id: String(row.thread_id ?? ""),
     prompt: String(row.prompt ?? ""),
     answer: row.answer == null ? null : String(row.answer),
     session_id: row.session_id == null ? null : String(row.session_id),

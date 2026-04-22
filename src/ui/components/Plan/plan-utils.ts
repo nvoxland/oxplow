@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type {
   BacklogState,
-  BatchWorkState,
+  ThreadWorkState,
   WorkItem,
   WorkItemPriority,
   WorkItemStatus,
@@ -77,7 +77,7 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
  * The Human Check and Done sections render descending (newest / highest
  * sort_index on top) so recent items stay visible without scrolling. Every
  * other section renders ascending. Persistence is a single ascending
- * sort_index space per batch, so when we flatten the visual order into an id
+ * sort_index space per thread, so when we flatten the visual order into an id
  * list for the store we need to flip descending runs back to ascending —
  * otherwise the store's "rewrite sort_index = position" rule would invert
  * them on the next render and drag-reorders inside the section would
@@ -140,14 +140,14 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
   return [{ epic: null, items, epicChildren: new Map() }];
 }
 
-export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
-  if (!batchWork) return [];
-  const all = [...batchWork.waiting, ...batchWork.inProgress, ...batchWork.done];
+export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[] {
+  if (!threadWork) return [];
+  const all = [...threadWork.waiting, ...threadWork.inProgress, ...threadWork.done];
 
   const epicChildrenMap = new Map<string, WorkItem[]>();
-  const epicIdSet = new Set(batchWork.epics.map((e) => e.id));
+  const epicIdSet = new Set(threadWork.epics.map((e) => e.id));
 
-  for (const epic of batchWork.epics) {
+  for (const epic of threadWork.epics) {
     epicChildrenMap.set(epic.id, []);
   }
 
@@ -170,7 +170,7 @@ export function buildGroups(batchWork: BatchWorkState | null): WorkItemGroup[] {
   }
 
   const epicsAndRoots: WorkItem[] = [
-    ...batchWork.epics,
+    ...threadWork.epics,
     ...rootItems,
   ].sort((a, b) => a.sort_index - b.sort_index);
 

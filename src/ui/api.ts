@@ -20,7 +20,7 @@ export interface Stream {
   resume: { working_session_id: string; talking_session_id: string };
 }
 
-export interface Batch {
+export interface Thread {
   id: string;
   stream_id: string;
   title: string;
@@ -34,10 +34,10 @@ export interface Batch {
   custom_prompt: string | null;
 }
 
-export interface BatchState {
-  selectedBatchId: string | null;
-  activeBatchId: string | null;
-  batches: Batch[];
+export interface ThreadState {
+  selectedThreadId: string | null;
+  activeThreadId: string | null;
+  threads: Thread[];
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
@@ -46,7 +46,7 @@ export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface WorkItem {
   id: string;
-  batch_id: string | null;
+  thread_id: string | null;
   parent_id: string | null;
   kind: WorkItemKind;
   title: string;
@@ -72,7 +72,7 @@ export interface WorkNote {
 
 export interface WorkItemEvent {
   id: string;
-  batch_id: string;
+  thread_id: string;
   item_id: string | null;
   event_type: string;
   actor_kind: "user" | "agent" | "system";
@@ -131,7 +131,7 @@ export interface SnapshotDiffResult {
 
 export interface AgentTurn {
   id: string;
-  batch_id: string;
+  thread_id: string;
   prompt: string;
   answer: string | null;
   session_id: string | null;
@@ -161,8 +161,8 @@ export interface EffortDetail {
   changed_paths: string[];
 }
 
-export interface BatchWorkState {
-  batchId: string;
+export interface ThreadWorkState {
+  threadId: string;
   waiting: WorkItem[];
   inProgress: WorkItem[];
   done: WorkItem[];
@@ -304,61 +304,61 @@ export async function createStream(input:
   return desktopApi().createStream(input);
 }
 
-export async function getBatchState(streamId: string): Promise<BatchState> {
-  return desktopApi().getBatchState(streamId);
+export async function getThreadState(streamId: string): Promise<ThreadState> {
+  return desktopApi().getThreadState(streamId);
 }
 
-export async function createBatch(streamId: string, title: string): Promise<BatchState> {
-  return desktopApi().createBatch(streamId, title);
+export async function createThread(streamId: string, title: string): Promise<ThreadState> {
+  return desktopApi().createThread(streamId, title);
 }
 
-export async function reorderBatch(streamId: string, batchId: string, targetIndex: number): Promise<BatchState> {
-  return desktopApi().reorderBatch(streamId, batchId, targetIndex);
+export async function reorderThread(streamId: string, threadId: string, targetIndex: number): Promise<ThreadState> {
+  return desktopApi().reorderThread(streamId, threadId, targetIndex);
 }
 
-export async function reorderBatches(streamId: string, orderedBatchIds: string[]): Promise<void> {
-  return desktopApi().reorderBatches(streamId, orderedBatchIds);
+export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {
+  return desktopApi().reorderThreads(streamId, orderedThreadIds);
 }
 
 export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
   return desktopApi().reorderStreams(orderedStreamIds);
 }
 
-export async function selectBatch(streamId: string, batchId: string): Promise<BatchState> {
-  return desktopApi().selectBatch(streamId, batchId);
+export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().selectThread(streamId, threadId);
 }
 
-export async function promoteBatch(streamId: string, batchId: string): Promise<BatchState> {
-  return desktopApi().promoteBatch(streamId, batchId);
+export async function promoteThread(streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().promoteThread(streamId, threadId);
 }
 
-export async function completeBatch(streamId: string, batchId: string): Promise<BatchState> {
-  return desktopApi().completeBatch(streamId, batchId);
+export async function completeThread(streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().completeThread(streamId, threadId);
 }
 
-export async function renameBatch(streamId: string, batchId: string, title: string): Promise<Batch> {
-  return desktopApi().renameBatch(streamId, batchId, title);
+export async function renameThread(streamId: string, threadId: string, title: string): Promise<Thread> {
+  return desktopApi().renameThread(streamId, threadId, title);
 }
 
-export async function setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]> {
-  return desktopApi().setAutoCommit(streamId, batchId, enabled);
+export async function setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]> {
+  return desktopApi().setAutoCommit(streamId, threadId, enabled);
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
   return desktopApi().setStreamPrompt(streamId, prompt);
 }
 
-export async function setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Promise<Batch[]> {
-  return desktopApi().setBatchPrompt(streamId, batchId, prompt);
+export async function setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]> {
+  return desktopApi().setThreadPrompt(streamId, threadId, prompt);
 }
 
-export async function getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState> {
-  return desktopApi().getBatchWorkState(streamId, batchId);
+export async function getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState> {
+  return desktopApi().getThreadWorkState(streamId, threadId);
 }
 
 export async function createWorkItem(
   streamId: string,
-  batchId: string,
+  threadId: string,
   input: {
     kind: WorkItemKind;
     title: string;
@@ -368,13 +368,13 @@ export async function createWorkItem(
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
   },
-): Promise<BatchWorkState> {
-  return desktopApi().createWorkItem(streamId, batchId, input);
+): Promise<ThreadWorkState> {
+  return desktopApi().createWorkItem(streamId, threadId, input);
 }
 
 export async function updateWorkItem(
   streamId: string,
-  batchId: string,
+  threadId: string,
   itemId: string,
   changes: {
     title?: string;
@@ -384,34 +384,34 @@ export async function updateWorkItem(
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
   },
-): Promise<BatchWorkState> {
-  return desktopApi().updateWorkItem(streamId, batchId, itemId, changes);
+): Promise<ThreadWorkState> {
+  return desktopApi().updateWorkItem(streamId, threadId, itemId, changes);
 }
 
 export async function deleteWorkItem(
   streamId: string,
-  batchId: string,
+  threadId: string,
   itemId: string,
-): Promise<BatchWorkState> {
-  return desktopApi().deleteWorkItem(streamId, batchId, itemId);
+): Promise<ThreadWorkState> {
+  return desktopApi().deleteWorkItem(streamId, threadId, itemId);
 }
 
 export async function reorderWorkItems(
   streamId: string,
-  batchId: string,
+  threadId: string,
   orderedItemIds: string[],
-): Promise<BatchWorkState> {
-  return desktopApi().reorderWorkItems(streamId, batchId, orderedItemIds);
+): Promise<ThreadWorkState> {
+  return desktopApi().reorderWorkItems(streamId, threadId, orderedItemIds);
 }
 
-export async function moveWorkItemToBatch(
+export async function moveWorkItemToThread(
   streamId: string,
-  fromBatchId: string,
+  fromThreadId: string,
   itemId: string,
-  toBatchId: string,
+  toThreadId: string,
   toStreamId?: string,
-): Promise<{ from: BatchWorkState; to: BatchWorkState }> {
-  return desktopApi().moveWorkItemToBatch(streamId, fromBatchId, itemId, toBatchId, toStreamId);
+): Promise<{ from: ThreadWorkState; to: ThreadWorkState }> {
+  return desktopApi().moveWorkItemToThread(streamId, fromThreadId, itemId, toThreadId, toStreamId);
 }
 
 export async function getBacklogState(): Promise<BacklogState> {
@@ -452,18 +452,18 @@ export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogS
 
 export async function moveWorkItemToBacklog(
   streamId: string,
-  fromBatchId: string,
+  fromThreadId: string,
   itemId: string,
-): Promise<{ from: BatchWorkState; backlog: BacklogState }> {
-  return desktopApi().moveWorkItemToBacklog(streamId, fromBatchId, itemId);
+): Promise<{ from: ThreadWorkState; backlog: BacklogState }> {
+  return desktopApi().moveWorkItemToBacklog(streamId, fromThreadId, itemId);
 }
 
-export async function moveBacklogItemToBatch(
+export async function moveBacklogItemToThread(
   streamId: string,
   itemId: string,
-  toBatchId: string,
-): Promise<{ backlog: BacklogState; to: BatchWorkState }> {
-  return desktopApi().moveBacklogItemToBatch(streamId, itemId, toBatchId);
+  toThreadId: string,
+): Promise<{ backlog: BacklogState; to: ThreadWorkState }> {
+  return desktopApi().moveBacklogItemToThread(streamId, itemId, toThreadId);
 }
 
 export async function getGitLog(
@@ -552,15 +552,15 @@ export async function localBlame(
   return desktopApi().localBlame(streamId, path);
 }
 
-export async function listCommitPoints(batchId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
-  return desktopApi().listCommitPoints(batchId);
+export async function listCommitPoints(threadId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
+  return desktopApi().listCommitPoints(threadId);
 }
 
 export async function createCommitPoint(
   streamId: string,
-  batchId: string,
+  threadId: string,
 ): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().createCommitPoint(streamId, batchId);
+  return desktopApi().createCommitPoint(streamId, threadId);
 }
 
 export async function deleteCommitPoint(id: string): Promise<void> {
@@ -581,24 +581,24 @@ export async function commitCommitPoint(
   return desktopApi().commitCommitPoint(id, message);
 }
 
-export async function reorderBatchQueue(
+export async function reorderThreadQueue(
   streamId: string,
-  batchId: string,
+  threadId: string,
   entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
 ): Promise<void> {
-  return desktopApi().reorderBatchQueue(streamId, batchId, entries);
+  return desktopApi().reorderThreadQueue(streamId, threadId, entries);
 }
 
-export async function listWaitPoints(batchId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
-  return desktopApi().listWaitPoints(batchId);
+export async function listWaitPoints(threadId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
+  return desktopApi().listWaitPoints(threadId);
 }
 
 export async function createWaitPoint(
   streamId: string,
-  batchId: string,
+  threadId: string,
   note?: string | null,
 ): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
-  return desktopApi().createWaitPoint(streamId, batchId, note);
+  return desktopApi().createWaitPoint(streamId, threadId, note);
 }
 
 export async function setWaitPointNote(
@@ -618,19 +618,19 @@ export async function listAllRefs(streamId: string): Promise<import("../git/git.
 
 export async function addWorkItemNote(
   streamId: string,
-  batchId: string,
+  threadId: string,
   itemId: string,
   note: string,
 ): Promise<WorkItemEvent[]> {
-  return desktopApi().addWorkItemNote(streamId, batchId, itemId, note);
+  return desktopApi().addWorkItemNote(streamId, threadId, itemId, note);
 }
 
 export async function listWorkItemEvents(
   streamId: string,
-  batchId: string,
+  threadId: string,
   itemId?: string,
 ): Promise<WorkItemEvent[]> {
-  return desktopApi().listWorkItemEvents(streamId, batchId, itemId);
+  return desktopApi().listWorkItemEvents(streamId, threadId, itemId);
 }
 
 export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
@@ -639,10 +639,10 @@ export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
 
 export async function listAgentTurns(
   streamId: string,
-  batchId: string,
+  threadId: string,
   limit?: number,
 ): Promise<AgentTurn[]> {
-  return desktopApi().listAgentTurns(streamId, batchId, limit);
+  return desktopApi().listAgentTurns(streamId, threadId, limit);
 }
 
 export async function getBranchChanges(
@@ -689,7 +689,7 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>> {
+): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>> {
   return desktopApi().listEffortsEndingAtSnapshots(snapshotIds);
 }
 
@@ -706,7 +706,7 @@ export interface FileSnapshotCreatedEventPayload {
   snapshotId: string;
   kind: SnapshotSource;
   turnId: string | null;
-  batchId: string | null;
+  threadId: string | null;
 }
 
 export function subscribeSnapshotEvents(
@@ -721,7 +721,7 @@ export function subscribeSnapshotEvents(
       snapshotId: event.snapshotId,
       kind: event.kind,
       turnId: event.turnId,
-      batchId: event.batchId,
+      threadId: event.threadId,
     });
   });
 }
@@ -729,7 +729,7 @@ export function subscribeSnapshotEvents(
 
 export interface TurnChangeEvent {
   streamId: string;
-  batchId: string;
+  threadId: string;
   turnId: string;
   kind: "opened" | "closed";
 }
@@ -743,7 +743,7 @@ export function subscribeTurnEvents(
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({
       streamId: event.streamId,
-      batchId: event.batchId,
+      threadId: event.threadId,
       turnId: event.turnId,
       kind: event.kind,
     });
@@ -836,7 +836,7 @@ export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "de
 
 export interface WorkItemChangeEvent {
   streamId: string;
-  batchId: string;
+  threadId: string;
   kind: WorkItemChangeKind;
   itemId: string | null;
 }
@@ -845,7 +845,7 @@ export type AgentStatus = "idle" | "working" | "waiting" | "done";
 
 export interface AgentStatusEntry {
   streamId: string;
-  batchId: string;
+  threadId: string;
   status: AgentStatus;
 }
 
@@ -860,7 +860,7 @@ export function subscribeAgentStatus(
   return subscribeNewdeEvents((event) => {
     if (event.type !== "agent-status.changed") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
-    onEvent({ streamId: event.streamId, batchId: event.batchId, status: event.status });
+    onEvent({ streamId: event.streamId, threadId: event.threadId, status: event.status });
   });
 }
 
@@ -885,7 +885,7 @@ export function subscribeWorkItemEvents(
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({
       streamId: event.streamId,
-      batchId: event.batchId,
+      threadId: event.threadId,
       kind: event.kind,
       itemId: event.itemId,
     });
@@ -926,7 +926,7 @@ export type NormalizedEvent =
 export interface StoredEvent {
   id: number;
   streamId: string;
-  batchId?: string;
+  threadId?: string;
   pane?: "working" | "talking";
   normalized: NormalizedEvent;
 }

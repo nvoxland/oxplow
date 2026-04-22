@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BatchStore } from "./batch-store.js";
+import { ThreadStore } from "./thread-store.js";
 import { WorkItemStore } from "./work-item-store.js";
 import type { Stream } from "./stream-store.js";
 
-function seedBatch() {
+function seedThread() {
   const dir = mkdtempSync(join(tmpdir(), "newde-work-items-"));
-  const batchStore = new BatchStore(dir);
+  const threadStore = new ThreadStore(dir);
   const stream: Stream = {
     id: "s-1",
     title: "Demo",
@@ -23,17 +23,17 @@ function seedBatch() {
     resume: { working_session_id: "", talking_session_id: "" },
     custom_prompt: null,
   };
-  const state = batchStore.ensureStream(stream);
-  const batchId = state.batches[0]!.id;
+  const state = threadStore.ensureStream(stream);
+  const threadId = state.threads[0]!.id;
   const workItems = new WorkItemStore(dir);
-  return { workItems, batchId };
+  return { workItems, threadId };
 }
 
 describe("WorkItemStore acceptance_criteria", () => {
   test("createItem persists acceptance criteria and they roundtrip", () => {
-    const { workItems, batchId } = seedBatch();
+    const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
-      batchId,
+      threadId,
       kind: "task",
       title: "Write login form",
       acceptanceCriteria: "- email + password inputs\n- submit posts to /login\n- shows error on 401",
@@ -41,29 +41,29 @@ describe("WorkItemStore acceptance_criteria", () => {
       actorId: "mcp",
     });
     expect(item.acceptance_criteria).toContain("email + password");
-    const fetched = workItems.getItem(batchId, item.id);
+    const fetched = workItems.getItem(threadId, item.id);
     expect(fetched?.acceptance_criteria).toBe(item.acceptance_criteria);
   });
 
   test("createItem appends to the bottom of the list (regression: new items must sort after existing)", () => {
-    const { workItems, batchId } = seedBatch();
-    const first = workItems.createItem({ batchId, kind: "task", title: "first", createdBy: "user", actorId: "ui" });
-    const second = workItems.createItem({ batchId, kind: "task", title: "second", createdBy: "user", actorId: "ui" });
-    const third = workItems.createItem({ batchId, kind: "task", title: "third", createdBy: "user", actorId: "ui" });
+    const { workItems, threadId } = seedThread();
+    const first = workItems.createItem({ threadId, kind: "task", title: "first", createdBy: "user", actorId: "ui" });
+    const second = workItems.createItem({ threadId, kind: "task", title: "second", createdBy: "user", actorId: "ui" });
+    const third = workItems.createItem({ threadId, kind: "task", title: "third", createdBy: "user", actorId: "ui" });
     expect(second.sort_index).toBeGreaterThan(first.sort_index);
     expect(third.sort_index).toBeGreaterThan(second.sort_index);
     // The MAX+1 rule keeps holding after a rename / status change — a new
     // item still lands strictly past the existing maximum rather than sliding
     // into a gap.
-    workItems.updateItem({ batchId, itemId: first.id, status: "done", actorKind: "user", actorId: "ui" });
-    const fourth = workItems.createItem({ batchId, kind: "task", title: "fourth", createdBy: "user", actorId: "ui" });
+    workItems.updateItem({ threadId, itemId: first.id, status: "done", actorKind: "user", actorId: "ui" });
+    const fourth = workItems.createItem({ threadId, kind: "task", title: "fourth", createdBy: "user", actorId: "ui" });
     expect(fourth.sort_index).toBeGreaterThan(third.sort_index);
   });
 
   test("updateItem with acceptanceCriteria='' clears the field", () => {
-    const { workItems, batchId } = seedBatch();
+    const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
-      batchId,
+      threadId,
       kind: "task",
       title: "X",
       acceptanceCriteria: "keep this",
@@ -71,13 +71,13 @@ describe("WorkItemStore acceptance_criteria", () => {
       actorId: "mcp",
     });
     workItems.updateItem({
-      batchId,
+      threadId,
       itemId: item.id,
       acceptanceCriteria: "",
       actorKind: "agent",
       actorId: "mcp",
     });
-    expect(workItems.getItem(batchId, item.id)?.acceptance_criteria).toBeNull();
+    expect(workItems.getItem(threadId, item.id)?.acceptance_criteria).toBeNull();
   });
 
   test("dragging a Done item back to Human Check: updateItem+reorderItems sequence leaves item in HC", () => {
@@ -85,30 +85,30 @@ describe("WorkItemStore acceptance_criteria", () => {
     // WorkGroupList.handleDropOnKey does: fires updateItem (status change)
     // then reorderItems (full persistence order) in that order. Final store
     // state must have the dragged item classified into humanCheck by
-    // BatchWorkState.getState.
-    const { workItems, batchId } = seedBatch();
-    const r0 = workItems.createItem({ batchId, kind: "task", title: "r0", createdBy: "user", actorId: "ui" });
-    const r1 = workItems.createItem({ batchId, kind: "task", title: "r1", createdBy: "user", actorId: "ui" });
-    const hc2 = workItems.createItem({ batchId, kind: "task", title: "hc2", createdBy: "user", actorId: "ui" });
-    const hc3 = workItems.createItem({ batchId, kind: "task", title: "hc3", createdBy: "user", actorId: "ui" });
-    const d4 = workItems.createItem({ batchId, kind: "task", title: "d4", createdBy: "user", actorId: "ui" });
-    const d5 = workItems.createItem({ batchId, kind: "task", title: "d5", createdBy: "user", actorId: "ui" });
+    // ThreadWorkState.getState.
+    const { workItems, threadId } = seedThread();
+    const r0 = workItems.createItem({ threadId, kind: "task", title: "r0", createdBy: "user", actorId: "ui" });
+    const r1 = workItems.createItem({ threadId, kind: "task", title: "r1", createdBy: "user", actorId: "ui" });
+    const hc2 = workItems.createItem({ threadId, kind: "task", title: "hc2", createdBy: "user", actorId: "ui" });
+    const hc3 = workItems.createItem({ threadId, kind: "task", title: "hc3", createdBy: "user", actorId: "ui" });
+    const d4 = workItems.createItem({ threadId, kind: "task", title: "d4", createdBy: "user", actorId: "ui" });
+    const d5 = workItems.createItem({ threadId, kind: "task", title: "d5", createdBy: "user", actorId: "ui" });
     // Put items into their target statuses. Note: updateItem's "bump sort_index
     // to MAX+1 on transition to done" will reassign sort_index values. That's
     // fine for this test — we care about the final drag result, not the setup.
-    workItems.updateItem({ batchId, itemId: hc2.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ batchId, itemId: hc3.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ batchId, itemId: d4.id, status: "done", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ batchId, itemId: d5.id, status: "done", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ threadId, itemId: hc2.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ threadId, itemId: hc3.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ threadId, itemId: d4.id, status: "done", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ threadId, itemId: d5.id, status: "done", actorKind: "user", actorId: "ui" });
 
     // Drop fires: (1) status → human_check, then (2) reorder with the
     // finalized id order from the UI. The id list we pass is what the UI
     // would produce after splice + finalizeReorderIds for a drag of d4 onto
     // the top of the Human Check section.
-    workItems.updateItem({ batchId, itemId: d4.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.reorderItems(batchId, [r0.id, r1.id, hc2.id, hc3.id, d4.id, d5.id], "user", "ui");
+    workItems.updateItem({ threadId, itemId: d4.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.reorderItems(threadId, [r0.id, r1.id, hc2.id, hc3.id, d4.id, d5.id], "user", "ui");
 
-    const state = workItems.getState(batchId);
+    const state = workItems.getState(threadId);
     const hcIds = state.inProgress.filter((i) => i.status === "human_check").map((i) => i.id);
     const doneIds = state.done.map((i) => i.id);
     expect(hcIds).toContain(d4.id);
@@ -121,12 +121,12 @@ describe("WorkItemStore acceptance_criteria", () => {
   });
 
   test("getItemDetail returns incoming + outgoing links + recent events", () => {
-    const { workItems, batchId } = seedBatch();
-    const parent = workItems.createItem({ batchId, kind: "epic", title: "Parent", createdBy: "agent", actorId: "mcp" });
-    const child = workItems.createItem({ batchId, kind: "task", title: "Child", createdBy: "agent", actorId: "mcp" });
-    workItems.linkItems(batchId, child.id, parent.id, "supersedes");
-    workItems.addNote(batchId, child.id, "made progress", "agent", "mcp");
-    const detail = workItems.getItemDetail(batchId, child.id);
+    const { workItems, threadId } = seedThread();
+    const parent = workItems.createItem({ threadId, kind: "epic", title: "Parent", createdBy: "agent", actorId: "mcp" });
+    const child = workItems.createItem({ threadId, kind: "task", title: "Child", createdBy: "agent", actorId: "mcp" });
+    workItems.linkItems(threadId, child.id, parent.id, "supersedes");
+    workItems.addNote(threadId, child.id, "made progress", "agent", "mcp");
+    const detail = workItems.getItemDetail(threadId, child.id);
     expect(detail).not.toBeNull();
     expect(detail!.outgoing).toHaveLength(1);
     expect(detail!.outgoing[0]!.link_type).toBe("supersedes");
@@ -136,17 +136,17 @@ describe("WorkItemStore acceptance_criteria", () => {
 
 describe("WorkItemStore.readWorkOptions", () => {
   test("returns empty when no ready items exist", () => {
-    const { workItems, batchId } = seedBatch();
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("empty");
   });
 
   test("returns epic unit when highest-priority ready item is an epic", () => {
-    const { workItems, batchId } = seedBatch();
-    const epic = workItems.createItem({ batchId, kind: "epic", title: "Big Feature", createdBy: "user", actorId: "ui" });
-    const child1 = workItems.createItem({ batchId, kind: "task", title: "Task A", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const child2 = workItems.createItem({ batchId, kind: "task", title: "Task B", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const epic = workItems.createItem({ threadId, kind: "epic", title: "Big Feature", createdBy: "user", actorId: "ui" });
+    const child1 = workItems.createItem({ threadId, kind: "task", title: "Task A", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const child2 = workItems.createItem({ threadId, kind: "task", title: "Task B", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("epic");
     if (result.mode !== "epic") return;
     expect(result.epic.id).toBe(epic.id);
@@ -157,11 +157,11 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("epic mode: only includes ready descendants, excludes blocked/done children", () => {
-    const { workItems, batchId } = seedBatch();
-    const epic = workItems.createItem({ batchId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
-    const ready = workItems.createItem({ batchId, kind: "task", title: "Ready", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const done = workItems.createItem({ batchId, kind: "task", title: "Done", parentId: epic.id, createdBy: "user", actorId: "ui", status: "done" });
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const epic = workItems.createItem({ threadId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
+    const ready = workItems.createItem({ threadId, kind: "task", title: "Ready", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const done = workItems.createItem({ threadId, kind: "task", title: "Done", parentId: epic.id, createdBy: "user", actorId: "ui", status: "done" });
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("epic");
     if (result.mode !== "epic") return;
     const childIds = result.children.map((c) => c.item.id);
@@ -170,12 +170,12 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("epic mode: blocked items (via blocks link) excluded from children", () => {
-    const { workItems, batchId } = seedBatch();
-    const epic = workItems.createItem({ batchId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
-    const blocker = workItems.createItem({ batchId, kind: "task", title: "Blocker", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const blocked = workItems.createItem({ batchId, kind: "task", title: "Blocked", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    workItems.linkItems(batchId, blocker.id, blocked.id, "blocks");
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const epic = workItems.createItem({ threadId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
+    const blocker = workItems.createItem({ threadId, kind: "task", title: "Blocker", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const blocked = workItems.createItem({ threadId, kind: "task", title: "Blocked", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    workItems.linkItems(threadId, blocker.id, blocked.id, "blocks");
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("epic");
     if (result.mode !== "epic") return;
     // blocked child excluded — it has an unresolved blocker
@@ -185,12 +185,12 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("epic mode: children include link edges inline", () => {
-    const { workItems, batchId } = seedBatch();
-    const epic = workItems.createItem({ batchId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
-    const task1 = workItems.createItem({ batchId, kind: "task", title: "T1", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const task2 = workItems.createItem({ batchId, kind: "task", title: "T2", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    workItems.linkItems(batchId, task1.id, task2.id, "relates_to");
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const epic = workItems.createItem({ threadId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
+    const task1 = workItems.createItem({ threadId, kind: "task", title: "T1", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const task2 = workItems.createItem({ threadId, kind: "task", title: "T2", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    workItems.linkItems(threadId, task1.id, task2.id, "relates_to");
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("epic");
     if (result.mode !== "epic") return;
     const t1 = result.children.find((c) => c.item.id === task1.id)!;
@@ -199,10 +199,10 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("returns standalone unit when head is not an epic", () => {
-    const { workItems, batchId } = seedBatch();
-    const t1 = workItems.createItem({ batchId, kind: "task", title: "T1", createdBy: "user", actorId: "ui" });
-    const t2 = workItems.createItem({ batchId, kind: "task", title: "T2", createdBy: "user", actorId: "ui" });
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const t1 = workItems.createItem({ threadId, kind: "task", title: "T1", createdBy: "user", actorId: "ui" });
+    const t2 = workItems.createItem({ threadId, kind: "task", title: "T2", createdBy: "user", actorId: "ui" });
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("standalone");
     if (result.mode !== "standalone") return;
     expect(result.items).toHaveLength(2);
@@ -212,11 +212,11 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("standalone mode: epics are excluded from the items list", () => {
-    const { workItems, batchId } = seedBatch();
-    const task = workItems.createItem({ batchId, kind: "task", title: "Task", createdBy: "user", actorId: "ui" });
+    const { workItems, threadId } = seedThread();
+    const task = workItems.createItem({ threadId, kind: "task", title: "Task", createdBy: "user", actorId: "ui" });
     // Epic created after task so task is still the head (lower sort_index)
-    workItems.createItem({ batchId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
-    const result = workItems.readWorkOptions(batchId);
+    workItems.createItem({ threadId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("standalone");
     if (result.mode !== "standalone") return;
     const ids = result.items.map((i) => i.item.id);
@@ -226,11 +226,11 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("standalone mode: items include link edges inline", () => {
-    const { workItems, batchId } = seedBatch();
-    const t1 = workItems.createItem({ batchId, kind: "task", title: "T1", createdBy: "user", actorId: "ui" });
-    const t2 = workItems.createItem({ batchId, kind: "task", title: "T2", createdBy: "user", actorId: "ui" });
-    workItems.linkItems(batchId, t1.id, t2.id, "discovered_from");
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const t1 = workItems.createItem({ threadId, kind: "task", title: "T1", createdBy: "user", actorId: "ui" });
+    const t2 = workItems.createItem({ threadId, kind: "task", title: "T2", createdBy: "user", actorId: "ui" });
+    workItems.linkItems(threadId, t1.id, t2.id, "discovered_from");
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("standalone");
     if (result.mode !== "standalone") return;
     const item1 = result.items.find((i) => i.item.id === t1.id)!;
@@ -240,11 +240,11 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("epic mode: transitively ready grandchildren are included", () => {
-    const { workItems, batchId } = seedBatch();
-    const epic = workItems.createItem({ batchId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
-    const task = workItems.createItem({ batchId, kind: "task", title: "Task", parentId: epic.id, createdBy: "user", actorId: "ui" });
-    const subtask = workItems.createItem({ batchId, kind: "subtask", title: "Subtask", parentId: task.id, createdBy: "user", actorId: "ui" });
-    const result = workItems.readWorkOptions(batchId);
+    const { workItems, threadId } = seedThread();
+    const epic = workItems.createItem({ threadId, kind: "epic", title: "Epic", createdBy: "user", actorId: "ui" });
+    const task = workItems.createItem({ threadId, kind: "task", title: "Task", parentId: epic.id, createdBy: "user", actorId: "ui" });
+    const subtask = workItems.createItem({ threadId, kind: "subtask", title: "Subtask", parentId: task.id, createdBy: "user", actorId: "ui" });
+    const result = workItems.readWorkOptions(threadId);
     expect(result.mode).toBe("epic");
     if (result.mode !== "epic") return;
     const ids = result.children.map((c) => c.item.id);
@@ -253,12 +253,12 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("beforeSortIndex cuts off items at or beyond a commit/wait boundary", () => {
-    const { workItems, batchId } = seedBatch();
-    const t1 = workItems.createItem({ batchId, kind: "task", title: "Before", createdBy: "user", actorId: "ui" });
-    const t2 = workItems.createItem({ batchId, kind: "task", title: "After", createdBy: "user", actorId: "ui" });
+    const { workItems, threadId } = seedThread();
+    const t1 = workItems.createItem({ threadId, kind: "task", title: "Before", createdBy: "user", actorId: "ui" });
+    const t2 = workItems.createItem({ threadId, kind: "task", title: "After", createdBy: "user", actorId: "ui" });
     // t1 has sort_index 0, t2 has sort_index 1; commit point sits at index 1
     const cutoff = t2.sort_index;
-    const result = workItems.readWorkOptions(batchId, cutoff);
+    const result = workItems.readWorkOptions(threadId, cutoff);
     expect(result.mode).toBe("standalone");
     if (result.mode !== "standalone") return;
     const ids = result.items.map((i) => i.item.id);
@@ -267,10 +267,10 @@ describe("WorkItemStore.readWorkOptions", () => {
   });
 
   test("beforeSortIndex with no items before cutoff returns empty", () => {
-    const { workItems, batchId } = seedBatch();
-    workItems.createItem({ batchId, kind: "task", title: "After boundary", createdBy: "user", actorId: "ui" });
+    const { workItems, threadId } = seedThread();
+    workItems.createItem({ threadId, kind: "task", title: "After boundary", createdBy: "user", actorId: "ui" });
     // cutoff at sort_index 0 means nothing qualifies (items need sort_index < 0)
-    const result = workItems.readWorkOptions(batchId, 0);
+    const result = workItems.readWorkOptions(threadId, 0);
     expect(result.mode).toBe("empty");
   });
 });

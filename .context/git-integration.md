@@ -121,7 +121,7 @@ Clicking it opens a small `CommitDialog` with a commit-message
 textarea; submitting runs `gitCommitAll` through a dedicated
 `newde:gitCommitAll` IPC method. This is the UI entry point for the
 **ad-hoc commit path** (the path `agent-model.md` distinguishes from
-commit points). The commit-point flow still owns automated batches;
+commit points). The commit-point flow still owns automated threads;
 the button is for "I've got changes and want to land them now."
 
 Button carries `data-testid="files-commit"`; the dialog's message
@@ -133,7 +133,7 @@ textarea is `files-commit-message` and the submit button is
 newde supports two paths for landing a commit, and they exist for
 different reasons:
 
-1. **Ad-hoc.** The writer-batch agent runs `git add` / `git commit`
+1. **Ad-hoc.** The writer-thread agent runs `git add` / `git commit`
    directly via Bash when the user tells it to commit. No commit
    point, no approval UI. This is the default shape for "I've got
    changes, land them now."
@@ -148,13 +148,13 @@ different reasons:
 The drafted message lives only in chat — there is no `propose_commit`
 tool and no DB-side drafted-message column.
 
-### Non-writer batches still cannot call git
+### Non-writer threads still cannot call git
 
 `NON_WRITER_PROMPT_BLOCK` (`src/electron/write-guard.ts`) explicitly
-forbids git mutations for non-writer batches — they share the
+forbids git mutations for non-writer threads — they share the
 worktree with the writer and any ref/index change corrupts the
 writer's in-progress work. The write-guard hook denies Write/Edit/
-MultiEdit/NotebookEdit in those batches, and the prompt block covers
+MultiEdit/NotebookEdit in those threads, and the prompt block covers
 Bash (which the hook can't classify reliably).
 
 ## Related

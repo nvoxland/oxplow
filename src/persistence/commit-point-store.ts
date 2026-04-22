@@ -19,7 +19,7 @@ const MESSAGE_MAX_LEN = 20_000;
 
 export interface CommitPoint {
   id: string;
-  batch_id: string;
+  thread_id: string;
   sort_index: number;
   mode: CommitPointMode;
   status: CommitPointStatus;
@@ -30,7 +30,7 @@ export interface CommitPoint {
 }
 
 export interface CommitPointChange {
-  batchId: string;
+  threadId: string;
   kind: "created" | "updated" | "deleted" | "reordered";
   id: string | null;
 }
@@ -52,11 +52,11 @@ export class CommitPointStore {
     this.emitter.emit(change);
   }
 
-  listForBatch(batchId: string): CommitPoint[] {
+  listForThread(threadId: string): CommitPoint[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM commit_point WHERE batch_id = ? ORDER BY sort_index, created_at, id`,
-        batchId,
+        `SELECT * FROM commit_point WHERE thread_id = ? ORDER BY sort_index, created_at, id`,
+        threadId,
       )
       .map(toCommitPoint);
   }
@@ -66,21 +66,21 @@ export class CommitPointStore {
     return row ? toCommitPoint(row) : null;
   }
 
-  /** Append a commit point at the end of the batch's queue. The caller passes
+  /** Append a commit point at the end of the thread's queue. The caller passes
    *  the next sort_index (the runtime computes it across all three queue
    *  tables). Default mode is 'approve' (user reviews before commit). */
-  create(input: { batchId: string; sortIndex: number; mode?: CommitPointMode }): CommitPoint {
+  create(input: { threadId: string; sortIndex: number; mode?: CommitPointMode }): CommitPoint {
     const id = createId("cp");
     const now = new Date().toISOString();
     const mode = input.mode ?? "approve";
     this.stateDb.run(
-      `INSERT INTO commit_point (id, batch_id, sort_index, mode, status, created_at, updated_at)
+      `INSERT INTO commit_point (id, thread_id, sort_index, mode, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
-      id, input.batchId, input.sortIndex, mode, now, now,
+      id, input.threadId, input.sortIndex, mode, now, now,
     );
     const row = this.get(id);
     if (!row) throw new Error("commit point not persisted");
-    this.emit({ batchId: input.batchId, kind: "created", id });
+    this.emit({ threadId: input.threadId, kind: "created", id });
     return row;
   }
 
@@ -97,14 +97,14 @@ export class CommitPointStore {
         );
       }
     });
-    // Emit one reordered change per distinct batch touched.
-    const batches = new Set<string>();
+    // Emit one reordered change per distinct thread touched.
+    const threads = new Set<string>();
     for (const entry of entries) {
       const cp = this.get(entry.id);
-      if (cp) batches.add(cp.batch_id);
+      if (cp) threads.add(cp.thread_id);
     }
-    for (const batchId of batches) {
-      this.emit({ batchId, kind: "reordered", id: null });
+    for (const threadId of threads) {
+      this.emit({ threadId, kind: "reordered", id: null });
     }
   }
 
@@ -121,7 +121,7 @@ export class CommitPointStore {
       );
     }
     const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
+    this.emit({ threadId: updated.thread_id, kind: "updated", id });
     return updated;
   }
 
@@ -138,7 +138,7 @@ export class CommitPointStore {
       sha, now, now, id,
     );
     const updated = this.requireCommitPoint(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
+    this.emit({ threadId: updated.thread_id, kind: "updated", id });
     return updated;
   }
 
@@ -147,7 +147,7 @@ export class CommitPointStore {
     if (!cp) return;
     if (cp.status === "done") throw new Error("cannot delete a completed commit point");
     this.stateDb.run(`DELETE FROM commit_point WHERE id = ?`, id);
-    this.emit({ batchId: cp.batch_id, kind: "deleted", id });
+    this.emit({ threadId: cp.thread_id, kind: "deleted", id });
   }
 
   private requireCommitPoint(id: string): CommitPoint {
@@ -177,7 +177,7 @@ function toCommitPoint(row: Record<string, unknown>): CommitPoint {
   const mode: CommitPointMode = rawMode === "auto" ? "auto" : "approve";
   return {
     id: String(row.id),
-    batch_id: String(row.batch_id),
+    thread_id: String(row.thread_id),
     sort_index: Number(row.sort_index),
     mode,
     status,

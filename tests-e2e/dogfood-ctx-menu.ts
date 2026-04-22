@@ -27,7 +27,7 @@ Please:
 2. Add a "Rename…" menu item that triggers the existing inline rename flow on the row (same effect as double-click).
 3. If the existing context menu plumbing makes it trivial, also add "Change status…" and "Change priority…" entries that open the existing s/p keyboard pickers. If not trivial, skip these — one entry is fine for this pass.
 4. Run bun test. Do not add new tests unless existing ones break.
-5. Propose a commit with a conventional-commits-style message that references the pattern established in commit 7cc3302 (BatchRail context-menu expansion).
+5. Propose a commit with a conventional-commits-style message that references the pattern established in commit 7cc3302 (ThreadRail context-menu expansion).
 
 Do not touch .self-ralph/ or tests-e2e/.`;
 

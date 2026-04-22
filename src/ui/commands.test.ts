@@ -8,7 +8,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: false,
+        hasThread: false,
         activeTab: "agent",
       },
       noopHandlers(),
@@ -25,7 +25,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: true,
         canSave: true,
-        hasBatch: true,
+        hasThread: true,
         activeTab: "editor",
       },
       noopHandlers(),
@@ -41,7 +41,7 @@ describe("buildMenuGroups", () => {
         hasStream: false,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: false,
+        hasThread: false,
         activeTab: "agent",
       },
       noopHandlers(),
@@ -52,38 +52,38 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "view.editor")?.enabled).toBe(false);
   });
 
-  test("exposes new-batch, new-stream, history, snapshots commands", () => {
+  test("exposes new-thread, new-stream, history, snapshots commands", () => {
     const groups = buildMenuGroups(
       {
         hasStream: true,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: true,
+        hasThread: true,
         activeTab: "agent",
       },
       noopHandlers(),
     );
 
     expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
-    expect(findCommandById(groups, "batch.new")?.enabled).toBe(true);
+    expect(findCommandById(groups, "thread.new")?.enabled).toBe(true);
     expect(findCommandById(groups, "history.open")?.enabled).toBe(true);
     expect(findCommandById(groups, "snapshots.open")?.enabled).toBe(true);
   });
 
-  test("disables batch.new/history/snapshots without a stream", () => {
+  test("disables thread.new/history/snapshots without a stream", () => {
     const groups = buildMenuGroups(
       {
         hasStream: false,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: false,
+        hasThread: false,
         activeTab: "agent",
       },
       noopHandlers(),
     );
 
     expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
-    expect(findCommandById(groups, "batch.new")?.enabled).toBe(false);
+    expect(findCommandById(groups, "thread.new")?.enabled).toBe(false);
     expect(findCommandById(groups, "history.open")?.enabled).toBe(false);
     expect(findCommandById(groups, "snapshots.open")?.enabled).toBe(false);
   });
@@ -94,7 +94,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: false,
+        hasThread: false,
         activeTab: "agent",
         canCommit: true,
       },
@@ -105,7 +105,7 @@ describe("buildMenuGroups", () => {
         hasStream: true,
         hasSelectedFile: false,
         canSave: false,
-        hasBatch: false,
+        hasThread: false,
         activeTab: "agent",
         canCommit: false,
       },
@@ -123,7 +123,7 @@ describe("buildMenuGroupSnapshots", () => {
       hasStream: true,
       hasSelectedFile: true,
       canSave: true,
-      hasBatch: true,
+      hasThread: true,
       activeTab: "editor",
     });
 
@@ -142,7 +142,7 @@ function noopHandlers() {
     showEditorPane() {},
     newWorkItem() {},
     newStream() {},
-    newBatch() {},
+    newThread() {},
     openHistory() {},
     openSnapshots() {},
     commitFiles() {},

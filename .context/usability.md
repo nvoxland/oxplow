@@ -65,7 +65,7 @@ Things I keep forgetting. Read this before adding any UI.
   palette reads from the same `buildMenuGroups` registry). When adding a
   user-visible action, prefer wiring it as a CommandId over a bespoke
   button so it stays keyboard-reachable. Current entries include
-  `stream.new`, `batch.new`, `history.open`, `snapshots.open` alongside
+  `stream.new`, `thread.new`, `history.open`, `snapshots.open` alongside
   save/find/quick-open/new-work-item.
 
 ## Test-driveability
@@ -85,7 +85,7 @@ Things I keep forgetting. Read this before adding any UI.
     dispatching keyboard probes, otherwise the listener misses them)
   - `plan-add-points-bar`, `plan-add-commit-point`, `plan-add-wait-point`
   - `files-commit`, `files-commit-message`, `files-commit-submit`
-  - `batch-rail-new`, `batch-chip-<batchId>` (chip testid is on the
+  - `thread-rail-new`, `thread-chip-<threadId>` (chip testid is on the
     outer wrapper that owns the drop handlers, so drag probes can
     target it directly)
   - `menu-item-<item.id>` on every button inside the shared
@@ -100,13 +100,13 @@ Things I keep forgetting. Read this before adding any UI.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
     `center-tab-close-<id>` on the × close button
-  - `batch-rail-create-input`, `batch-rail-create-submit` on the
-    new-batch creation row; `batch-chip-rename-input-<id>` on the
-    inline rename input; `batch-chip-promote-<id>` and
-    `batch-chip-complete-<id>` on the hover-card actions (also
-    reachable via right-click → `menu-item-batch.promote` /
-    `menu-item-batch.complete` — keyboard-first users should never
-    have to hover to promote a batch)
+  - `thread-rail-create-input`, `thread-rail-create-submit` on the
+    new-thread creation row; `thread-chip-rename-input-<id>` on the
+    inline rename input; `thread-chip-promote-<id>` and
+    `thread-chip-complete-<id>` on the hover-card actions (also
+    reachable via right-click → `menu-item-thread.promote` /
+    `menu-item-thread.complete` — keyboard-first users should never
+    have to hover to promote a thread)
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback

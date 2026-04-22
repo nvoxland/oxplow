@@ -23,7 +23,7 @@ touches roughly seven files. They sit in this order:
    in the constructor and delegate.
 
 3. **Runtime method** — `src/electron/runtime.ts`. Adds a method to
-   `ElectronRuntime` that resolves stream/batch as needed and delegates
+   `ElectronRuntime` that resolves stream/thread as needed and delegates
    to the store. Where cross-store atomicity matters, the runtime owns
    that orchestration (e.g. `reorderBatchQueue` updates work_items,
    commit_point, and wait_point in one go).
@@ -54,12 +54,12 @@ subscribes to the relevant `*.changed` event to refetch.
 What landed across each layer when commit points were added:
 
 - **Migration v6** in `migrations.ts`: `CREATE TABLE commit_point (...)`,
-  plus indexes on `(batch_id, sort_index)` and `(batch_id, status)`.
+  plus indexes on `(thread_id, sort_index)` and `(thread_id, status)`.
 - **Store**: `src/persistence/commit-point-store.ts` —
   `create/update/markCommitted/delete/setSortIndexes/listForBatch/get`.
   Status machine is `pending → done`; the drafted message lives in
-  chat, not the DB. Every mutation calls `emit({ batchId, kind, id })`.
-- **Runtime / batch-queue-orchestrator**: methods
+  chat, not the DB. Every mutation calls `emit({ threadId, kind, id })`.
+- **Runtime / thread-queue-orchestrator**: methods
   `createCommitPoint/deleteCommitPoint/listCommitPoints/
   reorderBatchQueue/executeCommit` plus the Stop-hook integration via
   `computeStopDirective`. `executeCommit` runs `gitCommitAll` inline
@@ -71,9 +71,9 @@ What landed across each layer when commit points were added:
   reset were removed — approval is chat-driven.)
 - **UI api**: `listCommitPoints/createCommitPoint/deleteCommitPoint/
   reorderBatchQueue` in `src/ui/api.ts`.
-- **UI consumption**: `PlanPane.tsx` loads commit points on batch change
+- **UI consumption**: `PlanPane.tsx` loads commit points on thread change
   and refetches via `subscribeNewdeEvents` filtered to
-  `event.type === "commit-point.changed" && event.batchId === batchId`.
+  `event.type === "commit-point.changed" && event.threadId === threadId`.
 - **MCP**: `commit` and `list_commit_points` registered in
   `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
   `commitPointStore` to its `McpToolDeps`). The agent drafts messages
@@ -178,12 +178,12 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
 
-## Batch and stream reorder IPC
+## Thread and stream reorder IPC
 
 - `reorderBatches(streamId, orderedBatchIds[])` — reassigns sequential
-  `sort_index` values to the given batch ids (only rows belonging to
-  `streamId` are updated). Emits `batch.changed` (kind: "reordered").
-  Promoting or completing a batch no longer auto-moves it to position 0;
+  `sort_index` values to the given thread ids (only rows belonging to
+  `streamId` are updated). Emits `thread.changed` (kind: "reordered").
+  Promoting or completing a thread no longer auto-moves it to position 0;
   the user controls order via drag-to-reorder in `BatchRail`.
 - `reorderStreams(orderedStreamIds[])` — reassigns sequential
   `sort_index` to streams. Emits `stream.changed` (kind: "reordered").
@@ -191,7 +191,7 @@ UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
   `created_at, rowid`.
 - `getWorkNotes(itemId)` — returns `WorkNote[]` sorted by `created_at ASC`
   for the given work item. Read-only; called when the edit modal opens to
-  populate the read-only Notes section. No stream/batch context needed.
+  populate the read-only Notes section. No stream/thread context needed.
 
 Both follow the standard 7-layer IPC flow (migration → store →
 runtime → ipc-contract → preload → main → ui/api).

@@ -11,12 +11,12 @@ import { launchNewde, probeLog, runProbe } from "./harness.ts";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WORK_ITEM_TITLE = "Surface 'no active commit point' state in Work panel";
-const WORK_ITEM_BODY = `When the agent finishes work but no commit point is queued in the batch, propose_commit silently no-ops — the user sees no signal in the Work panel that a commit was ever wanted. This breaks the dogfood loop: outer users don't know whether to click + Commit or wait.
+const WORK_ITEM_BODY = `When the agent finishes work but no commit point is queued in the thread, propose_commit silently no-ops — the user sees no signal in the Work panel that a commit was ever wanted. This breaks the dogfood loop: outer users don't know whether to click + Commit or wait.
 
 Please:
 1. Read .context/agent-model.md to understand the Stop-hook / commit-point flow. Note that buildCommitPointStopReason (src/electron/runtime.ts ~L1684) only fires when a commit point IS active.
-2. Find where the Stop-hook pipeline decides "no commit point, just stop" — likely in the same file around the queue-empty path. Add a one-time note or a work-item-level banner shown when: a work item reached 'human_check' or 'done' in a batch with no remaining commit points in that batch's queue.
-3. Keep scope TIGHT: a single inline hint in the Work panel when it detects the state "batch has human_check or done items but zero remaining commit_points waiting". Not a modal. Not a toast. An inline note.
+2. Find where the Stop-hook pipeline decides "no commit point, just stop" — likely in the same file around the queue-empty path. Add a one-time note or a work-item-level banner shown when: a work item reached 'human_check' or 'done' in a thread with no remaining commit points in that thread's queue.
+3. Keep scope TIGHT: a single inline hint in the Work panel when it detects the state "thread has human_check or done items but zero remaining commit_points waiting". Not a modal. Not a toast. An inline note.
 4. Update .context/ipc-and-stores.md or .context/agent-model.md with the new signal in the same commit.
 5. Run bun test. Do not add new unit tests unless existing ones break.
 6. Propose a commit via mcp__newde__propose_commit against the active commit point (there is one — the probe added it).

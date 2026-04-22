@@ -1,25 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createWorkItem,
-  completeBatch,
-  createBatch,
+  completeThread,
+  createThread,
   deleteWorkItem,
-  getBatchWorkState,
-  getBatchState,
+  getThreadWorkState,
+  getThreadState,
   createWorkspaceDirectory,
   listAgentStatuses,
   listAgentTurns,
   listWorkItemEfforts,
   getSnapshotPairDiff,
   reorderWorkItems,
-  moveWorkItemToBatch,
+  moveWorkItemToThread,
   getBacklogState,
   createBacklogItem,
   updateBacklogItem,
   deleteBacklogItem,
   reorderBacklog,
   moveWorkItemToBacklog,
-  moveBacklogItemToBatch,
+  moveBacklogItemToThread,
   subscribeBacklogEvents,
   subscribeAgentStatus,
   subscribeTurnEvents,
@@ -33,7 +33,7 @@ import {
   probeDaemon,
   readWorkspaceFile,
   renameWorkspacePath,
-  renameBatch,
+  renameThread,
   renameStream,
   subscribeNewdeEvents,
   subscribeWorkItemEvents,
@@ -41,16 +41,16 @@ import {
   subscribeWorkspaceEvents,
   getConfig,
   setGeneratedDirs,
-  selectBatch,
-  promoteBatch,
-  reorderBatches,
+  selectThread,
+  promoteThread,
+  reorderThreads,
   reorderStreams,
   switchStream,
   updateWorkItem,
   writeWorkspaceFile,
   type BacklogState,
-  type BatchWorkState,
-  type BatchState,
+  type ThreadWorkState,
+  type ThreadState,
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
@@ -80,7 +80,7 @@ import { BottomPanel } from "./components/BottomPanel.js";
 import { DockShell } from "./components/Dock/DockShell.js";
 import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
-import { BatchRail } from "./components/BatchRail.js";
+import { ThreadRail } from "./components/ThreadRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { Activity } from "./components/Activity/Activity.js";
@@ -156,8 +156,8 @@ function writePersistedCenterActive(value: string): void {
 
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
-  const [batchStates, setBatchStates] = useState<Record<string, BatchState>>({});
-  const [batchWorkStates, setBatchWorkStates] = useState<Record<string, BatchWorkState>>({});
+  const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
+  const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentTurns, setAgentTurns] = useState<Record<string, AgentTurn[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
@@ -179,7 +179,7 @@ export function App() {
   const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
-  const [batchCreateRequest, setBatchCreateRequest] = useState(0);
+  const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
@@ -196,15 +196,15 @@ export function App() {
   useEffect(() => {
     Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
       .then(async ([allStreams, current, context]) => {
-        const initialBatchState = await getBatchState(current.id);
-        const initialBatch = initialBatchState.batches.find((batch) => batch.id === initialBatchState.selectedBatchId);
-        if (initialBatch) {
-          const initialWork = await getBatchWorkState(current.id, initialBatch.id);
-          setBatchWorkStates((prev) => ({ ...prev, [initialBatch.id]: initialWork }));
+        const initialThreadState = await getThreadState(current.id);
+        const initialThread = initialThreadState.threads.find((thread) => thread.id === initialThreadState.selectedThreadId);
+        if (initialThread) {
+          const initialWork = await getThreadWorkState(current.id, initialThread.id);
+          setThreadWorkStates((prev) => ({ ...prev, [initialThread.id]: initialWork }));
         }
         setStreams(allStreams);
         setStream(current);
-        setBatchStates((prev) => ({ ...prev, [current.id]: initialBatchState }));
+        setThreadStates((prev) => ({ ...prev, [current.id]: initialThreadState }));
         setWorkspaceContext(context);
         setError(null);
         setDaemonUnavailable(false);
@@ -256,13 +256,13 @@ export function App() {
     try {
       logUi("info", "switching stream", { streamId: id });
       const next = await switchStream(id);
-      const nextBatchState = batchStates[next.id] ?? await getBatchState(next.id);
-      const nextBatch = nextBatchState.batches.find((batch) => batch.id === nextBatchState.selectedBatchId);
-      if (nextBatch && !batchWorkStates[nextBatch.id]) {
-        const nextWork = await getBatchWorkState(next.id, nextBatch.id);
-        setBatchWorkStates((prev) => ({ ...prev, [nextBatch.id]: nextWork }));
+      const nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
+      const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
+      if (nextThread && !threadWorkStates[nextThread.id]) {
+        const nextWork = await getThreadWorkState(next.id, nextThread.id);
+        setThreadWorkStates((prev) => ({ ...prev, [nextThread.id]: nextWork }));
       }
-      setBatchStates((prev) => ({ ...prev, [next.id]: nextBatchState }));
+      setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
       setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
@@ -292,12 +292,12 @@ export function App() {
     }
   }
 
-  async function handleRenameBatchById(batchId: string, newTitle: string) {
+  async function handleRenameThreadById(threadId: string, newTitle: string) {
     if (!stream) return;
     try {
-      await renameBatch(stream.id, batchId, newTitle);
-      const refreshed = await getBatchState(stream.id);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: refreshed }));
+      await renameThread(stream.id, threadId, newTitle);
+      const refreshed = await getThreadState(stream.id);
+      setThreadStates((prev) => ({ ...prev, [stream.id]: refreshed }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -305,12 +305,12 @@ export function App() {
   }
 
   function handleStreamCreated(next: Stream) {
-    void getBatchState(next.id).then((state) => {
-      setBatchStates((prev) => ({ ...prev, [next.id]: state }));
-      const batch = state.batches.find((candidate) => candidate.id === state.selectedBatchId);
-      if (batch) {
-        void getBatchWorkState(next.id, batch.id).then((work) => {
-          setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+    void getThreadState(next.id).then((state) => {
+      setThreadStates((prev) => ({ ...prev, [next.id]: state }));
+      const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
+      if (thread) {
+        void getThreadWorkState(next.id, thread.id).then((work) => {
+          setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
       }
     }).catch((e) => {
@@ -492,15 +492,15 @@ export function App() {
     });
   }
 
-  async function handleSelectBatch(batchId: string) {
+  async function handleSelectThread(threadId: string) {
     if (!stream) return;
     try {
-      const next = await selectBatch(stream.id, batchId);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
-      const batch = next.batches.find((candidate) => candidate.id === batchId);
-      if (batch) {
-        const work = await getBatchWorkState(stream.id, batch.id);
-        setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+      const next = await selectThread(stream.id, threadId);
+      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
+      const thread = next.threads.find((candidate) => candidate.id === threadId);
+      if (thread) {
+        const work = await getThreadWorkState(stream.id, thread.id);
+        setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
     } catch (e) {
@@ -508,15 +508,15 @@ export function App() {
     }
   }
 
-  async function handleCreateBatch(title: string) {
+  async function handleCreateThread(title: string) {
     if (!stream) return;
     try {
-      const next = await createBatch(stream.id, title);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
-      const batch = next.batches.find((candidate) => candidate.id === next.selectedBatchId);
-      if (batch) {
-        const work = await getBatchWorkState(stream.id, batch.id);
-        setBatchWorkStates((prev) => ({ ...prev, [batch.id]: work }));
+      const next = await createThread(stream.id, title);
+      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
+      const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
+      if (thread) {
+        const work = await getThreadWorkState(stream.id, thread.id);
+        setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
     } catch (e) {
@@ -525,11 +525,11 @@ export function App() {
     }
   }
 
-  async function handlePromoteBatch(batchId: string) {
+  async function handlePromoteThread(threadId: string) {
     if (!stream) return;
     try {
-      const next = await promoteBatch(stream.id, batchId);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      const next = await promoteThread(stream.id, threadId);
+      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       setCenterActive("agent");
       setError(null);
     } catch (e) {
@@ -537,11 +537,11 @@ export function App() {
     }
   }
 
-  async function handleCompleteBatch(batchId: string) {
+  async function handleCompleteThread(threadId: string) {
     if (!stream) return;
     try {
-      const next = await completeBatch(stream.id, batchId);
-      setBatchStates((prev) => ({ ...prev, [stream.id]: next }));
+      const next = await completeThread(stream.id, threadId);
+      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       setCenterActive("agent");
       setError(null);
     } catch (e) {
@@ -549,10 +549,10 @@ export function App() {
     }
   }
 
-  async function handleReorderBatches(orderedBatchIds: string[]) {
+  async function handleReorderThreads(orderedThreadIds: string[]) {
     if (!stream) return;
     try {
-      await reorderBatches(stream.id, orderedBatchIds);
+      await reorderThreads(stream.id, orderedThreadIds);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -581,10 +581,10 @@ export function App() {
     status?: "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
     priority?: "low" | "medium" | "high" | "urgent";
   }) {
-    if (!stream || !selectedBatch) return;
+    if (!stream || !selectedThread) return;
     try {
-      const next = await createWorkItem(stream.id, selectedBatch.id, input);
-      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      const next = await createWorkItem(stream.id, selectedThread.id, input);
+      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -603,10 +603,10 @@ export function App() {
       priority?: "low" | "medium" | "high" | "urgent";
     },
   ) {
-    if (!stream || !selectedBatch) return;
+    if (!stream || !selectedThread) return;
     try {
-      const next = await updateWorkItem(stream.id, selectedBatch.id, itemId, changes);
-      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      const next = await updateWorkItem(stream.id, selectedThread.id, itemId, changes);
+      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -615,10 +615,10 @@ export function App() {
   }
 
   async function handleDeleteWorkItem(itemId: string) {
-    if (!stream || !selectedBatch) return;
+    if (!stream || !selectedThread) return;
     try {
-      const next = await deleteWorkItem(stream.id, selectedBatch.id, itemId);
-      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      const next = await deleteWorkItem(stream.id, selectedThread.id, itemId);
+      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -627,10 +627,10 @@ export function App() {
   }
 
   async function handleReorderWorkItems(orderedItemIds: string[]) {
-    if (!stream || !selectedBatch) return;
+    if (!stream || !selectedThread) return;
     try {
-      const next = await reorderWorkItems(stream.id, selectedBatch.id, orderedItemIds);
-      setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+      const next = await reorderWorkItems(stream.id, selectedThread.id, orderedItemIds);
+      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -638,11 +638,11 @@ export function App() {
     }
   }
 
-  async function handleMoveWorkItemToBatch(itemId: string, fromBatchId: string, toBatchId: string) {
-    if (!stream || fromBatchId === toBatchId) return;
+  async function handleMoveWorkItemToThread(itemId: string, fromThreadId: string, toThreadId: string) {
+    if (!stream || fromThreadId === toThreadId) return;
     try {
-      const { from, to } = await moveWorkItemToBatch(stream.id, fromBatchId, itemId, toBatchId);
-      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from, [toBatchId]: to }));
+      const { from, to } = await moveWorkItemToThread(stream.id, fromThreadId, itemId, toThreadId);
+      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -650,11 +650,11 @@ export function App() {
     }
   }
 
-  async function handleMoveItemToBacklog(itemId: string, fromBatchId: string) {
+  async function handleMoveItemToBacklog(itemId: string, fromThreadId: string) {
     if (!stream) return;
     try {
-      const { from, backlog } = await moveWorkItemToBacklog(stream.id, fromBatchId, itemId);
-      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from }));
+      const { from, backlog } = await moveWorkItemToBacklog(stream.id, fromThreadId, itemId);
+      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from }));
       setBacklogState(backlog);
       setError(null);
     } catch (e) {
@@ -663,12 +663,12 @@ export function App() {
     }
   }
 
-  async function handleMoveBacklogItemToBatch(itemId: string, toBatchId: string) {
+  async function handleMoveBacklogItemToThread(itemId: string, toThreadId: string) {
     if (!stream) return;
     try {
-      const { backlog, to } = await moveBacklogItemToBatch(stream.id, itemId, toBatchId);
+      const { backlog, to } = await moveBacklogItemToThread(stream.id, itemId, toThreadId);
       setBacklogState(backlog);
-      setBatchWorkStates((prev) => ({ ...prev, [toBatchId]: to }));
+      setThreadWorkStates((prev) => ({ ...prev, [toThreadId]: to }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -727,36 +727,36 @@ export function App() {
   const selectedFilePath = currentSession.selectedPath;
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
-  const currentBatchState = useMemo(
-    () => (stream ? batchStates[stream.id] ?? { selectedBatchId: null, activeBatchId: null, batches: [] } : { selectedBatchId: null, activeBatchId: null, batches: [] }),
-    [batchStates, stream],
+  const currentThreadState = useMemo(
+    () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, activeThreadId: null, threads: [] } : { selectedThreadId: null, activeThreadId: null, threads: [] }),
+    [threadStates, stream],
   );
-  const selectedBatch = currentBatchState.batches.find((batch) => batch.id === currentBatchState.selectedBatchId) ?? null;
-  const selectedBatchWork = selectedBatch ? batchWorkStates[selectedBatch.id] ?? null : null;
-  const selectedBatchTurns = selectedBatch ? agentTurns[selectedBatch.id] ?? null : null;
+  const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
+  const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
+  const selectedThreadTurns = selectedThread ? agentTurns[selectedThread.id] ?? null : null;
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
-      const activeBatchId = batchStates[s.id]?.activeBatchId;
-      if (activeBatchId) out[s.id] = agentStatuses[activeBatchId] ?? "idle";
+      const activeThreadId = threadStates[s.id]?.activeThreadId;
+      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "idle";
       else out[s.id] = "idle";
     }
     return out;
-  }, [streams, batchStates, agentStatuses]);
-  const streamActiveBatchIds = useMemo<Record<string, string | null>>(() => {
+  }, [streams, threadStates, agentStatuses]);
+  const streamActiveThreadIds = useMemo<Record<string, string | null>>(() => {
     const out: Record<string, string | null> = {};
-    for (const s of streams) out[s.id] = batchStates[s.id]?.activeBatchId ?? null;
+    for (const s of streams) out[s.id] = threadStates[s.id]?.activeThreadId ?? null;
     return out;
-  }, [streams, batchStates]);
+  }, [streams, threadStates]);
 
-  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: string, fromBatchId: string | null) {
-    if (!stream || !fromBatchId) return;
-    const toBatchId = streamActiveBatchIds[targetStreamId];
-    if (!toBatchId || toBatchId === fromBatchId) return;
+  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: string, fromThreadId: string | null) {
+    if (!stream || !fromThreadId) return;
+    const toThreadId = streamActiveThreadIds[targetStreamId];
+    if (!toThreadId || toThreadId === fromThreadId) return;
     try {
-      const { from, to } = await moveWorkItemToBatch(stream.id, fromBatchId, itemId, toBatchId, targetStreamId);
-      setBatchWorkStates((prev) => ({ ...prev, [fromBatchId]: from, [toBatchId]: to }));
+      const { from, to } = await moveWorkItemToThread(stream.id, fromThreadId, itemId, toThreadId, targetStreamId);
+      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -861,29 +861,29 @@ export function App() {
   }, [stream?.id]);
 
   useEffect(() => {
-    if (!stream || !selectedBatch || batchWorkStates[selectedBatch.id]) return;
-    void getBatchWorkState(stream.id, selectedBatch.id)
+    if (!stream || !selectedThread || threadWorkStates[selectedThread.id]) return;
+    void getThreadWorkState(stream.id, selectedThread.id)
       .then((next) => {
-        setBatchWorkStates((prev) => ({ ...prev, [selectedBatch.id]: next }));
+        setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       })
       .catch((e) => {
         setError(String(e));
       });
-  }, [batchWorkStates, selectedBatch, stream]);
+  }, [threadWorkStates, selectedThread, stream]);
 
   useEffect(() => {
     if (!stream) return;
-    const missing = currentBatchState.batches.filter((batch) => !batchWorkStates[batch.id]);
+    const missing = currentThreadState.threads.filter((thread) => !threadWorkStates[thread.id]);
     if (missing.length === 0) return;
     let cancelled = false;
     void Promise.all(
-      missing.map(async (batch) => [batch.id, await getBatchWorkState(stream.id, batch.id)] as const),
+      missing.map(async (thread) => [thread.id, await getThreadWorkState(stream.id, thread.id)] as const),
     )
       .then((results) => {
         if (cancelled) return;
-        setBatchWorkStates((prev) => {
+        setThreadWorkStates((prev) => {
           const next = { ...prev };
-          for (const [batchId, work] of results) next[batchId] = work;
+          for (const [threadId, work] of results) next[threadId] = work;
           return next;
         });
       })
@@ -893,33 +893,33 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [batchWorkStates, currentBatchState.batches, stream]);
+  }, [threadWorkStates, currentThreadState.threads, stream]);
 
   useEffect(() => {
-    if (!stream || !selectedBatch || agentTurns[selectedBatch.id]) return;
-    void listAgentTurns(stream.id, selectedBatch.id)
+    if (!stream || !selectedThread || agentTurns[selectedThread.id]) return;
+    void listAgentTurns(stream.id, selectedThread.id)
       .then((turns) => {
-        setAgentTurns((prev) => ({ ...prev, [selectedBatch.id]: turns }));
+        setAgentTurns((prev) => ({ ...prev, [selectedThread.id]: turns }));
       })
       .catch((e) => {
         logUi("warn", "failed to load agent turns", {
           streamId: stream.id,
-          batchId: selectedBatch.id,
+          threadId: selectedThread.id,
           error: String(e),
         });
       });
-  }, [agentTurns, selectedBatch, stream]);
+  }, [agentTurns, selectedThread, stream]);
 
   useEffect(() => {
     const unsubscribe = subscribeTurnEvents("all", (event) => {
-      void listAgentTurns(event.streamId, event.batchId)
+      void listAgentTurns(event.streamId, event.threadId)
         .then((turns) => {
-          setAgentTurns((prev) => ({ ...prev, [event.batchId]: turns }));
+          setAgentTurns((prev) => ({ ...prev, [event.threadId]: turns }));
         })
         .catch((error) => {
           logUi("warn", "failed to refresh agent turns after change event", {
             streamId: event.streamId,
-            batchId: event.batchId,
+            threadId: event.threadId,
             kind: event.kind,
             error: String(error),
           });
@@ -946,26 +946,26 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    for (const [streamId, state] of Object.entries(batchStates)) {
-      for (const batch of state.batches) {
-        if (batchWorkStates[batch.id]) continue;
-        void getBatchWorkState(streamId, batch.id)
-          .then((work) => setBatchWorkStates((prev) => (prev[batch.id] ? prev : { ...prev, [batch.id]: work })))
-          .catch((error) => logUi("warn", "failed to preload batch work state", { streamId, batchId: batch.id, error: String(error) }));
+    for (const [streamId, state] of Object.entries(threadStates)) {
+      for (const thread of state.threads) {
+        if (threadWorkStates[thread.id]) continue;
+        void getThreadWorkState(streamId, thread.id)
+          .then((work) => setThreadWorkStates((prev) => (prev[thread.id] ? prev : { ...prev, [thread.id]: work })))
+          .catch((error) => logUi("warn", "failed to preload thread work state", { streamId, threadId: thread.id, error: String(error) }));
       }
     }
-  }, [batchStates]);
+  }, [threadStates]);
 
   useEffect(() => {
     const unsubscribe = subscribeWorkItemEvents("all", (event) => {
-      void getBatchWorkState(event.streamId, event.batchId)
+      void getThreadWorkState(event.streamId, event.threadId)
         .then((workState) => {
-          setBatchWorkStates((prev) => ({ ...prev, [event.batchId]: workState }));
+          setThreadWorkStates((prev) => ({ ...prev, [event.threadId]: workState }));
         })
         .catch((error) => {
-          logUi("warn", "failed to refresh batch work state after change event", {
+          logUi("warn", "failed to refresh thread work state after change event", {
             streamId: event.streamId,
-            batchId: event.batchId,
+            threadId: event.threadId,
             kind: event.kind,
             error: String(error),
           });
@@ -976,15 +976,15 @@ export function App() {
 
   useEffect(() => {
     const unsubscribe = subscribeNewdeEvents((event) => {
-      if (event.type !== "batch.changed") return;
-      void getBatchState(event.streamId)
+      if (event.type !== "thread.changed") return;
+      void getThreadState(event.streamId)
         .then((state) => {
-          setBatchStates((prev) => ({ ...prev, [event.streamId]: state }));
+          setThreadStates((prev) => ({ ...prev, [event.streamId]: state }));
         })
         .catch((error) => {
-          logUi("warn", "failed to refresh batch state after change event", {
+          logUi("warn", "failed to refresh thread state after change event", {
             streamId: event.streamId,
-            batchId: event.batchId,
+            threadId: event.threadId,
             kind: event.kind,
             error: String(error),
           });
@@ -1049,14 +1049,14 @@ export function App() {
       .then((entries) => {
         if (cancelled) return;
         const next: Record<string, AgentStatus> = {};
-        for (const entry of entries) next[entry.batchId] = entry.status;
+        for (const entry of entries) next[entry.threadId] = entry.status;
         setAgentStatuses(next);
       })
       .catch((error) => {
         logUi("warn", "failed to seed agent statuses", { error: String(error) });
       });
     const unsubscribe = subscribeAgentStatus("all", (entry) => {
-      setAgentStatuses((prev) => ({ ...prev, [entry.batchId]: entry.status }));
+      setAgentStatuses((prev) => ({ ...prev, [entry.threadId]: entry.status }));
     });
     return () => {
       cancelled = true;
@@ -1130,11 +1130,11 @@ export function App() {
       hasStream: !!stream,
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
-      hasBatch: !!selectedBatch,
+      hasThread: !!selectedThread,
       activeTab: centerActive.startsWith("file:") ? "editor" : "agent",
       canCommit: !!stream && !!workspaceContext.gitEnabled,
     } as const),
-    [centerActive, currentFile, currentFileDirty, selectedBatch, selectedFilePath, stream, workspaceContext.gitEnabled],
+    [centerActive, currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.gitEnabled],
   );
   const commandHandlers = useMemo(() => ({
     save() {
@@ -1162,9 +1162,9 @@ export function App() {
     newStream() {
       setStreamCreateRequest((n) => n + 1);
     },
-    newBatch() {
+    newThread() {
       if (!stream) return;
-      setBatchCreateRequest((n) => n + 1);
+      setThreadCreateRequest((n) => n + 1);
     },
     openHistory() {
       setBottomActivate({ id: "history", token: Date.now() });
@@ -1354,7 +1354,7 @@ export function App() {
     setCenterActive((current) => (current === id ? "agent" : current));
   };
 
-  const agentBatchStatus: AgentStatus = selectedBatch ? agentStatuses[selectedBatch.id] ?? "idle" : "idle";
+  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [
@@ -1362,12 +1362,12 @@ export function App() {
         id: "agent",
         label: "Agent",
         closable: false,
-        agentStatus: agentBatchStatus,
+        agentStatus: agentThreadStatus,
         render: () =>
-          selectedBatch ? (
-            <TerminalPane paneTarget={selectedBatch.pane_target} visible={effectiveCenterActive === "agent"} />
+          selectedThread ? (
+            <TerminalPane paneTarget={selectedThread.pane_target} visible={effectiveCenterActive === "agent"} />
           ) : (
-            <div style={{ padding: 12, color: "var(--muted)" }}>No batch selected.</div>
+            <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
           ),
       },
     ];
@@ -1427,8 +1427,8 @@ export function App() {
     }
     return tabs;
   }, [
-    selectedBatch,
-    agentBatchStatus,
+    selectedThread,
+    agentThreadStatus,
     effectiveCenterActive,
     stream,
     currentSession.openOrder,
@@ -1444,9 +1444,9 @@ export function App() {
       label: "Work",
       render: () => (
         <PlanPane
-          batch={selectedBatch}
-          activeBatchId={currentBatchState.activeBatchId}
-          batchWork={selectedBatchWork}
+          thread={selectedThread}
+          activeThreadId={currentThreadState.activeThreadId}
+          threadWork={selectedThreadWork}
           backlog={backlogState}
           onCreateWorkItem={handleCreateWorkItem}
           onUpdateWorkItem={handleUpdateWorkItem}
@@ -1472,7 +1472,7 @@ export function App() {
           stream={stream}
           gitEnabled={workspaceContext.gitEnabled}
           selectedFilePath={selectedFilePath}
-          currentBatchTurns={selectedBatchTurns}
+          currentThreadTurns={selectedThreadTurns}
           generatedDirs={generatedDirs}
           onOpenFile={handleOpenFile}
           onOpenDiff={handleOpenDiff}
@@ -1490,8 +1490,8 @@ export function App() {
       label: "Activity",
       render: () => (
         <Activity
-          agentTurns={selectedBatchTurns}
-          workItems={selectedBatchWork?.items ?? []}
+          agentTurns={selectedThreadTurns}
+          workItems={selectedThreadWork?.items ?? []}
           onOpenFile={handleOpenFile}
           onOpenTurnDiff={handleOpenTurnDiff}
         />
@@ -1501,9 +1501,9 @@ export function App() {
     stream,
     selectedFilePath,
     workspaceContext.gitEnabled,
-    selectedBatch,
-    selectedBatchWork,
-    selectedBatchTurns,
+    selectedThread,
+    selectedThreadWork,
+    selectedThreadTurns,
   ]);
 
   const bottomToolWindows: ToolWindow[] = [
@@ -1532,36 +1532,36 @@ export function App() {
           stream={stream}
           streams={streams}
           streamStatuses={streamStatuses}
-          streamActiveBatchIds={streamActiveBatchIds}
+          streamActiveThreadIds={streamActiveThreadIds}
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
           onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => void handleRenameStreamById(id, title)}
-          onRequestCreateBatch={stream ? () => setBatchCreateRequest((n) => n + 1) : undefined}
+          onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => setSettingsOpen(true)}
-          onDropWorkItemOnStream={(targetStreamId, itemId, fromBatchId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromBatchId)}
+          onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
           onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}
         />
         {stream ? (
-          <BatchRail
+          <ThreadRail
             streamId={stream.id}
-            batches={currentBatchState.batches}
-            activeBatchId={currentBatchState.activeBatchId}
-            selectedBatchId={currentBatchState.selectedBatchId}
+            threads={currentThreadState.threads}
+            activeThreadId={currentThreadState.activeThreadId}
+            selectedThreadId={currentThreadState.selectedThreadId}
             agentStatuses={agentStatuses}
-            batchWorkStates={batchWorkStates}
+            threadWorkStates={threadWorkStates}
             agentTurns={agentTurns}
-            onSelectBatch={handleSelectBatch}
-            onCreateBatch={handleCreateBatch}
-            onPromoteBatch={handlePromoteBatch}
-            onCompleteBatch={handleCompleteBatch}
-            onMoveWorkItem={handleMoveWorkItemToBatch}
-            onMoveBacklogItemToBatch={handleMoveBacklogItemToBatch}
-            onRenameBatch={handleRenameBatchById}
-            onReorderBatches={handleReorderBatches}
+            onSelectThread={handleSelectThread}
+            onCreateThread={handleCreateThread}
+            onPromoteThread={handlePromoteThread}
+            onCompleteThread={handleCompleteThread}
+            onMoveWorkItem={handleMoveWorkItemToThread}
+            onMoveBacklogItemToThread={handleMoveBacklogItemToThread}
+            onRenameThread={handleRenameThreadById}
+            onReorderThreads={handleReorderThreads}
             onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
-            createRequest={batchCreateRequest}
+            createRequest={threadCreateRequest}
           />
         ) : null}
         {error ? (

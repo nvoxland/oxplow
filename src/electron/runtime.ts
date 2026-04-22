@@ -4,10 +4,10 @@ import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
-import { decideStopDirective, type BatchSnapshot } from "./stop-hook-pipeline.js";
-import { BatchQueueOrchestrator } from "./batch-queue-orchestrator.js";
+import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
+import { ThreadQueueOrchestrator } from "./thread-queue-orchestrator.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
-import { BatchStore, type Batch, type BatchState } from "../persistence/batch-store.js";
+import { ThreadStore, type Thread, type ThreadState } from "../persistence/thread-store.js";
 import {
   detectBaseBranch,
   ensureWorktree,
@@ -40,7 +40,7 @@ import {
 } from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
 import { EditorFocusStore, formatEditorFocusForAgent, type EditorFocusState } from "../session/editor-focus.js";
-import { deriveBatchAgentStatus, type AgentStatus } from "../session/agent-status.js";
+import { deriveThreadAgentStatus, type AgentStatus } from "../session/agent-status.js";
 import { LspSessionManager, registerLanguageServer } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
 import { decideResumeUpdate } from "../session/resume-tracker.js";
@@ -93,11 +93,11 @@ export class ElectronRuntime {
   readonly projectBase: string;
   readonly logger: Logger;
   readonly store: StreamStore;
-  readonly batchStore: BatchStore;
+  readonly threadStore: ThreadStore;
   private readonly workItemStore: WorkItemStore;
   readonly commitPointStore: CommitPointStore;
   readonly waitPointStore: WaitPointStore;
-  readonly batchQueue: BatchQueueOrchestrator;
+  readonly threadQueue: ThreadQueueOrchestrator;
   readonly turnStore: TurnStore;
   readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
@@ -114,14 +114,14 @@ export class ElectronRuntime {
   private electronPlugin: ElectronPlugin | null = null;
   private readonly terminalSessions = new Map<string, RuntimeSocket>();
   private readonly lspClients = new Map<string, RuntimeSocket>();
-  private readonly agentStatusByBatch = new Map<string, AgentStatus>();
+  private readonly agentStatusByThread = new Map<string, AgentStatus>();
   private readonly recentUiWrites = new Map<string, number>();
   private readonly dirtyPathsByStream = new Map<string, Set<string>>();
   /** Last <session-context> block we sent to each Claude session. Used to
    *  skip re-injecting identical blocks turn-over-turn. Keyed by Claude
    *  session id; absent key means "nothing sent yet / fall back to emit". */
   private readonly lastSessionContextBySessionId = new Map<string, string>();
-  /** The batch's writer/read-only role at the moment a Claude session id was
+  /** The thread's writer/read-only role at the moment a Claude session id was
    *  first seen. Captured once and never rewritten, so
    *  buildSessionContextBlock can detect a mid-session role flip and emit a
    *  loud banner superseding the frozen NON_WRITER block in the agent's
@@ -139,24 +139,24 @@ export class ElectronRuntime {
     this.logger = logger;
     this.config = config;
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
-    this.batchStore = new BatchStore(projectDir, logger.child({ subsystem: "batch-store" }));
+    this.threadStore = new ThreadStore(projectDir, logger.child({ subsystem: "thread-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.waitPointStore = new WaitPointStore(projectDir, logger.child({ subsystem: "wait-points" }));
-    this.batchQueue = new BatchQueueOrchestrator(
+    this.threadQueue = new ThreadQueueOrchestrator(
       this.store,
-      this.batchStore,
+      this.threadStore,
       this.workItemStore,
       this.commitPointStore,
       this.waitPointStore,
-      logger.child({ subsystem: "batch-queue" }),
+      logger.child({ subsystem: "thread-queue" }),
     );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
-      resolveBatch: (streamId, batchId) => this.resolveBatch(streamId, batchId),
+      resolveThread: (streamId, threadId) => this.resolveThread(streamId, threadId),
       workItemStore: this.workItemStore,
       turnStore: this.turnStore,
       effortStore: this.effortStore,
@@ -233,7 +233,7 @@ export class ElectronRuntime {
     this.workspaceWatchers.setExtraIgnoreDirs(this.config.generatedDirs);
 
     for (const existingStream of this.store.list()) {
-      this.batchStore.ensureStream(existingStream);
+      this.threadStore.ensureStream(existingStream);
       this.workspaceWatchers.ensureWatching(existingStream);
       this.gitRefsWatchers.ensureWatching(existingStream);
       this.takeStartupSnapshot(existingStream.id);
@@ -248,7 +248,7 @@ export class ElectronRuntime {
         path: event.path,
         t: event.t,
       });
-      // Track into the snapshot dirty set regardless of active batch state —
+      // Track into the snapshot dirty set regardless of active thread state —
       // edits between turns still need to show up in the next turn-start
       // snapshot so the agent's "before" is accurate.
       this.markDirty(event.streamId, event.path);
@@ -264,14 +264,14 @@ export class ElectronRuntime {
       this.events.publish({
         type: "hook.recorded",
         streamId: event.streamId,
-        batchId: event.batchId,
+        threadId: event.threadId,
         pane: event.pane,
         event,
       });
-      if (event.batchId) this.recomputeAgentStatus(event.streamId, event.batchId);
+      if (event.threadId) this.recomputeAgentStatus(event.streamId, event.threadId);
     });
     this.workItemStore.subscribe((change) => {
-      if (change.batchId === BACKLOG_SCOPE) {
+      if (change.threadId === BACKLOG_SCOPE) {
         this.events.publish({
           type: "backlog.changed",
           kind: change.kind,
@@ -279,12 +279,12 @@ export class ElectronRuntime {
         });
         return;
       }
-      const batch = this.batchStore.findById(change.batchId);
-      if (!batch) return;
+      const thread = this.threadStore.findById(change.threadId);
+      if (!thread) return;
       if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
         this.handleStatusTransition(
-          batch.stream_id,
-          change.batchId,
+          thread.stream_id,
+          change.threadId,
           change.itemId,
           change.previousStatus,
           change.nextStatus,
@@ -293,17 +293,17 @@ export class ElectronRuntime {
       }
       this.events.publish({
         type: "work-item.changed",
-        streamId: batch.stream_id,
-        batchId: change.batchId,
+        streamId: thread.stream_id,
+        threadId: change.threadId,
         kind: change.kind,
         itemId: change.itemId,
       });
     });
-    this.batchStore.subscribe((change) => {
+    this.threadStore.subscribe((change) => {
       this.events.publish({
-        type: "batch.changed",
+        type: "thread.changed",
         streamId: change.streamId,
-        batchId: change.batchId,
+        threadId: change.threadId,
         kind: change.kind,
       });
     });
@@ -311,32 +311,32 @@ export class ElectronRuntime {
       this.events.publish({ type: "stream.changed", kind: change.kind, streamId: change.streamId });
     });
     this.waitPointStore.subscribe((change) => {
-      const batch = this.batchStore.findById(change.batchId);
+      const thread = this.threadStore.findById(change.threadId);
       this.events.publish({
         type: "wait-point.changed",
-        streamId: batch?.stream_id ?? null,
-        batchId: change.batchId,
+        streamId: thread?.stream_id ?? null,
+        threadId: change.threadId,
         id: change.id,
         kind: change.kind,
       });
     });
     this.commitPointStore.subscribe((change) => {
-      const batch = this.batchStore.findById(change.batchId);
+      const thread = this.threadStore.findById(change.threadId);
       this.events.publish({
         type: "commit-point.changed",
-        streamId: batch?.stream_id ?? null,
-        batchId: change.batchId,
+        streamId: thread?.stream_id ?? null,
+        threadId: change.threadId,
         id: change.id,
         kind: change.kind,
       });
     });
     this.turnStore.subscribe((change) => {
-      const batch = this.batchStore.findById(change.batchId);
-      if (!batch) return;
+      const thread = this.threadStore.findById(change.threadId);
+      if (!thread) return;
       this.events.publish({
         type: "turn.changed",
-        streamId: batch.stream_id,
-        batchId: change.batchId,
+        streamId: thread.stream_id,
+        threadId: change.threadId,
         turnId: change.turnId,
         kind: change.kind,
       });
@@ -390,12 +390,12 @@ export class ElectronRuntime {
       extraTools: [
         ...buildWorkItemMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
-          resolveBatchById: (batchId) => this.resolveBatchById(batchId),
-          batchStore: this.batchStore,
+          resolveThreadById: (threadId) => this.resolveThreadById(threadId),
+          threadStore: this.threadStore,
           streamStore: this.store,
           workItemStore: this.workItemStore,
           commitPointStore: this.commitPointStore,
-          executeCommit: (cpId, message) => this.batchQueue.executeCommit(cpId, message),
+          executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
           turnStore: this.turnStore,
           waitPointStore: this.waitPointStore,
         }),
@@ -437,31 +437,31 @@ export class ElectronRuntime {
     return this.events.subscribe(listener);
   }
 
-  getBatchAgentStatus(batchId: string): AgentStatus {
-    return this.agentStatusByBatch.get(batchId) ?? "idle";
+  getThreadAgentStatus(threadId: string): AgentStatus {
+    return this.agentStatusByThread.get(threadId) ?? "idle";
   }
 
-  listAgentStatuses(streamId?: string): Array<{ streamId: string; batchId: string; status: AgentStatus }> {
-    const out: Array<{ streamId: string; batchId: string; status: AgentStatus }> = [];
-    for (const [batchId, status] of this.agentStatusByBatch) {
-      const batch = this.batchStore.findById(batchId);
-      if (!batch) continue;
-      if (streamId && batch.stream_id !== streamId) continue;
-      out.push({ streamId: batch.stream_id, batchId, status });
+  listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {
+    const out: Array<{ streamId: string; threadId: string; status: AgentStatus }> = [];
+    for (const [threadId, status] of this.agentStatusByThread) {
+      const thread = this.threadStore.findById(threadId);
+      if (!thread) continue;
+      if (streamId && thread.stream_id !== streamId) continue;
+      out.push({ streamId: thread.stream_id, threadId, status });
     }
     return out;
   }
 
-  private recomputeAgentStatus(streamId: string, batchId: string): void {
-    const events = this.hookEvents.list(streamId).filter((candidate) => candidate.batchId === batchId);
-    const next = deriveBatchAgentStatus(events);
-    const prev = this.agentStatusByBatch.get(batchId);
+  private recomputeAgentStatus(streamId: string, threadId: string): void {
+    const events = this.hookEvents.list(streamId).filter((candidate) => candidate.threadId === threadId);
+    const next = deriveThreadAgentStatus(events);
+    const prev = this.agentStatusByThread.get(threadId);
     if (prev === next) return;
-    this.agentStatusByBatch.set(batchId, next);
+    this.agentStatusByThread.set(threadId, next);
     this.events.publish({
       type: "agent-status.changed",
       streamId,
-      batchId,
+      threadId,
       status: next,
     });
   }
@@ -728,68 +728,68 @@ export class ElectronRuntime {
     }
     this.workspaceWatchers.ensureWatching(stream);
     this.gitRefsWatchers.ensureWatching(stream);
-    this.batchStore.ensureStream(stream);
+    this.threadStore.ensureStream(stream);
     this.store.setCurrentStreamId(stream.id);
     return stream;
   }
 
-  getBatchState(streamId: string): BatchState {
+  getThreadState(streamId: string): ThreadState {
     const stream = this.resolveStream(streamId);
-    return this.batchStore.ensureStream(stream);
+    return this.threadStore.ensureStream(stream);
   }
 
-  createBatch(streamId: string, title: string): BatchState {
+  createThread(streamId: string, title: string): ThreadState {
     const stream = this.resolveStream(streamId);
-    if (!title.trim()) throw new Error("batch title is required");
-    return this.batchStore.create(stream, { title });
+    if (!title.trim()) throw new Error("thread title is required");
+    return this.threadStore.create(stream, { title });
   }
 
-  reorderBatch(streamId: string, batchId: string, targetIndex: number): BatchState {
+  reorderThread(streamId: string, threadId: string, targetIndex: number): ThreadState {
     this.resolveStream(streamId);
-    return this.batchStore.reorder(streamId, batchId, targetIndex);
+    return this.threadStore.reorder(streamId, threadId, targetIndex);
   }
 
-  reorderBatches(streamId: string, orderedBatchIds: string[]): void {
+  reorderThreads(streamId: string, orderedThreadIds: string[]): void {
     this.resolveStream(streamId);
-    this.batchStore.reorderBatches(streamId, orderedBatchIds);
+    this.threadStore.reorderThreads(streamId, orderedThreadIds);
   }
 
   reorderStreams(orderedStreamIds: string[]): void {
     this.store.reorderStreams(orderedStreamIds);
   }
 
-  selectBatch(streamId: string, batchId: string): BatchState {
+  selectThread(streamId: string, threadId: string): ThreadState {
     this.resolveStream(streamId);
-    return this.batchStore.select(streamId, batchId);
+    return this.threadStore.select(streamId, threadId);
   }
 
-  promoteBatch(streamId: string, batchId: string): BatchState {
+  promoteThread(streamId: string, threadId: string): ThreadState {
     this.resolveStream(streamId);
-    return this.batchStore.promote(streamId, batchId);
+    return this.threadStore.promote(streamId, threadId);
   }
 
-  completeBatch(streamId: string, batchId: string): BatchState {
+  completeThread(streamId: string, threadId: string): ThreadState {
     this.resolveStream(streamId);
-    return this.batchStore.complete(streamId, batchId);
+    return this.threadStore.complete(streamId, threadId);
   }
 
-  renameBatch(streamId: string, batchId: string, title: string): Batch {
+  renameThread(streamId: string, threadId: string, title: string): Thread {
     this.resolveStream(streamId);
-    return this.batchStore.rename(streamId, batchId, title);
+    return this.threadStore.rename(streamId, threadId, title);
   }
 
-  setAutoCommit(streamId: string, batchId: string, enabled: boolean): Batch[] {
-    this.resolveBatch(streamId, batchId);
-    return this.batchStore.setAutoCommit(batchId, enabled);
+  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Thread[] {
+    this.resolveThread(streamId, threadId);
+    return this.threadStore.setAutoCommit(threadId, enabled);
   }
 
   setStreamPrompt(streamId: string, prompt: string | null): Stream[] {
     return this.store.setStreamPrompt(streamId, prompt);
   }
 
-  setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Batch[] {
-    this.resolveBatch(streamId, batchId);
-    return this.batchStore.setBatchPrompt(batchId, prompt);
+  setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Thread[] {
+    this.resolveThread(streamId, threadId);
+    return this.threadStore.setThreadPrompt(threadId, prompt);
   }
 
   listWorkspaceEntries(streamId: string, path = "") {
@@ -895,24 +895,24 @@ export class ElectronRuntime {
     mode: "direct" | "tmux",
     onSend: (sessionId: string, message: string) => void,
   ): string {
-    const batch = this.batchStore.findByPane(paneTarget);
-    if (!batch) {
+    const thread = this.threadStore.findByPane(paneTarget);
+    if (!thread) {
       throw new Error(`unknown pane target: ${paneTarget}`);
     }
-    const stream = this.resolveStream(batch.stream_id);
+    const stream = this.resolveStream(thread.stream_id);
     const paneLogger = this.logger.child({
       streamId: stream.id,
-      batchId: batch.id,
+      threadId: thread.id,
       paneTarget,
     });
-    const agentCommand = this.getAgentCommand(stream, batch);
+    const agentCommand = this.getAgentCommand(stream, thread);
     if (mode === "tmux") {
       // Use a resume-less variant as the launcher identity so reconnecting to
       // a live agent whose resume id has since changed doesn't look like a
       // config change and trigger a respawn.
-      const signatureSource = this.getAgentCommand(stream, batch, { withoutResume: true });
+      const signatureSource = this.getAgentCommand(stream, thread, { withoutResume: true });
       ensureAgentPane(
-        batch.pane_target,
+        thread.pane_target,
         stream.worktree_path,
         cols,
         rows,
@@ -927,14 +927,14 @@ export class ElectronRuntime {
       this.terminalSessions.delete(sessionId);
     });
     if (mode === "tmux") {
-      attachPane(socket, batch.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
+      attachPane(socket, thread.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
     } else {
       // Direct-mode agent PTYs live in the runtime and persist across
-      // UI attach/detach. Switching batches or streams detaches the socket
+      // UI attach/detach. Switching threads or streams detaches the socket
       // but leaves the Claude process running so the user can return to an
       // in-progress agent without killing and resuming it.
       const agentPty = this.agentPtyStore.ensure(
-        batch.id,
+        thread.id,
         { command: agentCommand, cwd: stream.worktree_path, cols, rows },
         paneLogger.child({ subsystem: "agent-pty" }),
       );
@@ -990,45 +990,45 @@ export class ElectronRuntime {
     return stream;
   }
 
-  private resolveBatch(streamId: string, batchId: string): Batch {
+  private resolveThread(streamId: string, threadId: string): Thread {
     this.resolveStream(streamId);
-    const batch = this.batchStore.getBatch(streamId, batchId);
-    if (!batch) throw new Error(`unknown batch: ${batchId}`);
-    return batch;
+    const thread = this.threadStore.getThread(streamId, threadId);
+    if (!thread) throw new Error(`unknown thread: ${threadId}`);
+    return thread;
   }
 
-  // batchIds are globally unique, so a lookup by id alone is enough. MCP
+  // threadIds are globally unique, so a lookup by id alone is enough. MCP
   // tools use this when the caller omitted streamId (or passed one that
   // drifted out of sync with the UI's current stream); the agent's session
   // prompt shouldn't need to stay perfectly aligned with whatever stream
   // the user is viewing.
-  private resolveBatchById(batchId: string): Batch {
-    const batch = this.batchStore.findById(batchId);
-    if (!batch) throw new Error(`unknown batch: ${batchId}`);
-    return batch;
+  private resolveThreadById(threadId: string): Thread {
+    const thread = this.threadStore.findById(threadId);
+    if (!thread) throw new Error(`unknown thread: ${threadId}`);
+    return thread;
   }
 
   // Build a <session-context> additionalContext block reflecting LIVE state
   // (as opposed to the frozen snapshot in the agent's system prompt). Called
   // on every UserPromptSubmit — see handleHookEnvelope. Returns empty string
-  // when the envelope lacks enough to resolve a batch.
+  // when the envelope lacks enough to resolve a thread.
   private buildRefreshedSessionContext(
-    envelopeBatchId: string | null,
+    envelopeThreadId: string | null,
     streamId: string,
     sessionId: string | undefined,
   ): string {
     void streamId;
-    const batch = envelopeBatchId ? this.batchStore.findById(envelopeBatchId) : null;
-    if (!batch) return "";
-    const stream = this.store.get(batch.stream_id);
+    const thread = envelopeThreadId ? this.threadStore.findById(envelopeThreadId) : null;
+    if (!thread) return "";
+    const stream = this.store.get(thread.stream_id);
     if (!stream) return "";
-    const batchState = this.batchStore.list(stream.id);
-    const activeBatch = batchState.batches.find((b) => b.id === batchState.activeBatchId) ?? null;
-    // Stash (once) the role this batch had when Claude's session id was first
+    const threadState = this.threadStore.list(stream.id);
+    const activeThread = threadState.threads.find((b) => b.id === threadState.activeThreadId) ?? null;
+    // Stash (once) the role this thread had when Claude's session id was first
     // observed, so a later promotion/demotion surfaces as a ROLE CHANGE banner
     // rather than a subtle one-line diff.
     const currentRole: "writer" | "read-only" =
-      activeBatch && activeBatch.id !== batch.id ? "read-only" : "writer";
+      activeThread && activeThread.id !== thread.id ? "read-only" : "writer";
     let initialRole: "writer" | "read-only" | undefined;
     if (sessionId) {
       if (!this.initialRoleBySessionId.has(sessionId)) {
@@ -1036,22 +1036,22 @@ export class ElectronRuntime {
       }
       initialRole = this.initialRoleBySessionId.get(sessionId);
     }
-    return buildSessionContextBlock({ stream, batch, activeBatch, initialRole });
+    return buildSessionContextBlock({ stream, thread, activeThread, initialRole });
   }
 
-  private resolveActiveBatchForPrompt(streamId: string): Batch | null {
-    const activeId = this.batchStore.list(streamId).activeBatchId;
+  private resolveActiveThreadForPrompt(streamId: string): Thread | null {
+    const activeId = this.threadStore.list(streamId).activeThreadId;
     if (!activeId) return null;
-    return this.batchStore.getBatch(streamId, activeId) ?? null;
+    return this.threadStore.getThread(streamId, activeId) ?? null;
   }
 
-  private getAgentCommand(stream: Stream, batch: Batch, opts: { withoutResume?: boolean } = {}): string {
-    const resumeSessionId = opts.withoutResume ? "" : batch.resume_session_id;
+  private getAgentCommand(stream: Stream, thread: Thread, opts: { withoutResume?: boolean } = {}): string {
+    const resumeSessionId = opts.withoutResume ? "" : thread.resume_session_id;
     if (this.config.agent === "claude") {
       if (!this.mcp) throw new Error("mcp server not started");
       // One Claude plugin per runtime (the MCP port + hook URL are stable for
       // the process's lifetime). Plugin hook JSON references env vars, so
-      // per-batch identity flows in at exec time without re-writing files.
+      // per-thread identity flows in at exec time without re-writing files.
       if (!this.electronPlugin) {
         this.electronPlugin = createElectronPlugin({
           projectDir: this.projectDir,
@@ -1068,16 +1068,16 @@ export class ElectronRuntime {
         {
           pluginDir: this.electronPlugin.pluginDir,
           allowedTools: ["mcp__newde__*"],
-          appendSystemPrompt: buildBatchAgentPrompt(
+          appendSystemPrompt: buildThreadAgentPrompt(
             stream,
-            batch,
+            thread,
             this.config.agentPromptAppend,
-            this.resolveActiveBatchForPrompt(stream.id),
+            this.resolveActiveThreadForPrompt(stream.id),
           ),
-          mcpConfig: buildBatchMcpConfig(this.mcp),
+          mcpConfig: buildThreadMcpConfig(this.mcp),
           env: {
             NEWDE_STREAM_ID: stream.id,
-            NEWDE_BATCH_ID: batch.id,
+            NEWDE_THREAD_ID: thread.id,
             NEWDE_HOOK_TOKEN: this.mcp.authToken,
           },
         },
@@ -1099,28 +1099,28 @@ export class ElectronRuntime {
       : undefined;
     const stored = ingestHookPayload(this.hookEvents, envelope.event, envelope.payload, {
       streamId,
-      batchId: envelope.batchId,
+      threadId: envelope.threadId,
       pane,
     });
-    if (envelope.batchId && this.store.get(streamId)) {
-      const batch = this.batchStore.findById(envelope.batchId);
+    if (envelope.threadId && this.store.get(streamId)) {
+      const thread = this.threadStore.findById(envelope.threadId);
       const update = decideResumeUpdate(
-        batch?.resume_session_id ?? "",
+        thread?.resume_session_id ?? "",
         stored.normalized.sessionId,
       );
       if (update) {
-        this.batchStore.updateResume(streamId, envelope.batchId, update.sessionId);
+        this.threadStore.updateResume(streamId, envelope.threadId, update.sessionId);
       }
       this.applyTurnTracking(envelope, stored.normalized.sessionId);
     }
-    if (envelope.event === "PreToolUse" && envelope.batchId) {
-      // Fresh read of batch.status — promoting another batch to writer takes
+    if (envelope.event === "PreToolUse" && envelope.threadId) {
+      // Fresh read of thread.status — promoting another thread to writer takes
       // effect on the next tool call without restarting any agent.
-      const batch = this.batchStore.findById(envelope.batchId);
+      const thread = this.threadStore.findById(envelope.threadId);
       const toolName = typeof (envelope.payload as { tool_name?: unknown })?.tool_name === "string"
         ? (envelope.payload as { tool_name: string }).tool_name
         : "";
-      const deny = buildWriteGuardResponse(batch, toolName, {
+      const deny = buildWriteGuardResponse(thread, toolName, {
         projectDir: this.projectDir,
         toolInput: (envelope.payload as { tool_input?: unknown })?.tool_input,
       });
@@ -1130,14 +1130,14 @@ export class ElectronRuntime {
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // Re-inject the session context each turn — the agent's system-prompt
       // SESSION CONTEXT line is frozen at launch, but the UI's active /
-      // selected batch can flip mid-session. Reading the live state here
+      // selected thread can flip mid-session. Reading the live state here
       // keeps the agent pointed at the right ids without a user-visible
       // prompt edit. Skip emission when the block is identical to what we
       // already sent on the same Claude session — the agent's prompt cache
       // still holds the prior value, so re-sending is pure overhead.
       let sessionContext = "";
       if (this.config.injectSessionContext) {
-        const candidate = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId, stored.normalized.sessionId);
+        const candidate = this.buildRefreshedSessionContext(envelope.threadId ?? null, streamId, stored.normalized.sessionId);
         const sessionKey = stored.normalized.sessionId ?? "";
         if (candidate && sessionKey) {
           if (this.lastSessionContextBySessionId.get(sessionKey) !== candidate) {
@@ -1160,8 +1160,8 @@ export class ElectronRuntime {
         };
       }
     }
-    if (envelope.event === "Stop" && envelope.batchId) {
-      const directive = this.computeStopDirective(envelope.batchId);
+    if (envelope.event === "Stop" && envelope.threadId) {
+      const directive = this.computeStopDirective(envelope.threadId);
       this.reportHookHealthIfNeeded();
       if (directive) return { body: directive };
     }
@@ -1191,37 +1191,37 @@ export class ElectronRuntime {
    * in `src/electron/stop-hook-pipeline.ts` so each branch is unit-
    * testable without spinning up a runtime.
    */
-  private computeStopDirective(batchId: string): Record<string, unknown> | null {
-    const batch = this.batchStore.findById(batchId);
+  private computeStopDirective(threadId: string): Record<string, unknown> | null {
+    const thread = this.threadStore.findById(threadId);
     // The Stop hook fires while the current turn is still "open" (closeTurn
     // runs inside applyTurnTracking's Stop branch alongside this). Grab its
     // started_at so decideStopDirective can skip items the agent filed for
     // triage during the turn. A missing/closed turn falls back to the
     // pre-fix behaviour.
-    const openTurn = this.turnStore.currentOpenTurn(batchId);
+    const openTurn = this.turnStore.currentOpenTurn(threadId);
     const currentTurnFilePaths = openTurn?.start_snapshot_id
       ? this.computeTurnFilePaths(openTurn)
       : [];
-    // When auto-commit is on and the batch is the writer, run the commit
+    // When auto-commit is on and the thread is the writer, run the commit
     // directly without synthesizing a commit_point row. No DB row means no
     // "Commit · Auto" noise in the queue UI; manually-placed auto-mode
     // commit points are handled by the branch below.
-    if (batch?.auto_commit && batch.status === "active") {
-      const workItems = this.workItemStore.listItems(batchId);
+    if (thread?.auto_commit && thread.status === "active") {
+      const workItems = this.workItemStore.listItems(threadId);
       const hasSettledWork = workItems.some(
         (item) => item.status === "human_check" || item.status === "done",
       );
       if (hasSettledWork) {
-        const result = this.runAutoCommit(batch, workItems);
+        const result = this.runAutoCommit(thread, workItems);
         if (result) {
-          // Notify the UI that a commit landed in this batch's worktree so
+          // Notify the UI that a commit landed in this thread's worktree so
           // downstream views (git log, Files panel) know to refresh. The
           // fs-watcher will also fire git-refs.changed, but surfacing it as
-          // a batch-scoped lifecycle event keeps the batch UI responsive.
+          // a thread-scoped lifecycle event keeps the thread UI responsive.
           this.events.publish({
-            type: "batch.changed",
-            streamId: batch.stream_id,
-            batchId: batch.id,
+            type: "thread.changed",
+            streamId: thread.stream_id,
+            threadId: thread.id,
             kind: "auto-committed",
           });
         }
@@ -1232,35 +1232,35 @@ export class ElectronRuntime {
     // a message from settled work items and commit right now. After committing
     // the point becomes "done", so the snapshot built below sees it as done
     // and decideStopDirective falls through to the next pipeline step.
-    if (batch?.status === "active") {
-      const commitPoints = this.commitPointStore.listForBatch(batchId);
-      const workItems = this.workItemStore.listItems(batchId);
+    if (thread?.status === "active") {
+      const commitPoints = this.commitPointStore.listForThread(threadId);
+      const workItems = this.workItemStore.listItems(threadId);
       const autoCommitPoint = findActiveAutoCommitPoint(commitPoints, workItems);
       if (autoCommitPoint) {
-        this.executeAutoCommitPoint(autoCommitPoint, batch, workItems);
+        this.executeAutoCommitPoint(autoCommitPoint, thread, workItems);
       }
     }
-    const snapshot: BatchSnapshot = {
-      batch,
-      commitPoints: this.commitPointStore.listForBatch(batchId),
-      waitPoints: this.waitPointStore.listForBatch(batchId),
-      workItems: this.workItemStore.listItems(batchId),
-      readyWorkItems: this.workItemStore.listReady(batchId),
+    const snapshot: ThreadSnapshot = {
+      thread,
+      commitPoints: this.commitPointStore.listForThread(threadId),
+      waitPoints: this.waitPointStore.listForThread(threadId),
+      workItems: this.workItemStore.listItems(threadId),
+      readyWorkItems: this.workItemStore.listReady(threadId),
       currentTurnStartedAt: openTurn?.started_at ?? null,
       currentTurnFilePaths,
-      autoCommit: batch?.auto_commit ?? false,
+      autoCommit: thread?.auto_commit ?? false,
     };
-    // The item's own batch_id is what matters for the directive text (not
-    // `batchId` — they agree today but could diverge if listReady ever
-    // returns cross-batch candidates). stream_id comes off the batch row.
-    const streamId = batch?.stream_id ?? "";
+    // The item's own thread_id is what matters for the directive text (not
+    // `threadId` — they agree today but could diverge if listReady ever
+    // returns cross-thread candidates). stream_id comes off the thread row.
+    const streamId = thread?.stream_id ?? "";
     const outcome = decideStopDirective(snapshot, {
       buildCommitPointReason: buildCommitPointStopReason,
-      // item.batch_id is typed nullable (WorkItem covers backlog items too),
-      // but decideStopDirective only emits this reason for in-batch rows, so
-      // a fall-back to `batchId` keeps the directive stable.
+      // item.thread_id is typed nullable (WorkItem covers backlog items too),
+      // but decideStopDirective only emits this reason for in-thread rows, so
+      // a fall-back to `threadId` keeps the directive stable.
       buildNextWorkItemReason: (item, context) =>
-        buildNextWorkItemStopReason({ ...item, batch_id: item.batch_id ?? batchId }, streamId, context),
+        buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId, context),
       buildHumanCheckNudgeReason: buildHumanCheckNudgeStopReason,
     });
     for (const effect of outcome.sideEffects) {
@@ -1277,8 +1277,8 @@ export class ElectronRuntime {
   }
 
   private applyTurnTracking(envelope: HookEnvelope, sessionId: string | undefined): void {
-    const batchId = envelope.batchId;
-    if (!batchId) return;
+    const threadId = envelope.threadId;
+    if (!threadId) return;
     switch (envelope.event) {
       case "UserPromptSubmit": {
         const payload = (envelope.payload ?? {}) as { prompt?: unknown };
@@ -1286,14 +1286,14 @@ export class ElectronRuntime {
         if (!prompt.trim()) return;
         // Defensive: if a prior turn never saw Stop, close it out so every
         // open turn corresponds to the latest prompt.
-        const stillOpen = this.turnStore.currentOpenTurn(batchId);
+        const stillOpen = this.turnStore.currentOpenTurn(threadId);
         if (stillOpen) {
           this.turnStore.closeTurn(stillOpen.id, { answer: null });
         }
-        const turn = this.turnStore.openTurn({ batchId, prompt, sessionId });
-        const batch = this.batchStore.findById(batchId);
-        if (batch) {
-          const startSnapshotId = this.safeFlushSnapshot(batch.stream_id, "turn-start");
+        const turn = this.turnStore.openTurn({ threadId, prompt, sessionId });
+        const thread = this.threadStore.findById(threadId);
+        if (thread) {
+          const startSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-start");
           if (startSnapshotId) this.turnStore.setStartSnapshot(turn.id, startSnapshotId);
           this.linkOpenEffortsToTurn(turn.id);
         }
@@ -1311,24 +1311,24 @@ export class ElectronRuntime {
         if (status === "error") return;
         const extractedPath = extractEditedFilePath(payload.tool_input);
         if (!extractedPath) return;
-        const batch = this.batchStore.findById(batchId);
-        const stream = batch ? this.store.get(batch.stream_id) ?? null : null;
+        const thread = this.threadStore.findById(threadId);
+        const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
         const normalizedPath = stream
           ? toWorktreeRelativePath(extractedPath, stream.worktree_path)
           : extractedPath;
         if (stream && !shouldAcceptHookFilePath(normalizedPath, stream.worktree_path, this.config.generatedDirs)) {
           return;
         }
-        if (batch) this.markDirty(batch.stream_id, normalizedPath);
+        if (thread) this.markDirty(thread.stream_id, normalizedPath);
         // Per-effort write-log is populated on the status transition to
         // human_check via `update_work_item`'s `touchedFiles` payload — see
         // applyStatusTransition. The PostToolUse hook no longer guesses.
         return;
       }
       case "Stop": {
-        const open = this.turnStore.currentOpenTurn(batchId);
+        const open = this.turnStore.currentOpenTurn(threadId);
         if (!open) return;
-        const batch = this.batchStore.findById(batchId);
+        const thread = this.threadStore.findById(threadId);
         this.turnStore.closeTurn(open.id, { answer: null });
         const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
           ? (envelope.payload as { transcript_path: string }).transcript_path
@@ -1339,14 +1339,14 @@ export class ElectronRuntime {
             this.turnStore.setTurnUsage(open.id, usage);
           }
         }
-        if (batch) {
-          const endSnapshotId = this.safeFlushSnapshot(batch.stream_id, "turn-end");
+        if (thread) {
+          const endSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-end");
           if (endSnapshotId) this.turnStore.setEndSnapshot(open.id, endSnapshotId);
         }
         return;
       }
       case "SessionEnd": {
-        const open = this.turnStore.currentOpenTurn(batchId);
+        const open = this.turnStore.currentOpenTurn(threadId);
         if (!open) return;
         this.turnStore.closeTurn(open.id, { answer: null });
         return;
@@ -1363,7 +1363,7 @@ export class ElectronRuntime {
    */
   private handleStatusTransition(
     streamId: string,
-    batchId: string,
+    threadId: string,
     workItemId: string,
     previous: WorkItem["status"] | undefined,
     next: WorkItem["status"] | undefined,
@@ -1375,7 +1375,7 @@ export class ElectronRuntime {
         turnStore: this.turnStore,
         flushSnapshot: (source) => this.safeFlushSnapshot(streamId, source),
       },
-      { batchId, workItemId, previous, next, touchedFiles },
+      { threadId, workItemId, previous, next, touchedFiles },
     );
   }
 
@@ -1403,9 +1403,9 @@ export class ElectronRuntime {
    */
   private computeTurnFilePaths(openTurn: AgentTurn): string[] {
     if (!openTurn.start_snapshot_id) return [];
-    const batch = this.batchStore.findById(openTurn.batch_id);
-    if (!batch) return [];
-    const stream = this.store.get(batch.stream_id);
+    const thread = this.threadStore.findById(openTurn.thread_id);
+    if (!thread) return [];
+    const stream = this.store.get(thread.stream_id);
     if (!stream) return [];
     const ignore = (relpath: string) =>
       shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
@@ -1450,7 +1450,7 @@ export class ElectronRuntime {
         snapshotId: result.id,
         kind: source,
         turnId: null,
-        batchId: null,
+        threadId: null,
       });
     }
     return result.id;
@@ -1485,7 +1485,7 @@ export class ElectronRuntime {
             snapshotId: result.id,
             kind: "startup",
             turnId: null,
-            batchId: null,
+            threadId: null,
           });
         }
       } catch (error) {
@@ -1507,8 +1507,8 @@ export class ElectronRuntime {
     }
   }
 
-  listAgentTurns(batchId: string, limit?: number): AgentTurn[] {
-    return this.turnStore.listForBatch(batchId, limit);
+  listAgentTurns(threadId: string, limit?: number): AgentTurn[] {
+    return this.turnStore.listForThread(threadId, limit);
   }
 
   listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
@@ -1579,26 +1579,26 @@ export class ElectronRuntime {
 
   // -------- commit points (IPC-exposed delegations) --------
 
-  listCommitPoints(batchId: string): CommitPoint[] {
-    return this.batchQueue.listCommitPoints(batchId);
+  listCommitPoints(threadId: string): CommitPoint[] {
+    return this.threadQueue.listCommitPoints(threadId);
   }
 
-  createCommitPoint(streamId: string, batchId: string): CommitPoint {
-    this.resolveBatch(streamId, batchId);
-    return this.batchQueue.createCommitPoint(batchId);
+  createCommitPoint(streamId: string, threadId: string): CommitPoint {
+    this.resolveThread(streamId, threadId);
+    return this.threadQueue.createCommitPoint(threadId);
   }
 
   deleteCommitPoint(id: string): void {
-    this.batchQueue.deleteCommitPoint(id);
+    this.threadQueue.deleteCommitPoint(id);
   }
 
   updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): CommitPoint[] {
-    return this.batchQueue.updateCommitPoint(id, changes);
+    return this.threadQueue.updateCommitPoint(id, changes);
   }
 
   /** IPC-exposed: run the git commit for a commit point immediately. */
   commitCommitPoint(id: string, message: string): CommitPoint {
-    return this.batchQueue.executeCommit(id, message);
+    return this.threadQueue.executeCommit(id, message);
   }
 
   /**
@@ -1608,10 +1608,10 @@ export class ElectronRuntime {
    * `git commit`, returns sha+message on success or null on any failure. All
    * errors are logged here so callers can stay simple.
    */
-  private runAutoCommit(batch: Batch, workItems: WorkItem[]): { sha: string; message: string } | null {
-    const stream = this.store.get(batch.stream_id);
+  private runAutoCommit(thread: Thread, workItems: WorkItem[]): { sha: string; message: string } | null {
+    const stream = this.store.get(thread.stream_id);
     if (!stream) {
-      this.logger.warn("auto-commit: stream not found", { batchId: batch.id });
+      this.logger.warn("auto-commit: stream not found", { threadId: thread.id });
       return null;
     }
     const message = buildAutoCommitMessage(workItems);
@@ -1619,16 +1619,16 @@ export class ElectronRuntime {
       const result = gitCommitAll(stream.worktree_path, message, { includeUntracked: true });
       if (!result.ok || !result.sha) {
         this.logger.warn("auto-commit: git commit failed", {
-          batchId: batch.id,
+          threadId: thread.id,
           stderr: result.stderr,
         });
         return null;
       }
-      this.logger.info("auto-commit: committed", { batchId: batch.id, sha: result.sha, message });
+      this.logger.info("auto-commit: committed", { threadId: thread.id, sha: result.sha, message });
       return { sha: result.sha, message };
     } catch (err) {
       this.logger.warn("auto-commit: execution error", {
-        batchId: batch.id,
+        threadId: thread.id,
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
@@ -1641,38 +1641,38 @@ export class ElectronRuntime {
    * Used for manually-placed commit points with mode="auto". The no-row
    * auto-commit-mode path calls `runAutoCommit` directly.
    */
-  private executeAutoCommitPoint(cp: CommitPoint, batch: Batch, workItems: WorkItem[]): void {
-    const result = this.runAutoCommit(batch, workItems);
+  private executeAutoCommitPoint(cp: CommitPoint, thread: Thread, workItems: WorkItem[]): void {
+    const result = this.runAutoCommit(thread, workItems);
     if (!result) return;
     this.commitPointStore.markCommitted(cp.id, result.message, result.sha);
   }
 
-  reorderBatchQueue(
+  reorderThreadQueue(
     streamId: string,
-    batchId: string,
+    threadId: string,
     entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
   ): void {
-    this.resolveBatch(streamId, batchId);
-    this.batchQueue.reorderBatchQueue(batchId, entries);
+    this.resolveThread(streamId, threadId);
+    this.threadQueue.reorderThreadQueue(threadId, entries);
   }
 
   // -------- wait points (IPC-exposed delegations) --------
 
-  listWaitPoints(batchId: string): WaitPoint[] {
-    return this.batchQueue.listWaitPoints(batchId);
+  listWaitPoints(threadId: string): WaitPoint[] {
+    return this.threadQueue.listWaitPoints(threadId);
   }
 
-  createWaitPoint(streamId: string, batchId: string, note?: string | null): WaitPoint {
-    this.resolveBatch(streamId, batchId);
-    return this.batchQueue.createWaitPoint(batchId, note ?? null);
+  createWaitPoint(streamId: string, threadId: string, note?: string | null): WaitPoint {
+    this.resolveThread(streamId, threadId);
+    return this.threadQueue.createWaitPoint(threadId, note ?? null);
   }
 
   setWaitPointNote(id: string, note: string | null): WaitPoint {
-    return this.batchQueue.setWaitPointNote(id, note);
+    return this.threadQueue.setWaitPointNote(id, note);
   }
 
   deleteWaitPoint(id: string): void {
-    this.batchQueue.deleteWaitPoint(id);
+    this.threadQueue.deleteWaitPoint(id);
   }
 }
 
@@ -1715,7 +1715,7 @@ export function describeHookHealth(
 }
 
 export function buildNextWorkItemStopReason(
-  item: { id: string; title: string; kind: string; batch_id: string },
+  item: { id: string; title: string; kind: string; thread_id: string },
   _streamId: string,
   context: { uiChangeNudge?: boolean } = {},
 ): string {
@@ -1727,7 +1727,7 @@ export function buildNextWorkItemStopReason(
     );
   }
   lines.push(
-    `The batch queue has ready work (batchId="${item.batch_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-dispatch skill.`,
+    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-task-dispatch skill.`,
   );
   return lines.join("\n");
 }
@@ -1760,7 +1760,7 @@ function findActiveAutoCommitPoint(
 
 /**
  * Build an auto-generated commit message from settled work items. Uses the
- * titles of all human_check/done/canceled work items in the batch as the
+ * titles of all human_check/done/canceled work items in the thread as the
  * body of a "chore:" conventional commit.
  */
 export function buildAutoCommitMessage(workItems: WorkItem[]): string {
@@ -1797,7 +1797,7 @@ export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
 
 export function buildCommitPointStopReason(cp: CommitPoint): string {
   const lines = [
-    `A commit point is due in this batch's work queue (commit_point_id=${cp.id}).`,
+    `A commit point is due in this thread's work queue (commit_point_id=${cp.id}).`,
     ``,
     `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Keep the subject terse and descriptive — avoid Conventional-Commits prefixes like \`feat(scope):\` or \`fix:\`. Do NOT add Co-Authored-By or any self-attribution lines.`,
     ``,
@@ -1829,11 +1829,11 @@ class RuntimeSocket extends EventEmitter {
   }
 }
 
-function buildBatchAgentPrompt(
+function buildThreadAgentPrompt(
   stream: Stream,
-  batch: Batch,
+  thread: Thread,
   agentPromptAppend: string,
-  activeBatch?: Batch | null,
+  activeThread?: Thread | null,
 ): string {
   // Keep this preamble SITUATIONAL only — procedural "how to use the work-item
   // tools" policy lives in the `newde-task-filing` / `newde-task-lifecycle` /
@@ -1841,13 +1841,13 @@ function buildBatchAgentPrompt(
   // needs the relevant slice. Every line here is replayed via cache-read on
   // every turn; treat additions as expensive.
   const lines = [
-    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), batch "${batch.title}" (id: ${batch.id}). Pass batchId="${batch.id}" to all newde work-item tools.`,
-    activeBatch && activeBatch.id !== batch.id
-      ? `ACTIVE (writer) batch: "${activeBatch.title}" (id: ${activeBatch.id}). Only that batch can commit; your batch is read-only.`
-      : `Your batch is the ACTIVE writer — the only batch allowed to commit.`,
+    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), thread "${thread.title}" (id: ${thread.id}). Pass threadId="${thread.id}" to all newde work-item tools.`,
+    activeThread && activeThread.id !== thread.id
+      ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
+      : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
     `Start each session by calling \`newde__read_work_options\`; the newde-task-filing, newde-task-lifecycle, and newde-task-dispatch skills cover the orchestrator/subagent pattern, filing conventions, status transitions, and how to reference items in user-facing text.`,
   ];
-  if (batch.status !== "active") {
+  if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
   }
   const userAppend = agentPromptAppend.trim();
@@ -1858,9 +1858,9 @@ function buildBatchAgentPrompt(
   if (streamPrompt) {
     lines.push("", "# Stream instructions", "", streamPrompt);
   }
-  const batchPrompt = batch.custom_prompt?.trim();
-  if (batchPrompt) {
-    lines.push("", "# Batch instructions", "", batchPrompt);
+  const threadPrompt = thread.custom_prompt?.trim();
+  if (threadPrompt) {
+    lines.push("", "# Thread instructions", "", threadPrompt);
   }
   return lines.join("\n");
 }
@@ -1872,10 +1872,10 @@ function buildBatchAgentPrompt(
  */
 export function buildSessionContextBlock(input: {
   stream: { id: string; title: string };
-  batch: { id: string; title: string };
-  activeBatch: { id: string; title: string } | null;
+  thread: { id: string; title: string };
+  activeThread: { id: string; title: string } | null;
   /**
-   * The batch's writer/read-only role at the moment this Claude session
+   * The thread's writer/read-only role at the moment this Claude session
    * was first seen. When set and different from the *current* role, a
    * loud ROLE CHANGE banner is appended before `</session-context>` to
    * supersede the (frozen, cache-read) NON_WRITER_PROMPT_BLOCK in the
@@ -1884,25 +1884,25 @@ export function buildSessionContextBlock(input: {
    */
   initialRole?: "writer" | "read-only";
 }): string {
-  const { stream, batch, activeBatch, initialRole } = input;
+  const { stream, thread, activeThread, initialRole } = input;
   const currentRole: "writer" | "read-only" =
-    activeBatch && activeBatch.id !== batch.id ? "read-only" : "writer";
+    activeThread && activeThread.id !== thread.id ? "read-only" : "writer";
   const lines = [
     `<session-context>`,
     `stream: "${stream.title}" (id: ${stream.id})`,
-    `batch:  "${batch.title}" (id: ${batch.id})`,
-    activeBatch && activeBatch.id !== batch.id
-      ? `writer: "${activeBatch.title}" (id: ${activeBatch.id}) — your batch is read-only`
-      : `writer: (you) — your batch is the active writer`,
+    `thread:  "${thread.title}" (id: ${thread.id})`,
+    activeThread && activeThread.id !== thread.id
+      ? `writer: "${activeThread.title}" (id: ${activeThread.id}) — your thread is read-only`
+      : `writer: (you) — your thread is the active writer`,
   ];
   if (initialRole && initialRole !== currentRole) {
     if (currentRole === "writer") {
       lines.push(
-        "ROLE CHANGE: this batch was read-only when the session started; it is now the active writer. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree.",
+        "ROLE CHANGE: this thread was read-only when the session started; it is now the active writer. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree.",
       );
     } else {
       lines.push(
-        "ROLE CHANGE: this batch was the active writer when the session started; it is now read-only. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked.",
+        "ROLE CHANGE: this thread was the active writer when the session started; it is now read-only. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked.",
       );
     }
   }
@@ -1910,7 +1910,7 @@ export function buildSessionContextBlock(input: {
   return lines.join("\n");
 }
 
-export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {
+export function buildThreadMcpConfig(mcp: McpServerHandle | null): string {
   if (!mcp) {
     throw new Error("mcp server not started");
   }
@@ -2022,19 +2022,19 @@ export const TOUCHED_FILES_CAP = 100;
 export function applyStatusTransition(
   deps: StatusTransitionDeps,
   params: {
-    batchId: string;
+    threadId: string;
     workItemId: string;
     previous: WorkItem["status"] | undefined;
     next: WorkItem["status"] | undefined;
     touchedFiles?: string[];
   },
 ): void {
-  const { previous, next, batchId, workItemId, touchedFiles } = params;
+  const { previous, next, threadId, workItemId, touchedFiles } = params;
   if (!next) return;
   if (next === "in_progress" && previous !== "in_progress") {
     const startSnapshotId = deps.flushSnapshot("task-start");
     const effort = deps.effortStore.openEffort({ workItemId, startSnapshotId });
-    const openTurn = deps.turnStore.currentOpenTurn(batchId);
+    const openTurn = deps.turnStore.currentOpenTurn(threadId);
     if (openTurn) deps.effortStore.linkEffortTurn(effort.id, openTurn.id);
   } else if (previous === "in_progress" && next !== "in_progress") {
     // Capture the effort id *before* closing — closeEffort clears the

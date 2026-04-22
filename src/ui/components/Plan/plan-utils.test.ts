@@ -10,7 +10,7 @@ import {
 function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem {
   return {
     id,
-    batch_id: "b1",
+    thread_id: "b1",
     parent_id: null,
     kind: "task",
     title: id,
@@ -195,7 +195,7 @@ test("dragging a Done item onto a Human Check item — drop-out-of-Done scenario
 });
 
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {
-  // Regression: the old BatchWorkState pre-grouped in_progress + human_check
+  // Regression: the old ThreadWorkState pre-grouped in_progress + human_check
   // together; the work panel was reorganized to separate them.
   const sections = splitIntoSections([
     item("p1", "in_progress", 0),

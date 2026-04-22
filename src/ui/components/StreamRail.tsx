@@ -4,20 +4,20 @@ import { createStream, listBranches, setStreamPrompt, type AgentStatus, type Bra
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { ContextMenu } from "./ContextMenu.js";
-import { WORK_ITEM_DRAG_MIME, BATCH_DRAG_MIME } from "./BatchRail.js";
+import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 
 interface Props {
   stream: Stream | null;
   streams: Stream[];
   streamStatuses: Record<string, AgentStatus>;
-  streamActiveBatchIds?: Record<string, string | null>;
+  streamActiveThreadIds?: Record<string, string | null>;
   gitEnabled: boolean;
   onSwitch(id: string): void;
   onStreamCreated(stream: Stream): void;
   onRenameStream?(streamId: string, currentTitle: string): void;
-  onRequestCreateBatch?(): void;
+  onRequestCreateThread?(): void;
   onOpenSettings?(): void;
-  onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromBatchId: string | null): void;
+  onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
   /** Bumping this number opens the inline "new stream" form. */
   createRequest?: number;
@@ -25,7 +25,7 @@ interface Props {
 
 export const STREAM_DRAG_MIME = "application/x-newde-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateBatch, onOpenSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -141,7 +141,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
           {streams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "idle";
-            const canDrop = !!onDropWorkItemOnStream && !!streamActiveBatchIds?.[candidate.id];
+            const canDrop = !!onDropWorkItemOnStream && !!streamActiveThreadIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
             const isStreamDragTarget = isDragOver && draggingStreamId !== null && draggingStreamId !== candidate.id;
             return (
@@ -171,7 +171,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
                     return;
                   }
                   if (!canDrop) return;
-                  if (!types.includes(WORK_ITEM_DRAG_MIME) && !types.includes(BATCH_DRAG_MIME)) return;
+                  if (!types.includes(WORK_ITEM_DRAG_MIME) && !types.includes(THREAD_DRAG_MIME)) return;
                   if (!types.includes(WORK_ITEM_DRAG_MIME)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
@@ -206,13 +206,13 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
                     const payload = JSON.parse(raw) as {
                       itemId?: string;
                       itemIds?: string[];
-                      fromBatchId?: string | null;
+                      fromThreadId?: string | null;
                     };
                     const ids = payload.itemIds && payload.itemIds.length > 0
                       ? payload.itemIds
                       : payload.itemId ? [payload.itemId] : [];
                     for (const id of ids) {
-                      onDropWorkItemOnStream?.(candidate.id, id, payload.fromBatchId ?? null);
+                      onDropWorkItemOnStream?.(candidate.id, id, payload.fromThreadId ?? null);
                     }
                   } catch {
                     // ignore malformed payload
@@ -347,10 +347,10 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
               run: () => void openCreate(),
             },
             {
-              id: "stream.add-batch",
-              label: "Add batch",
-              enabled: !!onRequestCreateBatch,
-              run: () => onRequestCreateBatch?.(),
+              id: "stream.add-thread",
+              label: "Add thread",
+              enabled: !!onRequestCreateThread,
+              run: () => onRequestCreateThread?.(),
             },
           ]}
           position={{ x: contextMenu.x, y: contextMenu.y }}

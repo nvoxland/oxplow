@@ -7,8 +7,8 @@ import type {
   SnapshotSummary,
   BranchChanges,
   BranchRef,
-  Batch,
-  BatchState,
+  Thread,
+  ThreadState,
   GitFileStatus,
   GitLogResult,
   CommitDetail,
@@ -20,7 +20,7 @@ import type {
   CommitPoint,
   WaitPoint,
   RefOption,
-  BatchWorkState,
+  ThreadWorkState,
   Stream,
   WorkItemEvent,
   WorkItemKind,
@@ -49,9 +49,9 @@ export type {
   SnapshotSummary,
   BranchChanges,
   BranchRef,
-  Batch,
-  BatchState,
-  BatchWorkState,
+  Thread,
+  ThreadState,
+  ThreadWorkState,
   CommandId,
   GitFileStatus,
   GitLogResult,
@@ -133,22 +133,22 @@ export interface DesktopApi {
     | { title: string; summary?: string; source: "existing"; ref: string }
     | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
   ): Promise<Stream>;
-  getBatchState(streamId: string): Promise<BatchState>;
-  createBatch(streamId: string, title: string): Promise<BatchState>;
-  reorderBatch(streamId: string, batchId: string, targetIndex: number): Promise<BatchState>;
-  reorderBatches(streamId: string, orderedBatchIds: string[]): Promise<void>;
+  getThreadState(streamId: string): Promise<ThreadState>;
+  createThread(streamId: string, title: string): Promise<ThreadState>;
+  reorderThread(streamId: string, threadId: string, targetIndex: number): Promise<ThreadState>;
+  reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void>;
   reorderStreams(orderedStreamIds: string[]): Promise<void>;
-  selectBatch(streamId: string, batchId: string): Promise<BatchState>;
-  promoteBatch(streamId: string, batchId: string): Promise<BatchState>;
-  completeBatch(streamId: string, batchId: string): Promise<BatchState>;
-  renameBatch(streamId: string, batchId: string, title: string): Promise<Batch>;
-  setAutoCommit(streamId: string, batchId: string, enabled: boolean): Promise<Batch[]>;
+  selectThread(streamId: string, threadId: string): Promise<ThreadState>;
+  promoteThread(streamId: string, threadId: string): Promise<ThreadState>;
+  completeThread(streamId: string, threadId: string): Promise<ThreadState>;
+  renameThread(streamId: string, threadId: string, title: string): Promise<Thread>;
+  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]>;
   setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]>;
-  setBatchPrompt(streamId: string, batchId: string, prompt: string | null): Promise<Batch[]>;
-  getBatchWorkState(streamId: string, batchId: string): Promise<BatchWorkState>;
+  setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]>;
+  getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState>;
   createWorkItem(
     streamId: string,
-    batchId: string,
+    threadId: string,
     input: {
       kind: WorkItemKind;
       title: string;
@@ -158,10 +158,10 @@ export interface DesktopApi {
       status?: WorkItemStatus;
       priority?: WorkItemPriority;
     },
-  ): Promise<BatchWorkState>;
+  ): Promise<ThreadWorkState>;
   updateWorkItem(
     streamId: string,
-    batchId: string,
+    threadId: string,
     itemId: string,
     changes: {
       title?: string;
@@ -171,10 +171,10 @@ export interface DesktopApi {
       status?: WorkItemStatus;
       priority?: WorkItemPriority;
     },
-  ): Promise<BatchWorkState>;
-  deleteWorkItem(streamId: string, batchId: string, itemId: string): Promise<BatchWorkState>;
-  reorderWorkItems(streamId: string, batchId: string, orderedItemIds: string[]): Promise<BatchWorkState>;
-  moveWorkItemToBatch(streamId: string, fromBatchId: string, itemId: string, toBatchId: string, toStreamId?: string): Promise<{ from: BatchWorkState; to: BatchWorkState }>;
+  ): Promise<ThreadWorkState>;
+  deleteWorkItem(streamId: string, threadId: string, itemId: string): Promise<ThreadWorkState>;
+  reorderWorkItems(streamId: string, threadId: string, orderedItemIds: string[]): Promise<ThreadWorkState>;
+  moveWorkItemToThread(streamId: string, fromThreadId: string, itemId: string, toThreadId: string, toStreamId?: string): Promise<{ from: ThreadWorkState; to: ThreadWorkState }>;
   getBacklogState(): Promise<BacklogState>;
   createBacklogItem(input: {
     kind: WorkItemKind;
@@ -196,18 +196,18 @@ export interface DesktopApi {
   ): Promise<BacklogState>;
   deleteBacklogItem(itemId: string): Promise<BacklogState>;
   reorderBacklog(orderedItemIds: string[]): Promise<BacklogState>;
-  moveWorkItemToBacklog(streamId: string, fromBatchId: string, itemId: string): Promise<{ from: BatchWorkState; backlog: BacklogState }>;
-  moveBacklogItemToBatch(streamId: string, itemId: string, toBatchId: string): Promise<{ backlog: BacklogState; to: BatchWorkState }>;
-  addWorkItemNote(streamId: string, batchId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
-  listWorkItemEvents(streamId: string, batchId: string, itemId?: string): Promise<WorkItemEvent[]>;
+  moveWorkItemToBacklog(streamId: string, fromThreadId: string, itemId: string): Promise<{ from: ThreadWorkState; backlog: BacklogState }>;
+  moveBacklogItemToThread(streamId: string, itemId: string, toThreadId: string): Promise<{ backlog: BacklogState; to: ThreadWorkState }>;
+  addWorkItemNote(streamId: string, threadId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
+  listWorkItemEvents(streamId: string, threadId: string, itemId?: string): Promise<WorkItemEvent[]>;
   getWorkNotes(itemId: string): Promise<WorkNote[]>;
-  listAgentTurns(streamId: string, batchId: string, limit?: number): Promise<AgentTurn[]>;
+  listAgentTurns(streamId: string, threadId: string, limit?: number): Promise<AgentTurn[]>;
   listWorkItemEfforts(itemId: string): Promise<EffortDetail[]>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
   getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): Promise<SnapshotSummary | null>;
   getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<SnapshotDiffResult>;
   getEffortFiles(effortId: string): Promise<SnapshotSummary | null>;
-  listEffortsEndingAtSnapshots(snapshotIds: string[]): Promise<Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>>;
+  listEffortsEndingAtSnapshots(snapshotIds: string[]): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
   getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;
@@ -233,18 +233,18 @@ export interface DesktopApi {
   createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange>;
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string): Promise<WorkspaceRenameResult>;
   deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange>;
-  listCommitPoints(batchId: string): Promise<CommitPoint[]>;
-  createCommitPoint(streamId: string, batchId: string): Promise<CommitPoint>;
+  listCommitPoints(threadId: string): Promise<CommitPoint[]>;
+  createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;
   updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): Promise<CommitPoint[]>;
   commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
-  reorderBatchQueue(streamId: string, batchId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
-  listWaitPoints(batchId: string): Promise<WaitPoint[]>;
-  createWaitPoint(streamId: string, batchId: string, note?: string | null): Promise<WaitPoint>;
+  reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
+  listWaitPoints(threadId: string): Promise<WaitPoint[]>;
+  createWaitPoint(streamId: string, threadId: string, note?: string | null): Promise<WaitPoint>;
   setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;
   deleteWaitPoint(id: string): Promise<void>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
-  listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; batchId: string; status: AgentStatus }>>;
+  listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; threadId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   updateEditorFocus(payload: EditorFocusPayload): Promise<void>;

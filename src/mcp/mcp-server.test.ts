@@ -244,7 +244,7 @@ test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", 
         "Authorization": `Bearer ${server.authToken}`,
         "content-type": "application/json",
         "X-Newde-Stream": "s-1",
-        "X-Newde-Batch": "b-42",
+        "X-Newde-Thread": "b-42",
         "X-Newde-Pane": "working",
       },
       body: JSON.stringify({ session_id: "s1", cwd: "/tmp/demo" }),
@@ -254,7 +254,7 @@ test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", 
     expect(received).toHaveLength(1);
     expect(received[0].event).toBe("SessionStart");
     expect(received[0].streamId).toBe("s-1");
-    expect(received[0].batchId).toBe("b-42");
+    expect(received[0].threadId).toBe("b-42");
     expect(received[0].pane).toBe("working");
     expect(received[0].payload).toEqual({ session_id: "s1", cwd: "/tmp/demo" });
   } finally {

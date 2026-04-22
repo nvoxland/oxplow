@@ -16,7 +16,7 @@ import { dogfoodInnerAgent, launchNewde, probeLog, runProbe, waitForNewdeReady }
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WORK_ITEM_TITLE = "Add aria-labels to emoji sort buttons in PlanPane";
-const WORK_ITEM_BODY = `The four small buttons next to the batch status bar in PlanPane show glyphs ⤡ ⤢ ↓ ↑ with no aria-label and no title attribute. Hovering reveals nothing; a screen reader gets an empty button.
+const WORK_ITEM_BODY = `The four small buttons next to the thread status bar in PlanPane show glyphs ⤡ ⤢ ↓ ↑ with no aria-label and no title attribute. Hovering reveals nothing; a screen reader gets an empty button.
 
 Please:
 1. Find those buttons in src/ui/components/Plan/PlanPane.tsx (they sit in the status bar near the "Backlog · N" button).

@@ -40,7 +40,7 @@ interface Props {
   stream: Stream | null;
   gitEnabled: boolean;
   selectedFilePath: string | null;
-  currentBatchTurns: AgentTurn[] | null;
+  currentThreadTurns: AgentTurn[] | null;
   generatedDirs: string[];
   onOpenFile(path: string): void;
   onOpenDiff?(request: DiffRequest): void;
@@ -56,7 +56,7 @@ export function ProjectPanel({
   stream,
   gitEnabled,
   selectedFilePath,
-  currentBatchTurns,
+  currentThreadTurns,
   generatedDirs,
   onOpenFile,
   onOpenDiff,
@@ -196,14 +196,14 @@ export function ProjectPanel({
     [indexedFiles],
   );
 
-  // The last 10 turns from the current batch, newest first. Used to populate
+  // The last 10 turns from the current thread, newest first. Used to populate
   // the "Turn" filter's sub-dropdown.
   const recentTurns = useMemo(() => {
-    const turns = currentBatchTurns ?? [];
+    const turns = currentThreadTurns ?? [];
     return [...turns]
       .sort((a, b) => (a.started_at < b.started_at ? 1 : -1))
       .slice(0, 10);
-  }, [currentBatchTurns]);
+  }, [currentThreadTurns]);
 
   // Default the selected turn when the user picks the Turn mode.
   useEffect(() => {
@@ -252,7 +252,7 @@ export function ProjectPanel({
   // Load paths+deletions for the currently-selected scope.
   // - Uncommitted: read directly from the workspace index (already subscribed).
   // - Branch/Unpushed: `getBranchChanges` against the appropriate ref.
-  // - Turn: filter the batch's file-change log by `turn_id`.
+  // - Turn: filter the thread's file-change log by `turn_id`.
   // Deletions are tracked separately so we can inject phantom rows into the
   // tree (the filesystem no longer has them).
   useEffect(() => {
@@ -662,7 +662,7 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [{ id: "files.find-usages", label: "Find Usages", enabled: true, run: () => handleContextAction("find-usages") }]
         : []),
-      { id: "files.agent-history", label: "Agent History", enabled: (currentBatchTurns ?? []).length > 0, run: () => handleContextAction("agent-history") },
+      { id: "files.agent-history", label: "Agent History", enabled: (currentThreadTurns ?? []).length > 0, run: () => handleContextAction("agent-history") },
       ...(gitEnabled ? [{
         id: "files.git",
         label: "Git",
@@ -836,7 +836,7 @@ export function ProjectPanel({
       {agentHistoryState ? (
         <AgentHistoryModal
           path={agentHistoryState.path}
-          turns={currentBatchTurns ?? []}
+          turns={currentThreadTurns ?? []}
           onClose={() => setAgentHistoryState(null)}
         />
       ) : null}
@@ -1113,7 +1113,7 @@ function AgentHistoryModal({
     (async () => {
       const { getSnapshotSummary } = await import("../../api.js");
       // Parallelize the per-turn summary fetches. Sequential awaits here
-      // meant a 50-turn batch took 50 IPC round-trips in series.
+      // meant a 50-turn thread took 50 IPC round-trips in series.
       const results = await Promise.all(
         turns.map(async (turn) => {
           if (!turn.end_snapshot_id) return null;

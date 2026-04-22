@@ -8,9 +8,9 @@
       :root {
         --bg: #0e0e0e;           /* editor / main content — neutral, darkest */
         --bg-1: #1a1815;         /* center-tab strip, side panels — faint warm */
-        --bg-2: #342921;         /* batch rail — warm amber/sienna, complementary to the cool stream rail */
+        --bg-2: #342921;         /* thread rail — warm amber/sienna, complementary to the cool stream rail */
         --bg-3: #2a313f;         /* stream rail — cool blue-tinted top chrome */
-        --bg-tab-inactive: #3a3a3d; /* non-selected batch tabs — neutral light gray */
+        --bg-tab-inactive: #3a3a3d; /* non-selected thread tabs — neutral light gray */
         --bg-detail: #242424;    /* expanded-detail surfaces — neutral elevation above --bg, no warm tint */
         --fg: #e6e6e6;
         --muted: #8d8a85;        /* warm muted to go with the warm chrome */
@@ -51,7 +51,7 @@
       }
       /* Thin, unobtrusive scrollbars. The Electron default leaves a
          pill-shaped thumb artifact even when content fits, which was
-         showing up next to the New Stream / + Batch buttons. */
+         showing up next to the New Stream / + Thread buttons. */
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb {
@@ -63,7 +63,7 @@
       ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: padding-box; border: 2px solid transparent; }
       ::-webkit-scrollbar-corner { background: transparent; }
       /* Hide scrollbars entirely on the narrow horizontal rails — they only
-         show when many streams/batches are open and we don't want the thumb
+         show when many streams/threads are open and we don't want the thumb
          floating next to the trailing "+ New" button. */
       .newde-rail-scroll { scrollbar-width: none; }
       .newde-rail-scroll::-webkit-scrollbar { display: none; }

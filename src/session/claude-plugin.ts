@@ -60,7 +60,7 @@ export const HOOK_EVENTS = [
 const PLUGIN_ENV_VARS = [
   "NEWDE_HOOK_TOKEN",
   "NEWDE_STREAM_ID",
-  "NEWDE_BATCH_ID",
+  "NEWDE_THREAD_ID",
   "NEWDE_PANE",
 ] as const;
 
@@ -154,7 +154,7 @@ function buildPluginHooks(hookUrl: string) {
       headers: {
         "Authorization": "Bearer $NEWDE_HOOK_TOKEN",
         "X-Newde-Stream": "$NEWDE_STREAM_ID",
-        "X-Newde-Batch": "$NEWDE_BATCH_ID",
+        "X-Newde-Thread": "$NEWDE_THREAD_ID",
         "X-Newde-Pane": "$NEWDE_PANE",
       },
       allowedEnvVars: [...PLUGIN_ENV_VARS],

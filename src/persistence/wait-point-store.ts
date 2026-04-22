@@ -11,7 +11,7 @@ const NOTE_MAX_LEN = 2_000;
 
 export interface WaitPoint {
   id: string;
-  batch_id: string;
+  thread_id: string;
   sort_index: number;
   status: WaitPointStatus;
   note: string | null;
@@ -21,7 +21,7 @@ export interface WaitPoint {
 }
 
 export interface WaitPointChange {
-  batchId: string;
+  threadId: string;
   kind: "created" | "updated" | "deleted";
   id: string | null;
 }
@@ -43,11 +43,11 @@ export class WaitPointStore {
     this.emitter.emit(change);
   }
 
-  listForBatch(batchId: string): WaitPoint[] {
+  listForThread(threadId: string): WaitPoint[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM wait_point WHERE batch_id = ? ORDER BY sort_index, created_at, id`,
-        batchId,
+        `SELECT * FROM wait_point WHERE thread_id = ? ORDER BY sort_index, created_at, id`,
+        threadId,
       )
       .map(toWaitPoint);
   }
@@ -57,18 +57,18 @@ export class WaitPointStore {
     return row ? toWaitPoint(row) : null;
   }
 
-  create(input: { batchId: string; sortIndex: number; note?: string | null }): WaitPoint {
+  create(input: { threadId: string; sortIndex: number; note?: string | null }): WaitPoint {
     const id = createId("wp");
     const now = new Date().toISOString();
     const note = input.note?.slice(0, NOTE_MAX_LEN) ?? null;
     this.stateDb.run(
-      `INSERT INTO wait_point (id, batch_id, sort_index, status, note, created_at, updated_at)
+      `INSERT INTO wait_point (id, thread_id, sort_index, status, note, created_at, updated_at)
        VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-      id, input.batchId, input.sortIndex, note, now, now,
+      id, input.threadId, input.sortIndex, note, now, now,
     );
     const stored = this.get(id);
     if (!stored) throw new Error("wait point not persisted");
-    this.emit({ batchId: input.batchId, kind: "created", id });
+    this.emit({ threadId: input.threadId, kind: "created", id });
     return stored;
   }
 
@@ -79,12 +79,12 @@ export class WaitPointStore {
     const now = new Date().toISOString();
     this.stateDb.run(`UPDATE wait_point SET status = 'triggered', updated_at = ? WHERE id = ?`, now, id);
     const updated = this.require(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
+    this.emit({ threadId: updated.thread_id, kind: "updated", id });
     return updated;
   }
 
   /** Bulk assign sort_index values — paired with commit-point + work-item
-   *  bulk setters so the batch-queue reorder can keep all three tables in a
+   *  bulk setters so the thread-queue reorder can keep all three tables in a
    *  single index space. */
   setSortIndexes(entries: Array<{ id: string; sortIndex: number }>): void {
     if (entries.length === 0) return;
@@ -97,13 +97,13 @@ export class WaitPointStore {
         );
       }
     });
-    const batches = new Set<string>();
+    const threads = new Set<string>();
     for (const entry of entries) {
       const wp = this.get(entry.id);
-      if (wp) batches.add(wp.batch_id);
+      if (wp) threads.add(wp.thread_id);
     }
-    for (const batchId of batches) {
-      this.emit({ batchId, kind: "updated", id: null });
+    for (const threadId of threads) {
+      this.emit({ threadId, kind: "updated", id: null });
     }
   }
 
@@ -113,7 +113,7 @@ export class WaitPointStore {
     const trimmed = note == null ? null : note.slice(0, NOTE_MAX_LEN);
     this.stateDb.run(`UPDATE wait_point SET note = ?, updated_at = ? WHERE id = ?`, trimmed, now, id);
     const updated = this.require(id);
-    this.emit({ batchId: updated.batch_id, kind: "updated", id });
+    this.emit({ threadId: updated.thread_id, kind: "updated", id });
     return updated;
   }
 
@@ -121,7 +121,7 @@ export class WaitPointStore {
     const wp = this.get(id);
     if (!wp) return;
     this.stateDb.run(`DELETE FROM wait_point WHERE id = ?`, id);
-    this.emit({ batchId: wp.batch_id, kind: "deleted", id });
+    this.emit({ threadId: wp.thread_id, kind: "deleted", id });
   }
 
   private require(id: string): WaitPoint {
@@ -136,7 +136,7 @@ function toWaitPoint(row: Record<string, unknown>): WaitPoint {
   if (!WAIT_POINT_STATUSES.has(status as WaitPointStatus)) throw new Error(`invalid wait_point.status: ${status}`);
   return {
     id: String(row.id),
-    batch_id: String(row.batch_id),
+    thread_id: String(row.thread_id),
     sort_index: Number(row.sort_index),
     status: status as WaitPointStatus,
     note: row.note == null ? null : String(row.note),
