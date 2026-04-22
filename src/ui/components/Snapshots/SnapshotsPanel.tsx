@@ -209,7 +209,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
   }
 
   const labelFor = (snap: FileSnapshot): string =>
-    orphanEndIds.has(snap.id) ? "External Change" : snapshotLabel(snap);
+    orphanEndIds.has(snap.id) ? "[ External change ]" : snapshotLabel(snap);
 
   // Hide `-start` rows: they're only shown via their paired `-end`.
   const visibleSnapshots = snapshots.filter(

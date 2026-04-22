@@ -1344,7 +1344,7 @@ export function App() {
 
   const closeDiffTab = (id: string) => {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
-    setCenterActive("agent");
+    setCenterActive((current) => (current === id ? "agent" : current));
   };
 
   const agentBatchStatus: AgentStatus = selectedBatch ? agentStatuses[selectedBatch.id] ?? "idle" : "idle";
