@@ -7,7 +7,6 @@ import {
   restoreFileFromSnapshot,
   subscribeSnapshotEvents,
   type FileSnapshot,
-  type SnapshotSource,
   type SnapshotSummary,
   type Stream,
 } from "../../api.js";
@@ -265,6 +264,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
 }
 
 function snapshotLabel(snap: FileSnapshot): string {
+  if (snap.label) return snap.label;
   switch (snap.source) {
     case "task-start":
       return "Task started";
@@ -282,8 +282,18 @@ function snapshotLabel(snap: FileSnapshot): string {
   }
 }
 
-function isAgentSource(source: SnapshotSource): boolean {
-  return source === "task-start" || source === "task-end" || source === "turn-start" || source === "turn-end";
+function snapshotIconKind(snap: FileSnapshot): "task" | "turn" | "system" {
+  if (snap.label_kind) return snap.label_kind;
+  switch (snap.source) {
+    case "task-start":
+    case "task-end":
+      return "task";
+    case "turn-start":
+    case "turn-end":
+      return "turn";
+    default:
+      return "system";
+  }
 }
 
 function SnapshotRow({
@@ -298,7 +308,8 @@ function SnapshotRow({
   onClick(): void;
 }) {
   const date = formatRelative(snap.created_at);
-  const isAgent = isAgentSource(snap.source);
+  const iconKind = snapshotIconKind(snap);
+  const isAgent = iconKind !== "system";
   const description = snapshotLabel(snap);
   return (
     <div

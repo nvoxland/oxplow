@@ -217,6 +217,57 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
+  test("listSnapshotsForStream labels snapshots linked to a work_item_effort with the task title", () => {
+    const { store, worktreePath, streamId, projectDir } = seed();
+    writeFileSync(join(worktreePath, "a.txt"), "a");
+    store.flushSnapshot({ source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    writeFileSync(join(worktreePath, "a.txt"), "b");
+    const endSnap = store.flushSnapshot({
+      source: "task-end",
+      streamId,
+      worktreePath,
+      dirtyPaths: ["a.txt"],
+    });
+
+    // Simulate: an effort has this snapshot as its end_snapshot_id.
+    const db = getStateDatabase(projectDir);
+    // Need a batch + work_item for the effort FK. Use the BatchStore API via
+    // direct SQL to keep the test independent of it.
+    const batchRows = db.all<{ id: string }>(`SELECT id FROM batches LIMIT 1`);
+    if (batchRows.length === 0) {
+      // The seed doesn't create a batch — insert a minimal one for the FK.
+      db.run(
+        `INSERT INTO batches (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
+         VALUES ('b-test', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        streamId,
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+    }
+    const batchId = batchRows[0]?.id ?? "b-test";
+    db.run(
+      `INSERT INTO work_items (id, batch_id, kind, title, status, priority, created_by, created_at, updated_at)
+       VALUES ('wi-ship-it', ?, 'task', 'Ship the thing', 'human_check', 'medium', 'user', ?, ?)`,
+      batchId,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    db.run(
+      `INSERT INTO work_item_effort (id, work_item_id, started_at, ended_at, end_snapshot_id)
+       VALUES ('eff-1', 'wi-ship-it', ?, ?, ?)`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+      endSnap.id,
+    );
+
+    const listed = store.listSnapshotsForStream(streamId);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]!.id).toBe(endSnap.id);
+    expect(listed[0]!.label).toBe("Ship the thing — end");
+    expect(listed[0]!.label_kind).toBe("task");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
   test("listSnapshotsForStream hides the initial baseline (nothing to diff against)", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");

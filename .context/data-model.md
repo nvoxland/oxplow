@@ -195,6 +195,14 @@ nothing meaningful to show. `listSnapshotsForStream` excludes it
 `getSnapshotSummary`). The baseline still lives in the DB — only the
 UI list skips it.
 
+**Rows come with pre-joined labels.** `listSnapshotsForStream` joins
+against `work_item_effort` and `agent_turn` in a single query to
+populate `label` + `label_kind` on each `FileSnapshot`. Effort links
+win over turn links (task title + " — start"/" — end"); effort-end
+wins over effort-start when the same snapshot is both. Unlinked
+snapshots get `label: null` and the UI falls back to the `source`
+column.
+
 Blobs live on disk at `.newde/snapshots/objects/xx/yyyy…` (sha256
 addressed, shared across streams for dedup).
 

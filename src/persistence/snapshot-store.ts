@@ -57,6 +57,14 @@ export interface FileSnapshot {
   version_hash: string;
   source: SnapshotSource;
   created_at: string;
+  /**
+   * Populated by `listSnapshotsForStream`: the human-readable label for
+   * the row (task title + phase when an effort links here; prompt when
+   * a turn links here; otherwise null and the UI falls back to `source`).
+   */
+  label?: string | null;
+  /** `"task" | "turn" | "system"` — drives the icon choice in the UI. */
+  label_kind?: "task" | "turn" | "system" | null;
 }
 
 /**
@@ -453,24 +461,51 @@ export class SnapshotStore {
    * stream (the initial baseline has nothing to diff against and would only
    * add noise). The baseline still exists in the DB and acts as the
    * "previous" for the second snapshot's summary.
+   *
+   * Each row is enriched with a `label` + `label_kind` derived from joined
+   * work-item efforts / agent turns, so the UI can render a meaningful name
+   * ("<task title> end" / "<task title> start" / "<turn prompt>") without
+   * N+1 follow-up queries. When no effort or turn references the snapshot,
+   * label is null and the UI falls back to the `source` column.
+   *
+   * Effort links win over turn links (task titles are more identifying than
+   * prompts). "end" wins over "start" when a snapshot is both — the end-of-
+   * effort side is the one users navigate here to see.
    */
   listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
-    return this.stateDb
-      .all<Record<string, unknown>>(
-        `SELECT * FROM file_snapshot f
-         WHERE f.stream_id = ?
-           AND EXISTS (
-             SELECT 1 FROM file_snapshot earlier
-             WHERE earlier.stream_id = f.stream_id
-               AND (earlier.created_at < f.created_at
-                    OR (earlier.created_at = f.created_at AND earlier.rowid < f.rowid))
-           )
-         ORDER BY f.created_at DESC, f.rowid DESC
-         LIMIT ?`,
-        streamId,
-        limit,
-      )
-      .map(rowToSnapshot);
+    const rows = this.stateDb.all<Record<string, unknown>>(
+      `SELECT f.*,
+              effort_end_item.title AS effort_end_title,
+              effort_start_item.title AS effort_start_title,
+              turn_end.prompt AS turn_end_prompt,
+              turn_start.prompt AS turn_start_prompt
+       FROM file_snapshot f
+       LEFT JOIN work_item_effort effort_end ON effort_end.end_snapshot_id = f.id
+       LEFT JOIN work_items effort_end_item ON effort_end_item.id = effort_end.work_item_id
+       LEFT JOIN work_item_effort effort_start ON effort_start.start_snapshot_id = f.id
+       LEFT JOIN work_items effort_start_item ON effort_start_item.id = effort_start.work_item_id
+       LEFT JOIN agent_turn turn_end ON turn_end.end_snapshot_id = f.id
+       LEFT JOIN agent_turn turn_start ON turn_start.start_snapshot_id = f.id
+       WHERE f.stream_id = ?
+         AND EXISTS (
+           SELECT 1 FROM file_snapshot earlier
+           WHERE earlier.stream_id = f.stream_id
+             AND (earlier.created_at < f.created_at
+                  OR (earlier.created_at = f.created_at AND earlier.rowid < f.rowid))
+         )
+       GROUP BY f.id
+       ORDER BY f.created_at DESC, f.rowid DESC
+       LIMIT ?`,
+      streamId,
+      limit,
+    );
+    return rows.map((row) => {
+      const snap = rowToSnapshot(row);
+      const { label, kind } = deriveSnapshotLabel(row);
+      snap.label = label;
+      snap.label_kind = kind;
+      return snap;
+    });
   }
 
   /**
@@ -574,6 +609,32 @@ export function computeVersionHash(entries: Array<[string, SnapshotEntry]>): str
     h.update("\n");
   }
   return h.digest("hex");
+}
+
+function deriveSnapshotLabel(row: Record<string, unknown>): {
+  label: string | null;
+  kind: "task" | "turn" | "system" | null;
+} {
+  const effortEnd = asString(row.effort_end_title);
+  if (effortEnd) return { label: `${effortEnd} — end`, kind: "task" };
+  const effortStart = asString(row.effort_start_title);
+  if (effortStart) return { label: `${effortStart} — start`, kind: "task" };
+  const turnEnd = asString(row.turn_end_prompt);
+  if (turnEnd) return { label: firstLine(turnEnd), kind: "turn" };
+  const turnStart = asString(row.turn_start_prompt);
+  if (turnStart) return { label: firstLine(turnStart), kind: "turn" };
+  return { label: null, kind: null };
+}
+
+function asString(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s.length > 0 ? s : null;
+}
+
+function firstLine(text: string): string {
+  const newline = text.indexOf("\n");
+  return newline === -1 ? text : text.slice(0, newline);
 }
 
 function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {

@@ -96,6 +96,8 @@ export interface FileSnapshot {
   version_hash: string;
   source: SnapshotSource;
   created_at: string;
+  label?: string | null;
+  label_kind?: "task" | "turn" | "system" | null;
 }
 
 export type SnapshotEntryState = "present" | "deleted" | "oversize";
