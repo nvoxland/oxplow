@@ -315,7 +315,12 @@ export function WorkGroupList({
 
   const renderRow = (row: QueueRow) => {
     const key = keyFor(row);
-    const isOver = overKey === key && draggingKey !== key;
+    // Human Check / Done drops always land at the top of the section, so a
+    // between-rows indicator on those targets would lie about where the
+    // dragged item will end up. Suppress it there.
+    const targetSection = row.kind === "work" ? classifyWorkItem(row.item.status) : null;
+    const suppressDropLine = targetSection === "humanCheck" || targetSection === "done";
+    const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
     if (row.kind === "commit") {
       return (
