@@ -335,6 +335,21 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           createdBy: "agent",
           actorId: "mcp",
         });
+        // Epics filed without children render as one opaque IN PROGRESS row in
+        // the UI and defeat the purpose of the rollup. The newde-task-filing
+        // skill already says "file children in the same turn"; surfacing it on
+        // the tool response keeps the rule on the critical path instead of
+        // shelved in a skill doc. Non-epic responses stay terse — no field is
+        // added there so the happy-path log doesn't grow.
+        if (args.kind === "epic") {
+          return {
+            ok: true,
+            id: item.id,
+            sort_index: item.sort_index,
+            reminder:
+              "Epic filed with 0 children. Per newde-task-filing, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
+          };
+        }
         return { ok: true, id: item.id, sort_index: item.sort_index };
       },
     },

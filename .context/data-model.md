@@ -169,10 +169,13 @@ turn when an effort opens mid-turn.
 
 Read API: `listEffortsForWorkItem(itemId)`, `listOpenEfforts()`,
 `listEffortsForSnapshot(snapshotId)`, `listTurnsForEffort(effortId)`,
-`listEffortsForTurn(turnId)`. `createWorkItemApi` exposes
-`listWorkItemEfforts(itemId)` which returns per-effort rows with
-pre-joined start/end snapshot metadata and the list of changed paths
-(computed from the pair diff).
+`listEffortsForTurn(turnId)`, `listEffortsForPath(path)` (closed
+efforts that touched `path` via `work_item_effort_file`, joined to the
+owning work item's title/status, newest-first by `ended_at` — drives
+the local-blame overlay described in `.context/editor-and-monaco.md`).
+`createWorkItemApi` exposes `listWorkItemEfforts(itemId)` which returns
+per-effort rows with pre-joined start/end snapshot metadata and the
+list of changed paths (computed from the pair diff).
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 

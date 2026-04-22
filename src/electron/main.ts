@@ -227,6 +227,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:gitCommitAll", (_event, streamId: string, message: string, options) => currentRuntime.gitCommitAll(streamId, message, options));
   handle("newde:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
   handle("newde:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));
+  handle("newde:localBlame", (_event, streamId: string, path: string) => currentRuntime.localBlame(streamId, path));
   handle("newde:listAllRefs", (_event, streamId: string) => currentRuntime.listAllRefs(streamId));
   handle("newde:addWorkItemNote", (_event, streamId: string, batchId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, batchId, itemId, note));
   handle("newde:listWorkItemEvents", (_event, streamId: string, batchId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, batchId, itemId));

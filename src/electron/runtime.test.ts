@@ -128,6 +128,55 @@ test("buildSessionContextBlock treats a missing active batch as \"you're the wri
   expect(out).toContain("writer: (you)");
 });
 
+test("buildSessionContextBlock emits no ROLE CHANGE banner when initialRole matches current role", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    batch: { id: "b-1", title: "Default" },
+    activeBatch: { id: "b-1", title: "Default" },
+    initialRole: "writer",
+  });
+  expect(out).not.toContain("ROLE CHANGE");
+});
+
+test("buildSessionContextBlock emits a read-only → writer ROLE CHANGE banner when the batch was read-only at session start and is now the writer", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    batch: { id: "b-2", title: "Mine" },
+    activeBatch: { id: "b-2", title: "Mine" },
+    initialRole: "read-only",
+  });
+  expect(out).toContain("ROLE CHANGE");
+  expect(out).toContain("this batch was read-only when the session started");
+  expect(out).toContain("it is now the active writer");
+  expect(out).toContain("NON_WRITER block in your initial system prompt is SUPERSEDED");
+  // Banner sits before the closing tag.
+  const bannerIdx = out.indexOf("ROLE CHANGE");
+  const closeIdx = out.indexOf("</session-context>");
+  expect(bannerIdx).toBeLessThan(closeIdx);
+});
+
+test("buildSessionContextBlock emits a writer → read-only ROLE CHANGE banner when the batch was the writer at session start and is now read-only", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    batch: { id: "b-2", title: "Mine" },
+    activeBatch: { id: "b-1", title: "Other" },
+    initialRole: "writer",
+  });
+  expect(out).toContain("ROLE CHANGE");
+  expect(out).toContain("this batch was the active writer when the session started");
+  expect(out).toContain("it is now read-only");
+  expect(out).toContain("NON_WRITER block applies now even though it wasn't in your initial system prompt");
+});
+
+test("buildSessionContextBlock omits ROLE CHANGE when initialRole is not supplied (backwards compatible)", () => {
+  const out = buildSessionContextBlock({
+    stream: { id: "s-1", title: "Main" },
+    batch: { id: "b-1", title: "Default" },
+    activeBatch: { id: "b-1", title: "Default" },
+  });
+  expect(out).not.toContain("ROLE CHANGE");
+});
+
 test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context.uiChangeNudge is true", () => {
   const text = buildNextWorkItemStopReason(
     { id: "wi-x", title: "do", kind: "task", batch_id: "b-y" },

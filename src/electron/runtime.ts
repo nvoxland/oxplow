@@ -66,6 +66,7 @@ import {
 import { isInsideWorktree } from "./runtime-paths.js";
 import { shouldIgnoreWorkspaceWatchPath } from "../git/workspace-watch.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
+import { computeLocalBlame } from "./local-blame.js";
 import { EventBus, type NewdeEvent } from "../core/event-bus.js";
 import {
   createWorkspaceDirectory,
@@ -120,6 +121,12 @@ export class ElectronRuntime {
    *  skip re-injecting identical blocks turn-over-turn. Keyed by Claude
    *  session id; absent key means "nothing sent yet / fall back to emit". */
   private readonly lastSessionContextBySessionId = new Map<string, string>();
+  /** The batch's writer/read-only role at the moment a Claude session id was
+   *  first seen. Captured once and never rewritten, so
+   *  buildSessionContextBlock can detect a mid-session role flip and emit a
+   *  loud banner superseding the frozen NON_WRITER block in the agent's
+   *  initial system prompt. Keyed by Claude session id. */
+  private readonly initialRoleBySessionId = new Map<string, "writer" | "read-only">();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -623,6 +630,28 @@ export class ElectronRuntime {
     return gitBlame(stream.worktree_path, path);
   }
 
+  /**
+   * Per-line blame combining newde work-item efforts (authoritative) with
+   * git blame (fallback). See `src/electron/local-blame.ts` for the
+   * algorithm and `.context/editor-and-monaco.md` for the UI wiring.
+   */
+  localBlame(streamId: string, path: string): import("./local-blame.js").LocalBlameEntry[] {
+    const stream = this.resolveStream(streamId);
+    let diskText: string;
+    try {
+      diskText = readWorkspaceFile(stream.worktree_path, path).content;
+    } catch {
+      return [];
+    }
+    return computeLocalBlame({
+      effortStore: this.effortStore,
+      snapshotStore: this.snapshotStore,
+      path,
+      diskText,
+      gitBlame: () => gitBlame(stream.worktree_path, path),
+    });
+  }
+
   listAllRefs(streamId: string): RefOption[] {
     const stream = this.resolveStream(streamId);
     return listAllRefs(stream.worktree_path);
@@ -983,7 +1012,11 @@ export class ElectronRuntime {
   // (as opposed to the frozen snapshot in the agent's system prompt). Called
   // on every UserPromptSubmit — see handleHookEnvelope. Returns empty string
   // when the envelope lacks enough to resolve a batch.
-  private buildRefreshedSessionContext(envelopeBatchId: string | null, streamId: string): string {
+  private buildRefreshedSessionContext(
+    envelopeBatchId: string | null,
+    streamId: string,
+    sessionId: string | undefined,
+  ): string {
     void streamId;
     const batch = envelopeBatchId ? this.batchStore.findById(envelopeBatchId) : null;
     if (!batch) return "";
@@ -991,7 +1024,19 @@ export class ElectronRuntime {
     if (!stream) return "";
     const batchState = this.batchStore.list(stream.id);
     const activeBatch = batchState.batches.find((b) => b.id === batchState.activeBatchId) ?? null;
-    return buildSessionContextBlock({ stream, batch, activeBatch });
+    // Stash (once) the role this batch had when Claude's session id was first
+    // observed, so a later promotion/demotion surfaces as a ROLE CHANGE banner
+    // rather than a subtle one-line diff.
+    const currentRole: "writer" | "read-only" =
+      activeBatch && activeBatch.id !== batch.id ? "read-only" : "writer";
+    let initialRole: "writer" | "read-only" | undefined;
+    if (sessionId) {
+      if (!this.initialRoleBySessionId.has(sessionId)) {
+        this.initialRoleBySessionId.set(sessionId, currentRole);
+      }
+      initialRole = this.initialRoleBySessionId.get(sessionId);
+    }
+    return buildSessionContextBlock({ stream, batch, activeBatch, initialRole });
   }
 
   private resolveActiveBatchForPrompt(streamId: string): Batch | null {
@@ -1092,7 +1137,7 @@ export class ElectronRuntime {
       // still holds the prior value, so re-sending is pure overhead.
       let sessionContext = "";
       if (this.config.injectSessionContext) {
-        const candidate = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId);
+        const candidate = this.buildRefreshedSessionContext(envelope.batchId ?? null, streamId, stored.normalized.sessionId);
         const sessionKey = stored.normalized.sessionId ?? "";
         if (candidate && sessionKey) {
           if (this.lastSessionContextBySessionId.get(sessionKey) !== candidate) {
@@ -1829,17 +1874,40 @@ export function buildSessionContextBlock(input: {
   stream: { id: string; title: string };
   batch: { id: string; title: string };
   activeBatch: { id: string; title: string } | null;
+  /**
+   * The batch's writer/read-only role at the moment this Claude session
+   * was first seen. When set and different from the *current* role, a
+   * loud ROLE CHANGE banner is appended before `</session-context>` to
+   * supersede the (frozen, cache-read) NON_WRITER_PROMPT_BLOCK in the
+   * initial system prompt. Omitting the field is a no-op — older call
+   * sites keep the original single-line writer: rendering.
+   */
+  initialRole?: "writer" | "read-only";
 }): string {
-  const { stream, batch, activeBatch } = input;
-  return [
+  const { stream, batch, activeBatch, initialRole } = input;
+  const currentRole: "writer" | "read-only" =
+    activeBatch && activeBatch.id !== batch.id ? "read-only" : "writer";
+  const lines = [
     `<session-context>`,
     `stream: "${stream.title}" (id: ${stream.id})`,
     `batch:  "${batch.title}" (id: ${batch.id})`,
     activeBatch && activeBatch.id !== batch.id
       ? `writer: "${activeBatch.title}" (id: ${activeBatch.id}) — your batch is read-only`
       : `writer: (you) — your batch is the active writer`,
-    `</session-context>`,
-  ].join("\n");
+  ];
+  if (initialRole && initialRole !== currentRole) {
+    if (currentRole === "writer") {
+      lines.push(
+        "ROLE CHANGE: this batch was read-only when the session started; it is now the active writer. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree.",
+      );
+    } else {
+      lines.push(
+        "ROLE CHANGE: this batch was the active writer when the session started; it is now read-only. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked.",
+      );
+    }
+  }
+  lines.push(`</session-context>`);
+  return lines.join("\n");
 }
 
 export function buildBatchMcpConfig(mcp: McpServerHandle | null): string {

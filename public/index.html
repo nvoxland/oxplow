@@ -21,6 +21,20 @@
         --priority-high: #e5a06a;     /* warm orange — escalates visually over --muted */
         --priority-medium: #8d8a85;   /* alias of --muted; no highlight */
         --priority-low: #6b6864;      /* sits below --muted so Low items recede */
+        /* Blame overlay — two hue tracks so local (work-item) and git
+           attribution read as distinct sources. Saturation encodes age,
+           hue encodes source. See .context/theming.md. */
+        --blame-local-fresh: rgba(229, 160, 106, 0.55);   /* accent amber, <7d */
+        --blame-local-recent: rgba(229, 160, 106, 0.40);  /* <30d */
+        --blame-local-stale: rgba(229, 160, 106, 0.28);   /* <180d */
+        --blame-local-old: rgba(170, 140, 110, 0.18);     /* older */
+        --blame-local-border: #e5a06a;
+        --blame-git-fresh: rgba(96, 165, 250, 0.55);      /* accent blue, <7d */
+        --blame-git-recent: rgba(96, 165, 250, 0.40);
+        --blame-git-stale: rgba(96, 165, 250, 0.28);
+        --blame-git-old: rgba(120, 140, 170, 0.14);
+        --blame-git-border: #4a9eff;
+        --blame-uncommitted: rgba(70, 70, 70, 0.35);
       }
       html, body, #root {
         margin: 0;

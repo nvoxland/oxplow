@@ -1399,6 +1399,7 @@ export function App() {
             onSelectOpenFile={handleSelectOpenFile}
             onCloseOpenFile={handleCloseOpenFile}
             onRevealCommit={handleRevealCommit}
+            onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
           />
         ) : null,

@@ -543,6 +543,15 @@ export async function gitBlame(
   return desktopApi().gitBlame(streamId, path);
 }
 
+export type { LocalBlameEntry } from "../electron/local-blame.js";
+
+export async function localBlame(
+  streamId: string,
+  path: string,
+): Promise<import("../electron/local-blame.js").LocalBlameEntry[]> {
+  return desktopApi().localBlame(streamId, path);
+}
+
 export async function listCommitPoints(batchId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
   return desktopApi().listCommitPoints(batchId);
 }

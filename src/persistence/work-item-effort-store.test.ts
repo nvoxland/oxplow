@@ -101,6 +101,58 @@ describe("WorkItemEffortStore", () => {
     expect(threw).toBe(true);
   });
 
+  test("listEffortsForPath returns closed efforts ordered by ended_at DESC, with work-item title", () => {
+    const { efforts, workItems, batchId, snapshots, dir, streamId } = seed();
+    // Three tasks, each touching a common path via work_item_effort_file, each
+    // with distinct ended_at timestamps. listEffortsForPath should return them
+    // in newest-first order and include the work-item title.
+    const items = [0, 1, 2].map((i) =>
+      workItems.createItem({
+        batchId,
+        kind: "task",
+        title: `Task ${i}`,
+        createdBy: "user",
+        actorId: "test",
+      }),
+    );
+    const closedIds: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const startSnap = createSnapshot(dir, snapshots, streamId, `start-${i}`, `v${i}a`);
+      const eff = efforts.openEffort({ workItemId: items[i]!.id, startSnapshotId: startSnap });
+      efforts.recordEffortFile(eff.id, "shared.txt");
+      const endSnap = createSnapshot(dir, snapshots, streamId, `end-${i}`, `v${i}b`);
+      efforts.closeEffort({ workItemId: items[i]!.id, endSnapshotId: endSnap });
+      closedIds.push(eff.id);
+      // Ensure distinct ended_at ordering by sleeping 2ms between closes
+      // (ISO timestamps have ms resolution).
+      Bun.sleepSync?.(3);
+    }
+    const rows = efforts.listEffortsForPath("shared.txt");
+    expect(rows).toHaveLength(3);
+    // Newest-first: closed index 2 should come first.
+    expect(rows[0]!.effortId).toBe(closedIds[2]!);
+    expect(rows[1]!.effortId).toBe(closedIds[1]!);
+    expect(rows[2]!.effortId).toBe(closedIds[0]!);
+    expect(rows[0]!.title).toBe("Task 2");
+    expect(rows[0]!.workItemId).toBe(items[2]!.id);
+    // Rows for a path that no effort touched.
+    expect(efforts.listEffortsForPath("nothing.txt")).toHaveLength(0);
+  });
+
+  test("listEffortsForPath excludes still-open efforts", () => {
+    const { efforts, workItems, batchId } = seed();
+    const item = workItems.createItem({
+      batchId,
+      kind: "task",
+      title: "Open",
+      createdBy: "user",
+      actorId: "test",
+    });
+    const eff = efforts.openEffort({ workItemId: item.id, startSnapshotId: null });
+    efforts.recordEffortFile(eff.id, "open.txt");
+    expect(efforts.listEffortsForPath("open.txt")).toHaveLength(0);
+  });
+
   test("linkEffortTurn + listTurnsForEffort + listEffortsForTurn", () => {
     const { efforts, turns, itemId, batchId } = seed();
     const effort = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });

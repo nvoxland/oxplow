@@ -62,6 +62,7 @@ const api: DesktopApi = {
   gitCommitAll: (streamId, message, options) => ipcRenderer.invoke("newde:gitCommitAll", streamId, message, options),
   listFileCommits: (streamId, path, limit) => ipcRenderer.invoke("newde:listFileCommits", streamId, path, limit),
   gitBlame: (streamId, path) => ipcRenderer.invoke("newde:gitBlame", streamId, path),
+  localBlame: (streamId, path) => ipcRenderer.invoke("newde:localBlame", streamId, path),
   listAllRefs: (streamId) => ipcRenderer.invoke("newde:listAllRefs", streamId),
   addWorkItemNote: (streamId, batchId, itemId, note) => ipcRenderer.invoke("newde:addWorkItemNote", streamId, batchId, itemId, note),
   listWorkItemEvents: (streamId, batchId, itemId) => ipcRenderer.invoke("newde:listWorkItemEvents", streamId, batchId, itemId),

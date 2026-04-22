@@ -74,10 +74,20 @@ submenu flip-up logic; never re-implement that per-call site.
 
 ## Blame overlay
 
-When the user toggles `Annotate with Git Blame`, `EditorPane` fetches
-blame via `gitBlame(stream.id, filePath)` and renders an absolutely-
-positioned DOM overlay on the left gutter (the `BlameOverlay`
-sub-component). Layout details:
+When the user toggles `Annotate with Blame`, `EditorPane` fetches a
+merged per-line attribution via `localBlame(stream.id, filePath)` and
+renders an absolutely-positioned DOM overlay on the left gutter (the
+`BlameOverlay` sub-component). The merge is computed server-side in
+`src/electron/local-blame.ts` (`computeLocalBlame`) — it walks closed
+work-item efforts newest-first (`WorkItemEffortStore.listEffortsForPath`),
+diffs each effort's start/end snapshot content to figure out which lines
+the effort introduced, and falls back to `gitBlame` for any line the
+local walk can't attribute. Snapshots pruned by the 7-day retention
+window degrade gracefully — the effort is skipped and git blame picks
+up the line. The IPC is a single round-trip (`newde:localBlame`) so the
+UI never has to reconcile two streams.
+
+Layout details:
 
 - Reserves ~150px of left space by setting `lineNumbers: "off"` and
   `lineDecorationsWidth: 150` on the editor while blame is on.
@@ -85,23 +95,28 @@ sub-component). Layout details:
   `blameScrollTop` state.
 - Reads `monaco.editor.EditorOption.lineHeight` so each row aligns with
   the corresponding text line.
-- Ages each line via `blameColor(ageDays)` — bright blue for fresh
-  commits, fading through gray for older ones. Uncommitted lines (sha
-  all zeros) render blank.
-- On click, calls the `onRevealCommit(sha)` prop (wired from `App.tsx`)
-  which bumps two tokens: `historyReveal` (passed to `HistoryPanel` to
-  select the commit) and `bottomActivate` (passed to the bottom
-  `DockShell` to open the History tool window). Uncommitted lines
-  (all-zero sha) intentionally pass `onClick={undefined}` so clicking
-  them does nothing — there is no commit to reveal.
-- On right-click, opens the shared `ContextMenu` with three entries —
-  Copy commit SHA, Reveal commit, Copy author email. Uncommitted rows
-  also skip the context menu (`onContextMenu={undefined}`) since the
-  three actions all need a real sha or author.
+- Two hue tracks share one overlay: **local** (work-item) lines use
+  `--blame-local-*` (warm amber age ramp) with a 2px
+  `--blame-local-border` left stripe; **git** lines use `--blame-git-*`
+  (cool blue age ramp) with a 2px `--blame-git-border` left stripe.
+  Uncommitted lines render with `--blame-uncommitted` and a transparent
+  border. All variables live in `public/index.html` — see
+  `.context/theming.md`.
+- Labels: local rows show the truncated work-item title; git rows show
+  `yyyy-mm-dd  author`; uncommitted rows are blank.
+- On click, local rows call `onRevealWorkItem(itemId)` (wired to
+  `handleRequestEditWorkItem` in `App.tsx` — pops the Plan pane and
+  opens the work-item edit modal). Git rows call
+  `onRevealCommit(sha)` (same path as before: bumps `historyReveal`
+  and `bottomActivate` tokens).
+- Right-click on a git row still opens the three-item menu (Copy SHA,
+  Reveal commit, Copy author email). Local and uncommitted rows skip
+  the menu — there is no commit to act on.
 
 Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
-edit because blame is against `HEAD`, not the buffer.
+edit because attribution is relative to the last closed effort / HEAD,
+not the buffer.
 
 ## Uncommitted-change gutter markers
 

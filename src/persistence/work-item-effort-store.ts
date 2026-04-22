@@ -202,6 +202,56 @@ export class WorkItemEffortStore {
     return out;
   }
 
+  /**
+   * All closed efforts that touched `path` (via `work_item_effort_file`),
+   * joined to the owning work item's title/status. Newest-first by
+   * `ended_at`. Used by the local-blame overlay to walk efforts from most
+   * recent backward when attributing current lines.
+   */
+  listEffortsForPath(path: string): Array<{
+    effortId: string;
+    workItemId: string;
+    title: string;
+    status: string;
+    startSnapshotId: string | null;
+    endSnapshotId: string | null;
+    endedAt: string;
+    startedAt: string;
+  }> {
+    const rows = this.stateDb.all<{
+      id: string;
+      work_item_id: string;
+      started_at: string;
+      ended_at: string;
+      start_snapshot_id: string | null;
+      end_snapshot_id: string | null;
+      title: string | null;
+      status: string | null;
+    }>(
+      `SELECT e.id, e.work_item_id, e.started_at, e.ended_at,
+              e.start_snapshot_id, e.end_snapshot_id,
+              wi.title, wi.status
+       FROM work_item_effort_file f
+       JOIN work_item_effort e ON e.id = f.effort_id
+       JOIN work_items wi ON wi.id = e.work_item_id
+       WHERE f.path = ?
+         AND e.ended_at IS NOT NULL
+         AND wi.deleted_at IS NULL
+       ORDER BY e.ended_at DESC, e.rowid DESC`,
+      path,
+    );
+    return rows.map((row) => ({
+      effortId: row.id,
+      workItemId: row.work_item_id,
+      title: row.title ?? "(untitled)",
+      status: row.status ?? "",
+      startSnapshotId: row.start_snapshot_id,
+      endSnapshotId: row.end_snapshot_id,
+      endedAt: row.ended_at,
+      startedAt: row.started_at,
+    }));
+  }
+
   linkEffortTurn(effortId: string, turnId: string): void {
     this.stateDb.run(
       `INSERT OR IGNORE INTO work_item_effort_turn (effort_id, turn_id) VALUES (?, ?)`,

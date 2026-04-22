@@ -370,6 +370,30 @@ title edit), emits normally. If a project wants to disable injection
 entirely, set `injectSessionContext: false` in `newde.yaml` — default is
 `true`.
 
+### ROLE CHANGE banner
+
+The initial system prompt's `NON_WRITER_PROMPT_BLOCK` is frozen at
+launch and replayed via cache-read on every turn, so a mid-session
+writer promotion used to leave the agent acting read-only long after
+the UI flipped it. To supersede the stale block in-place,
+`buildSessionContextBlock` accepts an `initialRole` input and appends a
+loud `ROLE CHANGE:` line before `</session-context>` when the current
+role differs from it. `buildRefreshedSessionContext` (in `runtime.ts`)
+captures the role once per Claude session id in
+`initialRoleBySessionId`, keyed off the first `UserPromptSubmit` the
+runtime sees for that session, so the comparison baseline is stable
+across subsequent turns. Both directions are covered:
+
+- **read-only → writer.** "The NON_WRITER block in your initial system
+  prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the
+  worktree."
+- **writer → read-only.** "The NON_WRITER block applies now even though
+  it wasn't in your initial system prompt — Write/Edit/Bash mutations
+  to the worktree will be blocked."
+
+No banner is emitted when the role has not changed, so steady-state
+turns don't grow.
+
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer

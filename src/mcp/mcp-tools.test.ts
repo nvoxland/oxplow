@@ -151,6 +151,35 @@ describe("MCP work-item tools: streamId is inferred from batchId", () => {
     expect((result as { sort_index: number }).sort_index).toBeGreaterThanOrEqual(0);
   });
 
+  test("create_work_item includes a reminder field when kind=\"epic\" so the orchestrator files children in the same turn", async () => {
+    const { tools, batchB } = seed();
+    const t = tool(tools, "newde__create_work_item");
+    const result = await t.handler({
+      batchId: batchB.id,
+      kind: "epic",
+      title: "A big rollup",
+    } as never) as { id: string; reminder?: string };
+    expect(result.id).toMatch(/^wi-/);
+    expect(result.reminder).toBeDefined();
+    expect(result.reminder).toContain("Epic filed with 0 children");
+    expect(result.reminder).toContain("file child tasks now");
+    expect(result.reminder).toContain("parentId=this id");
+  });
+
+  test("create_work_item does NOT include a reminder for non-epic kinds (happy path stays terse)", async () => {
+    const { tools, batchB } = seed();
+    const t = tool(tools, "newde__create_work_item");
+    for (const kind of ["task", "subtask", "bug", "note"] as const) {
+      const result = await t.handler({
+        batchId: batchB.id,
+        kind,
+        title: `A ${kind}`,
+      } as never) as { id: string; reminder?: string };
+      expect(result.id).toMatch(/^wi-/);
+      expect(result.reminder).toBeUndefined();
+    }
+  });
+
   test("descriptionLooksLikeEmbeddedCriteria ignores description mentions without a bullet-looking block", () => {
     // Regression: we don't want to trip on "the existing acceptance criteria
     // said …" in a prose description — the guard only fires when there's

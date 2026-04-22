@@ -222,6 +222,7 @@ export interface DesktopApi {
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
+  localBlame(streamId: string, path: string): Promise<import("./local-blame.js").LocalBlameEntry[]>;
   listAllRefs(streamId: string): Promise<RefOption[]>;
   readFileAtRef(streamId: string, ref: string, path: string): Promise<{ content: string | null }>;
   listWorkspaceEntries(streamId: string, path?: string): Promise<WorkspaceEntry[]>;

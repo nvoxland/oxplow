@@ -2,8 +2,8 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
-import type { BlameLine, Stream } from "../api.js";
-import { gitBlame, readFileAtRef } from "../api.js";
+import type { LocalBlameEntry, Stream } from "../api.js";
+import { localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import type { MenuItem } from "../menu.js";
@@ -24,6 +24,7 @@ interface Props {
   onSelectOpenFile(path: string): void;
   onCloseOpenFile(path: string): void;
   onRevealCommit?(sha: string): void;
+  onRevealWorkItem?(itemId: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
 
@@ -42,6 +43,7 @@ export function EditorPane({
   onSelectOpenFile,
   onCloseOpenFile,
   onRevealCommit,
+  onRevealWorkItem,
   onCompareWithClipboard,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -65,12 +67,14 @@ export function EditorPane({
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
-  const [blame, setBlame] = useState<{ path: string; lines: BlameLine[] } | null>(null);
+  const [blame, setBlame] = useState<{ path: string; entries: LocalBlameEntry[] } | null>(null);
   const [blameScrollTop, setBlameScrollTop] = useState(0);
   const [blameLineHeight, setBlameLineHeight] = useState(19);
   const prevDirtyRef = useRef(isDirty);
   const onRevealCommitRef = useRef(onRevealCommit);
   onRevealCommitRef.current = onRevealCommit;
+  const onRevealWorkItemRef = useRef(onRevealWorkItem);
+  onRevealWorkItemRef.current = onRevealWorkItem;
   const headByPathRef = useRef<Map<string, string | null>>(new Map());
   const diffDecoIdsRef = useRef<string[]>([]);
   // Monaco loads asynchronously, so the model-binding effect below needs a
@@ -397,15 +401,15 @@ export function EditorPane({
 
   async function refreshBlame(path: string) {
     try {
-      const lines = await gitBlame(streamRef.current.id, path);
+      const entries = await localBlame(streamRef.current.id, path);
       if (filePathRef.current !== path) return;
-      if (lines.length === 0) {
+      if (entries.length === 0) {
         setBlame(null);
-        setLspStatus("No git blame available");
-        setTimeout(() => setLspStatus((s) => (s === "No git blame available" ? null : s)), 2500);
+        setLspStatus("No blame available");
+        setTimeout(() => setLspStatus((s) => (s === "No blame available" ? null : s)), 2500);
         return;
       }
-      setBlame({ path, lines });
+      setBlame({ path, entries });
     } catch (err) {
       setLspStatus(`Blame failed: ${String(err)}`);
     }
@@ -524,7 +528,7 @@ export function EditorPane({
     },
     {
       id: "editor.annotate-blame",
-      label: blame && blame.path === filePath ? "Hide Git Blame" : "Annotate with Git Blame",
+      label: blame && blame.path === filePath ? "Hide Blame" : "Annotate with Blame",
       enabled: !!filePath,
       run: () => toggleBlame(),
     },
@@ -553,17 +557,18 @@ export function EditorPane({
         <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
         {showBlame ? (
           <BlameOverlay
-            lines={blame!.lines}
+            entries={blame!.entries}
             scrollTop={blameScrollTop}
             lineHeight={blameLineHeight}
-            onClick={(sha) => {
-              if (sha.replace(/0/g, "") === "") return;
+            onLocalClick={(itemId) => {
+              onRevealWorkItemRef.current?.(itemId);
+            }}
+            onGitClick={(sha) => {
               onRevealCommitRef.current?.(sha);
             }}
-            onContextMenu={(event, line) => {
-              if (line.sha.replace(/0/g, "") === "") return;
+            onGitContextMenu={(event, sha, authorMail) => {
               event.preventDefault();
-              setBlameMenu({ x: event.clientX, y: event.clientY, sha: line.sha, authorMail: line.authorMail });
+              setBlameMenu({ x: event.clientX, y: event.clientY, sha, authorMail });
             }}
           />
         ) : null}
@@ -707,19 +712,21 @@ function computeDiffDecorations(monaco: any, oldLines: string[], newLines: strin
 const BLAME_WIDTH = 150;
 
 function BlameOverlay({
-  lines,
+  entries,
   scrollTop,
   lineHeight,
-  onClick,
-  onContextMenu,
+  onLocalClick,
+  onGitClick,
+  onGitContextMenu,
 }: {
-  lines: BlameLine[];
+  entries: LocalBlameEntry[];
   scrollTop: number;
   lineHeight: number;
-  onClick(sha: string): void;
-  onContextMenu(event: ReactMouseEvent, line: BlameLine): void;
+  onLocalClick(itemId: string): void;
+  onGitClick(sha: string): void;
+  onGitContextMenu(event: ReactMouseEvent, sha: string, authorMail: string): void;
 }) {
-  const now = Date.now() / 1000;
+  const nowSec = Date.now() / 1000;
   return (
     <div
       style={{
@@ -736,34 +743,61 @@ function BlameOverlay({
       }}
     >
       <div style={{ position: "absolute", top: -scrollTop, left: 0, right: 0 }}>
-        {lines.map((line) => {
-          const uncommitted = line.sha.replace(/0/g, "") === "";
-          const ageDays = uncommitted ? 0 : Math.max(0, (now - line.authorTime) / 86400);
-          const bg = uncommitted ? "rgba(70,70,70,0.35)" : blameColor(ageDays);
-          const date = uncommitted ? "" : formatBlameDate(line.authorTime);
-          const author = uncommitted ? "" : truncateAuthor(line.author);
+        {entries.map((entry) => {
+          if (entry.source === "local" && entry.workItem) {
+            const endedAtSec = Date.parse(entry.workItem.endedAt) / 1000;
+            const ageDays = Math.max(0, (nowSec - endedAtSec) / 86400);
+            const bg = blameLocalColor(ageDays);
+            const label = truncateAuthor(entry.workItem.title);
+            const itemId = entry.workItem.id;
+            return (
+              <div
+                key={entry.line}
+                title={`${entry.workItem.title}\nwork item ${itemId}\nfinished ${formatBlameDate(endedAtSec)}`}
+                onClick={() => onLocalClick(itemId)}
+                style={{
+                  ...rowStyle(lineHeight, bg),
+                  borderLeft: "2px solid var(--blame-local-border, #e5a06a)",
+                  cursor: "pointer",
+                }}
+              >
+                {label}
+              </div>
+            );
+          }
+          if (entry.source === "git" && entry.git) {
+            const ageDays = Math.max(0, (nowSec - entry.git.authorTime) / 86400);
+            const bg = blameGitColor(ageDays);
+            const date = formatBlameDate(entry.git.authorTime);
+            const author = truncateAuthor(entry.git.author);
+            const sha = entry.git.sha;
+            return (
+              <div
+                key={entry.line}
+                title={`${sha.slice(0, 8)} ${entry.git.author} <${entry.git.authorMail}>\n${entry.git.summary}`}
+                onClick={() => onGitClick(sha)}
+                onContextMenu={(event) => onGitContextMenu(event, sha, entry.git!.authorMail)}
+                style={{
+                  ...rowStyle(lineHeight, bg),
+                  borderLeft: "2px solid var(--blame-git-border, #4a9eff)",
+                  cursor: "pointer",
+                }}
+              >
+                {`${date}  ${author}`}
+              </div>
+            );
+          }
+          // uncommitted
           return (
             <div
-              key={line.line}
-              title={uncommitted ? "Uncommitted" : `${line.sha.slice(0, 8)} ${line.author} <${line.authorMail}>\n${line.summary}`}
-              onClick={uncommitted ? undefined : () => onClick(line.sha)}
-              onContextMenu={uncommitted ? undefined : (event) => onContextMenu(event, line)}
+              key={entry.line}
+              title="Uncommitted"
               style={{
-                height: lineHeight,
-                lineHeight: `${lineHeight}px`,
-                padding: "0 6px",
-                background: bg,
-                color: "var(--fg, #ddd)",
-                borderRight: "1px solid var(--border, #333)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                cursor: uncommitted ? "default" : "pointer",
-                boxSizing: "border-box",
+                ...rowStyle(lineHeight, "var(--blame-uncommitted, rgba(70,70,70,0.35))"),
+                borderLeft: "2px solid transparent",
+                cursor: "default",
               }}
-            >
-              {uncommitted ? "" : `${date}  ${author}`}
-            </div>
+            />
           );
         })}
       </div>
@@ -771,14 +805,33 @@ function BlameOverlay({
   );
 }
 
-function blameColor(ageDays: number): string {
-  // Younger commits = warmer/more saturated; older = cooler/darker.
-  if (ageDays < 7) return "rgba(96, 165, 250, 0.55)";
-  if (ageDays < 30) return "rgba(96, 165, 250, 0.40)";
-  if (ageDays < 180) return "rgba(96, 165, 250, 0.28)";
-  if (ageDays < 365) return "rgba(120, 140, 170, 0.22)";
-  if (ageDays < 1095) return "rgba(120, 140, 170, 0.14)";
-  return "rgba(120, 140, 170, 0.08)";
+function rowStyle(lineHeight: number, background: string): CSSProperties {
+  return {
+    height: lineHeight,
+    lineHeight: `${lineHeight}px`,
+    padding: "0 6px",
+    background,
+    color: "var(--fg, #ddd)",
+    borderRight: "1px solid var(--border, #333)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    boxSizing: "border-box",
+  };
+}
+
+function blameLocalColor(ageDays: number): string {
+  if (ageDays < 7) return "var(--blame-local-fresh, rgba(229,160,106,0.55))";
+  if (ageDays < 30) return "var(--blame-local-recent, rgba(229,160,106,0.40))";
+  if (ageDays < 180) return "var(--blame-local-stale, rgba(229,160,106,0.28))";
+  return "var(--blame-local-old, rgba(170,140,110,0.18))";
+}
+
+function blameGitColor(ageDays: number): string {
+  if (ageDays < 7) return "var(--blame-git-fresh, rgba(96,165,250,0.55))";
+  if (ageDays < 30) return "var(--blame-git-recent, rgba(96,165,250,0.40))";
+  if (ageDays < 180) return "var(--blame-git-stale, rgba(96,165,250,0.28))";
+  return "var(--blame-git-old, rgba(120,140,170,0.14))";
 }
 
 function formatBlameDate(epochSec: number): string {
