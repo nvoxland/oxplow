@@ -124,6 +124,32 @@ test("finalizeReorderIds handles a single humanCheck item (trivial reverse)", ()
   expect(finalizeReorderIds(visualRows)).toEqual(["a", "h", "b"]);
 });
 
+test("finalizeReorderIds reverses the Done/canceled/archived run too — matches WorkGroupList's descending Done render", () => {
+  // Done renders descending visually (newest-done on top); sort_index stays
+  // ascending. finalizeReorderIds must flip a multi-item Done run the same
+  // way it flips humanCheck so reorderItems' "sort_index = position" rule
+  // produces a visual order that matches what was just rendered.
+  const visualRows = [
+    { id: "t1", status: "ready" as const },
+    { id: "d3", status: "done" as const },
+    { id: "d2", status: "done" as const },
+    { id: "d1", status: "done" as const },
+  ];
+  expect(finalizeReorderIds(visualRows)).toEqual(["t1", "d1", "d2", "d3"]);
+});
+
+test("finalizeReorderIds treats human_check and done as separate descending runs", () => {
+  // A boundary between hc and done flips each run independently — otherwise
+  // dragging across the hc→done boundary would scramble both sections.
+  const visualRows = [
+    { id: "h2", status: "human_check" as const },
+    { id: "h1", status: "human_check" as const },
+    { id: "d2", status: "done" as const },
+    { id: "d1", status: "done" as const },
+  ];
+  expect(finalizeReorderIds(visualRows)).toEqual(["h1", "h2", "d1", "d2"]);
+});
+
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {
   // Regression: the old BatchWorkState pre-grouped in_progress + human_check
   // together; the work panel was reorganized to separate them.

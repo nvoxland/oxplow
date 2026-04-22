@@ -143,12 +143,16 @@ export function WorkGroupList({
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
     for (const { kind, label } of SECTION_ORDER) {
-      // Human Check is the only section that renders descending by sort_index
-      // — newest-finished items surface at the top so the user can triage them
-      // without scrolling. `finalizeReorderIds` unwinds this when we persist a
-      // reorder so the underlying sort_index space stays ascending.
+      // Human Check and Done render descending by sort_index — newest-finished
+      // items surface at the top so the user can triage (or reopen) them
+      // without scrolling. For Done specifically, the "drop into Done lands at
+      // the top" contract depends on this + the MAX+1 sort_index bump in
+      // `work-item-store.updateItem`. `finalizeReorderIds` unwinds descending
+      // runs when we persist a reorder so the underlying sort_index space
+      // stays ascending.
+      const descending = kind === "humanCheck" || kind === "done";
       buckets[kind].sort((a, b) =>
-        kind === "humanCheck" ? b.sortIndex - a.sortIndex : a.sortIndex - b.sortIndex,
+        descending ? b.sortIndex - a.sortIndex : a.sortIndex - b.sortIndex,
       );
       // Keep empty sections in the list while a drag is active so the user
       // can drop into an empty "Done" / "Human check" to create the first
@@ -184,6 +188,12 @@ export function WorkGroupList({
     const dragged = allRows[from]!;
     const target = allRows[to]!;
     const isMultiDrag = dragged.kind === "work" && markedIds && markedIds.has(dragged.item.id) && markedIds.size > 1;
+    // Track any status changes the drop implies so we can feed the *effective*
+    // new status into finalizeReorderIds below — otherwise the dragged row
+    // would still look like its old section to the run detector, which
+    // miscomputes the descending-run flips (regression when dragging out of
+    // Done back to Human Check / To Do).
+    const statusOverrides = new Map<string, WorkItemStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
@@ -197,36 +207,74 @@ export function WorkGroupList({
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
               if (row && row.kind === "work" && row.item.status !== nextStatus) {
                 void onUpdateWorkItem(id, { status: nextStatus });
+                statusOverrides.set(id, nextStatus);
               }
             }
           } else if (nextStatus !== dragged.item.status) {
             void onUpdateWorkItem(dragged.item.id, { status: nextStatus });
+            statusOverrides.set(dragged.item.id, nextStatus);
           }
         }
       }
     }
+    // Determine whether this drop lands in the Done section. Done has a
+    // "drop-to-top" contract: dropped items always land at sort_index MAX+1
+    // rather than wherever the pointer hit. We enforce that here by
+    // overriding the insert position to the head of the Done bucket in the
+    // reordered list (Done renders descending, so "top" = index 0 of the
+    // Done run in visual order).
+    const targetSection = target.kind === "work" ? classifyWorkItem(target.item.status) : null;
+    const dropsIntoDone = targetSection === "done";
+
     // Reorder: multi-drag moves all marked rows as a block to the drop position.
     let next: QueueRow[];
     if (isMultiDrag && markedIds) {
       const markedSet = new Set(markedIds);
       const markedRows = allRows.filter((r) => r.kind === "work" && markedSet.has(r.id));
       const unmarked = allRows.filter((r) => r.kind !== "work" || !markedSet.has(r.id));
-      const insertIdx = unmarked.findIndex((r) => keyFor(r) === targetKey);
-      const insertAt = insertIdx < 0 ? unmarked.length : insertIdx;
+      let insertAt: number;
+      if (dropsIntoDone) {
+        // Insert at the first Done row in `unmarked` (top of Done section
+        // visually, since Done renders descending). If there's no Done row
+        // yet, append — this is the first Done item.
+        const doneIdx = unmarked.findIndex(
+          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+        );
+        insertAt = doneIdx < 0 ? unmarked.length : doneIdx;
+      } else {
+        const insertIdx = unmarked.findIndex((r) => keyFor(r) === targetKey);
+        insertAt = insertIdx < 0 ? unmarked.length : insertIdx;
+      }
       next = [...unmarked.slice(0, insertAt), ...markedRows, ...unmarked.slice(insertAt)];
     } else {
       next = allRows.slice();
       const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved!);
+      if (dropsIntoDone) {
+        const doneIdx = next.findIndex(
+          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+        );
+        const insertAt = doneIdx < 0 ? next.length : doneIdx;
+        next.splice(insertAt, 0, moved!);
+      } else {
+        // `to` was computed before splice; if from < to the remaining index
+        // after removal is `to - 1`. (Pre-existing behavior kept for the
+        // non-Done path so other sections behave the same as before.)
+        next.splice(to, 0, moved!);
+      }
     }
     resetDrag();
-    // `next` is in visual order (Human Check descending). Convert to
-    // persistence order before writing — finalizeReorderIds flips the
-    // humanCheck run so sort_index ends up ascending in the store, which
-    // keeps the next render's visual order stable.
+    // `next` is in visual order (Human Check + Done descending). Convert to
+    // persistence order before writing — finalizeReorderIds flips descending
+    // runs so sort_index ends up ascending in the store, which keeps the
+    // next render's visual order stable. Use the effective (post-drop)
+    // status for rows whose status just changed so the run detector sees
+    // the new section membership.
     const workRowsInVisualOrder = next
       .filter((row): row is Extract<QueueRow, { kind: "work" }> => row.kind === "work")
-      .map((row) => ({ id: row.id, status: row.item.status }));
+      .map((row) => ({
+        id: row.id,
+        status: statusOverrides.get(row.id) ?? row.item.status,
+      }));
     const persistedWorkIds = finalizeReorderIds(workRowsInVisualOrder);
     if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
       // Rebuild the mixed entries list using the persisted work-item order.

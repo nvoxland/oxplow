@@ -271,16 +271,25 @@ items. Reordering the queue immediately changes which work items a marker
 "covers" (everything before it, not yet covered by an earlier marker),
 with no migration step.
 
-**Visual vs persistence order for Human Check.** Every section in
-`WorkGroupList` renders ascending by `sort_index` *except* Human Check,
-which renders descending (newest-finished items surface on top). The
-underlying `sort_index` space is still a single ascending line — the
-section is only flipped at render time. When a drag-reorder persists a
-new order, `finalizeReorderIds` in `plan-utils.ts` reverses the
-humanCheck subsequence so the `reorderItems` / `reorderBatchQueue`
-"sort_index = position" rule produces the intended visual result. Any
-new section with a non-ascending display must either do the same
-reversal dance or get its own flat list.
+**Visual vs persistence order for Human Check and Done.** Sections in
+`WorkGroupList` render ascending by `sort_index` *except* Human Check
+and Done, which render descending (newest-finished items surface on
+top). The underlying `sort_index` space is still a single ascending
+line — the sections are only flipped at render time. When a
+drag-reorder persists a new order, `finalizeReorderIds` in
+`plan-utils.ts` reverses each descending run (`human_check`, plus the
+`done`/`canceled`/`archived` group) so the `reorderItems` /
+`reorderBatchQueue` "sort_index = position" rule produces the intended
+visual result. The drag handler passes the *effective* new status of a
+row whose status is changing as part of the drop (e.g. a Done row
+dropped onto a Human Check row) so the run detector sees the new
+section membership. Dropping any item *into* Done is a drop-to-top
+contract: the drag handler inserts the row at the head of the Done
+bucket in visual order, and `work-item-store.updateItem` bumps
+`sort_index` to `MAX+1` on every non-Done → Done transition, so the
+two paths agree on "newest-done on top." Any new section with a
+non-ascending display must either do the same reversal dance or get
+its own flat list.
 
 Constraint: commit and wait points cannot be the very first queue entry —
 they have nothing to fire after. Enforced both in the runtime
