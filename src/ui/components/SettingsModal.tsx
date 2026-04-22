@@ -88,8 +88,8 @@ export function SettingsModal({ open, onClose }: Props) {
   }
 
   return (
-    <div style={backdropStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={(event) => event.stopPropagation()}>
+    <div style={backdropStyle}>
+      <div style={modalStyle}>
         <div style={headerStyle}>
           <span>Settings</span>
           <button type="button" onClick={onClose} style={closeBtnStyle} aria-label="Close settings">×</button>

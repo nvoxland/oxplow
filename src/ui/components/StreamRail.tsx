@@ -262,10 +262,9 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
         </span>
       </div>
       {showCreate ? (
-        <div style={backdropStyle} onMouseDown={() => setShowCreate(false)}>
+        <div style={backdropStyle}>
           <form
             onSubmit={(e) => { e.preventDefault(); void handleCreate(); }}
-            onMouseDown={(e) => e.stopPropagation()}
             style={modalStyle}
           >
             <div style={modalHeaderStyle}>
@@ -360,8 +359,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveBatchI
         />
       ) : null}
       {settingsStream ? (
-        <div style={backdropStyle} onMouseDown={() => setSettingsStream(null)}>
-          <div onMouseDown={(e) => e.stopPropagation()} style={modalStyle}>
+        <div style={backdropStyle}>
+          <div style={modalStyle}>
             <div style={modalHeaderStyle}>
               <span>Stream settings — {settingsStream.title}</span>
               <button type="button" onClick={() => setSettingsStream(null)} style={closeBtnStyle} aria-label="Close">×</button>

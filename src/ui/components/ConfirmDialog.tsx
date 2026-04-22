@@ -47,9 +47,8 @@ export function ConfirmDialog({
       aria-modal="true"
       data-testid="confirm-dialog"
       style={backdropStyle}
-      onClick={onCancel}
     >
-      <div style={panelStyle} onClick={(event) => event.stopPropagation()}>
+      <div style={panelStyle}>
         <div style={messageStyle}>{message}</div>
         <div style={buttonRowStyle}>
           <button

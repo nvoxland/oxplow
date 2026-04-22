@@ -247,8 +247,8 @@ export function BatchRail({
         />
       ) : null}
       {settingsBatch ? (
-        <div style={backdropStyle} onMouseDown={() => setSettingsBatch(null)}>
-          <div onMouseDown={(e) => e.stopPropagation()} style={settingsModalStyle}>
+        <div style={backdropStyle}>
+          <div style={settingsModalStyle}>
             <div style={settingsModalHeaderStyle}>
               <span>Batch settings — {settingsBatch.title}</span>
               <button type="button" onClick={() => setSettingsBatch(null)} style={closeBtnStyle} aria-label="Close">×</button>
