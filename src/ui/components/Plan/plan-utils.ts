@@ -26,8 +26,8 @@ export interface WorkItemSection {
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "toDo", label: "To Do" },
-  { kind: "humanCheck", label: "Human check" },
   { kind: "blocked", label: "Blocked" },
+  { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
 ];
 

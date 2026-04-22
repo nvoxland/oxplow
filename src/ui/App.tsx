@@ -1123,6 +1123,7 @@ export function App() {
   }, [selectedFilePath, stream]);
   const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [planNewRequest, setPlanNewRequest] = useState(0);
+  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commandState = useMemo(
     () => ({
@@ -1324,6 +1325,12 @@ export function App() {
     setBottomActivate({ id: "history", token });
   };
 
+  const handleRequestEditWorkItem = (itemId: string) => {
+    const token = Date.now();
+    setLeftDockActivate({ id: "plan", token });
+    setPlanEditRequest({ itemId, token });
+  };
+
   const handleShowWorkItemInHistory = async (itemId: string) => {
     const token = Date.now();
     // Open the Local History panel regardless of whether we find an effort —
@@ -1450,6 +1457,7 @@ export function App() {
           onReorderBacklog={handleReorderBacklog}
           onMoveItemToBacklog={handleMoveItemToBacklog}
           openNewRequest={planNewRequest}
+          editRequest={planEditRequest}
           onOpenFile={handleOpenFile}
           onShowInHistory={handleShowWorkItemInHistory}
         />
@@ -1511,7 +1519,7 @@ export function App() {
     {
       id: "snapshots",
       label: "Local history",
-      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} />,
+      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} onRequestEditWorkItem={handleRequestEditWorkItem} />,
     },
   ];
 

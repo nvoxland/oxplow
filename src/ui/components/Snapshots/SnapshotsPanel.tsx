@@ -22,9 +22,11 @@ interface Props {
   /** When set, the panel selects the snapshot with the matching id. Change
    *  the token to request a new selection even if the id repeats. */
   revealSnapshotId?: { snapshotId: string; token: number } | null;
+  /** Open the given work item in the edit modal (switching tool windows). */
+  onRequestEditWorkItem?(itemId: string): void;
 }
 
-export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) {
+export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
     Record<string, Array<{ effortId: string; workItemId: string; title: string }>>
@@ -322,6 +324,12 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
             loading={summaryLoading}
             onOpenFileDiff={handleOpenFileDiff}
             onRestore={handleRestore}
+            workItemId={
+              selectedId && selectedEffortId
+                ? (effortsBySnapshot[selectedId] ?? []).find((e) => e.effortId === selectedEffortId)?.workItemId ?? null
+                : null
+            }
+            onOpenWorkItem={onRequestEditWorkItem}
           />
         </div>
       </div>
@@ -448,11 +456,15 @@ function DetailPane({
   loading,
   onOpenFileDiff,
   onRestore,
+  workItemId,
+  onOpenWorkItem,
 }: {
   summary: SnapshotSummary | null;
   loading: boolean;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
+  workItemId: string | null;
+  onOpenWorkItem?(itemId: string): void;
 }) {
   if (loading && !summary) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;
@@ -464,6 +476,18 @@ function DetailPane({
   const { counts } = summary;
   return (
     <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10, fontSize: 12, overflow: "auto", height: "100%" }}>
+      {workItemId && onOpenWorkItem ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => onOpenWorkItem(workItemId)}
+            style={openTaskButtonStyle}
+            title="Open this task in the edit modal"
+          >
+            Open task
+          </button>
+        </div>
+      ) : null}
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", color: "var(--muted)", fontSize: 11 }}>
         <span>Created</span>
         <span>{formatAbsolute(summary.snapshot.created_at)}</span>
@@ -656,6 +680,16 @@ const detailPaneStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",
+};
+
+const openTaskButtonStyle: CSSProperties = {
+  background: "var(--panel)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 3,
+  padding: "3px 10px",
+  fontSize: 11,
+  cursor: "pointer",
 };
 
 const statusBadgeStyle: CSSProperties = {

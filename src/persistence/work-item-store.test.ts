@@ -21,6 +21,7 @@ function seedBatch() {
     updated_at: "2024-01-01T00:00:00.000Z",
     panes: { working: "newde-demo:working-s-1", talking: "newde-demo:talking-s-1" },
     resume: { working_session_id: "", talking_session_id: "" },
+    custom_prompt: null,
   };
   const state = batchStore.ensureStream(stream);
   const batchId = state.batches[0]!.id;
@@ -77,6 +78,46 @@ describe("WorkItemStore acceptance_criteria", () => {
       actorId: "mcp",
     });
     expect(workItems.getItem(batchId, item.id)?.acceptance_criteria).toBeNull();
+  });
+
+  test("dragging a Done item back to Human Check: updateItem+reorderItems sequence leaves item in HC", () => {
+    // Reproduces the user-facing drag-out-of-Done regression. Mirrors what
+    // WorkGroupList.handleDropOnKey does: fires updateItem (status change)
+    // then reorderItems (full persistence order) in that order. Final store
+    // state must have the dragged item classified into humanCheck by
+    // BatchWorkState.getState.
+    const { workItems, batchId } = seedBatch();
+    const r0 = workItems.createItem({ batchId, kind: "task", title: "r0", createdBy: "user", actorId: "ui" });
+    const r1 = workItems.createItem({ batchId, kind: "task", title: "r1", createdBy: "user", actorId: "ui" });
+    const hc2 = workItems.createItem({ batchId, kind: "task", title: "hc2", createdBy: "user", actorId: "ui" });
+    const hc3 = workItems.createItem({ batchId, kind: "task", title: "hc3", createdBy: "user", actorId: "ui" });
+    const d4 = workItems.createItem({ batchId, kind: "task", title: "d4", createdBy: "user", actorId: "ui" });
+    const d5 = workItems.createItem({ batchId, kind: "task", title: "d5", createdBy: "user", actorId: "ui" });
+    // Put items into their target statuses. Note: updateItem's "bump sort_index
+    // to MAX+1 on transition to done" will reassign sort_index values. That's
+    // fine for this test — we care about the final drag result, not the setup.
+    workItems.updateItem({ batchId, itemId: hc2.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ batchId, itemId: hc3.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ batchId, itemId: d4.id, status: "done", actorKind: "user", actorId: "ui" });
+    workItems.updateItem({ batchId, itemId: d5.id, status: "done", actorKind: "user", actorId: "ui" });
+
+    // Drop fires: (1) status → human_check, then (2) reorder with the
+    // finalized id order from the UI. The id list we pass is what the UI
+    // would produce after splice + finalizeReorderIds for a drag of d4 onto
+    // the top of the Human Check section.
+    workItems.updateItem({ batchId, itemId: d4.id, status: "human_check", actorKind: "user", actorId: "ui" });
+    workItems.reorderItems(batchId, [r0.id, r1.id, hc2.id, hc3.id, d4.id, d5.id], "user", "ui");
+
+    const state = workItems.getState(batchId);
+    const hcIds = state.inProgress.filter((i) => i.status === "human_check").map((i) => i.id);
+    const doneIds = state.done.map((i) => i.id);
+    expect(hcIds).toContain(d4.id);
+    expect(doneIds).not.toContain(d4.id);
+    // The dropped item should render at the top of HC (highest sort_index in
+    // the HC run) when the section renders descending.
+    const hcItems = state.inProgress.filter((i) => i.status === "human_check");
+    hcItems.sort((a, b) => b.sort_index - a.sort_index);
+    expect(hcItems[0]?.id).toBe(d4.id);
   });
 
   test("getItemDetail returns incoming + outgoing links + recent events", () => {

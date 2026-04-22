@@ -83,6 +83,9 @@ interface Props {
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
   onMoveItemToBacklog(itemId: string, fromBatchId: string): Promise<void>;
   openNewRequest?: number;
+  /** Open the edit modal for the specified work item. Change the token to
+   *  request again even if the itemId repeats. */
+  editRequest?: { itemId: string; token: number } | null;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(itemId: string): void;
 }
@@ -110,6 +113,7 @@ export function PlanPane({
   onReorderBacklog,
   onMoveItemToBacklog,
   openNewRequest,
+  editRequest,
   onOpenFile,
   onShowInHistory,
 }: Props) {
@@ -392,6 +396,17 @@ export function PlanPane({
     // that are stable across renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openNewRequest]);
+
+  useEffect(() => {
+    if (!editRequest) return;
+    const allItems = groups.flatMap((g) => [
+      ...g.items,
+      ...g.items.flatMap((item) => g.epicChildren?.get(item.id) ?? []),
+    ]);
+    const item = allItems.find((i) => i.id === editRequest.itemId);
+    if (item) openEditModal(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest?.token]);
 
 
   if (mode === "batch" && !batch) {

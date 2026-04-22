@@ -150,6 +150,50 @@ test("finalizeReorderIds treats human_check and done as separate descending runs
   expect(finalizeReorderIds(visualRows)).toEqual(["h1", "h2", "d1", "d2"]);
 });
 
+test("dragging a Done item onto a Human Check item — drop-out-of-Done scenario", () => {
+  // Regression scenario per user: items with statuses
+  // [ready, ready, human_check, human_check, done, done] at sort_indexes
+  // [0, 1, 2, 3, 4, 5]. User drags the first Done row (sort_index=4, d4) onto
+  // the second HC row (sort_index=2, hc2). Visual order on screen is:
+  //   toDo ascending:          r0, r1
+  //   humanCheck descending:   hc3, hc2
+  //   done descending:         d5, d4
+  // ⇒ allRows = [r0, r1, hc3, hc2, d5, d4]; from=5, to=3.
+  // After the splice (non-Done target so dropsIntoDone=false), the visual
+  // `next` array is [r0, r1, hc3, d4, hc2, d5]. The dragged row's status
+  // override is human_check. finalizeReorderIds should produce persistence
+  // ids that, when written back with sort_index = position, render to a
+  // visual order with d4 inside Human Check.
+  const visualRowsAfterSplice = [
+    { id: "r0", status: "ready" as const },
+    { id: "r1", status: "ready" as const },
+    { id: "hc3", status: "human_check" as const },
+    { id: "d4", status: "human_check" as const }, // effective status (was "done")
+    { id: "hc2", status: "human_check" as const },
+    { id: "d5", status: "done" as const },
+  ];
+  const persisted = finalizeReorderIds(visualRowsAfterSplice);
+  // HC run [hc3, d4, hc2] reverses to [hc2, d4, hc3]; d5 stays.
+  expect(persisted).toEqual(["r0", "r1", "hc2", "d4", "hc3", "d5"]);
+
+  // Simulate persistence: sort_index = array position; d4's status is now
+  // "human_check" (updateItem call) with sort_index=3. Confirm splitIntoSections
+  // renders d4 inside the Human Check section.
+  const persistedItems: WorkItem[] = persisted.map((id, idx) => {
+    const status: WorkItemStatus = id === "d5"
+      ? "done"
+      : id === "r0" || id === "r1"
+        ? "ready"
+        : "human_check";
+    return item(id, status, idx);
+  });
+  const sections = splitIntoSections(persistedItems);
+  const hc = sections.find((s) => s.kind === "humanCheck");
+  const done = sections.find((s) => s.kind === "done");
+  expect(hc?.items.map((i) => i.id)).toEqual(["hc3", "d4", "hc2"]);
+  expect(done?.items.map((i) => i.id)).toEqual(["d5"]);
+});
+
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {
   // Regression: the old BatchWorkState pre-grouped in_progress + human_check
   // together; the work panel was reorganized to separate them.
