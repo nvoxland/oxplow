@@ -26,6 +26,7 @@ export function DiffPane({ stream, spec, visible }: Props) {
   const editorRef = useRef<any>(null);
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
   const monacoRef = useRef<any>(null);
+  const [editorReady, setEditorReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export function DiffPane({ stream, spec, visible }: Props) {
         minimap: { enabled: false },
       });
       editorRef.current = editor;
+      setEditorReady(true);
     })();
     return () => {
       cancelled = true;
@@ -56,7 +58,7 @@ export function DiffPane({ stream, spec, visible }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!stream) return;
+    if (!stream || !editorReady) return;
     let cancelled = false;
     (async () => {
       try {
@@ -91,7 +93,7 @@ export function DiffPane({ stream, spec, visible }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [stream, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent]);
+  }, [stream, editorReady, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
