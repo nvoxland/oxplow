@@ -41,8 +41,12 @@ For each item, in this exact order:
    visibly skips the In Progress section (ready → human_check in a
    blink) and the user loses visibility into what you're doing.
 2. Do the investigation / edits / tests.
-3. **Mark \`human_check\` when acceptance criteria are met.** Never
-   mark \`done\` yourself; the user marks done after reviewing.
+3. **Mark \`human_check\` the moment acceptance criteria are met —
+   before returning to the orchestrator.** \`in_progress\` means you
+   are actively working on it *right now*, not "I made progress."
+   Don't return a "done, tests pass" summary while leaving the item
+   parked in IN PROGRESS. Never mark \`done\` yourself; the user marks
+   done after reviewing.
 
 ## One in_progress at a time
 
@@ -141,18 +145,29 @@ describe in a one-line commit message.
 
 ## Plans → epics
 
-When the work naturally decomposes into multiple ordered steps, **model
-the plan as an epic with child tasks** instead of cramming everything
+**An epic without children is a bug.** If you file \`kind: "epic"\`,
+you MUST also file its child tasks in the same turn — before starting
+execution. An epic with no children shows up in the UI as one opaque
+IN PROGRESS row for the whole initiative; the user can't see which
+phase landed when, can't flag concerns mid-stream, and can't mark
+individual phases \`human_check\` as they finish. If you can't break
+the work into at least two children, it isn't an epic — file it as a
+single \`task\`.
+
+When the work naturally decomposes into multiple ordered steps, model
+the plan as an epic with child tasks instead of cramming everything
 into one task:
 
 1. Create the epic (\`kind: "epic"\`) with the overall goal as the title
    and the high-level approach in the description. Acceptance criteria
    on the epic are the "done" bar for the whole initiative — keep them
    observable ("feature ships behind flag X", not "implement feature").
-2. Create each step as a task with \`parentId\` set to the epic's id.
+2. **Create each step as a task with \`parentId\` set to the epic's id
+   — file them up front, before starting execution, not as-you-go.**
    Each child task gets its own observable acceptance criteria. The
    child's description is the "how"; the epic's description is the
-   "why".
+   "why". Rough sizing heuristic: if a refactor touches N subsystems
+   (migration, store, UI, docs), expect roughly N children.
 3. If a task itself has meaningful sub-steps the user should see in the
    history, create them as \`subtask\` children of that task. Don't
    nest subtasks three levels deep — past one level of nesting, prefer
@@ -161,6 +176,11 @@ into one task:
    (migration before the feature that uses it). Sibling tasks without
    hard ordering should not be over-linked — the ready queue sorts on
    \`sort_index\`/priority already.
+5. **Roll the epic up when children are settled.** While children are
+   in flight, the epic stays \`in_progress\`. When every child has
+   reached \`human_check\`/\`done\`/\`canceled\`/\`archived\`, move the
+   epic itself to \`human_check\` in the same turn — don't leave a
+   settled epic parked in IN PROGRESS waiting for the user to notice.
 
 ## Choosing the batch and stream
 
@@ -241,6 +261,13 @@ For epics, acceptance criteria describe the initiative's done bar, not
 - **Never self-mark \`done\`.** Push to \`human_check\` when you
   believe the acceptance criteria are met. The user marks done after
   reviewing. If you set done, you will be corrected.
+- **\`in_progress\` means you are actively working on it right now —
+  not "I made progress on it."** The moment the acceptance criteria
+  are met, move the item to \`human_check\` in the same turn, before
+  ending your response. Don't narrate completion ("all done, tests
+  pass") while leaving the item parked in IN PROGRESS — the Work
+  panel's IN PROGRESS section is the user's live signal of what's in
+  motion, and finished work hiding there defeats its purpose.
 - **\`blocked\`** is for "can't proceed until X" (missing context,
   waiting on another item, waiting on the user). Add a note that
   explains what the blocker is. If you hit an error you cannot resolve,
