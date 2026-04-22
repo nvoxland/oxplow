@@ -680,7 +680,7 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; workItemId: string; title: string }>>> {
+): Promise<Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>> {
   return desktopApi().listEffortsEndingAtSnapshots(snapshotIds);
 }
 

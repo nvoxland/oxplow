@@ -1022,7 +1022,7 @@ function InlineItemRow({
   );
 }
 
-function InlineStatusPicker({
+export function InlineStatusPicker({
   status,
   onChange,
   locked,

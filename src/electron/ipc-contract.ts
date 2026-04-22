@@ -207,7 +207,7 @@ export interface DesktopApi {
   getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): Promise<SnapshotSummary | null>;
   getSnapshotPairDiff(beforeSnapshotId: string | null, afterSnapshotId: string, path: string): Promise<SnapshotDiffResult>;
   getEffortFiles(effortId: string): Promise<SnapshotSummary | null>;
-  listEffortsEndingAtSnapshots(snapshotIds: string[]): Promise<Record<string, Array<{ effortId: string; workItemId: string; title: string }>>>;
+  listEffortsEndingAtSnapshots(snapshotIds: string[]): Promise<Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
   getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;

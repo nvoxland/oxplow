@@ -8,13 +8,17 @@ import {
   listSnapshots,
   restoreFileFromSnapshot,
   subscribeSnapshotEvents,
+  updateWorkItem,
   type FileSnapshot,
   type SnapshotSummary,
   type Stream,
+  type WorkItemStatus,
+  type WorkItemPriority,
 } from "../../api.js";
 import { logUi } from "../../logger.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { InlineStatusPicker } from "../Plan/WorkGroupList.js";
 
 interface Props {
   stream: Stream | null;
@@ -29,7 +33,7 @@ interface Props {
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
-    Record<string, Array<{ effortId: string; workItemId: string; title: string }>>
+    Record<string, Array<{ effortId: string; workItemId: string; batchId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +141,29 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     };
   }, [dragging]);
 
+  const handleChangeStatus = async (
+    workItemId: string,
+    batchId: string,
+    status: WorkItemStatus,
+  ) => {
+    if (!stream || !batchId) return;
+    try {
+      await updateWorkItem(stream.id, batchId, workItemId, { status });
+      // Optimistic local update; the snapshot-event subscription refreshes.
+      setEffortsBySnapshot((prev) => {
+        const next: typeof prev = {};
+        for (const [sid, list] of Object.entries(prev)) {
+          next[sid] = list.map((e) =>
+            e.workItemId === workItemId ? { ...e, status } : e,
+          );
+        }
+        return next;
+      });
+    } catch (err) {
+      logUi("warn", "update work item status failed", { error: String(err) });
+    }
+  };
+
   const handleRowClick = (id: string, effortId: string | null) => {
     if (compareMode) {
       if (compareBaseId === id) {
@@ -230,12 +257,25 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     snap: FileSnapshot;
     label: string;
     effortId: string | null;
+    workItemId: string | null;
+    batchId: string | null;
+    status: WorkItemStatus | null;
+    isExternal: boolean;
   };
   const rows: Row[] = [];
   for (const snap of visibleSnapshots) {
     const efforts = effortsBySnapshot[snap.id] ?? [];
     if (efforts.length === 0) {
-      rows.push({ key: snap.id, snap, label: labelFor(snap), effortId: null });
+      rows.push({
+        key: snap.id,
+        snap,
+        label: labelFor(snap),
+        effortId: null,
+        workItemId: null,
+        batchId: null,
+        status: null,
+        isExternal: orphanEndIds.has(snap.id),
+      });
       continue;
     }
     for (const e of efforts) {
@@ -244,6 +284,10 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         snap,
         label: e.title,
         effortId: e.effortId,
+        workItemId: e.workItemId,
+        batchId: e.batchId,
+        status: e.status,
+        isExternal: false,
       });
     }
   }
@@ -306,6 +350,19 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
                   selected={selectedId === row.snap.id && selectedEffortId === row.effortId}
                   compareBase={compareBaseId === row.snap.id}
                   onClick={() => handleRowClick(row.snap.id, row.effortId)}
+                  status={row.status}
+                  workItemId={row.workItemId}
+                  isExternal={row.isExternal}
+                  onChangeStatus={
+                    row.workItemId && row.batchId
+                      ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.batchId!, nextStatus); }
+                      : undefined
+                  }
+                  onDoubleClick={
+                    row.workItemId && onRequestEditWorkItem
+                      ? () => onRequestEditWorkItem(row.workItemId!)
+                      : undefined
+                  }
                 />
               ))
             )}
@@ -394,20 +451,36 @@ function SnapshotRow({
   selected,
   compareBase,
   onClick,
+  status,
+  workItemId,
+  isExternal,
+  onChangeStatus,
+  onDoubleClick,
 }: {
   snap: FileSnapshot;
   label: string;
   selected: boolean;
   compareBase: boolean;
   onClick(): void;
+  status: WorkItemStatus | null;
+  workItemId: string | null;
+  isExternal: boolean;
+  onChangeStatus?(nextStatus: WorkItemStatus): void;
+  onDoubleClick?(): void;
 }) {
   const date = formatRelative(snap.created_at);
   const iconKind = snapshotIconKind(snap);
   const isAgent = iconKind !== "system";
   const description = label;
+  // Row "modes":
+  //   - external  → distinct glyph, non-interactive status, no dbl-click
+  //   - effort    → InlineStatusPicker bound to the work item status
+  //   - other     → keep the legacy pencil icon (system rows, etc.)
+  const isEffortRow = !!workItemId && !isExternal && !!status;
   return (
     <div
       onClick={onClick}
+      onDoubleClick={isExternal ? undefined : onDoubleClick}
       style={{
         display: "flex",
         alignItems: "center",
@@ -425,7 +498,29 @@ function SnapshotRow({
         overflow: "hidden",
       }}
     >
-      {isAgent ? (
+      {isExternal ? (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          style={{ flexShrink: 0 }}
+          aria-label="External change"
+        >
+          <title>External change</title>
+          {/* Box */}
+          <path d="M2 5V12H9V8" stroke="var(--muted)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Arrow escaping up-right */}
+          <path d="M7 7L12 2" stroke="var(--muted)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8 2H12V6" stroke="var(--muted)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : isEffortRow && status ? (
+        <InlineStatusPicker
+          status={status}
+          onChange={(next) => onChangeStatus?.(next)}
+          locked={!onChangeStatus}
+        />
+      ) : isAgent ? (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
           <path d="M7 1L8.5 5.5H13L9.25 8.25L10.75 13L7 10.25L3.25 13L4.75 8.25L1 5.5H5.5L7 1Z" fill="var(--accent)" />
         </svg>
