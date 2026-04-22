@@ -217,7 +217,7 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  test("listSnapshotsForStream labels effort-start snapshots with '<title> — start'", () => {
+  test("listSnapshotsForStream leaves effort-start-only snapshots unlabeled", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
     store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
@@ -247,8 +247,8 @@ describe("SnapshotStore", () => {
 
     const listed = store.listSnapshotsForStream(streamId);
     const row = listed.find((s) => s.id === startSnap.id);
-    expect(row?.label).toBe("Start only task — start");
-    expect(row?.label_kind).toBe("task");
+    expect(row?.label).toBeNull();
+    expect(row?.label_kind).toBeNull();
     rmSync(projectDir, { recursive: true, force: true });
   });
 

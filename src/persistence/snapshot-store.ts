@@ -477,13 +477,12 @@ export class SnapshotStore {
    *
    * Each row is enriched with a `label` + `label_kind` derived from joined
    * work-item efforts / agent turns, so the UI can render a meaningful name
-   * ("<task title> end" / "<task title> start" / "<turn prompt>") without
-   * N+1 follow-up queries. When no effort or turn references the snapshot,
-   * label is null and the UI falls back to the `source` column.
-   *
-   * Effort links win over turn links (task titles are more identifying than
-   * prompts). "end" wins over "start" when a snapshot is both — the end-of-
-   * effort side is the one users navigate here to see.
+   * ("<task title> end" / "<turn prompt>") without N+1 follow-up queries.
+   * When no effort or turn references the snapshot, label is null and the
+   * UI falls back to the `source` column. Only the end-of-effort side is
+   * labeled — a snapshot that is merely the start point of an effort adds
+   * no information to the history view (effort starts are already implicit
+   * in the previous row).
    */
   listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
     // Correlated subqueries (rather than LEFT JOIN + GROUP BY) so that when
@@ -498,12 +497,6 @@ export class SnapshotStore {
                 WHERE e.end_snapshot_id = f.id
                 ORDER BY COALESCE(e.ended_at, '') DESC, e.rowid DESC LIMIT 1
               ) AS effort_end_title,
-              (
-                SELECT wi.title FROM work_item_effort e
-                JOIN work_items wi ON wi.id = e.work_item_id
-                WHERE e.start_snapshot_id = f.id
-                ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1
-              ) AS effort_start_title,
               (
                 SELECT t.prompt FROM agent_turn t
                 WHERE t.end_snapshot_id = f.id
@@ -645,8 +638,6 @@ function deriveSnapshotLabel(row: Record<string, unknown>): {
 } {
   const effortEnd = asString(row.effort_end_title);
   if (effortEnd) return { label: `${effortEnd} — end`, kind: "task" };
-  const effortStart = asString(row.effort_start_title);
-  if (effortStart) return { label: `${effortStart} — start`, kind: "task" };
   const turnEnd = asString(row.turn_end_prompt);
   if (turnEnd) return { label: firstLine(turnEnd), kind: "turn" };
   const turnStart = asString(row.turn_start_prompt);
