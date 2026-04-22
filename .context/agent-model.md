@@ -469,6 +469,42 @@ See [data-model.md](./data-model.md) for the `file_snapshot`,
 [ipc-and-stores.md](./ipc-and-stores.md) for the `file-snapshot.created`
 EventBus event and the snapshot/effort IPC methods.
 
+## Per-effort write log
+
+Snapshot pair-diffs over-report when two subagents edit the same worktree
+in parallel: both efforts share the same window, so each shows the
+union. To attribute writes correctly the `PostToolUse` hook also appends
+rows to `work_item_effort_file` (see data-model.md).
+
+**Active-effort heuristic.** On every write-tool postcall (Write, Edit,
+MultiEdit, NotebookEdit), the runtime queries
+`listOpenEffortsForBatch(batchId)` — efforts whose owning work item is
+in this batch and whose `ended_at IS NULL`. If exactly one row comes
+back, the hook inserts `(effort_id, path)` into `work_item_effort_file`.
+If 0 or 2+, the write is skipped silently: the 1-effort case can fall
+back to the raw pair-diff, and >1 is exactly when the log is needed but
+we can't tell which effort owns the write from the hook envelope alone.
+Future tightening (env-var-injected `NEWDE_EFFORT_ID`) is sketched in
+`/Users/nvoxland/.claude/plans/i-see-a-problem-crystalline-ritchie.md`
+option 2.
+
+**1-vs-many rendering rule.** The Local History panel renders one row
+per effort ending at a snapshot, *not* one row per snapshot. For a
+snapshot `S`:
+
+- 0 efforts end at S → single "External Change" / source-labelled row
+  (unchanged from pre-write-log behaviour).
+- 1 effort ends at S → one row labelled with the work item title;
+  detail pane uses `getEffortFiles(effortId)`, which short-circuits to
+  the raw pair-diff.
+- ≥2 efforts end at S → one row per effort, each labelled with its
+  work item title; detail panes call `getEffortFiles(effortId)`, which
+  filters the pair-diff by `work_item_effort_file` rows.
+
+`getEffortFiles` is exported from `runtime.ts` as `computeEffortFiles`
+(pure helper over the two stores) for test reuse, and wired to IPC via
+the same pattern as `getSnapshotSummary`.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the queue the agent operates on.

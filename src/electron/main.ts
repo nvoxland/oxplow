@@ -236,6 +236,8 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
   handle("newde:getSnapshotSummary", (_event, snapshotId: string, previousSnapshotId?: string | null) => currentRuntime.getSnapshotSummary(snapshotId, previousSnapshotId));
   handle("newde:getSnapshotPairDiff", (_event, beforeSnapshotId: string | null, afterSnapshotId: string, path: string) => currentRuntime.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path));
+  handle("newde:getEffortFiles", (_event, effortId: string) => currentRuntime.getEffortFiles(effortId));
+  handle("newde:listEffortsEndingAtSnapshots", (_event, snapshotIds: string[]) => currentRuntime.listEffortsEndingAtSnapshots(snapshotIds));
   handle("newde:restoreFileFromSnapshot", (_event, streamId: string, snapshotId: string, path: string) => currentRuntime.restoreFileFromSnapshot(streamId, snapshotId, path));
   handle("newde:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
   handle("newde:readFileAtRef", (_event, streamId: string, ref: string, path: string) => currentRuntime.readFileAtRef(streamId, ref, path));

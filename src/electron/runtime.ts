@@ -1274,6 +1274,17 @@ export class ElectronRuntime {
           return;
         }
         if (batch) this.markDirty(batch.stream_id, normalizedPath);
+        // Per-effort write-log: attribute this write to the sole in_progress
+        // effort for this batch (active-effort heuristic). If 0 or >1 are
+        // open we skip silently — the single-effort fallback in
+        // getEffortFiles covers the 1-effort case via the raw pair diff, and
+        // >1 is the only case where we actually need the log.
+        if (batch) {
+          const open = this.effortStore.listOpenEffortsForBatch(batch.id);
+          if (open.length === 1) {
+            this.effortStore.recordEffortFile(open[0]!.id, normalizedPath);
+          }
+        }
         return;
       }
       case "Stop": {
@@ -1475,6 +1486,23 @@ export class ElectronRuntime {
     path: string,
   ): SnapshotDiffResult {
     return this.snapshotStore.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
+  }
+
+  /**
+   * For each snapshot id in `snapshotIds`, return the list of efforts whose
+   * `end_snapshot_id` is that snapshot, annotated with the owning work item's
+   * title. Used by the Local History panel to render one row per effort
+   * (matching the per-effort write-log attribution model). Snapshots without
+   * any ending effort map to an empty array.
+   */
+  listEffortsEndingAtSnapshots(
+    snapshotIds: string[],
+  ): Record<string, Array<{ effortId: string; workItemId: string; title: string }>> {
+    return this.effortStore.listEffortsEndingAtSnapshots(snapshotIds);
+  }
+
+  getEffortFiles(effortId: string): SnapshotSummary | null {
+    return computeEffortFiles(this.effortStore, this.snapshotStore, effortId);
   }
 
   /**
@@ -1948,6 +1976,50 @@ export function linkOpenEffortsToTurn(effortStore: WorkItemEffortStore, turnId: 
   for (const effort of effortStore.listOpenEfforts()) {
     effortStore.linkEffortTurn(effort.id, turnId);
   }
+}
+
+/**
+ * Per-effort file list. Computes the pair-diff over
+ * (start_snapshot_id, end_snapshot_id); when 2+ efforts end at the same
+ * snapshot the result is filtered to paths recorded in
+ * `work_item_effort_file` for THIS effort, so parallel subagents each see
+ * only their own writes. The 1-effort case returns the raw pair-diff so
+ * Bash-level writes that bypass the hook log are still visible. Returns
+ * null when the effort is unknown or still open (no end snapshot).
+ */
+export function computeEffortFiles(
+  effortStore: WorkItemEffortStore,
+  snapshotStore: SnapshotStore,
+  effortId: string,
+): SnapshotSummary | null {
+  const effort = effortStore.getById(effortId);
+  if (!effort) return null;
+  const endId = effort.end_snapshot_id;
+  if (!endId) return null;
+  const summary = snapshotStore.getSnapshotSummary(endId, effort.start_snapshot_id);
+  if (!summary) return null;
+  const siblings = effortStore
+    .listEffortsForSnapshot(endId)
+    .filter((row) => row.end_snapshot_id === endId);
+  if (siblings.length < 2) return summary;
+  const allowed = new Set(effortStore.listEffortFiles(effortId));
+  const filteredFiles: typeof summary.files = {};
+  let created = 0;
+  let updated = 0;
+  let deleted = 0;
+  for (const [path, row] of Object.entries(summary.files)) {
+    if (!allowed.has(path)) continue;
+    filteredFiles[path] = row;
+    if (row.kind === "created") created++;
+    else if (row.kind === "updated") updated++;
+    else deleted++;
+  }
+  return {
+    snapshot: summary.snapshot,
+    previousSnapshotId: summary.previousSnapshotId,
+    files: filteredFiles,
+    counts: { created, updated, deleted },
+  };
 }
 
 function derivePostToolStatus(resp: unknown): "ok" | "error" {

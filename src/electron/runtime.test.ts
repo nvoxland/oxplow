@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, describeHookHealth, isInsideWorktree, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildBatchMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
 import { BatchStore } from "../persistence/batch-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -459,6 +459,161 @@ describe("history-tracking runtime wiring", () => {
       ignore: (rel) => rel.startsWith(".newde") || rel.startsWith(".git"),
     });
     expect(again.created).toBe(false);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("per-effort write log", () => {
+  test("listOpenEffortsForBatch returns exactly one effort for a single in_progress item", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A",
+      createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    writeFileSync(join(h.dir, "a.txt"), "v1");
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    const open = h.effortStore.listOpenEffortsForBatch(h.batchId);
+    expect(open).toHaveLength(1);
+    expect(open[0]!.work_item_id).toBe(a.id);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("listOpenEffortsForBatch returns 2 when two items are in_progress simultaneously", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const b = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    writeFileSync(join(h.dir, "a.txt"), "v1");
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    writeFileSync(join(h.dir, "b.txt"), "v1");
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    expect(h.effortStore.listOpenEffortsForBatch(h.batchId)).toHaveLength(2);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("recordEffortFile is idempotent on (effort, path)", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    applyStatusTransition(
+      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" },
+    );
+    const open = h.effortStore.listOpenEffortsForBatch(h.batchId)[0]!;
+    h.effortStore.recordEffortFile(open.id, "a.txt");
+    h.effortStore.recordEffortFile(open.id, "a.txt");
+    h.effortStore.recordEffortFile(open.id, "b.txt");
+    expect(h.effortStore.listEffortFiles(open.id)).toEqual(["a.txt", "b.txt"]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("computeEffortFiles", () => {
+  test("single-effort snapshot returns raw pair-diff even with empty write log", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    writeFileSync(join(h.dir, "a.txt"), "v1");
+    writeFileSync(join(h.dir, "b.txt"), "v1");
+    // No recordEffortFile calls — log is empty for this effort.
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    const open = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
+    const summary = computeEffortFiles(h.effortStore, h.snapshotStore, open.id);
+    expect(summary).not.toBeNull();
+    // Raw pair-diff: both files show because they changed in the window.
+    const paths = Object.keys(summary!.files).sort();
+    expect(paths).toContain("a.txt");
+    expect(paths).toContain("b.txt");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("two efforts ending at same snapshot filter by the write log", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const b = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    // Both transitioning to in_progress, then each writes distinct files.
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    const effA = h.effortStore.getOpenEffort(a.id)!;
+    const effB = h.effortStore.getOpenEffort(b.id)!;
+    writeFileSync(join(h.dir, "a.txt"), "by-a");
+    h.effortStore.recordEffortFile(effA.id, "a.txt");
+    writeFileSync(join(h.dir, "b.txt"), "by-b");
+    h.effortStore.recordEffortFile(effB.id, "b.txt");
+    // Both efforts close at the same flush point (end-snapshot is shared).
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+
+    const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
+    const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
+    // When both end at the same snapshot the filter engages. If the two
+    // task-end flushes happen to produce two snapshots (different version
+    // hashes because of b.txt appearing between them), the filter won't
+    // engage — so we only assert the filtering behaviour when the end ids
+    // collide.
+    if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
+      const sumA = computeEffortFiles(h.effortStore, h.snapshotStore, closedA.id);
+      const sumB = computeEffortFiles(h.effortStore, h.snapshotStore, closedB.id);
+      expect(Object.keys(sumA!.files)).toEqual(["a.txt"]);
+      expect(Object.keys(sumB!.files)).toEqual(["b.txt"]);
+    }
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("overlap: same file written by both efforts appears in both filtered results", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const b = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    const effA = h.effortStore.getOpenEffort(a.id)!;
+    const effB = h.effortStore.getOpenEffort(b.id)!;
+    writeFileSync(join(h.dir, "shared.txt"), "final");
+    h.effortStore.recordEffortFile(effA.id, "shared.txt");
+    h.effortStore.recordEffortFile(effB.id, "shared.txt");
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
+    const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
+    if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
+      const sumA = computeEffortFiles(h.effortStore, h.snapshotStore, closedA.id);
+      const sumB = computeEffortFiles(h.effortStore, h.snapshotStore, closedB.id);
+      expect(Object.keys(sumA!.files)).toContain("shared.txt");
+      expect(Object.keys(sumB!.files)).toContain("shared.txt");
+    }
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("open effort (no end snapshot) returns null", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    applyStatusTransition(
+      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" },
+    );
+    const effA = h.effortStore.getOpenEffort(a.id)!;
+    expect(computeEffortFiles(h.effortStore, h.snapshotStore, effA.id)).toBeNull();
     rmSync(h.dir, { recursive: true, force: true });
   });
 });

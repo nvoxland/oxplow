@@ -1,8 +1,10 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
+  getEffortFiles,
   getSnapshotPairDiff,
   getSnapshotSummary,
+  listEffortsEndingAtSnapshots,
   listSnapshots,
   restoreFileFromSnapshot,
   subscribeSnapshotEvents,
@@ -24,10 +26,17 @@ interface Props {
 
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
+  const [effortsBySnapshot, setEffortsBySnapshot] = useState<
+    Record<string, Array<{ effortId: string; workItemId: string; title: string }>>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  // A "selection" is either a raw snapshot (no effort) or a specific effort
+  // row within a snapshot. `selectedEffortId` disambiguates; when null the
+  // summary comes from the raw pair-diff against the previous snapshot.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEffortId, setSelectedEffortId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -47,9 +56,15 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
       setLoading(true);
       setError(null);
       void listSnapshots(stream.id, 200)
-        .then((list) => {
+        .then(async (list) => {
           if (cancelled) return;
           setSnapshots(list);
+          try {
+            const efforts = await listEffortsEndingAtSnapshots(list.map((s) => s.id));
+            if (!cancelled) setEffortsBySnapshot(efforts);
+          } catch (err) {
+            logUi("warn", "list efforts-by-snapshot failed", { error: String(err) });
+          }
           setLoading(false);
         })
         .catch((err) => {
@@ -74,7 +89,10 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
     }
     let cancelled = false;
     setSummaryLoading(true);
-    void getSnapshotSummary(selectedId)
+    const fetcher = selectedEffortId
+      ? getEffortFiles(selectedEffortId)
+      : getSnapshotSummary(selectedId);
+    void fetcher
       .then((result) => {
         if (cancelled) return;
         setSummary(result);
@@ -88,7 +106,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, selectedEffortId]);
 
   useEffect(() => {
     if (!revealSnapshotId) return;
@@ -117,7 +135,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
     };
   }, [dragging]);
 
-  const handleRowClick = (id: string) => {
+  const handleRowClick = (id: string, effortId: string | null) => {
     if (compareMode) {
       if (compareBaseId === id) {
         setCompareBaseId(null);
@@ -125,10 +143,12 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
         setCompareBaseId(id);
       } else {
         setSelectedId(id);
+        setSelectedEffortId(effortId);
       }
       return;
     }
     setSelectedId(id);
+    setSelectedEffortId(effortId);
   };
 
   const handleOpenFileDiff = async (path: string) => {
@@ -196,10 +216,40 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
     (snap) => snap.source !== "task-start" && snap.source !== "turn-start",
   );
 
+  // Synthesize one row per effort when multiple efforts end at the same
+  // snapshot (per the per-effort write log attribution model). When zero
+  // efforts end at a snapshot, a single "external change" / source-derived
+  // row is rendered. When one effort ends at it, a single row with the
+  // work item title is rendered (effortId carried so the detail pane calls
+  // `getEffortFiles` — same result as the raw pair-diff in the 1-effort
+  // fallback, but keeps the UI rendering rule uniform).
+  type Row = {
+    key: string;
+    snap: FileSnapshot;
+    label: string;
+    effortId: string | null;
+  };
+  const rows: Row[] = [];
+  for (const snap of visibleSnapshots) {
+    const efforts = effortsBySnapshot[snap.id] ?? [];
+    if (efforts.length === 0) {
+      rows.push({ key: snap.id, snap, label: labelFor(snap), effortId: null });
+      continue;
+    }
+    for (const e of efforts) {
+      rows.push({
+        key: `${snap.id}:${e.effortId}`,
+        snap,
+        label: e.title,
+        effortId: e.effortId,
+      });
+    }
+  }
+
   const filterLower = filter.trim().toLowerCase();
-  const filteredSnapshots = filterLower
-    ? visibleSnapshots.filter((snap) => labelFor(snap).toLowerCase().includes(filterLower))
-    : visibleSnapshots;
+  const filteredRows = filterLower
+    ? rows.filter((row) => row.label.toLowerCase().includes(filterLower))
+    : rows;
 
   return (
     <div id="snapshots-panel-root" style={containerStyle}>
@@ -233,7 +283,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
               </span>
             ) : null}
             <div style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)" }}>
-              {loading ? "loading…" : filterLower ? `${filteredSnapshots.length} / ${visibleSnapshots.length}` : `${visibleSnapshots.length}`}
+              {loading ? "loading…" : filterLower ? `${filteredRows.length} / ${rows.length}` : `${rows.length}`}
             </div>
           </div>
           <div style={listStyle}>
@@ -241,19 +291,19 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId }: Props) 
               <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
             ) : !stream ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
-            ) : visibleSnapshots.length === 0 ? (
+            ) : rows.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots yet.</div>
-            ) : filteredSnapshots.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots match filter.</div>
             ) : (
-              filteredSnapshots.map((snap) => (
+              filteredRows.map((row) => (
                 <SnapshotRow
-                  key={snap.id}
-                  snap={snap}
-                  label={labelFor(snap)}
-                  selected={selectedId === snap.id}
-                  compareBase={compareBaseId === snap.id}
-                  onClick={() => handleRowClick(snap.id)}
+                  key={row.key}
+                  snap={row.snap}
+                  label={row.label}
+                  selected={selectedId === row.snap.id && selectedEffortId === row.effortId}
+                  compareBase={compareBaseId === row.snap.id}
+                  onClick={() => handleRowClick(row.snap.id, row.effortId)}
                 />
               ))
             )}

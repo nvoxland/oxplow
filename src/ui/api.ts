@@ -674,6 +674,16 @@ export async function getSnapshotPairDiff(
   return desktopApi().getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
 }
 
+export async function getEffortFiles(effortId: string): Promise<SnapshotSummary | null> {
+  return desktopApi().getEffortFiles(effortId);
+}
+
+export async function listEffortsEndingAtSnapshots(
+  snapshotIds: string[],
+): Promise<Record<string, Array<{ effortId: string; workItemId: string; title: string }>>> {
+  return desktopApi().listEffortsEndingAtSnapshots(snapshotIds);
+}
+
 export async function restoreFileFromSnapshot(
   streamId: string,
   snapshotId: string,

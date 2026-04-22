@@ -149,7 +149,18 @@ Re-opening a task (human_check → ready → in_progress) produces a second
 effort. At most one open effort per work item at a time.
 
 `work_item_effort_turn` is a many-to-many join so a single effort can
-span multiple turns. The runtime writes a link row (a) for every
+span multiple turns.
+
+`work_item_effort_file` (v22) records per-effort write paths so parallel
+subagents in one batch get distinct file lists instead of the union via
+the snapshot pair-diff. Columns: `effort_id`, `path`, `first_seen_at`,
+primary key `(effort_id, path)`. Populated by the PostToolUse hook via
+the active-effort heuristic described in agent-model.md's "Per-effort
+write log." Consumed by `computeEffortFiles(effortStore,
+snapshotStore, effortId)` (exported from `runtime.ts`): when ≥2 efforts
+share an end snapshot, the pair-diff is filtered to the paths in this
+table for the asked-about effort; with 1 effort the raw pair-diff is
+returned so Bash-level writes (which bypass the hook log) still show. The runtime writes a link row (a) for every
 currently-open effort when a turn opens and (b) for the currently-open
 turn when an effort opens mid-turn.
 

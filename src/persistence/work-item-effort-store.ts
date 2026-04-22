@@ -24,7 +24,7 @@ export class WorkItemEffortStore {
   private readonly stateDb;
   private readonly emitter: StoreEmitter<EffortChange>;
 
-  constructor(projectDir: string, private readonly logger?: Logger) {
+  constructor(projectDir: string, logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
     this.emitter = new StoreEmitter("effort change", logger);
   }
@@ -113,6 +113,47 @@ export class WorkItemEffortStore {
       .map(rowToEffort);
   }
 
+  /**
+   * Open efforts whose owning work_item belongs to `batchId`. Used by the
+   * PostToolUse active-effort heuristic: when exactly one row comes back, the
+   * hook attributes the write to it; otherwise (0 or 2+) the hook skips.
+   */
+  listOpenEffortsForBatch(batchId: string): WorkItemEffort[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT e.* FROM work_item_effort e
+         JOIN work_items wi ON wi.id = e.work_item_id
+         WHERE e.ended_at IS NULL AND wi.batch_id = ?
+         ORDER BY e.started_at ASC, e.rowid ASC`,
+        batchId,
+      )
+      .map(rowToEffort);
+  }
+
+  /**
+   * Insert a (effort, path) row if missing. Safe to call repeatedly for the
+   * same pair; the primary key dedupes.
+   */
+  recordEffortFile(effortId: string, path: string): void {
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      `INSERT OR IGNORE INTO work_item_effort_file (effort_id, path, first_seen_at)
+       VALUES (?, ?, ?)`,
+      effortId,
+      path,
+      now,
+    );
+  }
+
+  /** Paths recorded for `effortId` via `recordEffortFile`. */
+  listEffortFiles(effortId: string): string[] {
+    const rows = this.stateDb.all<{ path: string }>(
+      `SELECT path FROM work_item_effort_file WHERE effort_id = ? ORDER BY path`,
+      effortId,
+    );
+    return rows.map((row) => row.path);
+  }
+
   listEffortsForWorkItem(workItemId: string): WorkItemEffort[] {
     return this.stateDb
       .all<Record<string, unknown>>(
@@ -132,6 +173,44 @@ export class WorkItemEffortStore {
         snapshotId,
       )
       .map(rowToEffort);
+  }
+
+  /**
+   * For each given snapshot id, list efforts whose `end_snapshot_id` equals
+   * it, annotated with the owning work_item's title. Returns a record keyed
+   * by snapshot id, with an empty array for snapshots that have no ending
+   * effort.
+   */
+  listEffortsEndingAtSnapshots(
+    snapshotIds: string[],
+  ): Record<string, Array<{ effortId: string; workItemId: string; title: string }>> {
+    const out: Record<string, Array<{ effortId: string; workItemId: string; title: string }>> = {};
+    for (const id of snapshotIds) out[id] = [];
+    if (snapshotIds.length === 0) return out;
+    const placeholders = snapshotIds.map(() => "?").join(",");
+    const rows = this.stateDb.all<{
+      id: string;
+      work_item_id: string;
+      end_snapshot_id: string;
+      title: string | null;
+    }>(
+      `SELECT e.id, e.work_item_id, e.end_snapshot_id, wi.title
+       FROM work_item_effort e
+       JOIN work_items wi ON wi.id = e.work_item_id
+       WHERE e.end_snapshot_id IN (${placeholders})
+       ORDER BY e.started_at ASC, e.rowid ASC`,
+      ...snapshotIds,
+    );
+    for (const row of rows) {
+      const list = out[row.end_snapshot_id];
+      if (!list) continue;
+      list.push({
+        effortId: row.id,
+        workItemId: row.work_item_id,
+        title: row.title ?? "(untitled)",
+      });
+    }
+    return out;
   }
 
   linkEffortTurn(effortId: string, turnId: string): void {

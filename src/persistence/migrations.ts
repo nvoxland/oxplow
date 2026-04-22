@@ -580,6 +580,27 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 22,
+    name: "work_item_effort_file",
+    up: (db) => {
+      // Per-effort write log. Populated by the PostToolUse hook when
+      // exactly one effort is in_progress for the batch (the active-
+      // effort heuristic) so parallel subagents within one batch get
+      // distinct file lists instead of the union via the snapshot pair
+      // diff. See .context/agent-model.md "per-effort write log".
+      db.exec(`
+        CREATE TABLE work_item_effort_file (
+          effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+          path TEXT NOT NULL,
+          first_seen_at TEXT NOT NULL,
+          PRIMARY KEY (effort_id, path)
+        );
+
+        CREATE INDEX idx_work_item_effort_file_effort ON work_item_effort_file(effort_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {
