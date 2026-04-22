@@ -281,6 +281,7 @@ export class ElectronRuntime {
           change.itemId,
           change.previousStatus,
           change.nextStatus,
+          change.touchedFiles,
         );
       }
       this.events.publish({
@@ -1274,17 +1275,9 @@ export class ElectronRuntime {
           return;
         }
         if (batch) this.markDirty(batch.stream_id, normalizedPath);
-        // Per-effort write-log: attribute this write to the sole in_progress
-        // effort for this batch (active-effort heuristic). If 0 or >1 are
-        // open we skip silently — the single-effort fallback in
-        // getEffortFiles covers the 1-effort case via the raw pair diff, and
-        // >1 is the only case where we actually need the log.
-        if (batch) {
-          const open = this.effortStore.listOpenEffortsForBatch(batch.id);
-          if (open.length === 1) {
-            this.effortStore.recordEffortFile(open[0]!.id, normalizedPath);
-          }
-        }
+        // Per-effort write-log is populated on the status transition to
+        // human_check via `update_work_item`'s `touchedFiles` payload — see
+        // applyStatusTransition. The PostToolUse hook no longer guesses.
         return;
       }
       case "Stop": {
@@ -1329,6 +1322,7 @@ export class ElectronRuntime {
     workItemId: string,
     previous: WorkItem["status"] | undefined,
     next: WorkItem["status"] | undefined,
+    touchedFiles?: string[],
   ): void {
     applyStatusTransition(
       {
@@ -1336,7 +1330,7 @@ export class ElectronRuntime {
         turnStore: this.turnStore,
         flushSnapshot: (source) => this.safeFlushSnapshot(streamId, source),
       },
-      { batchId, workItemId, previous, next },
+      { batchId, workItemId, previous, next, touchedFiles },
     );
   }
 
@@ -1949,6 +1943,14 @@ export interface StatusTransitionDeps {
   flushSnapshot: (source: SnapshotSource) => string | null;
 }
 
+/**
+ * Server-side cap on declared touched-file lists. Payloads larger than
+ * this are dropped entirely, which matches the "assume all files"
+ * fallback in `computeEffortFiles` (empty log → raw pair-diff). Keeps
+ * an agent with a degenerate list from flooding the table.
+ */
+export const TOUCHED_FILES_CAP = 100;
+
 export function applyStatusTransition(
   deps: StatusTransitionDeps,
   params: {
@@ -1956,9 +1958,10 @@ export function applyStatusTransition(
     workItemId: string;
     previous: WorkItem["status"] | undefined;
     next: WorkItem["status"] | undefined;
+    touchedFiles?: string[];
   },
 ): void {
-  const { previous, next, batchId, workItemId } = params;
+  const { previous, next, batchId, workItemId, touchedFiles } = params;
   if (!next) return;
   if (next === "in_progress" && previous !== "in_progress") {
     const startSnapshotId = deps.flushSnapshot("task-start");
@@ -1966,8 +1969,22 @@ export function applyStatusTransition(
     const openTurn = deps.turnStore.currentOpenTurn(batchId);
     if (openTurn) deps.effortStore.linkEffortTurn(effort.id, openTurn.id);
   } else if (previous === "in_progress" && next !== "in_progress") {
+    // Capture the effort id *before* closing — closeEffort clears the
+    // "open effort" marker. We need the id to attach the touched-files
+    // payload to the row just closed.
+    const openEffort = deps.effortStore.getOpenEffort(workItemId);
     const endSnapshotId = deps.flushSnapshot("task-end");
     deps.effortStore.closeEffort({ workItemId, endSnapshotId });
+    if (openEffort && next === "human_check" && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
+      // Dedup, then enforce the cap. Oversized payloads drop ALL rows
+      // so computeEffortFiles falls back to raw pair-diff ("assume all").
+      const deduped = Array.from(new Set(touchedFiles.filter((p) => typeof p === "string" && p.length > 0)));
+      if (deduped.length > 0 && deduped.length <= TOUCHED_FILES_CAP) {
+        for (const path of deduped) {
+          deps.effortStore.recordEffortFile(openEffort.id, path);
+        }
+      }
+    }
   }
 }
 
@@ -1981,10 +1998,12 @@ export function linkOpenEffortsToTurn(effortStore: WorkItemEffortStore, turnId: 
 /**
  * Per-effort file list. Computes the pair-diff over
  * (start_snapshot_id, end_snapshot_id); when 2+ efforts end at the same
- * snapshot the result is filtered to paths recorded in
- * `work_item_effort_file` for THIS effort, so parallel subagents each see
- * only their own writes. The 1-effort case returns the raw pair-diff so
- * Bash-level writes that bypass the hook log are still visible. Returns
+ * snapshot AND this effort has ≥1 row in `work_item_effort_file`, the
+ * result is filtered to those paths so parallel subagents each see only
+ * their own writes. If this effort has zero rows (agent skipped
+ * `touchedFiles` on the human_check transition, or list exceeded the
+ * server cap), we fall back to the raw pair-diff — the "assume all"
+ * behaviour. The 1-effort case also returns the raw pair-diff. Returns
  * null when the effort is unknown or still open (no end snapshot).
  */
 export function computeEffortFiles(
@@ -2002,7 +2021,12 @@ export function computeEffortFiles(
     .listEffortsForSnapshot(endId)
     .filter((row) => row.end_snapshot_id === endId);
   if (siblings.length < 2) return summary;
-  const allowed = new Set(effortStore.listEffortFiles(effortId));
+  const recorded = effortStore.listEffortFiles(effortId);
+  // No declared touched-files for this effort: fall back to the raw
+  // pair-diff ("assume all"). Better to over-report than to silently
+  // show nothing.
+  if (recorded.length === 0) return summary;
+  const allowed = new Set(recorded);
   const filteredFiles: typeof summary.files = {};
   let created = 0;
   let updated = 0;

@@ -114,23 +114,6 @@ export class WorkItemEffortStore {
   }
 
   /**
-   * Open efforts whose owning work_item belongs to `batchId`. Used by the
-   * PostToolUse active-effort heuristic: when exactly one row comes back, the
-   * hook attributes the write to it; otherwise (0 or 2+) the hook skips.
-   */
-  listOpenEffortsForBatch(batchId: string): WorkItemEffort[] {
-    return this.stateDb
-      .all<Record<string, unknown>>(
-        `SELECT e.* FROM work_item_effort e
-         JOIN work_items wi ON wi.id = e.work_item_id
-         WHERE e.ended_at IS NULL AND wi.batch_id = ?
-         ORDER BY e.started_at ASC, e.rowid ASC`,
-        batchId,
-      )
-      .map(rowToEffort);
-  }
-
-  /**
    * Insert a (effort, path) row if missing. Safe to call repeatedly for the
    * same pair; the primary key dedupes.
    */

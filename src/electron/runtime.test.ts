@@ -463,53 +463,69 @@ describe("history-tracking runtime wiring", () => {
   });
 });
 
-describe("per-effort write log", () => {
-  test("listOpenEffortsForBatch returns exactly one effort for a single in_progress item", () => {
-    const h = seedHistoryHarness();
-    const a = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "A",
-      createdBy: "user", actorId: "test",
-    });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    writeFileSync(join(h.dir, "a.txt"), "v1");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
-    const open = h.effortStore.listOpenEffortsForBatch(h.batchId);
-    expect(open).toHaveLength(1);
-    expect(open[0]!.work_item_id).toBe(a.id);
-    rmSync(h.dir, { recursive: true, force: true });
-  });
-
-  test("listOpenEffortsForBatch returns 2 when two items are in_progress simultaneously", () => {
+describe("touchedFiles payload on human_check transition", () => {
+  test("update_work_item with touchedFiles populates work_item_effort_file on transition to human_check", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
       batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const b = h.workItems.createItem({
-      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
-    });
     const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
-    writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    const openEffort = h.effortStore.getOpenEffort(a.id)!;
+    writeFileSync(join(h.dir, "a.txt"), "v1");
     writeFileSync(join(h.dir, "b.txt"), "v1");
-    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
-    expect(h.effortStore.listOpenEffortsForBatch(h.batchId)).toHaveLength(2);
+    applyStatusTransition(deps, {
+      batchId: h.batchId, workItemId: a.id,
+      previous: "in_progress", next: "human_check",
+      touchedFiles: ["a.txt", "b.txt", "a.txt"],
+    });
+    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual(["a.txt", "b.txt"]);
     rmSync(h.dir, { recursive: true, force: true });
   });
 
-  test("recordEffortFile is idempotent on (effort, path)", () => {
+  test("transitions to ready/blocked ignore touchedFiles", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
       batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" },
-    );
-    const open = h.effortStore.listOpenEffortsForBatch(h.batchId)[0]!;
-    h.effortStore.recordEffortFile(open.id, "a.txt");
-    h.effortStore.recordEffortFile(open.id, "a.txt");
-    h.effortStore.recordEffortFile(open.id, "b.txt");
-    expect(h.effortStore.listEffortFiles(open.id)).toEqual(["a.txt", "b.txt"]);
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    const openEffort = h.effortStore.getOpenEffort(a.id)!;
+    applyStatusTransition(deps, {
+      batchId: h.batchId, workItemId: a.id,
+      previous: "in_progress", next: "blocked",
+      touchedFiles: ["a.txt"],
+    });
+    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
+
+    // Re-open, then close to ready — also ignored.
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "blocked", next: "in_progress" });
+    const secondEffort = h.effortStore.getOpenEffort(a.id)!;
+    applyStatusTransition(deps, {
+      batchId: h.batchId, workItemId: a.id,
+      previous: "in_progress", next: "ready",
+      touchedFiles: ["b.txt"],
+    });
+    expect(h.effortStore.listEffortFiles(secondEffort.id)).toEqual([]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("touchedFiles with >100 paths inserts nothing (server cap)", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    const openEffort = h.effortStore.getOpenEffort(a.id)!;
+    const many: string[] = [];
+    for (let i = 0; i < 101; i++) many.push(`f${i}.txt`);
+    applyStatusTransition(deps, {
+      batchId: h.batchId, workItemId: a.id,
+      previous: "in_progress", next: "human_check",
+      touchedFiles: many,
+    });
+    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
     rmSync(h.dir, { recursive: true, force: true });
   });
 });
@@ -599,6 +615,38 @@ describe("computeEffortFiles", () => {
       const sumB = computeEffortFiles(h.effortStore, h.snapshotStore, closedB.id);
       expect(Object.keys(sumA!.files)).toContain("shared.txt");
       expect(Object.keys(sumB!.files)).toContain("shared.txt");
+    }
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("two efforts ending at same snapshot with no write log fall back to raw pair-diff", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const b = h.workItems.createItem({
+      batchId: h.batchId, kind: "task", title: "B", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "ready", next: "in_progress" });
+    writeFileSync(join(h.dir, "a.txt"), "by-a");
+    writeFileSync(join(h.dir, "b.txt"), "by-b");
+    // Neither transition declares touchedFiles — effort_file log stays empty.
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { batchId: h.batchId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
+    const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
+    if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
+      const sumA = computeEffortFiles(h.effortStore, h.snapshotStore, closedA.id);
+      const sumB = computeEffortFiles(h.effortStore, h.snapshotStore, closedB.id);
+      // Assume-all fallback: both efforts report the union of changes.
+      const pathsA = Object.keys(sumA!.files).sort();
+      const pathsB = Object.keys(sumB!.files).sort();
+      expect(pathsA).toContain("a.txt");
+      expect(pathsA).toContain("b.txt");
+      expect(pathsB).toContain("a.txt");
+      expect(pathsB).toContain("b.txt");
     }
     rmSync(h.dir, { recursive: true, force: true });
   });

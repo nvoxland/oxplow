@@ -154,13 +154,16 @@ span multiple turns.
 `work_item_effort_file` (v22) records per-effort write paths so parallel
 subagents in one batch get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `first_seen_at`,
-primary key `(effort_id, path)`. Populated by the PostToolUse hook via
-the active-effort heuristic described in agent-model.md's "Per-effort
-write log." Consumed by `computeEffortFiles(effortStore,
-snapshotStore, effortId)` (exported from `runtime.ts`): when ≥2 efforts
-share an end snapshot, the pair-diff is filtered to the paths in this
-table for the asked-about effort; with 1 effort the raw pair-diff is
-returned so Bash-level writes (which bypass the hook log) still show. The runtime writes a link row (a) for every
+primary key `(effort_id, path)`. Rows come from the `touchedFiles`
+payload on the `update_work_item` transition to `human_check`, not
+from the PostToolUse hook (the previous heuristic couldn't attribute
+writes when ≥2 efforts were in_progress). See agent-model.md's
+"Per-effort write log" for the flow. Consumed by
+`computeEffortFiles(effortStore, snapshotStore, effortId)` (exported
+from `runtime.ts`): when ≥2 efforts share an end snapshot AND this
+effort has ≥1 row here, the pair-diff is filtered to those paths;
+0 rows → fall back to raw pair-diff ("assume all"); 1 effort → raw
+pair-diff. The runtime writes a link row (a) for every
 currently-open effort when a turn opens and (b) for the currently-open
 turn when an effort opens mid-turn.
 

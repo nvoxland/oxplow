@@ -353,6 +353,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           acceptanceCriteria: { type: "string", description: "Optional replacement acceptance criteria (checklist). Pass empty string to clear." },
           status: { type: "string", description: "Optional replacement status. One of: ready, in_progress, human_check, blocked, done, canceled, archived. When you believe a task is complete, set status to 'human_check' — never set 'done' yourself; the user marks 'done' after reviewing. 'archived' hides the item from the default Work view." },
           priority: { type: "string", description: "Optional replacement priority." },
+          touchedFiles: {
+            type: "array",
+            description: "Optional list of files the agent touched during this effort. Pass when transitioning to `human_check` to support parallel-task attribution. Skip if >50 files — the fallback (assume-all) is fine for large change sets.",
+            items: { type: "string" },
+          },
         },
         required: ["batchId", "itemId"],
       },
@@ -366,6 +371,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         acceptanceCriteria?: string | null;
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
+        touchedFiles?: string[];
       }) => {
         resolveBatchAndStream(args);
         const item = workItemStore.updateItem({
@@ -377,6 +383,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           acceptanceCriteria: args.acceptanceCriteria,
           status: args.status,
           priority: args.priority,
+          touchedFiles: args.touchedFiles,
           actorKind: "agent",
           actorId: "mcp",
         });

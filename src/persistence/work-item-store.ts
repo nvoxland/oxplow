@@ -127,6 +127,13 @@ export interface WorkItemChange {
   previousStatus?: WorkItemStatus;
   /** Only populated for `updated` events when the status changed. */
   nextStatus?: WorkItemStatus;
+  /**
+   * Optional list of repo-relative paths the agent declares it touched
+   * during this effort. Only forwarded when the status transitions to
+   * `human_check`; consumed by the effort-close path to populate
+   * `work_item_effort_file`. Server dedups and caps at 100 paths.
+   */
+  touchedFiles?: string[];
 }
 
 export interface BatchWorkState {
@@ -162,6 +169,13 @@ interface UpdateWorkItemInput {
   parentId?: string | null;
   actorKind: WorkItemActorKind;
   actorId: string;
+  /**
+   * Optional list of repo-relative paths the agent touched during this
+   * effort. Relevant only when transitioning to `human_check`; ignored
+   * otherwise. Passed through to the `WorkItemChange` event so the
+   * runtime can insert `work_item_effort_file` rows at effort-close.
+   */
+  touchedFiles?: string[];
 }
 
 export class WorkItemStore {
@@ -388,6 +402,7 @@ export class WorkItemStore {
       itemId: input.itemId,
       previousStatus: statusChanged ? existing.status : undefined,
       nextStatus: statusChanged ? nextStatus : undefined,
+      touchedFiles: statusChanged && nextStatus === "human_check" ? input.touchedFiles : undefined,
     });
     return updated;
   }

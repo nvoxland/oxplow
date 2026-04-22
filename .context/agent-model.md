@@ -473,20 +473,21 @@ EventBus event and the snapshot/effort IPC methods.
 
 Snapshot pair-diffs over-report when two subagents edit the same worktree
 in parallel: both efforts share the same window, so each shows the
-union. To attribute writes correctly the `PostToolUse` hook also appends
-rows to `work_item_effort_file` (see data-model.md).
+union. To attribute writes correctly the agent declares its touched
+files on the status transition that closes the effort; the runtime
+stores them in `work_item_effort_file` (see data-model.md).
 
-**Active-effort heuristic.** On every write-tool postcall (Write, Edit,
-MultiEdit, NotebookEdit), the runtime queries
-`listOpenEffortsForBatch(batchId)` — efforts whose owning work item is
-in this batch and whose `ended_at IS NULL`. If exactly one row comes
-back, the hook inserts `(effort_id, path)` into `work_item_effort_file`.
-If 0 or 2+, the write is skipped silently: the 1-effort case can fall
-back to the raw pair-diff, and >1 is exactly when the log is needed but
-we can't tell which effort owns the write from the hook envelope alone.
-Future tightening (env-var-injected `NEWDE_EFFORT_ID`) is sketched in
-`/Users/nvoxland/.claude/plans/i-see-a-problem-crystalline-ritchie.md`
-option 2.
+**Agent-declared payload.** When calling `update_work_item` with
+`status: "human_check"`, the agent passes `touchedFiles: string[]` —
+the repo-relative paths it wrote or edited during this effort.
+`applyStatusTransition` (in `runtime.ts`) captures the open effort id,
+flushes the task-end snapshot, closes the effort, and then inserts
+`work_item_effort_file` rows for each deduped path via `INSERT OR
+IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100 paths) drop all
+rows, so the "assume all" fallback engages in `computeEffortFiles`.
+The PostToolUse hook no longer writes to `work_item_effort_file`; the
+previous active-effort heuristic was unreliable whenever ≥2 efforts
+were in_progress (the common case the log is meant to cover).
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a
@@ -498,8 +499,11 @@ snapshot `S`:
   detail pane uses `getEffortFiles(effortId)`, which short-circuits to
   the raw pair-diff.
 - ≥2 efforts end at S → one row per effort, each labelled with its
-  work item title; detail panes call `getEffortFiles(effortId)`, which
-  filters the pair-diff by `work_item_effort_file` rows.
+  work item title; detail panes call `getEffortFiles(effortId)`. If
+  the effort has ≥1 `work_item_effort_file` row the pair-diff is
+  filtered to those paths; if it has 0 rows (agent skipped the
+  `touchedFiles` payload, or list exceeded the cap) we fall back to
+  the raw pair-diff — better to over-report than silently show empty.
 
 `getEffortFiles` is exported from `runtime.ts` as `computeEffortFiles`
 (pure helper over the two stores) for test reuse, and wired to IPC via
