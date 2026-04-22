@@ -761,7 +761,7 @@ const detailPaneStyle: CSSProperties = {
   minWidth: 240,
   maxWidth: "100%",
   borderLeft: "1px solid var(--border)",
-  background: "var(--bg-2)",
+  background: "var(--bg)",
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
