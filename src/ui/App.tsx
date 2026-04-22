@@ -1360,7 +1360,7 @@ export function App() {
     const tabs: CenterTab[] = [
       {
         id: "agent",
-        label: selectedBatch ? selectedBatch.title : "Agent",
+        label: "Agent",
         closable: false,
         agentStatus: agentBatchStatus,
         render: () =>
