@@ -234,6 +234,18 @@ same pair is a no-op. A junction-insert failure is logged but does
 **not** fail the commit (the sha has already landed; losing attribution
 is strictly less bad than a phantom "commit failed" error).
 
+**Ad-hoc commit backfill (wi-ec4c8e6f44fd).** Commits that bypass
+`executeAutoCommitForThread` — user-driven Files-panel commits, agent
+Bash `git commit` calls — would otherwise leave the junction empty.
+The runtime subscribes to `git-refs.changed`, reads the fresh HEAD
+sha via `readWorktreeHeadSha` (`src/git/git.ts`), and calls
+`backfillCommitLinksForThread` (`src/electron/runtime.ts`) for every
+active thread on the stream. Skips shas already present in the
+junction (runtime-mediated commits race here — first writer wins).
+Together with the Stop-hook clean-tree check, this means settled
+work gets its attribution on *all* commit paths and the auto-commit
+directive doesn't refire on a clean tree.
+
 Read API: `listShasForItem(itemId)` returns the commits attributed to
 one item (newest-first); `listItemsForSha(sha)` returns every item
 attributed to one commit (stable by itemId). Consumers: future

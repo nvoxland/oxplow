@@ -197,8 +197,16 @@ The pipeline runs in priority order:
    stays pending until that thread is promoted to writer.
 2. **Ad-hoc auto-commit (writer thread only, no DB row).** When
    `thread.auto_commit` is true AND settled work (`human_check`/`done`
-   items) is present AND no pending commit_point is queued, the pipeline
-   emits `buildAutoCommitStopReason(null)`. Agent drafts a message from
+   items) is present AND no pending commit_point is queued AND the
+   worktree has staged/unstaged changes, the pipeline emits
+   `buildAutoCommitStopReason(null)`. Clean-tree suppression: if
+   `git diff --quiet && git diff --cached --quiet` both pass
+   (`isWorktreeClean` in `src/git/git.ts`), the directive is skipped
+   even when settled work looks unlinked — the sha already landed via
+   an ad-hoc `git commit` (Bash / Files panel) and the
+   `git-refs.changed` backfill path attaches the junction rows. Same
+   suppression applies to the `mode="auto"` commit_point branch above.
+   Agent drafts a message from
    the diff and calls `mcp__newde__commit({ auto: true, threadId, message })`,
    which routes to `executeAutoCommitForThread` — runs `git commit`,
    links contributing work items to the new sha via the
@@ -719,6 +727,22 @@ explicitly file a ticket.
   exists or if it has no effort in the current turn (so user- or
   explicitly-agent-authored items are never auto-closed). The full note
   body is clamped to `AUTO_COMPLETE_NOTE_MAX_LEN` (400 chars).
+
+  **Coordinator-only turns (wi-4daabc5e1dae).** An orchestrator turn
+  whose only write-intent activity is subagent dispatch (`Task`,
+  `mcp__newde__dispatch_work_item`, `mcp__newde__file_epic_with_children`)
+  leaves the auto-filed row with no effort row and no diff — the edits
+  happen inside the subagent threads and attribute to *their* work
+  items. To keep the row from parking forever in `in_progress`, the
+  runtime tallies dispatch-shaped tool calls per turn
+  (`dispatchesByTurn`, `isDispatchLikeTool`, `extractDispatchedItemIds`).
+  At Stop, when the auto-item has no effort-in-turn and zero filePaths
+  but `dispatchCount > 0`, auto-complete takes the coordinator branch:
+  writes a `Coordinated N subagent dispatch(es).` note, links each
+  parsed-out item id to the auto-item via `discovered_from`
+  (child → coordinator), and flips the row to `human_check`. Turns with
+  no dispatches and no edits don't auto-file in the first place (no
+  write-intent tool call), so there's nothing to close.
 
   **Signal detection (heuristic-only, no LLM).** Runtime buffers raw
   PostToolUse `tool_response` stdout/stderr from Bash calls per

@@ -27,6 +27,8 @@ import {
   gitPush,
   gitPull,
   gitCommitAll,
+  isWorktreeClean,
+  readWorktreeHeadSha,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -144,6 +146,15 @@ export class ElectronRuntime {
    *  branch of `applyTurnTracking`. */
   private readonly bashOutputsByTurn = new Map<string, string[]>();
   private readonly todoStateByTurn = new Map<string, Array<{ content: string; status: string }>>();
+  /** Per-turn tally of orchestrator subagent-dispatch tool calls (Task,
+   *  mcp__newde__dispatch_work_item, mcp__newde__file_epic_with_children).
+   *  `count` is the total — we report it in the coordinator-close note even
+   *  when we can't extract item ids. `itemIds` captures the
+   *  dispatch_work_item target ids we could parse out of `tool_input`, used
+   *  to link the closing auto-item to its dispatched children via
+   *  `discovered_from`. Keyed by `${threadId}\0${turnId}`; cleared at Stop
+   *  alongside the other per-turn buffers. See wi-4daabc5e1dae. */
+  private readonly dispatchesByTurn = new Map<string, { count: number; itemIds: string[] }>();
   /** Running per-thread running sum of tool-result bytes observed during
    *  the currently open turn. Populated on each PostToolUse envelope and
    *  cleared on UserPromptSubmit (new turn) and Stop. Fed into
@@ -295,6 +306,34 @@ export class ElectronRuntime {
         streamId: change.streamId,
         t: change.t,
       });
+      // Backfill the work_item_commit junction for ad-hoc commits that
+      // bypassed `executeAutoCommitForThread` (agent Bash `git commit`,
+      // Files-panel commits). See wi-ec4c8e6f44fd. Skips when the sha is
+      // already linked (runtime-mediated commits race here — whichever
+      // side lands first wins, the other is a no-op).
+      try {
+        const stream = this.store.get(change.streamId);
+        if (!stream) return;
+        const sha = readWorktreeHeadSha(stream.worktree_path);
+        if (!sha) return;
+        const state = this.threadStore.list(change.streamId);
+        for (const t of state.threads) {
+          if (t.status !== "active") continue;
+          backfillCommitLinksForThread(
+            {
+              effortStore: this.effortStore,
+              workItemCommitStore: this.workItemCommitStore,
+              commitPointStore: this.commitPointStore,
+            },
+            { threadId: t.id, sha },
+          );
+        }
+      } catch (err) {
+        this.logger.warn("git-refs backfill failed", {
+          streamId: change.streamId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
     this.hookEvents.subscribe((event) => {
       this.events.publish({
@@ -1478,6 +1517,21 @@ export class ElectronRuntime {
       ?? this.turnStore.listForThread(threadId, 1)[0]?.prompt
       ?? null;
     const cumulativeCacheRead = this.turnStore.getCumulativeCacheRead(threadId);
+    // Cheap clean-tree probe: suppresses the auto-commit directive when an
+    // ad-hoc `git commit` (Bash / Files panel) already landed the work, so
+    // the Stop hook doesn't refire a no-op commit directive. See
+    // wi-ec4c8e6f44fd. Read from the thread's worktree; null / unknown
+    // paths fall back to "assume dirty" so we don't accidentally mute a
+    // legit commit directive.
+    let worktreeClean = false;
+    const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
+    if (stream) {
+      try { worktreeClean = isWorktreeClean(stream.worktree_path); } catch (err) {
+        this.logger.debug("isWorktreeClean probe failed", {
+          threadId, error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1490,6 +1544,7 @@ export class ElectronRuntime {
       currentTurnPrompt,
       justReadReadySet,
       cumulativeCacheRead,
+      worktreeClean,
     };
     // The item's own thread_id is what matters for the directive text (not
     // `threadId` — they agree today but could diverge if listReady ever
@@ -1604,6 +1659,24 @@ export class ElectronRuntime {
             }
           }
         }
+        // Coordinator-only turn tracking: tally dispatch-shaped tool calls
+        // so a turn that is pure orchestration (no direct edits) still
+        // closes its auto-filed item at Stop with a coordination note +
+        // links to dispatched children. See wi-4daabc5e1dae and
+        // autoCompleteOpenAutoItems' coordinator-only branch.
+        if (toolStatus !== "error" && isDispatchLikeTool(toolName)) {
+          const openTurn = this.turnStore.currentOpenTurn(threadId);
+          if (openTurn) {
+            const key = `${threadId}\0${openTurn.id}`;
+            const prev = this.dispatchesByTurn.get(key) ?? { count: 0, itemIds: [] };
+            prev.count += 1;
+            const extracted = extractDispatchedItemIds(toolName, payload.tool_input);
+            for (const id of extracted) {
+              if (!prev.itemIds.includes(id)) prev.itemIds.push(id);
+            }
+            this.dispatchesByTurn.set(key, prev);
+          }
+        }
         // Capture TodoWrite state (Claude Code's built-in within-turn task
         // list) for the task-list bridge. The last call wins — TodoWrite
         // payloads are declarative (the full list of todos in final shape),
@@ -1676,12 +1749,15 @@ export class ElectronRuntime {
               tscErrors = detectTscErrorsFromBashOutput(joinedBash);
               commitShas = detectCommitShasFromBashOutput(joinedBash);
             }
+            const dispatches = this.dispatchesByTurn.get(bufKey);
             autoCompleteOpenAutoItems(
               { workItemStore: this.workItemStore, effortStore: this.effortStore },
               {
                 threadId, turnId: open.id, filePaths,
                 testResult, tscErrors, commitShas,
                 actorId: "runtime-auto",
+                dispatchCount: dispatches?.count ?? 0,
+                dispatchedItemIds: dispatches?.itemIds ?? null,
               },
             );
             // Task-list bridge: if Claude Code's within-turn TodoWrite was
@@ -1704,6 +1780,7 @@ export class ElectronRuntime {
             }
             this.bashOutputsByTurn.delete(bufKey);
             this.todoStateByTurn.delete(bufKey);
+            this.dispatchesByTurn.delete(bufKey);
             // The next UserPromptSubmit will reset this too, but clear
             // on Stop so any context block rendered between Stop and the
             // next prompt (e.g. from the next UserPromptSubmit hook)
@@ -2186,7 +2263,7 @@ export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
     ``,
     `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__newde__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
     ``,
-    `Keep the subject terse and descriptive — no Conventional-Commits prefixes like \`feat(scope):\` or \`fix:\`. Do NOT add Co-Authored-By or self-attribution lines. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
+    `Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
   ];
   return lines.join("\n");
 }
@@ -2195,7 +2272,7 @@ export function buildCommitPointStopReason(cp: CommitPoint): string {
   const lines = [
     `A commit point is due in this thread's work queue (commit_point_id=${cp.id}).`,
     ``,
-    `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Keep the subject terse and descriptive — avoid Conventional-Commits prefixes like \`feat(scope):\` or \`fix:\`. Do NOT add Co-Authored-By or any self-attribution lines.`,
+    `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style.`,
     ``,
     `Output the drafted message in your chat reply and ask the user to approve or suggest changes. Do NOT run \`git add\` or \`git commit\` yourself.`,
     ``,
@@ -2686,6 +2763,55 @@ export interface AutoCompleteDeps {
   effortStore: WorkItemEffortStore;
 }
 
+/** Orchestrator dispatch-shaped tool names. A turn that only calls these
+ *  (no Edit/Write/Bash edits) still represents real work — the orchestrator
+ *  split the prompt into subagent tasks. The Stop-hook auto-complete path
+ *  uses the tally to decide whether an empty auto-item should close with a
+ *  "Coordinated N dispatches" note rather than sit in_progress forever.
+ *  See wi-4daabc5e1dae. */
+const DISPATCH_LIKE_TOOLS: ReadonlySet<string> = new Set([
+  "Task",
+  "mcp__newde__dispatch_work_item",
+  "mcp__newde__file_epic_with_children",
+]);
+
+export function isDispatchLikeTool(toolName: string): boolean {
+  return DISPATCH_LIKE_TOOLS.has(toolName);
+}
+
+/** Best-effort scrape of work-item ids from a dispatch-shaped tool_input.
+ *  `mcp__newde__dispatch_work_item` carries `{ itemId }` directly; the
+ *  built-in `Task` tool has opaque subagent prompts — we scan the prompt
+ *  text for `wi-<hex>` tokens (the id format createId emits). Returns an
+ *  empty array on anything unrecognisable. */
+export function extractDispatchedItemIds(toolName: string, toolInput: unknown): string[] {
+  if (!toolInput || typeof toolInput !== "object") return [];
+  const obj = toolInput as Record<string, unknown>;
+  const out: string[] = [];
+  const pushIfId = (v: unknown) => {
+    if (typeof v === "string" && /^wi-[0-9a-f]+$/.test(v)) out.push(v);
+  };
+  pushIfId(obj.itemId);
+  pushIfId(obj.workItemId);
+  // Task/Agent invocations: scan the brief text.
+  const textCandidates: unknown[] = [obj.prompt, obj.description, obj.input];
+  for (const field of textCandidates) {
+    if (typeof field !== "string") continue;
+    const matches = field.match(/\bwi-[0-9a-f]+\b/g);
+    if (matches) out.push(...matches);
+  }
+  // Deduped, preserving first-seen order.
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const id of out) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  void toolName;
+  return unique;
+}
+
 /** Tool names that always count as write-intent. */
 const ALWAYS_WRITE_INTENT_TOOLS: ReadonlySet<string> = new Set([
   "Write", "Edit", "MultiEdit", "NotebookEdit",
@@ -2813,6 +2939,33 @@ export function linkCommitToContributingItems(
   return Array.from(seen);
 }
 
+/** Junction backfill for ad-hoc commits — called when `git-refs.changed`
+ *  fires with a new HEAD sha that the runtime did NOT produce via
+ *  `executeAutoCommitForThread`. Populates `work_item_commit` rows for
+ *  every work item settled since the thread's most recent done commit
+ *  point, so Files-panel commits and agent Bash `git commit` calls no
+ *  longer bypass the junction. Idempotent (INSERT OR IGNORE). Skips
+ *  shas the junction has already seen. Returns the itemIds inserted, or
+ *  an empty array when there's nothing to do (no sha, already backfilled,
+ *  or no settled efforts). See wi-ec4c8e6f44fd. */
+export function backfillCommitLinksForThread(
+  deps: {
+    effortStore: WorkItemEffortStore;
+    workItemCommitStore: WorkItemCommitStore;
+    commitPointStore: CommitPointStore;
+  },
+  input: { threadId: string; sha: string | null },
+): string[] {
+  if (!input.sha) return [];
+  const alreadyLinked = deps.workItemCommitStore.listItemsForSha(input.sha);
+  if (alreadyLinked.length > 0) return [];
+  const latestDone = deps.commitPointStore.getLatestDoneForThread(input.threadId);
+  return linkCommitToContributingItems(
+    { effortStore: deps.effortStore, workItemCommitStore: deps.workItemCommitStore },
+    { threadId: input.threadId, sha: input.sha, latestDoneCompletedAt: latestDone?.completed_at ?? null },
+  );
+}
+
 export interface AutoFileDeps {
   workItemStore: WorkItemStore;
 }
@@ -2861,20 +3014,57 @@ export function autoCompleteOpenAutoItems(
     tscErrors?: number | null;
     commitShas?: string[] | null;
     actorId?: string;
+    /** Count of orchestrator dispatch tool calls observed in this turn
+     *  (Task / mcp__newde__dispatch_work_item / file_epic_with_children).
+     *  When > 0 and the item has no effort-in-turn and no diff, the
+     *  auto-item is still closed with a "Coordinated N dispatches" note
+     *  instead of being left in_progress. See wi-4daabc5e1dae. */
+    dispatchCount?: number | null;
+    /** Work-item ids the orchestrator dispatched this turn. Each is linked
+     *  to the closing auto-item via a `discovered_from` edge (child →
+     *  auto-item) so the orchestrator row stays visible in the Work panel
+     *  and the dispatched children point back at their coordinator. */
+    dispatchedItemIds?: string[] | null;
   },
 ): string | null {
   const item = deps.workItemStore.findOpenAutoItemForThread(input.threadId);
   if (!item) return null;
   const effortsForTurn = deps.effortStore.listEffortsForTurn(input.turnId);
   const hasEffortInThisTurn = effortsForTurn.some((e) => e.work_item_id === item.id);
-  if (!hasEffortInThisTurn) return null;
+  const dispatchCount = input.dispatchCount ?? 0;
+  const coordinatorOnly = !hasEffortInThisTurn && dispatchCount > 0 && input.filePaths.length === 0;
+  if (!hasEffortInThisTurn && !coordinatorOnly) return null;
+  const actorId = input.actorId ?? "runtime-auto";
+  if (coordinatorOnly) {
+    // Orchestrator / coordinator turn: no edits, but real work — record the
+    // coordination + link to children.
+    const note = `Coordinated ${dispatchCount} subagent dispatch${dispatchCount === 1 ? "" : "es"}.`;
+    deps.workItemStore.addNote(input.threadId, item.id, note, "system", actorId);
+    const linked = new Set<string>();
+    for (const childId of input.dispatchedItemIds ?? []) {
+      if (!childId || childId === item.id || linked.has(childId)) continue;
+      try {
+        deps.workItemStore.linkItems(input.threadId, childId, item.id, "discovered_from");
+        linked.add(childId);
+      } catch {
+        // child might be in another thread or missing; skip silently.
+      }
+    }
+    deps.workItemStore.updateItem({
+      threadId: input.threadId,
+      itemId: item.id,
+      status: "human_check",
+      actorKind: "system",
+      actorId,
+    });
+    return item.id;
+  }
   const note = composeAutoCompleteNote({
     filePaths: input.filePaths,
     testResult: input.testResult ?? null,
     tscErrors: input.tscErrors ?? null,
     commitShas: input.commitShas ?? null,
   });
-  const actorId = input.actorId ?? "runtime-auto";
   deps.workItemStore.addNote(input.threadId, item.id, note, "system", actorId);
   // Rewrite the prompt-prefix title with a diff-derived label so blame
   // and the Work panel read something specific. Only rewrites when we

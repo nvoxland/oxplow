@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, autoCompleteOpenAutoItems, autoFileWorkItemIfNeeded, AUTO_COMPLETE_NOTE_MAX_LEN, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, composeAutoCompleteNote, composeTaskListNote, computeEffortFiles, deriveAutoItemTitleFromDiff, deriveAutoItemTitleFromPrompt, describeHookHealth, detectCommitShasFromBashOutput, detectTestResultFromBashOutput, detectTscErrorsFromBashOutput, extractBashStdout, extractTodoList, isInsideWorktree, isWriteIntentTool, linkCommitToContributingItems, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, autoCompleteOpenAutoItems, autoFileWorkItemIfNeeded, AUTO_COMPLETE_NOTE_MAX_LEN, backfillCommitLinksForThread, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, composeAutoCompleteNote, composeTaskListNote, computeEffortFiles, deriveAutoItemTitleFromDiff, deriveAutoItemTitleFromPrompt, describeHookHealth, detectCommitShasFromBashOutput, detectTestResultFromBashOutput, detectTscErrorsFromBashOutput, extractBashStdout, extractDispatchedItemIds, extractTodoList, isDispatchLikeTool, isInsideWorktree, isWriteIntentTool, linkCommitToContributingItems, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
 import { WorkItemCommitStore } from "../persistence/work-item-commit-store.js";
+import { CommitPointStore } from "../persistence/commit-point-store.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -376,8 +377,14 @@ test("buildAutoCommitStopReason: ad-hoc (cp=null) directive asks for auto shape 
   // No approval gate: should explicitly forbid asking, not request it.
   expect(text).toMatch(/do NOT ask the user to approve/i);
   expect(text).not.toMatch(/(^|\s)ask the user to approve(?! first; commit)/i);
-  // Attribution ban preserved.
-  expect(text).toMatch(/Co-Authored-By/);
+  // Style-preference sentences must NOT live in the runtime directive — they
+  // belong in the consuming agent's memory / project CLAUDE.md. See
+  // wi-d716867f589a.
+  expect(text).not.toMatch(/Co-Authored-By/);
+  expect(text).not.toMatch(/Conventional-Commits/);
+  expect(text).not.toMatch(/self-attribution/);
+  // Neutral closer points at the repo's conventions.
+  expect(text).toMatch(/commit-message conventions/i);
 });
 
 test("buildAutoCommitStopReason: with a commit_point (auto-mode row) includes the id", () => {
@@ -1277,6 +1284,71 @@ describe("autoCompleteOpenAutoItems", () => {
     )).toBeNull();
     rmSync(h.dir, { recursive: true, force: true });
   });
+
+  // --- wi-4daabc5e1dae: orchestrator dispatch-only turns close their auto-item ---
+
+  test("pure-dispatch turn (no file changes, no effort) closes the auto-item with a coordination note and discovered_from links", () => {
+    const h = seedHistoryHarness();
+    // Dispatched children — imagine the orchestrator created + dispatched these.
+    const childA = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "child A",
+      status: "in_progress", createdBy: "agent", actorId: "runtime",
+    });
+    const childB = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "child B",
+      status: "in_progress", createdBy: "agent", actorId: "runtime",
+    });
+    // The orchestrator's own auto-filed item — no effort, no file changes.
+    const auto = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "do it all",
+      status: "in_progress", createdBy: "agent", actorId: "runtime-auto",
+      author: "agent-auto",
+    });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "do it all" });
+
+    const closedId = autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      {
+        threadId: h.threadId,
+        turnId: turn.id,
+        filePaths: [],
+        dispatchCount: 2,
+        dispatchedItemIds: [childA.id, childB.id],
+      },
+    );
+    expect(closedId).toBe(auto.id);
+    const after = h.workItems.getItem(h.threadId, auto.id)!;
+    expect(after.status).toBe("human_check");
+    const notes = h.workItems.getWorkNotes(auto.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.body).toMatch(/Coordinated 2 subagent dispatch/);
+    // discovered_from links: child.id -> auto.id (the children were uncovered
+    // while working on the orchestrator auto-item).
+    const autoDetail = h.workItems.getItemDetail(h.threadId, auto.id)!;
+    const fromIds = autoDetail.incoming
+      .filter((l) => l.link_type === "discovered_from")
+      .map((l) => l.from_item_id)
+      .sort();
+    expect(fromIds).toEqual([childA.id, childB.id].sort());
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("pure-dispatch: no dispatchCount and no effort → still a no-op (no auto close)", () => {
+    const h = seedHistoryHarness();
+    const auto = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "stuck",
+      status: "in_progress", createdBy: "agent", actorId: "runtime-auto",
+      author: "agent-auto",
+    });
+    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "x" });
+    expect(autoCompleteOpenAutoItems(
+      { workItemStore: h.workItems, effortStore: h.effortStore },
+      { threadId: h.threadId, turnId: turn.id, filePaths: [], dispatchCount: 0 },
+    )).toBeNull();
+    const after = h.workItems.getItem(h.threadId, auto.id)!;
+    expect(after.status).toBe("in_progress");
+    rmSync(h.dir, { recursive: true, force: true });
+  });
 });
 
 describe("linkCommitToContributingItems", () => {
@@ -1319,5 +1391,85 @@ describe("linkCommitToContributingItems", () => {
     expect(inserted).toEqual([]);
     expect(commitJunction.listItemsForSha("sha-nope")).toEqual([]);
     rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("backfillCommitLinksForThread (wi-ec4c8e6f44fd)", () => {
+  test("populates junction rows for settled items when an ad-hoc sha arrives", () => {
+    const h = seedHistoryHarness();
+    const commitJunction = new WorkItemCommitStore(h.dir);
+    const commitPointStore = new CommitPointStore(h.dir);
+    const a = h.workItems.createItem({ threadId: h.threadId, kind: "task", title: "A", status: "in_progress", createdBy: "user", actorId: "t" });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+
+    const inserted = backfillCommitLinksForThread(
+      { effortStore: h.effortStore, workItemCommitStore: commitJunction, commitPointStore },
+      { threadId: h.threadId, sha: "sha-adhoc" },
+    );
+    expect(inserted).toEqual([a.id]);
+    const rows = commitJunction.listItemsForSha("sha-adhoc").map((r) => r.work_item_id);
+    expect(rows).toEqual([a.id]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("sha that is already linked → no-op", () => {
+    const h = seedHistoryHarness();
+    const commitJunction = new WorkItemCommitStore(h.dir);
+    const commitPointStore = new CommitPointStore(h.dir);
+    const a = h.workItems.createItem({ threadId: h.threadId, kind: "task", title: "A", status: "in_progress", createdBy: "user", actorId: "t" });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    commitJunction.insert(a.id, "sha-known", new Date().toISOString());
+    const inserted = backfillCommitLinksForThread(
+      { effortStore: h.effortStore, workItemCommitStore: commitJunction, commitPointStore },
+      { threadId: h.threadId, sha: "sha-known" },
+    );
+    expect(inserted).toEqual([]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
+  test("null sha → no-op", () => {
+    const h = seedHistoryHarness();
+    const commitJunction = new WorkItemCommitStore(h.dir);
+    const commitPointStore = new CommitPointStore(h.dir);
+    const inserted = backfillCommitLinksForThread(
+      { effortStore: h.effortStore, workItemCommitStore: commitJunction, commitPointStore },
+      { threadId: h.threadId, sha: null },
+    );
+    expect(inserted).toEqual([]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+});
+
+describe("isDispatchLikeTool / extractDispatchedItemIds", () => {
+  test("Task, mcp__newde__dispatch_work_item, mcp__newde__file_epic_with_children are dispatch-shaped", () => {
+    expect(isDispatchLikeTool("Task")).toBe(true);
+    expect(isDispatchLikeTool("mcp__newde__dispatch_work_item")).toBe(true);
+    expect(isDispatchLikeTool("mcp__newde__file_epic_with_children")).toBe(true);
+  });
+
+  test("Edit / Bash / TodoWrite are NOT dispatch-shaped", () => {
+    expect(isDispatchLikeTool("Edit")).toBe(false);
+    expect(isDispatchLikeTool("Bash")).toBe(false);
+    expect(isDispatchLikeTool("TodoWrite")).toBe(false);
+  });
+
+  test("extracts itemId field from MCP dispatch_work_item input", () => {
+    const ids = extractDispatchedItemIds("mcp__newde__dispatch_work_item", { threadId: "b1", itemId: "wi-abc123" });
+    expect(ids).toEqual(["wi-abc123"]);
+  });
+
+  test("scans the Task prompt text for wi-<hex> tokens", () => {
+    const brief = "Run wi-deadbeef and also wi-1234abcd in parallel with wi-deadbeef again";
+    const ids = extractDispatchedItemIds("Task", { prompt: brief });
+    expect(ids.sort()).toEqual(["wi-1234abcd", "wi-deadbeef"]);
+  });
+
+  test("ignores non-object input", () => {
+    expect(extractDispatchedItemIds("Task", null)).toEqual([]);
+    expect(extractDispatchedItemIds("Task", "just text")).toEqual([]);
   });
 });

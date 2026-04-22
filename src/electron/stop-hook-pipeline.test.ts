@@ -343,6 +343,39 @@ describe("decideStopDirective", () => {
     expect(out.directive).toEqual({ decision: "block", reason: "auto: ad-hoc" });
   });
 
+  test("auto_commit=true with settled work but a clean worktree: suppress directive (wi-ec4c8e6f44fd)", () => {
+    // Ad-hoc git commit (Bash / Files-panel) already landed the work; tree is
+    // clean. The directive would misfire otherwise.
+    const settled = workItem("w1", 0, "human_check");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
+    const out = decideStopDirective(
+      snapshot({
+        thread: thread({ auto_commit: true }),
+        workItems: [settled],
+        autoCommit: true,
+        worktreeClean: true,
+      }),
+      autoBuilders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("auto-mode commit point pending but a clean worktree: suppress directive (wi-ec4c8e6f44fd)", () => {
+    const cp = commitPoint("cp1", 0, "pending", "auto");
+    const autoBuilders = {
+      ...builders,
+      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
+    };
+    const out = decideStopDirective(
+      snapshot({ commitPoints: [cp], worktreeClean: true }),
+      autoBuilders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
   test("auto_commit=true with no settled work: allow stop (nothing to commit)", () => {
     const inProgress = workItem("w1", 0, "in_progress");
     const autoBuilders = {

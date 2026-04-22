@@ -73,6 +73,12 @@ export interface ThreadSnapshot {
    *  fork_thread hint so the orchestrator can shed the tail. Optional;
    *  absent / 0 means "no hint." */
   cumulativeCacheRead?: number;
+  /** True when the thread's worktree has no staged OR unstaged diff
+   *  (ad-hoc `git commit` from Bash or the Files panel already landed).
+   *  When set, the auto-commit directive is suppressed even if settled
+   *  work appears unlinked — the next `git-refs.changed` backfill attaches
+   *  the pending rows to the fresh sha. See wi-ec4c8e6f44fd. */
+  worktreeClean?: boolean;
 }
 
 export interface NextWorkItemContext {
@@ -116,6 +122,13 @@ export function decideStopDirective(
   // commit point pending for the thread that eventually becomes writer.
   if (activeCommit && activeCommit.status === "pending" && snapshot.thread?.status === "active") {
     if (activeCommit.mode === "auto" && builders.buildAutoCommitReason) {
+      // Clean tree → nothing to commit. Skip the directive (wi-ec4c8e6f44fd).
+      // Backfill of the junction runs via git-refs.changed on the prior
+      // commit; the pending commit_point row stays "pending" until the
+      // agent/runtime resolves it explicitly.
+      if (snapshot.worktreeClean) {
+        return { directive: null, sideEffects };
+      }
       return {
         directive: { decision: "block", reason: builders.buildAutoCommitReason(activeCommit) },
         sideEffects,
@@ -131,11 +144,15 @@ export function decideStopDirective(
   // settled work — fire the auto-commit directive with cp=null. The agent
   // runs `mcp__newde__commit` with { auto: true } and the runtime commits
   // without touching a commit_point row. Only the writer thread commits.
+  // Clean tree suppresses the misfire — the sha already landed via ad-hoc
+  // git commit (Bash / Files panel) and the backfill path attaches the
+  // junction rows. See wi-ec4c8e6f44fd.
   if (
     snapshot.autoCommit &&
     snapshot.thread?.status === "active" &&
     builders.buildAutoCommitReason &&
-    hasSettledWork(snapshot.workItems)
+    hasSettledWork(snapshot.workItems) &&
+    !snapshot.worktreeClean
   ) {
     return {
       directive: { decision: "block", reason: builders.buildAutoCommitReason(null) },
