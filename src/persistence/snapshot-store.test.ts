@@ -217,7 +217,7 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  test("listSnapshotsForStream returns rows newest-first", () => {
+  test("listSnapshotsForStream hides the initial baseline (nothing to diff against)", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
     const first = store.flushSnapshot({
@@ -226,6 +226,9 @@ describe("SnapshotStore", () => {
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
+    // Only the baseline exists — nothing should be listed.
+    expect(store.listSnapshotsForStream(streamId)).toEqual([]);
+
     writeFileSync(join(worktreePath, "a.txt"), "b");
     const second = store.flushSnapshot({
       source: "turn-end",
@@ -233,8 +236,11 @@ describe("SnapshotStore", () => {
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
+    // The baseline (`first`) is still excluded; only the second shows up.
     const listed = store.listSnapshotsForStream(streamId);
-    expect(listed.map((s) => s.id)).toEqual([second.id, first.id]);
+    expect(listed.map((s) => s.id)).toEqual([second.id]);
+    // But the baseline is still resolvable (it's the previous for `second`).
+    expect(store.getPreviousSnapshot(second.id)?.id).toBe(first.id);
     rmSync(projectDir, { recursive: true, force: true });
   });
 

@@ -188,6 +188,13 @@ deleted counts relative to that previous snapshot (or an explicit one
 if provided); `getSnapshotPairDiff(beforeId, afterId, path)` serves
 arbitrary pair diffs.
 
+**Baseline is hidden from Local History.** The first snapshot per
+stream has no predecessor, so there's nothing to diff against and
+nothing meaningful to show. `listSnapshotsForStream` excludes it
+(subsequent snapshots use it as their "previous" via
+`getSnapshotSummary`). The baseline still lives in the DB — only the
+UI list skips it.
+
 Blobs live on disk at `.newde/snapshots/objects/xx/yyyy…` (sha256
 addressed, shared across streams for dedup).
 

@@ -448,12 +448,24 @@ export class SnapshotStore {
     return Array.from(dirty).sort();
   }
 
+  /**
+   * Snapshots visible in Local History: excludes the very first snapshot per
+   * stream (the initial baseline has nothing to diff against and would only
+   * add noise). The baseline still exists in the DB and acts as the
+   * "previous" for the second snapshot's summary.
+   */
   listSnapshotsForStream(streamId: string, limit = 100): FileSnapshot[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        `SELECT * FROM file_snapshot
-         WHERE stream_id = ?
-         ORDER BY created_at DESC, rowid DESC
+        `SELECT * FROM file_snapshot f
+         WHERE f.stream_id = ?
+           AND EXISTS (
+             SELECT 1 FROM file_snapshot earlier
+             WHERE earlier.stream_id = f.stream_id
+               AND (earlier.created_at < f.created_at
+                    OR (earlier.created_at = f.created_at AND earlier.rowid < f.rowid))
+           )
+         ORDER BY f.created_at DESC, f.rowid DESC
          LIMIT ?`,
         streamId,
         limit,
