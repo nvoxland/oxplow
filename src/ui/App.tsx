@@ -1405,7 +1405,15 @@ export function App() {
         label: `${label} (${suffix})`,
         closable: true,
         render: () => stream ? (
-          <DiffPane stream={stream} spec={diff.spec} visible={effectiveCenterActive === diff.id} />
+          <DiffPane
+            stream={stream}
+            spec={diff.spec}
+            visible={effectiveCenterActive === diff.id}
+            onJumpToSource={(path) => {
+              void handleOpenFile(path);
+              closeDiffTab(diff.id);
+            }}
+          />
         ) : null,
       });
     }

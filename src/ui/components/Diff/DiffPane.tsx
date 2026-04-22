@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { readFileAtRef, readWorkspaceFile, type Stream } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
 
@@ -19,9 +19,21 @@ interface Props {
   stream: Stream;
   spec: DiffSpec;
   visible: boolean;
+  /** Open the right-side path in the regular editor pane and close this diff tab. */
+  onJumpToSource?: (path: string) => void;
 }
 
-export function DiffPane({ stream, spec, visible }: Props) {
+const toolbarButtonStyle: React.CSSProperties = {
+  background: "var(--panel)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 3,
+  padding: "2px 8px",
+  fontSize: 11,
+  cursor: "pointer",
+};
+
+export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
@@ -101,6 +113,37 @@ export function DiffPane({ stream, spec, visible }: Props) {
         <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--fg)" }}>{spec.path}</span>
         <span>vs {spec.baseLabel}</span>
         {error ? <span style={{ color: "#ff6b6b" }}>{error}</span> : null}
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => editorRef.current?.goToDiff("previous")}
+          disabled={!editorReady}
+          title="Previous change"
+          data-testid="diff-prev-change"
+          style={toolbarButtonStyle}
+        >
+          ↑ Prev
+        </button>
+        <button
+          type="button"
+          onClick={() => editorRef.current?.goToDiff("next")}
+          disabled={!editorReady}
+          title="Next change"
+          data-testid="diff-next-change"
+          style={toolbarButtonStyle}
+        >
+          ↓ Next
+        </button>
+        <button
+          type="button"
+          onClick={() => onJumpToSource?.(spec.path)}
+          disabled={!onJumpToSource}
+          title="Open file in editor"
+          data-testid="diff-jump-to-source"
+          style={toolbarButtonStyle}
+        >
+          Open file
+        </button>
       </div>
       <div
         ref={hostRef}

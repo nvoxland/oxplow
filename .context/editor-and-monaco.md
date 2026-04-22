@@ -136,6 +136,16 @@ two render modes:
 Tab labels honor an optional `labelOverride` so inline diffs can show
 "selection vs clipboard" instead of generic "(diff)".
 
+The pane's top toolbar carries three buttons: Prev / Next (which call
+`editor.goToDiff("previous" | "next")` — Monaco's built-in diff
+navigation on the diff editor instance) and Open file (fires the
+`onJumpToSource` prop). `App.tsx` wires `onJumpToSource` to
+`handleOpenFile(spec.path)` followed by `closeDiffTab(diff.id)`, so
+jumping to source opens the working copy of the right-side path in the
+regular editor pane and closes the diff tab. For literal-content diffs
+(e.g. Compare with Clipboard) this still opens the workspace file,
+which is the useful action.
+
 ## LSP bridge
 
 `src/ui/lsp.ts` defines `LspClient`, which talks to a per-language LSP
