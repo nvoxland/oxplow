@@ -21,14 +21,14 @@ That means the app already has a strong custom domain model. In particular, **st
 
 ## Workspace isolation rule
 
-Newde usage must always be isolated to the directory where the daemon was started and that directory's descendants.
+Oxplow usage must always be isolated to the directory where the daemon was started and that directory's descendants.
 
 Specifically:
 
 - do not look to parent directories for project data, repo state, workspace files, or configuration
 - treat the daemon start directory as the workspace root, even if it lives inside some larger parent repo
 - only consider Git enabled when that workspace root itself contains the repo root
-- if the workspace root is not its own Git repo, newde should still work for file browsing/editing and agent panes, but Git features must be disabled
+- if the workspace root is not its own Git repo, oxplow should still work for file browsing/editing and agent panes, but Git features must be disabled
 - when Git is disabled, alternate stream creation and other Git-dependent flows must also be disabled
 
 This rule takes priority over convenience heuristics like "find the nearest enclosing git repo."

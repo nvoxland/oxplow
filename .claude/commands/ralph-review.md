@@ -33,9 +33,9 @@ Walk the transcript window and pull out:
 - Any pass that was **abandoned** or **stopped early** and why.
 - Any moment you spent notable token budget on debugging,
   polling, killing orphan processes, or re-running the same thing.
-- Every time you reached for information **outside of newde** (git
+- Every time you reached for information **outside of oxplow** (git
   log, grep, direct file reads, sqlite, tests-e2e probes driving
-  DOM selectors) when the loop's spirit is to drive newde as a
+  DOM selectors) when the loop's spirit is to drive oxplow as a
   user.
 
 Also scan `ls -t .self-ralph/fix-*.md | head` and cross-reference
@@ -73,20 +73,20 @@ fighting a hung probe, say that. If most of your passes were
 testid-adding busywork, say that — the prompt has a rule against
 it, and if the rule was broken, call it out.
 
-### How well did you actually dogfood newde?
+### How well did you actually dogfood oxplow?
 The `/self-ralph` prompt says "you are a user, not an MCP caller."
-- Did you ever launch newde and drive it as a user end-to-end, or
+- Did you ever launch oxplow and drive it as a user end-to-end, or
   did you only drive individual DOM widgets through Playwright?
 - Did you prompt the agent pane, approve commit points, resume
   from wait points? Or did every probe sit on empty/static state?
-- Did you call `mcp__newde__*` tools directly? (You shouldn't
+- Did you call `mcp__oxplow__*` tools directly? (You shouldn't
   have. If you did, that's the top problem.)
 
 ### Where did you cheat?
-Every time you reached outside of newde for information a newde
+Every time you reached outside of oxplow for information a oxplow
 user would get from the UI. Git log, grep, direct file reads. Some
 are fine; some are the loop failing to find the answer inside
-newde.
+oxplow.
 
 ### Token efficiency
 Specific cases where you burned tokens:
@@ -100,7 +100,7 @@ prevented each one.** If no existing rule covers it, propose one.
 
 ### Larger patterns you only see in aggregate
 Look across the window, not per pass. Usability problems, parts of
-newde the loop keeps under-picking, missing affordances,
+oxplow the loop keeps under-picking, missing affordances,
 inconsistencies that no single pass surfaces. These are the
 highest-value finds of a retrospective — a pass fixes one thing,
 a retrospective names a pattern.
@@ -119,7 +119,7 @@ you read at Before-you-start time:
 - **Problems that were flagged and stayed unfixed.** Name them.
   Repeat offenses are the most damning evidence.
 - **Problems that were flagged and DID get fixed** (prompt, harness,
-  todo, or newde code). Credit the commit.
+  todo, or oxplow code). Credit the commit.
 - **Problems that newly appeared** in this window that the prior
   review would have caught if it had been run again sooner.
 - **Delta in behavior:** are you cheating less / dogfooding more /
@@ -132,10 +132,10 @@ Two lists:
 
 1. **Direct fixes to the harness / prompt / `.self-ralph/`** —
    things you should fix *right now* without a `/self-ralph`
-   pass, because they are meta-infra, not newde code. Just do
+   pass, because they are meta-infra, not oxplow code. Just do
    them and note what you did.
 
-2. **Recommendations to newde / todo.md** — things that go into
+2. **Recommendations to oxplow / todo.md** — things that go into
    `.self-ralph/todo.md` (or adjustments to existing entries) so
    future passes pick them up. Avoid the testid-adding-as-todo
    trap from the current prompt's guard.
@@ -179,6 +179,6 @@ prior one. Keep `.self-ralph/review-*.md` gitignored (the whole
 - **Be honest about your own mistakes.** "I abandoned this pass
   because I couldn't root-cause a hang" is more useful than
   "the pass was exploratory."
-- **Never call `mcp__newde__*` tools as part of the review.** You
-  are the reviewer, not a newde agent. If the review reveals that
+- **Never call `mcp__oxplow__*` tools as part of the review.** You
+  are the reviewer, not a oxplow agent. If the review reveals that
   you previously called them, flag it as the top problem.

@@ -48,7 +48,7 @@ function fakeMcp(overrides: Partial<McpServerHandle> = {}): McpServerHandle {
 
 test("buildThreadMcpConfig points Claude at the shared HTTP MCP endpoint", () => {
   const config = JSON.parse(buildThreadMcpConfig(fakeMcp()));
-  expect(config.mcpServers.newde).toEqual({
+  expect(config.mcpServers.oxplow).toEqual({
     type: "http",
     url: "http://127.0.0.1:43123/mcp",
     headers: {
@@ -57,14 +57,14 @@ test("buildThreadMcpConfig points Claude at the shared HTTP MCP endpoint", () =>
   });
 });
 
-test("buildThreadMcpConfig only declares the newde server", () => {
+test("buildThreadMcpConfig only declares the oxplow server", () => {
   const config = JSON.parse(buildThreadMcpConfig(fakeMcp()));
-  expect(Object.keys(config.mcpServers)).toEqual(["newde"]);
+  expect(Object.keys(config.mcpServers)).toEqual(["oxplow"]);
 });
 
 test("buildThreadMcpConfig embeds the exact bearer format", () => {
   const config = JSON.parse(buildThreadMcpConfig(fakeMcp({ authToken: "abc.def-ghi" })));
-  expect(config.mcpServers.newde.headers.Authorization).toBe("Bearer abc.def-ghi");
+  expect(config.mcpServers.oxplow.headers.Authorization).toBe("Bearer abc.def-ghi");
 });
 
 test("buildThreadMcpConfig throws when the MCP server is not running", () => {
@@ -271,7 +271,7 @@ test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context
     { uiChangeNudge: true },
   );
   expect(text).toMatch(/^⚠ UI change detected/);
-  expect(text).toMatch(/restart newde/i);
+  expect(text).toMatch(/restart oxplow/i);
   expect(text).toContain("exercise the feature in the browser");
   // The dispatch body still follows after the banner.
   expect(text).toContain("read_work_options");
@@ -297,8 +297,8 @@ test("buildNextWorkItemStopReason directs the agent to call read_work_options an
   // thread_id is embedded in the read_work_options call so the agent can pass the right threadId.
   expect(text).toMatch(/threadId="b-xyz"/);
   // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
-  // merged newde-runtime skill — the directive just points at it to stay terse.
-  expect(text).toContain("newde-runtime");
+  // merged oxplow-runtime skill — the directive just points at it to stay terse.
+  expect(text).toContain("oxplow-runtime");
   // Trimmed: directive should be a single line / well under 400 tokens.
   expect(text.length).toBeLessThan(400);
 });
@@ -423,7 +423,7 @@ test("buildCommitPointStopReason: approve-mode directive keeps the user-approval
 // ---- isInsideWorktree / shouldAcceptHookFilePath: hook path filtering ----
 
 test("isInsideWorktree: absolute path inside the worktree is accepted", () => {
-  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  const root = mkdtempSync(join(tmpdir(), "oxplow-runtime-"));
   try {
     expect(isInsideWorktree(resolve(root, "src/index.ts"), root)).toBe(true);
     expect(isInsideWorktree(root, root)).toBe(true);
@@ -433,7 +433,7 @@ test("isInsideWorktree: absolute path inside the worktree is accepted", () => {
 });
 
 test("isInsideWorktree: path that resolves outside the worktree is rejected", () => {
-  const parent = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  const parent = mkdtempSync(join(tmpdir(), "oxplow-runtime-"));
   try {
     const root = join(parent, "worktree");
     // ../ escape from within root
@@ -446,7 +446,7 @@ test("isInsideWorktree: path that resolves outside the worktree is rejected", ()
 });
 
 test("shouldAcceptHookFilePath: accepts a normal in-tree source file", () => {
-  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  const root = mkdtempSync(join(tmpdir(), "oxplow-runtime-"));
   try {
     expect(shouldAcceptHookFilePath(resolve(root, "src/index.ts"), root)).toBe(true);
     // Works with a relative path too.
@@ -457,9 +457,9 @@ test("shouldAcceptHookFilePath: accepts a normal in-tree source file", () => {
 });
 
 test("shouldAcceptHookFilePath: rejects in-tree paths that match workspace ignore rules", () => {
-  const root = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  const root = mkdtempSync(join(tmpdir(), "oxplow-runtime-"));
   try {
-    expect(shouldAcceptHookFilePath(resolve(root, ".newde/state.db"), root)).toBe(false);
+    expect(shouldAcceptHookFilePath(resolve(root, ".oxplow/state.db"), root)).toBe(false);
     expect(shouldAcceptHookFilePath(resolve(root, "node_modules/x/index.js"), root)).toBe(false);
     expect(shouldAcceptHookFilePath(resolve(root, ".context/foo.md.tmp.1.2"), root)).toBe(false);
   } finally {
@@ -468,7 +468,7 @@ test("shouldAcceptHookFilePath: rejects in-tree paths that match workspace ignor
 });
 
 test("shouldAcceptHookFilePath: rejects paths that resolve outside the worktree", () => {
-  const parent = mkdtempSync(join(tmpdir(), "newde-runtime-"));
+  const parent = mkdtempSync(join(tmpdir(), "oxplow-runtime-"));
   try {
     const root = join(parent, "worktree");
     expect(shouldAcceptHookFilePath("/tmp/elsewhere/file.ts", root)).toBe(false);
@@ -501,7 +501,7 @@ test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit 
 });
 
 function seedHistoryHarness() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-rth-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-rth-"));
   const streamStore = new StreamStore(dir);
   const stream = streamStore.create({
     title: "Demo",
@@ -516,11 +516,11 @@ function seedHistoryHarness() {
   const turnStore = new TurnStore(dir);
   const effortStore = new WorkItemEffortStore(dir);
   const snapshotStore = new SnapshotStore(dir);
-  // Mirror production's workspace-watch ignore: skip .newde and common
+  // Mirror production's workspace-watch ignore: skip .oxplow and common
   // build/cache dirs so the full-walk comparison is over the user's files
   // only. Without this, a full-walk flush would pick up the SQLite DB and
   // snapshot blobs, none of which are stable between calls.
-  const ignore = (rel: string) => rel.startsWith(".newde") || rel.startsWith(".git");
+  const ignore = (rel: string) => rel.startsWith(".oxplow") || rel.startsWith(".git");
   // Flush a baseline so the first task-start/turn-start snapshot has a
   // `getLatestSnapshot` to dedup against (mirrors real startup flow).
   writeFileSync(join(dir, "seed.txt"), "baseline");
@@ -667,7 +667,7 @@ describe("history-tracking runtime wiring", () => {
       streamId: h.stream.id,
       worktreePath: h.dir,
       dirtyPaths: null,
-      ignore: (rel) => rel.startsWith(".newde") || rel.startsWith(".git"),
+      ignore: (rel) => rel.startsWith(".oxplow") || rel.startsWith(".git"),
     });
     expect(again.created).toBe(false);
     rmSync(h.dir, { recursive: true, force: true });

@@ -45,7 +45,7 @@ export class StreamStore {
     private readonly projectDir: string,
     private readonly logger?: Logger,
   ) {
-    this.rootDir = join(projectDir, ".newde");
+    this.rootDir = join(projectDir, ".oxplow");
     this.legacyDir = join(this.rootDir, "streams");
     this.legacyStatePath = join(this.rootDir, "state.json");
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
@@ -135,8 +135,8 @@ export class StreamStore {
       updated_at: now,
       custom_prompt: null,
       panes: {
-        working: `newde-${input.projectBase}:working-${id}`,
-        talking: `newde-${input.projectBase}:talking-${id}`,
+        working: `oxplow-${input.projectBase}:working-${id}`,
+        talking: `oxplow-${input.projectBase}:talking-${id}`,
       },
       resume: {
         working_session_id: "",

@@ -186,7 +186,7 @@ export class TurnStore {
   }
 
   /** Return the open (`ended_at IS NULL`) turns for a thread whose
-   *  `started_at >= sinceIso`. The cutoff is load-bearing: when newde
+   *  `started_at >= sinceIso`. The cutoff is load-bearing: when oxplow
    *  crashes, open turns don't get their `ended_at` set — the
    *  runtime-start cutoff filters those orphans out so the in_progress
    *  bucket doesn't haunt with dead turns. Newest-first (started_at DESC,

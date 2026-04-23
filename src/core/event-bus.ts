@@ -108,7 +108,7 @@ export interface FileSnapshotCreatedEvent {
   threadId: string | null;
 }
 
-export type NewdeEvent =
+export type OxplowEvent =
   | WorkspaceChangedEvent
   | HookRecordedEvent
   | WorkItemChangedEvent
@@ -124,16 +124,16 @@ export type NewdeEvent =
   | StreamChangedEvent
   | ConfigChangedEvent;
 
-export type NewdeEventType = NewdeEvent["type"];
+export type OxplowEventType = OxplowEvent["type"];
 
-export type NewdeEventOf<T extends NewdeEventType> = Extract<NewdeEvent, { type: T }>;
+export type OxplowEventOf<T extends OxplowEventType> = Extract<OxplowEvent, { type: T }>;
 
 export class EventBus {
-  private readonly listeners = new Set<(event: NewdeEvent) => void>();
+  private readonly listeners = new Set<(event: OxplowEvent) => void>();
 
   constructor(private readonly logger?: Logger) {}
 
-  publish(event: NewdeEvent): void {
+  publish(event: OxplowEvent): void {
     for (const listener of this.listeners) {
       try {
         listener(event);
@@ -146,19 +146,19 @@ export class EventBus {
     }
   }
 
-  subscribe(listener: (event: NewdeEvent) => void): () => void {
+  subscribe(listener: (event: OxplowEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
   }
 
-  subscribeByType<T extends NewdeEventType>(
+  subscribeByType<T extends OxplowEventType>(
     type: T,
-    listener: (event: NewdeEventOf<T>) => void,
+    listener: (event: OxplowEventOf<T>) => void,
   ): () => void {
     return this.subscribe((event) => {
-      if (event.type === type) listener(event as NewdeEventOf<T>);
+      if (event.type === type) listener(event as OxplowEventOf<T>);
     });
   }
 }

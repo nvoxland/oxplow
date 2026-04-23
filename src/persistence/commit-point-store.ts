@@ -5,7 +5,7 @@ import { StoreEmitter } from "./store-emitter.js";
 
 // Commit points support two modes:
 //   "approve" (default) — the agent drafts a message in chat, waits for user
-//     approval, then calls `newde__commit` to run git.
+//     approval, then calls `oxplow__commit` to run git.
 //   "auto" — the runtime commits immediately without user approval (stop-hook
 //     pipeline handles this with an auto-generated message).
 export type CommitPointStatus = "pending" | "done";

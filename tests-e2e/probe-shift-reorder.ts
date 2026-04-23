@@ -17,7 +17,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, runProbe } from "./harness.ts";
+import { launchOxplow, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +30,7 @@ async function main() {
   const titleA = `shift-reorder-A-${stamp}`;
   const titleB = `shift-reorder-B-${stamp}`;
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   const fails: string[] = [];
   try {
     await window.waitForTimeout(3_000);

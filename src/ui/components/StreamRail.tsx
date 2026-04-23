@@ -23,7 +23,7 @@ interface Props {
   createRequest?: number;
 }
 
-export const STREAM_DRAG_MIME = "application/x-newde-stream";
+export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
 export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
@@ -137,7 +137,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   return (
     <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-3)", borderBottom: "1px solid var(--border-strong)" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "0 10px", overflow: "hidden" }}>
-        <div className="newde-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+        <div className="oxplow-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
           {streams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "idle";

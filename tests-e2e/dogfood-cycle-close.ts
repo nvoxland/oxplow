@@ -6,12 +6,12 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { dogfoodInnerAgent, launchNewde, probeLog, runProbe, waitForNewdeReady } from "./harness.ts";
+import { dogfoodInnerAgent, launchOxplow, probeLog, runProbe, waitForOxplowReady } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WORK_ITEM_TITLE = "Propose commit for in-flight changes";
-const WORK_ITEM_BODY = "A commit point was just seeded. Call mcp__newde__propose_commit for the pending edits with a conventional-commits message.";
+const WORK_ITEM_BODY = "A commit point was just seeded. Call mcp__oxplow__propose_commit for the pending edits with a conventional-commits message.";
 
 async function main() {
   await runProbe("dogfood-cycle-close", async () => {
@@ -19,9 +19,9 @@ async function main() {
     const outDir = resolve(__dirname, "screenshots");
     mkdirSync(outDir, { recursive: true });
 
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
-      await waitForNewdeReady(window);
+      await waitForOxplowReady(window);
       const result = await dogfoodInnerAgent(window, {
         slug: "close",
         outDir,

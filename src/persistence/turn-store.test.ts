@@ -8,7 +8,7 @@ import { StreamStore } from "./stream-store.js";
 import { TurnStore, type TurnChange } from "./turn-store.js";
 
 function seed() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-turns-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-turns-"));
   const streamStore = new StreamStore(dir);
   const stream = streamStore.create({
     title: "Demo",

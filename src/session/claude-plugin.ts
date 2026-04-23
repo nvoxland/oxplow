@@ -12,7 +12,7 @@ import {
 
 export interface ElectronPluginOptions {
   /** Project dir. The plugin is written to
-   *  <projectDir>/.newde/runtime/claude-plugin/. */
+   *  <projectDir>/.oxplow/runtime/claude-plugin/. */
   projectDir: string;
   /** Absolute URL the plugin's http hooks POST to. Event name is appended
    *  as a path segment. */
@@ -28,7 +28,7 @@ export interface ElectronPlugin {
   manifestPath: string;
   /** Absolute path to the reference guide the agent can Read on demand. */
   agentGuidePath: string;
-  /** Absolute path to the merged newde-runtime SKILL.md (filing + lifecycle + dispatch). */
+  /** Absolute path to the merged oxplow-runtime SKILL.md (filing + lifecycle + dispatch). */
   runtimeSkillPath: string;
   /** Back-compat alias for runtimeSkillPath — the three legacy skills
    *  now collapse into the single merged skill, so all three paths point
@@ -59,14 +59,14 @@ export const HOOK_EVENTS = [
 ] as const;
 
 const PLUGIN_ENV_VARS = [
-  "NEWDE_HOOK_TOKEN",
-  "NEWDE_STREAM_ID",
-  "NEWDE_THREAD_ID",
-  "NEWDE_PANE",
+  "OXPLOW_HOOK_TOKEN",
+  "OXPLOW_STREAM_ID",
+  "OXPLOW_THREAD_ID",
+  "OXPLOW_PANE",
 ] as const;
 
 /**
- * Writes a Claude Code plugin to <projectDir>/.newde/runtime/claude-plugin/
+ * Writes a Claude Code plugin to <projectDir>/.oxplow/runtime/claude-plugin/
  * that registers http hooks pointing at the runtime's MCP hook endpoint.
  * Invoked via `claude --plugin-dir <absPath>` so no files land in the user's
  * worktree.
@@ -75,7 +75,7 @@ const PLUGIN_ENV_VARS = [
  * headers, so re-writing is safe as long as the runtime's MCP port is stable.
  */
 export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugin {
-  const pluginDir = join(opts.projectDir, ".newde", "runtime", "claude-plugin");
+  const pluginDir = join(opts.projectDir, ".oxplow", "runtime", "claude-plugin");
   const manifestDir = join(pluginDir, ".claude-plugin");
   const hooksDir = join(pluginDir, "hooks");
   mkdirSync(manifestDir, { recursive: true });
@@ -86,9 +86,9 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     manifestPath,
     JSON.stringify(
       {
-        name: "newde-runtime",
+        name: "oxplow-runtime",
         version: "0.0.0",
-        description: "Forwards Claude Code lifecycle hooks into the newde runtime.",
+        description: "Forwards Claude Code lifecycle hooks into the oxplow runtime.",
       },
       null,
       2,
@@ -110,7 +110,7 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
 
   // Model-invoked skills that fire on targeted triggers. Post-merge the
   // three legacy orchestrator-side skills (filing, lifecycle, dispatch)
-  // collapse into one `newde-runtime` skill — the per-turn skill index
+  // collapse into one `oxplow-runtime` skill — the per-turn skill index
   // drops from three lines to one. The subagent-work-protocol skill
   // stays separate since it only triggers in subagent contexts.
   const writeSkill = (skillName: string, content: string): string => {
@@ -129,7 +129,7 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
 
   // Standing dispatch protocol for subagents — loaded whenever an agent
   // (typically a general-purpose subagent the orchestrator launched) sees a
-  // work-item id in its brief or touches the newde update/note tools. Keeping
+  // work-item id in its brief or touches the oxplow update/note tools. Keeping
   // this out of every orchestrator brief cuts per-dispatch brief size from
   // ~1000 tokens to ~150.
   const subagentProtocolDir = join(pluginDir, "skills", SUBAGENT_PROTOCOL_SKILL_NAME);
@@ -158,10 +158,10 @@ function buildPluginHooks(hookUrl: string) {
       url: `${hookUrl}/${event}`,
       timeout: 3,
       headers: {
-        "Authorization": "Bearer $NEWDE_HOOK_TOKEN",
-        "X-Newde-Stream": "$NEWDE_STREAM_ID",
-        "X-Newde-Thread": "$NEWDE_THREAD_ID",
-        "X-Newde-Pane": "$NEWDE_PANE",
+        "Authorization": "Bearer $OXPLOW_HOOK_TOKEN",
+        "X-Oxplow-Stream": "$OXPLOW_STREAM_ID",
+        "X-Oxplow-Thread": "$OXPLOW_THREAD_ID",
+        "X-Oxplow-Pane": "$OXPLOW_PANE",
       },
       allowedEnvVars: [...PLUGIN_ENV_VARS],
     };

@@ -1,10 +1,10 @@
-// Actual end-to-end dogfood: open a scratch file via newde's file tree, type
+// Actual end-to-end dogfood: open a scratch file via oxplow's file tree, type
 // into Monaco, save with Cmd+S, verify the bytes on disk. This is the harness
-// proving it can *drive* newde to make a real edit.
+// proving it can *drive* oxplow to make a real edit.
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { launchNewde } from "./harness.ts";
+import { launchOxplow } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -13,13 +13,13 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  // Scratch file that we will edit through newde's UI.
+  // Scratch file that we will edit through oxplow's UI.
   const scratchRel = "tests-e2e/scratch-edit-target.txt";
   const scratchAbs = resolve(projectDir, scratchRel);
   const originalContent = `original line\n`;
   writeFileSync(scratchAbs, originalContent);
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   const log = (...args: unknown[]) => console.log("[drive]", ...args);
 
   try {

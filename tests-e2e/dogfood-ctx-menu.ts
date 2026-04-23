@@ -1,8 +1,8 @@
-// Dogfood pass: prompt the inner agent (inside newde) to expand the
+// Dogfood pass: prompt the inner agent (inside oxplow) to expand the
 // work-item right-click context menu beyond Delete. Adapted from
 // dogfood-cycle.ts but narrower in scope.
 //
-// This script drives newde as a user:
+// This script drives oxplow as a user:
 //   1. Create ONE work item via + New (the allowed Plan-UI exception)
 //   2. Focus the agent-pane xterm
 //   3. Type a prompt referencing the work item by title
@@ -15,7 +15,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,11 +36,11 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
 
   try {
     await window.waitForTimeout(3_000);
-    probeLog("[dogfood] newde launched");
+    probeLog("[dogfood] oxplow launched");
 
     // Step 1: activate Work panel
     const workPanel = window.getByTestId("dock-panel-plan");
@@ -67,7 +67,7 @@ async function main() {
     await xterm.click();
     await window.waitForTimeout(400);
 
-    const prompt = `There's a new work item in the queue titled "${WORK_ITEM_TITLE}". Call mcp__newde__list_ready_work to see it, pick it up (mark in_progress), do the work as described, run bun test, and propose a commit when done.`;
+    const prompt = `There's a new work item in the queue titled "${WORK_ITEM_TITLE}". Call mcp__oxplow__list_ready_work to see it, pick it up (mark in_progress), do the work as described, run bun test, and propose a commit when done.`;
     await window.keyboard.type(prompt);
     await window.waitForTimeout(500);
     await window.screenshot({ path: resolve(outDir, "dogfood-02-prompt.png") });

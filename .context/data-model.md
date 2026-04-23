@@ -7,7 +7,7 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Storage
 
-All persistence lives in one SQLite file under `.newde/state.sqlite`, opened
+All persistence lives in one SQLite file under `.oxplow/state.sqlite`, opened
 through `getStateDatabase()` (`src/persistence/state-db.ts`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 migrations (`src/persistence/migrations.ts`) gated by `PRAGMA user_version`
@@ -20,7 +20,7 @@ migrations (`src/persistence/migrations.ts`) gated by `PRAGMA user_version`
 Top-level workspace context. One row per branch the user is working on.
 Each stream owns:
 
-- a worktree path (its own checkout under `.newde/worktrees/`)
+- a worktree path (its own checkout under `.oxplow/worktrees/`)
 - two tmux pane targets (`working` and `talking`)
 - per-pane Claude resume session ids (so reconnecting picks up history)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
@@ -121,12 +121,12 @@ migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
   table for structured note display.
 
 - **Thread-scoped rows** (`thread_id` set, `work_item_id` NULL) are the
-  landing spot for `newde__delegate_query` Explore-subagent findings. The
+  landing spot for `oxplow__delegate_query` Explore-subagent findings. The
   delegate tool pre-allocates a row with empty body (via
   `addThreadNote`), passes the id into the subagent prompt, and the
-  subagent fills the body by calling `newde__record_query_finding` (store
+  subagent fills the body by calling `oxplow__record_query_finding` (store
   method `updateThreadNoteBody`). The orchestrator reads them back via
-  `newde__get_thread_notes` / `listThreadNotes(threadId, limit)` —
+  `oxplow__get_thread_notes` / `listThreadNotes(threadId, limit)` —
   reverse-chronological, capped at 100.
 
 ### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
@@ -136,7 +136,7 @@ Markers in the queue that say "commit at this point." Status:
 now route through the agent: the Stop-hook directive asks the agent to
 inspect the diff and draft a message. The only difference is the user-
 approval gate — approve mode asks, auto mode commits in the same turn.
-Either way the agent calls `newde__commit({ commit_point_id, message })`,
+Either way the agent calls `oxplow__commit({ commit_point_id, message })`,
 `git commit` runs synchronously, and the row flips to `done`. Drafted
 messages live only in chat; the row stores mode, status, and (once
 committed) the sha. See [agent-model.md](./agent-model.md) for the
@@ -146,7 +146,7 @@ Stop-hook flow.
 downstream queries:
 
 - `CommitPointStore.getLatestDoneForThread(threadId)` — used by the
-  `mcp__newde__tasks_since_last_commit` MCP tool to bound "what's
+  `mcp__oxplow__tasks_since_last_commit` MCP tool to bound "what's
   changed since last commit?" for auto-commit drafting.
 - The `buildAutoCommitMessage` fallback filters settled work items by
   `updated_at > completed_at` so its body reflects this commit's
@@ -239,14 +239,14 @@ list of changed paths (computed from the pair diff).
 
 **Commit↔item attribution is intentionally NOT tracked.** A
 `work_item_commit` junction existed briefly (migration v27) but was
-removed in v28. Users commit outside newde all the time (IDE buttons,
-CLI, CI rebases, merges, squashes) and newde has no authoritative hook
+removed in v28. Users commit outside oxplow all the time (IDE buttons,
+CLI, CI rebases, merges, squashes) and oxplow has no authoritative hook
 there; the best the runtime could do was a heuristic ("items whose
 efforts closed in the window since the last done commit_point"), which
 silently misattributes when work is split across multiple commits,
 committed earlier, or touched by reopened efforts. A blame-style
 feature built on that data would lie more often than it'd be useful.
-The supplementary `mcp__newde__tasks_since_last_commit` tool stays —
+The supplementary `mcp__oxplow__tasks_since_last_commit` tool stays —
 it's advisory context for the agent drafting a commit message, not a
 persisted link — and `commit_point.commit_sha` stays (1:1 with the
 point the runtime itself closed). If a future feature wants "show me
@@ -298,7 +298,7 @@ wins over effort-start when the same snapshot is both. Unlinked
 snapshots get `label: null` and the UI falls back to the `source`
 column.
 
-Blobs live on disk at `.newde/snapshots/objects/xx/yyyy…` (sha256
+Blobs live on disk at `.oxplow/snapshots/objects/xx/yyyy…` (sha256
 addressed, shared across streams for dedup).
 
 Entry states:
@@ -312,11 +312,11 @@ entry as the deletion signal. Migration v24 drops any legacy
 
 **Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
 deletes snapshots older than the cutoff (default 7 days, configurable
-via `newde.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
+via `oxplow.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
 most recent snapshot per stream is always kept. `gcBlobs()` then sweeps
-`.newde/snapshots/objects/` and removes any blob whose sha isn't
+`.oxplow/snapshots/objects/` and removes any blob whose sha isn't
 referenced by a surviving manifest. The blob store is shared across all
-streams (`.newde/snapshots/objects/`), so GC runs at the project level
+streams (`.oxplow/snapshots/objects/`), so GC runs at the project level
 and dedupes identical content across branches.
 
 Cleanup runs at runtime startup and again once every 24 hours via
@@ -325,11 +325,11 @@ Cleanup runs at runtime startup and again once every 24 hours via
 
 **Ignoring generated directories.** The fs-watcher and the snapshot
 seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
-`src/git/workspace-watch.ts`. It covers `.git/`, `.newde/logs/`,
-`.newde/worktrees/`, and a hardcoded list of common build/cache dir
+`src/git/workspace-watch.ts`. It covers `.git/`, `.oxplow/logs/`,
+`.oxplow/worktrees/`, and a hardcoded list of common build/cache dir
 names (`node_modules`, `dist`, `build`, `target`, `.next`, `.turbo`,
 `.cache`, `.venv`, `__pycache__`, …). Users can extend the list via
-`generatedDirs: [...]` in `newde.yaml` — names are single path
+`generatedDirs: [...]` in `oxplow.yaml` — names are single path
 segments matched anywhere in the relative path, and apply to both
 the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
@@ -433,7 +433,7 @@ The runtime relays each store's changes onto the typed EventBus
 - `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`
 
-UI components subscribe via `subscribeNewdeEvents()` (or scoped helpers
+UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
 like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in
 `src/ui/api.ts`. See [ipc-and-stores.md](./ipc-and-stores.md) for how to
 plumb a new event end-to-end.

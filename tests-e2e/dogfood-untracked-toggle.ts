@@ -5,7 +5,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -14,7 +14,7 @@ const BODY = `The Files-commit dialog (CommitDialog in src/ui/components/Panels/
 
 Please:
 1. Add an \`includeUntracked\` boolean to gitCommitAll in src/git/git.ts. When false, use \`git add -u\` (modified + deleted only). When true, keep current \`git add -A\` behavior.
-2. Thread the parameter through src/electron/runtime.ts (gitCommitAll), src/electron/main.ts (newde:gitCommitAll handler), and src/ui/api.ts (gitCommitAll wrapper).
+2. Thread the parameter through src/electron/runtime.ts (gitCommitAll), src/electron/main.ts (oxplow:gitCommitAll handler), and src/ui/api.ts (gitCommitAll wrapper).
 3. In CommitDialog, add a checkbox labeled "Include N untracked file(s)" that defaults OFF. The N comes from the indexedFiles list filtered by gitStatus === "untracked"; if N is 0, hide the checkbox entirely. Pass the checkbox state through to gitCommitAll.
 4. Update the dialog footer text "Runs \`git add -A &amp;&amp; git commit -m …\`" to reflect the chosen behavior (e.g. "Runs \`git add -u\`" when off).
 5. Update .context/data-model.md if it covers commit flow; otherwise mention the change in whichever .context/*.md doc fits.
@@ -23,7 +23,7 @@ Please:
 
 Do NOT touch .self-ralph/ or tests-e2e/.`;
 
-const PROMPT = `There is one work item in the queue titled "${TITLE}". Call mcp__newde__list_ready_work to confirm, pick it up, complete it as described, run bun test, and propose a commit. Ignore any other queued items.`;
+const PROMPT = `There is one work item in the queue titled "${TITLE}". Call mcp__oxplow__list_ready_work to confirm, pick it up, complete it as described, run bun test, and propose a commit. Ignore any other queued items.`;
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
@@ -31,7 +31,7 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
       probeLog("[untracked] phase 1 launched");
@@ -52,7 +52,7 @@ async function main() {
   }
 
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
       probeLog("[untracked] phase 2 launched (approve)");

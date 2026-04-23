@@ -13,7 +13,7 @@ interface RpcResponse {
 }
 
 function tempIdeDir(): string {
-  return mkdtempSync(join(tmpdir(), "newde-ide-"));
+  return mkdtempSync(join(tmpdir(), "oxplow-ide-"));
 }
 
 function connect(port: number, token: string): Promise<WebSocket> {
@@ -58,7 +58,7 @@ test("startMcpServer writes lockfile with port, pid, authToken", async () => {
     expect(body.pid).toBe(process.pid);
     expect(body.port).toBe(server.port);
     expect(body.workspaceFolders).toEqual(["/tmp/fake-project"]);
-    expect(body.ideName).toBe("newde");
+    expect(body.ideName).toBe("oxplow");
     expect(body.transport).toBe("ws");
     expect(typeof body.authToken).toBe("string");
     expect(body.authToken.length).toBeGreaterThan(8);
@@ -78,7 +78,7 @@ test("stop() removes lockfile", async () => {
   rmSync(ideDir, { recursive: true, force: true });
 });
 
-test("MCP handshake: initialize, tools/list, tools/call newde__ping", async () => {
+test("MCP handshake: initialize, tools/list, tools/call oxplow__ping", async () => {
   const ideDir = tempIdeDir();
   const server = await startMcpServer({ ideDir, workspaceFolders: [] });
   try {
@@ -90,16 +90,16 @@ test("MCP handshake: initialize, tools/list, tools/call newde__ping", async () =
       clientInfo: { name: "test", version: "0" },
     });
     expect(init.error).toBeUndefined();
-    expect(init.result.serverInfo.name).toBe("newde");
+    expect(init.result.serverInfo.name).toBe("oxplow");
     expect(init.result.capabilities.tools).toBeDefined();
 
     const list = await rpc(ws, 2, "tools/list", {});
     expect(list.error).toBeUndefined();
     const tools = list.result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toContain("newde__ping");
+    expect(tools.map((t) => t.name)).toContain("oxplow__ping");
 
     const call = await rpc(ws, 3, "tools/call", {
-      name: "newde__ping",
+      name: "oxplow__ping",
       arguments: {},
     });
     expect(call.error).toBeUndefined();
@@ -117,7 +117,7 @@ test("MCP handshake: initialize, tools/list, tools/call newde__ping", async () =
   }
 });
 
-test("HTTP MCP handshake: initialize, tools/list, tools/call newde__ping", async () => {
+test("HTTP MCP handshake: initialize, tools/list, tools/call oxplow__ping", async () => {
   const ideDir = tempIdeDir();
   const server = await startMcpServer({ ideDir, workspaceFolders: [] });
   try {
@@ -143,7 +143,7 @@ test("HTTP MCP handshake: initialize, tools/list, tools/call newde__ping", async
     expect(initRes.status).toBe(200);
     const init = await initRes.json();
     expect(init.error).toBeUndefined();
-    expect(init.result.serverInfo.name).toBe("newde");
+    expect(init.result.serverInfo.name).toBe("oxplow");
 
     const listRes = await fetch(server.httpUrl, {
       method: "POST",
@@ -153,7 +153,7 @@ test("HTTP MCP handshake: initialize, tools/list, tools/call newde__ping", async
     expect(listRes.status).toBe(200);
     const list = await listRes.json();
     expect(list.error).toBeUndefined();
-    expect((list.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toContain("newde__ping");
+    expect((list.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toContain("oxplow__ping");
 
     const callRes = await fetch(server.httpUrl, {
       method: "POST",
@@ -162,7 +162,7 @@ test("HTTP MCP handshake: initialize, tools/list, tools/call newde__ping", async
         jsonrpc: "2.0",
         id: 3,
         method: "tools/call",
-        params: { name: "newde__ping", arguments: {} },
+        params: { name: "oxplow__ping", arguments: {} },
       }),
     });
     expect(callRes.status).toBe(200);
@@ -229,7 +229,7 @@ test("does not sweep lockfiles that belong to live pids", async () => {
   }
 });
 
-test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", async () => {
+test("POST /hook/:event routes to onHook with identity from X-Oxplow-* headers", async () => {
   const ideDir = tempIdeDir();
   const received: any[] = [];
   const server = await startMcpServer({
@@ -243,9 +243,9 @@ test("POST /hook/:event routes to onHook with identity from X-Newde-* headers", 
       headers: {
         "Authorization": `Bearer ${server.authToken}`,
         "content-type": "application/json",
-        "X-Newde-Stream": "s-1",
-        "X-Newde-Thread": "b-42",
-        "X-Newde-Pane": "working",
+        "X-Oxplow-Stream": "s-1",
+        "X-Oxplow-Thread": "b-42",
+        "X-Oxplow-Pane": "working",
       },
       body: JSON.stringify({ session_id: "s1", cwd: "/tmp/demo" }),
     });
@@ -287,7 +287,7 @@ test("hook endpoint returns handler's JSON body as a 200 response", async () => 
       headers: {
         "Authorization": `Bearer ${server.authToken}`,
         "content-type": "application/json",
-        "X-Newde-Stream": "s-1",
+        "X-Oxplow-Stream": "s-1",
       },
       body: "{}",
     });

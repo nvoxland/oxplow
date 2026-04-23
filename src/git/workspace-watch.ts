@@ -23,7 +23,7 @@ export class WorkspaceWatcherRegistry {
 
   setExtraIgnoreDirs(dirs: string[]): void {
     // Stored by reference so the filter inside each watcher sees live
-    // updates when the user edits `generatedDirs` in newde.yaml. Callers
+    // updates when the user edits `generatedDirs` in oxplow.yaml. Callers
     // that mutate the config should call this again on reload.
     this.extraIgnoreDirs = [...dirs];
   }
@@ -251,7 +251,7 @@ export function isTempFilename(name: string): boolean {
 }
 
 export function shouldIgnoreWorkspaceWatchPath(path: string, extraIgnoreDirs: string[] = []): boolean {
-  if (path === ".newde" || path.startsWith(".newde/")) return true;
+  if (path === ".oxplow" || path.startsWith(".oxplow/")) return true;
   const extras = extraIgnoreDirs.length > 0 ? new Set(extraIgnoreDirs) : null;
   const segments = path.split("/");
   for (const segment of segments) {

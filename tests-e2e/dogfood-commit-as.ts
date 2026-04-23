@@ -1,14 +1,14 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
     await window.getByTestId("dock-tab-project").click();
@@ -24,7 +24,7 @@ returns a reliable signal). Surfaced by fix-20260419-220229; scope
 kept to one file, two new attributes.
 
 Done by the inner agent during a /self-ralph dogfood run; outer
-agent approved via newde's Files commit dialog.
+agent approved via oxplow's Files commit dialog.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`);
     await window.getByTestId("files-commit-submit").click();

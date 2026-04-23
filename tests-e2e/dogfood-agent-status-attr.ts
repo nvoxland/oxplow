@@ -4,13 +4,13 @@
 // prompt xterm → poll → approve.
 //
 // Pass 2 surfaced that stale work items in the repo's
-// .newde/state.sqlite get picked up by Stop-hook and pull the agent
+// .oxplow/state.sqlite get picked up by Stop-hook and pull the agent
 // sideways. Mitigation in the prompt: name "ignore any other queued
 // items — only do the one titled exactly X" explicitly.
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,10 +29,10 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
-    probeLog("[as] newde launched");
+    probeLog("[as] oxplow launched");
 
     const workPanel = window.getByTestId("dock-panel-plan");
     for (let i = 0; i < 3; i++) {

@@ -47,7 +47,7 @@ test("isGitWorktree distinguishes secondary worktrees (.git is a file) from the 
   const repoDir = mkRepo();
   expect(isGitWorktree(repoDir)).toBe(false);
 
-  const worktreeDir = mkdtempSync(join(tmpdir(), "newde-git-worktree-"));
+  const worktreeDir = mkdtempSync(join(tmpdir(), "oxplow-git-worktree-"));
   tempDirs.push(worktreeDir);
   rmSync(worktreeDir, { recursive: true, force: true });
   execFileSync("git", ["-C", repoDir, "worktree", "add", worktreeDir, "-b", "feature"], { stdio: "ignore" });
@@ -56,7 +56,7 @@ test("isGitWorktree distinguishes secondary worktrees (.git is a file) from the 
 });
 
 test("isGitWorktree returns false for directories without a .git entry", () => {
-  const dir = mkdtempSync(join(tmpdir(), "newde-plain-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-plain-"));
   tempDirs.push(dir);
   expect(isGitWorktree(dir)).toBe(false);
 });
@@ -152,7 +152,7 @@ test("gitBlame returns one BlameLine per final-file line with commit metadata", 
 });
 
 test("gitBlame returns [] for non-git paths", () => {
-  const dir = mkdtempSync(join(tmpdir(), "newde-noblame-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-noblame-"));
   tempDirs.push(dir);
   expect(gitBlame(dir, "nope.txt")).toEqual([]);
 });
@@ -187,7 +187,7 @@ test("detectBaseBranch prefers main when no origin is configured", () => {
 });
 
 function mkRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "newde-git-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-git-test-"));
   tempDirs.push(dir);
   execFileSync("git", ["init", "-b", "main", dir], { stdio: "ignore" });
   execFileSync("git", ["-C", dir, "config", "user.name", "Test User"], { stdio: "ignore" });

@@ -63,7 +63,7 @@ export function EditorPane({
   const trackedOpenDocsRef = useRef(new Map<string, string>());
   const trackedSavedContentRef = useRef(new Map<string, string>());
   const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
-  const markerOwnerRef = useRef(`newde-lsp-${stream.id}`);
+  const markerOwnerRef = useRef(`oxplow-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
@@ -202,7 +202,7 @@ export function EditorPane({
         return { path, dirty: entry.draftContent !== entry.savedContent };
       })
       .filter((entry): entry is { path: string; dirty: boolean } => !!entry);
-    const api = (window as any).newdeApi as { updateEditorFocus?: (payload: unknown) => unknown } | undefined;
+    const api = (window as any).oxplowApi as { updateEditorFocus?: (payload: unknown) => unknown } | undefined;
     if (!api?.updateEditorFocus) return;
     void api.updateEditorFocus({
       streamId: currentStream.id,
@@ -317,7 +317,7 @@ export function EditorPane({
   }, [openFiles, stream]);
 
   useEffect(() => {
-    markerOwnerRef.current = `newde-lsp-${stream.id}`;
+    markerOwnerRef.current = `oxplow-lsp-${stream.id}`;
     setLspStatus(null);
     for (const client of lspClientsRef.current.values()) {
       client.dispose();
@@ -689,7 +689,7 @@ function computeDiffDecorations(monaco: any, oldLines: string[], newLines: strin
       range: new monaco.Range(line, 1, line, 1),
       options: {
         isWholeLine: true,
-        linesDecorationsClassName: kind === "added" ? "newde-gutter-added" : "newde-gutter-modified",
+        linesDecorationsClassName: kind === "added" ? "oxplow-gutter-added" : "oxplow-gutter-modified",
       },
     });
   }
@@ -702,7 +702,7 @@ function computeDiffDecorations(monaco: any, oldLines: string[], newLines: strin
       range: new monaco.Range(line, 1, line, 1),
       options: {
         isWholeLine: true,
-        linesDecorationsClassName: "newde-gutter-deleted",
+        linesDecorationsClassName: "oxplow-gutter-deleted",
       },
     });
   }
@@ -878,7 +878,7 @@ const lspStatusStyle: CSSProperties = {
 
 function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promise<void>) {
   editor.addAction({
-    id: "newde.goToDefinition",
+    id: "oxplow.goToDefinition",
     label: "Go to Definition",
     keybindings: [monaco.KeyCode.F12],
     contextMenuGroupId: "navigation",

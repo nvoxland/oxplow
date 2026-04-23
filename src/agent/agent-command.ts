@@ -45,7 +45,7 @@ export function buildAgentCommandForSession(
   const claudeBase = `claude${pluginArg}${allowedToolsArg}${promptArg}${mcpArg}`;
   const freshClaude = `${envPrefix}exec ${claudeBase}`;
   const command = resumeSessionId
-    ? `${envPrefix}${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[newde] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
+    ? `${envPrefix}${claudeBase} --resume ${shellEscape(resumeSessionId)} || { echo '[oxplow] saved resume id was stale; starting a fresh Claude session' >&2; ${freshClaude}; }`
     : freshClaude;
   return `sh -lc ${shellEscape(`cd ${shellEscape(cwd)} && ${command}`)}`;
 }

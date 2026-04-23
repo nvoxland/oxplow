@@ -282,7 +282,7 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       // Content-addressed snapshot tracking. `file_snapshot` is the metadata
       // row for one flushed manifest on disk; the manifest itself lives at
-      // `.newde/snapshots/manifests/<id>.json` and holds the dirty-path
+      // `.oxplow/snapshots/manifests/<id>.json` and holds the dirty-path
       // entries (hash + mtime + size). Walking the parent chain
       // reconstructs the full file set at any point in time.
       db.exec(`
@@ -310,12 +310,12 @@ export const MIGRATIONS: Migration[] = [
     version: 9,
     name: "snapshot_entry",
     up: (db) => {
-      // Move manifest storage out of .newde/snapshots/manifests/*.json into
+      // Move manifest storage out of .oxplow/snapshots/manifests/*.json into
       // SQLite. Also drops the now-unused manifest_path column on
       // file_snapshot. Existing snapshot rows are wiped since their
       // manifests are on-disk JSON we no longer read; cascades clear
       // streams.current_snapshot_id and batch_file_change.snapshot_id for
-      // us. Blobs in .newde/snapshots/objects/ are orphaned by this and
+      // us. Blobs in .oxplow/snapshots/objects/ are orphaned by this and
       // get GC'd on the next cleanup cycle.
       db.exec(`
         PRAGMA defer_foreign_keys = 1;
@@ -478,7 +478,7 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       // The "proposed" status + `proposed_message` column were part of a
       // two-step draft-then-commit flow that's been replaced by the agent
-      // drafting a message directly in chat and calling `newde__commit` once
+      // drafting a message directly in chat and calling `oxplow__commit` once
       // the user approves. Collapse any lingering `proposed` rows back to
       // `pending` and drop the now-unused column.
       db.exec(`
@@ -680,7 +680,7 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       // Broaden `work_note` so it can hold thread-scoped rows (not attached
       // to any individual work item). This is the durable landing spot for
-      // `newde__delegate_query` Explore-subagent findings: the orchestrator
+      // `oxplow__delegate_query` Explore-subagent findings: the orchestrator
       // can fetch them via `get_thread_notes` only when it actually needs
       // the content, keeping its own cached context small.
       //
@@ -763,8 +763,8 @@ export const MIGRATIONS: Migration[] = [
     name: "drop work_item_commit junction",
     up: (db) => {
       // Commit↔item attribution can't be made reliable — users commit
-      // outside newde (IDE buttons, CLI, CI rebases, merges, squashes)
-      // and newde has no authoritative hook at those sites. The
+      // outside oxplow (IDE buttons, CLI, CI rebases, merges, squashes)
+      // and oxplow has no authoritative hook at those sites. The
       // heuristic "settled_at > latest_done_commit_point" misattributes
       // silently. A blame overlay that sometimes lies is worse than no
       // overlay, so the feature is removed before any live consumer

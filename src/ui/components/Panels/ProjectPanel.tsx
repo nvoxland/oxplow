@@ -893,7 +893,7 @@ export function ProjectPanel({
 // Inside the list we still keep directories-before-files and alphabetical
 // ordering within each bucket.
 const DEV_NOISE_DIRS = new Set([
-  ".claude", ".newde", ".git", ".github", ".vscode", ".idea",
+  ".claude", ".oxplow", ".git", ".github", ".vscode", ".idea",
   "bin", "dist", "build", "out", "node_modules", "public", "coverage",
   "target", "vendor", "tmp", ".tmp", ".cache",
 ]);

@@ -15,14 +15,14 @@ afterEach(() => {
 });
 
 test("git refs watcher fires after a commit inside a secondary worktree", async () => {
-  const repoDir = mkdtempSync(join(tmpdir(), "newde-refs-repo-"));
+  const repoDir = mkdtempSync(join(tmpdir(), "oxplow-refs-repo-"));
   tempDirs.push(repoDir);
   execFileSync("git", ["init", "-b", "main", repoDir], { stdio: "ignore" });
   execFileSync("git", ["-C", repoDir, "config", "user.name", "Test"], { stdio: "ignore" });
   execFileSync("git", ["-C", repoDir, "config", "user.email", "t@e.x"], { stdio: "ignore" });
   execFileSync("git", ["-C", repoDir, "commit", "--allow-empty", "-m", "init"], { stdio: "ignore" });
 
-  const worktreeDir = mkdtempSync(join(tmpdir(), "newde-refs-wt-"));
+  const worktreeDir = mkdtempSync(join(tmpdir(), "oxplow-refs-wt-"));
   tempDirs.push(worktreeDir);
   rmSync(worktreeDir, { recursive: true, force: true });
   execFileSync("git", ["-C", repoDir, "worktree", "add", worktreeDir, "-b", "feature"], { stdio: "ignore" });

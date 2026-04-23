@@ -1,6 +1,6 @@
-import type { DesktopApi, NewdeEvent } from "../electron/ipc-contract.js";
+import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
-export type { NewdeEvent } from "../electron/ipc-contract.js";
+export type { OxplowEvent } from "../electron/ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
 export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
 export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
@@ -277,23 +277,23 @@ export async function renameStream(streamId: string, title: string): Promise<Str
   return desktopApi().renameStream(streamId, title);
 }
 
-export async function getConfig(): Promise<import("../config/config.js").NewdeConfig> {
+export async function getConfig(): Promise<import("../config/config.js").OxplowConfig> {
   return desktopApi().getConfig();
 }
 
-export async function setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig> {
+export async function setAgentPromptAppend(text: string): Promise<import("../config/config.js").OxplowConfig> {
   return desktopApi().setAgentPromptAppend(text);
 }
 
-export async function setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").NewdeConfig> {
+export async function setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").OxplowConfig> {
   return desktopApi().setGeneratedDirs(dirs);
 }
 
-export async function setSnapshotRetentionDays(days: number): Promise<import("../config/config.js").NewdeConfig> {
+export async function setSnapshotRetentionDays(days: number): Promise<import("../config/config.js").OxplowConfig> {
   return desktopApi().setSnapshotRetentionDays(days);
 }
 
-export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").NewdeConfig> {
+export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").OxplowConfig> {
   return desktopApi().setSnapshotMaxFileBytes(bytes);
 }
 
@@ -736,7 +736,7 @@ export function subscribeSnapshotEvents(
   streamId: string,
   fn: (payload: FileSnapshotCreatedEventPayload) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "file-snapshot.created") return;
     if (event.streamId !== streamId) return;
     fn({
@@ -761,7 +761,7 @@ export function subscribeTurnEvents(
   streamId: string | "all",
   onEvent: (event: TurnChangeEvent) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "turn.changed") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({
@@ -812,16 +812,16 @@ export async function deleteWorkspacePath(streamId: string, path: string): Promi
   return desktopApi().deleteWorkspacePath(streamId, path);
 }
 
-export function subscribeNewdeEvents(
-  listener: (event: NewdeEvent) => void,
+export function subscribeOxplowEvents(
+  listener: (event: OxplowEvent) => void,
 ): () => void {
-  return desktopApi().onNewdeEvent(listener);
+  return desktopApi().onOxplowEvent(listener);
 }
 
 export function subscribeWorkspaceContext(
   onEvent: (next: WorkspaceContext) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "workspace-context.changed") return;
     onEvent({ gitEnabled: event.gitEnabled });
   });
@@ -831,7 +831,7 @@ export function subscribeWorkspaceEvents(
   streamId: string,
   onEvent: (event: WorkspaceWatchEvent) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type === "workspace.changed" && event.streamId === streamId) {
       onEvent({
         id: event.id,
@@ -848,7 +848,7 @@ export function subscribeGitRefsEvents(
   streamId: string,
   onEvent: () => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type === "git-refs.changed" && event.streamId === streamId) {
       onEvent();
     }
@@ -880,7 +880,7 @@ export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "agent-status.changed") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({ streamId: event.streamId, threadId: event.threadId, status: event.status });
@@ -893,7 +893,7 @@ export interface BacklogChangeEvent {
 }
 
 export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "backlog.changed") return;
     onEvent({ kind: event.kind, itemId: event.itemId });
   });
@@ -903,7 +903,7 @@ export function subscribeWorkItemEvents(
   streamId: string | "all",
   onEvent: (event: WorkItemChangeEvent) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "work-item.changed") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({
@@ -962,7 +962,7 @@ export function subscribeHookEvents(
   streamId: string | "all",
   onEvent: (event: StoredEvent) => void,
 ): () => void {
-  return subscribeNewdeEvents((event) => {
+  return subscribeOxplowEvents((event) => {
     if (event.type !== "hook.recorded") return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent(event.event as StoredEvent);
@@ -970,8 +970,8 @@ export function subscribeHookEvents(
 }
 
 function desktopApi(): DesktopApi {
-  if (!window.newdeApi) {
-    throw new Error("newde Electron API is unavailable");
+  if (!window.oxplowApi) {
+    throw new Error("oxplow Electron API is unavailable");
   }
-  return window.newdeApi;
+  return window.oxplowApi;
 }

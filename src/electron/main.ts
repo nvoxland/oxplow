@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOpti
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
-import type { CommandId, EditorFocusPayload, LspEvent, MenuGroupSnapshot, NewdeEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
+import type { CommandId, EditorFocusPayload, LspEvent, MenuGroupSnapshot, OxplowEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
 
 let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -47,7 +47,7 @@ async function main() {
 
   app.on("activate", () => {
     if (!mainWindow && runtime) {
-      mainWindow = createWindow(openDevTools, `NewDE: ${runtime.config.projectName}`);
+      mainWindow = createWindow(openDevTools, `Oxplow: ${runtime.config.projectName}`);
     }
   });
 
@@ -56,8 +56,8 @@ async function main() {
   const lockResult = acquireProjectLock(projectDir);
   if (!lockResult.ok) {
     dialog.showErrorBox(
-      "newde is already running for this project",
-      `Another newde process (pid ${lockResult.pid}) is managing\n${projectDir}\n\nClose it (or kill that process) before starting a new one.`,
+      "oxplow is already running for this project",
+      `Another oxplow process (pid ${lockResult.pid}) is managing\n${projectDir}\n\nClose it (or kill that process) before starting a new one.`,
     );
     app.exit(1);
     return;
@@ -68,7 +68,7 @@ async function main() {
     runtime = await ElectronRuntime.create(projectDir);
   } catch (error) {
     dialog.showErrorBox(
-      "newde failed to start",
+      "oxplow failed to start",
       error instanceof Error ? error.message : String(error),
     );
     releaseProjectLock();
@@ -77,9 +77,9 @@ async function main() {
   }
 
   registerIpc(runtime);
-  runtime.onEvent((event) => broadcast("newde:event", event));
+  runtime.onEvent((event) => broadcast("oxplow:event", event));
 
-  mainWindow = createWindow(openDevTools, `NewDE: ${runtime.config.projectName}`);
+  mainWindow = createWindow(openDevTools, `Oxplow: ${runtime.config.projectName}`);
 }
 
 function getWindowBoundsPath(): string {
@@ -103,7 +103,7 @@ function loadSavedBounds(): { x: number; y: number; width: number; height: numbe
     }
     return null;
   } catch (error) {
-    console.warn("[newde] failed to load window bounds:", error);
+    console.warn("[oxplow] failed to load window bounds:", error);
     return null;
   }
 }
@@ -117,7 +117,7 @@ function saveBounds(window: BrowserWindow): void {
     const bounds = window.getBounds();
     writeFileSync(getWindowBoundsPath(), JSON.stringify(bounds), "utf8");
   } catch (error) {
-    console.warn("[newde] failed to save window bounds:", error);
+    console.warn("[oxplow] failed to save window bounds:", error);
   }
 }
 
@@ -177,129 +177,129 @@ function createWindow(openDevTools: boolean, title: string) {
 }
 
 function registerIpc(currentRuntime: ElectronRuntime) {
-  handle("newde:getCurrentStream", () => currentRuntime.getCurrentStream());
-  handle("newde:listStreams", () => currentRuntime.listStreams());
-  handle("newde:switchStream", (_event, id: string) => currentRuntime.switchStream(id));
-  handle("newde:renameCurrentStream", (_event, title: string) => currentRuntime.renameCurrentStream(title));
-  handle("newde:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
-  handle("newde:getConfig", () => currentRuntime.getConfig());
-  handle("newde:setAgentPromptAppend", (_event, text: string) => currentRuntime.setAgentPromptAppend(text));
-  handle("newde:setSnapshotRetentionDays", (_event, days: number) => currentRuntime.setSnapshotRetentionDays(days));
-  handle("newde:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
-  handle("newde:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
-  handle("newde:listBranches", () => currentRuntime.listBranches());
-  handle("newde:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
-  handle("newde:createStream", (_event, input) => currentRuntime.createStream(input));
-  handle("newde:getThreadState", (_event, streamId: string) => currentRuntime.getThreadState(streamId));
-  handle("newde:createThread", (_event, streamId: string, title: string) => currentRuntime.createThread(streamId, title));
-  handle("newde:reorderThread", (_event, streamId: string, threadId: string, targetIndex: number) => currentRuntime.reorderThread(streamId, threadId, targetIndex));
-  handle("newde:reorderThreads", (_event, streamId: string, orderedThreadIds: string[]) => currentRuntime.reorderThreads(streamId, orderedThreadIds));
-  handle("newde:reorderStreams", (_event, orderedStreamIds: string[]) => currentRuntime.reorderStreams(orderedStreamIds));
-  handle("newde:selectThread", (_event, streamId: string, threadId: string) => currentRuntime.selectThread(streamId, threadId));
-  handle("newde:promoteThread", (_event, streamId: string, threadId: string) => currentRuntime.promoteThread(streamId, threadId));
-  handle("newde:completeThread", (_event, streamId: string, threadId: string) => currentRuntime.completeThread(streamId, threadId));
-  handle("newde:renameThread", (_event, streamId: string, threadId: string, title: string) => currentRuntime.renameThread(streamId, threadId, title));
-  handle("newde:setAutoCommit", (_event, streamId: string, threadId: string, enabled: boolean) => currentRuntime.setAutoCommit(streamId, threadId, enabled));
-  handle("newde:setStreamPrompt", (_event, streamId: string, prompt: string | null) => currentRuntime.setStreamPrompt(streamId, prompt));
-  handle("newde:setThreadPrompt", (_event, streamId: string, threadId: string, prompt: string | null) => currentRuntime.setThreadPrompt(streamId, threadId, prompt));
-  handle("newde:getThreadWorkState", (_event, streamId: string, threadId: string) => currentRuntime.workItemApi.getThreadWorkState(streamId, threadId));
-  handle("newde:createWorkItem", (_event, streamId: string, threadId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, threadId, input));
-  handle("newde:updateWorkItem", (_event, streamId: string, threadId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, threadId, itemId, changes));
-  handle("newde:deleteWorkItem", (_event, streamId: string, threadId: string, itemId: string) => currentRuntime.workItemApi.deleteWorkItem(streamId, threadId, itemId));
-  handle("newde:reorderWorkItems", (_event, streamId: string, threadId: string, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderWorkItems(streamId, threadId, orderedItemIds));
-  handle("newde:moveWorkItemToThread", (_event, streamId: string, fromThreadId: string, itemId: string, toThreadId: string, toStreamId?: string) => currentRuntime.workItemApi.moveWorkItemToThread(streamId, fromThreadId, itemId, toThreadId, toStreamId));
-  handle("newde:getBacklogState", () => currentRuntime.workItemApi.getBacklogState());
-  handle("newde:createBacklogItem", (_event, input) => currentRuntime.workItemApi.createBacklogItem(input));
-  handle("newde:updateBacklogItem", (_event, itemId: string, changes) => currentRuntime.workItemApi.updateBacklogItem(itemId, changes));
-  handle("newde:deleteBacklogItem", (_event, itemId: string) => currentRuntime.workItemApi.deleteBacklogItem(itemId));
-  handle("newde:reorderBacklog", (_event, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderBacklog(orderedItemIds));
-  handle("newde:moveWorkItemToBacklog", (_event, streamId: string, fromThreadId: string, itemId: string) => currentRuntime.workItemApi.moveWorkItemToBacklog(streamId, fromThreadId, itemId));
-  handle("newde:moveBacklogItemToThread", (_event, streamId: string, itemId: string, toThreadId: string) => currentRuntime.workItemApi.moveBacklogItemToThread(streamId, itemId, toThreadId));
-  handle("newde:getGitLog", (_event, streamId: string, options?: { limit?: number }) => currentRuntime.getGitLog(streamId, options));
-  handle("newde:getCommitDetail", (_event, streamId: string, sha: string) => currentRuntime.getCommitDetail(streamId, sha));
-  handle("newde:getChangeScopes", (_event, streamId: string) => currentRuntime.getChangeScopes(streamId));
-  handle("newde:searchWorkspaceText", (_event, streamId: string, query: string, options?: { limit?: number }) => currentRuntime.searchWorkspaceText(streamId, query, options));
-  handle("newde:gitRestorePath", (_event, streamId: string, path: string) => currentRuntime.gitRestorePath(streamId, path));
-  handle("newde:gitAddPath", (_event, streamId: string, path: string) => currentRuntime.gitAddPath(streamId, path));
-  handle("newde:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
-  handle("newde:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
-  handle("newde:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
-  handle("newde:gitCommitAll", (_event, streamId: string, message: string, options) => currentRuntime.gitCommitAll(streamId, message, options));
-  handle("newde:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
-  handle("newde:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));
-  handle("newde:localBlame", (_event, streamId: string, path: string) => currentRuntime.localBlame(streamId, path));
-  handle("newde:listAllRefs", (_event, streamId: string) => currentRuntime.listAllRefs(streamId));
-  handle("newde:addWorkItemNote", (_event, streamId: string, threadId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, threadId, itemId, note));
-  handle("newde:listWorkItemEvents", (_event, streamId: string, threadId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, threadId, itemId));
-  handle("newde:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
-  handle("newde:listAgentTurns", (_event, streamId: string, threadId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, threadId, limit));
-  handle("newde:listOpenTurns", (_event, threadId: string) => currentRuntime.listOpenTurns(threadId));
-  handle("newde:listRecentInactiveTurns", (_event, threadId: string, limit?: number) => currentRuntime.listRecentInactiveTurns(threadId, limit));
-  handle("newde:archiveAgentTurn", (_event, turnId: string) => currentRuntime.archiveAgentTurn(turnId));
-  handle("newde:listWorkItemEfforts", (_event, itemId: string) => currentRuntime.workItemApi.listWorkItemEfforts(itemId));
-  handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
-  handle("newde:getSnapshotSummary", (_event, snapshotId: string, previousSnapshotId?: string | null) => currentRuntime.getSnapshotSummary(snapshotId, previousSnapshotId));
-  handle("newde:getSnapshotPairDiff", (_event, beforeSnapshotId: string | null, afterSnapshotId: string, path: string) => currentRuntime.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path));
-  handle("newde:getEffortFiles", (_event, effortId: string) => currentRuntime.getEffortFiles(effortId));
-  handle("newde:listEffortsEndingAtSnapshots", (_event, snapshotIds: string[]) => currentRuntime.listEffortsEndingAtSnapshots(snapshotIds));
-  handle("newde:restoreFileFromSnapshot", (_event, streamId: string, snapshotId: string, path: string) => currentRuntime.restoreFileFromSnapshot(streamId, snapshotId, path));
-  handle("newde:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
-  handle("newde:readFileAtRef", (_event, streamId: string, ref: string, path: string) => currentRuntime.readFileAtRef(streamId, ref, path));
-  handle("newde:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
-  handle("newde:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
-  handle("newde:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));
-  handle("newde:writeWorkspaceFile", (_event, streamId: string, path: string, content: string) => currentRuntime.writeWorkspaceFile(streamId, path, content));
-  handle("newde:createWorkspaceFile", (_event, streamId: string, path: string, content?: string) => currentRuntime.createWorkspaceFile(streamId, path, content));
-  handle("newde:createWorkspaceDirectory", (_event, streamId: string, path: string) => currentRuntime.createWorkspaceDirectory(streamId, path));
-  handle("newde:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
-  handle("newde:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
-  handle("newde:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
-  handle("newde:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));
-  handle("newde:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
-  handle("newde:updateCommitPoint", (_event, id: string, changes: { mode?: "auto" | "approve" }) => currentRuntime.updateCommitPoint(id, changes));
-  handle("newde:commitCommitPoint", (_event, id: string, message: string) => currentRuntime.commitCommitPoint(id, message));
-  handle("newde:reorderThreadQueue", (_event, streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderThreadQueue(streamId, threadId, entries));
-  handle("newde:listWaitPoints", (_event, threadId: string) => currentRuntime.listWaitPoints(threadId));
-  handle("newde:createWaitPoint", (_event, streamId: string, threadId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, threadId, note));
-  handle("newde:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));
-  handle("newde:deleteWaitPoint", (_event, id: string) => currentRuntime.deleteWaitPoint(id));
-  handle("newde:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
-  handle("newde:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
-  handle("newde:ping", () => currentRuntime.ping());
-  handle("newde:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
-  handle("newde:updateEditorFocus", (_event, payload: EditorFocusPayload) => currentRuntime.updateEditorFocus(payload));
-  handle("newde:setNativeMenu", (_event, groups: MenuGroupSnapshot[]) => {
+  handle("oxplow:getCurrentStream", () => currentRuntime.getCurrentStream());
+  handle("oxplow:listStreams", () => currentRuntime.listStreams());
+  handle("oxplow:switchStream", (_event, id: string) => currentRuntime.switchStream(id));
+  handle("oxplow:renameCurrentStream", (_event, title: string) => currentRuntime.renameCurrentStream(title));
+  handle("oxplow:renameStream", (_event, streamId: string, title: string) => currentRuntime.renameStream(streamId, title));
+  handle("oxplow:getConfig", () => currentRuntime.getConfig());
+  handle("oxplow:setAgentPromptAppend", (_event, text: string) => currentRuntime.setAgentPromptAppend(text));
+  handle("oxplow:setSnapshotRetentionDays", (_event, days: number) => currentRuntime.setSnapshotRetentionDays(days));
+  handle("oxplow:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
+  handle("oxplow:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
+  handle("oxplow:listBranches", () => currentRuntime.listBranches());
+  handle("oxplow:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
+  handle("oxplow:createStream", (_event, input) => currentRuntime.createStream(input));
+  handle("oxplow:getThreadState", (_event, streamId: string) => currentRuntime.getThreadState(streamId));
+  handle("oxplow:createThread", (_event, streamId: string, title: string) => currentRuntime.createThread(streamId, title));
+  handle("oxplow:reorderThread", (_event, streamId: string, threadId: string, targetIndex: number) => currentRuntime.reorderThread(streamId, threadId, targetIndex));
+  handle("oxplow:reorderThreads", (_event, streamId: string, orderedThreadIds: string[]) => currentRuntime.reorderThreads(streamId, orderedThreadIds));
+  handle("oxplow:reorderStreams", (_event, orderedStreamIds: string[]) => currentRuntime.reorderStreams(orderedStreamIds));
+  handle("oxplow:selectThread", (_event, streamId: string, threadId: string) => currentRuntime.selectThread(streamId, threadId));
+  handle("oxplow:promoteThread", (_event, streamId: string, threadId: string) => currentRuntime.promoteThread(streamId, threadId));
+  handle("oxplow:completeThread", (_event, streamId: string, threadId: string) => currentRuntime.completeThread(streamId, threadId));
+  handle("oxplow:renameThread", (_event, streamId: string, threadId: string, title: string) => currentRuntime.renameThread(streamId, threadId, title));
+  handle("oxplow:setAutoCommit", (_event, streamId: string, threadId: string, enabled: boolean) => currentRuntime.setAutoCommit(streamId, threadId, enabled));
+  handle("oxplow:setStreamPrompt", (_event, streamId: string, prompt: string | null) => currentRuntime.setStreamPrompt(streamId, prompt));
+  handle("oxplow:setThreadPrompt", (_event, streamId: string, threadId: string, prompt: string | null) => currentRuntime.setThreadPrompt(streamId, threadId, prompt));
+  handle("oxplow:getThreadWorkState", (_event, streamId: string, threadId: string) => currentRuntime.workItemApi.getThreadWorkState(streamId, threadId));
+  handle("oxplow:createWorkItem", (_event, streamId: string, threadId: string, input) => currentRuntime.workItemApi.createWorkItem(streamId, threadId, input));
+  handle("oxplow:updateWorkItem", (_event, streamId: string, threadId: string, itemId: string, changes) => currentRuntime.workItemApi.updateWorkItem(streamId, threadId, itemId, changes));
+  handle("oxplow:deleteWorkItem", (_event, streamId: string, threadId: string, itemId: string) => currentRuntime.workItemApi.deleteWorkItem(streamId, threadId, itemId));
+  handle("oxplow:reorderWorkItems", (_event, streamId: string, threadId: string, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderWorkItems(streamId, threadId, orderedItemIds));
+  handle("oxplow:moveWorkItemToThread", (_event, streamId: string, fromThreadId: string, itemId: string, toThreadId: string, toStreamId?: string) => currentRuntime.workItemApi.moveWorkItemToThread(streamId, fromThreadId, itemId, toThreadId, toStreamId));
+  handle("oxplow:getBacklogState", () => currentRuntime.workItemApi.getBacklogState());
+  handle("oxplow:createBacklogItem", (_event, input) => currentRuntime.workItemApi.createBacklogItem(input));
+  handle("oxplow:updateBacklogItem", (_event, itemId: string, changes) => currentRuntime.workItemApi.updateBacklogItem(itemId, changes));
+  handle("oxplow:deleteBacklogItem", (_event, itemId: string) => currentRuntime.workItemApi.deleteBacklogItem(itemId));
+  handle("oxplow:reorderBacklog", (_event, orderedItemIds: string[]) => currentRuntime.workItemApi.reorderBacklog(orderedItemIds));
+  handle("oxplow:moveWorkItemToBacklog", (_event, streamId: string, fromThreadId: string, itemId: string) => currentRuntime.workItemApi.moveWorkItemToBacklog(streamId, fromThreadId, itemId));
+  handle("oxplow:moveBacklogItemToThread", (_event, streamId: string, itemId: string, toThreadId: string) => currentRuntime.workItemApi.moveBacklogItemToThread(streamId, itemId, toThreadId));
+  handle("oxplow:getGitLog", (_event, streamId: string, options?: { limit?: number }) => currentRuntime.getGitLog(streamId, options));
+  handle("oxplow:getCommitDetail", (_event, streamId: string, sha: string) => currentRuntime.getCommitDetail(streamId, sha));
+  handle("oxplow:getChangeScopes", (_event, streamId: string) => currentRuntime.getChangeScopes(streamId));
+  handle("oxplow:searchWorkspaceText", (_event, streamId: string, query: string, options?: { limit?: number }) => currentRuntime.searchWorkspaceText(streamId, query, options));
+  handle("oxplow:gitRestorePath", (_event, streamId: string, path: string) => currentRuntime.gitRestorePath(streamId, path));
+  handle("oxplow:gitAddPath", (_event, streamId: string, path: string) => currentRuntime.gitAddPath(streamId, path));
+  handle("oxplow:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
+  handle("oxplow:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
+  handle("oxplow:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
+  handle("oxplow:gitCommitAll", (_event, streamId: string, message: string, options) => currentRuntime.gitCommitAll(streamId, message, options));
+  handle("oxplow:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
+  handle("oxplow:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));
+  handle("oxplow:localBlame", (_event, streamId: string, path: string) => currentRuntime.localBlame(streamId, path));
+  handle("oxplow:listAllRefs", (_event, streamId: string) => currentRuntime.listAllRefs(streamId));
+  handle("oxplow:addWorkItemNote", (_event, streamId: string, threadId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, threadId, itemId, note));
+  handle("oxplow:listWorkItemEvents", (_event, streamId: string, threadId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, threadId, itemId));
+  handle("oxplow:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
+  handle("oxplow:listAgentTurns", (_event, streamId: string, threadId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, threadId, limit));
+  handle("oxplow:listOpenTurns", (_event, threadId: string) => currentRuntime.listOpenTurns(threadId));
+  handle("oxplow:listRecentInactiveTurns", (_event, threadId: string, limit?: number) => currentRuntime.listRecentInactiveTurns(threadId, limit));
+  handle("oxplow:archiveAgentTurn", (_event, turnId: string) => currentRuntime.archiveAgentTurn(turnId));
+  handle("oxplow:listWorkItemEfforts", (_event, itemId: string) => currentRuntime.workItemApi.listWorkItemEfforts(itemId));
+  handle("oxplow:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
+  handle("oxplow:getSnapshotSummary", (_event, snapshotId: string, previousSnapshotId?: string | null) => currentRuntime.getSnapshotSummary(snapshotId, previousSnapshotId));
+  handle("oxplow:getSnapshotPairDiff", (_event, beforeSnapshotId: string | null, afterSnapshotId: string, path: string) => currentRuntime.getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path));
+  handle("oxplow:getEffortFiles", (_event, effortId: string) => currentRuntime.getEffortFiles(effortId));
+  handle("oxplow:listEffortsEndingAtSnapshots", (_event, snapshotIds: string[]) => currentRuntime.listEffortsEndingAtSnapshots(snapshotIds));
+  handle("oxplow:restoreFileFromSnapshot", (_event, streamId: string, snapshotId: string, path: string) => currentRuntime.restoreFileFromSnapshot(streamId, snapshotId, path));
+  handle("oxplow:getBranchChanges", (_event, streamId: string, baseRef?: string) => currentRuntime.getBranchChanges(streamId, baseRef));
+  handle("oxplow:readFileAtRef", (_event, streamId: string, ref: string, path: string) => currentRuntime.readFileAtRef(streamId, ref, path));
+  handle("oxplow:listWorkspaceEntries", (_event, streamId: string, path?: string) => currentRuntime.listWorkspaceEntries(streamId, path));
+  handle("oxplow:listWorkspaceFiles", (_event, streamId: string) => currentRuntime.listWorkspaceFiles(streamId));
+  handle("oxplow:readWorkspaceFile", (_event, streamId: string, path: string) => currentRuntime.readWorkspaceFile(streamId, path));
+  handle("oxplow:writeWorkspaceFile", (_event, streamId: string, path: string, content: string) => currentRuntime.writeWorkspaceFile(streamId, path, content));
+  handle("oxplow:createWorkspaceFile", (_event, streamId: string, path: string, content?: string) => currentRuntime.createWorkspaceFile(streamId, path, content));
+  handle("oxplow:createWorkspaceDirectory", (_event, streamId: string, path: string) => currentRuntime.createWorkspaceDirectory(streamId, path));
+  handle("oxplow:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
+  handle("oxplow:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
+  handle("oxplow:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
+  handle("oxplow:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));
+  handle("oxplow:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
+  handle("oxplow:updateCommitPoint", (_event, id: string, changes: { mode?: "auto" | "approve" }) => currentRuntime.updateCommitPoint(id, changes));
+  handle("oxplow:commitCommitPoint", (_event, id: string, message: string) => currentRuntime.commitCommitPoint(id, message));
+  handle("oxplow:reorderThreadQueue", (_event, streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderThreadQueue(streamId, threadId, entries));
+  handle("oxplow:listWaitPoints", (_event, threadId: string) => currentRuntime.listWaitPoints(threadId));
+  handle("oxplow:createWaitPoint", (_event, streamId: string, threadId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, threadId, note));
+  handle("oxplow:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));
+  handle("oxplow:deleteWaitPoint", (_event, id: string) => currentRuntime.deleteWaitPoint(id));
+  handle("oxplow:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
+  handle("oxplow:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
+  handle("oxplow:ping", () => currentRuntime.ping());
+  handle("oxplow:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
+  handle("oxplow:updateEditorFocus", (_event, payload: EditorFocusPayload) => currentRuntime.updateEditorFocus(payload));
+  handle("oxplow:setNativeMenu", (_event, groups: MenuGroupSnapshot[]) => {
     Menu.setApplicationMenu(buildNativeMenu(groups));
   });
-  handle("newde:openTerminalSession", (_event, paneTarget: string, cols: number, rows: number, mode: "direct" | "tmux" = "direct") =>
+  handle("oxplow:openTerminalSession", (_event, paneTarget: string, cols: number, rows: number, mode: "direct" | "tmux" = "direct") =>
     currentRuntime.openTerminalSession(paneTarget, cols, rows, mode, (sessionId, message) => {
       const payload: TerminalEvent = { sessionId, message };
-      broadcast("newde:terminal-event", payload);
+      broadcast("oxplow:terminal-event", payload);
     }),
   );
-  handle("newde:sendTerminalMessage", (_event, sessionId: string, message: string) =>
+  handle("oxplow:sendTerminalMessage", (_event, sessionId: string, message: string) =>
     currentRuntime.sendTerminalMessage(sessionId, message),
   );
-  handle("newde:closeTerminalSession", (_event, sessionId: string) =>
+  handle("oxplow:closeTerminalSession", (_event, sessionId: string) =>
     currentRuntime.closeTerminalSession(sessionId),
   );
-  handle("newde:openLspClient", (_event, streamId: string, languageId: string) =>
+  handle("oxplow:openLspClient", (_event, streamId: string, languageId: string) =>
     currentRuntime.openLspClient(streamId, languageId, (clientId, message) => {
       const payload: LspEvent = { clientId, message };
-      broadcast("newde:lsp-event", payload);
+      broadcast("oxplow:lsp-event", payload);
     }),
   );
-  handle("newde:sendLspMessage", (_event, clientId: string, message: string) =>
+  handle("oxplow:sendLspMessage", (_event, clientId: string, message: string) =>
     currentRuntime.sendLspMessage(clientId, message),
   );
-  handle("newde:closeLspClient", (_event, clientId: string) =>
+  handle("oxplow:closeLspClient", (_event, clientId: string) =>
     currentRuntime.closeLspClient(clientId),
   );
 }
 
 function broadcast(
-  channel: "newde:event" | "newde:terminal-event" | "newde:lsp-event",
-  payload: NewdeEvent | TerminalEvent | LspEvent,
+  channel: "oxplow:event" | "oxplow:terminal-event" | "oxplow:lsp-event",
+  payload: OxplowEvent | TerminalEvent | LspEvent,
 ) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
@@ -311,7 +311,7 @@ function broadcast(
 function sendMenuCommand(commandId: CommandId) {
   const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
   if (targetWindow && !targetWindow.isDestroyed()) {
-    targetWindow.webContents.send("newde:menu-command", commandId);
+    targetWindow.webContents.send("oxplow:menu-command", commandId);
   }
 }
 
@@ -398,13 +398,13 @@ type LockResult =
   | { ok: false; pid: number; lockPath: string };
 
 /**
- * Claims an exclusive per-project lock at `.newde/runtime/instance.lock`
+ * Claims an exclusive per-project lock at `.oxplow/runtime/instance.lock`
  * containing this process's PID. Refuses to start if another live process
  * already holds the lock; reclaims stale locks whose PID no longer exists.
- * Per-project means two different projects can each have their own newde.
+ * Per-project means two different projects can each have their own oxplow.
  */
 function acquireProjectLock(projectDir: string): LockResult {
-  const runtimeDir = join(projectDir, ".newde", "runtime");
+  const runtimeDir = join(projectDir, ".oxplow", "runtime");
   mkdirSync(runtimeDir, { recursive: true });
   const lockPath = join(runtimeDir, "instance.lock");
   if (existsSync(lockPath)) {
@@ -414,7 +414,7 @@ function acquireProjectLock(projectDir: string): LockResult {
     }
     // stale — either the writer died without cleaning up, or it's our own pid
     try { unlinkSync(lockPath); } catch (err) {
-      console.warn("[newde] could not remove stale lock file", lockPath, err);
+      console.warn("[oxplow] could not remove stale lock file", lockPath, err);
     }
   }
   writeFileSync(lockPath, String(process.pid), "utf8");
@@ -427,7 +427,7 @@ function releaseProjectLock(): void {
     const currentPid = readLockPid(instanceLockPath);
     if (currentPid === process.pid) unlinkSync(instanceLockPath);
   } catch (err) {
-    console.warn("[newde] could not release project lock", instanceLockPath, err);
+    console.warn("[oxplow] could not release project lock", instanceLockPath, err);
   }
   instanceLockPath = null;
 }

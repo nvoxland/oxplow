@@ -10,7 +10,7 @@ import { WorkItemStore } from "./work-item-store.js";
 import { WorkItemEffortStore } from "./work-item-effort-store.js";
 
 function seed() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-effort-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-effort-"));
   const streamStore = new StreamStore(dir);
   const stream = streamStore.create({
     title: "Demo",

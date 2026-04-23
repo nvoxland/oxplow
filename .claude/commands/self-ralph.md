@@ -1,5 +1,5 @@
 ---
-description: Drive newde through an exploratory or known-bug task, fix what surfaces, log the run
+description: Drive oxplow through an exploratory or known-bug task, fix what surfaces, log the run
 ---
 
 # /self-ralph — one (or N) self-driving passes
@@ -13,17 +13,17 @@ machines*. All state lives in `.self-ralph/` (gitignored), in
 `ux-test.md` (tracked), and in `.context/*.md` (tracked). Each pass
 must stand on its own.
 
-## What "dogfooding newde" actually means (read first — THIS IS THE WHOLE POINT)
+## What "dogfooding oxplow" actually means (read first — THIS IS THE WHOLE POINT)
 
-Self-ralph is **newde improving newde** through actual use. You, the
-outer agent, are a **human engineer** sitting at a newde window.
+Self-ralph is **oxplow improving oxplow** through actual use. You, the
+outer agent, are a **human engineer** sitting at a oxplow window.
 When you want a fix, you don't open an editor — you **tell the inner
-agent inside newde to do it**, by creating a work item and prompting
+agent inside oxplow to do it**, by creating a work item and prompting
 the agent pane. You watch the inner agent work, you approve the
 commit through the UI, and you **notice every friction that slowed
 you down**. Those frictions are the raw material of the loop.
 
-If you finish a pass and you never launched newde, never typed into
+If you finish a pass and you never launched oxplow, never typed into
 the agent pane, never approved a commit through the UI — **you did
 not dogfood, and the pass was a failure** regardless of what code
 got committed. The `/ralph-review` at `20260419-213605` explicitly
@@ -31,8 +31,8 @@ caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
 
 ### The canonical pass, spelled out
 
-1. **Launch newde yourself**, via the electron app running from this
-   repo. You can script the launch with Playwright (`launchNewde`
+1. **Launch oxplow yourself**, via the electron app running from this
+   repo. You can script the launch with Playwright (`launchOxplow`
    from `tests-e2e/harness.ts`) but you are driving as a user: you
    click the buttons a user would click, you read the text a user
    would read, you notice the delays a user would notice.
@@ -42,7 +42,7 @@ caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
    scope: <pointers>. Run bun test after, propose a commit." The
    inner agent has MCP tools; it will create its own work items to
    plan, surface a commit point when ready, etc. **You prompt; it
-   executes.** You are not allowed to call `mcp__newde__*`.
+   executes.** You are not allowed to call `mcp__oxplow__*`.
 3. **Do not pre-stack work items via the Plan UI.** The `+ New work
    item` button exists, but work items are mostly the *inner
    agent's* planning artifact and your window into what it did. If
@@ -57,11 +57,11 @@ caught this failure mode: 5 passes, 0 dogfood. Don't repeat it.
    about progress. Notice when a wait point lands without surfacing
    in the Work panel. Notice when an approval button is hidden
    under a hover card. **These are the findings.**
-5. **Approve the commit through newde's UI** — not via `git
+5. **Approve the commit through oxplow's UI** — not via `git
    commit`, not by editing a file. Click the approve button. If
    you can't find it, that's a finding.
 6. **Reflect on friction.** Everything that surprised you, slowed
-   you down, or required reaching outside newde goes into the
+   you down, or required reaching outside oxplow goes into the
    fix log and/or a new todo entry.
 
 `tests-e2e/dogfood-cycle.ts` is the reference implementation of
@@ -73,15 +73,15 @@ a license to pre-queue.)
 
 ### Hard rules
 
-- **Never call `mcp__newde__*` tools yourself.** Those are for the
+- **Never call `mcp__oxplow__*` tools yourself.** Those are for the
   inner agent. You prompt it; you don't bypass it.
-- **Never write to `.newde/state.sqlite` with `sqlite3`** while
-  newde is running. You're a user, not a DB admin.
-- **No reaching around newde.** When you need to look at a thread's
-  history, open it in newde's History panel. When you want to see
-  what changed, open the diff in newde's editor. `git log` is fine
+- **Never write to `.oxplow/state.sqlite` with `sqlite3`** while
+  oxplow is running. You're a user, not a DB admin.
+- **No reaching around oxplow.** When you need to look at a thread's
+  history, open it in oxplow's History panel. When you want to see
+  what changed, open the diff in oxplow's editor. `git log` is fine
   for reading your own commit trail in the conversation; it is not
-  fine for answering "what does newde show the user about this
+  fine for answering "what does oxplow show the user about this
   branch?" — that's dogfood territory. Cheating through Grep and
   Read is easier than driving the UI, which is exactly why the
   friction you'd notice never gets noticed.
@@ -92,7 +92,7 @@ Playwright is a **user-simulation harness**, not a shortcut around
 user-level interaction:
 
 - **Primary use (dogfood):** script the canonical pass above — the
-  agent-loop scenario end-to-end. The probe drives newde as a user
+  agent-loop scenario end-to-end. The probe drives oxplow as a user
   would: creates a work item, prompts the agent, approves the
   commit. This is a full dogfood run captured as a regression test.
 - **Secondary use (regression lock-in):** after a dogfood pass
@@ -110,7 +110,7 @@ user-level interaction:
 
 Every end-of-pass report (Step 8) **must include a one-line
 "Dogfood:" field** stating what you actually did as a user. Valid
-answers name concrete UI interactions — "launched newde, created
+answers name concrete UI interactions — "launched oxplow, created
 work item via +New, prompted inner agent in terminal, approved
 commit via Work panel." The string "none" or "n/a" is a valid but
 **damning** answer and should only be used for pure infra-only
@@ -142,11 +142,11 @@ If what you expect is different from what you see, **that's a
 bug**. File it. Don't rationalize ("oh, I see why they did it
 that way") — a user's first read is the test.
 
-**2. Scan for capability before reaching outside newde.** When
+**2. Scan for capability before reaching outside oxplow.** When
 you think "I need to see the git log" or "I need to check what
-changed," pause and look at newde's UI first. What's on the
+changed," pause and look at oxplow's UI first. What's on the
 screen? Does a History panel, a Changes tab, a blame overlay,
-a Cmd+K command already do this? If you could use newde for
+a Cmd+K command already do this? If you could use oxplow for
 this and chose not to, that's a cheat — and usually a finding
 (the affordance was there but wasn't discoverable enough that
 you noticed it under pressure). Log the near-miss.
@@ -168,7 +168,7 @@ you noticed it under pressure). Log the near-miss.
 - **Files pane filter modes.** `ProjectPanel` surfaces filters
   along `branchBase`, `upstream`, `uncommitted`, and the current
   thread's file changes. Try switching filters — they're the
-  newde-native answer to `git diff --stat HEAD` and
+  oxplow-native answer to `git diff --stat HEAD` and
   `git diff origin/main...HEAD`. Notice if a filter doesn't do
   what its label suggests.
 
@@ -247,24 +247,24 @@ run must behave identically to N separate invocations from cold.
 ## Ground rules
 
 1. **Never touch `.self-ralph/` from application code.** This dir
-   belongs to the command; newde must stay unaware of it.
+   belongs to the command; oxplow must stay unaware of it.
 2. **Two classes of improvement, different homes.** Problems with
-   *newde* (the app) → fix in newde's code/tests/docs, commit, log
+   *oxplow* (the app) → fix in oxplow's code/tests/docs, commit, log
    to `.self-ralph/fix-*.md`. Problems with the *harness, this
    command, probes, or your own workflow* → fix directly in
    `tests-e2e/harness.ts`, `.claude/commands/self-ralph.md`, or
-   `.self-ralph/`. Never dump meta-friction into newde's codebase.
-3. **Red/green TDD still applies** for newde changes. Probe or
+   `.self-ralph/`. Never dump meta-friction into oxplow's codebase.
+3. **Red/green TDD still applies** for oxplow changes. Probe or
    colocated `bun:test` — whichever matches the seam — must be
    green before you commit.
 4. **Update the matching `.context/*.md` doc in the same commit** as
-   any newde code change — per `CLAUDE.md` rules. Don't skip this.
-5. **Commit only newde changes in the "fix" commit.** `.self-ralph/`
+   any oxplow code change — per `CLAUDE.md` rules. Don't skip this.
+5. **Commit only oxplow changes in the "fix" commit.** `.self-ralph/`
    is gitignored. Harness / probe / command changes ARE tracked and
    go in the same commit as the matching fix (or a separate commit
    if purely infra).
 6. **You are a user, not an MCP caller.** See "What dogfooding
-   means" above — no `mcp__newde__*` calls from /self-ralph, ever.
+   means" above — no `mcp__oxplow__*` calls from /self-ralph, ever.
 
 ## Guard against the subsystem rut
 
@@ -281,13 +281,13 @@ rest of the app.
 - This guard sits *above* the top-of-stack rule — it's a blast-
   radius concern, not a priority concern. The topmost item comes
   right back on the following invocation.
-- It does **not** trip on harness/prompt/probe commits; only newde
+- It does **not** trip on harness/prompt/probe commits; only oxplow
   code. Infra commits are meta and shouldn't count against
-  newde subsystems.
+  oxplow subsystems.
 
 ## Guard against the testid rut
 
-**Testids are probe infrastructure, not newde deliverables.**
+**Testids are probe infrastructure, not oxplow deliverables.**
 
 - **Never file `[F] add data-testid=...` as a standalone todo.** If
   a probe needs a testid, add it in the same pass that drives the
@@ -371,9 +371,9 @@ about to touch.
 ## Step 3 — Drive (dogfood first, Playwright second)
 
 **The default shape of every pass is a dogfood run**, whether it's
-flagged `[E]` or `[F]`. You launch newde, create a work item, prompt
+flagged `[E]` or `[F]`. You launch oxplow, create a work item, prompt
 the inner agent, watch, approve. The fix itself should be done by
-the inner agent through newde, not by you in your editor. Skip this
+the inner agent through oxplow, not by you in your editor. Skip this
 only if the item is harness/prompt/infra — and disclose that in the
 "Picked" announcement.
 
@@ -387,7 +387,7 @@ entry, so no separate cleanup step.
 
 Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
 
-1. `launchNewde(projectDir)` into a fresh userData dir.
+1. `launchOxplow(projectDir)` into a fresh userData dir.
 2. Click through to the UI area you're exercising (Work panel,
    editor, History, etc.) as a user would. Notice every delay,
    missing affordance, or unclear label on the way.
@@ -414,7 +414,7 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
    agent can be quiet while thinking. Reference template:
    `tests-e2e/dogfood-ctx-menu.ts`.
    - `[data-agent-status]` doesn't work as a signal — there's a
-     filed `[F]` against newde for it. Rely on terminal content
+     filed `[F]` against oxplow for it. Rely on terminal content
      until that lands.
 6. **Approve via the UI.** When the agent surfaces a propose
    result, the Work panel should offer an approve affordance.
@@ -422,8 +422,8 @@ Write or extend a probe modeled on `tests-e2e/dogfood-cycle.ts`:
    "no active commit point existed"), fall back to the
    `files-commit` palette command (Cmd+K → "Commit") and commit
    the agent's changes manually. Either way, the commit lands
-   through newde's UI — not via `git commit`.
-7. **Verify through newde, not git.** Open the History tab in the
+   through oxplow's UI — not via `git commit`.
+7. **Verify through oxplow, not git.** Open the History tab in the
    bottom pane and confirm the commit appears there as a user
    would see it. If the commit touched files, open one of them
    and try the per-file history view. Also flip the Files pane
@@ -476,8 +476,8 @@ overlaps; new probes are expensive to maintain.
   fix (via inner agent) before chasing the second thing.
 
 **If `runProbe` kills a probe as silent or timed-out:** do not try
-again in the same pass. File `[F]` against the harness (or newde if
-the hang is clearly in newde), write the log, stop this pass.
+again in the same pass. File `[F]` against the harness (or oxplow if
+the hang is clearly in oxplow), write the log, stop this pass.
 Retrying eats tokens — saw this burn 25 minutes in the pass-3
 toggleBlame incident.
 
@@ -497,7 +497,7 @@ with the Co-Authored-By line.
 - **Bot hat:** what about the loop/harness/command was awkward? Fix
   it right here (in `.self-ralph/`, `tests-e2e/harness.ts`, or this
   file) — don't just write it down.
-- **Engineer hat:** what about newde's code made the fix harder than
+- **Engineer hat:** what about oxplow's code made the fix harder than
   it should have been? That becomes a new `[F]` or `[E]` todo
   entry.
 
@@ -531,7 +531,7 @@ surprise):
 <verbatim todo line, why (for [E]: what hypothesis)>
 
 ## Dogfood
-<concrete user actions: launched newde, created work item "X",
+<concrete user actions: launched oxplow, created work item "X",
 prompted inner agent with "Y", approved commit at <sha> via Work
 panel. OR "infra-only pass — no dogfood needed because <reason>".
 Bare "none" without justification is a failed pass.>
@@ -587,7 +587,7 @@ load-bearing sections.
 ≤ 90 words. State:
 (a) which item you picked (+ any rotation/skip reasoning),
 (b) **Dogfood:** one line naming concrete UI actions you took as a
-    user — "launched newde, created work item, prompted inner agent,
+    user — "launched oxplow, created work item, prompted inner agent,
     approved commit." Bare "none" means this was an infra-only pass
     AND you must justify that in (a).
 (c) **Top surprise or expectation miss:** the single most

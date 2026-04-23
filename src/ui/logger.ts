@@ -1,6 +1,6 @@
 export type UiLogLevel = "debug" | "info" | "warn" | "error";
 
-const CLIENT_ID_KEY = "newde-ui-client-id";
+const CLIENT_ID_KEY = "oxplow-ui-client-id";
 
 let installed = false;
 
@@ -71,7 +71,7 @@ export function getUiClientId(): string {
 
 async function sendUiLog(level: UiLogLevel, message: string, context?: Record<string, unknown>): Promise<void> {
   try {
-    await window.newdeApi.logUi({
+    await window.oxplowApi.logUi({
       clientId: getUiClientId(),
       level,
       message,

@@ -8,10 +8,10 @@
 export const AGENT_GUIDE_FILENAME = "AGENT_GUIDE.md";
 
 export function buildAgentGuide(): string {
-  return `# newde agent guide
+  return `# oxplow agent guide
 
 Reference catalog the agent can read on demand — you shouldn't need to
-quote this back, just use the right values when calling newde MCP tools.
+quote this back, just use the right values when calling oxplow MCP tools.
 
 ## Work-item kinds
 
@@ -27,7 +27,7 @@ quote this back, just use the right values when calling newde MCP tools.
   findings, open questions, decisions to revisit). Appears in the
   history panel but never enters the ready queue.
 
-## Link types (\`newde__link_work_items\`)
+## Link types (\`oxplow__link_work_items\`)
 
 - **blocks** — from-item must finish before to-item can start. Use
   this for hard ordering (migration before feature that uses it).

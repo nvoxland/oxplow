@@ -4,7 +4,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { dogfoodInnerAgent, launchNewde, probeLog, runProbe, waitForNewdeReady } from "./harness.ts";
+import { dogfoodInnerAgent, launchOxplow, probeLog, runProbe, waitForOxplowReady } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,15 +17,15 @@ async function main() {
     const outDir = resolve(__dirname, "screenshots");
     mkdirSync(outDir, { recursive: true });
 
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
-      await waitForNewdeReady(window);
+      await waitForOxplowReady(window);
       const result = await dogfoodInnerAgent(window, {
         slug: "cycle2",
         outDir,
         workItemTitle: WORK_ITEM_TITLE,
         workItemBody: WORK_ITEM_BODY,
-        prompt: `There's a new work item titled "${WORK_ITEM_TITLE}". Call mcp__newde__list_ready_work to see it, pick it up, do the work, run bun test, and commit directly with git (not propose_commit — this is the ad-hoc path).`,
+        prompt: `There's a new work item titled "${WORK_ITEM_TITLE}". Call mcp__oxplow__list_ready_work to see it, pick it up, do the work, run bun test, and commit directly with git (not propose_commit — this is the ad-hoc path).`,
         addCommitPoint: false,
       });
       probeLog(`[cycle2] done ticks=${result.ticks} exit=${result.exitReason}`);

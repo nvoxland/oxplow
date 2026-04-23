@@ -13,12 +13,12 @@ function readJsonLines(path: string): any[] {
 }
 
 test("createDaemonLogger writes structured logs to the project daemon log", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-logger-test-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-logger-test-"));
   const logger = createDaemonLogger(projectDir).child({ subsystem: "daemon-test" });
 
   logger.info("daemon started", { port: 7457 });
 
-  expect(logger.path).toBe(join(projectDir, ".newde", "logs", "system.log"));
+  expect(logger.path).toBe(join(projectDir, ".oxplow", "logs", "system.log"));
   const lines = readJsonLines(logger.path);
   expect(lines).toHaveLength(1);
   expect(lines[0].level).toBe("info");
@@ -28,7 +28,7 @@ test("createDaemonLogger writes structured logs to the project daemon log", () =
 });
 
 test("child loggers merge context across writes", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-logger-test-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-logger-test-"));
   const logger = createDaemonLogger(projectDir).child({ streamId: "s-1" }).child({ pane: "working" });
 
   logger.warn("pane resumed", { sessionId: "abc" });
@@ -38,12 +38,12 @@ test("child loggers merge context across writes", () => {
 });
 
 test("createUiClientLogger writes to a per-client log file with a safe file name", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-logger-test-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-logger-test-"));
   const logger = createUiClientLogger(projectDir, "browser/tab:1");
 
   logger.error("ui crash", { route: "/streams" });
 
-  expect(logger.path).toBe(join(projectDir, ".newde", "logs", "ui", "browser_tab_1.log"));
+  expect(logger.path).toBe(join(projectDir, ".oxplow", "logs", "ui", "browser_tab_1.log"));
   const [line] = readJsonLines(logger.path);
   expect(line.level).toBe("error");
   expect(line.message).toBe("ui crash");
@@ -51,7 +51,7 @@ test("createUiClientLogger writes to a per-client log file with a safe file name
 });
 
 test("createDaemonLogger mirrors info+ messages to the terminal", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-logger-test-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-logger-test-"));
   const stdoutWrites: string[] = [];
   const stderrWrites: string[] = [];
   const originalStdout = process.stdout.write.bind(process.stdout);
@@ -83,7 +83,7 @@ test("createDaemonLogger mirrors info+ messages to the terminal", () => {
 });
 
 test("createUiClientLogger does not mirror to the terminal", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-logger-test-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-logger-test-"));
   const stdoutWrites: string[] = [];
   const stderrWrites: string[] = [];
   const originalStdout = process.stdout.write.bind(process.stdout);

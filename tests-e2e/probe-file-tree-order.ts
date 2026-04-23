@@ -1,17 +1,17 @@
 /**
  * Probe: file-tree root puts source-y directories before known dev-noise
- * dirs (.claude, .newde, node_modules, etc.). First-time users shouldn't
+ * dirs (.claude, .oxplow, node_modules, etc.). First-time users shouldn't
  * scroll past .claude to find src/.
  */
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { launchNewde, runProbe } from "./harness.ts";
+import { launchOxplow, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
     await window.getByTestId("dock-tab-project").click();

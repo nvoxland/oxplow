@@ -19,10 +19,10 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, runProbe } from "./harness.ts";
+import { launchOxplow, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
+const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
@@ -33,7 +33,7 @@ async function main() {
   const itemTitle = `drag-thread-probe-${stamp}`;
   const threadTitle = `drop-target-${stamp}`;
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   const fails: string[] = [];
   try {
     await window.waitForTimeout(3_000);

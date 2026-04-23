@@ -23,7 +23,7 @@ variables live in `public/index.html` under `:root`.
 | `--priority-high`    | `#e5a06a`  | Work-item priority icon — high                     |
 | `--priority-medium`  | `#8d8a85`  | Work-item priority icon — medium (alias of muted)  |
 | `--priority-low`     | `#6b6864`  | Work-item priority icon — low (recedes past muted) |
-| `--blame-local-fresh` / `--blame-local-recent` / `--blame-local-stale` / `--blame-local-old` | amber age ramp | Blame overlay rows attributed to a newde work-item effort (saturation = age) |
+| `--blame-local-fresh` / `--blame-local-recent` / `--blame-local-stale` / `--blame-local-old` | amber age ramp | Blame overlay rows attributed to a oxplow work-item effort (saturation = age) |
 | `--blame-local-border` | `#e5a06a`  | 2px left border on local-attributed blame rows      |
 | `--blame-git-fresh` / `--blame-git-recent` / `--blame-git-stale` / `--blame-git-old` | blue age ramp | Blame overlay rows attributed to a git commit (saturation = age) |
 | `--blame-git-border`  | `#4a9eff`  | 2px left border on git-attributed blame rows        |

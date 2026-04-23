@@ -98,7 +98,7 @@ export function SettingsModal({ open, onClose }: Props) {
           <section style={sectionStyle}>
             <div style={sectionTitleStyle}>Agent prompt additions</div>
             <div style={sectionHintStyle}>
-              Text appended to every agent's system prompt. Applies to agent sessions started after Save — existing sessions keep the prompt they launched with. Stored in <code>newde.yaml</code>.
+              Text appended to every agent's system prompt. Applies to agent sessions started after Save — existing sessions keep the prompt they launched with. Stored in <code>oxplow.yaml</code>.
             </div>
             <textarea
               value={promptAppend}

@@ -176,7 +176,7 @@ export class LspSession {
       this.logger.warn("language server exited", { code: code ?? undefined, signal: signal ?? undefined });
       this.broadcast({
         jsonrpc: "2.0",
-        method: "$/newde/status",
+        method: "$/oxplow/status",
         params: { message: `LSP server exited for ${this.registration.languageId}` },
       });
       this.proc = null;
@@ -245,7 +245,7 @@ export class LspSession {
     });
     ws.send(JSON.stringify({
       jsonrpc: "2.0",
-      method: "$/newde/status",
+      method: "$/oxplow/status",
       params: { message: null },
     }));
   }

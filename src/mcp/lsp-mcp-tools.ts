@@ -202,9 +202,9 @@ const POSITION_SCHEMA = {
 export function buildLspMcpTools(deps: LspMcpToolDeps): ToolDef[] {
   return [
     {
-      name: "newde__lsp_definition",
+      name: "oxplow__lsp_definition",
       description:
-        "Jump to the definition of the symbol at (line, column) in the given file. Returns an array of locations (path relative to the worktree, plus 1-based line/column ranges). Works for any language configured in newde.yaml's lsp.servers.",
+        "Jump to the definition of the symbol at (line, column) in the given file. Returns an array of locations (path relative to the worktree, plus 1-based line/column ranges). Works for any language configured in oxplow.yaml's lsp.servers.",
       inputSchema: {
         type: "object",
         properties: POSITION_SCHEMA,
@@ -220,7 +220,7 @@ export function buildLspMcpTools(deps: LspMcpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__lsp_references",
+      name: "oxplow__lsp_references",
       description:
         "Find all references to the symbol at (line, column). Returns locations with worktree-relative paths and 1-based ranges.",
       inputSchema: {
@@ -239,7 +239,7 @@ export function buildLspMcpTools(deps: LspMcpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__lsp_hover",
+      name: "oxplow__lsp_hover",
       description:
         "Retrieve hover documentation (type info, JSDoc / docstrings) for the symbol at (line, column). Returns { markdown, range }.",
       inputSchema: {
@@ -268,7 +268,7 @@ export function buildLspMcpTools(deps: LspMcpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__lsp_diagnostics",
+      name: "oxplow__lsp_diagnostics",
       description:
         "Return the language server's current diagnostics (errors, warnings, hints) for the given file. Opens the file in the server if needed, waits briefly for the first batch of diagnostics, and returns normalized entries with 1-based ranges.",
       inputSchema: {

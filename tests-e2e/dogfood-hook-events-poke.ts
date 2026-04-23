@@ -5,7 +5,7 @@
 // suppressing the duplicate xterm output.
 //
 // Procedure:
-//   1. Launch newde
+//   1. Launch oxplow
 //   2. Switch to dock-tab-hook-events
 //   3. Prompt the inner agent with a trivial echo task so events flow
 //   4. Capture the hook-events panel rows + xterm rows side-by-side
@@ -14,7 +14,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +23,7 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
     probeLog("[hook-poke] launched");

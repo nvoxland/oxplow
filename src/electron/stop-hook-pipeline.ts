@@ -87,7 +87,7 @@ export interface ThreadSnapshot {
 
 export interface NextWorkItemContext {
   /** Set to true when the current turn wrote to any src/ui/** path — the
-   *  builder should emit a "restart newde and exercise in the browser"
+   *  builder should emit a "restart oxplow and exercise in the browser"
    *  banner before the normal directive text. */
   uiChangeNudge: boolean;
 }
@@ -146,7 +146,7 @@ export function decideStopDirective(
 
   // No commit_point row queued, but the thread is in auto_commit mode with
   // settled work — fire the auto-commit directive with cp=null. The agent
-  // runs `mcp__newde__commit` with { auto: true } and the runtime commits
+  // runs `mcp__oxplow__commit` with { auto: true } and the runtime commits
   // without touching a commit_point row. Only the writer thread commits.
   // Clean tree suppresses the misfire — the sha already landed via ad-hoc
   // git commit (Bash / Files panel) and the backfill path attaches the
@@ -340,7 +340,7 @@ function buildForkHint(snapshot: ThreadSnapshot): string | null {
   if (typeof cum !== "number" || cum < FORK_HINT_THRESHOLD) return null;
   const mStr = (cum / 1_000_000).toFixed(1);
   const threadId = snapshot.thread?.id ?? "<threadId>";
-  return `note: this thread has burned ${mStr}M cache-read. If upcoming work is unrelated, consider newde__fork_thread({ sourceThreadId: "${threadId}", title: "...", summary: "short carry-over context" })`;
+  return `note: this thread has burned ${mStr}M cache-read. If upcoming work is unrelated, consider oxplow__fork_thread({ sourceThreadId: "${threadId}", title: "...", summary: "short carry-over context" })`;
 }
 
 function isTerminalStatus(item: WorkItem): boolean {

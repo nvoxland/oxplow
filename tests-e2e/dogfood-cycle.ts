@@ -1,4 +1,4 @@
-// Canonical dogfood loop driven through newde's UI:
+// Canonical dogfood loop driven through oxplow's UI:
 //   1. Add a commit point (so propose_commit has a target).
 //   2. Create one work item describing the desired edit.
 //   3. Type a prompt into the agent xterm.
@@ -11,7 +11,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { dogfoodInnerAgent, launchNewde, probeLog, runProbe, waitForNewdeReady } from "./harness.ts";
+import { dogfoodInnerAgent, launchOxplow, probeLog, runProbe, waitForOxplowReady } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,15 +32,15 @@ async function main() {
     const outDir = resolve(__dirname, "screenshots");
     mkdirSync(outDir, { recursive: true });
 
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
-      await waitForNewdeReady(window);
+      await waitForOxplowReady(window);
       const result = await dogfoodInnerAgent(window, {
         slug: "cycle",
         outDir,
         workItemTitle: WORK_ITEM_TITLE,
         workItemBody: WORK_ITEM_BODY,
-        prompt: `There's a new work item in the queue titled "${WORK_ITEM_TITLE}". Call mcp__newde__list_ready_work to see it, then pick it up (mark it in_progress), do the work as described, run bun test, and propose a commit when done.`,
+        prompt: `There's a new work item in the queue titled "${WORK_ITEM_TITLE}". Call mcp__oxplow__list_ready_work to see it, then pick it up (mark it in_progress), do the work as described, run bun test, and propose a commit when done.`,
         addCommitPoint: true,
       });
       probeLog(`[cycle] done ticks=${result.ticks} exit=${result.exitReason}`);

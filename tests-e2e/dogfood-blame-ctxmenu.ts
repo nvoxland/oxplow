@@ -11,7 +11,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,7 +31,7 @@ Please:
 
 Do NOT touch .self-ralph/ or tests-e2e/.`;
 
-const PROMPT = `There is one work item in the queue titled "${TITLE}". Please call mcp__newde__list_ready_work to confirm, then pick it up and complete it as described in its body. Run bun test before proposing the commit. Ignore any other queued items — focus only on this one.`;
+const PROMPT = `There is one work item in the queue titled "${TITLE}". Please call mcp__oxplow__list_ready_work to confirm, then pick it up and complete it as described in its body. Run bun test before proposing the commit. Ignore any other queued items — focus only on this one.`;
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
@@ -40,10 +40,10 @@ async function main() {
 
   // Phase 1: launch, prompt inner agent, watch
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
-      probeLog("[blame-ctx] newde launched (phase 1: prompt)");
+      probeLog("[blame-ctx] oxplow launched (phase 1: prompt)");
 
       const { ticks, exitReason } = await dogfoodInnerAgent(window, {
         slug: "blame-ctx",
@@ -64,10 +64,10 @@ async function main() {
 
   // Phase 2: relaunch, approve via Files-commit dialog
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
-      probeLog("[blame-ctx] newde launched (phase 2: approve)");
+      probeLog("[blame-ctx] oxplow launched (phase 2: approve)");
       await approveViaFiles(window, {
         slug: "blame-ctx",
         outDir,

@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Logger } from "../core/logger.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
-const SERVER_NAME = "newde";
+const SERVER_NAME = "oxplow";
 const SERVER_VERSION = "0.0.1";
 const HTTP_AUTH_HEADER = "authorization";
 const MAX_HTTP_BODY_BYTES = 1_000_000;
@@ -80,7 +80,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   wss.on("connection", (ws, req) => {
     if (!isAuthorizedHttpRequest(req, authToken)) {
       // debug, not warn — unauthorized probes from other IDEs scanning
-      // `~/.claude/ide/*.lock` fire this on every newde launch. The
+      // `~/.claude/ide/*.lock` fire this on every oxplow launch. The
       // rejection itself is correct defense; surfacing it at WARN just
       // pollutes startup logs with expected behavior.
       logger?.debug("rejected unauthorized mcp websocket");
@@ -94,7 +94,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
   let serverPort = 0;
 
   tools.push({
-    name: "newde__ping",
+    name: "oxplow__ping",
     description: "Proof-of-life tool. Returns ok + daemonPort + timestamp.",
     inputSchema: { type: "object", properties: {} },
     handler: () => ({ ok: true, daemonPort: serverPort, timestamp: Date.now() }),
@@ -218,13 +218,13 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
       try { payload = JSON.parse(body); } catch { payload = { raw: body }; }
     }
 
-    // Identity rides X-Newde-* request headers (Claude's http hooks support
+    // Identity rides X-Oxplow-* request headers (Claude's http hooks support
     // env-var interpolation in header values).
     const envelope: HookEnvelope = {
       event,
-      streamId: readHeader(req, "x-newde-stream"),
-      threadId: readHeader(req, "x-newde-thread"),
-      pane: readHeader(req, "x-newde-pane"),
+      streamId: readHeader(req, "x-oxplow-stream"),
+      threadId: readHeader(req, "x-oxplow-thread"),
+      pane: readHeader(req, "x-oxplow-pane"),
       payload,
     };
 

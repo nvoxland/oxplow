@@ -5,7 +5,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -14,10 +14,10 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
-    probeLog("[commit] newde launched");
+    probeLog("[commit] oxplow launched");
 
     // Open Files dock tab.
     await window.getByTestId("dock-tab-project").click();

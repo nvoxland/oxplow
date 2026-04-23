@@ -86,7 +86,7 @@ function readWindowSignature(target: string): string | null {
   try {
     const out = execFileSync(
       "tmux",
-      ["show-options", "-w", "-v", "-t", target, "@newde_launcher_signature"],
+      ["show-options", "-w", "-v", "-t", target, "@oxplow_launcher_signature"],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     const value = out.trim();
@@ -98,7 +98,7 @@ function readWindowSignature(target: string): string | null {
 
 function writeWindowSignature(target: string, launcherSignature: string): void {
   try {
-    tmux(["set-option", "-w", "-t", target, "@newde_launcher_signature", launcherSignature]);
+    tmux(["set-option", "-w", "-t", target, "@oxplow_launcher_signature", launcherSignature]);
   } catch {}
 }
 

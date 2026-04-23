@@ -1,7 +1,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde } from "./harness.ts";
+import { launchOxplow } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -10,8 +10,8 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  console.log(`[smoke] launching newde against ${projectDir}`);
-  const { app, window, close } = await launchNewde(projectDir);
+  console.log(`[smoke] launching oxplow against ${projectDir}`);
+  const { app, window, close } = await launchOxplow(projectDir);
 
   try {
     // Give the app a beat to mount the React tree.

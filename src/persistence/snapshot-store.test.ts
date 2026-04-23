@@ -17,7 +17,7 @@ function backdateSnapshot(projectDir: string, snapshotId: string, daysAgo: numbe
 }
 
 function seed() {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-snap-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-snap-"));
   const worktreePath = projectDir;
   const streams = new StreamStore(projectDir);
   const stream = streams.create({

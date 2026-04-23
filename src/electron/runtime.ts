@@ -68,7 +68,7 @@ import { isInsideWorktree } from "./runtime-paths.js";
 import { shouldIgnoreWorkspaceWatchPath } from "../git/workspace-watch.js";
 import { createWorkItemApi, type WorkItemApi } from "./work-item-api.js";
 import { computeLocalBlame } from "./local-blame.js";
-import { EventBus, type NewdeEvent } from "../core/event-bus.js";
+import { EventBus, type OxplowEvent } from "../core/event-bus.js";
 import {
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -83,7 +83,7 @@ import {
 import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 import { GitRefsWatcherRegistry } from "../git/git-refs-watch.js";
 import { detectCurrentBranch } from "../git/git.js";
-import { loadProjectConfig, writeProjectConfig, type NewdeConfig } from "../config/config.js";
+import { loadProjectConfig, writeProjectConfig, type OxplowConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
 import { attachPane } from "../terminal/pty-bridge.js";
 import { AgentPtyStore } from "../terminal/agent-pty-store.js";
@@ -109,7 +109,7 @@ export class ElectronRuntime {
   readonly agentPtyStore: AgentPtyStore;
   readonly workspaceWatchers: WorkspaceWatcherRegistry;
   readonly gitRefsWatchers: GitRefsWatcherRegistry;
-  config: NewdeConfig;
+  config: OxplowConfig;
   readonly events: EventBus;
 
   private electronPlugin: ElectronPlugin | null = null;
@@ -155,7 +155,7 @@ export class ElectronRuntime {
   private gitRootWatcher: FSWatcher | null = null;
   private snapshotCleanupTimer: ReturnType<typeof setInterval> | null = null;
   /** Dev-time watchers for src/mcp and src/persistence; created only when
-   *  `NEWDE_DEV_RELOAD=1` AND the runtime can resolve a source tree
+   *  `OXPLOW_DEV_RELOAD=1` AND the runtime can resolve a source tree
    *  (checked via `findSourceRoot`). Close in dispose(). */
   private devReloadWatchers: FSWatcher[] = [];
   /** Coalesces bursty fs events (save-on-build, git checkout) into a
@@ -166,12 +166,12 @@ export class ElectronRuntime {
   private devReloadInFlight = false;
   /** ISO timestamp captured in `initialize()`. Used as the cutoff for
    *  `turnStore.listOpenTurns` so orphaned open turns from prior runs
-   *  (newde crashed mid-turn, `ended_at` never set) don't haunt the UI's
+   *  (oxplow crashed mid-turn, `ended_at` never set) don't haunt the UI's
    *  in_progress bucket. See the passive-turn-tracking plan. */
   startedAt: string = "";
   private disposed = false;
 
-  private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
+  private constructor(projectDir: string, projectBase: string, logger: Logger, config: OxplowConfig) {
     this.projectDir = projectDir;
     this.projectBase = projectBase;
     this.logger = logger;
@@ -219,12 +219,12 @@ export class ElectronRuntime {
   private hookHealthReported = false;
 
   static async create(projectDir: string): Promise<ElectronRuntime> {
-    // newde manages its own worktrees under .newde/worktrees/; refusing to
+    // oxplow manages its own worktrees under .oxplow/worktrees/; refusing to
     // boot inside someone else's worktree keeps the stream/pane accounting
     // from getting tangled with a foreign git checkout.
     if (isGitWorktree(projectDir)) {
       throw new Error(
-        `newde cannot run inside a git worktree (${projectDir}). Open it from the main repository checkout or from a directory that isn't under git.`,
+        `oxplow cannot run inside a git worktree (${projectDir}). Open it from the main repository checkout or from a directory that isn't under git.`,
       );
     }
     const logger = createDaemonLogger(projectDir).child({ pid: process.pid, subsystem: "electron-runtime" });
@@ -455,7 +455,7 @@ export class ElectronRuntime {
   }
 
   /**
-   * Dev-only: when `NEWDE_DEV_RELOAD=1` and a source tree is resolvable
+   * Dev-only: when `OXPLOW_DEV_RELOAD=1` and a source tree is resolvable
    * from `process.cwd()`, watch `src/mcp/` and `src/persistence/` and
    * restart the MCP server on change. The restart re-runs
    * `buildWorkItemMcpTools` / `buildLspMcpTools` and rebinds the TCP
@@ -477,10 +477,10 @@ export class ElectronRuntime {
    * resolve the source root in that case.
    */
   private maybeStartDevReloadWatchers(): void {
-    if (process.env.NEWDE_DEV_RELOAD !== "1") return;
+    if (process.env.OXPLOW_DEV_RELOAD !== "1") return;
     const sourceRoot = findSourceRoot();
     if (!sourceRoot) {
-      this.logger.warn("NEWDE_DEV_RELOAD=1 but no source tree found; dev-reload disabled");
+      this.logger.warn("OXPLOW_DEV_RELOAD=1 but no source tree found; dev-reload disabled");
       return;
     }
     const watched = [join(sourceRoot, "src", "mcp"), join(sourceRoot, "src", "persistence")];
@@ -598,7 +598,7 @@ export class ElectronRuntime {
     getStateDatabase(this.projectDir).close();
   }
 
-  onEvent(listener: (event: NewdeEvent) => void): () => void {
+  onEvent(listener: (event: OxplowEvent) => void): () => void {
     return this.events.subscribe(listener);
   }
 
@@ -654,12 +654,12 @@ export class ElectronRuntime {
     return this.renameStream(current.id, title);
   }
 
-  getConfig(): NewdeConfig {
+  getConfig(): OxplowConfig {
     return this.config;
   }
 
-  setAgentPromptAppend(text: string): NewdeConfig {
-    const next: NewdeConfig = { ...this.config, agentPromptAppend: text };
+  setAgentPromptAppend(text: string): OxplowConfig {
+    const next: OxplowConfig = { ...this.config, agentPromptAppend: text };
     writeProjectConfig(this.projectDir, next);
     this.config = next;
     this.logger.info("updated agent prompt append", { length: text.length });
@@ -667,11 +667,11 @@ export class ElectronRuntime {
     return next;
   }
 
-  setSnapshotRetentionDays(days: number): NewdeConfig {
+  setSnapshotRetentionDays(days: number): OxplowConfig {
     if (!Number.isFinite(days) || days < 0) {
       throw new Error("snapshotRetentionDays must be a non-negative number");
     }
-    const next: NewdeConfig = { ...this.config, snapshotRetentionDays: days };
+    const next: OxplowConfig = { ...this.config, snapshotRetentionDays: days };
     writeProjectConfig(this.projectDir, next);
     this.config = next;
     this.logger.info("updated snapshot retention days", { days });
@@ -679,11 +679,11 @@ export class ElectronRuntime {
     return next;
   }
 
-  setSnapshotMaxFileBytes(bytes: number): NewdeConfig {
+  setSnapshotMaxFileBytes(bytes: number): OxplowConfig {
     if (!Number.isFinite(bytes) || bytes < 1024) {
       throw new Error("snapshotMaxFileBytes must be a number >= 1024");
     }
-    const next: NewdeConfig = { ...this.config, snapshotMaxFileBytes: Math.floor(bytes) };
+    const next: OxplowConfig = { ...this.config, snapshotMaxFileBytes: Math.floor(bytes) };
     writeProjectConfig(this.projectDir, next);
     this.config = next;
     this.logger.info("updated snapshot max file bytes", { bytes: next.snapshotMaxFileBytes });
@@ -691,7 +691,7 @@ export class ElectronRuntime {
     return next;
   }
 
-  setGeneratedDirs(dirs: string[]): NewdeConfig {
+  setGeneratedDirs(dirs: string[]): OxplowConfig {
     // Normalize: strip leading/trailing slashes, dedupe, drop empties. Path
     // separators are illegal — single path segments only, per config schema.
     const normalized = Array.from(
@@ -701,7 +701,7 @@ export class ElectronRuntime {
           .filter((entry) => entry.length > 0 && !entry.includes("/")),
       ),
     ).sort();
-    const next: NewdeConfig = { ...this.config, generatedDirs: normalized };
+    const next: OxplowConfig = { ...this.config, generatedDirs: normalized };
     writeProjectConfig(this.projectDir, next);
     this.config = next;
     this.workspaceWatchers.setExtraIgnoreDirs(normalized);
@@ -796,7 +796,7 @@ export class ElectronRuntime {
   }
 
   /**
-   * Per-line blame combining newde work-item efforts (authoritative) with
+   * Per-line blame combining oxplow work-item efforts (authoritative) with
    * git blame (fallback). See `src/electron/local-blame.ts` for the
    * algorithm and `.context/editor-and-monaco.md` for the UI wiring.
    */
@@ -1241,7 +1241,7 @@ export class ElectronRuntime {
         resumeSessionId,
         {
           pluginDir: this.electronPlugin.pluginDir,
-          allowedTools: ["mcp__newde__*"],
+          allowedTools: ["mcp__oxplow__*"],
           appendSystemPrompt: buildThreadAgentPrompt(
             stream,
             thread,
@@ -1250,9 +1250,9 @@ export class ElectronRuntime {
           ),
           mcpConfig: buildThreadMcpConfig(this.mcp),
           env: {
-            NEWDE_STREAM_ID: stream.id,
-            NEWDE_THREAD_ID: thread.id,
-            NEWDE_HOOK_TOKEN: this.mcp.authToken,
+            OXPLOW_STREAM_ID: stream.id,
+            OXPLOW_THREAD_ID: thread.id,
+            OXPLOW_HOOK_TOKEN: this.mcp.authToken,
           },
         },
       );
@@ -1265,7 +1265,7 @@ export class ElectronRuntime {
   }
 
   /**
-   * Called by the `newde__read_work_options` MCP handler so the runtime
+   * Called by the `oxplow__read_work_options` MCP handler so the runtime
    * can suppress the ready-work Stop directive on the very next Stop
    * when the set the agent just saw is unchanged. The record is
    * consumed (deleted) by the first Stop hook that reads it — a second
@@ -1465,7 +1465,7 @@ export class ElectronRuntime {
     // mode=auto commit points) is now routed through the agent via a
     // Stop-hook directive — see buildAutoCommitStopReason. The runtime no
     // longer generates a message mechanically; the agent inspects the diff
-    // and calls `mcp__newde__commit`. That unifies the approve-mode and
+    // and calls `mcp__oxplow__commit`. That unifies the approve-mode and
     // auto-mode flows: the only remaining distinction is "ask the user
     // first, yes/no." See .context/agent-model.md for the flow.
     // Consume the just-read record (once per call). If the agent called
@@ -1945,7 +1945,7 @@ export class ElectronRuntime {
 
   /**
    * Execute an agent-drafted auto-commit for a thread (no commit_point
-   * row). Called from the `mcp__newde__commit` tool when the agent
+   * row). Called from the `mcp__oxplow__commit` tool when the agent
    * passes `{ auto: true, message }`. Runs `git commit` synchronously,
    * publishes the `auto-committed` thread lifecycle event, and throws
    * on failure so the agent sees the stderr and can retry. Falls back
@@ -2053,19 +2053,19 @@ export function buildNextWorkItemStopReason(
   const lines: string[] = [];
   if (context.uiChangeNudge) {
     lines.push(
-      `⚠ UI change detected in this turn (src/ui/** paths). Restart newde and exercise the feature in the browser before the subagent marks any item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
+      `⚠ UI change detected in this turn (src/ui/** paths). Restart oxplow and exercise the feature in the browser before the subagent marks any item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
       ``,
     );
   }
   lines.push(
-    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__newde__read_work_options\` and dispatch to a \`general-purpose\` subagent per the newde-runtime skill.`,
+    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__oxplow__read_work_options\` and dispatch to a \`general-purpose\` subagent per the oxplow-runtime skill.`,
   );
   return lines.join("\n");
 }
 
 /**
  * Fallback auto-commit message builder used only when the agent-drafted
- * path fails (no message provided to `mcp__newde__commit`). The primary
+ * path fails (no message provided to `mcp__oxplow__commit`). The primary
  * path is agent-drafted via the Stop-hook directive — this keeps the
  * runtime able to land *something* rather than stall.
  *
@@ -2111,9 +2111,9 @@ export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
   const lines = [
     `You have one work item still \`in_progress\` but you didn't update it during this turn: "${item.title}" (id=${item.id}).`,
     ``,
-    `If its acceptance criteria are met, call \`mcp__newde__update_work_item\` with \`status: "human_check"\` — don't leave finished work parked in IN PROGRESS.`,
+    `If its acceptance criteria are met, call \`mcp__oxplow__update_work_item\` with \`status: "human_check"\` — don't leave finished work parked in IN PROGRESS.`,
     ``,
-    `If the work isn't done, either: (a) call \`mcp__newde__add_work_note\` summarizing what's still needed (this suppresses the nudge), or (b) call \`update_work_item\` with \`status: "blocked"\` if you're stuck and a user decision is required.`,
+    `If the work isn't done, either: (a) call \`mcp__oxplow__add_work_note\` summarizing what's still needed (this suppresses the nudge), or (b) call \`update_work_item\` with \`status: "blocked"\` if you're stuck and a user decision is required.`,
   ];
   return lines.join("\n");
 }
@@ -2126,7 +2126,7 @@ export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
  * when a manually-placed commit_point row has `mode="auto"`.
  *
  * Passing `commit_point_id: null` selects the no-row shape; the agent
- * calls `mcp__newde__commit` with `{ auto: true, message }`. With a
+ * calls `mcp__oxplow__commit` with `{ auto: true, message }`. With a
  * commit point id, the agent passes it so the row flips to done.
  */
 export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
@@ -2134,9 +2134,9 @@ export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
     ? `{ commit_point_id: "${cp.id}", message: "<final message>" }`
     : `{ auto: true, message: "<final message>" }`;
   const lines = [
-    `Auto-commit is due in this thread${cp ? ` (commit_point_id=${cp.id}, mode=auto)` : ""}. Inspect the unstaged/staged changes with read-only git commands (\`git status\`, \`git diff\`, \`git diff --staged\`), draft a concise commit message from what you see, then call \`mcp__newde__commit\` with ${commitArgs}.`,
+    `Auto-commit is due in this thread${cp ? ` (commit_point_id=${cp.id}, mode=auto)` : ""}. Inspect the unstaged/staged changes with read-only git commands (\`git status\`, \`git diff\`, \`git diff --staged\`), draft a concise commit message from what you see, then call \`mcp__oxplow__commit\` with ${commitArgs}.`,
     ``,
-    `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__newde__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
+    `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__oxplow__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
     ``,
     `Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
   ];
@@ -2151,7 +2151,7 @@ export function buildCommitPointStopReason(cp: CommitPoint): string {
     ``,
     `Output the drafted message in your chat reply and ask the user to approve or suggest changes. Do NOT run \`git add\` or \`git commit\` yourself.`,
     ``,
-    `When the user approves, call \`mcp__newde__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the git commit. If the user suggests changes, redraft the message in your next reply and ask again; only call \`mcp__newde__commit\` once the user has explicitly approved.`,
+    `When the user approves, call \`mcp__oxplow__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the git commit. If the user suggests changes, redraft the message in your next reply and ask again; only call \`mcp__oxplow__commit\` once the user has explicitly approved.`,
   ];
   return lines.join("\n");
 }
@@ -2184,16 +2184,16 @@ function buildThreadAgentPrompt(
   activeThread?: Thread | null,
 ): string {
   // Keep this preamble SITUATIONAL only — procedural "how to use the work-item
-  // tools" policy lives in the `newde-runtime` skill (merged: filing +
+  // tools" policy lives in the `oxplow-runtime` skill (merged: filing +
   // lifecycle + dispatch) so it's only loaded when the agent actually
   // needs it. Every line here is replayed via cache-read on every turn;
   // treat additions as expensive.
   const lines = [
-    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), thread "${thread.title}" (id: ${thread.id}). Pass threadId="${thread.id}" to all newde work-item tools.`,
+    `SESSION CONTEXT: stream "${stream.title}" (id: ${stream.id}), thread "${thread.title}" (id: ${thread.id}). Pass threadId="${thread.id}" to all oxplow work-item tools.`,
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__newde__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__newde__complete_task\` (normal finish) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the newde-runtime skill for tool details.`,
+    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__oxplow__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -2309,7 +2309,7 @@ export function buildThreadMcpConfig(mcp: McpServerHandle | null): string {
   }
   return JSON.stringify({
     mcpServers: {
-      newde: {
+      oxplow: {
         type: "http",
         url: mcp.httpUrl,
         headers: {
@@ -2332,7 +2332,7 @@ function cleanupSessions(streams: Stream[]) {
 }
 
 function streamWorktreePath(projectDir: string, branch: string): string {
-  return join(projectDir, ".newde", "worktrees", sanitizeBranch(branch));
+  return join(projectDir, ".oxplow", "worktrees", sanitizeBranch(branch));
 }
 
 function sanitizeBranch(branch: string): string {
@@ -2519,13 +2519,13 @@ const ALWAYS_WRITE_INTENT_TOOLS: ReadonlySet<string> = new Set([
  *  whether to fire the ready-work directive. See wi-0f1492f5e60e. */
 const FILING_AND_DISPATCH_ACTIVITY_TOOLS: ReadonlySet<string> = new Set([
   "Task",
-  "mcp__newde__create_work_item",
-  "mcp__newde__file_epic_with_children",
-  "mcp__newde__complete_task",
-  "mcp__newde__update_work_item",
-  "mcp__newde__transition_work_items",
-  "mcp__newde__add_work_note",
-  "mcp__newde__dispatch_work_item",
+  "mcp__oxplow__create_work_item",
+  "mcp__oxplow__file_epic_with_children",
+  "mcp__oxplow__complete_task",
+  "mcp__oxplow__update_work_item",
+  "mcp__oxplow__transition_work_items",
+  "mcp__oxplow__add_work_note",
+  "mcp__oxplow__dispatch_work_item",
 ]);
 
 /**

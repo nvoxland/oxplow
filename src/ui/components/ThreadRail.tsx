@@ -34,8 +34,8 @@ interface Props {
   createRequest?: number;
 }
 
-export const WORK_ITEM_DRAG_MIME = "application/x-newde-work-item";
-export const THREAD_DRAG_MIME = "application/x-newde-thread";
+export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
+export const THREAD_DRAG_MIME = "application/x-oxplow-thread";
 
 export function ThreadRail({
   streamId,
@@ -149,7 +149,7 @@ export function ThreadRail({
 
   return (
     <div style={railStyle}>
-      <div className="newde-rail-scroll" style={{ display: "flex", alignItems: "flex-end", gap: 2, flex: 1, minWidth: 0, overflowX: "auto" }}>
+      <div className="oxplow-rail-scroll" style={{ display: "flex", alignItems: "flex-end", gap: 2, flex: 1, minWidth: 0, overflowX: "auto" }}>
         {ordered.length === 0 && completed.length === 0 ? (
           <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No threads yet.</span>
         ) : null}

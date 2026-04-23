@@ -2,12 +2,12 @@
 set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 if [ ! -f "$DIR/dist/electron-main.cjs" ]; then
-  echo "[newde] missing Electron build output. Run 'bun run build' first." >&2
+  echo "[oxplow] missing Electron build output. Run 'bun run build' first." >&2
   exit 1
 fi
 
 if [ ! -x "$DIR/node_modules/.bin/electron" ]; then
-  echo "[newde] electron is not installed. Run 'bun install' first." >&2
+  echo "[oxplow] electron is not installed. Run 'bun install' first." >&2
   exit 1
 fi
 

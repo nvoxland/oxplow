@@ -48,7 +48,7 @@ export class ThreadStore {
   private readonly emitter: StoreEmitter<ThreadChange>;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
-    this.legacyDir = join(projectDir, ".newde", "threads");
+    this.legacyDir = join(projectDir, ".oxplow", "threads");
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
     this.emitter = new StoreEmitter("thread change", logger);
   }

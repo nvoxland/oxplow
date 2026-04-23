@@ -6,7 +6,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -19,7 +19,7 @@ Please:
 3. Keep scope TIGHT: a single inline hint in the Work panel when it detects the state "thread has human_check or done items but zero remaining commit_points waiting". Not a modal. Not a toast. An inline note.
 4. Update .context/ipc-and-stores.md or .context/agent-model.md with the new signal in the same commit.
 5. Run bun test. Do not add new unit tests unless existing ones break.
-6. Propose a commit via mcp__newde__propose_commit against the active commit point (there is one — the probe added it).
+6. Propose a commit via mcp__oxplow__propose_commit against the active commit point (there is one — the probe added it).
 
 Keep the scope narrow: one UI note + doc update. No new stores, no new IPC methods, no typing sweeps.`;
 
@@ -28,10 +28,10 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
-    probeLog("[cv] newde launched");
+    probeLog("[cv] oxplow launched");
 
     // Activate Work panel
     const workPanel = window.getByTestId("dock-panel-plan");
@@ -64,7 +64,7 @@ async function main() {
     await xterm.waitFor({ state: "visible", timeout: 5_000 });
     await xterm.click();
     await window.waitForTimeout(400);
-    const prompt = `There's a new work item titled "${WORK_ITEM_TITLE}". Call mcp__newde__list_ready_work to see it, pick it up, do the work as described, run bun test, and propose the commit when done.`;
+    const prompt = `There's a new work item titled "${WORK_ITEM_TITLE}". Call mcp__oxplow__list_ready_work to see it, pick it up, do the work as described, run bun test, and propose the commit when done.`;
     await window.keyboard.type(prompt);
     await window.waitForTimeout(500);
     await window.keyboard.press("Enter");

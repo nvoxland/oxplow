@@ -1,11 +1,11 @@
-// Continuation of dogfood-ctx-menu.ts: reopen newde, find the
+// Continuation of dogfood-ctx-menu.ts: reopen oxplow, find the
 // pending commit point the inner agent proposed, and approve it
-// through the UI. This is the "click Approve through newde's UI"
+// through the UI. This is the "click Approve through oxplow's UI"
 // step of the canonical dogfood pass.
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { launchNewde, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -14,10 +14,10 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
-    probeLog("[approve] newde launched");
+    probeLog("[approve] oxplow launched");
 
     // Work panel should be first dock tab.
     const workPanel = window.getByTestId("dock-panel-plan");

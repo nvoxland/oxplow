@@ -326,7 +326,7 @@ describe("decideStopDirective", () => {
   test("auto_commit=true with settled work and no commit point: emits the ad-hoc auto-commit directive", () => {
     // No commit_point row, but the thread is in auto_commit mode and has
     // human_check/done items. The pipeline asks the agent to draft a
-    // message and call `mcp__newde__commit` with { auto: true }.
+    // message and call `mcp__oxplow__commit` with { auto: true }.
     const settled = workItem("w1", 0, "human_check");
     const autoBuilders = {
       ...builders,
@@ -710,7 +710,7 @@ describe("decideStopDirective", () => {
         builders,
       );
       expect(out.directive?.reason).toContain("next: w1");
-      expect(out.directive?.reason).toContain("newde__fork_thread");
+      expect(out.directive?.reason).toContain("oxplow__fork_thread");
       expect(out.directive?.reason).toMatch(/25\.0M/);
     });
 
@@ -724,7 +724,7 @@ describe("decideStopDirective", () => {
         }),
         builders,
       );
-      expect(out.directive?.reason).not.toContain("newde__fork_thread");
+      expect(out.directive?.reason).not.toContain("oxplow__fork_thread");
     });
 
     test("fork hint is NOT appended when directive is suppressed", () => {

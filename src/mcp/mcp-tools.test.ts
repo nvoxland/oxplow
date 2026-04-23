@@ -21,13 +21,13 @@ function makeStream(id: string, title: string): Stream {
     worktree_path: `/tmp/${id}`,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
-    panes: { working: `newde-${id}:working`, talking: `newde-${id}:talking` },
+    panes: { working: `oxplow-${id}:working`, talking: `oxplow-${id}:talking` },
     resume: { working_session_id: "", talking_session_id: "" },
   };
 }
 
 function seed() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-mcp-tools-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-mcp-tools-"));
   const threadStore = new ThreadStore(dir);
   const workItemStore = new WorkItemStore(dir);
   const streamA = makeStream("s-A", "Alpha");
@@ -75,7 +75,7 @@ function tool(tools: ToolDef[], name: string): ToolDef {
 describe("MCP work-item tools: streamId is inferred from threadId", () => {
   test("list_thread_work with only threadId resolves against the thread's own stream", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__list_thread_work");
+    const t = tool(tools, "oxplow__list_thread_work");
     // No streamId — old code would throw "unknown thread: b-…" because
     // resolveStream defaults to streamA and streamA doesn't own threadB.
     // New code derives the stream from the thread row.
@@ -85,7 +85,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("create_work_item with only threadId lands in the right thread", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const t = tool(tools, "newde__create_work_item");
+    const t = tool(tools, "oxplow__create_work_item");
     const result = await t.handler({
       threadId: threadB.id,
       kind: "task",
@@ -99,7 +99,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("mismatched streamId is ignored in favour of the thread's real stream", async () => {
     const { tools, streamA, threadB } = seed();
-    const t = tool(tools, "newde__list_thread_work");
+    const t = tool(tools, "oxplow__list_thread_work");
     // Lying about streamId (claiming streamA when threadB lives in streamB):
     // the old code would pass the wrong streamId to getThread and throw.
     // The new code trusts the thread row.
@@ -109,7 +109,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("get_thread_context exposes otherActiveThreads across every peer stream", async () => {
     const { tools, streamB, threadB } = seed();
-    const t = tool(tools, "newde__get_thread_context");
+    const t = tool(tools, "oxplow__get_thread_context");
     // Default-stream call — streamA is "current"; streamB should appear in
     // the cross-stream snapshot.
     const result = await t.handler({} as never);
@@ -125,7 +125,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("create_work_item rejects with a soft-error when acceptance criteria looks embedded in description", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__create_work_item");
+    const t = tool(tools, "oxplow__create_work_item");
     const result = await t.handler({
       threadId: threadB.id,
       kind: "task",
@@ -142,7 +142,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("create_work_item accepts the happy path: acceptanceCriteria promoted to its own field", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__create_work_item");
+    const t = tool(tools, "oxplow__create_work_item");
     const result = await t.handler({
       threadId: threadB.id,
       kind: "task",
@@ -157,7 +157,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("create_work_item includes a reminder field when kind=\"epic\" so the orchestrator files children in the same turn", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__create_work_item");
+    const t = tool(tools, "oxplow__create_work_item");
     const result = await t.handler({
       threadId: threadB.id,
       kind: "epic",
@@ -172,7 +172,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("create_work_item does NOT include a reminder for non-epic kinds (happy path stays terse)", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__create_work_item");
+    const t = tool(tools, "oxplow__create_work_item");
     for (const kind of ["task", "subtask", "bug", "note"] as const) {
       const result = await t.handler({
         threadId: threadB.id,
@@ -219,14 +219,14 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("unknown threadId still throws, with the same error text", async () => {
     const { tools } = seed();
-    const t = tool(tools, "newde__list_thread_work");
+    const t = tool(tools, "oxplow__list_thread_work");
     await expect(async () => t.handler({ threadId: "b-does-not-exist" } as never))
       .toThrow(/unknown thread/);
   });
 
   test("transition_work_items flips multiple items, fires events per item, same effect as individual calls", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "A" } as never)) as { id: string };
     const b = (await create.handler({ threadId: threadB.id, kind: "task", title: "B" } as never)) as { id: string };
     const c = (await create.handler({ threadId: threadB.id, kind: "task", title: "C" } as never)) as { id: string };
@@ -234,7 +234,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const changes: Array<{ itemId: string | null; kind: string }> = [];
     workItemStore.subscribe((change) => changes.push({ itemId: change.itemId, kind: change.kind }));
 
-    const t = tool(tools, "newde__transition_work_items");
+    const t = tool(tools, "oxplow__transition_work_items");
     const result = (await t.handler({
       transitions: [
         { threadId: threadB.id, itemId: a.id, status: "in_progress" },
@@ -259,7 +259,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(workItemStore.getItem(threadB.id, c.id)!.status).toBe("human_check");
   });
 
-  test("newde__commit with { auto: true, threadId, message } calls executeAutoCommit and returns the sha", async () => {
+  test("oxplow__commit with { auto: true, threadId, message } calls executeAutoCommit and returns the sha", async () => {
     const { threadStore, workItemStore, streamA, threadA } = seed();
     const autoCalls: Array<{ threadId: string; message: string }> = [];
     const tools = buildWorkItemMcpTools({
@@ -282,7 +282,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
         return { sha: "sha-auto-123", message };
       },
     });
-    const t = tool(tools, "newde__commit");
+    const t = tool(tools, "oxplow__commit");
     const result = (await t.handler({
       auto: true,
       threadId: threadA.id,
@@ -293,32 +293,32 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(autoCalls).toEqual([{ threadId: threadA.id, message: "Refactor the commit flow" }]);
   });
 
-  test("newde__commit rejects `auto: true` with a commit_point_id (mutually exclusive)", async () => {
+  test("oxplow__commit rejects `auto: true` with a commit_point_id (mutually exclusive)", async () => {
     const { tools, threadA } = seed();
-    const t = tool(tools, "newde__commit");
+    const t = tool(tools, "oxplow__commit");
     await expect(async () =>
       t.handler({ auto: true, threadId: threadA.id, commit_point_id: "cp-1", message: "x" } as never),
     ).toThrow(/either.*commit_point_id.*OR.*auto/i);
   });
 
-  test("newde__commit rejects `auto: true` without a threadId", async () => {
+  test("oxplow__commit rejects `auto: true` without a threadId", async () => {
     const { tools } = seed();
-    const t = tool(tools, "newde__commit");
+    const t = tool(tools, "oxplow__commit");
     await expect(async () =>
       t.handler({ auto: true, message: "x" } as never),
     ).toThrow(/threadId.*required/i);
   });
 
-  test("newde__commit rejects empty message", async () => {
+  test("oxplow__commit rejects empty message", async () => {
     const { tools, threadA } = seed();
-    const t = tool(tools, "newde__commit");
+    const t = tool(tools, "oxplow__commit");
     await expect(async () =>
       t.handler({ auto: true, threadId: threadA.id, message: "   " } as never),
     ).toThrow(/message.*non-empty/i);
   });
 
-  test("newde__tasks_since_last_commit with no prior commit returns all closed efforts (first-commit case)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-tscl-"));
+  test("oxplow__tasks_since_last_commit with no prior commit returns all closed efforts (first-commit case)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-tscl-"));
     const threadStore = new ThreadStore(dir);
     const stream = makeStream("s-A", "Alpha");
     const state = threadStore.ensureStream(stream);
@@ -351,7 +351,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       executeCommit: (() => { throw new Error("not used"); }) as never,
       executeAutoCommit: (() => { throw new Error("not used"); }) as never,
     });
-    const t = tool(tools, "newde__tasks_since_last_commit");
+    const t = tool(tools, "oxplow__tasks_since_last_commit");
     const result = (await t.handler({ threadId: threadA.id } as never)) as {
       previousCommit: { sha: string | null; completed_at: string | null } | null;
       items: Array<{ id: string; title: string; kind: string; status: string; ended_at: string }>;
@@ -362,8 +362,8 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(titles).toEqual(["First task", "Second task"]);
   });
 
-  test("newde__tasks_since_last_commit filters by the latest-done commit_point's completed_at", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-tscl-filter-"));
+  test("oxplow__tasks_since_last_commit filters by the latest-done commit_point's completed_at", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-tscl-filter-"));
     const threadStore = new ThreadStore(dir);
     const stream = makeStream("s-A", "Alpha");
     const state = threadStore.ensureStream(stream);
@@ -406,7 +406,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       executeCommit: (() => { throw new Error("not used"); }) as never,
       executeAutoCommit: (() => { throw new Error("not used"); }) as never,
     });
-    const t = tool(tools, "newde__tasks_since_last_commit");
+    const t = tool(tools, "oxplow__tasks_since_last_commit");
     const result = (await t.handler({ threadId: threadA.id } as never)) as {
       previousCommit: { sha: string | null; completed_at: string | null } | null;
       items: Array<{ id: string; title: string }>;
@@ -419,10 +419,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("transition_work_items rejects an unknown threadId before firing any side effects", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "A" } as never)) as { id: string };
 
-    const t = tool(tools, "newde__transition_work_items");
+    const t = tool(tools, "oxplow__transition_work_items");
     await expect(async () =>
       t.handler({
         transitions: [
@@ -437,7 +437,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("file_epic_with_children creates epic and child tasks in one atomic call", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const t = tool(tools, "newde__file_epic_with_children");
+    const t = tool(tools, "oxplow__file_epic_with_children");
     const result = (await t.handler({
       threadId: threadB.id,
       epic: {
@@ -471,7 +471,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("file_epic_with_children rejects empty children array — epics must have children", async () => {
     const { tools, threadB } = seed();
-    const t = tool(tools, "newde__file_epic_with_children");
+    const t = tool(tools, "oxplow__file_epic_with_children");
     await expect(async () => t.handler({
       threadId: threadB.id,
       epic: { title: "Lonely epic" },
@@ -481,7 +481,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("file_epic_with_children rolls back if a child fails validation (atomic)", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const t = tool(tools, "newde__file_epic_with_children");
+    const t = tool(tools, "oxplow__file_epic_with_children");
     const before = workItemStore.listItems(threadB.id).length;
     await expect(async () => t.handler({
       threadId: threadB.id,
@@ -497,13 +497,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("complete_task appends a note and flips status to human_check in one call", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "Thing" } as never)) as { id: string };
     // Put it in progress first (realistic starting state).
-    const update = tool(tools, "newde__update_work_item");
+    const update = tool(tools, "oxplow__update_work_item");
     await update.handler({ threadId: threadB.id, itemId: a.id, status: "in_progress" } as never);
 
-    const t = tool(tools, "newde__complete_task");
+    const t = tool(tools, "oxplow__complete_task");
     const result = (await t.handler({
       threadId: threadB.id,
       itemId: a.id,
@@ -520,9 +520,9 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("complete_task accepts status=blocked", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "Stuck" } as never)) as { id: string };
-    const t = tool(tools, "newde__complete_task");
+    const t = tool(tools, "oxplow__complete_task");
     const result = (await t.handler({
       threadId: threadB.id,
       itemId: a.id,
@@ -535,9 +535,9 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("complete_task rejects status=done (callers must not self-mark done)", async () => {
     const { tools, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "X" } as never)) as { id: string };
-    const t = tool(tools, "newde__complete_task");
+    const t = tool(tools, "oxplow__complete_task");
     await expect(async () => t.handler({
       threadId: threadB.id, itemId: a.id, note: "done", status: "done",
     } as never)).toThrow(/done.*self|self.*done|human_check|blocked/i);
@@ -545,7 +545,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("dispatch_work_item returns a brief containing preamble, title, description, and acceptance criteria", async () => {
     const { tools, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
@@ -555,7 +555,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       priority: "high",
     } as never)) as { id: string };
 
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     const result = (await t.handler({
       threadId: threadB.id,
       itemId: item.id,
@@ -568,10 +568,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(result.prompt).toContain("The wait point on boot does not advance.");
     expect(result.prompt).toContain("boots past wait point");
     // Preamble: subagent-protocol essentials
-    expect(result.prompt).toContain("newde work item");
+    expect(result.prompt).toContain("oxplow work item");
     expect(result.prompt).toContain("in_progress");
     expect(result.prompt).toContain("complete_task");
-    expect(result.prompt).toContain("newde-result:");
+    expect(result.prompt).toContain("oxplow-result:");
     // Trailing constraints
     expect(result.prompt).toMatch(/Co-Authored-By/i);
     expect(result.prompt).toMatch(/Singular table names/i);
@@ -579,7 +579,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("dispatch_work_item autoStart=true transitions a ready item to in_progress", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
@@ -587,28 +587,28 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     } as never)) as { id: string };
     expect(workItemStore.getItem(threadB.id, item.id)!.status).toBe("ready");
 
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     await t.handler({ threadId: threadB.id, itemId: item.id } as never);
     expect(workItemStore.getItem(threadB.id, item.id)!.status).toBe("in_progress");
   });
 
   test("dispatch_work_item autoStart=false leaves status alone", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
       title: "Untouched",
     } as never)) as { id: string };
 
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     await t.handler({ threadId: threadB.id, itemId: item.id, autoStart: false } as never);
     expect(workItemStore.getItem(threadB.id, item.id)!.status).toBe("ready");
   });
 
   test("dispatch_work_item on already-in_progress item skips transition silently", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
@@ -621,7 +621,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       actorKind: "agent",
       actorId: "test",
     });
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     const result = (await t.handler({ threadId: threadB.id, itemId: item.id } as never)) as { prompt: string };
     expect(result.prompt).toContain("Already running");
     expect(workItemStore.getItem(threadB.id, item.id)!.status).toBe("in_progress");
@@ -629,7 +629,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("dispatch_work_item for an epic includes child titles and acceptance criteria", async () => {
     const { tools, threadB } = seed();
-    const fileEpic = tool(tools, "newde__file_epic_with_children");
+    const fileEpic = tool(tools, "oxplow__file_epic_with_children");
     const result = (await fileEpic.handler({
       threadId: threadB.id,
       epic: {
@@ -642,7 +642,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       ],
     } as never)) as { epicId: string; childIds: string[] };
 
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     const out = (await t.handler({
       threadId: threadB.id,
       itemId: result.epicId,
@@ -657,13 +657,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("dispatch_work_item appends extraContext when provided", async () => {
     const { tools, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
       title: "T",
     } as never)) as { id: string };
-    const t = tool(tools, "newde__dispatch_work_item");
+    const t = tool(tools, "oxplow__dispatch_work_item");
     const out = (await t.handler({
       threadId: threadB.id,
       itemId: item.id,
@@ -701,7 +701,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
         return { newThreadId: "b-newfork" };
       },
     });
-    const t = tool(tools2, "newde__fork_thread");
+    const t = tool(tools2, "oxplow__fork_thread");
     const out = (await t.handler({
       sourceThreadId: threadA.id,
       title: "Forked thread",
@@ -718,7 +718,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("fork_thread throws when the runtime hook is not wired (test-only deps shape)", async () => {
     const { tools, threadA } = seed();
-    const t = tool(tools, "newde__fork_thread");
+    const t = tool(tools, "oxplow__fork_thread");
     await expect(async () => t.handler({
       sourceThreadId: threadA.id,
       title: "x",
@@ -749,7 +749,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       effortStore: null as never,
       markReadWorkOptions: (threadId, readyIds) => calls.push({ threadId, readyIds }),
     });
-    const t = tool(tools2, "newde__read_work_options");
+    const t = tool(tools2, "oxplow__read_work_options");
     await t.handler({ threadId: threadA.id } as never);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.threadId).toBe(threadA.id);
@@ -758,7 +758,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("delegate_query pre-allocates a thread-scoped note and returns a prompt including question + focus + noteId", async () => {
     const { tools, workItemStore, threadA } = seed();
-    const t = tool(tools, "newde__delegate_query");
+    const t = tool(tools, "oxplow__delegate_query");
     const result = (await t.handler({
       threadId: threadA.id,
       question: "Where is Monaco wired in?",
@@ -781,8 +781,8 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("record_query_finding fills the body of a pre-allocated thread note", async () => {
     const { tools, workItemStore, threadA } = seed();
-    const delegate = tool(tools, "newde__delegate_query");
-    const record = tool(tools, "newde__record_query_finding");
+    const delegate = tool(tools, "oxplow__delegate_query");
+    const record = tool(tools, "oxplow__record_query_finding");
     const { provisionalNoteId } = (await delegate.handler({
       threadId: threadA.id,
       question: "question?",
@@ -798,13 +798,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("record_query_finding rejects an item-scoped note id", async () => {
     const { tools, workItemStore, threadA } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({ threadId: threadA.id, kind: "task", title: "t" } as never)) as { id: string };
     // Insert an item-scoped row directly via add_work_note — but add_work_note
     // writes to work_item_events, not work_note. Instead, build an item-scoped
     // work_note via a raw SQL path is overkill; assert the error shape by
     // asking record_query_finding for a non-existent id first:
-    const record = tool(tools, "newde__record_query_finding");
+    const record = tool(tools, "oxplow__record_query_finding");
     await expect(async () =>
       record.handler({ noteId: "note-does-not-exist", body: "x" } as never),
     ).toThrow(/unknown thread note/);
@@ -815,9 +815,9 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("get_thread_notes returns thread notes in reverse chronological order", async () => {
     const { tools, threadA } = seed();
-    const delegate = tool(tools, "newde__delegate_query");
-    const record = tool(tools, "newde__record_query_finding");
-    const getNotes = tool(tools, "newde__get_thread_notes");
+    const delegate = tool(tools, "oxplow__delegate_query");
+    const record = tool(tools, "oxplow__record_query_finding");
+    const getNotes = tool(tools, "oxplow__get_thread_notes");
     const a = (await delegate.handler({ threadId: threadA.id, question: "q1" } as never)) as { provisionalNoteId: string };
     // Small gap so created_at differs.
     await new Promise((r) => setTimeout(r, 5));
@@ -861,13 +861,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
   test("complete_task rejects if current status is terminal (done/canceled/archived)", async () => {
     const { tools, workItemStore, threadB } = seed();
-    const create = tool(tools, "newde__create_work_item");
+    const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "Finished" } as never)) as { id: string };
     // Directly seed a terminal state via the store.
     workItemStore.updateItem({
       threadId: threadB.id, itemId: a.id, status: "done", actorKind: "user", actorId: "test",
     });
-    const t = tool(tools, "newde__complete_task");
+    const t = tool(tools, "oxplow__complete_task");
     await expect(async () => t.handler({
       threadId: threadB.id, itemId: a.id, note: "already done",
     } as never)).toThrow(/terminal|already.*done|canceled|archived/i);

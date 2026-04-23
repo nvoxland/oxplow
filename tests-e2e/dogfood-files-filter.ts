@@ -7,7 +7,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
+import { launchOxplow, dogfoodInnerAgent, approveViaFiles, probeLog, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +27,7 @@ Please:
 
 Do NOT touch .self-ralph/ or tests-e2e/.`;
 
-const PROMPT = `There is one work item in the queue titled "${TITLE}". Call mcp__newde__list_ready_work to confirm, pick it up, complete it as described in the body, run bun test, and propose a commit when done. Ignore any other queued items.`;
+const PROMPT = `There is one work item in the queue titled "${TITLE}". Call mcp__oxplow__list_ready_work to confirm, pick it up, complete it as described in the body, run bun test, and propose a commit when done. Ignore any other queued items.`;
 
 async function main() {
   const projectDir = resolve(__dirname, "..");
@@ -35,7 +35,7 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
       probeLog("[files-filter] phase 1 launched");
@@ -56,7 +56,7 @@ async function main() {
   }
 
   {
-    const { window, close } = await launchNewde(projectDir);
+    const { window, close } = await launchOxplow(projectDir);
     try {
       await window.waitForTimeout(3_000);
       probeLog("[files-filter] phase 2 launched");

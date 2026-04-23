@@ -37,7 +37,7 @@ import type {
   WorkspaceWatchEvent,
   StoredEvent,
 } from "../ui/api.js";
-import type { AgentStatus, NewdeEvent } from "../core/event-bus.js";
+import type { AgentStatus, OxplowEvent } from "../core/event-bus.js";
 import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
@@ -66,7 +66,7 @@ export type {
   RefOption,
   AgentStatus,
   MenuGroupSnapshot,
-  NewdeEvent,
+  OxplowEvent,
   Stream,
   WorkItemEvent,
   WorkItemKind,
@@ -122,11 +122,11 @@ export interface DesktopApi {
   switchStream(id: string): Promise<Stream>;
   renameCurrentStream(title: string): Promise<Stream>;
   renameStream(streamId: string, title: string): Promise<Stream>;
-  getConfig(): Promise<import("../config/config.js").NewdeConfig>;
-  setAgentPromptAppend(text: string): Promise<import("../config/config.js").NewdeConfig>;
-  setSnapshotRetentionDays(days: number): Promise<import("../config/config.js").NewdeConfig>;
-  setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").NewdeConfig>;
-  setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").NewdeConfig>;
+  getConfig(): Promise<import("../config/config.js").OxplowConfig>;
+  setAgentPromptAppend(text: string): Promise<import("../config/config.js").OxplowConfig>;
+  setSnapshotRetentionDays(days: number): Promise<import("../config/config.js").OxplowConfig>;
+  setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").OxplowConfig>;
+  setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").OxplowConfig>;
   listBranches(): Promise<BranchRef[]>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
@@ -265,7 +265,7 @@ export interface DesktopApi {
   openLspClient(streamId: string, languageId: string): Promise<string>;
   sendLspMessage(clientId: string, message: string): Promise<void>;
   closeLspClient(clientId: string): Promise<void>;
-  onNewdeEvent(listener: (event: NewdeEvent) => void): () => void;
+  onOxplowEvent(listener: (event: OxplowEvent) => void): () => void;
   onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
   onLspEvent(listener: (event: LspEvent) => void): () => void;
   onMenuCommand(listener: (commandId: CommandId) => void): () => void;

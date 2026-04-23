@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ensureNewdeRoot } from "./newde-dir.js";
+import { ensureOxplowRoot } from "./oxplow-dir.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -81,13 +81,13 @@ class FileLogger implements Logger {
 }
 
 export function createDaemonLogger(projectDir: string): Logger {
-  ensureNewdeRoot(projectDir);
-  return new FileLogger(join(projectDir, ".newde", "logs", "system.log"), {}, { minLevel: "info" });
+  ensureOxplowRoot(projectDir);
+  return new FileLogger(join(projectDir, ".oxplow", "logs", "system.log"), {}, { minLevel: "info" });
 }
 
 export function createUiClientLogger(projectDir: string, clientId: string): Logger {
-  ensureNewdeRoot(projectDir);
-  return new FileLogger(join(projectDir, ".newde", "logs", "ui", `${sanitizeLogFileSegment(clientId)}.log`), { clientId });
+  ensureOxplowRoot(projectDir);
+  return new FileLogger(join(projectDir, ".oxplow", "logs", "ui", `${sanitizeLogFileSegment(clientId)}.log`), { clientId });
 }
 
 function sanitizeLogFileSegment(value: string): string {
@@ -105,5 +105,5 @@ function levelRank(level: LogLevel): number {
 
 function formatConsoleEntry(entry: LogEntry): string {
   const context = entry.context ? ` ${JSON.stringify(entry.context)}` : "";
-  return `[newde] ${entry.level.toUpperCase()} ${entry.message}${context}`;
+  return `[oxplow] ${entry.level.toUpperCase()} ${entry.message}${context}`;
 }

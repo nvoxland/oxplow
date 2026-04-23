@@ -29,7 +29,7 @@ export interface McpToolDeps {
   executeCommit(cpId: string, message: string): CommitPoint;
   /** Synchronously run `git commit` for an ad-hoc auto-commit (no
    *  commit_point row). Called when the agent passes `{ auto: true }` to
-   *  `mcp__newde__commit` — the Stop-hook directive for auto_commit
+   *  `mcp__oxplow__commit` — the Stop-hook directive for auto_commit
    *  threads asks for this shape. Throws on any git failure so the
    *  agent can read the stderr and retry. */
   executeAutoCommit(threadId: string, message: string): { sha: string; message: string };
@@ -84,12 +84,12 @@ export function hasAcceptanceCriteria(raw: string | null | undefined): boolean {
  *  self-contained and token-predictable, even if the subagent hasn't
  *  auto-loaded the SKILL yet. */
 const DISPATCH_PREAMBLE = [
-  "You are executing newde work item. Follow the subagent-protocol:",
-  "1. Mark the item `in_progress` via `mcp__newde__update_work_item` if it is not already.",
+  "You are executing oxplow work item. Follow the subagent-protocol:",
+  "1. Mark the item `in_progress` via `mcp__oxplow__update_work_item` if it is not already.",
   "2. Use red/green TDD. Do not self-mark `done` — use `human_check` when acceptance criteria are met.",
-  "3. End by calling `mcp__newde__complete_task({ threadId, itemId, note: \"<detailed summary>\" })`. The detailed work summary lives in the note.",
+  "3. End by calling `mcp__oxplow__complete_task({ threadId, itemId, note: \"<detailed summary>\" })`. The detailed work summary lives in the note.",
   "4. Your final returned text must be ONE line:",
-  "   newde-result: {\"ok\":true,\"itemId\":\"wi-...\",\"status\":\"human_check\",\"tscClean\":true,\"testsPass\":\"N/0\",\"filesChanged\":N}",
+  "   oxplow-result: {\"ok\":true,\"itemId\":\"wi-...\",\"status\":\"human_check\",\"tscClean\":true,\"testsPass\":\"N/0\",\"filesChanged\":N}",
   "   No prose — the orchestrator parses the header and fetches the note only if it needs detail.",
 ].join("\n");
 
@@ -178,10 +178,10 @@ export function composeDispatchBrief(input: DispatchBriefInputs): string {
   return parts.join("\n");
 }
 
-/** Pure composition for `newde__delegate_query`. The orchestrator passes the
+/** Pure composition for `oxplow__delegate_query`. The orchestrator passes the
  *  returned string to `Agent(subagent_type='Explore', prompt=…)`. The prompt
  *  tells the subagent what to investigate and how to report findings (a
- *  single `newde__record_query_finding` call against the pre-allocated
+ *  single `oxplow__record_query_finding` call against the pre-allocated
  *  `noteId`). Pure so it's unit-testable without an MCP server. */
 export function composeDelegateQueryPrompt(input: {
   threadId: string;
@@ -205,7 +205,7 @@ export function composeDelegateQueryPrompt(input: {
   parts.push("");
   parts.push("## How to report");
   parts.push(
-    "When done, call `mcp__newde__record_query_finding({ noteId, body })` ONCE with your complete finding. " +
+    "When done, call `mcp__oxplow__record_query_finding({ noteId, body })` ONCE with your complete finding. " +
     "The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. " +
     "Do not make code changes. Do not create work items. Read/Grep/Glob only.",
   );
@@ -237,7 +237,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
 
   return [
     {
-      name: "newde__get_thread_context",
+      name: "oxplow__get_thread_context",
       description: "Return stream and thread context. Use this to confirm the active thread id before calling work-item tools.",
       inputSchema: {
         type: "object",
@@ -292,7 +292,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__list_thread_work",
+      name: "oxplow__list_thread_work",
       description: "List all tracked work items for one thread, grouped by waiting/in progress/done. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
@@ -308,7 +308,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__list_ready_work",
+      name: "oxplow__list_ready_work",
       description: "List actionable work items in one thread that are not blocked by unfinished dependencies. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
@@ -331,7 +331,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__read_work_options",
+      name: "oxplow__read_work_options",
       description: "Return the next dispatch unit for the orchestrator. If the highest-priority ready item is an epic, returns the epic and all its ready descendants as one atomic unit. Otherwise returns all ready non-epic items so you can pick one or a related cluster to dispatch. Always pass the threadId from your session context. By default returns a slim shape (id, title, kind, priority, parent_id, status, sort_index) for scanning — call `get_work_item` per id when composing a dispatch brief, or pass `full=true` for the verbose shape (adds description, acceptance_criteria, and link edges).",
       inputSchema: {
         type: "object",
@@ -446,7 +446,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__create_work_item",
+      name: "oxplow__create_work_item",
       description: "Create a new epic/task/subtask/bug/note within one thread. Always pass the threadId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags.",
       inputSchema: {
         type: "object",
@@ -483,7 +483,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         // the criteria promoted to the proper field.
         if (!hasAcceptanceCriteria(args.acceptanceCriteria) && descriptionLooksLikeEmbeddedCriteria(args.description)) {
           return {
-            error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call newde__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
+            error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call oxplow__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
           };
         }
         const item = workItemStore.createItem({
@@ -500,7 +500,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           author: "agent",
         });
         // Epics filed without children render as one opaque IN PROGRESS row in
-        // the UI and defeat the purpose of the rollup. The newde-runtime
+        // the UI and defeat the purpose of the rollup. The oxplow-runtime
         // skill already says "file children in the same turn"; surfacing it on
         // the tool response keeps the rule on the critical path instead of
         // shelved in a skill doc. Non-epic responses stay terse — no field is
@@ -511,14 +511,14 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             id: item.id,
             sort_index: item.sort_index,
             reminder:
-              "Epic filed with 0 children. Per newde-runtime, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
+              "Epic filed with 0 children. Per oxplow-runtime, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
           };
         }
         return { ok: true, id: item.id, sort_index: item.sort_index };
       },
     },
     {
-      name: "newde__file_epic_with_children",
+      name: "oxplow__file_epic_with_children",
       description:
         "Atomically create an epic plus its child work items in one call. Preferred over " +
         "calling create_work_item N+1 times because (a) the epic can't end up in the UI " +
@@ -599,7 +599,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__dispatch_work_item",
+      name: "oxplow__dispatch_work_item",
       description:
         "Compose a subagent dispatch brief server-side from the work item's own fields, " +
         "so the orchestrator doesn't have to Read its description/acceptance criteria/notes " +
@@ -681,7 +681,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__complete_task",
+      name: "oxplow__complete_task",
       description:
         "Collapse the final add_work_note + status transition into one call. Default " +
         "`status` is `human_check` (callers must not self-mark `done`). Pass `status: \"blocked\"` " +
@@ -719,7 +719,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__update_work_item",
+      name: "oxplow__update_work_item",
       description: "Update title, description, acceptance criteria, status, priority, or parent of an existing work item in one thread. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
@@ -771,7 +771,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__transition_work_items",
+      name: "oxplow__transition_work_items",
       description:
         "Flip the status of multiple work items in one call. Useful at phase boundaries " +
         "(e.g., moving several subtasks from `ready` to `in_progress`, or rolling an epic " +
@@ -827,7 +827,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__get_work_item",
+      name: "oxplow__get_work_item",
       description: "Fetch one work item plus its links (incoming + outgoing) and recent audit events. Use when resuming work on an item and you need the full context without pulling the whole thread.",
       inputSchema: {
         type: "object",
@@ -849,7 +849,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__delete_work_item",
+      name: "oxplow__delete_work_item",
       description: "Soft-delete a work item. Hidden from lists but preserved in the audit log.",
       inputSchema: {
         type: "object",
@@ -867,7 +867,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__reorder_work_items",
+      name: "oxplow__reorder_work_items",
       description: "Reorder sibling work items within a thread. All ids must share the same parent.",
       inputSchema: {
         type: "object",
@@ -889,7 +889,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__link_work_items",
+      name: "oxplow__link_work_items",
       description:
         "Create a relationship between two work items in one thread. linkType is one of: " +
         "`blocks` (from-item must finish before to-item starts), " +
@@ -922,7 +922,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__list_agent_turn",
+      name: "oxplow__list_agent_turn",
       description:
         "List recent agent turns for a thread (newest first). Each turn represents one user prompt and the agent's Stop-terminated response, with the snapshot summary and optionally a single in-progress work item it was attributed to.",
       inputSchema: {
@@ -940,7 +940,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__add_work_note",
+      name: "oxplow__add_work_note",
       description: "Append a note/history entry to a work item in one thread. Always pass the threadId from your session context.",
       inputSchema: {
         type: "object",
@@ -959,7 +959,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__commit",
+      name: "oxplow__commit",
       description:
         "Run git commit for this thread. Two shapes:\n" +
         "  (1) Approve/auto mode with a queued commit_point row: pass `{ commit_point_id, message }`. For approve mode only call this AFTER the user approves the drafted message in chat; for auto mode (the row already has mode=auto) commit in the same turn without asking.\n" +
@@ -977,28 +977,28 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
       handler: (args: { commit_point_id?: string; auto?: boolean; threadId?: string; message: string }) => {
         if (typeof args.message !== "string" || args.message.trim().length === 0) {
-          throw new Error("newde__commit: `message` is required and must be non-empty");
+          throw new Error("oxplow__commit: `message` is required and must be non-empty");
         }
         if (args.auto === true) {
           if (args.commit_point_id) {
-            throw new Error("newde__commit: pass either `commit_point_id` OR `auto: true`, not both");
+            throw new Error("oxplow__commit: pass either `commit_point_id` OR `auto: true`, not both");
           }
           if (!args.threadId) {
-            throw new Error("newde__commit: `threadId` is required when `auto: true`");
+            throw new Error("oxplow__commit: `threadId` is required when `auto: true`");
           }
           resolveThreadAndStream({ threadId: args.threadId });
           const result = executeAutoCommit(args.threadId, args.message);
           return { ok: true, commitSha: result.sha, message: result.message };
         }
         if (!args.commit_point_id) {
-          throw new Error("newde__commit: pass either `commit_point_id` or `auto: true`");
+          throw new Error("oxplow__commit: pass either `commit_point_id` or `auto: true`");
         }
         const updated = executeCommit(args.commit_point_id, args.message);
         return { ok: true, commitPoint: updated, commitSha: updated.commit_sha };
       },
     },
     {
-      name: "newde__tasks_since_last_commit",
+      name: "oxplow__tasks_since_last_commit",
       description:
         "Return work items whose efforts closed after the most recent completed commit_point for this thread. Supplementary context for drafting an auto-commit message when the agent has lost memory of earlier completed tasks; the diff is still the primary source of truth. Always pass the threadId from your session context.",
       inputSchema: {
@@ -1040,7 +1040,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__fork_thread",
+      name: "oxplow__fork_thread",
       description:
         "Create a new thread on the same stream as `sourceThreadId`, seeded with a single " +
         "`note`-kind work item carrying the `summary` you supply as context. Optionally moves " +
@@ -1068,7 +1068,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         summary: string;
         moveItemIds?: string[];
       }) => {
-        if (!forkThread) throw new Error("newde__fork_thread: runtime not wired");
+        if (!forkThread) throw new Error("oxplow__fork_thread: runtime not wired");
         const result = forkThread({
           sourceThreadId: args.sourceThreadId,
           title: args.title,
@@ -1079,10 +1079,10 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__delegate_query",
+      name: "oxplow__delegate_query",
       description:
         "Prepare an exploration query for an Explore subagent. Use when you need to understand a codebase area before dispatching real work and would otherwise read 5+ files inline — offloading the reads keeps your own cached context small. " +
-        "Returns `{ prompt, provisionalNoteId }`. The orchestrator then calls `Agent(subagent_type='Explore', prompt=<prompt>)`; the prompt already instructs the subagent to call `newde__record_query_finding({ noteId: <provisionalNoteId>, body })` with its findings. Read the finding later via `newde__get_thread_notes` only when you need the content.",
+        "Returns `{ prompt, provisionalNoteId }`. The orchestrator then calls `Agent(subagent_type='Explore', prompt=<prompt>)`; the prompt already instructs the subagent to call `oxplow__record_query_finding({ noteId: <provisionalNoteId>, body })` with its findings. Read the finding later via `oxplow__get_thread_notes` only when you need the content.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1096,7 +1096,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       handler: (args: { streamId?: string; threadId: string; question: string; focus?: string }) => {
         resolveThreadAndStream(args);
         const question = String(args.question ?? "").trim();
-        if (!question) throw new Error("newde__delegate_query: `question` is required");
+        if (!question) throw new Error("oxplow__delegate_query: `question` is required");
         const focus = typeof args.focus === "string" ? args.focus.trim() : "";
         const provisionalNoteId = workItemStore.addThreadNote(args.threadId, "", "explore-subagent");
         const prompt = composeDelegateQueryPrompt({
@@ -1109,30 +1109,30 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__record_query_finding",
+      name: "oxplow__record_query_finding",
       description:
-        "Write the Explore subagent's finding into a pre-allocated thread-scoped note (id returned by `newde__delegate_query`). Call this once at the end of the exploration — the orchestrator reads it later via `newde__get_thread_notes`.",
+        "Write the Explore subagent's finding into a pre-allocated thread-scoped note (id returned by `oxplow__delegate_query`). Call this once at the end of the exploration — the orchestrator reads it later via `oxplow__get_thread_notes`.",
       inputSchema: {
         type: "object",
         properties: {
-          noteId: { type: "string", description: "Provisional thread-note id returned by `newde__delegate_query`." },
+          noteId: { type: "string", description: "Provisional thread-note id returned by `oxplow__delegate_query`." },
           body: { type: "string", description: "Finding content. Structured prose is fine — it gets stored verbatim." },
         },
         required: ["noteId", "body"],
       },
       handler: (args: { noteId: string; body: string }) => {
-        if (!args.noteId) throw new Error("newde__record_query_finding: `noteId` is required");
+        if (!args.noteId) throw new Error("oxplow__record_query_finding: `noteId` is required");
         if (typeof args.body !== "string") {
-          throw new Error("newde__record_query_finding: `body` must be a string");
+          throw new Error("oxplow__record_query_finding: `body` must be a string");
         }
         workItemStore.updateThreadNoteBody(args.noteId, args.body);
         return { ok: true, noteId: args.noteId };
       },
     },
     {
-      name: "newde__get_thread_notes",
+      name: "oxplow__get_thread_notes",
       description:
-        "Return recent thread-scoped notes (reverse chronological). Thread-scoped notes are findings from `newde__delegate_query` Explore subagents and any other thread-level context not attached to a specific work item.",
+        "Return recent thread-scoped notes (reverse chronological). Thread-scoped notes are findings from `oxplow__delegate_query` Explore subagents and any other thread-level context not attached to a specific work item.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1149,7 +1149,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "newde__list_commit_points",
+      name: "oxplow__list_commit_points",
       description: "List commit points for a thread, ordered by their position in the work queue.",
       inputSchema: {
         type: "object",

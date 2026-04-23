@@ -63,7 +63,7 @@ function extractAbsTargetPath(toolInput: unknown, projectDir: string): string | 
  * restart required.
  *
  * For Write/Edit/MultiEdit/NotebookEdit, agent-private paths outside the
- * shared worktree AND outside the project's `.newde/` are allowed even on
+ * shared worktree AND outside the project's `.oxplow/` are allowed even on
  * read-only threads (e.g. writing to `~/.claude/plans/foo.md`). Bash stays
  * conservatively allowed regardless — the write guard doesn't try to parse
  * shell commands.
@@ -83,15 +83,15 @@ export function buildWriteGuardResponse(
 
   // When we know the project root, allow writes to agent-private paths that
   // don't touch the shared worktree (e.g. ~/.claude/plans/foo.md). A path
-  // inside the project's .newde/ is still blocked — that's shared state.
+  // inside the project's .oxplow/ is still blocked — that's shared state.
   const { projectDir, toolInput } = context;
   if (projectDir) {
     const abs = extractAbsTargetPath(toolInput, projectDir);
     if (abs) {
-      const newdeDir = resolve(projectDir, ".newde");
+      const oxplowDir = resolve(projectDir, ".oxplow");
       const insideProject = isInsideWorktree(abs, projectDir);
-      const insideNewde = isInsideWorktree(abs, newdeDir);
-      if (!insideProject && !insideNewde) {
+      const insideOxplow = isInsideWorktree(abs, oxplowDir);
+      if (!insideProject && !insideOxplow) {
         return null;
       }
       return {
@@ -101,7 +101,7 @@ export function buildWriteGuardResponse(
           permissionDecisionReason:
             `path \`${abs}\` is inside the shared worktree and this thread is read-only — ` +
             "only the stream's writer thread may mutate the worktree. " +
-            "Record the change as a note on the current work item via mcp__newde tools (or stop this turn). " +
+            "Record the change as a note on the current work item via mcp__oxplow tools (or stop this turn). " +
             "Promote this thread to writer from the thread rail if you need to edit.",
         },
       };
@@ -114,7 +114,7 @@ export function buildWriteGuardResponse(
       permissionDecision: "deny",
       permissionDecisionReason:
         "This thread is read-only — only the stream's writer thread may mutate the worktree. " +
-        "Record the change as a note on the current work item via mcp__newde tools (or stop this turn). " +
+        "Record the change as a note on the current work item via mcp__oxplow tools (or stop this turn). " +
         "Promote this thread to writer from the thread rail if you need to edit.",
     },
   };
@@ -139,7 +139,7 @@ export const NON_WRITER_PROMPT_BLOCK = [
   `- install dependencies, run build/format/lint commands that write artifacts or modify lockfiles (npm i, bun install, cargo build, etc.), or run tests that write snapshots/coverage`,
   `- set environment state or touch configs`,
   ``,
-  `Read-only tools (Read, Grep, Glob) and mcp__newde__* (work items, backlog) remain fully available. Record proposed changes as a note on the current work item or as a new work item's description; the writer thread will pick them up.`,
+  `Read-only tools (Read, Grep, Glob) and mcp__oxplow__* (work items, backlog) remain fully available. Record proposed changes as a note on the current work item or as a new work item's description; the writer thread will pick them up.`,
   ``,
   `If you are unsure whether a command writes, do not run it.`,
 ].join("\n");

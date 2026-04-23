@@ -31,7 +31,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
     if (!visible) return;
     termRef.current?.focus();
     if (transportMode === "tmux" && sessionIdRef.current) {
-      void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+      void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
     }
     setInteractionMode("live");
   }, [paneTarget, transportMode, visible]);
@@ -83,7 +83,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
 
         if (routeToTmuxHistory) {
           if (sessionIdRef.current) {
-            void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({
+            void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({
               type: "history-page",
               direction: event.key === "PageUp" ? "up" : "down",
             }));
@@ -102,7 +102,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
 
         if (transportMode === "tmux" && modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
         if (sessionIdRef.current) {
-          void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
@@ -134,7 +134,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       }
 
       if (sessionIdRef.current) {
-        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
+        void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
       }
       setInteractionMode("history");
       event.preventDefault();
@@ -145,12 +145,12 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
       if (sessionIdRef.current) {
-        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: btoa(data) }));
+        void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: btoa(data) }));
       }
     });
     const binaryDisp = term.onBinary((data) => {
       if (sessionIdRef.current) {
-        void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
+        void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
       }
     });
 
@@ -172,7 +172,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       }
       const handleMouseDown = () => {
         if (sessionIdRef.current) {
-          void window.newdeApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
@@ -222,7 +222,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
           }
         } catch {}
       };
-      const unsubscribe = window.newdeApi.onTerminalEvent((event) => {
+      const unsubscribe = window.oxplowApi.onTerminalEvent((event) => {
         if (sessionIdRef.current === null) {
           pendingEvents.push(event);
           return;
@@ -232,9 +232,9 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       });
 
       logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, transportMode });
-      void window.newdeApi.openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then((sessionId) => {
+      void window.oxplowApi.openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then((sessionId) => {
         if (disposed) {
-          void window.newdeApi.closeTerminalSession(sessionId);
+          void window.oxplowApi.closeTerminalSession(sessionId);
           return;
         }
         sessionIdRef.current = sessionId;
@@ -244,7 +244,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         pendingEvents.length = 0;
         term.focus();
         if (transportMode === "tmux") {
-          void window.newdeApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
+          void window.oxplowApi.sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         logUi("info", "terminal session opened", { paneTarget, sessionId, transportMode });
@@ -267,7 +267,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
             fit.fit();
             if (term.cols < 2 || term.rows < 2) return;
             if (sessionIdRef.current) {
-              void window.newdeApi.sendTerminalMessage(
+              void window.oxplowApi.sendTerminalMessage(
                 sessionIdRef.current,
                 JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
               );
@@ -299,7 +299,7 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
       sessionIdRef.current = null;
       termRef.current = null;
       if (sessionId) {
-        void window.newdeApi.closeTerminalSession(sessionId);
+        void window.oxplowApi.closeTerminalSession(sessionId);
       }
       term.dispose();
     };

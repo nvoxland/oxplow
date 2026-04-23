@@ -10,7 +10,7 @@ interface PersistedState {
 export interface DockShellProps {
   side: DockSide;
   toolWindows: ToolWindow[];
-  /** localStorage key suffix; final key is `newde.layout.v1.dock.${storageKey}`. */
+  /** localStorage key suffix; final key is `oxplow.layout.v1.dock.${storageKey}`. */
   storageKey: string;
   defaultOpen?: boolean;
   /** Width for left/right docks, height for bottom dock. */
@@ -23,7 +23,7 @@ export interface DockShellProps {
   activateRequest?: { id: string; token: number };
 }
 
-const STORAGE_PREFIX = "newde.layout.v1.dock.";
+const STORAGE_PREFIX = "oxplow.layout.v1.dock.";
 
 export function DockShell({
   side,

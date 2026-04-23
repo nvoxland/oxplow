@@ -18,27 +18,27 @@ the agent are:
    `200 {}` (not `202` empty) — Claude Code prints a "non-blocking
    status code" warning into the user's terminal on every empty 202,
    which fills the xterm with noise on Edit/Write-heavy turns.
-3. MCP tool responses (when the agent calls a `newde__*` tool).
+3. MCP tool responses (when the agent calls a `oxplow__*` tool).
 
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
 
-### What we can't do from newde hooks
+### What we can't do from oxplow hooks
 
 Claude Code inserts its own `<system-reminder>` blocks into user
 messages — for example, the periodic "The task tools haven't been used
 recently; consider using TaskCreate" nudge. **Hooks can add context to
-a prompt but cannot edit existing system-reminders out**, so newde has
+a prompt but cannot edit existing system-reminders out**, so oxplow has
 no way to suppress these from the agent's view. Related asks (e.g.
-"don't nag about TaskCreate while a newde work item is in_progress")
-require upstream Claude Code support; a newde-side "just inject a
+"don't nag about TaskCreate while a oxplow work item is in_progress")
+require upstream Claude Code support; a oxplow-side "just inject a
 counter-instruction" workaround would leave both the nag and the
 counter-nag visible, which is worse than the status quo. If Claude
 Code ever ships a hook-surface knob for this, revisit.
 
 **Caveat — the first turn still needs a user prompt.** "Runtime never
 prompts" is about auto-progression, not cold-start. When the agent is
-sitting idle at its shell prompt (e.g. just after `newde` opens a
+sitting idle at its shell prompt (e.g. just after `oxplow` opens a
 fresh project, or after a `Stop` that didn't block), creating a work
 item does **not** kick it off. Someone — a human, or a harness typing
 into the xterm — has to send the first `UserPromptSubmit`. Stop-hook
@@ -47,7 +47,7 @@ chaining only begins after the agent has done at least one turn.
 ## Driving from automation
 
 Everything a test harness (or another agent) needs to drive an inner
-newde agent:
+oxplow agent:
 
 - **Where the agent runs.** Each thread has a tmux pane rendered in the
   first center-area tab. The renderer is `TerminalPane` attached to
@@ -70,7 +70,7 @@ newde agent:
     pending commit point, it blocks with a directive telling the
     agent to inspect the diff, draft a message in its reply, and ask
     the user to approve. On approval the agent calls
-    `mcp__newde__commit({ commit_point_id, message })`, which runs
+    `mcp__oxplow__commit({ commit_point_id, message })`, which runs
     `gitCommitAll` and flips the point to `done`. Auto-mode commit
     points skip the chat round-trip — the runtime commits immediately
     with a generated message.
@@ -82,7 +82,7 @@ newde agent:
 
 ## Common pitfalls
 
-- **`mcp__newde__commit` only works when a commit point is pending.**
+- **`mcp__oxplow__commit` only works when a commit point is pending.**
   The tool requires an existing commit_point row; for ad-hoc commits
   have the agent run `git commit` directly via Bash.
   - **UI signal:** the Work panel renders an inline hint
@@ -111,8 +111,8 @@ newde agent:
 shell command that:
 
 - `cd`s into the stream's worktree
-- runs `claude --plugin-dir <abs> --allowedTools mcp__newde__* --append-system-prompt <text> --mcp-config <json> [--resume <sid>]`
-- exports `NEWDE_STREAM_ID`, `NEWDE_BATCH_ID`, `NEWDE_HOOK_TOKEN` so the
+- runs `claude --plugin-dir <abs> --allowedTools mcp__oxplow__* --append-system-prompt <text> --mcp-config <json> [--resume <sid>]`
+- exports `OXPLOW_STREAM_ID`, `OXPLOW_BATCH_ID`, `OXPLOW_HOOK_TOKEN` so the
   plugin's HTTP hooks can identify themselves to the runtime
 
 `copilot` is supported as an alternative agent kind but skips the plugin
@@ -125,7 +125,7 @@ existing agent sessions; tmux keeps them alive in the background.
 ## Plugin hook bridge
 
 `createElectronPlugin` (`src/session/claude-plugin.ts`) writes a per-project
-Claude Code plugin into `<projectDir>/.newde/runtime/claude-plugin/`. The
+Claude Code plugin into `<projectDir>/.oxplow/runtime/claude-plugin/`. The
 plugin's `hooks.json` registers HTTP hooks for `PreToolUse`, `PostToolUse`,
 `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and `Notification`.
 
@@ -136,7 +136,7 @@ learn the session id, so we adopt whichever id shows up on the *next* hook
 that does fire (`UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionEnd`, …) —
 see `decideResumeUpdate` in `src/session/resume-tracker.ts`.
 
-`newde__get_batch_context` returns, besides the caller's stream/thread
+`oxplow__get_batch_context` returns, besides the caller's stream/thread
 ids + summary, an `otherActiveBatches: Array<{ streamId, streamTitle,
 threadId, batchTitle, activeBatchId }>` with one entry per peer stream —
 handy when the agent suspects the "current stream" has drifted from
@@ -144,14 +144,14 @@ where it actually writes (the same phenomenon that motivated the
 streamId-derivation in other MCP tools).
 
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
-env-var-interpolated `NEWDE_HOOK_TOKEN` header, plus `X-Newde-Stream`,
-`X-Newde-Thread`, `X-Newde-Pane`. The MCP server's `onHook` callback dispatches
+env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
+`X-Oxplow-Thread`, `X-Oxplow-Pane`. The MCP server's `onHook` callback dispatches
 to `runtime.handleHookEnvelope`, which:
 
 1. Stores the event in `HookEventStore` (a ring buffer, also fed to the UI's
    Hook Events tool window via the `hook.recorded` EventBus event).
 2. If the normalized payload carries a session id that differs from
-   `thread.resume_session_id`, persists the new id so a later newde restart
+   `thread.resume_session_id`, persists the new id so a later oxplow restart
    relaunches claude with `--resume <id>`.
 3. Calls `applyTurnTracking` to open/close `agent_turn` rows and flush
    turn-start / turn-end snapshots (see "Snapshot tracking" below). On `Stop`
@@ -186,7 +186,7 @@ The pipeline runs in priority order:
    agent-drafted commit directive. Two shapes:
    - `mode="approve"` (default) → `buildCommitPointStopReason`: agent
      inspects the diff, drafts a message in chat, asks the user to
-     approve, then calls `mcp__newde__commit({ commit_point_id, message })`.
+     approve, then calls `mcp__oxplow__commit({ commit_point_id, message })`.
    - `mode="auto"` → `buildAutoCommitStopReason` (same directive text
      used for the no-row ad-hoc case below): agent inspects the diff,
      drafts a message, and commits **in the same turn without asking**.
@@ -206,21 +206,21 @@ The pipeline runs in priority order:
    ad-hoc `git commit` (Bash / Files panel) and there's nothing
    to commit. Same suppression applies to the `mode="auto"`
    commit_point branch above. Agent drafts a message from the diff
-   and calls `mcp__newde__commit({ auto: true, threadId, message })`,
+   and calls `mcp__oxplow__commit({ auto: true, threadId, message })`,
    which routes to `executeAutoCommitForThread` — runs `git commit`
    and publishes a `thread.changed`/`auto-committed` event. **No
    commit_point row is created, and no item↔sha bookkeeping happens**
    (item↔commit attribution can't be made reliable when users commit
-   outside newde — see data-model.md for why we removed the
+   outside oxplow — see data-model.md for why we removed the
    `work_item_commit` junction). This is the unified-flow endpoint:
    auto and approve modes now only differ in whether the agent asks
    the user first.
-   - Supplementary context tool: `mcp__newde__tasks_since_last_commit`
+   - Supplementary context tool: `mcp__oxplow__tasks_since_last_commit`
      returns work items whose efforts closed after the most recent done
      commit_point (or all closed efforts when the thread has never
      committed). The agent uses it when it's lost memory of earlier
      completed tasks; the diff is still the primary source of truth.
-   - Fallback: if the agent calls `newde__commit` with `auto: true` but
+   - Fallback: if the agent calls `oxplow__commit` with `auto: true` but
      an empty `message`, the runtime falls back to `buildAutoCommitMessage`
      — now filtered by the latest done commit_point's `completed_at`
      (items whose `updated_at` is strictly after it), so the body
@@ -236,8 +236,8 @@ The pipeline runs in priority order:
    user catches up on verification.
 4. **Writer thread with a ready work item.** Block with a terse directive
    built by `buildNextWorkItemStopReason` — a one-liner pointing at
-   `mcp__newde__read_work_options` (with the embedded threadId) and the
-   merged `newde-runtime` skill. Protocol
+   `mcp__oxplow__read_work_options` (with the embedded threadId) and the
+   merged `oxplow-runtime` skill. Protocol
    (mark `in_progress` before work, `human_check` after, one-at-a-time
    attribution) lives in those skills, not the directive — keep the
    stop-hook message stable and cheap. Items the
@@ -258,7 +258,7 @@ The pipeline runs in priority order:
      flipped to `true` on the first qualifying PostToolUse). Qualifying
      tools: every write-intent tool (Edit / Write / MultiEdit /
      NotebookEdit / Bash with a non-readonly command — see
-     `isWriteIntentTool`), the newde filing tools
+     `isWriteIntentTool`), the oxplow filing tools
      (`create_work_item`, `file_epic_with_children`, `complete_task`,
      `update_work_item`, `transition_work_items`, `add_work_note`), and
      the dispatch tools (`Task`, `dispatch_work_item`). If the flag is
@@ -285,7 +285,7 @@ The pipeline runs in priority order:
 At scale a single thread accumulates cache-read cost across its
 lifetime; once it's climbed past ~20M the replay-on-every-turn tax
 starts to dominate. To let the orchestrator shed the tail, the runtime
-exposes `mcp__newde__fork_thread({ sourceThreadId, title, summary,
+exposes `mcp__oxplow__fork_thread({ sourceThreadId, title, summary,
 moveItemIds? })` — one transaction that:
 
 1. Creates a new thread on the same stream, status `queued` (never
@@ -316,7 +316,7 @@ When ≥20M AND the ready-work directive is about to be emitted (i.e.
 not suppressed by the rules above), the directive text has a
 trailing line appended:
 
-> `note: this thread has burned <N.N>M cache-read. If upcoming work is unrelated, consider newde__fork_thread({ sourceThreadId: "<id>", title: "...", summary: "short carry-over context" })`
+> `note: this thread has burned <N.N>M cache-read. If upcoming work is unrelated, consider oxplow__fork_thread({ sourceThreadId: "<id>", title: "...", summary: "short carry-over context" })`
 
 The hint is a nudge, not a requirement — the orchestrator decides
 whether the tail really is unrelated. Commit-point and wait-point
@@ -335,7 +335,7 @@ Cross-store queue logic (commit points + wait points + the
 in `src/electron/thread-queue-orchestrator.ts`. The runtime instantiates
 it as `this.batchQueue` and delegates IPC-exposed methods through.
 `executeCommit` (which runs `git commit` synchronously from the
-`newde__commit` MCP handler once the user has approved in chat) is
+`oxplow__commit` MCP handler once the user has approved in chat) is
 also there.
 
 ## Orchestrator pattern
@@ -353,7 +353,7 @@ that, the orchestrator has two modes:
    `human_check`. Snapshots still fire with correct attribution; we
    just skip the subagent round-trip.
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
-   risky changes, the orchestrator calls `newde__read_work_options`,
+   risky changes, the orchestrator calls `oxplow__read_work_options`,
    launches one `general-purpose` subagent with the brief, and
    records the summary via `add_work_note`. Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
@@ -362,15 +362,15 @@ that, the orchestrator has two modes:
 The dispatch protocol (mark `in_progress` before work, `human_check`
 after, never two items `in_progress` at once, blocked + note on
 stuck) is identical for both modes and lives in the merged
-`newde-runtime` skill (orchestrator side — filing + lifecycle +
-dispatch combined) plus the `newde-subagent-work-protocol` skill
+`oxplow-runtime` skill (orchestrator side — filing + lifecycle +
+dispatch combined) plus the `oxplow-subagent-work-protocol` skill
 (scoped to subagents). Briefs no longer need to repeat it.
 
 Related small fixes get batched into one task ("fix 4 test fixtures" =
 one item, not four). Claude Code's built-in `TaskCreate` is a
-within-turn micro-planner and never mirrors newde items.
+within-turn micro-planner and never mirrors oxplow items.
 
-`newde__read_work_options` (defined in `src/mcp/mcp-tools.ts`, backed by
+`oxplow__read_work_options` (defined in `src/mcp/mcp-tools.ts`, backed by
 `WorkItemStore.readWorkOptions`) returns one of three shapes:
 - `{ mode: "epic", epic, children }` — the highest-priority ready item is
   an epic; all ready descendants (filtered for blocks links, transitively)
@@ -391,7 +391,7 @@ primary tool for queue-driven dispatch.
 ## MCP tools
 
 `buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
-`newde__*` tool surface:
+`oxplow__*` tool surface:
 
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
@@ -433,7 +433,7 @@ in-progress changes.
   (`src/electron/write-guard.ts`) returns a `PreToolUse` deny for `Write`,
   `Edit`, `MultiEdit`, `NotebookEdit` from any non-`active` thread. When
   the tool's target path resolves OUTSIDE the project root AND outside
-  the project's `.newde/`, the call is allowed (e.g. writing to
+  the project's `.oxplow/`, the call is allowed (e.g. writing to
   `~/.claude/plans/foo.md`); the deny message names the specific
   absolute path. Containment checks use `isInsideWorktree` from
   `src/electron/runtime-paths.ts`, shared with the runtime's hook-path
@@ -442,12 +442,12 @@ in-progress changes.
   appended to the system prompt for non-writer threads, telling the agent
   to avoid Bash mutations too (the hook can't reliably classify shell
   commands, so the prompt is the only line of defence there).
-- MCP tools (`mcp__newde__*`) are always allowed: they write to the state
+- MCP tools (`mcp__oxplow__*`) are always allowed: they write to the state
   DB, not the worktree.
 
 ## Dev-time MCP live-reload (opt-in)
 
-Set `NEWDE_DEV_RELOAD=1` before launching the runtime to watch
+Set `OXPLOW_DEV_RELOAD=1` before launching the runtime to watch
 `src/mcp/` and `src/persistence/` recursively. On any `.ts`/`.tsx`
 change, a debounced (250ms) restart stops the current MCP server and
 calls `startMcpServer` again so the rebuilt tool registrations and a
@@ -472,7 +472,7 @@ doesn't run at all in that case.
 Claude Code defers MCP tool schemas (surfacing them as names only until
 `ToolSearch` fetches the schema) based on its own heuristics — it is
 **not** a signal the MCP server sends. `tools/list` already reports
-every newde tool with full `inputSchema`; the harness picks which to
+every oxplow tool with full `inputSchema`; the harness picks which to
 eagerly inline vs defer. There is no MCP-spec annotation and no plugin
 config knob to declare a tool "always loaded". If this ever becomes
 tunable, the wiring is `src/mcp/mcp-server.ts` `tools/list` response +
@@ -481,16 +481,16 @@ tunable, the wiring is `src/mcp/mcp-server.ts` `tools/list` response +
 ## Harness-injected system-reminders (not ours)
 
 A few system-reminders come from the Claude Code harness itself, not
-newde hooks, and are **not suppressible** from the plugin side:
+oxplow hooks, and are **not suppressible** from the plugin side:
 
 - "The task tools haven't been used recently…" — harness nudge about
-  `TaskCreate`/`TaskUpdate`. Noise in newde projects where work items
-  live in `mcp__newde__*` tools instead. No hook, env var, or plugin
+  `TaskCreate`/`TaskUpdate`. Noise in oxplow projects where work items
+  live in `mcp__oxplow__*` tools instead. No hook, env var, or plugin
   config lets us silence it; it fires on its own schedule. If a future
   Claude Code release exposes a suppression hook, revisit wi-2a0262ae2ac2.
 - The file-in-IDE reminder ("The user opened the file X in the IDE.
   This may or may not be related to the current task.") — same story,
-  harness-injected on IDE focus, not a newde hook. Revisit if Claude
+  harness-injected on IDE focus, not a oxplow hook. Revisit if Claude
   Code adds a customization hook.
 
 ## Session-context injection
@@ -505,7 +505,7 @@ re-sending the same string is pure overhead since the agent's prompt
 cache still holds the prior value. The first turn on a session, and any
 turn after the block's contents change (thread flip, writer promotion,
 title edit), emits normally. If a project wants to disable injection
-entirely, set `injectSessionContext: false` in `newde.yaml` — default is
+entirely, set `injectSessionContext: false` in `oxplow.yaml` — default is
 `true`.
 
 ### ROLE CHANGE banner
@@ -565,7 +565,7 @@ the last-turn value, since `currentTurnBytes` is undefined.
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
 flag, and a pointer to the skills. Procedural policy is consolidated in
 one orchestrator-side skill (`src/session/agent-skills.ts`):
-`newde-runtime` merges filing (when to file, how to shape items,
+`oxplow-runtime` merges filing (when to file, how to shape items,
 acceptance-criteria style, epic-with-children rule), lifecycle
 (status conventions, epic rollup, notes), and dispatch (orchestrator
 vs subagent execution mode, brief composition). Its description
@@ -579,7 +579,7 @@ tools).
 
 ## Custom prompt addendum
 
-`config.agentPromptAppend` (loaded from `newde.yaml` via
+`config.agentPromptAppend` (loaded from `oxplow.yaml` via
 `loadProjectConfig` in `src/config/config.ts`) is concatenated into every
 agent's system prompt by `buildBatchAgentPrompt` (in `runtime.ts`). The
 Settings modal (`src/ui/components/SettingsModal.tsx`) reads/writes this
@@ -701,7 +701,7 @@ the same pattern as `getSnapshotSummary`.
 
 ## Active turns in the in_progress bucket (observational)
 
-Newde passively tracks what the agent is doing: no synthesized work
+Oxplow passively tracks what the agent is doing: no synthesized work
 items, no auto-file / auto-complete / adoption. The Work panel's
 in_progress bucket renders the union of real work items plus **open
 `agent_turn` rows** — each turn with `ended_at IS NULL` AND
@@ -711,7 +711,7 @@ and the current TaskCreate breakdown (from `agent_turn.task_list_json`).
 When the turn Stops, `ended_at` is set and the row disappears from the
 bucket. No status flips, no notes, no cleanup.
 
-The `runtime.startedAt` cutoff is load-bearing: when newde crashes
+The `runtime.startedAt` cutoff is load-bearing: when oxplow crashes
 mid-turn, `ended_at` never gets set; filtering to turns started after
 the current runtime boot keeps those orphans out of the UI.
 
@@ -722,7 +722,7 @@ renders the live sub-list as the agent ticks steps off. The column
 persists after the turn closes for a later History view.
 
 If a turn spawns real follow-up work, the agent calls
-`mcp__newde__create_work_item` / `file_epic_with_children` the way it
+`mcp__oxplow__create_work_item` / `file_epic_with_children` the way it
 always has. Those land as first-class work items alongside the turn
 row, with a normal ready → in_progress → human_check lifecycle.
 

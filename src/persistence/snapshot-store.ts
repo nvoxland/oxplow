@@ -113,7 +113,7 @@ export class SnapshotStore {
 
   constructor(projectDir: string, private readonly logger?: Logger) {
     this.stateDb = getStateDatabase(projectDir, logger?.child({ subsystem: "state-db" }));
-    this.rootDir = join(projectDir, ".newde", "snapshots");
+    this.rootDir = join(projectDir, ".oxplow", "snapshots");
     this.objectsDir = join(this.rootDir, "objects");
     mkdirSync(this.objectsDir, { recursive: true });
   }

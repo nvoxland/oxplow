@@ -34,7 +34,7 @@ import {
   renameWorkspacePath,
   renameThread,
   renameStream,
-  subscribeNewdeEvents,
+  subscribeOxplowEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
@@ -100,12 +100,12 @@ const MAX_OPEN_FILE_TABS = 10;
 
 // Persists which file tabs are open (per stream) across app restarts. Only the
 // paths are saved — dirty state and scroll position are intentionally dropped.
-const FILE_SESSIONS_STORAGE_KEY = "newde.layout.v1.fileSessions";
+const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v1.fileSessions";
 // Persists which center pane was last active ("agent", "file:<path>", or a
 // diff tab id). Restored after file sessions are rebuilt; falls back to
 // "agent" if the saved id is no longer resolvable (diff tabs never persist,
 // and a file tab may have failed to reopen).
-const CENTER_ACTIVE_STORAGE_KEY = "newde.layout.v1.centerActive";
+const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v1.centerActive";
 
 function readPersistedFileSessionPaths(): Record<string, string[]> {
   try {
@@ -183,7 +183,7 @@ export function App() {
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
-  const isElectron = !!window.newdeDesktop?.isElectron;
+  const isElectron = !!window.oxplowDesktop?.isElectron;
 
   useEffect(() => {
     return subscribeUiError(({ label, message }) => {
@@ -973,7 +973,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = subscribeNewdeEvents((event) => {
+    const unsubscribe = subscribeOxplowEvents((event) => {
       if (event.type !== "thread.changed") return;
       void getThreadState(event.streamId)
         .then((state) => {
@@ -992,7 +992,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = subscribeNewdeEvents((event) => {
+    const unsubscribe = subscribeOxplowEvents((event) => {
       if (event.type !== "stream.changed" || event.kind !== "prompt-changed" || !event.streamId) return;
       void listStreams()
         .then((updated) => {
@@ -1020,7 +1020,7 @@ export function App() {
         });
     };
     reload();
-    const unsub = subscribeNewdeEvents((event) => {
+    const unsub = subscribeOxplowEvents((event) => {
       if (event.type === "config.changed") reload();
     });
     return () => {
@@ -1231,14 +1231,14 @@ export function App() {
 
   useEffect(() => {
     if (!isElectron) return;
-    void window.newdeApi.setNativeMenu(menuGroupSnapshots).catch((error) => {
+    void window.oxplowApi.setNativeMenu(menuGroupSnapshots).catch((error) => {
       logUi("error", "failed to update native menu", { error: String(error) });
     });
   }, [isElectron, menuGroupSnapshots]);
 
   useEffect(() => {
     if (!isElectron) return;
-    return window.newdeApi.onMenuCommand((commandId) => {
+    return window.oxplowApi.onMenuCommand((commandId) => {
       // Same "don't yank a user out of a text field" rule as the non-Electron
       // keydown path, applied here because native-menu shortcuts fire
       // regardless of web-view focus.

@@ -78,8 +78,8 @@ export interface WorkNote {
    *  migration v25). */
   work_item_id: string | null;
   /** Non-null when this is a thread-scoped note (not attached to any work
-   *  item) — typically findings from `newde__delegate_query` Explore-subagent
-   *  runs landed here via `newde__record_query_finding`. */
+   *  item) — typically findings from `oxplow__delegate_query` Explore-subagent
+   *  runs landed here via `oxplow__record_query_finding`. */
   thread_id: string | null;
   body: string;
   author: string;
@@ -952,7 +952,7 @@ export class WorkItemStore {
   }
 
   /** Insert a thread-scoped note row (no work item). Returns the inserted
-   *  row's id. Used by `newde__delegate_query` to pre-allocate a landing
+   *  row's id. Used by `oxplow__delegate_query` to pre-allocate a landing
    *  slot for Explore-subagent findings, and by `record_query_finding` to
    *  fill the body in once the subagent returns. Pass `body = ""` at
    *  allocation time and update it later via `updateThreadNoteBody`. */
@@ -977,7 +977,7 @@ export class WorkItemStore {
   }
 
   /** Overwrite the `body` of an existing thread-scoped note. Used by
-   *  `newde__record_query_finding` to fill in a pre-allocated row once the
+   *  `oxplow__record_query_finding` to fill in a pre-allocated row once the
    *  Explore subagent returns its finding. Throws if the note doesn't
    *  exist or isn't thread-scoped (belongs to a work item instead). */
   updateThreadNoteBody(noteId: string, body: string): void {

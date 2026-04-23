@@ -4,21 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createElectronPlugin } from "./claude-plugin.js";
 
-test("createElectronPlugin writes a valid Claude Code plugin under .newde/runtime/claude-plugin", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+test("createElectronPlugin writes a valid Claude Code plugin under .oxplow/runtime/claude-plugin", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const plugin = createElectronPlugin({
     projectDir,
     hookUrl: "http://127.0.0.1:12345/hook",
   });
 
-  expect(plugin.pluginDir).toBe(join(projectDir, ".newde", "runtime", "claude-plugin"));
+  expect(plugin.pluginDir).toBe(join(projectDir, ".oxplow", "runtime", "claude-plugin"));
   expect(plugin.manifestPath).toBe(join(plugin.pluginDir, ".claude-plugin", "plugin.json"));
   expect(plugin.hooksPath).toBe(join(plugin.pluginDir, "hooks", "hooks.json"));
   expect(existsSync(plugin.manifestPath)).toBe(true);
   expect(existsSync(plugin.hooksPath)).toBe(true);
 
   const manifest = JSON.parse(readFileSync(plugin.manifestPath, "utf8"));
-  expect(manifest.name).toBe("newde-runtime");
+  expect(manifest.name).toBe("oxplow-runtime");
 
   const hooks = JSON.parse(readFileSync(plugin.hooksPath, "utf8"));
   for (const event of [
@@ -33,21 +33,21 @@ test("createElectronPlugin writes a valid Claude Code plugin under .newde/runtim
     const entry = hooks.hooks[event][0].hooks[0];
     expect(entry.type).toBe("http");
     expect(entry.url).toBe(`http://127.0.0.1:12345/hook/${event}`);
-    expect(entry.headers.Authorization).toBe("Bearer $NEWDE_HOOK_TOKEN");
-    expect(entry.headers["X-Newde-Stream"]).toBe("$NEWDE_STREAM_ID");
-    expect(entry.headers["X-Newde-Thread"]).toBe("$NEWDE_THREAD_ID");
-    expect(entry.headers["X-Newde-Pane"]).toBe("$NEWDE_PANE");
+    expect(entry.headers.Authorization).toBe("Bearer $OXPLOW_HOOK_TOKEN");
+    expect(entry.headers["X-Oxplow-Stream"]).toBe("$OXPLOW_STREAM_ID");
+    expect(entry.headers["X-Oxplow-Thread"]).toBe("$OXPLOW_THREAD_ID");
+    expect(entry.headers["X-Oxplow-Pane"]).toBe("$OXPLOW_PANE");
     expect(entry.allowedEnvVars).toEqual(expect.arrayContaining([
-      "NEWDE_HOOK_TOKEN",
-      "NEWDE_STREAM_ID",
-      "NEWDE_THREAD_ID",
-      "NEWDE_PANE",
+      "OXPLOW_HOOK_TOKEN",
+      "OXPLOW_STREAM_ID",
+      "OXPLOW_THREAD_ID",
+      "OXPLOW_PANE",
     ]));
   }
 });
 
 test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
   expect(plugin.agentGuidePath).toBe(join(plugin.pluginDir, "AGENT_GUIDE.md"));
   expect(existsSync(plugin.agentGuidePath)).toBe(true);
@@ -67,15 +67,15 @@ test("createElectronPlugin writes an AGENT_GUIDE.md the agent can Read on demand
   expect(text).toContain("note");
 });
 
-test("createElectronPlugin writes the merged newde-runtime skill Claude Code can model-invoke", () => {
+test("createElectronPlugin writes the merged oxplow-runtime skill Claude Code can model-invoke", () => {
   // Post-merge: the three legacy skills (filing/lifecycle/dispatch)
-  // collapse into a single `newde-runtime` SKILL.md. The legacy path
+  // collapse into a single `oxplow-runtime` SKILL.md. The legacy path
   // fields still exist as back-compat aliases and point at the same
   // file. Net effect: one fewer index line per turn.
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
 
-  const expectedPath = join(plugin.pluginDir, "skills", "newde-runtime", "SKILL.md");
+  const expectedPath = join(plugin.pluginDir, "skills", "oxplow-runtime", "SKILL.md");
   expect(plugin.runtimeSkillPath).toBe(expectedPath);
   expect(plugin.taskFilingSkillPath).toBe(expectedPath);
   expect(plugin.taskLifecycleSkillPath).toBe(expectedPath);
@@ -93,7 +93,7 @@ test("createElectronPlugin writes the merged newde-runtime skill Claude Code can
 });
 
 test("createElectronPlugin is idempotent across calls", () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "newde-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const first = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
   const firstManifest = readFileSync(first.manifestPath, "utf8");
   const firstHooks = readFileSync(first.hooksPath, "utf8");

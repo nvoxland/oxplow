@@ -73,7 +73,7 @@ test("update persists renamed title", () => {
 });
 
 function mkProjectDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "newde-stream-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-stream-store-"));
   tempDirs.push(dir);
   return dir;
 }

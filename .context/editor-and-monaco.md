@@ -84,7 +84,7 @@ diffs each effort's start/end snapshot content to figure out which lines
 the effort introduced, and falls back to `gitBlame` for any line the
 local walk can't attribute. Snapshots pruned by the 7-day retention
 window degrade gracefully — the effort is skipped and git blame picks
-up the line. The IPC is a single round-trip (`newde:localBlame`) so the
+up the line. The IPC is a single round-trip (`oxplow:localBlame`) so the
 UI never has to reconcile two streams.
 
 Layout details:
@@ -126,9 +126,9 @@ against it on every content change. The line-level LCS diff runs in
 `diffLineKinds` (capped at 5000 lines per side — larger files skip
 diffing). Gutter bars render via Monaco `linesDecorationsClassName`:
 
-- `newde-gutter-added` — green 3px inset bar (new line, no nearby delete).
-- `newde-gutter-modified` — blue 3px inset bar (added line next to a delete).
-- `newde-gutter-deleted` — red bottom bar on the surviving line next to a
+- `oxplow-gutter-added` — green 3px inset bar (new line, no nearby delete).
+- `oxplow-gutter-modified` — blue 3px inset bar (added line next to a delete).
+- `oxplow-gutter-deleted` — red bottom bar on the surviving line next to a
   pure deletion.
 
 Classes are defined in `public/index.html`. HEAD is re-fetched when
@@ -173,7 +173,7 @@ component.
 
 The set of languages eligible for LSP is determined by
 `isLspCandidateLanguage` (`src/ui/editor-language.ts`). The runtime
-loads extra LSP servers from `newde.yaml` on startup
+loads extra LSP servers from `oxplow.yaml` on startup
 (`config.lspServers` → `registerLanguageServer` per server).
 
 LSP is also exposed to **agents** via `buildLspMcpTools`
@@ -183,7 +183,7 @@ without shelling out.
 ## Editor focus tracking
 
 `EditorPane` pushes the user's current file/selection/caret to the
-runtime via `window.newdeApi.updateEditorFocus`, debounced ~150ms. The
+runtime via `window.oxplowApi.updateEditorFocus`, debounced ~150ms. The
 runtime relays it through `EditorFocusStore` and uses
 `formatEditorFocusForAgent` to inject it as `additionalContext` on the
 agent's `UserPromptSubmit` hook — so the agent automatically knows what

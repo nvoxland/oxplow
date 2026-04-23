@@ -115,7 +115,7 @@ class StreamGitRefsWatcher {
 
   /** Resolves `.git`: a directory for the main checkout, or the target of a
    *  `gitdir:` pointer file for secondary worktrees (streams are usually
-   *  worktrees under `.newde/worktrees/`). */
+   *  worktrees under `.oxplow/worktrees/`). */
   private resolveGitDir(): string | null {
     const dotGit = join(this.rootDir, ".git");
     const stat = safeStat(dotGit);

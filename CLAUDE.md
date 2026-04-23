@@ -57,7 +57,7 @@ tests use a fresh `mkdtempSync` project dir against a real SQLite file.
 
 ## Work items are observational
 
-Newde passively tracks active agent turns: each open `agent_turn` row
+Oxplow passively tracks active agent turns: each open `agent_turn` row
 (`ended_at IS NULL` and started after runtime boot) renders as a live
 row in the Work panel's in_progress bucket showing the prompt,
 "thinking…", and elapsed time. When the turn Stops, the row
@@ -67,7 +67,7 @@ adoption — you don't need to narrate turn boundaries.
 **File a durable work item before you start editing.** When you realize
 you're about to change project files in a turn and you aren't already
 working against an existing item, call
-`mcp__newde__create_work_item` (or `file_epic_with_children` if the
+`mcp__oxplow__create_work_item` (or `file_epic_with_children` if the
 work is large enough to be worth splitting into macro subtasks) with
 status `in_progress` and track your progress against it across however
 many turns it takes — including stops to ask the user questions. The

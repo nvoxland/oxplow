@@ -103,7 +103,7 @@ export class LspClient {
     this.unsubscribeMessages?.();
     this.unsubscribeMessages = null;
     if (clientId) {
-      void window.newdeApi.closeLspClient(clientId);
+      void window.oxplowApi.closeLspClient(clientId);
     }
   }
 
@@ -112,13 +112,13 @@ export class LspClient {
     if (this.openPromise) return this.openPromise;
     this.openPromise = new Promise<void>((resolve, reject) => {
       let opened = false;
-      this.unsubscribeMessages = window.newdeApi.onLspEvent((event) => {
+      this.unsubscribeMessages = window.oxplowApi.onLspEvent((event) => {
         if (event.clientId !== this.clientId) return;
         const parsed = parseJsonRpc(event.message);
         if (!parsed) return;
         this.handleMessage(parsed);
       });
-      void window.newdeApi.openLspClient(this.streamId, this.languageId).then((clientId) => {
+      void window.oxplowApi.openLspClient(this.streamId, this.languageId).then((clientId) => {
         this.clientId = clientId;
         opened = true;
         this.emitStatus(null);
@@ -150,7 +150,7 @@ export class LspClient {
       this.queued.push(payload);
       return;
     }
-    void window.newdeApi.sendLspMessage(this.clientId, payload).catch((error) => {
+    void window.oxplowApi.sendLspMessage(this.clientId, payload).catch((error) => {
       this.emitStatus(`LSP unavailable: ${errorMessage(error)}`);
     });
   }
@@ -163,7 +163,7 @@ export class LspClient {
         for (const listener of this.diagnosticsListeners) {
           listener(params.uri, params.diagnostics);
         }
-      } else if (message.method === "$/newde/status") {
+      } else if (message.method === "$/oxplow/status") {
         const params = message.params as { message?: string | null } | undefined;
         this.emitStatus(params?.message ?? null);
       }

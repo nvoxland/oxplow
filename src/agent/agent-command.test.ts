@@ -14,8 +14,8 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     panes: {
-      working: "newde-proj:working-s-1",
-      talking: "newde-proj:talking-s-1",
+      working: "oxplow-proj:working-s-1",
+      talking: "oxplow-proj:talking-s-1",
     },
     resume: {
       working_session_id: "resume-working",
@@ -31,7 +31,7 @@ test("buildAgentCommand launches Claude from the stream worktree", () => {
   expect(command).toContain("resume-working");
   expect(command).toContain("cd ");
   expect(command).toContain("exec claude");
-  expect(command).toContain("[newde] saved resume id was stale; starting a fresh Claude session");
+  expect(command).toContain("[oxplow] saved resume id was stale; starting a fresh Claude session");
 });
 
 test("buildAgentCommand never emits --settings (no daemon path anymore)", () => {
@@ -49,7 +49,7 @@ test("buildAgentCommand can append a thread-specific system prompt for Claude", 
 
 test("buildAgentCommand can include session-specific mcp config for Claude", () => {
   const command = buildAgentCommand("claude", makeStream(), "working", {
-    mcpConfig: '{"mcpServers":{"newde":{"type":"stdio","command":"node","args":["/tmp/mcp.cjs"]}}}',
+    mcpConfig: '{"mcpServers":{"oxplow":{"type":"stdio","command":"node","args":["/tmp/mcp.cjs"]}}}',
   });
   expect(command).toContain("--mcp-config");
   expect(command).toContain("--strict-mcp-config");
@@ -58,31 +58,31 @@ test("buildAgentCommand can include session-specific mcp config for Claude", () 
 
 test("buildAgentCommand appends --plugin-dir when pluginDir is set", () => {
   const command = buildAgentCommand("claude", makeStream(), "working", {
-    pluginDir: "/abs/.newde/runtime/claude-plugin",
+    pluginDir: "/abs/.oxplow/runtime/claude-plugin",
   });
   expect(command).toContain("--plugin-dir");
-  expect(command).toContain("/abs/.newde/runtime/claude-plugin");
+  expect(command).toContain("/abs/.oxplow/runtime/claude-plugin");
 });
 
 test("buildAgentCommand appends --allowedTools with each pattern quoted", () => {
   const command = buildAgentCommand("claude", makeStream(), "working", {
-    allowedTools: ["mcp__newde__*", "Read"],
+    allowedTools: ["mcp__oxplow__*", "Read"],
   });
   expect(command).toContain("--allowedTools");
-  expect(command).toContain("mcp__newde__*");
+  expect(command).toContain("mcp__oxplow__*");
   expect(command).toContain("Read");
 });
 
 test("buildAgentCommand injects env vars before exec claude", () => {
   const command = buildAgentCommand("claude", makeStream(), "working", {
-    env: { NEWDE_STREAM_ID: "s-1", NEWDE_THREAD_ID: "b-42" },
+    env: { OXPLOW_STREAM_ID: "s-1", OXPLOW_THREAD_ID: "b-42" },
   });
-  expect(command).toContain("NEWDE_STREAM_ID=");
-  expect(command).toContain("NEWDE_THREAD_ID=");
+  expect(command).toContain("OXPLOW_STREAM_ID=");
+  expect(command).toContain("OXPLOW_THREAD_ID=");
   // The env assignment must appear before `exec claude` so the env flows
   // into the claude process.
   const execIdx = command.indexOf("exec claude");
-  const envIdx = command.indexOf("NEWDE_THREAD_ID");
+  const envIdx = command.indexOf("OXPLOW_THREAD_ID");
   expect(envIdx).toBeGreaterThan(0);
   expect(envIdx).toBeLessThan(execIdx);
 });
@@ -102,7 +102,7 @@ test("buildAgentCommand omits --resume when none is saved", () => {
 });
 
 test("buildAgentCommandForSession with empty resumeSessionId is identical regardless of which session was previously saved", () => {
-  const opts = { pluginDir: "/abs/plugin", allowedTools: ["mcp__newde__*"], appendSystemPrompt: "thread b-42" };
+  const opts = { pluginDir: "/abs/plugin", allowedTools: ["mcp__oxplow__*"], appendSystemPrompt: "thread b-42" };
   const withA = buildAgentCommandForSession("claude", "/tmp/wt", "session-a", opts);
   const withB = buildAgentCommandForSession("claude", "/tmp/wt", "session-b", opts);
   expect(withA).not.toBe(withB);

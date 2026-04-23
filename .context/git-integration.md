@@ -54,8 +54,8 @@ stream, recursive on the stream's `.git/` directory, debounced ~200ms
 (a single `git commit` fires a dozen events touching `HEAD`, `refs/*`,
 `logs/*`, `index`, `ORIG_HEAD`, …).
 
-When the stream lives in a secondary worktree (the common case — newde
-manages its own worktrees under `.newde/worktrees/`), the stream's
+When the stream lives in a secondary worktree (the common case — oxplow
+manages its own worktrees under `.oxplow/worktrees/`), the stream's
 `.git` is a pointer file, not a directory. The watcher reads the
 `gitdir:` line to find the per-worktree state dir (containing `HEAD`,
 `index`, `logs/HEAD`) and also follows the `commondir` pointer to watch
@@ -99,7 +99,7 @@ All git invocations go through `src/git/git.ts`. Notable:
   checkbox when the workspace has untracked files; the orchestrator's
   commit-point commit passes `{ includeUntracked: true }` to keep
   its historical behaviour. Used by `batchQueue.executeCommit`, which
-  is called synchronously from the `newde__commit` MCP tool after the
+  is called synchronously from the `oxplow__commit` MCP tool after the
   user approves the drafted message in chat.
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
@@ -110,7 +110,7 @@ All git invocations go through `src/git/git.ts`. Notable:
 `isGitRepo` requires the project root *itself* to be the git toplevel —
 nested git repos and parent-dir lookups are explicitly refused (see
 `architecture.md`'s "Workspace isolation rule"). `isGitWorktree` rejects
-secondary worktrees so newde won't try to nest its own worktrees inside
+secondary worktrees so oxplow won't try to nest its own worktrees inside
 another tool's checkout.
 
 ## UI commit affordance
@@ -119,7 +119,7 @@ The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
 header toolbar whenever `gitEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
 textarea; submitting runs `gitCommitAll` through a dedicated
-`newde:gitCommitAll` IPC method. This is the UI entry point for the
+`oxplow:gitCommitAll` IPC method. This is the UI entry point for the
 **ad-hoc commit path** (the path `agent-model.md` distinguishes from
 commit points). The commit-point flow still owns automated threads;
 the button is for "I've got changes and want to land them now."
@@ -130,7 +130,7 @@ textarea is `files-commit-message` and the submit button is
 
 ## Two commit paths
 
-newde supports two paths for landing a commit, and they exist for
+oxplow supports two paths for landing a commit, and they exist for
 different reasons:
 
 1. **Ad-hoc.** The writer-thread agent runs `git add` / `git commit`
@@ -141,7 +141,7 @@ different reasons:
    queue and the Stop-hook has blocked the agent with a directive
    telling it to inspect the diff, draft a message in its chat reply,
    and ask the user to approve. On approval the agent calls
-   `mcp__newde__commit` (or in auto mode the runtime commits
+   `mcp__oxplow__commit` (or in auto mode the runtime commits
    immediately) which runs `gitCommitAll` through the runtime. The
    row records the commit sha for provenance.
 

@@ -135,7 +135,7 @@ test("summarizeGitStatuses returns counts by status", () => {
 });
 
 function mkProjectDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "newde-workspace-files-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-workspace-files-"));
   tempDirs.push(dir);
   return dir;
 }

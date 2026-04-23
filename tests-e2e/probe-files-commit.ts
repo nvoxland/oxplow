@@ -1,12 +1,12 @@
 // Verify the "Commit (N)" button in the Files view works end-to-end:
-// create a scratch dirty file, launch newde, click the button, fill message,
+// create a scratch dirty file, launch oxplow, click the button, fill message,
 // submit, verify commit landed in git log, then safely roll back the test
 // commit (only if we actually advanced HEAD).
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { launchNewde, runProbe } from "./harness.ts";
+import { launchOxplow, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +22,7 @@ async function main() {
   writeFileSync(scratchAbs, `line one\nline two\n`);
   console.log("[probe] created scratch dirty file; start sha:", startSha);
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
 

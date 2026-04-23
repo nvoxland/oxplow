@@ -11,7 +11,7 @@ import { computeLocalBlame } from "./local-blame.js";
 import type { BlameLine } from "../git/git.js";
 
 function seed() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-local-blame-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-local-blame-"));
   const streamStore = new StreamStore(dir);
   const stream = streamStore.create({
     title: "Demo",

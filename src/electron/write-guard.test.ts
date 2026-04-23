@@ -12,7 +12,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     title: "Thread 1",
     status: "queued",
     sort_index: 0,
-    pane_target: "newde:0",
+    pane_target: "oxplow:0",
     resume_session_id: "",
     auto_commit: false,
     custom_prompt: null,
@@ -45,8 +45,8 @@ describe("buildWriteGuardResponse", () => {
   });
 
   test("allows MCP tools from any thread", () => {
-    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__newde__add_work_note")).toBeNull();
-    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__newde__create_work_item")).toBeNull();
+    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__oxplow__add_work_note")).toBeNull();
+    expect(buildWriteGuardResponse(makeThread({ status: "queued" }), "mcp__oxplow__create_work_item")).toBeNull();
   });
 
   test("allows read-only tools (Read, Grep, Glob)", () => {
@@ -60,7 +60,7 @@ describe("buildWriteGuardResponse", () => {
   });
 
   test("allows Write to an agent-private path outside the project root", () => {
-    const parent = mkdtempSync(join(tmpdir(), "newde-wg-"));
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
     try {
       const projectDir = join(parent, "project");
       const outside = join(parent, "elsewhere", "plans", "foo.md");
@@ -76,7 +76,7 @@ describe("buildWriteGuardResponse", () => {
   });
 
   test("denies Write to an in-tree path and names the resolved path in the reason", () => {
-    const parent = mkdtempSync(join(tmpdir(), "newde-wg-"));
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
     try {
       const projectDir = join(parent, "project");
       const inside = join(projectDir, "src", "index.ts");
@@ -95,15 +95,15 @@ describe("buildWriteGuardResponse", () => {
     }
   });
 
-  test("denies Write to project's .newde/ directory even from agent-private-looking path", () => {
-    const parent = mkdtempSync(join(tmpdir(), "newde-wg-"));
+  test("denies Write to project's .oxplow/ directory even from agent-private-looking path", () => {
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
     try {
       const projectDir = join(parent, "project");
-      const newdePath = join(projectDir, ".newde", "shared-state.json");
+      const oxplowPath = join(projectDir, ".oxplow", "shared-state.json");
       const result = buildWriteGuardResponse(
         makeThread({ status: "queued" }),
         "Write",
-        { projectDir, toolInput: { file_path: newdePath } },
+        { projectDir, toolInput: { file_path: oxplowPath } },
       );
       expect(result?.hookSpecificOutput.permissionDecision).toBe("deny");
     } finally {
@@ -112,7 +112,7 @@ describe("buildWriteGuardResponse", () => {
   });
 
   test("relative file_path resolves against projectDir (in-tree → deny)", () => {
-    const parent = mkdtempSync(join(tmpdir(), "newde-wg-"));
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
     try {
       const projectDir = join(parent, "project");
       const result = buildWriteGuardResponse(

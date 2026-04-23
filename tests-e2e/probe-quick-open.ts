@@ -9,7 +9,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, sendMenuCommand, runProbe } from "./harness.ts";
+import { launchOxplow, sendMenuCommand, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -18,7 +18,7 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { app, window, close } = await launchNewde(projectDir);
+  const { app, window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
 

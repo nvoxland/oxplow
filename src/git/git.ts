@@ -39,8 +39,8 @@ export function isGitRepo(projectDir: string): boolean {
 /**
  * True if `projectDir` is a secondary git worktree (its `.git` is a file
  * pointing at the main repo's worktrees/ dir, not a regular `.git` directory).
- * We refuse to start newde in a worktree because newde manages its own
- * worktrees under `.newde/worktrees/` and nesting one inside a user-created
+ * We refuse to start oxplow in a worktree because oxplow manages its own
+ * worktrees under `.oxplow/worktrees/` and nesting one inside a user-created
  * worktree makes pane/stream accounting incoherent.
  */
 export function isGitWorktree(projectDir: string): boolean {

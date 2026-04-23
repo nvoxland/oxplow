@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Logger } from "../core/logger.js";
-import { ensureNewdeRoot } from "../core/newde-dir.js";
+import { ensureOxplowRoot } from "../core/oxplow-dir.js";
 import { assertParamCount, createSqlDriver, type SqlDriver, type SQLiteValue } from "./driver.js";
 import { runMigrations } from "./migrations.js";
 
@@ -13,7 +13,7 @@ export class StateDatabase {
   private closed = false;
 
   constructor(projectDir: string, private readonly logger?: Logger) {
-    const rootDir = ensureNewdeRoot(projectDir);
+    const rootDir = ensureOxplowRoot(projectDir);
     this.path = join(rootDir, "state.sqlite");
     const preExisted = existsSync(this.path);
     this.driver = createSqlDriver(this.path);

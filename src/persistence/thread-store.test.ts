@@ -7,7 +7,7 @@ import type { Stream } from "./stream-store.js";
 
 describe("ThreadStore", () => {
   test("initializes a stream with one active thread", () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-threads-"));
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
     const store = new ThreadStore(dir);
 
     const state = store.ensureStream(makeStream());
@@ -15,7 +15,7 @@ describe("ThreadStore", () => {
     expect(state.activeThreadId).toBe(state.threads[0]?.id);
     expect(state.selectedThreadId).toBe(state.threads[0]?.id);
     expect(state.threads[0]?.status).toBe("active");
-    expect(state.threads[0]?.pane_target).toBe("newde-demo:working-s-1");
+    expect(state.threads[0]?.pane_target).toBe("oxplow-demo:working-s-1");
   });
 
   test("findById resolves a thread by id alone, even across streams", () => {
@@ -23,7 +23,7 @@ describe("ThreadStore", () => {
     // broke when the UI's "current stream" drifted from where the agent was
     // writing. findById is the single-stream-free lookup that lets the
     // server derive streamId from the thread row itself.
-    const dir = mkdtempSync(join(tmpdir(), "newde-threads-"));
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
     const store = new ThreadStore(dir);
     const streamA = makeStream();
     const streamB: Stream = { ...makeStream(), id: "s-2", title: "Other" };
@@ -39,7 +39,7 @@ describe("ThreadStore", () => {
   });
 
   test("reorderThreads writes sort_index in the provided order", () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-threads-"));
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
     const stream = makeStream();
     const store = new ThreadStore(dir);
     store.ensureStream(stream);
@@ -57,7 +57,7 @@ describe("ThreadStore", () => {
   });
 
   test("creates, reorders, promotes, and completes threads", () => {
-    const dir = mkdtempSync(join(tmpdir(), "newde-threads-"));
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
     const stream = makeStream();
     const store = new ThreadStore(dir);
     store.ensureStream(stream);
@@ -99,8 +99,8 @@ function makeStream(): Stream {
     updated_at: "2024-01-01T00:00:00.000Z",
     custom_prompt: null,
     panes: {
-      working: "newde-demo:working-s-1",
-      talking: "newde-demo:talking-s-1",
+      working: "oxplow-demo:working-s-1",
+      talking: "oxplow-demo:talking-s-1",
     },
     resume: {
       working_session_id: "resume-working",

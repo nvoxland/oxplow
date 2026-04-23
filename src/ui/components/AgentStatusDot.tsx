@@ -23,7 +23,7 @@ export function AgentStatusDot({ status, size = 8 }: { status: AgentStatus; size
     borderRadius: "50%",
     background: COLORS[status],
     flexShrink: 0,
-    animation: status === "working" ? "newde-pulse 1.4s ease-in-out infinite" : undefined,
+    animation: status === "working" ? "oxplow-pulse 1.4s ease-in-out infinite" : undefined,
     boxShadow: status === "waiting" ? `0 0 0 2px rgba(252, 165, 165, 0.25)` : undefined,
   };
   return <span style={style} title={LABELS[status]} aria-label={`Agent status: ${LABELS[status]}`} data-agent-status={status} data-agent-label={LABELS[status]} />;

@@ -14,7 +14,7 @@ import { gitCommitAll } from "../git/git.js";
  * Owns the parts of the thread queue that span multiple stores: commit
  * points, wait points, the shared sort_index space they occupy alongside
  * work items, and the synchronous execution of a commit once the agent
- * calls `newde__commit` (after the user approves in chat).
+ * calls `oxplow__commit` (after the user approves in chat).
  */
 export class ThreadQueueOrchestrator {
   constructor(
@@ -113,7 +113,7 @@ export class ThreadQueueOrchestrator {
 
   /**
    * Run `git commit` for a commit point. Called synchronously from the
-   * `newde__commit` MCP handler after the user has approved the drafted
+   * `oxplow__commit` MCP handler after the user has approved the drafted
    * message in chat. Throws if git commit fails; the caller surfaces the
    * error to the agent so it can retry.
    */

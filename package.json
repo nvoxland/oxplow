@@ -1,11 +1,11 @@
 {
-  "name": "newde",
+  "name": "oxplow",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "./dist/electron-main.cjs",
   "bin": {
-    "newde": "./bin/newde"
+    "oxplow": "./bin/oxplow"
   },
   "scripts": {
     "build:ui": "bun build src/ui/main.tsx --outdir=public/dist --target=browser --format=esm --splitting",

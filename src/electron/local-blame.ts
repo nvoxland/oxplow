@@ -31,7 +31,7 @@ export interface LocalBlameDeps {
 }
 
 /**
- * Attribute each line of `diskText` to the newde work-item effort that last
+ * Attribute each line of `diskText` to the oxplow work-item effort that last
  * touched it, falling back to git blame for any line the local walk can't
  * cover. See `.context/editor-and-monaco.md` "Blame overlay" for the UI
  * side and the local-blame plan for the algorithm rationale.

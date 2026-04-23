@@ -29,7 +29,7 @@ function waitFor(condition: () => boolean, timeoutMs = 5000, intervalMs = 100): 
 
 test("killSession removes a tmux session", () => {
   if (!tmuxAvailable()) return;
-  const name = `newde-test-kill-${process.pid}`;
+  const name = `oxplow-test-kill-${process.pid}`;
   createTestSession(name);
   expect(hasSession(name)).toBe(true);
   killSession(name);
@@ -38,13 +38,13 @@ test("killSession removes a tmux session", () => {
 
 test("killSession is a no-op for a non-existent session", () => {
   if (!tmuxAvailable()) return;
-  expect(() => killSession("newde-test-nonexistent-999999")).not.toThrow();
+  expect(() => killSession("oxplow-test-nonexistent-999999")).not.toThrow();
 });
 
 test("capturePaneHistory returns recent pane output", async () => {
   if (!tmuxAvailable()) return;
 
-  const name = `newde-test-capture-${process.pid}`;
+  const name = `oxplow-test-capture-${process.pid}`;
   try {
     execFileSync("tmux", ["new-session", "-d", "-s", name, "printf 'alpha\\nbeta\\n' && sleep 1"], { stdio: "ignore" });
     await waitFor(() => capturePaneHistory(`${name}:0`, 50).includes("alpha"), 3000, 100);

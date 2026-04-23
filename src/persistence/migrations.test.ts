@@ -6,7 +6,7 @@ import { createSqlDriver } from "./driver.js";
 import { MIGRATIONS, runMigrations } from "./migrations.js";
 
 function freshDriver() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-migrations-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-migrations-"));
   return createSqlDriver(join(dir, "state.sqlite"));
 }
 

@@ -18,7 +18,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
-import { launchNewde, runProbe } from "./harness.ts";
+import { launchOxplow, runProbe } from "./harness.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +27,7 @@ async function main() {
   const outDir = resolve(__dirname, "screenshots");
   mkdirSync(outDir, { recursive: true });
 
-  const { window, close } = await launchNewde(projectDir);
+  const { window, close } = await launchOxplow(projectDir);
   const fails: string[] = [];
   // Unique title per run so leftover state.sqlite rows from earlier runs
   // don't confuse locators (tracked separately as a probe-isolation todo).

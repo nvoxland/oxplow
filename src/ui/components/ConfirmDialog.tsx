@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 
 /**
  * Themed destructive-action confirmation. Replaces `window.confirm()` so
- * every destructive prompt in newde uses the same visual language —
+ * every destructive prompt in oxplow uses the same visual language —
  * `window.confirm()` is unstyled, non-dismissable by outside click, and
  * locks rendering of the whole window.
  *

@@ -258,7 +258,7 @@ export class WorkItemEffortStore {
    * first-commit case). Joined to `work_items` so the caller gets the
    * item title/kind/status without a second round-trip. Ordered by
    * `ended_at ASC` — earliest first — so the agent sees the work in
-   * chronological order. Used by `mcp__newde__tasks_since_last_commit`.
+   * chronological order. Used by `mcp__oxplow__tasks_since_last_commit`.
    */
   listClosedEffortsForThreadAfter(
     threadId: string,

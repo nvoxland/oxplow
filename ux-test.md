@@ -2,7 +2,7 @@
 
 ## Context
 
-newde has no E2E/Playwright tests. The user wants to hand a Playwright-capable
+oxplow has no E2E/Playwright tests. The user wants to hand a Playwright-capable
 agent a list of realistic user tasks, let it exercise the UI, and have it
 surface (and fix) UX problems it encounters along the way. This plan is that
 list: a catalog of discrete, self-contained tasks phrased the way a real user
@@ -19,7 +19,7 @@ Each task is written so the agent can:
 
 Feed tasks one at a time (or in small threads). For each:
 
-1. **Setup**: launch newde against a throwaway project dir (see Verification).
+1. **Setup**: launch oxplow against a throwaway project dir (see Verification).
 2. **Execute the task** via Playwright, narrating each step.
 3. **Record friction**: every place the agent had to guess, retry, or where
    behavior didn't match expectation. This is the real output — the task
@@ -119,7 +119,7 @@ Keep this pinned — friction usually traces back to one of these:
 End-to-end smoke for the test harness itself:
 
 1. **Launch against a scratch project**: `mkdtemp` a dir, `git init` it, point
-   newde at it. This mirrors what `runtime.test.ts` does.
+   oxplow at it. This mirrors what `runtime.test.ts` does.
 2. **Confirm Playwright can attach to the Electron main window** and query
    stable selectors (add `data-testid` attributes if missing — that's itself a
    likely outcome of task 1 or 2).

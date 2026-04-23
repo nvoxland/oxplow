@@ -27,7 +27,7 @@ test("workspace watcher subscribers are stream-scoped", () => {
 });
 
 test("workspace watcher emits events for filesystem changes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "newde-watch-"));
+  const root = mkdtempSync(join(tmpdir(), "oxplow-watch-"));
   tempDirs.push(root);
   mkdirSync(join(root, "src"), { recursive: true });
   const registry = new WorkspaceWatcherRegistry(noopLogger());
@@ -61,10 +61,10 @@ test("workspace watcher emits events for filesystem changes", async () => {
 
 test("workspace watcher ignores internal runtime paths", () => {
   expect(shouldIgnoreWorkspaceWatchPath(".git/index")).toBe(true);
-  expect(shouldIgnoreWorkspaceWatchPath(".newde/logs/system.log")).toBe(true);
-  expect(shouldIgnoreWorkspaceWatchPath(".newde/worktrees/feature/src/app.ts")).toBe(true);
-  expect(shouldIgnoreWorkspaceWatchPath(".newde/state.db")).toBe(true);
-  expect(shouldIgnoreWorkspaceWatchPath(".newde/snapshots/objects/ab/cd")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".oxplow/logs/system.log")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".oxplow/worktrees/feature/src/app.ts")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".oxplow/state.db")).toBe(true);
+  expect(shouldIgnoreWorkspaceWatchPath(".oxplow/snapshots/objects/ab/cd")).toBe(true);
   expect(shouldIgnoreWorkspaceWatchPath("src/app.ts")).toBe(false);
 });
 

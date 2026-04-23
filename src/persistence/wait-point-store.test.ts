@@ -7,7 +7,7 @@ import { WaitPointStore } from "./wait-point-store.js";
 import type { Stream } from "./stream-store.js";
 
 function seed() {
-  const dir = mkdtempSync(join(tmpdir(), "newde-wait-point-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-wait-point-"));
   const threadStore = new ThreadStore(dir);
   const stream: Stream = {
     id: "s-1",
@@ -19,7 +19,7 @@ function seed() {
     worktree_path: "/tmp/demo",
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
-    panes: { working: "newde-demo:working-s-1", talking: "newde-demo:talking-s-1" },
+    panes: { working: "oxplow-demo:working-s-1", talking: "oxplow-demo:talking-s-1" },
     resume: { working_session_id: "", talking_session_id: "" },
   };
   const state = threadStore.ensureStream(stream);

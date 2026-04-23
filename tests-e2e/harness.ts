@@ -8,14 +8,14 @@ import { execSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export interface LaunchedNewde {
+export interface LaunchedOxplow {
   app: ElectronApplication;
   window: Page;
   close: () => Promise<void>;
 }
 
-// Launch the built newde Electron app, pointed at `projectDir`.
-// Mirrors what `bin/newde` does: `electron . --project <dir>`.
+// Launch the built oxplow Electron app, pointed at `projectDir`.
+// Mirrors what `bin/oxplow` does: `electron . --project <dir>`.
 //
 // Each launch gets a fresh Electron userData directory via
 // --user-data-dir. Without this, localStorage (dock open/collapsed,
@@ -24,21 +24,21 @@ export interface LaunchedNewde {
 // "Files" dock tab toggles the dock closed, and the next probe finds
 // file-tree rows in the DOM but display:none. Isolating userData
 // per launch is what makes probes reproducible.
-export async function launchNewde(projectDir: string, opts: { timeoutMs?: number; fresh?: boolean } = {}): Promise<LaunchedNewde> {
+export async function launchOxplow(projectDir: string, opts: { timeoutMs?: number; fresh?: boolean } = {}): Promise<LaunchedOxplow> {
   const repoRoot = resolve(__dirname, "..");
-  const userDataDir = mkdtempSync(join(tmpdir(), "newde-e2e-userdata-"));
+  const userDataDir = mkdtempSync(join(tmpdir(), "oxplow-e2e-userdata-"));
 
-  // When `fresh: true`, wipe the project's persisted newde state so a
+  // When `fresh: true`, wipe the project's persisted oxplow state so a
   // probe doesn't inherit stale work_items / commit_points / wait_points
   // from a prior run. Without this, the Stop hook can pick up an
   // orphaned work item from a totally different session and steer the
-  // inner agent sideways. Targets `.newde/state.sqlite*` (DB + WAL +
+  // inner agent sideways. Targets `.oxplow/state.sqlite*` (DB + WAL +
   // SHM) and the runtime instance lock; leaves snapshots/git alone.
   if (opts.fresh) {
     for (const name of ["state.sqlite", "state.sqlite-wal", "state.sqlite-shm"]) {
-      try { rmSync(join(projectDir, ".newde", name), { force: true }); } catch { /* ignore */ }
+      try { rmSync(join(projectDir, ".oxplow", name), { force: true }); } catch { /* ignore */ }
     }
-    try { rmSync(join(projectDir, ".newde", "runtime", "instance.lock"), { force: true }); } catch { /* ignore */ }
+    try { rmSync(join(projectDir, ".oxplow", "runtime", "instance.lock"), { force: true }); } catch { /* ignore */ }
   }
 
   const app = await electron.launch({
@@ -69,13 +69,13 @@ export async function launchNewde(projectDir: string, opts: { timeoutMs?: number
 }
 
 /**
- * Wait until newde's chrome has mounted by polling for the dock-tab-plan
+ * Wait until oxplow's chrome has mounted by polling for the dock-tab-plan
  * testid. Replaces the blind `await window.waitForTimeout(3_000)` that
  * every probe used to sleep for at startup. Returns as soon as the
  * marker is present (typically <1s on a warm machine), or throws if it
  * doesn't show up within `timeoutMs`.
  */
-export async function waitForNewdeReady(window: Page, opts: { timeoutMs?: number } = {}): Promise<void> {
+export async function waitForOxplowReady(window: Page, opts: { timeoutMs?: number } = {}): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   await window.locator('[data-testid="dock-tab-plan"]').first().waitFor({ state: "visible", timeout: timeoutMs });
 }
@@ -89,7 +89,7 @@ export async function waitForNewdeReady(window: Page, opts: { timeoutMs?: number
 export async function sendMenuCommand(app: ElectronApplication, commandId: string): Promise<void> {
   await app.evaluate(({ BrowserWindow }, id) => {
     const win = BrowserWindow.getAllWindows()[0];
-    win?.webContents.send("newde:menu-command", id);
+    win?.webContents.send("oxplow:menu-command", id);
   }, commandId);
 }
 
@@ -156,13 +156,13 @@ export async function runProbe(
 
 // Kill any probe-spawned electron processes or orphaned user-data dirs
 // from prior aborted runs. Matches on our launch args (--user-data-dir
-// prefix `newde-e2e-userdata-`) so we don't touch the user's other
+// prefix `oxplow-e2e-userdata-`) so we don't touch the user's other
 // Electron apps. Also clears a stale instance lock if the PID inside is
 // dead.
 export function preflightKillStrays(): void {
   try {
     const pids = execSync(
-      "pgrep -f 'newde-e2e-userdata-' 2>/dev/null || true",
+      "pgrep -f 'oxplow-e2e-userdata-' 2>/dev/null || true",
       { encoding: "utf8" },
     ).trim().split(/\s+/).filter(Boolean);
     if (pids.length > 0) {
@@ -171,7 +171,7 @@ export function preflightKillStrays(): void {
     }
   } catch { /* ignore */ }
 
-  const lock = resolve(__dirname, "..", ".newde", "runtime", "instance.lock");
+  const lock = resolve(__dirname, "..", ".oxplow", "runtime", "instance.lock");
   if (existsSync(lock)) {
     try {
       const pid = Number(readFileSync(lock, "utf8").trim());
@@ -200,7 +200,7 @@ function isPidAlive(pid: number): boolean {
 // ---------------------------------------------------------------------
 
 /**
- * Drive the canonical dogfood pass inside an already-launched newde
+ * Drive the canonical dogfood pass inside an already-launched oxplow
  * window:
  *   1. Click + Commit when done so propose_commit has something to
  *      target.
@@ -320,7 +320,7 @@ export function runBuild(): void {
 /**
  * Approve a pending set of changes by opening Files panel, clicking
  * the files-commit button, filling the message, and submitting.
- * Must be called inside an already-launched newde window.
+ * Must be called inside an already-launched oxplow window.
  *
  * Since `096b2f0` the Files-commit dialog defaults Include-untracked
  * to OFF, so this helper only commits tracked changes. Pass an

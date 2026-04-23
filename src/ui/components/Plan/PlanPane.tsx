@@ -22,7 +22,7 @@ import {
   listWorkItemEfforts,
   reorderThreadQueue,
   setAutoCommit,
-  subscribeNewdeEvents,
+  subscribeOxplowEvents,
   updateCommitPoint,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
@@ -174,7 +174,7 @@ export function PlanPane({
       .catch((err) => reportUiError("Load wait points", err));
     refreshCommits();
     refreshWaits();
-    const off = subscribeNewdeEvents((event) => {
+    const off = subscribeOxplowEvents((event) => {
       if (event.type === "commit-point.changed" && event.threadId === threadId) refreshCommits();
       if (event.type === "wait-point.changed" && event.threadId === threadId) refreshWaits();
     });

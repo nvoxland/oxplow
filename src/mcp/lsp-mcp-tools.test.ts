@@ -46,7 +46,7 @@ let tmpDir: string;
 let workDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "newde-lsp-tools-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "oxplow-lsp-tools-"));
   workDir = join(tmpDir, "wt");
   mkdirSync(workDir);
   (fakeStream as any).worktree_path = workDir;
@@ -58,7 +58,7 @@ afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("newde__lsp_definition", () => {
+describe("oxplow__lsp_definition", () => {
   test("converts 1-based line/column to 0-based LSP position and reads file", async () => {
     writeFileSync(join(workDir, "app.py"), "print('hello')\n");
     const { manager, syncs } = buildFakeManager({
@@ -75,7 +75,7 @@ describe("newde__lsp_definition", () => {
       },
     });
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_definition")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_definition")!;
     const out = await tool.handler({ path: "app.py", line: 3, column: 6 });
     expect(out).toEqual({
       locations: [
@@ -95,19 +95,19 @@ describe("newde__lsp_definition", () => {
     writeFileSync(join(workDir, "notes.unknown"), "");
     const { manager } = buildFakeManager();
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_definition")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_definition")!;
     await expect(tool.handler({ path: "notes.unknown", line: 1, column: 1 })).rejects.toThrow(/no LSP/i);
   });
 
   test("throws when path escapes the worktree", async () => {
     const { manager } = buildFakeManager();
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_definition")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_definition")!;
     await expect(tool.handler({ path: "../outside.py", line: 1, column: 1 })).rejects.toThrow(/outside/i);
   });
 });
 
-describe("newde__lsp_hover", () => {
+describe("oxplow__lsp_hover", () => {
   test("normalizes markup content", async () => {
     writeFileSync(join(workDir, "a.py"), "x = 1\n");
     const { manager } = buildFakeManager({
@@ -117,7 +117,7 @@ describe("newde__lsp_hover", () => {
       }),
     });
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_hover")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_hover")!;
     const out = await tool.handler({ path: "a.py", line: 1, column: 1 });
     expect(out).toEqual({
       markdown: "**x**: int",
@@ -126,7 +126,7 @@ describe("newde__lsp_hover", () => {
   });
 });
 
-describe("newde__lsp_diagnostics", () => {
+describe("oxplow__lsp_diagnostics", () => {
   test("returns diagnostics with 1-based ranges and severity labels", async () => {
     writeFileSync(join(workDir, "a.py"), "x = 1\n");
     const uri = fileUri(join(workDir, "a.py"));
@@ -144,7 +144,7 @@ describe("newde__lsp_diagnostics", () => {
       waitForDiagnostics: async (u) => diagnosticsByUri.get(u) ?? [],
     });
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_diagnostics")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_diagnostics")!;
     const out = await tool.handler({ path: "a.py" });
     expect(out).toEqual({
       diagnostics: [
@@ -185,7 +185,7 @@ describe("isKnownFalsePositiveDiagnostic", () => {
   });
 });
 
-describe("newde__lsp_diagnostics filtering", () => {
+describe("oxplow__lsp_diagnostics filtering", () => {
   test("drops known false positives (bun:test) before returning to the agent", async () => {
     writeFileSync(join(workDir, "a.test.ts"), "import { test } from 'bun:test'\n");
     const uri = fileUri(join(workDir, "a.test.ts"));
@@ -210,13 +210,13 @@ describe("newde__lsp_diagnostics filtering", () => {
       waitForDiagnostics: async (u) => diagnosticsByUri.get(u) ?? [],
     });
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_diagnostics")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_diagnostics")!;
     const out = await tool.handler({ path: "a.test.ts" }) as { diagnostics: Array<{ message: string }> };
     expect(out.diagnostics.map((d) => d.message)).toEqual(["Real error"]);
   });
 });
 
-describe("newde__lsp_references", () => {
+describe("oxplow__lsp_references", () => {
   test("returns all references as worktree-relative paths", async () => {
     writeFileSync(join(workDir, "a.py"), "x = 1\n");
     const { manager } = buildFakeManager({
@@ -232,7 +232,7 @@ describe("newde__lsp_references", () => {
       ],
     });
     const tools = buildLspMcpTools({ resolveStream: () => fakeStream, lspManager: manager });
-    const tool = tools.find((t) => t.name === "newde__lsp_references")!;
+    const tool = tools.find((t) => t.name === "oxplow__lsp_references")!;
     const out = await tool.handler({ path: "a.py", line: 1, column: 1 });
     expect(out).toEqual({
       locations: [

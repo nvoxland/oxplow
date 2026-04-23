@@ -29,15 +29,15 @@ touches roughly seven files. They sit in this order:
    commit_point, and wait_point in one go).
 
 4. **IPC contract** — `src/electron/ipc-contract.ts`. Add the method
-   signature to the `NewdeApi` interface. This is the source of truth for
+   signature to the `OxplowApi` interface. This is the source of truth for
    what's exposed to the renderer.
 
 5. **Preload binding** — `src/electron/preload.ts`. One line per method:
-   `name: (args) => ipcRenderer.invoke("newde:name", args)`. Channel
-   names follow `newde:<methodName>`.
+   `name: (args) => ipcRenderer.invoke("oxplow:name", args)`. Channel
+   names follow `oxplow:<methodName>`.
 
 6. **Main-process handler** — `src/electron/main.ts`.
-   `handle("newde:name", (_event, ...args) => currentRuntime.name(...args))`.
+   `handle("oxplow:name", (_event, ...args) => currentRuntime.name(...args))`.
    Use the local `handle()` wrapper, not `ipcMain.handle` directly —
    the wrapper records the channel so `disposeRuntime()` can remove
    every handler before the SQLite database closes (otherwise late
@@ -63,7 +63,7 @@ What landed across each layer when commit points were added:
   `createCommitPoint/deleteCommitPoint/listCommitPoints/
   reorderBatchQueue/executeCommit` plus the Stop-hook integration via
   `computeStopDirective`. `executeCommit` runs `gitCommitAll` inline
-  from the `newde__commit` MCP handler.
+  from the `oxplow__commit` MCP handler.
 - **Event**: `CommitPointChangedEvent` added to `src/core/event-bus.ts`,
   published in `runtime.ts` from the store's `subscribe`.
 - **IPC contract / preload / main**: `listCommitPoints`,
@@ -72,7 +72,7 @@ What landed across each layer when commit points were added:
 - **UI api**: `listCommitPoints/createCommitPoint/deleteCommitPoint/
   reorderBatchQueue` in `src/ui/api.ts`.
 - **UI consumption**: `PlanPane.tsx` loads commit points on thread change
-  and refetches via `subscribeNewdeEvents` filtered to
+  and refetches via `subscribeOxplowEvents` filtered to
   `event.type === "commit-point.changed" && event.threadId === threadId`.
 - **MCP**: `commit` and `list_commit_points` registered in
   `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
@@ -85,14 +85,14 @@ feature.
 
 ## Event bus
 
-`src/core/event-bus.ts` defines the typed `NewdeEvent` discriminated
+`src/core/event-bus.ts` defines the typed `OxplowEvent` discriminated
 union. To add an event:
 
 1. Add a new interface (`type: "thing.changed"; …`).
-2. Add it to the `NewdeEvent` union.
+2. Add it to the `OxplowEvent` union.
 3. Publish from `runtime.ts` inside the relevant store's `subscribe`
    block.
-4. Consume in the UI via `subscribeNewdeEvents((e) => { if (e.type === ...) ... })`.
+4. Consume in the UI via `subscribeOxplowEvents((e) => { if (e.type === ...) ... })`.
 
 For commonly-filtered events there are scoped helpers in `src/ui/api.ts`:
 
@@ -107,7 +107,7 @@ filter.
 
 **Listener count:** each UI subscriber adds one listener to
 `ipcRenderer`. Electron's default `MaxListeners=10` is too low for
-newde (~11 stores subscribe on startup), so `src/electron/preload.ts`
+oxplow (~11 stores subscribe on startup), so `src/electron/preload.ts`
 calls `ipcRenderer.setMaxListeners(64)` at load time. These are
 long-lived per-store subscribers and grow only when we add a store —
 not a leak. If the count ever climbs into dozens, switch to a single
@@ -144,7 +144,7 @@ expected schema.
 
 `SnapshotStore` (`src/persistence/snapshot-store.ts`) is a hybrid: a
 SQLite-indexed table (`file_snapshot`) plus an on-disk content-
-addressed blob store at `.newde/snapshots/objects/xx/yyyy…`. Snapshots
+addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
 are time-ordered and deduplicated on a `version_hash` (no parent
 chain). Rows returned by `listSnapshotsForStream` are pre-enriched
 with `label` + `label_kind` joined from `work_item_effort` and
