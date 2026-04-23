@@ -486,37 +486,19 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call newde__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
           };
         }
-        // Auto-file adoption: if the runtime filed an 'agent-auto' item
-        // during this turn, update that row in place rather than creating
-        // a duplicate — keeps effort attribution and the UI row stable.
-        // Only adopts for root-level filings (no parentId) so epic-child
-        // creations under a user-filed epic stay independent.
-        const openAuto = args.parentId ? null : workItemStore.findOpenAutoItemForThread(args.threadId);
-        const item = openAuto
-          ? workItemStore.adoptAutoItem({
-              threadId: args.threadId,
-              itemId: openAuto.id,
-              title: args.title,
-              description: args.description,
-              acceptanceCriteria: args.acceptanceCriteria,
-              kind: args.kind,
-              priority: args.priority,
-              actorKind: "agent",
-              actorId: "mcp",
-            })
-          : workItemStore.createItem({
-              threadId: args.threadId,
-              parentId: args.parentId,
-              kind: args.kind,
-              title: args.title,
-              description: args.description,
-              acceptanceCriteria: args.acceptanceCriteria,
-              status: args.status,
-              priority: args.priority,
-              createdBy: "agent",
-              actorId: "mcp",
-              author: "agent",
-            });
+        const item = workItemStore.createItem({
+          threadId: args.threadId,
+          parentId: args.parentId,
+          kind: args.kind,
+          title: args.title,
+          description: args.description,
+          acceptanceCriteria: args.acceptanceCriteria,
+          status: args.status,
+          priority: args.priority,
+          createdBy: "agent",
+          actorId: "mcp",
+          author: "agent",
+        });
         // Epics filed without children render as one opaque IN PROGRESS row in
         // the UI and defeat the purpose of the rollup. The newde-runtime
         // skill already says "file children in the same turn"; surfacing it on
@@ -595,11 +577,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         }>;
       }) => {
         resolveThreadAndStream(args);
-        // Auto-file adoption: if the runtime filed an 'agent-auto' item
-        // earlier in this turn, adopt its id as the epic (title/desc/AC/
-        // kind/priority overwritten, author flipped to 'agent'). Children
-        // are created fresh under the adopted epic id.
-        const openAuto = workItemStore.findOpenAutoItemForThread(args.threadId);
         const result = workItemStore.fileEpicWithChildren({
           threadId: args.threadId,
           epic: {
@@ -617,7 +594,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           })),
           createdBy: "agent",
           actorId: "mcp",
-          adoptItemId: openAuto?.id,
         });
         return { ok: true, epicId: result.epicId, childIds: result.childIds };
       },
@@ -629,8 +605,9 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         "so the orchestrator doesn't have to Read its description/acceptance criteria/notes " +
         "into chat context. Returns `{ prompt, itemId }`; pass `prompt` directly to the " +
         "general-purpose Agent tool. When `autoStart !== false` (default true) the item is " +
-        "atomically transitioned to `in_progress` if currently `ready` or `blocked`; other " +
-        "statuses are left alone. For epics, the brief includes each child's title + AC.",
+        "atomically transitioned to `in_progress` if currently `ready`; other " +
+        "statuses (including `blocked`) are left alone — un-block explicitly via update_work_item first. " +
+        "For epics, the brief includes each child's title + AC.",
       inputSchema: {
         type: "object",
         properties: {
@@ -638,7 +615,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           threadId: { type: "string", description: "Required thread id." },
           itemId: { type: "string", description: "Required id of the work item to dispatch." },
           extraContext: { type: "string", description: "Optional free-form context to append under `## Additional context`. Use for cross-item coordination or decisions the user made in chat that aren't captured in the item itself." },
-          autoStart: { type: "boolean", description: "When true (default) transition the item to in_progress if currently ready/blocked. Skipped silently for terminal/human_check/in_progress." },
+          autoStart: { type: "boolean", description: "When true (default) transition the item to in_progress if currently ready. Skipped silently for blocked/terminal/human_check/in_progress — use update_work_item to un-block first." },
         },
         required: ["threadId", "itemId"],
       },
@@ -648,7 +625,10 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         if (!item) throw new Error(`unknown work item: ${args.itemId}`);
 
         const autoStart = args.autoStart !== false;
-        if (autoStart && (item.status === "ready" || item.status === "blocked")) {
+        // Only auto-start from `ready`. Per wi-6285706789c5 a blocked item
+        // must be explicitly moved to ready first (un-block is a conscious
+        // action; dispatch_work_item shouldn't sneak around the guard).
+        if (autoStart && item.status === "ready") {
           workItemStore.updateItem({
             threadId: args.threadId,
             itemId: args.itemId,

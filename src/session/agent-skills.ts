@@ -4,11 +4,11 @@
 // so policy text that only matters for overrides lives here and doesn't
 // tax every turn.
 //
-// As of the "observational newde" reset, most of what these skills used
-// to enforce is now auto-synthesized by the runtime (first write-intent
-// tool call auto-files a work item; Stop auto-completes it). The skills
-// are deliberately minimal — they only describe MANUAL overrides. See
-// the plan at `.context/agent-model.md` §"Auto-file / auto-complete".
+// As of the passive-turn-tracking reset, the runtime no longer
+// synthesizes work items — active agent_turn rows render as live
+// entries in the Work panel's in_progress bucket. These skills
+// describe when to file durable work items explicitly. See
+// `.context/agent-model.md` §"Active turns in the in_progress bucket".
 
 /**
  * Single merged skill covering filing / lifecycle / dispatch. Pre-merge
@@ -62,17 +62,13 @@ description: Newde runtime — work-item filing, status transitions, and orchest
 
 # Filing newde work items
 
-Newde auto-files a work item on the first write-intent tool call of a
-turn, so you don't need to file one per request. Use the explicit
-tools only when you want to:
+Active agent turns render as live rows in the Work panel passively —
+no synthesized work items. File durable work items explicitly when
+you want to:
 
 - Split a bigger ask into an epic + children (\`file_epic_with_children\`).
 - Pre-queue work the user wants done in a later turn (\`create_work_item\`).
-- Add a distinct second item on top of the auto-filed one (rare).
-
-The auto-filed row is adopted in place: calling \`create_work_item\`
-or \`file_epic_with_children\` during the same turn overwrites the
-existing row's title/description/AC/kind/priority and keeps its id.
+- Record a follow-up you noticed but can't fix right now.
 
 ## Shaping the row
 
@@ -85,17 +81,23 @@ existing row's title/description/AC/kind/priority and keeps its id.
 
 # Work-item transitions
 
-Newde auto-progresses the runtime-filed item: opens it at
-\`in_progress\` on the first write-intent tool call, flips it to
-\`human_check\` at Stop with a diff-derived summary note. You don't
-need to narrate transitions.
+Mark an explicit item \`in_progress\` when you start executing it and
+\`human_check\` (via \`update_work_item\` or \`complete_task\`) when
+you finish. Use \`blocked\` for items parked on user input.
 
-Override manually via \`update_work_item\` when you want to:
+**Close the row in the same turn the work actually ships.** An
+\`in_progress\` row with finished work parked in it looks stuck to the
+user. Call \`complete_task\` the moment the code change lands —
+don't wait for a later turn.
 
-- Park work as \`blocked\` with an explanatory note.
-- Ship a hand-written completion note via \`complete_task\`
-  (overrides the auto-summary).
-- Mark a second \`in_progress\` item (rare — prefer one at a time).
+Legitimate reasons to *stay* \`in_progress\` across a stop boundary:
+
+- You have a question the user must answer before you can finish.
+- The work is genuinely multi-turn and you're pausing partway through.
+
+In either case, leave a note (\`add_work_note\`) explaining what's
+pending so the stop-hook nudge suppresses itself — it only fires for
+items the agent didn't touch during the turn.
 
 Never self-mark \`done\` — the user owns that transition.
 

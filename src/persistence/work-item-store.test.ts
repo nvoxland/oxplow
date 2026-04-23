@@ -327,14 +327,14 @@ describe("WorkItemStore author column", () => {
     const item = workItems.createItem({
       threadId,
       kind: "task",
-      title: "auto-filed item",
+      title: "agent-filed item",
       createdBy: "agent",
       actorId: "mcp",
-      author: "agent-auto",
+      author: "agent",
     });
-    expect(item.author).toBe("agent-auto");
+    expect(item.author).toBe("agent");
     const fetched = workItems.getItem(threadId, item.id);
-    expect(fetched?.author).toBe("agent-auto");
+    expect(fetched?.author).toBe("agent");
   });
 
   test("createItem defaults author to null when not provided", () => {
@@ -349,69 +349,42 @@ describe("WorkItemStore author column", () => {
     expect(item.author).toBeNull();
   });
 
-  test("updateItem can change author in place", () => {
-    const { workItems, threadId } = seedThread();
-    const item = workItems.createItem({
-      threadId,
-      kind: "task",
-      title: "start",
-      createdBy: "agent",
-      actorId: "mcp",
-      author: "agent-auto",
-    });
-    workItems.updateItem({
-      threadId,
-      itemId: item.id,
-      author: "agent",
-      actorKind: "agent",
-      actorId: "mcp",
-    });
-    const fetched = workItems.getItem(threadId, item.id);
-    expect(fetched?.author).toBe("agent");
+  test("read path maps legacy 'agent-auto' author string to null", () => {
+    // Pre-v29 DBs persisted author='agent-auto'. The narrowed enum can't
+    // represent it; the store maps such rows to null on read.
+    const { workItems, threadId, dir } = seedThread();
+    const driver = (workItems as unknown as { stateDb: { run: (sql: string, ...args: unknown[]) => void } }).stateDb;
+    const id = "wi-legacy-test";
+    const now = new Date().toISOString();
+    driver.run(
+      `INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, status, priority, sort_index, created_by, created_at, updated_at, author)
+       VALUES (?, ?, NULL, 'task', 'legacy', '', 'canceled', 'medium', 99, 'system', ?, ?, 'agent-auto')`,
+      id, threadId, now, now,
+    );
+    void dir;
+    const fetched = workItems.getItem(threadId, id);
+    expect(fetched?.author).toBeNull();
   });
 });
 
-describe("WorkItemStore.findOpenAutoItemForThread", () => {
-  test("returns in_progress item authored by 'agent-auto'", () => {
+describe("WorkItemStore.findOpenItemForThread (wi-e79eaffd7cf0)", () => {
+  test("returns any in_progress item regardless of author", () => {
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
-      threadId,
-      kind: "task",
-      title: "auto",
-      status: "in_progress",
-      createdBy: "agent",
-      actorId: "mcp",
-      author: "agent-auto",
+      threadId, kind: "task", title: "explicit",
+      status: "in_progress", createdBy: "agent", actorId: "mcp",
+      author: "agent",
     });
-    const found = workItems.findOpenAutoItemForThread(threadId);
+    const found = workItems.findOpenItemForThread(threadId);
     expect(found?.id).toBe(item.id);
   });
 
-  test("ignores items that aren't in_progress", () => {
+  test("returns null when no in_progress items exist", () => {
     const { workItems, threadId } = seedThread();
     workItems.createItem({
-      threadId,
-      kind: "task",
-      title: "ready",
-      createdBy: "agent",
-      actorId: "mcp",
-      author: "agent-auto",
+      threadId, kind: "task", title: "ready", createdBy: "agent", actorId: "mcp",
     });
-    expect(workItems.findOpenAutoItemForThread(threadId)).toBeNull();
-  });
-
-  test("ignores items without agent-auto author", () => {
-    const { workItems, threadId } = seedThread();
-    workItems.createItem({
-      threadId,
-      kind: "task",
-      title: "user",
-      status: "in_progress",
-      createdBy: "user",
-      actorId: "ui",
-      author: "user",
-    });
-    expect(workItems.findOpenAutoItemForThread(threadId)).toBeNull();
+    expect(workItems.findOpenItemForThread(threadId)).toBeNull();
   });
 });
 
@@ -473,5 +446,122 @@ describe("copyLastItemNotes (used by fork_thread)", () => {
     expect(workItems.copyLastItemNotes(item.id, 0)).toBe(0);
     expect(workItems.copyLastItemNotes(item.id, -1)).toBe(0);
     expect(workItems.getWorkNotes(item.id)).toHaveLength(1);
+  });
+});
+
+describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
+  test("updateItem rejects blocked -> in_progress with a descriptive error", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "blocked",
+    });
+    expect(() => workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    })).toThrow(/blocked.*in_progress|move to.*ready.*first/i);
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("blocked");
+  });
+
+  test("updateItem accepts blocked -> ready (explicit unblock)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "blocked",
+    });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "ready", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("ready");
+  });
+
+  test("updateItem accepts ready -> in_progress", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui",
+    });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
+  });
+
+  test("updateItem accepts human_check -> in_progress (reopen)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "human_check",
+    });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
+  });
+
+  test("updateItem accepts in_progress -> in_progress (no-op)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "in_progress",
+    });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
+  });
+
+  test("updateItem rejects done -> in_progress", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "done",
+    });
+    expect(() => workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    })).toThrow(/done.*in_progress|ready.*first/i);
+  });
+
+  test("updateItem rejects canceled -> in_progress", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "canceled",
+    });
+    expect(() => workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    })).toThrow(/canceled.*in_progress|ready.*first/i);
+  });
+
+  test("updateItem rejects archived -> in_progress", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "archived",
+    });
+    expect(() => workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    })).toThrow(/archived.*in_progress|ready.*first/i);
+  });
+
+  test("listReady excludes blocked items", () => {
+    const { workItems, threadId } = seedThread();
+    const readyItem = workItems.createItem({
+      threadId, kind: "task", title: "ready-item", createdBy: "user", actorId: "ui",
+    });
+    workItems.createItem({
+      threadId, kind: "task", title: "blocked-item", createdBy: "user", actorId: "ui", status: "blocked",
+    });
+    const ready = workItems.listReady(threadId);
+    const ids = ready.map((i) => i.id);
+    expect(ids).toContain(readyItem.id);
+    expect(ready.every((i) => i.status === "ready")).toBe(true);
+  });
+
+  test("readWorkOptions (standalone) excludes blocked items", () => {
+    const { workItems, threadId } = seedThread();
+    const readyItem = workItems.createItem({
+      threadId, kind: "task", title: "ready-item", createdBy: "user", actorId: "ui",
+    });
+    workItems.createItem({
+      threadId, kind: "task", title: "blocked-item", createdBy: "user", actorId: "ui", status: "blocked",
+    });
+    const result = workItems.readWorkOptions(threadId);
+    expect(result.mode).toBe("standalone");
+    if (result.mode !== "standalone") return;
+    const ids = result.items.map((i) => i.item.id);
+    expect(ids).toContain(readyItem.id);
+    expect(result.items.every((i) => i.item.status === "ready")).toBe(true);
   });
 });

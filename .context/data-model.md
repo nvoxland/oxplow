@@ -91,15 +91,12 @@ distinguish backlog changes from in-thread changes.
 `author` (migration v26, nullable TEXT) — semantic origin of the row,
 distinct from `created_by` (which just classifies the SQL writer as
 `user`/`agent`/`system`). Values: `'user'` (explicit user-initiated
-create), `'agent'` (explicit agent `create_work_item` / `file_epic_with_children`
-call), `'agent-auto'` (runtime-synthesized on the first write-intent
-tool call of a turn — see agent-model.md's "Auto-file / auto-complete"
-section), or `NULL` (legacy rows). The auto-file → explicit adoption
-flow flips `'agent-auto'` → `'agent'` in place when the agent calls
-`create_work_item` during the same turn. `WorkItemStore.findOpenAutoItemForThread(threadId)`
-returns the oldest `status='in_progress' AND author='agent-auto'` row
-for a thread; the runtime uses it from both hooks to detect "already
-have an open auto-filed item."
+create), `'agent'` (explicit agent `create_work_item` /
+`file_epic_with_children` call), or `NULL` (legacy rows). Pre-v29 DBs
+also held `'agent-auto'` rows synthesized by the removed auto-file
+listener; migration v29 cancels any such still-in_progress rows, and
+the read path maps the legacy string to `null` so older terminal rows
+continue to load under the narrowed enum.
 
 `note_count` is a computed column added to every `WorkItem` returned by the
 store (via COUNT subquery over `work_note`). It drives the note badge on
@@ -172,6 +169,30 @@ its per-turn file-change list by diffing those two snapshots. A turn has
 no direct work-item FK anymore — efforts connect work items to turns via
 the `work_item_effort_turn` join table (see below).
 
+`task_list_json` (migration v30, nullable TEXT) stores the serialized
+TaskCreate/TaskUpdate breakdown for the turn. Written incrementally by
+the PostToolUse TaskCreate bridge on every call (not only at Stop) so
+the Work panel's in_progress bucket can render the live sub-list on
+the open-turn row. Persists on the row after the turn closes for a
+later History view. `TurnStore.setTaskList(turnId, json)` emits a
+`turn.changed` / `task-list-updated` event so UI subscribers refresh.
+`TurnStore.listOpenTurns(threadId, sinceIso)` returns rows with
+`ended_at IS NULL` AND `started_at >= sinceIso` — the runtime passes
+its own `startedAt` as the cutoff to filter orphaned open turns from
+prior runs out of the live list.
+
+`produced_activity` (migration v31, nullable INTEGER) records whether
+any mutation / filing / dispatch tool call fired during the turn — the
+same in-memory `turnActivityByThread` flag that drives the Stop-hook's
+ready-work suppression rule. Persisted by the runtime's Stop hook after
+`closeTurn` (before `computeStopDirective` consumes the in-memory flag)
+via `TurnStore.setProducedActivity(turnId, boolean|null)`: `1` =
+activity, `0` = pure Q&A, NULL = unknown (pre-v31 rows, or turns where
+UserPromptSubmit never fired). Drives the Work panel's "Recent answers"
+section: `TurnStore.listRecentInactiveTurns(threadId, limit=10)`
+returns closed turns with `produced_activity = 0`, newest-ended first.
+NULL rows are excluded so legacy turns don't back-fill the list.
+
 ### `work_item_effort` + `work_item_effort_turn` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
 
 An **effort** is one `in_progress → human_check` (or done/canceled) cycle
@@ -216,40 +237,21 @@ the local-blame overlay described in `.context/editor-and-monaco.md`).
 per-effort rows with pre-joined start/end snapshot metadata and the
 list of changed paths (computed from the pair diff).
 
-### `work_item_commit` — `WorkItemCommitStore` (`src/persistence/work-item-commit-store.ts`)
-
-Junction linking work items to the git commits that landed their
-changes. Columns: `work_item_id`, `sha`, `committed_at`. Composite
-primary key `(work_item_id, sha)` (an item may have multiple shas; a
-sha may cover multiple items). Created in migration v27.
-
-Populated by the runtime's `executeAutoCommitForThread` path after a
-successful `gitCommitAll`, via the pure helper `linkCommitToContributingItems`
-(`src/electron/runtime.ts`). Contributing items = whatever
-`WorkItemEffortStore.listClosedEffortsForThreadAfter(threadId,
-latestDoneCompletedAt)` returns — i.e. the same set the
-`mcp__newde__tasks_since_last_commit` MCP tool exposes — deduped by
-`itemId`. Inserts use `INSERT OR IGNORE`, so re-running against the
-same pair is a no-op. A junction-insert failure is logged but does
-**not** fail the commit (the sha has already landed; losing attribution
-is strictly less bad than a phantom "commit failed" error).
-
-**Ad-hoc commit backfill (wi-ec4c8e6f44fd).** Commits that bypass
-`executeAutoCommitForThread` — user-driven Files-panel commits, agent
-Bash `git commit` calls — would otherwise leave the junction empty.
-The runtime subscribes to `git-refs.changed`, reads the fresh HEAD
-sha via `readWorktreeHeadSha` (`src/git/git.ts`), and calls
-`backfillCommitLinksForThread` (`src/electron/runtime.ts`) for every
-active thread on the stream. Skips shas already present in the
-junction (runtime-mediated commits race here — first writer wins).
-Together with the Stop-hook clean-tree check, this means settled
-work gets its attribution on *all* commit paths and the auto-commit
-directive doesn't refire on a clean tree.
-
-Read API: `listShasForItem(itemId)` returns the commits attributed to
-one item (newest-first); `listItemsForSha(sha)` returns every item
-attributed to one commit (stable by itemId). Consumers: future
-GitHistory / Activity-panel UX.
+**Commit↔item attribution is intentionally NOT tracked.** A
+`work_item_commit` junction existed briefly (migration v27) but was
+removed in v28. Users commit outside newde all the time (IDE buttons,
+CLI, CI rebases, merges, squashes) and newde has no authoritative hook
+there; the best the runtime could do was a heuristic ("items whose
+efforts closed in the window since the last done commit_point"), which
+silently misattributes when work is split across multiple commits,
+committed earlier, or touched by reopened efforts. A blame-style
+feature built on that data would lie more often than it'd be useful.
+The supplementary `mcp__newde__tasks_since_last_commit` tool stays —
+it's advisory context for the agent drafting a commit message, not a
+persisted link — and `commit_point.commit_sha` stays (1:1 with the
+point the runtime itself closed). If a future feature wants "show me
+commits for this item," the answer is to scope `git log` by the files
+in `work_item_effort_file`.
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
@@ -390,6 +392,28 @@ commit point: pending ─► done
 
 wait point:   pending ─► triggered                     (consumed)
 ```
+
+### Transitions to `in_progress` (server-side guard)
+
+`WorkItemStore.updateItem` rejects any direct jump into `in_progress`
+that didn't come from `ready` or `human_check`. The only accepted
+sources are:
+
+- `ready → in_progress` (normal pickup)
+- `human_check → in_progress` (reopen — the user decided it needs more work)
+- `in_progress → in_progress` (no-op)
+
+Everything else (`blocked`, `done`, `canceled`, `archived`) must
+transit through `ready` first with an explicit `update_work_item`
+call. Rationale: `blocked` is a distinct signal the user parked the
+item on; silently promoting it into `in_progress` ignores that
+decision. Terminal sources (`done`/`canceled`/`archived`) likewise
+require a conscious re-open step. `dispatch_work_item`'s autoStart
+path also only fires when the item is currently `ready`.
+
+`listReady` / `readWorkOptions` / `list_ready_work` filter to
+`status='ready'` only — `blocked` items are never dispatchable until
+un-blocked.
 
 ## Change events
 

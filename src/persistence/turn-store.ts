@@ -19,6 +19,22 @@ export interface AgentTurn {
   cache_read_input_tokens: number | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
+  /** Per-turn TaskCreate/TaskUpdate breakdown — serialized JSON array of
+   *  `{ content, status }` entries. Written incrementally by the
+   *  PostToolUse bridge on every TaskUpdate so the Work panel's open-turn
+   *  row can render the live sub-list. Persists on the row after the turn
+   *  closes for a later History view. Null when TaskCreate never fired. */
+  task_list_json: string | null;
+  /** Whether any mutation / filing / dispatch tool call fired during the
+   *  turn (`1` = activity, `0` = pure Q&A). Written by the runtime at Stop
+   *  from the in-memory `turnActivityByThread` flag. NULL on pre-v31 rows
+   *  and on turns where UserPromptSubmit never fired (unknown). Drives
+   *  the "Recent answers" section in the Work panel — closed turns with
+   *  `produced_activity = 0` surface as re-readable Q&A rows. */
+  produced_activity: number | null;
+  /** ISO timestamp at which the user archived this turn from the Recent
+   *  answers list. NULL = visible; non-NULL = hidden from the list. */
+  archived_at: string | null;
 }
 
 export interface TurnUsage {
@@ -27,7 +43,7 @@ export interface TurnUsage {
   cacheReadInputTokens: number | null;
 }
 
-export type TurnChangeKind = "opened" | "closed";
+export type TurnChangeKind = "opened" | "closed" | "task-list-updated";
 
 export interface TurnChange {
   threadId: string;
@@ -79,6 +95,9 @@ export class TurnStore {
       cache_read_input_tokens: null,
       start_snapshot_id: null,
       end_snapshot_id: null,
+      task_list_json: null,
+      produced_activity: null,
+      archived_at: null,
     };
     this.stateDb.run(
       `INSERT INTO agent_turn (id, thread_id, prompt, answer, session_id, started_at, ended_at)
@@ -142,12 +161,105 @@ export class TurnStore {
     );
   }
 
+  /** Write the serialized TaskCreate/TaskUpdate breakdown for a turn and
+   *  emit a `task-list-updated` change so UI subscribers (the open-turn
+   *  row in PlanPane) can refresh. Called on every TaskCreate/TaskUpdate
+   *  PostToolUse bridge call, not only at Stop — the Work panel renders
+   *  live progress. */
+  setTaskList(turnId: string, taskListJson: string | null): void {
+    const existing = this.getById(turnId);
+    if (!existing) return;
+    this.stateDb.run(
+      `UPDATE agent_turn SET task_list_json = ? WHERE id = ?`,
+      taskListJson,
+      turnId,
+    );
+    this.emit({ threadId: existing.thread_id, turnId, kind: "task-list-updated" });
+  }
+
   currentOpenTurn(threadId: string): AgentTurn | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       `SELECT * FROM agent_turn WHERE thread_id = ? AND ended_at IS NULL ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       threadId,
     );
     return row ? rowToTurn(row) : null;
+  }
+
+  /** Return the open (`ended_at IS NULL`) turns for a thread whose
+   *  `started_at >= sinceIso`. The cutoff is load-bearing: when newde
+   *  crashes, open turns don't get their `ended_at` set — the
+   *  runtime-start cutoff filters those orphans out so the in_progress
+   *  bucket doesn't haunt with dead turns. Newest-first (started_at DESC,
+   *  rowid DESC). */
+  listOpenTurns(threadId: string, sinceIso: string): AgentTurn[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM agent_turn
+         WHERE thread_id = ?
+           AND ended_at IS NULL
+           AND started_at >= ?
+         ORDER BY started_at DESC, rowid DESC`,
+        threadId,
+        sinceIso,
+      )
+      .map(rowToTurn);
+  }
+
+  /** Persist the activity flag for a closed turn. Called by the runtime's
+   *  Stop hook handler after `closeTurn`, using the in-memory
+   *  `turnActivityByThread` value that also drives the ready-work
+   *  suppression rule. Accepts boolean or null — null means "unknown"
+   *  (UserPromptSubmit never fired for this turn), stored as NULL so the
+   *  Recent-answers query skips the row. */
+  setProducedActivity(turnId: string, produced: boolean | null): void {
+    const existing = this.getById(turnId);
+    if (!existing) return;
+    const value = produced == null ? null : produced ? 1 : 0;
+    this.stateDb.run(
+      `UPDATE agent_turn SET produced_activity = ? WHERE id = ?`,
+      value,
+      turnId,
+    );
+  }
+
+  /** Archive a turn from the Recent-answers list. Sets `archived_at`
+   *  to now; idempotent. Emits a "closed" change so the panel refreshes.
+   *  Returns the updated row, or null when the id is unknown. */
+  archiveTurn(turnId: string): AgentTurn | null {
+    const existing = this.getById(turnId);
+    if (!existing) return null;
+    if (existing.archived_at) return existing;
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      `UPDATE agent_turn SET archived_at = ? WHERE id = ?`,
+      now,
+      turnId,
+    );
+    const updated = this.getById(turnId);
+    if (updated) this.emit({ threadId: updated.thread_id, turnId, kind: "closed" });
+    return updated;
+  }
+
+  /** Return recently-closed turns for this thread that produced no
+   *  activity (pure Q&A / planning / review) — re-readable "Recent
+   *  answers" in the Work panel. NULL `produced_activity` rows
+   *  (pre-migration, or turns where tracking was unknown) are excluded
+   *  so users don't get a back-filled haystack of legacy turns. Newest-
+   *  closed first. */
+  listRecentInactiveTurns(threadId: string, limit = 10): AgentTurn[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        `SELECT * FROM agent_turn
+         WHERE thread_id = ?
+           AND ended_at IS NOT NULL
+           AND produced_activity = 0
+           AND archived_at IS NULL
+         ORDER BY ended_at DESC, rowid DESC
+         LIMIT ?`,
+        threadId,
+        limit,
+      )
+      .map(rowToTurn);
   }
 
   listForThread(threadId: string, limit = 50): AgentTurn[] {
@@ -214,6 +326,9 @@ function rowToTurn(row: Record<string, unknown>): AgentTurn {
     cache_read_input_tokens: toNumber(row.cache_read_input_tokens),
     start_snapshot_id: row.start_snapshot_id == null ? null : String(row.start_snapshot_id),
     end_snapshot_id: row.end_snapshot_id == null ? null : String(row.end_snapshot_id),
+    task_list_json: row.task_list_json == null ? null : String(row.task_list_json),
+    produced_activity: toNumber(row.produced_activity),
+    archived_at: row.archived_at == null ? null : String(row.archived_at),
   };
 }
 

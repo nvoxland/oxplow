@@ -10,7 +10,6 @@ import {
   listAgentStatuses,
   listAgentTurns,
   listWorkItemEfforts,
-  getSnapshotPairDiff,
   reorderWorkItems,
   moveWorkItemToThread,
   getBacklogState,
@@ -83,7 +82,6 @@ import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.j
 import { ThreadRail } from "./components/ThreadRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
-import { Activity } from "./components/Activity/Activity.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
@@ -1294,31 +1292,6 @@ export function App() {
     setCenterActive(id);
   };
 
-  const handleOpenTurnDiff = async (turn: AgentTurn, path: string) => {
-    try {
-      if (!turn.end_snapshot_id) {
-        setError(`Turn has no end snapshot yet for ${path}`);
-        return;
-      }
-      const diff = await getSnapshotPairDiff(turn.start_snapshot_id, turn.end_snapshot_id, path);
-      if (diff.beforeState === "absent" && diff.afterState === "absent") {
-        setError(`No snapshot diff available for ${path} in this turn`);
-        return;
-      }
-      handleOpenDiff({
-        path,
-        leftRef: "",
-        rightKind: "working",
-        baseLabel: `turn ${turn.id.slice(-6)}`,
-        leftContent: renderDiffSide(diff.before, diff.beforeState),
-        rightContent: renderDiffSide(diff.after, diff.afterState),
-        labelOverride: `turn ${turn.id.slice(-6)}`,
-      });
-    } catch (err) {
-      setError(`Open turn diff failed: ${String(err)}`);
-    }
-  };
-
   const handleRevealCommit = (sha: string) => {
     const token = Date.now();
     setHistoryReveal({ sha, token });
@@ -1482,18 +1455,6 @@ export function App() {
           onDeletePath={handleDeletePath}
           onToggleGeneratedDir={handleToggleGeneratedDir}
           commitRequest={commitFilesRequest}
-        />
-      ),
-    },
-    {
-      id: "activity",
-      label: "Activity",
-      render: () => (
-        <Activity
-          agentTurns={selectedThreadTurns}
-          workItems={selectedThreadWork?.items ?? []}
-          onOpenFile={handleOpenFile}
-          onOpenTurnDiff={handleOpenTurnDiff}
         />
       ),
     },
@@ -1678,22 +1639,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
     return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
   }
   return false;
-}
-
-function renderDiffSide(
-  content: string | null,
-  state: "absent" | "present" | "oversize",
-): string {
-  if (content !== null) return content;
-  switch (state) {
-    case "absent":
-      return "// (file not tracked at this snapshot)";
-    case "oversize":
-      return "// (file too large to snapshot — size/mtime tracked only)";
-    case "present":
-      // "present" with null content = blob read failed.
-      return "// (snapshot blob unreadable)";
-  }
 }
 
 function DaemonDownDialog() {

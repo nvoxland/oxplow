@@ -233,6 +233,9 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("newde:listWorkItemEvents", (_event, streamId: string, threadId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, threadId, itemId));
   handle("newde:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
   handle("newde:listAgentTurns", (_event, streamId: string, threadId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, threadId, limit));
+  handle("newde:listOpenTurns", (_event, threadId: string) => currentRuntime.listOpenTurns(threadId));
+  handle("newde:listRecentInactiveTurns", (_event, threadId: string, limit?: number) => currentRuntime.listRecentInactiveTurns(threadId, limit));
+  handle("newde:archiveAgentTurn", (_event, turnId: string) => currentRuntime.archiveAgentTurn(turnId));
   handle("newde:listWorkItemEfforts", (_event, itemId: string) => currentRuntime.workItemApi.listWorkItemEfforts(itemId));
   handle("newde:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
   handle("newde:getSnapshotSummary", (_event, snapshotId: string, previousSnapshotId?: string | null) => currentRuntime.getSnapshotSummary(snapshotId, previousSnapshotId));

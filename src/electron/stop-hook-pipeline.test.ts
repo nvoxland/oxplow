@@ -545,54 +545,53 @@ describe("decideStopDirective", () => {
   });
 
   describe("ready-work suppression rules", () => {
-    test("suppressed when prompt is conversational (why/how/...)", () => {
+    test("suppressed when turn produced no activity (pure Q&A)", () => {
       const ready = workItem("w1", 0, "ready");
       const out = decideStopDirective(
         snapshot({
           workItems: [ready],
           readyWorkItems: [ready],
-          currentTurnPrompt: "why does this work that way?",
+          turnProducedActivity: false,
         }),
         builders,
       );
       expect(out.directive).toBeNull();
     });
 
-    test("all conversational starter words suppress", () => {
-      const words = ["why", "how", "explain", "what", "look", "tell", "show", "can you", "does", "is", "should", "could", "would"];
-      for (const word of words) {
-        const ready = workItem("w1", 0, "ready");
-        const out = decideStopDirective(
-          snapshot({
-            workItems: [ready],
-            readyWorkItems: [ready],
-            currentTurnPrompt: `   ${word.toUpperCase()} something here`,
-          }),
-          builders,
-        );
-        expect(out.directive).toBeNull();
-      }
-    });
-
-    test("non-conversational prompt like 'Fix the bug' still fires the directive", () => {
+    test("fires when turn produced activity (Q&A + Edit/filing/dispatch)", () => {
       const ready = workItem("w1", 0, "ready");
       const out = decideStopDirective(
         snapshot({
           workItems: [ready],
           readyWorkItems: [ready],
-          currentTurnPrompt: "Fix the bug",
+          turnProducedActivity: true,
         }),
         builders,
       );
       expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
     });
 
-    test("conversational-suppression does NOT affect commit-point directives", () => {
+    test("fires when turnProducedActivity is absent (unknown ≠ suppress)", () => {
+      // Non-suppressive default: only an explicit `false` silences the
+      // directive. Keeps behaviour stable when the runtime couldn't
+      // determine activity for some reason.
+      const ready = workItem("w1", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ready],
+          readyWorkItems: [ready],
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+    });
+
+    test("activity-suppression does NOT affect commit-point directives", () => {
       const cp = commitPoint("cp1", 1);
       const out = decideStopDirective(
         snapshot({
           commitPoints: [cp],
-          currentTurnPrompt: "why is the build broken?",
+          turnProducedActivity: false,
         }),
         builders,
       );
@@ -637,56 +636,64 @@ describe("decideStopDirective", () => {
       expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
     });
 
-    describe("extended classifier", () => {
-      // Positives (should suppress): imperative-question patterns + no-change-verb prompts.
-      const suppressed: string[] = [
-        "help me understand the fork_thread flow",
-        "tell me about the write guard",
-        "walk me through how auto-commit works",
-        "I'm confused by the snapshot store",
-        "thoughts on splitting this into two threads",
-        "where is the commit-point status persisted",
-      ];
-      for (const prompt of suppressed) {
-        test(`suppressed: "${prompt}"`, () => {
-          const ready = workItem("w1", 0, "ready");
-          const out = decideStopDirective(
-            snapshot({
-              workItems: [ready],
-              readyWorkItems: [ready],
-              currentTurnPrompt: prompt,
-            }),
-            builders,
-          );
-          expect(out.directive).toBeNull();
-        });
-      }
+    describe("activity scenarios", () => {
+      test("Q&A + Edit turn: fires (activity beats conversational prompt)", () => {
+        // The old regex rule would have suppressed any prompt starting
+        // with a question verb. The new rule lets the directive fire
+        // because the turn produced mutation activity.
+        const ready = workItem("w1", 0, "ready");
+        const out = decideStopDirective(
+          snapshot({
+            workItems: [ready],
+            readyWorkItems: [ready],
+            turnProducedActivity: true,
+          }),
+          builders,
+        );
+        expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+      });
 
-      // Negatives (should fire the directive): prompts containing change-verbs.
-      const directive: string[] = [
-        "fix the typo in PlanPane",
-        "add a test for the wait point trigger",
-        "refactor the snapshot store to share a helper",
-        "implement live-reload for MCP tools",
-        "rename batch to thread everywhere",
-        "update .context/agent-model.md with the new flow",
-        "remove the dead code in runtime.ts",
-        "create a new migration to drop the legacy column",
-      ];
-      for (const prompt of directive) {
-        test(`directive fires: "${prompt}"`, () => {
-          const ready = workItem("w1", 0, "ready");
-          const out = decideStopDirective(
-            snapshot({
-              workItems: [ready],
-              readyWorkItems: [ready],
-              currentTurnPrompt: prompt,
-            }),
-            builders,
-          );
-          expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
-        });
-      }
+      test("pure Q&A turn (no activity): suppresses", () => {
+        const ready = workItem("w1", 0, "ready");
+        const out = decideStopDirective(
+          snapshot({
+            workItems: [ready],
+            readyWorkItems: [ready],
+            turnProducedActivity: false,
+          }),
+          builders,
+        );
+        expect(out.directive).toBeNull();
+      });
+
+      test("filing-only turn (create_work_item, no Edit): fires", () => {
+        // The runtime marks `turnProducedActivity=true` when the turn
+        // called any filing tool, so the directive still fires even if
+        // no code changed.
+        const ready = workItem("w1", 0, "ready");
+        const out = decideStopDirective(
+          snapshot({
+            workItems: [ready],
+            readyWorkItems: [ready],
+            turnProducedActivity: true,
+          }),
+          builders,
+        );
+        expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+      });
+
+      test("dispatch-only turn: fires", () => {
+        const ready = workItem("w1", 0, "ready");
+        const out = decideStopDirective(
+          snapshot({
+            workItems: [ready],
+            readyWorkItems: [ready],
+            turnProducedActivity: true,
+          }),
+          builders,
+        );
+        expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+      });
     });
   });
 
@@ -727,7 +734,7 @@ describe("decideStopDirective", () => {
           workItems: [ready],
           readyWorkItems: [ready],
           cumulativeCacheRead: 25_000_000,
-          currentTurnPrompt: "why does this work?",
+          turnProducedActivity: false,
         }),
         builders,
       );

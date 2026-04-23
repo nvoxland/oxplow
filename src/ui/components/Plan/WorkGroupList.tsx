@@ -27,7 +27,7 @@ import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 /**
  * Renders one work-item group (an epic + its children, or the root group
  * with no epic). Items are split by status into four sections —
- * In progress → To do → Human check → Done — with dividers between non-empty
+ * In progress → To do → Blocked → Human check → Done — with dividers between non-empty
  * sections. Commit / wait points are interleaved into the To do section
  * only (they represent work yet to run); clicking a divider expands its
  * CommitPointRow / WaitPointRow inline. The "+ Commit when done" and
@@ -57,8 +57,8 @@ interface SectionBucket {
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "toDo", label: "To Do" },
-  { kind: "humanCheck", label: "Human check" },
   { kind: "blocked", label: "Blocked" },
+  { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
 ];
 
@@ -83,6 +83,8 @@ export function WorkGroupList({
   onReparentWorkItem,
   onAddChildTask,
   isActive,
+  inProgressLeadSlot,
+  afterInProgressSlot,
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
@@ -104,6 +106,13 @@ export function WorkGroupList({
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
+  /** Rendered inside the In progress section, before the in_progress work
+   *  items. Used by PlanPane to surface live open-turn rows at the top
+   *  of the section. */
+  inProgressLeadSlot?: React.ReactNode;
+  /** Rendered right after the In progress section, before the next
+   *  section. Used by PlanPane to surface the Recent answers list. */
+  afterInProgressSlot?: React.ReactNode;
 }) {
   // When the thread is not the active writer, in_progress items are not agent-owned
   // and can be freely reordered — only lock them when this thread is active.
@@ -570,7 +579,12 @@ export function WorkGroupList({
               data-testid={`plan-section-header-${section.kind}`}
               {...headerDropHandlers}
             >
-              <span style={{ flex: 1, minWidth: 0 }}>{section.label}</span>
+              <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>{section.label}</span>
+                {section.rows.length > 0 ? (
+                  <span style={sectionCountBadgeStyle}>{section.rows.length}</span>
+                ) : null}
+              </span>
               {isDone ? (
                 <DoneHeaderActions
                   archivableCount={archivableCount}
@@ -587,11 +601,14 @@ export function WorkGroupList({
                 />
               ) : null}
             </div>
+            {section.kind === "inProgress" ? inProgressLeadSlot : null}
             {renderedRows.map(renderRow)}
             {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
-              <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-                {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
-              </div>
+              section.kind === "inProgress" && inProgressLeadSlot ? null : (
+                <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                  {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
+                </div>
+              )
             ) : null}
             {/* The "+ Commit Point" / "+ Wait Point" bar hangs off the tail
                 of the "To do" section (not the very bottom of the list) so
@@ -599,6 +616,7 @@ export function WorkGroupList({
                 rather than the dead/done pile. Because "To do" always renders
                 (even when empty), the slot is always reachable. */}
             {section.kind === "toDo" ? addPointsSlot : null}
+            {section.kind === "inProgress" ? afterInProgressSlot : null}
           </div>
         );
       })}
@@ -646,6 +664,22 @@ function DoneHeaderActions({
     </span>
   );
 }
+
+const sectionCountBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 18,
+  height: 16,
+  padding: "0 6px",
+  borderRadius: 999,
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--muted)",
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: 0,
+};
 
 const miniDoneHeaderButtonStyle: CSSProperties = {
   borderRadius: 6,
@@ -738,7 +772,6 @@ function EpicInlineRow({
         {isExpanded ? "\u25BC" : "\u25B6"}
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
-        <AutoAuthorBadge author={item.author} />
         {item.title}
         {item.note_count > 0 ? (
           <span style={{
@@ -1003,7 +1036,6 @@ function InlineItemRow({
           whiteSpace: "nowrap",
         }}
       >
-        <AutoAuthorBadge author={item.author} />
         {item.title}
         {item.note_count > 0 ? (
           <span style={{
@@ -1021,38 +1053,6 @@ function InlineItemRow({
         onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
       />
     </div>
-  );
-}
-
-/**
- * Muted "auto" tag rendered inline before the title when a row was
- * filed by the runtime's first-write-intent auto-file hook
- * (author === "agent-auto"). Human-filed, explicitly-agent-filed, and
- * legacy (author=null) rows render nothing — avoids visual noise on
- * the dominant path.
- */
-function AutoAuthorBadge({ author }: { author: WorkItem["author"] }) {
-  if (author !== "agent-auto") return null;
-  return (
-    <span
-      data-testid="work-item-auto-badge"
-      style={{
-        display: "inline-block",
-        padding: "0 4px",
-        marginRight: 4,
-        borderRadius: 3,
-        background: "var(--bg-2)",
-        color: "var(--muted)",
-        fontSize: 9,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: 0.4,
-        verticalAlign: "middle",
-      }}
-      title="Auto-filed by the runtime from the first write-intent tool call of a turn."
-    >
-      auto
-    </span>
   );
 }
 

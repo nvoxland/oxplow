@@ -136,6 +136,112 @@ describe("TurnStore", () => {
     expect(turns.getCumulativeCacheRead(threadId)).toBe(0);
   });
 
+  test("listOpenTurns returns only open turns with started_at >= sinceIso", async () => {
+    const { turns, threadId } = seed();
+    // Orphaned (pre-runtime) open turn — should be filtered out by sinceIso.
+    const orphan = turns.openTurn({ threadId, prompt: "orphan" });
+    // Bump the wall clock past the orphan by at least 2ms so the ISO
+    // cutoff is strictly greater than orphan.started_at.
+    await new Promise((r) => setTimeout(r, 5));
+    const cutoff = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 5));
+    // Live open turns above the cutoff.
+    const a = turns.openTurn({ threadId, prompt: "a" });
+    const b = turns.openTurn({ threadId, prompt: "b" });
+    // Closed turn — excluded.
+    const c = turns.openTurn({ threadId, prompt: "c" });
+    turns.closeTurn(c.id, { answer: "done" });
+
+    const open = turns.listOpenTurns(threadId, cutoff);
+    const ids = open.map((t) => t.id);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+    expect(ids).not.toContain(orphan.id);
+    expect(ids).not.toContain(c.id);
+    // Newest-first ordering.
+    expect(ids[0]).toBe(b.id);
+  });
+
+  test("listOpenTurns returns empty when no open turns", () => {
+    const { turns, threadId } = seed();
+    const since = new Date(0).toISOString();
+    expect(turns.listOpenTurns(threadId, since)).toEqual([]);
+    const a = turns.openTurn({ threadId, prompt: "a" });
+    turns.closeTurn(a.id, { answer: "ok" });
+    expect(turns.listOpenTurns(threadId, since)).toEqual([]);
+  });
+
+  test("setTaskList persists json and emits task-list-updated", () => {
+    const { turns, threadId } = seed();
+    const changes: TurnChange[] = [];
+    turns.subscribe((c) => changes.push(c));
+    const open = turns.openTurn({ threadId, prompt: "P" });
+    const json = JSON.stringify([{ content: "step 1", status: "in_progress" }]);
+    turns.setTaskList(open.id, json);
+    const read = turns.getById(open.id);
+    expect(read?.task_list_json).toBe(json);
+    const kinds = changes.map((c) => c.kind);
+    expect(kinds).toContain("opened");
+    expect(kinds).toContain("task-list-updated");
+  });
+
+  test("setProducedActivity persists the flag and listRecentInactiveTurns filters closed inactive turns", () => {
+    const { turns, threadId } = seed();
+    // a: closed, produced activity → excluded.
+    const a = turns.openTurn({ threadId, prompt: "did work" });
+    turns.closeTurn(a.id, { answer: "ok" });
+    turns.setProducedActivity(a.id, true);
+    expect(turns.getById(a.id)?.produced_activity).toBe(1);
+
+    // b: closed, no activity → included.
+    const b = turns.openTurn({ threadId, prompt: "asked a question" });
+    turns.closeTurn(b.id, { answer: "here's the answer" });
+    turns.setProducedActivity(b.id, false);
+    expect(turns.getById(b.id)?.produced_activity).toBe(0);
+
+    // c: closed, null flag → excluded (unknown).
+    const c = turns.openTurn({ threadId, prompt: "legacy" });
+    turns.closeTurn(c.id, { answer: "ok" });
+    // No setProducedActivity call — stays null.
+    expect(turns.getById(c.id)?.produced_activity).toBeNull();
+
+    // d: open, no activity → excluded (not ended).
+    const d = turns.openTurn({ threadId, prompt: "still running" });
+    turns.setProducedActivity(d.id, false);
+
+    const recent = turns.listRecentInactiveTurns(threadId);
+    const ids = recent.map((t) => t.id);
+    expect(ids).toEqual([b.id]);
+    void d;
+  });
+
+  test("setProducedActivity with null clears the flag", () => {
+    const { turns, threadId } = seed();
+    const a = turns.openTurn({ threadId, prompt: "P" });
+    turns.closeTurn(a.id, { answer: "ok" });
+    turns.setProducedActivity(a.id, true);
+    expect(turns.getById(a.id)?.produced_activity).toBe(1);
+    turns.setProducedActivity(a.id, null);
+    expect(turns.getById(a.id)?.produced_activity).toBeNull();
+  });
+
+  test("listRecentInactiveTurns is newest-closed-first and respects limit", async () => {
+    const { turns, threadId } = seed();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const t = turns.openTurn({ threadId, prompt: `q-${i}` });
+      await new Promise((r) => setTimeout(r, 5));
+      turns.closeTurn(t.id, { answer: `a-${i}` });
+      turns.setProducedActivity(t.id, false);
+      ids.push(t.id);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const all = turns.listRecentInactiveTurns(threadId);
+    expect(all.map((t) => t.id)).toEqual([ids[2], ids[1], ids[0]]);
+    const limited = turns.listRecentInactiveTurns(threadId, 2);
+    expect(limited.map((t) => t.id)).toEqual([ids[2], ids[1]]);
+  });
+
   test("getCumulativeCacheRead sums cache_read_input_tokens across closed turns", () => {
     const { turns, threadId } = seed();
     const a = turns.openTurn({ threadId, prompt: "a" });

@@ -244,13 +244,18 @@ export const deleteButtonStyle: CSSProperties = {
 export const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  padding: "4px 10px",
-  fontSize: 10,
+  padding: "6px 10px",
+  fontSize: 11,
+  fontWeight: 600,
   textTransform: "uppercase",
-  letterSpacing: 0.6,
-  color: "var(--muted)",
-  borderTop: "1px solid var(--border)",
-  background: "var(--bg)",
+  letterSpacing: 0.8,
+  color: "var(--fg)",
+  borderTop: "1px solid var(--border-strong, var(--border))",
+  borderBottom: "1px solid var(--border)",
+  background: "var(--bg-2)",
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
 };
 
 export const groupHeaderStyle: CSSProperties = {

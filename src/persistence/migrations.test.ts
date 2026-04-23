@@ -173,37 +173,27 @@ describe("runMigrations", () => {
     ).toThrow();
   });
 
-  test("v27 creates the work_item_commit junction table", () => {
+  test("v28 drops the work_item_commit junction table (v27 created it, v28 removes it)", () => {
     const driver = freshDriver();
-    runMigrations(driver);
-    const tables = driver
-      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-      .map((row) => row.name);
-    expect(tables).toContain("work_item_commit");
-    const cols = driver
-      .all<{ name: string }>(`PRAGMA table_info(work_item_commit)`)
-      .map((r) => r.name)
-      .sort();
-    expect(cols).toEqual(["committed_at", "sha", "work_item_id"]);
-    // Composite primary key allows multiple items per sha and multiple shas per item.
-    const now = "2024-01-01T00:00:00Z";
-    driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'p1:w', 'p1:t', '', '', '${now}', '${now}')`);
-    driver.exec(`INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b1', 's1', 'T', 'active', 0, 'pt1', '', '${now}', '${now}')`);
-    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority, sort_index, created_by, created_at, updated_at) VALUES ('wi-a', 'b1', NULL, 'task', 'A', '', NULL, 'done', 'medium', 0, 'user', '${now}', '${now}')`);
-    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority, sort_index, created_by, created_at, updated_at) VALUES ('wi-b', 'b1', NULL, 'task', 'B', '', NULL, 'done', 'medium', 1, 'user', '${now}', '${now}')`);
-    driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-a', 'abc123', '${now}')`);
-    driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-b', 'abc123', '${now}')`);
-    expect(() =>
-      driver.exec(`INSERT INTO work_item_commit (work_item_id, sha, committed_at) VALUES ('wi-a', 'abc123', '${now}')`),
-    ).toThrow();
-    const rows = driver.all<{ work_item_id: string; sha: string }>(`SELECT work_item_id, sha FROM work_item_commit ORDER BY work_item_id`);
-    expect(rows).toEqual([
-      { work_item_id: "wi-a", sha: "abc123" },
-      { work_item_id: "wi-b", sha: "abc123" },
-    ]);
+    // Run only up through v27 so we can assert the intermediate state.
+    for (const m of MIGRATIONS) {
+      if (m.version <= 27) m.up(driver);
+    }
+    const mid = driver
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_item_commit'")
+      .map((r) => r.name);
+    expect(mid).toContain("work_item_commit");
+    // v28 drops it.
+    const v28 = MIGRATIONS.find((m) => m.version === 28);
+    expect(v28).toBeDefined();
+    v28!.up(driver);
+    const after = driver
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_item_commit'")
+      .map((r) => r.name);
+    expect(after).toEqual([]);
   });
 
-  test("v27 applies cleanly on a DB already at v26", () => {
+  test("migrations apply cleanly on a DB already at v26", () => {
     const driver = freshDriver();
     // Stop at v26 by running only migrations ≤ 26.
     for (const m of MIGRATIONS) {
@@ -216,10 +206,60 @@ describe("runMigrations", () => {
     expect(driver.get<{ user_version: number }>("PRAGMA user_version")?.user_version).toBe(26);
     runMigrations(driver);
     expect(driver.get<{ user_version: number }>("PRAGMA user_version")?.user_version).toBe(MIGRATIONS.at(-1)!.version);
+    // work_item_commit was created in v27 and removed in v28; running all
+    // migrations on a v26 DB should leave the table absent.
     const tables = driver
-      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_item_commit'")
       .map((r) => r.name);
-    expect(tables).toContain("work_item_commit");
+    expect(tables).toEqual([]);
+  });
+
+  test("v29 cancels lingering author='agent-auto' in_progress rows with a legacy note", () => {
+    const driver = freshDriver();
+    // Run up through v28 to seed a legacy auto-item at the schema where
+    // author='agent-auto' was allowed.
+    for (const m of MIGRATIONS) {
+      if (m.version > 28) break;
+      driver.transaction(() => {
+        m.up(driver);
+        driver.exec(`PRAGMA user_version = ${m.version}`);
+      });
+    }
+    const now = "2024-01-01T00:00:00Z";
+    driver.exec(`INSERT INTO streams (id, title, summary, branch, branch_ref, branch_source, worktree_path, working_pane, talking_pane, working_session_id, talking_session_id, created_at, updated_at) VALUES ('s1', 'S', '', 'main', 'refs/heads/main', 'local', '/tmp/s1', 'w', 't', '', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, resume_session_id, created_at, updated_at) VALUES ('b1', 's1', 'T', 'active', 0, 'working', '', '${now}', '${now}')`);
+    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, status, priority, sort_index, created_by, created_at, updated_at, author) VALUES ('wi-auto', 'b1', NULL, 'task', 'legacy auto', '', 'in_progress', 'medium', 0, 'system', '${now}', '${now}', 'agent-auto')`);
+    driver.exec(`INSERT INTO work_items (id, thread_id, parent_id, kind, title, description, status, priority, sort_index, created_by, created_at, updated_at, author) VALUES ('wi-user', 'b1', NULL, 'task', 'user row', '', 'in_progress', 'medium', 1, 'user', '${now}', '${now}', 'user')`);
+
+    runMigrations(driver);
+
+    const auto = driver.get<{ status: string }>(`SELECT status FROM work_items WHERE id = 'wi-auto'`);
+    expect(auto?.status).toBe("canceled");
+    const user = driver.get<{ status: string }>(`SELECT status FROM work_items WHERE id = 'wi-user'`);
+    expect(user?.status).toBe("in_progress");
+    const notes = driver.all<{ body: string }>(`SELECT body FROM work_note WHERE work_item_id = 'wi-auto'`);
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes[0]!.body).toMatch(/legacy auto-item/);
+  });
+
+  test("v30 adds agent_turn.task_list_json column nullable", () => {
+    const driver = freshDriver();
+    runMigrations(driver);
+    const cols = driver
+      .all<{ name: string; notnull: number }>("PRAGMA table_info(agent_turn)")
+      .find((c) => c.name === "task_list_json");
+    expect(cols).toBeDefined();
+    expect(cols?.notnull).toBe(0);
+  });
+
+  test("v31 adds agent_turn.produced_activity column nullable", () => {
+    const driver = freshDriver();
+    runMigrations(driver);
+    const cols = driver
+      .all<{ name: string; notnull: number }>("PRAGMA table_info(agent_turn)")
+      .find((c) => c.name === "produced_activity");
+    expect(cols).toBeDefined();
+    expect(cols?.notnull).toBe(0);
   });
 
   test("refuses to open a database at a higher version than this build knows", () => {

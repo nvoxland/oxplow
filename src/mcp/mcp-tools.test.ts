@@ -872,4 +872,5 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       threadId: threadB.id, itemId: a.id, note: "already done",
     } as never)).toThrow(/terminal|already.*done|canceled|archived/i);
   });
+
 });

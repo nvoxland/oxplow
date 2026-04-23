@@ -202,19 +202,19 @@ The pipeline runs in priority order:
    `buildAutoCommitStopReason(null)`. Clean-tree suppression: if
    `git diff --quiet && git diff --cached --quiet` both pass
    (`isWorktreeClean` in `src/git/git.ts`), the directive is skipped
-   even when settled work looks unlinked — the sha already landed via
-   an ad-hoc `git commit` (Bash / Files panel) and the
-   `git-refs.changed` backfill path attaches the junction rows. Same
-   suppression applies to the `mode="auto"` commit_point branch above.
-   Agent drafts a message from
-   the diff and calls `mcp__newde__commit({ auto: true, threadId, message })`,
-   which routes to `executeAutoCommitForThread` — runs `git commit`,
-   links contributing work items to the new sha via the
-   `work_item_commit` junction (see `linkCommitToContributingItems` and
-   data-model.md), and publishes a `thread.changed`/`auto-committed`
-   event. **No commit_point row is created.** This is the unified-flow endpoint: auto
-   and approve modes now only differ in whether the agent asks the user
-   first.
+   even when settled work exists — the sha already landed via an
+   ad-hoc `git commit` (Bash / Files panel) and there's nothing
+   to commit. Same suppression applies to the `mode="auto"`
+   commit_point branch above. Agent drafts a message from the diff
+   and calls `mcp__newde__commit({ auto: true, threadId, message })`,
+   which routes to `executeAutoCommitForThread` — runs `git commit`
+   and publishes a `thread.changed`/`auto-committed` event. **No
+   commit_point row is created, and no item↔sha bookkeeping happens**
+   (item↔commit attribution can't be made reliable when users commit
+   outside newde — see data-model.md for why we removed the
+   `work_item_commit` junction). This is the unified-flow endpoint:
+   auto and approve modes now only differ in whether the agent asks
+   the user first.
    - Supplementary context tool: `mcp__newde__tasks_since_last_commit`
      returns work items whose efforts closed after the most recent done
      commit_point (or all closed efforts when the thread has never
@@ -252,13 +252,25 @@ The pipeline runs in priority order:
    **Ready-work suppression rules** (apply to this branch only — commit /
    wait / auto-commit are unaffected):
 
-   - **Conversational-prompt suppression.** When the current user prompt
-     starts with one of a small allowlist of starter words
-     (`why|how|explain|what|look|tell|show|can you|does|is|should|could|would`,
-     case-insensitive, leading whitespace trimmed), the ready-work
-     directive is skipped. Rationale: the user is asking a question, not
-     commanding queue-driven execution; force-marching the agent to the
-     next ready item inverts that intent.
+   - **Activity-based suppression.** The runtime tracks whether the
+     currently-open turn has fired any mutation / filing / dispatch tool
+     call (`turnActivityByThread`; seeded `false` on UserPromptSubmit,
+     flipped to `true` on the first qualifying PostToolUse). Qualifying
+     tools: every write-intent tool (Edit / Write / MultiEdit /
+     NotebookEdit / Bash with a non-readonly command — see
+     `isWriteIntentTool`), the newde filing tools
+     (`create_work_item`, `file_epic_with_children`, `complete_task`,
+     `update_work_item`, `transition_work_items`, `add_work_note`), and
+     the dispatch tools (`Task`, `dispatch_work_item`). If the flag is
+     still `false` at Stop, the ready-work directive is skipped — the
+     turn was pure Q&A / planning / review and force-marching the agent
+     to the next ready item inverts the user's intent. Any activity
+     re-arms the directive even when the prompt looked conversational.
+     Replaces an older regex-on-the-user-prompt check that over-fired
+     whenever a question-shaped prompt produced real work. An
+     `undefined` flag (UserPromptSubmit never fired) is treated as
+     "unknown → do not suppress" so behaviour stays stable when turn
+     tracking is missing.
    - **Just-read suppression.** The runtime keeps a per-thread record
      (`lastReadWorkOptionsByThread`) of the ready-item ids the agent saw
      in its most recent `read_work_options` call. On the next Stop, if
@@ -687,81 +699,54 @@ snapshot `S`:
 (pure helper over the two stores) for test reuse, and wired to IPC via
 the same pattern as `getSnapshotSummary`.
 
-## Auto-file / auto-complete (observational)
+## Active turns in the in_progress bucket (observational)
 
-Newde auto-synthesizes a work-item record from the agent's natural
-signals so the Work panel stays populated even when the agent didn't
-explicitly file a ticket.
+Newde passively tracks what the agent is doing: no synthesized work
+items, no auto-file / auto-complete / adoption. The Work panel's
+in_progress bucket renders the union of real work items plus **open
+`agent_turn` rows** — each turn with `ended_at IS NULL` AND
+`started_at >= runtime.startedAt` shows up as a synthetic row
+displaying the user's prompt, a "thinking…" indicator, elapsed time,
+and the current TaskCreate breakdown (from `agent_turn.task_list_json`).
+When the turn Stops, `ended_at` is set and the row disappears from the
+bucket. No status flips, no notes, no cleanup.
 
-- **Auto-file** (runtime hook, fires on first write-intent PostToolUse
-  after no open agent-auto row exists for the thread): the runtime
-  creates a `work_items` row with `author='agent-auto'`,
-  `status='in_progress'`, title derived from the first ~60 chars of the
-  current turn's prompt. The gate is **thread-wide via
-  `WorkItemStore.findOpenAutoItemForThread`**, not per-turn — a second
-  turn/session firing PostToolUse while the first auto-filed row is
-  still open is a no-op. No in-memory per-turn Map is kept. See
-  `runtime.autoFileWorkItem` + the PostToolUse branch of
-  `applyTurnTracking`. Write-intent = `{Write, Edit, MultiEdit,
-  NotebookEdit}` always; `Bash` is write-intent unless the command
-  starts with a readonly verb (`ls`, `cat`, `grep`, `find`, `git log`,
-  `git diff`, `git status`, `bun test`, `bunx tsc --noEmit`).
+The `runtime.startedAt` cutoff is load-bearing: when newde crashes
+mid-turn, `ended_at` never gets set; filtering to turns started after
+the current runtime boot keeps those orphans out of the UI.
 
-- **Override adoption**: if the agent then calls `create_work_item` or
-  `file_epic_with_children` during the same turn, the MCP handler
-  updates the existing auto-filed row in place (same id) rather than
-  creating a duplicate, and flips `author` to `'agent'`.
-  `WorkItemStore.findOpenAutoItemForThread(threadId)` is the lookup.
+**TaskCreate/TaskUpdate bridge.** The PostToolUse hook writes the
+declarative TodoWrite payload to `agent_turn.task_list_json` on every
+call (not only at Stop), so the open-turn row in the Work panel
+renders the live sub-list as the agent ticks steps off. The column
+persists after the turn closes for a later History view.
 
-- **Auto-complete** (runtime hook, fires at Stop, after the turn-end
-  snapshot is flushed): `autoCompleteOpenAutoItems` (exported from
-  `runtime.ts`) looks up the open `author='agent-auto'` item for the
-  thread, confirms it has an effort row linked to the closing turn,
-  composes a summary note via `composeAutoCompleteNote` (diff-derived
-  file-change count + first 5 paths, optional signals leader built from
-  structured heuristics run over captured Bash output), **rewrites the
-  item's title via `deriveAutoItemTitleFromDiff(filePaths)`** (heuristic —
-  `Edit foo.ts` / `Edit src: a.ts, b.ts, +N more`, capped at 60 chars) so
-  the prompt-prefix title doesn't linger in blame / Work-panel UX, and
-  transitions the item to `human_check`. No-op if no auto-filed item
-  exists or if it has no effort in the current turn (so user- or
-  explicitly-agent-authored items are never auto-closed). The full note
-  body is clamped to `AUTO_COMPLETE_NOTE_MAX_LEN` (400 chars).
+If a turn spawns real follow-up work, the agent calls
+`mcp__newde__create_work_item` / `file_epic_with_children` the way it
+always has. Those land as first-class work items alongside the turn
+row, with a normal ready → in_progress → human_check lifecycle.
 
-  **Coordinator-only turns (wi-4daabc5e1dae).** An orchestrator turn
-  whose only write-intent activity is subagent dispatch (`Task`,
-  `mcp__newde__dispatch_work_item`, `mcp__newde__file_epic_with_children`)
-  leaves the auto-filed row with no effort row and no diff — the edits
-  happen inside the subagent threads and attribute to *their* work
-  items. To keep the row from parking forever in `in_progress`, the
-  runtime tallies dispatch-shaped tool calls per turn
-  (`dispatchesByTurn`, `isDispatchLikeTool`, `extractDispatchedItemIds`).
-  At Stop, when the auto-item has no effort-in-turn and zero filePaths
-  but `dispatchCount > 0`, auto-complete takes the coordinator branch:
-  writes a `Coordinated N subagent dispatch(es).` note, links each
-  parsed-out item id to the auto-item via `discovered_from`
-  (child → coordinator), and flips the row to `human_check`. Turns with
-  no dispatches and no edits don't auto-file in the first place (no
-  write-intent tool call), so there's nothing to close.
+## Recent answers — inactive closed turns
 
-  **Signal detection (heuristic-only, no LLM).** Runtime buffers raw
-  PostToolUse `tool_response` stdout/stderr from Bash calls per
-  (threadId, turnId) in `bashOutputsByTurn`. At Stop,
-  `detectTestResultFromBashOutput`, `detectTscErrorsFromBashOutput`, and
-  `detectCommitShasFromBashOutput` (all in `runtime.ts`) scan the
-  concatenated buffer and return null when their pattern is absent.
-  Absent signals stay absent; present ones render as
-  `Tests: 484/0. tsc: clean. commits: abc1234. Auto-summary: …`.
+The Work panel renders a "Recent answers" section below the in_progress
+bucket (open-turn rows) and above Human Check, populated by
+`runtime.listRecentInactiveTurns(threadId, limit?)` which delegates to
+`TurnStore.listRecentInactiveTurns`. The section surfaces closed
+`agent_turn` rows with `produced_activity = 0` — turns where the agent
+answered a question / did planning / reviewed without firing any
+mutation / filing / dispatch tool call.
 
-- **Task-list bridge** (Claude Code TodoWrite → work-item note). When
-  Claude uses the built-in `TodoWrite` during a turn, the runtime's
-  PostToolUse handler mirrors the declarative todo list into
-  `todoStateByTurn` (last-write-wins — TodoWrite payloads are already
-  final-state). At Stop, if the buffer is non-empty,
-  `composeTaskListNote` (`runtime.ts`) serializes it as
-  `TaskCreate breakdown: ☑ step / ☑ step / ☐ step` and adds it as a note
-  on the open `agent-auto` work item. No note written when TodoWrite
-  wasn't used. Buffers are cleared at Stop regardless.
+At Stop, the runtime captures `turnActivityByThread[threadId]` (the
+same flag that drives the ready-work suppression rule) and persists
+it via `setProducedActivity(turnId, flag)` right after `closeTurn` and
+before `computeStopDirective` reads+clears the in-memory entry. A
+missing map entry (UserPromptSubmit never fired) is stored as NULL;
+NULL rows are excluded from the Recent-answers query so pre-migration
+turns don't back-fill the list.
+
+UI: double-click a row to open a modal with the full prompt + answer
+(Escape-dismissible, no drag, no right-click — observational only).
+See `src/ui/components/Plan/RecentAnswersList.tsx`.
 
 ## Related
 

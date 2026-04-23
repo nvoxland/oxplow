@@ -31,6 +31,8 @@ import { ConfirmDialog } from "../ConfirmDialog.js";
 import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { WorkGroupList } from "./WorkGroupList.js";
+import { OpenTurnsList } from "./OpenTurnsList.js";
+import { RecentAnswersList } from "./RecentAnswersList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
@@ -41,7 +43,7 @@ import {
   statusLabel,
 } from "./plan-utils.js";
 
-const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, humanCheck: 2, done: 3 };
+const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, blocked: 2, humanCheck: 3, done: 4 };
 function statusOrderRank(status: WorkItemStatus): number {
   return STATUS_RANK[classifyWorkItem(status)] ?? 0;
 }
@@ -137,13 +139,6 @@ export function PlanPane({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
   const [mode, setMode] = useState<"thread" | "backlog">("thread");
-  // "Hide auto" filter toggle — collapses agent-auto rows out of the
-  // visible queue without touching the store. Local state only; the
-  // preference resets when the user reloads the pane. Rationale: agent-
-  // auto rows are runtime observations, not human-directed work, so
-  // some users prefer to see only the latter. Persistence is deferred
-  // to a follow-up — the user can still bulk-change view today.
-  const [hideAuto, setHideAuto] = useState(false);
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
@@ -187,28 +182,13 @@ export function PlanPane({
   }, [threadId]);
 
   const groups = useMemo(() => {
-    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
-    if (!hideAuto) return raw;
-    // Hide rows whose author === "agent-auto". Legacy rows (author = null)
-    // and human/explicit-agent rows are always shown. epicChildren is
-    // filtered to match so collapsed epics don't still report hidden kids.
-    return raw
-      .map((group) => {
-        const filteredItems = group.items.filter((item) => item.author !== "agent-auto");
-        const filteredChildren = new Map<string, WorkItem[]>();
-        for (const [epicId, kids] of group.epicChildren) {
-          const keep = kids.filter((kid) => kid.author !== "agent-auto");
-          if (keep.length > 0) filteredChildren.set(epicId, keep);
-        }
-        return { ...group, items: filteredItems, epicChildren: filteredChildren };
-      })
-      .filter((group) => group.items.length > 0 || (group.epic != null));
-  }, [mode, threadWork, backlog, hideAuto]);
+    return mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+  }, [mode, threadWork, backlog]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
   // sync with the section split in WorkGroupList (In progress → To do →
-  // Human check → Done). Commit/wait-point rows are deliberately excluded:
+  // Blocked → Human check → Done). Commit/wait-point rows are deliberately excluded:
   // they're not "selectable work" in the keyboard sense.
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
@@ -489,21 +469,6 @@ export function PlanPane({
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button
-            type="button"
-            data-testid="plan-toggle-hide-auto"
-            onClick={() => setHideAuto((prev) => !prev)}
-            style={{
-              ...miniButtonStyle,
-              padding: "3px 8px",
-              fontSize: 11,
-              background: hideAuto ? "var(--accent)" : "var(--bg-2)",
-              color: hideAuto ? "#fff" : "var(--fg)",
-            }}
-            title={hideAuto ? "Showing only human/agent-authored items. Click to show auto-filed items." : "Click to hide runtime auto-filed items."}
-          >
-            {hideAuto ? "Show auto" : "Hide auto"}
-          </button>
         </div>
       </div>
       {modalMode ? (
@@ -583,12 +548,25 @@ export function PlanPane({
       ) : null}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {groups.length === 0 ? (
-          <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
-            {mode === "backlog" ? "Backlog is empty." : "No work items."}
-          </div>
+          <>
+            {mode === "thread" ? <OpenTurnsList streamId={streamId} threadId={threadId} /> : null}
+            {mode === "thread" ? (
+              <RecentAnswersList streamId={streamId} threadId={threadId} />
+            ) : null}
+            <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
+              {mode === "backlog" ? "Backlog is empty." : "No work items."}
+            </div>
+          </>
         ) : (
-          groups.map((group) => {
+          groups.map((group, groupIndex) => {
             const isRootThread = mode === "thread";
+            const isFirstGroup = groupIndex === 0;
+            const inProgressLeadSlot = isRootThread && isFirstGroup
+              ? <OpenTurnsList streamId={streamId} threadId={threadId} />
+              : undefined;
+            const afterInProgressSlot = isRootThread && isFirstGroup
+              ? <RecentAnswersList streamId={streamId} threadId={threadId} />
+              : undefined;
             const isActive = isRootThread && thread?.id === activeThreadId;
             const canAddPoints = isRootThread && !!threadWork && threadWork.waiting.length > 0;
             const autoCommitOn = thread?.auto_commit ?? false;
@@ -676,6 +654,8 @@ export function PlanPane({
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
                 isActive={isActive}
+                inProgressLeadSlot={inProgressLeadSlot}
+                afterInProgressSlot={afterInProgressSlot}
               />
             );
           })

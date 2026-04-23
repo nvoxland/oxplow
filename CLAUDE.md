@@ -57,18 +57,26 @@ tests use a fresh `mkdtempSync` project dir against a real SQLite file.
 
 ## Work items are observational
 
-Newde auto-tracks your work. Auto-file: on the first write-intent tool
-call of a turn the runtime synthesizes a work item for the user's
-prompt. Auto-complete: at Stop it derives a summary from the diff and
-flips the item to `human_check`. See `.context/agent-model.md` for the
-full mechanics. You don't need to narrate filings or transitions.
+Newde passively tracks active agent turns: each open `agent_turn` row
+(`ended_at IS NULL` and started after runtime boot) renders as a live
+row in the Work panel's in_progress bucket showing the prompt,
+"thinking…", and elapsed time. When the turn Stops, the row
+disappears. No synthesized work items, no auto-file/auto-complete, no
+adoption — you don't need to narrate turn boundaries.
 
-Call `mcp__newde__create_work_item` / `file_epic_with_children` when
-you want to split, link, or pre-queue work — the auto-filed row is
-adopted in place. Call `complete_task` when you want to ship an
-explicit summary that overrides the auto-one.
+**File a durable work item before you start editing.** When you realize
+you're about to change project files in a turn and you aren't already
+working against an existing item, call
+`mcp__newde__create_work_item` (or `file_epic_with_children` if the
+work is large enough to be worth splitting into macro subtasks) with
+status `in_progress` and track your progress against it across however
+many turns it takes — including stops to ask the user questions. The
+item should describe the real piece of work you're committing to
+shipping, not a placeholder "auto" row that may or may not get
+reshaped into something real. When it's settled, call `complete_task`
+to ship an explicit summary.
 
-Claude Code's built-in TaskCreate/TaskUpdate is for intra-turn
-micro-planning; its final state is serialized as a note on the
-auto-filed item at Stop, so it stays out of the user-visible newde
-surface unless you promote it.
+Claude Code's built-in TaskCreate/TaskUpdate is captured to
+`agent_turn.task_list_json` on every call and rendered live on the
+open-turn row as an expandable sub-list. It stays out of the
+persistent work-item stream.

@@ -60,12 +60,11 @@ export interface WorkItem {
   updated_at: string;
   completed_at: string | null;
   note_count: number;
-  /** Semantic origin of the row: `"agent-auto"` for runtime auto-filed
-   *  items, `"agent"` for items the agent explicitly created (including
-   *  auto-filed rows later adopted via `create_work_item`), `"user"` for
-   *  items the human filed, or `null` for legacy rows pre-dating the
-   *  author column. See `WorkItemAuthor` in the persistence store. */
-  author: "user" | "agent" | "agent-auto" | null;
+  /** Semantic origin of the row: `"agent"` for items the agent explicitly
+   *  created via MCP, `"user"` for items the human filed, or `null` for
+   *  legacy rows (including pre-v29 `agent-auto` rows that the store
+   *  maps to null on read). See `WorkItemAuthor` in the persistence store. */
+  author: "user" | "agent" | null;
 }
 
 export interface WorkNote {
@@ -148,6 +147,9 @@ export interface AgentTurn {
   cache_read_input_tokens: number | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
+  task_list_json: string | null;
+  produced_activity?: number | null;
+  archived_at?: string | null;
 }
 
 export interface WorkItemEffort {
@@ -651,6 +653,21 @@ export async function listAgentTurns(
   return desktopApi().listAgentTurns(streamId, threadId, limit);
 }
 
+export async function listOpenTurns(threadId: string): Promise<AgentTurn[]> {
+  return desktopApi().listOpenTurns(threadId);
+}
+
+export async function listRecentInactiveTurns(
+  threadId: string,
+  limit?: number,
+): Promise<AgentTurn[]> {
+  return desktopApi().listRecentInactiveTurns(threadId, limit);
+}
+
+export async function archiveAgentTurn(turnId: string): Promise<AgentTurn | null> {
+  return desktopApi().archiveAgentTurn(turnId);
+}
+
 export async function getBranchChanges(
   streamId: string,
   baseRef?: string,
@@ -737,7 +754,7 @@ export interface TurnChangeEvent {
   streamId: string;
   threadId: string;
   turnId: string;
-  kind: "opened" | "closed";
+  kind: "opened" | "closed" | "task-list-updated";
 }
 
 export function subscribeTurnEvents(

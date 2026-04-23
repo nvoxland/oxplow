@@ -59,7 +59,7 @@ export interface TurnChangedEvent {
   streamId: string;
   threadId: string;
   turnId: string;
-  kind: "opened" | "closed";
+  kind: "opened" | "closed" | "task-list-updated";
 }
 
 export interface WorkspaceContextChangedEvent {

@@ -57,12 +57,16 @@ export interface ThreadSnapshot {
    *  proposes a commit whenever settled work (human_check/done) exists
    *  but no commit point is in the queue. */
   autoCommit?: boolean;
-  /** The raw user prompt for the current turn, if known. Used ONLY by the
-   *  ready-work directive to suppress conversational-starter prompts
-   *  (why/how/explain/…) — agents shouldn't be force-marched to the next
-   *  ready item when the user is asking a question. Optional; absent means
-   *  "no conversational suppression." */
-  currentTurnPrompt?: string | null;
+  /** True when the current turn fired at least one mutation / filing /
+   *  dispatch tool call. Used ONLY by the ready-work directive: a pure
+   *  Q&A turn (no activity) suppresses the directive — agents shouldn't be
+   *  force-marched to the next ready item when the user just asked a
+   *  question. When activity IS present (Edits, create_work_item,
+   *  dispatch, etc.), the directive fires even if the prompt looked
+   *  conversational. Optional; absent / undefined means "activity
+   *  unknown → do not suppress" (non-suppressive default keeps behaviour
+   *  stable when turn tracking is missing). See wi-0f1492f5e60e. */
+  turnProducedActivity?: boolean;
   /** Work-item ids the agent saw in the most recent `read_work_options` call
    *  during the immediately-preceding turn. When the current ready-set is
    *  identical, the ready-work directive is suppressed — the agent already
@@ -174,7 +178,7 @@ export function decideStopDirective(
   if (next) {
     // Suppression rules (ready-work directive only — commit/wait are
     // unaffected and ran above).
-    if (shouldSuppressReadyWorkForPrompt(snapshot.currentTurnPrompt)) {
+    if (shouldSuppressReadyWorkForNoActivity(snapshot.turnProducedActivity)) {
       return { directive: null, sideEffects };
     }
     if (shouldSuppressReadyWorkForJustRead(snapshot.readyWorkItems, snapshot.justReadReadySet)) {
@@ -294,47 +298,27 @@ function hasSettledWork(workItems: WorkItem[]): boolean {
 }
 
 /**
- * Classifier for the ready-work directive. Three layers, evaluated in
- * order:
+ * Activity-based suppression for the ready-work directive. A turn that
+ * produced no mutation, filing, or dispatch tool calls is treated as
+ * pure Q&A / planning / review — the agent shouldn't be force-marched
+ * to the next ready item when the user just asked a question. Any
+ * activity (Edits, Writes, non-readonly Bash, create_work_item,
+ * file_epic_with_children, transition_work_items, update_work_item,
+ * complete_task, add_work_note, Task/dispatch_work_item) re-arms the
+ * directive.
  *
- * 1. **Conversational-starter** — prompt begins with a question/lookup
- *    verb (why/how/explain/what/look/tell/show/can you/does/is/should/
- *    could/would). Case-insensitive, leading whitespace trimmed, word
- *    boundary required so `whyever` doesn't match.
- * 2. **Imperative-question** — anywhere in the prompt, patterns like
- *    `help me …`, `tell me about …`, `walk me through …` that read as
- *    directive-shaped but ask for explanation, not mutation.
- * 3. **No-change-verb default** — if neither (1) nor (2) fired AND the
- *    prompt contains no change-verb (fix/add/change/rename/delete/
- *    implement/build/remove/update/refactor/create/write), default to
- *    suppressed. Rationale: a turn that has no imperative verb of
- *    mutation is almost always discussion / planning / review; the
- *    ready-work force-march inverts the user's intent. Presence of a
- *    change-verb re-arms the directive.
+ * Rationale: the prior rule was a regex against the user prompt
+ * (why/how/explain/…) which over-fired on Q&A turns that happened to
+ * produce real work, silencing the directive even when the queue was
+ * non-empty and the agent had genuine follow-ups. Observed activity is
+ * a direct signal; an agent that edited / filed / dispatched wants to
+ * continue, no matter how the turn started. See wi-0f1492f5e60e.
  *
- * Kept as regex — an LLM classifier is a follow-up if this still
- * misfires. Anchoring with \b on both sides keeps noun forms ("a
- * change") from tripping the verb match.
+ * `undefined` means "activity unknown" and does NOT suppress — we only
+ * suppress when we have affirmative evidence the turn produced nothing.
  */
-const CONVERSATIONAL_STARTER_RE =
-  /^(why|how|explain|what|look|tell|show|can you|does|is|should|could|would)\b/i;
-
-const IMPERATIVE_QUESTION_RE =
-  /\b(help me|tell me|walk me through|show me)\b/i;
-
-const CHANGE_VERB_RE =
-  /\b(fix|add|change|rename|delete|implement|build|remove|update|refactor|create|write)\b/i;
-
-function shouldSuppressReadyWorkForPrompt(prompt: string | null | undefined): boolean {
-  if (typeof prompt !== "string") return false;
-  const trimmed = prompt.replace(/^\s+/, "");
-  if (trimmed.length === 0) return false;
-  if (CONVERSATIONAL_STARTER_RE.test(trimmed)) return true;
-  if (IMPERATIVE_QUESTION_RE.test(trimmed)) return true;
-  // No change-verb default: if the prompt lacks any recognisable
-  // mutation verb, treat it as discussion and suppress.
-  if (!CHANGE_VERB_RE.test(trimmed)) return true;
-  return false;
+function shouldSuppressReadyWorkForNoActivity(activity: boolean | undefined): boolean {
+  return activity === false;
 }
 
 function shouldSuppressReadyWorkForJustRead(

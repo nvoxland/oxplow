@@ -758,6 +758,93 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 28,
+    name: "drop work_item_commit junction",
+    up: (db) => {
+      // Commit↔item attribution can't be made reliable — users commit
+      // outside newde (IDE buttons, CLI, CI rebases, merges, squashes)
+      // and newde has no authoritative hook at those sites. The
+      // heuristic "settled_at > latest_done_commit_point" misattributes
+      // silently. A blame overlay that sometimes lies is worse than no
+      // overlay, so the feature is removed before any live consumer
+      // shipped.
+      db.exec(`DROP TABLE IF EXISTS work_item_commit;`);
+    },
+  },
+  {
+    version: 29,
+    name: "cancel legacy agent-auto in_progress rows",
+    up: (db) => {
+      // Auto-file / auto-complete were removed in favor of passively
+      // rendering `agent_turn` rows in the in_progress bucket. Any
+      // author='agent-auto' row still sitting in_progress on upgrade is an
+      // orphan (the auto-complete path used to close them, but the listener
+      // went away). Flip them to `canceled` and drop a note so the user
+      // can see what happened if they hunt down the row. Non-in_progress
+      // agent-auto rows (already human_check / done / canceled) are left
+      // alone — they've already run the adoption/completion path.
+      const now = new Date().toISOString();
+      db.exec(`
+        UPDATE work_items
+        SET status = 'canceled', updated_at = '${now}'
+        WHERE author = 'agent-auto' AND status = 'in_progress';
+      `);
+      const rows = db.all<{ id: string; thread_id: string | null }>(
+        `SELECT id, thread_id FROM work_items
+         WHERE author = 'agent-auto' AND status = 'canceled' AND updated_at = '${now}'`,
+      );
+      for (const row of rows) {
+        const noteId = `note-v29-${row.id}`;
+        db.run(
+          `INSERT INTO work_note (id, work_item_id, thread_id, body, author, created_at)
+           VALUES (?, ?, NULL, ?, 'system', ?)`,
+          noteId,
+          row.id,
+          "legacy auto-item (pre-v29); auto-file removed",
+          now,
+        );
+      }
+    },
+  },
+  {
+    version: 30,
+    name: "agent_turn.task_list_json",
+    up: (db) => {
+      // Add per-turn TaskCreate/TaskUpdate breakdown storage. Written
+      // incrementally by the PostToolUse TaskCreate/TaskUpdate bridge so
+      // the Work panel's open-turn row can render the live sub-list;
+      // persists on the row after the turn closes for History.
+      db.exec(`ALTER TABLE agent_turn ADD COLUMN task_list_json TEXT;`);
+    },
+  },
+  {
+    version: 31,
+    name: "agent_turn.produced_activity",
+    up: (db) => {
+      // Per-turn record of whether any mutation / filing / dispatch tool
+      // call fired during the turn (the same flag the Stop-hook's
+      // ready-work suppression rule already computes in-memory). Captured
+      // at Stop so the Work panel can surface closed turns that were pure
+      // Q&A as "Recent answers" — re-readable without cluttering the
+      // Done section or the in_progress bucket. Pre-migration rows stay
+      // NULL (unknown); the UI treats NULL as "not shown" to avoid
+      // back-filling every legacy turn with a synthetic value.
+      db.exec(`ALTER TABLE agent_turn ADD COLUMN produced_activity INTEGER;`);
+    },
+  },
+  {
+    version: 32,
+    name: "agent_turn.archived_at",
+    up: (db) => {
+      // "Recent answers" rows can be archived by the user to clear them
+      // out of the Work panel without marking them as having produced
+      // activity (which would misrepresent the turn). Nullable ISO
+      // timestamp: NULL means visible, non-NULL means hidden from the
+      // Recent-answers query.
+      db.exec(`ALTER TABLE agent_turn ADD COLUMN archived_at TEXT;`);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

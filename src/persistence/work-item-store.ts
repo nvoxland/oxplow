@@ -15,13 +15,14 @@ export type WorkItemLinkType =
   | "replies_to";
 export type WorkItemActorKind = "user" | "agent" | "system";
 /** Semantic origin of a work-item row — distinct from `created_by` (the
- *  writer). 'agent-auto' marks rows synthesized by the runtime on the first
- *  write-intent tool call of a turn; an explicit create_work_item later in
- *  the same turn adopts the row and flips author to 'agent'. */
-export type WorkItemAuthor = "user" | "agent" | "agent-auto";
+ *  writer). Narrowed to user/agent after auto-file was removed in v29+;
+ *  legacy `agent-auto` rows exist on pre-v29 DBs but v29 cancels any
+ *  still-in_progress ones. The read path tolerates the legacy string by
+ *  mapping it to null so older rows still load. */
+export type WorkItemAuthor = "user" | "agent";
 
 const WORK_ITEM_AUTHORS: ReadonlySet<WorkItemAuthor> = new Set([
-  "user", "agent", "agent-auto",
+  "user", "agent",
 ]);
 
 const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
@@ -195,12 +196,6 @@ export interface FileEpicWithChildrenInput {
   }>;
   createdBy: WorkItemActorKind;
   actorId: string;
-  /** When set, re-use this existing auto-filed work item's id as the epic
-   *  (via `adoptAutoItem` semantics: title/description/kind/priority
-   *  overwritten, author flipped to 'agent'). Children are created fresh
-   *  under the adopted row's id. Used by the auto-file → explicit
-   *  adoption flow in MCP `file_epic_with_children`. */
-  adoptItemId?: string;
 }
 
 export interface CompleteTaskInput {
@@ -279,83 +274,20 @@ export class WorkItemStore {
       .map(toWorkItem);
   }
 
-  /** Adopt an existing open auto-filed item: overwrite its title /
-   *  description / acceptance_criteria / kind / priority in place, flip
-   *  `author` to 'agent', and keep the same id and sort_index so downstream
-   *  references (efforts, notes, UI state) stay intact. Used by MCP
-   *  `create_work_item` / `file_epic_with_children` when they're called
-   *  during a turn that already has an auto-filed row. */
-  adoptAutoItem(input: {
-    threadId: string;
-    itemId: string;
-    title: string;
-    description?: string;
-    acceptanceCriteria?: string | null;
-    kind?: WorkItemKind;
-    priority?: WorkItemPriority;
-    actorKind: WorkItemActorKind;
-    actorId: string;
-  }): WorkItem {
-    const existing = this.getItem(input.threadId, input.itemId);
-    if (!existing) throw new Error(`unknown work item: ${input.itemId}`);
-    const title = requireTitle(input.title);
-    const description = input.description !== undefined ? clampDescription(input.description) : existing.description;
-    const acceptance = input.acceptanceCriteria !== undefined ? clampAcceptanceCriteria(input.acceptanceCriteria) : existing.acceptance_criteria;
-    const kind = input.kind ? requireWorkItemKind(input.kind) : existing.kind;
-    const priority = input.priority ? requireWorkItemPriority(input.priority) : existing.priority;
-    const actorKind = requireWorkItemActorKind(input.actorKind);
-    const now = new Date().toISOString();
-    const updated: WorkItem = {
-      ...existing,
-      title,
-      description,
-      acceptance_criteria: acceptance,
-      kind,
-      priority,
-      author: "agent",
-      updated_at: now,
-    };
-    this.stateDb.transaction(() => {
-      this.stateDb.run(
-        `UPDATE work_items
-         SET title = ?, description = ?, acceptance_criteria = ?, kind = ?, priority = ?, author = ?, updated_at = ?
-         WHERE thread_id = ? AND id = ?`,
-        updated.title,
-        updated.description,
-        updated.acceptance_criteria,
-        updated.kind,
-        updated.priority,
-        updated.author,
-        updated.updated_at,
-        updated.thread_id,
-        updated.id,
-      );
-      this.recordEvent({
-        threadId: input.threadId,
-        itemId: input.itemId,
-        eventType: "adopted",
-        actorKind,
-        actorId: input.actorId,
-        payload: { before: existing, after: updated },
-      });
-    });
-    this.emitChange({ threadId: input.threadId, kind: "updated", itemId: input.itemId });
-    return updated;
-  }
-
-  /** Find the currently-open runtime-auto-filed work item for a thread, if
-   *  any. Returns the in_progress item authored by 'agent-auto' with the
-   *  earliest created_at (there should be at most one by convention; we
-   *  take the oldest so a duplicate doesn't hide the adopted row). Used by
-   *  the auto-file / auto-complete runtime hooks. */
-  findOpenAutoItemForThread(threadId: string): WorkItem | null {
+  /** Find any in_progress work item in a thread (regardless of author).
+   *  Used by the auto-file guard to decide whether to spawn a new
+   *  agent-auto row — if ANY in_progress item already exists in the
+   *  thread (agent-filed, user-filed, already-adopted, reopened, etc.),
+   *  the current turn's edits attribute to it and a duplicate auto-row
+   *  would be a zombie. See wi-e79eaffd7cf0. Returns the oldest
+   *  in_progress row so callers see a deterministic pick when two exist. */
+  findOpenItemForThread(threadId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       `SELECT work_items.*,
               (SELECT COUNT(*) FROM work_note WHERE work_note.work_item_id = work_items.id) AS note_count
        FROM work_items
        WHERE thread_id = ?
          AND status = 'in_progress'
-         AND author = 'agent-auto'
          AND deleted_at IS NULL
        ORDER BY created_at, id
        LIMIT 1`,
@@ -477,6 +409,16 @@ export class WorkItemStore {
     const now = new Date().toISOString();
     const nextParentId = input.parentId !== undefined ? input.parentId : existing.parent_id;
     const nextStatus = input.status ? requireWorkItemStatus(input.status) : existing.status;
+    // Transition guard: block any non-ready, non-human_check source from
+    // jumping directly to in_progress. Callers must explicitly un-block
+    // (or un-terminal) by moving through `ready` first. See wi-6285706789c5.
+    if (nextStatus === "in_progress" && existing.status !== nextStatus) {
+      if (existing.status !== "ready" && existing.status !== "human_check") {
+        throw new Error(
+          `cannot transition \`${existing.status}\` → \`in_progress\` directly; move to \`ready\` first`,
+        );
+      }
+    }
     const nextPriority = input.priority ? requireWorkItemPriority(input.priority) : existing.priority;
     const nextTitle = input.title !== undefined ? requireTitle(input.title) : existing.title;
     const nextDescription = input.description !== undefined ? clampDescription(input.description) : existing.description;
@@ -647,56 +589,21 @@ export class WorkItemStore {
       author: null,
     });
 
-    // When adopting an existing auto-filed row as the epic, reuse its id
-    // so effort/note attribution stays intact. Otherwise mint a fresh id.
-    // All rows (epic/adopt + children) live in ONE transaction so a
-    // validation failure on any child rolls back the epic too.
+    // All rows (epic + children) live in ONE transaction so a validation
+    // failure on any child rolls back the epic too.
     let epicId: string;
     const children: WorkItem[] = [];
     this.stateDb.transaction(() => {
-      if (input.adoptItemId) {
-        const existing = this.getItem(input.threadId, input.adoptItemId);
-        if (!existing) throw new Error(`unknown work item: ${input.adoptItemId}`);
-        const title = requireTitle(input.epic.title);
-        const description = input.epic.description !== undefined ? clampDescription(input.epic.description) : existing.description;
-        const acceptance = input.epic.acceptanceCriteria !== undefined
-          ? clampAcceptanceCriteria(input.epic.acceptanceCriteria)
-          : existing.acceptance_criteria;
-        const priority = input.epic.priority ? requireWorkItemPriority(input.epic.priority) : existing.priority;
-        const updatedAt = new Date().toISOString();
-        this.stateDb.run(
-          `UPDATE work_items
-           SET title = ?, description = ?, acceptance_criteria = ?, kind = 'epic', priority = ?, author = 'agent', updated_at = ?
-           WHERE thread_id = ? AND id = ?`,
-          title,
-          description,
-          acceptance,
-          priority,
-          updatedAt,
-          input.threadId,
-          input.adoptItemId,
-        );
-        this.recordEvent({
-          threadId: input.threadId,
-          itemId: input.adoptItemId,
-          eventType: "adopted",
-          actorKind: createdBy,
-          actorId: input.actorId,
-          payload: { before: existing, via: "file_epic_with_children" },
-        });
-        epicId = input.adoptItemId;
-      } else {
-        const epic = buildItem({
-          kind: "epic",
-          title: input.epic.title,
-          description: input.epic.description,
-          acceptanceCriteria: input.epic.acceptanceCriteria,
-          priority: input.epic.priority,
-          parentId: null,
-        });
-        this.insertItemRow(epic, input.actorId);
-        epicId = epic.id;
-      }
+      const epic = buildItem({
+        kind: "epic",
+        title: input.epic.title,
+        description: input.epic.description,
+        acceptanceCriteria: input.epic.acceptanceCriteria,
+        priority: input.epic.priority,
+        parentId: null,
+      });
+      this.insertItemRow(epic, input.actorId);
+      epicId = epic.id;
       for (const childInput of input.children) {
         const child = buildItem({
           kind: childInput.kind ?? "task",
@@ -710,7 +617,7 @@ export class WorkItemStore {
         children.push(child);
       }
     });
-    this.emitChange({ threadId: input.threadId, kind: input.adoptItemId ? "updated" : "created", itemId: epicId! });
+    this.emitChange({ threadId: input.threadId, kind: "created", itemId: epicId! });
     for (const child of children) {
       this.emitChange({ threadId: input.threadId, kind: "created", itemId: child.id });
     }
@@ -1500,7 +1407,12 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
     acceptance_criteria: row.acceptance_criteria == null ? null : String(row.acceptance_criteria),
     note_count: Number(row.note_count ?? 0),
-    author: row.author == null ? null : requireOptionalWorkItemAuthor(String(row.author)),
+    // Legacy pre-v29 rows used author='agent-auto'; the migration cancels
+    // lingering in_progress ones but keeps the string on terminal rows for
+    // audit. Map it to null so the narrowed WorkItemAuthor enum holds.
+    author: row.author == null || String(row.author) === "agent-auto"
+      ? null
+      : requireOptionalWorkItemAuthor(String(row.author)),
   };
 }
 

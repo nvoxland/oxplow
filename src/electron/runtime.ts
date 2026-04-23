@@ -28,7 +28,6 @@ import {
   gitPull,
   gitCommitAll,
   isWorktreeClean,
-  readWorktreeHeadSha,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -58,7 +57,6 @@ import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
-import { WorkItemCommitStore } from "../persistence/work-item-commit-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -103,7 +101,6 @@ export class ElectronRuntime {
   readonly threadQueue: ThreadQueueOrchestrator;
   readonly turnStore: TurnStore;
   readonly effortStore: WorkItemEffortStore;
-  readonly workItemCommitStore: WorkItemCommitStore;
   readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
@@ -137,24 +134,6 @@ export class ElectronRuntime {
    *  list the agent already has. Populated through the
    *  markReadWorkOptions callback wired into the MCP tool surface. */
   private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
-  /** Per-turn buffers used to derive richer auto-complete summaries at Stop.
-   *  Keyed by `${threadId}\0${turnId}`; entries are populated on
-   *  PostToolUse (Bash tool_response captured for signal detection;
-   *  TodoWrite payload captured for task-list bridging) and cleared at
-   *  Stop after the auto-complete note is composed. See
-   *  `composeAutoCompleteNote` and the task-list bridge in the Stop
-   *  branch of `applyTurnTracking`. */
-  private readonly bashOutputsByTurn = new Map<string, string[]>();
-  private readonly todoStateByTurn = new Map<string, Array<{ content: string; status: string }>>();
-  /** Per-turn tally of orchestrator subagent-dispatch tool calls (Task,
-   *  mcp__newde__dispatch_work_item, mcp__newde__file_epic_with_children).
-   *  `count` is the total — we report it in the coordinator-close note even
-   *  when we can't extract item ids. `itemIds` captures the
-   *  dispatch_work_item target ids we could parse out of `tool_input`, used
-   *  to link the closing auto-item to its dispatched children via
-   *  `discovered_from`. Keyed by `${threadId}\0${turnId}`; cleared at Stop
-   *  alongside the other per-turn buffers. See wi-4daabc5e1dae. */
-  private readonly dispatchesByTurn = new Map<string, { count: number; itemIds: string[] }>();
   /** Running per-thread running sum of tool-result bytes observed during
    *  the currently open turn. Populated on each PostToolUse envelope and
    *  cleared on UserPromptSubmit (new turn) and Stop. Fed into
@@ -163,6 +142,14 @@ export class ElectronRuntime {
    *  is fine per the work item — we just sum stringified tool_response
    *  length without any token conversion. */
   private readonly currentTurnBytesByThread = new Map<string, number>();
+  /** Per-thread flag: did the currently-open turn fire any mutation /
+   *  filing / dispatch tool call? Set true on the first qualifying
+   *  PostToolUse (see `isActivityTool`); seeded to `false` on
+   *  UserPromptSubmit (new turn); consumed by the Stop-hook's
+   *  ready-work suppression and cleared after Stop. A pure Q&A turn
+   *  leaves it at `false`, suppressing the directive. See
+   *  wi-0f1492f5e60e. */
+  private readonly turnActivityByThread = new Map<string, boolean>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -177,6 +164,11 @@ export class ElectronRuntime {
   /** Guards against overlapping restarts — fs events keep firing while
    *  the restart is in-flight. */
   private devReloadInFlight = false;
+  /** ISO timestamp captured in `initialize()`. Used as the cutoff for
+   *  `turnStore.listOpenTurns` so orphaned open turns from prior runs
+   *  (newde crashed mid-turn, `ended_at` never set) don't haunt the UI's
+   *  in_progress bucket. See the passive-turn-tracking plan. */
+  startedAt: string = "";
   private disposed = false;
 
   private constructor(projectDir: string, projectBase: string, logger: Logger, config: NewdeConfig) {
@@ -199,7 +191,6 @@ export class ElectronRuntime {
     );
     this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
-    this.workItemCommitStore = new WorkItemCommitStore(projectDir, logger.child({ subsystem: "work-item-commit-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
@@ -252,6 +243,7 @@ export class ElectronRuntime {
   }
 
   private async initialize(): Promise<void> {
+    this.startedAt = new Date().toISOString();
     const gitWorkspace = isGitRepo(this.projectDir);
     const branch = gitWorkspace ? detectCurrentBranch(this.projectDir) ?? this.projectBase : this.projectBase;
 
@@ -306,34 +298,6 @@ export class ElectronRuntime {
         streamId: change.streamId,
         t: change.t,
       });
-      // Backfill the work_item_commit junction for ad-hoc commits that
-      // bypassed `executeAutoCommitForThread` (agent Bash `git commit`,
-      // Files-panel commits). See wi-ec4c8e6f44fd. Skips when the sha is
-      // already linked (runtime-mediated commits race here — whichever
-      // side lands first wins, the other is a no-op).
-      try {
-        const stream = this.store.get(change.streamId);
-        if (!stream) return;
-        const sha = readWorktreeHeadSha(stream.worktree_path);
-        if (!sha) return;
-        const state = this.threadStore.list(change.streamId);
-        for (const t of state.threads) {
-          if (t.status !== "active") continue;
-          backfillCommitLinksForThread(
-            {
-              effortStore: this.effortStore,
-              workItemCommitStore: this.workItemCommitStore,
-              commitPointStore: this.commitPointStore,
-            },
-            { threadId: t.id, sha },
-          );
-        }
-      } catch (err) {
-        this.logger.warn("git-refs backfill failed", {
-          streamId: change.streamId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
     });
     this.hookEvents.subscribe((event) => {
       this.events.publish({
@@ -1510,12 +1474,15 @@ export class ElectronRuntime {
     // directive — the agent already has the list.
     const justReadReadySet = this.lastReadWorkOptionsByThread.get(threadId);
     this.lastReadWorkOptionsByThread.delete(threadId);
-    // The Stop hook runs after applyTurnTracking closes the turn, so
-    // currentOpenTurn is typically null by now. Fall back to the
-    // most-recent turn row to read the prompt for conversational-suppression.
-    const currentTurnPrompt = openTurn?.prompt
-      ?? this.turnStore.listForThread(threadId, 1)[0]?.prompt
-      ?? null;
+    // Activity flag for the turn being closed: false when the turn was
+    // pure Q&A / planning / review, true when any mutation / filing /
+    // dispatch tool fired. Consumed by the Stop-hook's ready-work
+    // directive (suppress on pure Q&A) and then cleared. `undefined` if
+    // we never saw UserPromptSubmit for this thread — the pipeline's
+    // default is non-suppressive so the directive still fires. See
+    // wi-0f1492f5e60e.
+    const turnProducedActivity = this.turnActivityByThread.get(threadId);
+    this.turnActivityByThread.delete(threadId);
     const cumulativeCacheRead = this.turnStore.getCumulativeCacheRead(threadId);
     // Cheap clean-tree probe: suppresses the auto-commit directive when an
     // ad-hoc `git commit` (Bash / Files panel) already landed the work, so
@@ -1541,7 +1508,7 @@ export class ElectronRuntime {
       currentTurnStartedAt: openTurn?.started_at ?? null,
       currentTurnFilePaths,
       autoCommit: thread?.auto_commit ?? false,
-      currentTurnPrompt,
+      turnProducedActivity,
       justReadReadySet,
       cumulativeCacheRead,
       worktreeClean,
@@ -1590,6 +1557,12 @@ export class ElectronRuntime {
         // Reset the running-turn tool-byte estimate so the next session
         // context block starts from zero for this turn.
         this.currentTurnBytesByThread.delete(threadId);
+        // Seed the turn-activity flag to `false` at the start of each
+        // turn. PostToolUse flips it to `true` on the first mutation /
+        // filing / dispatch tool call; the Stop-hook reads it to decide
+        // whether to suppress the ready-work directive (pure Q&A turn →
+        // suppress). See `isActivityTool` and wi-0f1492f5e60e.
+        this.turnActivityByThread.set(threadId, false);
         const turn = this.turnStore.openTurn({ threadId, prompt, sessionId });
         const thread = this.threadStore.findById(threadId);
         if (thread) {
@@ -1620,74 +1593,26 @@ export class ElectronRuntime {
         } catch {
           // Never let estimation failures disrupt hook handling.
         }
-        // Auto-file path: on the first write-intent tool call of a turn, the
-        // runtime synthesizes an agent-auto work item so the Work panel
-        // populates without Claude having to call create_work_item. Fires
-        // for successful write-intent tools only — we don't want to file a
-        // ticket for a failed Bash call. See autoFileWorkItemIfNeeded.
-        if (toolStatus !== "error" && isWriteIntentTool(toolName, payload.tool_input)) {
-          try {
-            const openTurn = this.turnStore.currentOpenTurn(threadId);
-            const prompt = openTurn?.prompt ?? null;
-            autoFileWorkItemIfNeeded(
-              { workItemStore: this.workItemStore },
-              { threadId, prompt },
-            );
-          } catch (err) {
-            this.logger.warn("auto-file on PostToolUse failed", {
-              threadId, toolName,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+        // Activity flag: flip to `true` on any successful mutation /
+        // filing / dispatch tool call. Used by the Stop-hook to
+        // distinguish pure Q&A turns (suppress ready-work directive)
+        // from turns that produced real work (fire directive even if the
+        // prompt looked conversational). See wi-0f1492f5e60e.
+        if (toolStatus !== "error" && isActivityTool(toolName, payload.tool_input)) {
+          this.turnActivityByThread.set(threadId, true);
         }
-        // Capture Bash stdout for signal detection at Stop (test counts, tsc
-        // errors, commit shas). The HookEventStore normalized form drops
-        // stdout, so we buffer raw tool_response text per (thread, turn)
-        // and flush at Stop. See `composeAutoCompleteNote`.
-        if (toolStatus !== "error" && toolName === "Bash") {
-          const openTurn = this.turnStore.currentOpenTurn(threadId);
-          if (openTurn) {
-            const out = extractBashStdout(payload.tool_response);
-            if (out) {
-              const key = `${threadId}\0${openTurn.id}`;
-              const buf = this.bashOutputsByTurn.get(key) ?? [];
-              buf.push(out);
-              // Cap per-turn memory — keep the last ~20 commands (summary
-              // lines are short, but some outputs are long).
-              if (buf.length > 20) buf.splice(0, buf.length - 20);
-              this.bashOutputsByTurn.set(key, buf);
-            }
-          }
-        }
-        // Coordinator-only turn tracking: tally dispatch-shaped tool calls
-        // so a turn that is pure orchestration (no direct edits) still
-        // closes its auto-filed item at Stop with a coordination note +
-        // links to dispatched children. See wi-4daabc5e1dae and
-        // autoCompleteOpenAutoItems' coordinator-only branch.
-        if (toolStatus !== "error" && isDispatchLikeTool(toolName)) {
-          const openTurn = this.turnStore.currentOpenTurn(threadId);
-          if (openTurn) {
-            const key = `${threadId}\0${openTurn.id}`;
-            const prev = this.dispatchesByTurn.get(key) ?? { count: 0, itemIds: [] };
-            prev.count += 1;
-            const extracted = extractDispatchedItemIds(toolName, payload.tool_input);
-            for (const id of extracted) {
-              if (!prev.itemIds.includes(id)) prev.itemIds.push(id);
-            }
-            this.dispatchesByTurn.set(key, prev);
-          }
-        }
-        // Capture TodoWrite state (Claude Code's built-in within-turn task
-        // list) for the task-list bridge. The last call wins — TodoWrite
-        // payloads are declarative (the full list of todos in final shape),
-        // so we just keep the most recent.
+        // TaskCreate/TaskUpdate → agent_turn.task_list_json bridge.
+        // TodoWrite payloads are declarative (the full list of todos in
+        // final shape), so each call wins and we persist the latest JSON
+        // on the row immediately — the Work panel's open-turn row renders
+        // from this column, so live updates must be visible mid-turn, not
+        // deferred to Stop.
         if (toolStatus !== "error" && toolName === "TodoWrite") {
           const openTurn = this.turnStore.currentOpenTurn(threadId);
           if (openTurn) {
             const todos = extractTodoList(payload.tool_input);
             if (todos && todos.length > 0) {
-              const key = `${threadId}\0${openTurn.id}`;
-              this.todoStateByTurn.set(key, todos);
+              this.turnStore.setTaskList(openTurn.id, JSON.stringify(todos));
             }
           }
         }
@@ -1714,6 +1639,14 @@ export class ElectronRuntime {
         if (!open) return;
         const thread = this.threadStore.findById(threadId);
         this.turnStore.closeTurn(open.id, { answer: null });
+        // Persist the per-turn activity flag before computeStopDirective
+        // consumes (and clears) it. Closed turns that produced no
+        // activity surface in the Work panel's "Recent answers" section
+        // so the user can re-read Q&A turns without them cluttering
+        // Done. `undefined` in the map means UserPromptSubmit never
+        // fired (unknown) — persist as NULL so the query skips the row.
+        const activity = this.turnActivityByThread.get(threadId);
+        this.turnStore.setProducedActivity(open.id, activity === undefined ? null : activity);
         const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
           ? (envelope.payload as { transcript_path: string }).transcript_path
           : null;
@@ -1726,72 +1659,10 @@ export class ElectronRuntime {
         if (thread) {
           const endSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-end");
           if (endSnapshotId) this.turnStore.setEndSnapshot(open.id, endSnapshotId);
-          // Auto-complete the runtime-filed "agent-auto" work item, if any,
-          // using the turn's file-change set as the note body. Only fires
-          // when a matching item exists and has an effort linked to THIS
-          // turn — explicitly agent-created items are left alone. See
-          // autoCompleteOpenAutoItems + the plan in .context/agent-model.md.
-          try {
-            const filePaths = endSnapshotId && open.start_snapshot_id
-              ? Object.keys(this.snapshotStore.getSnapshotSummary(endSnapshotId, open.start_snapshot_id)?.files ?? {})
-              : [];
-            // Drain the per-turn Bash output buffer and scan for structured
-            // signals (test counts, tsc error totals, commit shas). Each
-            // detector returns non-null only when its pattern is found, so
-            // absent signals stay absent.
-            const bufKey = `${threadId}\0${open.id}`;
-            const joinedBash = (this.bashOutputsByTurn.get(bufKey) ?? []).join("\n");
-            let testResult: { pass: number; fail: number } | null = null;
-            let tscErrors: number | null = null;
-            let commitShas: string[] | null = null;
-            if (joinedBash) {
-              testResult = detectTestResultFromBashOutput(joinedBash);
-              tscErrors = detectTscErrorsFromBashOutput(joinedBash);
-              commitShas = detectCommitShasFromBashOutput(joinedBash);
-            }
-            const dispatches = this.dispatchesByTurn.get(bufKey);
-            autoCompleteOpenAutoItems(
-              { workItemStore: this.workItemStore, effortStore: this.effortStore },
-              {
-                threadId, turnId: open.id, filePaths,
-                testResult, tscErrors, commitShas,
-                actorId: "runtime-auto",
-                dispatchCount: dispatches?.count ?? 0,
-                dispatchedItemIds: dispatches?.itemIds ?? null,
-              },
-            );
-            // Task-list bridge: if Claude Code's within-turn TodoWrite was
-            // used this turn, serialize the final state as a note on the
-            // active in_progress item. No note when TodoWrite wasn't used.
-            const todos = this.todoStateByTurn.get(bufKey);
-            if (todos && todos.length > 0) {
-              try {
-                const target = this.workItemStore.findOpenAutoItemForThread(threadId);
-                const note = composeTaskListNote(todos);
-                if (target && note) {
-                  this.workItemStore.addNote(threadId, target.id, note, "system", "runtime-auto");
-                }
-              } catch (err) {
-                this.logger.warn("task-list bridge note failed", {
-                  threadId, turnId: open.id,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }
-            this.bashOutputsByTurn.delete(bufKey);
-            this.todoStateByTurn.delete(bufKey);
-            this.dispatchesByTurn.delete(bufKey);
-            // The next UserPromptSubmit will reset this too, but clear
-            // on Stop so any context block rendered between Stop and the
-            // next prompt (e.g. from the next UserPromptSubmit hook)
-            // starts cleanly.
-            this.currentTurnBytesByThread.delete(threadId);
-          } catch (err) {
-            this.logger.warn("auto-complete on Stop failed", {
-              threadId, turnId: open.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          // The next UserPromptSubmit will reset this too, but clear on
+          // Stop so any context block rendered between Stop and the next
+          // prompt starts cleanly.
+          this.currentTurnBytesByThread.delete(threadId);
         }
         return;
       }
@@ -1961,6 +1832,27 @@ export class ElectronRuntime {
     return this.turnStore.listForThread(threadId, limit);
   }
 
+  /** Active turns (`ended_at IS NULL` AND `started_at >= runtime.startedAt`)
+   *  for a thread. Used by the Work panel's in_progress bucket to render
+   *  each live agent turn as its own synthetic row (showing the prompt +
+   *  elapsed time + optional TaskCreate breakdown). Orphaned rows from
+   *  prior runs are filtered out via `startedAt`. */
+  listOpenTurns(threadId: string): AgentTurn[] {
+    return this.turnStore.listOpenTurns(threadId, this.startedAt);
+  }
+
+  /** Recent closed turns for a thread that produced no activity — the
+   *  "Recent answers" section in the Work panel. Re-readable Q&A turns
+   *  without cluttering Done. */
+  listRecentInactiveTurns(threadId: string, limit?: number): AgentTurn[] {
+    return this.turnStore.listRecentInactiveTurns(threadId, limit);
+  }
+
+  /** Archive a closed Q&A turn so it drops out of the Recent-answers list. */
+  archiveAgentTurn(turnId: string): AgentTurn | null {
+    return this.turnStore.archiveTurn(turnId);
+  }
+
   listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
     return this.snapshotStore.listSnapshotsForStream(streamId, limit);
   }
@@ -2077,23 +1969,6 @@ export class ElectronRuntime {
       throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
     }
     this.logger.info("auto-commit: committed", { threadId, sha: result.sha, message: finalMessage });
-    // Attribute the sha back to the contributing work items via the
-    // `work_item_commit` junction (migration v27). Uses the same
-    // "tasks since last commit" cutoff `mcp__newde__tasks_since_last_commit`
-    // uses. Guarded so a junction-insert blip doesn't fail the commit.
-    try {
-      const latestDone = this.commitPointStore.getLatestDoneForThread(threadId);
-      linkCommitToContributingItems(
-        { effortStore: this.effortStore, workItemCommitStore: this.workItemCommitStore },
-        { threadId, sha: result.sha, latestDoneCompletedAt: latestDone?.completed_at ?? null },
-      );
-    } catch (err) {
-      this.logger.warn("work_item_commit junction insert failed", {
-        threadId,
-        sha: result.sha,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
     this.events.publish({
       type: "thread.changed",
       streamId: thread.stream_id,
@@ -2318,7 +2193,7 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `Newde auto-tracks your work (first write-intent tool call auto-files, Stop auto-summarizes). The newde-runtime skill loads on-demand when you want to override.`,
+    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__newde__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__newde__complete_task\` (normal finish) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the newde-runtime skill for tool details.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -2632,190 +2507,40 @@ export function computeEffortFiles(
   };
 }
 
-/** Soft cap for the full auto-complete note body (see composeAutoCompleteNote). */
-export const AUTO_COMPLETE_NOTE_MAX_LEN = 400;
-
-/**
- * Build the auto-complete note body from the turn's file-change set and any
- * structured signals detected from recent Bash tool output. The
- * resulting note is what the runtime attaches to an auto-filed work item
- * when transitioning it to `human_check` at Stop — see
- * `autoCompleteOpenAutoItems` below and the plan in
- * `.context/agent-model.md`.
- *
- * Structured signals are heuristic-only (no LLM call) — grep test counts,
- * tsc error totals, and commit shas out of captured Bash stdout and
- * prepend them before the file-list summary. The design is deliberately
- * cheap: signals-present produces a concise leader line; signals-absent
- * falls back to the file list.
- *
- * Format:
- *   `Auto-summary: touched N files: <a>, <b>, …and M more`  (when N > 5)
- *   `Auto-summary: touched N files: <a>, <b>`                (when N ≤ 5)
- *   `Auto-summary: no file changes detected.`                (when N = 0)
- *
- * When `testResult`, `tscErrors`, or `commitShas` are non-null, a signals
- * leader is prepended (e.g. `Tests: 484/0. tsc: clean. `). Total note
- * length is clamped to `AUTO_COMPLETE_NOTE_MAX_LEN` chars.
- */
-export function composeAutoCompleteNote(input: {
-  filePaths: string[];
-  testResult?: { pass: number; fail: number } | null;
-  tscErrors?: number | null;
-  commitShas?: string[] | null;
-}): string {
-  const unique = Array.from(new Set(input.filePaths.filter((p) => typeof p === "string" && p.length > 0)));
-  const head = unique.length === 0
-    ? "Auto-summary: no file changes detected."
-    : (() => {
-      const preview = unique.slice(0, 5).join(", ");
-      const more = unique.length > 5 ? ` …and ${unique.length - 5} more` : "";
-      return `Auto-summary: touched ${unique.length} file${unique.length === 1 ? "" : "s"}: ${preview}${more}.`;
-    })();
-  const signalParts: string[] = [];
-  if (input.testResult) {
-    const { pass, fail } = input.testResult;
-    signalParts.push(
-      fail === 0
-        ? `Tests: ${pass}/0`
-        : `Tests: ${pass}/${fail} (${fail} failing)`,
-    );
-  }
-  if (input.tscErrors != null) {
-    signalParts.push(input.tscErrors === 0 ? "tsc: clean" : `TS errors: ${input.tscErrors}`);
-  }
-  if (input.commitShas && input.commitShas.length > 0) {
-    signalParts.push(`commits: ${input.commitShas.slice(0, 3).join(", ")}`);
-  }
-  const signalPrefix = signalParts.length > 0 ? `${signalParts.join(". ")}. ` : "";
-  const full = `${signalPrefix}${head}`;
-  if (full.length <= AUTO_COMPLETE_NOTE_MAX_LEN) return full;
-  return full.slice(0, AUTO_COMPLETE_NOTE_MAX_LEN - 1) + "…";
-}
-
-/**
- * Count `error TSxxxx` occurrences in a Bash output string — the shape
- * `tsc --noEmit` prints for each type error. Returns null when the
- * output contains no tsc-style line at all (so the caller knows tsc
- * wasn't run). Returns `0` when a tsc run is detected (the output
- * mentions "tsc" or "tsconfig") but no errors were printed — useful
- * for the "tsc: clean" signal.
- */
-export function detectTscErrorsFromBashOutput(output: string | null | undefined): number | null {
-  if (typeof output !== "string" || output.length === 0) return null;
-  const errorRe = /error TS\d+/g;
-  const errorMatches = output.match(errorRe);
-  if (errorMatches && errorMatches.length > 0) return errorMatches.length;
-  // No error lines — only signal "clean" when we're confident this was a tsc run.
-  if (/\btsc\b|tsconfig|Found \d+ errors?/i.test(output)) return 0;
-  return null;
-}
-
-/**
- * Extract short git commit shas from Bash output — matches the
- * `[branch abcdef1]` shape `git commit` prints on success. Returns a
- * deduped list of sha prefixes (7-10 hex chars) or null when nothing
- * matches. Caller prepends to the auto-complete note as
- * `commits: <sha>[, <sha>...]`.
- */
-export function detectCommitShasFromBashOutput(output: string | null | undefined): string[] | null {
-  if (typeof output !== "string" || output.length === 0) return null;
-  // `[main 1a2b3c4]` or `[detached HEAD 1a2b3c4]`
-  const shaRe = /\[(?:[^\]]+?\s)?([0-9a-f]{7,10})\]/g;
-  const found: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = shaRe.exec(output)) !== null) {
-    if (m[1] && !found.includes(m[1])) found.push(m[1]);
-  }
-  return found.length > 0 ? found : null;
-}
-
-/**
- * Parse a Bash tool output string for the bun-test / jest-style summary
- * line `N pass\s+M fail`. Returns the first match or null. Only looks at
- * the last ~50 lines (the summary line is at the very end by convention).
- */
-export function detectTestResultFromBashOutput(output: string | null | undefined): { pass: number; fail: number } | null {
-  if (typeof output !== "string" || output.length === 0) return null;
-  const lines = output.split(/\r?\n/);
-  const tail = lines.slice(-80);
-  // Case 1: `N pass M fail` on a single line (other test runners).
-  const combined = /^\s*(\d+)\s+pass\s+(\d+)\s+fail/;
-  // Case 2: bun-test splits across two lines (` N pass` then ` M fail`).
-  const passRe = /^\s*(\d+)\s+pass\s*$/;
-  const failRe = /^\s*(\d+)\s+fail\s*$/;
-  let lastPass: number | null = null;
-  let lastFail: number | null = null;
-  for (const line of tail) {
-    const combinedMatch = combined.exec(line);
-    if (combinedMatch) return { pass: Number(combinedMatch[1]), fail: Number(combinedMatch[2]) };
-    const p = passRe.exec(line);
-    if (p) lastPass = Number(p[1]);
-    const f = failRe.exec(line);
-    if (f) lastFail = Number(f[1]);
-  }
-  if (lastPass !== null && lastFail !== null) return { pass: lastPass, fail: lastFail };
-  return null;
-}
-
-export interface AutoCompleteDeps {
-  workItemStore: WorkItemStore;
-  effortStore: WorkItemEffortStore;
-}
-
-/** Orchestrator dispatch-shaped tool names. A turn that only calls these
- *  (no Edit/Write/Bash edits) still represents real work — the orchestrator
- *  split the prompt into subagent tasks. The Stop-hook auto-complete path
- *  uses the tally to decide whether an empty auto-item should close with a
- *  "Coordinated N dispatches" note rather than sit in_progress forever.
- *  See wi-4daabc5e1dae. */
-const DISPATCH_LIKE_TOOLS: ReadonlySet<string> = new Set([
-  "Task",
-  "mcp__newde__dispatch_work_item",
-  "mcp__newde__file_epic_with_children",
-]);
-
-export function isDispatchLikeTool(toolName: string): boolean {
-  return DISPATCH_LIKE_TOOLS.has(toolName);
-}
-
-/** Best-effort scrape of work-item ids from a dispatch-shaped tool_input.
- *  `mcp__newde__dispatch_work_item` carries `{ itemId }` directly; the
- *  built-in `Task` tool has opaque subagent prompts — we scan the prompt
- *  text for `wi-<hex>` tokens (the id format createId emits). Returns an
- *  empty array on anything unrecognisable. */
-export function extractDispatchedItemIds(toolName: string, toolInput: unknown): string[] {
-  if (!toolInput || typeof toolInput !== "object") return [];
-  const obj = toolInput as Record<string, unknown>;
-  const out: string[] = [];
-  const pushIfId = (v: unknown) => {
-    if (typeof v === "string" && /^wi-[0-9a-f]+$/.test(v)) out.push(v);
-  };
-  pushIfId(obj.itemId);
-  pushIfId(obj.workItemId);
-  // Task/Agent invocations: scan the brief text.
-  const textCandidates: unknown[] = [obj.prompt, obj.description, obj.input];
-  for (const field of textCandidates) {
-    if (typeof field !== "string") continue;
-    const matches = field.match(/\bwi-[0-9a-f]+\b/g);
-    if (matches) out.push(...matches);
-  }
-  // Deduped, preserving first-seen order.
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const id of out) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    unique.push(id);
-  }
-  void toolName;
-  return unique;
-}
-
 /** Tool names that always count as write-intent. */
 const ALWAYS_WRITE_INTENT_TOOLS: ReadonlySet<string> = new Set([
   "Write", "Edit", "MultiEdit", "NotebookEdit",
 ]);
+
+/** Tool names that count as "turn produced real work" even if nothing
+ *  was written to disk: filing / transition / dispatch calls. Combined
+ *  with the write-intent check (Edits, Writes, non-readonly Bash) in
+ *  `isActivityTool` to form the signal the Stop-hook uses to decide
+ *  whether to fire the ready-work directive. See wi-0f1492f5e60e. */
+const FILING_AND_DISPATCH_ACTIVITY_TOOLS: ReadonlySet<string> = new Set([
+  "Task",
+  "mcp__newde__create_work_item",
+  "mcp__newde__file_epic_with_children",
+  "mcp__newde__complete_task",
+  "mcp__newde__update_work_item",
+  "mcp__newde__transition_work_items",
+  "mcp__newde__add_work_note",
+  "mcp__newde__dispatch_work_item",
+]);
+
+/**
+ * Did a tool call count as mutation / filing / dispatch activity for
+ * the current turn? Used by the Stop-hook ready-work suppression (a
+ * turn with zero activity is treated as pure Q&A and suppresses the
+ * directive; any activity re-arms it). The write-intent check subsumes
+ * Edits, Writes, and non-readonly Bash; the filing/dispatch set adds
+ * the MCP tools that represent real work without touching the worktree.
+ */
+export function isActivityTool(toolName: string, toolInput: unknown): boolean {
+  if (FILING_AND_DISPATCH_ACTIVITY_TOOLS.has(toolName)) return true;
+  if (isWriteIntentTool(toolName, toolInput)) return true;
+  return false;
+}
 
 /** Leading tokens that mark a Bash command as read-only. Matched case-sensitively
  *  against the first non-whitespace word of the command (`git log`, `git diff`,
@@ -2851,243 +2576,6 @@ export function isWriteIntentTool(toolName: string, toolInput: unknown): boolean
   return true;
 }
 
-/** Build the auto-filed work-item's title from the turn prompt: first 60
- *  chars, newlines collapsed, trimmed. Falls back to "agent work". */
-export function deriveAutoItemTitleFromPrompt(prompt: string | null | undefined): string {
-  if (!prompt || typeof prompt !== "string") return "agent work";
-  const collapsed = prompt.replace(/\s+/g, " ").trim();
-  if (!collapsed) return "agent work";
-  if (collapsed.length <= 60) return collapsed;
-  return collapsed.slice(0, 57) + "...";
-}
-
-/**
- * Heuristic title derived from the set of files touched during an auto-
- * filed item's lifecycle. Used to rewrite the prompt-prefix title at
- * auto-complete time so local blame reads a useful label rather than
- * the first 60 chars of the original user prompt.
- *
- * - 0 files → null (caller keeps existing title)
- * - 1 file  → `Edit <basename>`
- * - 2–3 files without common dir → `Edit a, b[, c]`
- * - 2–3 files sharing a top-level dir → `Edit <dir>: a, b[, c]`
- * - 4+ files → `Edit [<dir>: ]a, b, +N more`
- *
- * Result is always trimmed to ≤60 chars.
- */
-export function deriveAutoItemTitleFromDiff(filePaths: string[]): string | null {
-  const unique = Array.from(new Set(
-    (filePaths ?? []).filter((p): p is string => typeof p === "string" && p.length > 0),
-  ));
-  if (unique.length === 0) return null;
-  const basename = (p: string): string => {
-    const slash = p.lastIndexOf("/");
-    return slash === -1 ? p : p.slice(slash + 1);
-  };
-  const topDir = (p: string): string | null => {
-    const slash = p.indexOf("/");
-    return slash === -1 ? null : p.slice(0, slash);
-  };
-  // Single file always uses `Edit <basename>` — no dir prefix.
-  if (unique.length === 1) {
-    const out = `Edit ${basename(unique[0]!)}`;
-    return out.length <= 60 ? out : out.slice(0, 60);
-  }
-
-  const dirs = unique.map(topDir);
-  const firstDir = dirs[0];
-  const allShareDir = firstDir !== null && dirs.every((d) => d === firstDir);
-  const prefix = allShareDir ? `Edit ${firstDir}: ` : "Edit ";
-
-  let body: string;
-  if (unique.length <= 3) {
-    body = unique.map(basename).join(", ");
-  } else {
-    const head = [basename(unique[0]!), basename(unique[1]!)];
-    body = `${head.join(", ")}, +${unique.length - 2} more`;
-  }
-
-  const out = `${prefix}${body}`;
-  if (out.length <= 60) return out;
-  return out.slice(0, 60);
-}
-
-/**
- * Insert one `work_item_commit` junction row per contributing work item
- * for the given sha. "Contributing" is defined as the items returned by
- * `listClosedEffortsForThreadAfter(threadId, latestDoneCompletedAt)` —
- * the same set the `mcp__newde__tasks_since_last_commit` MCP tool
- * exposes. Deduped by itemId so an item with multiple closed efforts
- * in the window gets one row. Uses `INSERT OR IGNORE`, so re-running
- * against the same (item, sha) pair is a no-op.
- */
-export function linkCommitToContributingItems(
-  deps: { effortStore: WorkItemEffortStore; workItemCommitStore: WorkItemCommitStore },
-  input: { threadId: string; sha: string; latestDoneCompletedAt: string | null },
-): string[] {
-  const closed = deps.effortStore.listClosedEffortsForThreadAfter(
-    input.threadId,
-    input.latestDoneCompletedAt,
-  );
-  const seen = new Set<string>();
-  const committedAt = new Date().toISOString();
-  for (const entry of closed) {
-    if (seen.has(entry.itemId)) continue;
-    seen.add(entry.itemId);
-    deps.workItemCommitStore.insert(entry.itemId, input.sha, committedAt);
-  }
-  return Array.from(seen);
-}
-
-/** Junction backfill for ad-hoc commits — called when `git-refs.changed`
- *  fires with a new HEAD sha that the runtime did NOT produce via
- *  `executeAutoCommitForThread`. Populates `work_item_commit` rows for
- *  every work item settled since the thread's most recent done commit
- *  point, so Files-panel commits and agent Bash `git commit` calls no
- *  longer bypass the junction. Idempotent (INSERT OR IGNORE). Skips
- *  shas the junction has already seen. Returns the itemIds inserted, or
- *  an empty array when there's nothing to do (no sha, already backfilled,
- *  or no settled efforts). See wi-ec4c8e6f44fd. */
-export function backfillCommitLinksForThread(
-  deps: {
-    effortStore: WorkItemEffortStore;
-    workItemCommitStore: WorkItemCommitStore;
-    commitPointStore: CommitPointStore;
-  },
-  input: { threadId: string; sha: string | null },
-): string[] {
-  if (!input.sha) return [];
-  const alreadyLinked = deps.workItemCommitStore.listItemsForSha(input.sha);
-  if (alreadyLinked.length > 0) return [];
-  const latestDone = deps.commitPointStore.getLatestDoneForThread(input.threadId);
-  return linkCommitToContributingItems(
-    { effortStore: deps.effortStore, workItemCommitStore: deps.workItemCommitStore },
-    { threadId: input.threadId, sha: input.sha, latestDoneCompletedAt: latestDone?.completed_at ?? null },
-  );
-}
-
-export interface AutoFileDeps {
-  workItemStore: WorkItemStore;
-}
-
-/**
- * If the thread has no open `author='agent-auto'` work item, create one
- * (in_progress, title derived from the turn prompt) and return its id.
- * Otherwise returns null (the runtime has already filed the auto-item
- * for this turn — subsequent write-intent calls don't stack).
- */
-export function autoFileWorkItemIfNeeded(
-  deps: AutoFileDeps,
-  input: { threadId: string; prompt: string | null | undefined },
-): string | null {
-  const existing = deps.workItemStore.findOpenAutoItemForThread(input.threadId);
-  if (existing) return null;
-  const title = deriveAutoItemTitleFromPrompt(input.prompt);
-  const item = deps.workItemStore.createItem({
-    threadId: input.threadId,
-    kind: "task",
-    title,
-    status: "in_progress",
-    createdBy: "system",
-    actorId: "runtime-auto",
-    author: "agent-auto",
-  });
-  return item.id;
-}
-
-/**
- * At Stop time, if an auto-filed in_progress item (author='agent-auto')
- * exists in this thread AND has effort rows linked to the just-closed
- * turn, emit an auto-summary note and flip the item to human_check. The
- * note body comes from `composeAutoCompleteNote`. Idempotent: a thread
- * without an auto-filed item is a no-op.
- *
- * Returns the item id that was auto-completed, or null.
- */
-export function autoCompleteOpenAutoItems(
-  deps: AutoCompleteDeps,
-  input: {
-    threadId: string;
-    turnId: string;
-    filePaths: string[];
-    testResult?: { pass: number; fail: number } | null;
-    tscErrors?: number | null;
-    commitShas?: string[] | null;
-    actorId?: string;
-    /** Count of orchestrator dispatch tool calls observed in this turn
-     *  (Task / mcp__newde__dispatch_work_item / file_epic_with_children).
-     *  When > 0 and the item has no effort-in-turn and no diff, the
-     *  auto-item is still closed with a "Coordinated N dispatches" note
-     *  instead of being left in_progress. See wi-4daabc5e1dae. */
-    dispatchCount?: number | null;
-    /** Work-item ids the orchestrator dispatched this turn. Each is linked
-     *  to the closing auto-item via a `discovered_from` edge (child →
-     *  auto-item) so the orchestrator row stays visible in the Work panel
-     *  and the dispatched children point back at their coordinator. */
-    dispatchedItemIds?: string[] | null;
-  },
-): string | null {
-  const item = deps.workItemStore.findOpenAutoItemForThread(input.threadId);
-  if (!item) return null;
-  const effortsForTurn = deps.effortStore.listEffortsForTurn(input.turnId);
-  const hasEffortInThisTurn = effortsForTurn.some((e) => e.work_item_id === item.id);
-  const dispatchCount = input.dispatchCount ?? 0;
-  const coordinatorOnly = !hasEffortInThisTurn && dispatchCount > 0 && input.filePaths.length === 0;
-  if (!hasEffortInThisTurn && !coordinatorOnly) return null;
-  const actorId = input.actorId ?? "runtime-auto";
-  if (coordinatorOnly) {
-    // Orchestrator / coordinator turn: no edits, but real work — record the
-    // coordination + link to children.
-    const note = `Coordinated ${dispatchCount} subagent dispatch${dispatchCount === 1 ? "" : "es"}.`;
-    deps.workItemStore.addNote(input.threadId, item.id, note, "system", actorId);
-    const linked = new Set<string>();
-    for (const childId of input.dispatchedItemIds ?? []) {
-      if (!childId || childId === item.id || linked.has(childId)) continue;
-      try {
-        deps.workItemStore.linkItems(input.threadId, childId, item.id, "discovered_from");
-        linked.add(childId);
-      } catch {
-        // child might be in another thread or missing; skip silently.
-      }
-    }
-    deps.workItemStore.updateItem({
-      threadId: input.threadId,
-      itemId: item.id,
-      status: "human_check",
-      actorKind: "system",
-      actorId,
-    });
-    return item.id;
-  }
-  const note = composeAutoCompleteNote({
-    filePaths: input.filePaths,
-    testResult: input.testResult ?? null,
-    tscErrors: input.tscErrors ?? null,
-    commitShas: input.commitShas ?? null,
-  });
-  deps.workItemStore.addNote(input.threadId, item.id, note, "system", actorId);
-  // Rewrite the prompt-prefix title with a diff-derived label so blame
-  // and the Work panel read something specific. Only rewrites when we
-  // have at least one file path; otherwise keep the existing title.
-  const rewrittenTitle = deriveAutoItemTitleFromDiff(input.filePaths);
-  deps.workItemStore.updateItem({
-    threadId: input.threadId,
-    itemId: item.id,
-    status: "human_check",
-    ...(rewrittenTitle ? { title: rewrittenTitle } : {}),
-    actorKind: "system",
-    actorId,
-  });
-  return item.id;
-}
-
-/**
- * Pull a best-effort stdout string out of a PostToolUse `tool_response`.
- * Claude Code's Bash tool response shape is `{ stdout, stderr, interrupted, ... }`
- * or a raw string in older builds. We concatenate stdout + stderr when
- * both are present so signal detectors can match on either channel
- * (e.g. tsc emits errors on stdout, bun-test on either).
- */
 /**
  * Rough byte-size of a PostToolUse tool_response payload for the
  * running-turn cost estimator. String-serializes once per call; within
@@ -3103,21 +2591,6 @@ export function estimateToolResponseBytes(resp: unknown): number {
   } catch {
     return 0;
   }
-}
-
-export function extractBashStdout(resp: unknown): string | null {
-  if (resp == null) return null;
-  if (typeof resp === "string") return resp;
-  if (typeof resp === "object") {
-    const obj = resp as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof obj.stdout === "string") parts.push(obj.stdout);
-    if (typeof obj.stderr === "string" && obj.stderr.length > 0) parts.push(obj.stderr);
-    if (typeof obj.output === "string" && parts.length === 0) parts.push(obj.output);
-    if (parts.length === 0) return null;
-    return parts.join("\n");
-  }
-  return null;
 }
 
 /**
@@ -3140,33 +2613,6 @@ export function extractTodoList(input: unknown): Array<{ content: string; status
     if (content) out.push({ content, status });
   }
   return out;
-}
-
-/**
- * Serialize a TodoWrite final-state list into a one-line-per-step note
- * body. Format: `☑ completed step / ☐ pending step / ▶ in-progress step`.
- * Truncates each step's content to keep the note readable; full note
- * caps out at AUTO_COMPLETE_NOTE_MAX_LEN chars. Returns null when the
- * list is empty (caller treats null as "skip the note").
- */
-export function composeTaskListNote(
-  todos: Array<{ content: string; status: string }>,
-): string | null {
-  if (!Array.isArray(todos) || todos.length === 0) return null;
-  const glyph = (status: string): string => {
-    if (status === "completed") return "☑";
-    if (status === "in_progress") return "▶";
-    return "☐";
-  };
-  const trim = (s: string): string => {
-    const collapsed = String(s).replace(/\s+/g, " ").trim();
-    return collapsed.length > 80 ? collapsed.slice(0, 79) + "…" : collapsed;
-  };
-  const lines = todos.map((t) => `${glyph(t.status)} ${trim(t.content)}`);
-  const head = "TaskCreate breakdown:";
-  const full = `${head} ${lines.join(" / ")}`;
-  if (full.length <= AUTO_COMPLETE_NOTE_MAX_LEN) return full;
-  return full.slice(0, AUTO_COMPLETE_NOTE_MAX_LEN - 1) + "…";
 }
 
 function derivePostToolStatus(resp: unknown): "ok" | "error" {
