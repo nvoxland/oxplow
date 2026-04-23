@@ -223,6 +223,48 @@ export function descriptionLooksLikeEmbeddedCriteria(description: string | null 
   return /^\s*[-*]\s+\S/m.test(description);
 }
 
+// Redo-detection: a create_work_item call made shortly after closing
+// an item to `human_check` on the same thread is *probably* a redo the
+// user just asked for (common pattern: agent ships task, user pushes
+// back, agent reflexively files a new "Fix …" task). Surface the
+// candidate item id so the response hint can point the agent at the
+// reopen path (update_work_item → in_progress) instead.
+const REDO_HINT_WINDOW_MS = 10 * 60 * 1000;
+
+function findRecentHumanCheckItem(
+  workItemStore: WorkItemStore,
+  threadId: string,
+): { id: string; title: string } | null {
+  const cutoff = Date.now() - REDO_HINT_WINDOW_MS;
+  const items = workItemStore.listItems(threadId);
+  let candidate: { id: string; title: string; ts: number } | null = null;
+  for (const item of items) {
+    if (item.status !== "human_check") continue;
+    if (item.author !== "agent") continue;
+    const ts = Date.parse(item.updated_at);
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+    if (!candidate || ts > candidate.ts) {
+      candidate = { id: item.id, title: item.title, ts };
+    }
+  }
+  return candidate ? { id: candidate.id, title: candidate.title } : null;
+}
+
+function withRedoHint<T extends Record<string, unknown>>(
+  response: T,
+  recent: { id: string; title: string } | null,
+): T {
+  if (!recent) return response;
+  return {
+    ...response,
+    redoHint:
+      `Recently closed to human_check on this thread: ${recent.id} "${recent.title}". ` +
+      `If this create is a fix/redo of that item, cancel it and instead: ` +
+      `update_work_item ${recent.id} status=in_progress → redo → complete_task back to human_check. ` +
+      `Only keep this new item if it's a genuinely separate concern.`,
+  };
+}
+
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
   const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, turnStore, effortStore, markReadWorkOptions, forkThread } = deps;
 
@@ -447,7 +489,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
     },
     {
       name: "oxplow__create_work_item",
-      description: "Create a new epic/task/subtask/bug/note within one thread. Always pass the threadId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags.",
+      description: "Create a new epic/task/subtask/bug/note within one thread. Always pass the threadId from your session context. acceptanceCriteria, priority, and parentId are top-level JSON fields — do not embed them inside description as XML-style tags. For the 'file and close in one call' shortcut (retroactive splits, record rows where edits already shipped), pass `status: \"human_check\"` (or `\"blocked\"`) together with `touchedFiles`; the server opens and immediately closes an effort so Local History gets attribution just like a normal close. DO NOT use this to record a fix/redo of an item you just closed to `human_check` — reopen that item instead (`update_work_item` → `in_progress`), do the new effort, then `complete_task` back to `human_check`. Filing a new task for a redo fragments the history. A genuinely new concern still warrants a new item.",
       inputSchema: {
         type: "object",
         properties: {
@@ -460,6 +502,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           acceptanceCriteria: { type: "string", description: "Optional plain-text checklist (one criterion per line) defining observable conditions for 'done'." },
           status: { type: "string", description: "Optional initial status. One of: ready, in_progress, human_check, blocked, done, canceled, archived." },
           priority: { type: "string", description: "Optional priority: low, medium, high, or urgent." },
+          touchedFiles: {
+            type: "array",
+            description: "Optional list of repo-relative paths the agent edited for this item. Only meaningful when combined with `status: \"human_check\"` or `\"blocked\"` (the file-and-close shortcut) — the server synthesizes an in_progress→target transition so Local History can attribute writes. Silently ignored for other statuses.",
+            items: { type: "string" },
+          },
         },
         required: ["threadId", "kind", "title"],
       },
@@ -473,6 +520,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         acceptanceCriteria?: string | null;
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
+        touchedFiles?: string[];
       }) => {
         resolveThreadAndStream(args);
         // Silent-failure guard: agents sometimes cram the acceptance
@@ -485,6 +533,53 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           return {
             error: "acceptanceCriteria is a top-level JSON field; don't embed it inside description. Re-call oxplow__create_work_item with the checklist in the acceptanceCriteria field (one criterion per line, plain text).",
           };
+        }
+        // Redo-detection hint: if a human_check item authored by the
+        // agent was closed on this thread within the last 10 minutes,
+        // the new create is *probably* a redo the user just asked for.
+        // Emit a soft hint pointing at the reopen path. The create still
+        // proceeds — genuinely new concerns should get their own row —
+        // but the agent sees a nudge if this is actually a redo.
+        const recentHumanCheck = findRecentHumanCheckItem(workItemStore, args.threadId);
+        // File-and-close shortcut: when the caller asks for a terminal
+        // status AND passes `touchedFiles`, file at `ready`, then flip to
+        // `in_progress` (opens an effort), then flip to the target
+        // (closes with attribution). This is the only path by which an
+        // item filed "directly" into human_check/blocked can carry file
+        // attribution — otherwise no effort exists to hang the paths off.
+        const closesImmediately =
+          (args.status === "human_check" || args.status === "blocked")
+            && Array.isArray(args.touchedFiles) && args.touchedFiles.length > 0;
+        if (closesImmediately) {
+          const created = workItemStore.createItem({
+            threadId: args.threadId,
+            parentId: args.parentId,
+            kind: args.kind,
+            title: args.title,
+            description: args.description,
+            acceptanceCriteria: args.acceptanceCriteria,
+            status: "ready",
+            priority: args.priority,
+            createdBy: "agent",
+            actorId: "mcp",
+            author: "agent",
+          });
+          workItemStore.updateItem({
+            threadId: args.threadId,
+            itemId: created.id,
+            status: "in_progress",
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+          workItemStore.updateItem({
+            threadId: args.threadId,
+            itemId: created.id,
+            status: args.status!,
+            touchedFiles: args.touchedFiles,
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+          return withRedoHint({ ok: true, id: created.id, sort_index: created.sort_index }, recentHumanCheck);
         }
         const item = workItemStore.createItem({
           threadId: args.threadId,
@@ -506,15 +601,15 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         // shelved in a skill doc. Non-epic responses stay terse — no field is
         // added there so the happy-path log doesn't grow.
         if (args.kind === "epic") {
-          return {
+          return withRedoHint({
             ok: true,
             id: item.id,
             sort_index: item.sort_index,
             reminder:
               "Epic filed with 0 children. Per oxplow-runtime, file child tasks now (parentId=this id), before starting execution. An epic without children renders as one opaque IN PROGRESS row in the UI.",
-          };
+          }, recentHumanCheck);
         }
-        return { ok: true, id: item.id, sort_index: item.sort_index };
+        return withRedoHint({ ok: true, id: item.id, sort_index: item.sort_index }, recentHumanCheck);
       },
     },
     {
@@ -685,7 +780,9 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       description:
         "Collapse the final add_work_note + status transition into one call. Default " +
         "`status` is `human_check` (callers must not self-mark `done`). Pass `status: \"blocked\"` " +
-        "instead when you're signalling you can't finish and need user input. Rejects items " +
+        "instead when you're signalling you can't finish and need user input. Pass `touchedFiles` " +
+        "with the repo-relative paths you edited so Local History can attribute writes to this " +
+        "item — without it the panel falls back to \"assume all\" for this effort. Rejects items " +
         "whose current status is already terminal (done/canceled/archived) — use update_work_item " +
         "for those.",
       inputSchema: {
@@ -696,6 +793,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           itemId: { type: "string", description: "Required id of the work item to complete." },
           note: { type: "string", description: "Required summary note — what shipped, what's left, where to look." },
           status: { type: "string", description: "Optional. One of `human_check` (default) or `blocked`. `done` is rejected." },
+          touchedFiles: {
+            type: "array",
+            description: "Optional list of repo-relative paths the agent edited during this effort. Attaches to the closing effort for Local History attribution. Skip if >100 files — the fallback (assume-all) is fine for large change sets.",
+            items: { type: "string" },
+          },
         },
         required: ["threadId", "itemId", "note"],
       },
@@ -705,6 +807,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         itemId: string;
         note: string;
         status?: "human_check" | "blocked";
+        touchedFiles?: string[];
       }) => {
         resolveThreadAndStream(args);
         const item = workItemStore.completeTask({
@@ -712,6 +815,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           itemId: args.itemId,
           note: args.note,
           status: args.status,
+          touchedFiles: args.touchedFiles,
           actorKind: "agent",
           actorId: "mcp",
         });

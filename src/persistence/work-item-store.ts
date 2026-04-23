@@ -205,6 +205,13 @@ export interface CompleteTaskInput {
   /** Defaults to `human_check`. Only `human_check` and `blocked` are valid
    *  finishers — callers must not self-mark `done`. */
   status?: "human_check" | "blocked";
+  /** Optional list of repo-relative paths the agent touched during this
+   *  effort. Forwarded to the underlying status transition so the runtime
+   *  can insert `work_item_effort_file` rows at effort-close. This is the
+   *  ONE-shot attribution point for close-via-complete_task — if omitted,
+   *  the effort closes with zero attributed files and the Local History
+   *  panel falls back to "assume all" for this item. */
+  touchedFiles?: string[];
   actorKind: WorkItemActorKind;
   actorId: string;
 }
@@ -502,7 +509,7 @@ export class WorkItemStore {
       itemId: input.itemId,
       previousStatus: statusChanged ? existing.status : undefined,
       nextStatus: statusChanged ? nextStatus : undefined,
-      touchedFiles: statusChanged && nextStatus === "human_check" ? input.touchedFiles : undefined,
+      touchedFiles: statusChanged && (nextStatus === "human_check" || nextStatus === "blocked") ? input.touchedFiles : undefined,
     });
     return updated;
   }
@@ -651,6 +658,7 @@ export class WorkItemStore {
       threadId: input.threadId,
       itemId: input.itemId,
       status,
+      touchedFiles: input.touchedFiles,
       actorKind: input.actorKind,
       actorId: input.actorId,
     });

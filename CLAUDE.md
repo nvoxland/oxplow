@@ -59,10 +59,10 @@ tests use a fresh `mkdtempSync` project dir against a real SQLite file.
 
 Oxplow passively tracks active agent turns: each open `agent_turn` row
 (`ended_at IS NULL` and started after runtime boot) renders as a live
-row in the Work panel's in_progress bucket showing the prompt,
-"thinking…", and elapsed time. When the turn Stops, the row
-disappears. No synthesized work items, no auto-file/auto-complete, no
-adoption — you don't need to narrate turn boundaries.
+row in the Work panel's in_progress bucket showing the prompt and a
+spinner. When the turn Stops, the row disappears. No synthesized work
+items, no auto-file/auto-complete, no adoption — you don't need to
+narrate turn boundaries.
 
 **File a durable work item before you start editing.** When you realize
 you're about to change project files in a turn and you aren't already
@@ -75,6 +75,36 @@ item should describe the real piece of work you're committing to
 shipping, not a placeholder "auto" row that may or may not get
 reshaped into something real. When it's settled, call `complete_task`
 to ship an explicit summary.
+
+**One user-visible concern per work item.** If the user asks for two
+things that a reviewer would QA separately (e.g. "show (waiting) when
+idle" AND "drop the elapsed-time counter"), file them as two items —
+even if you intend to implement both in the same edit pass. Batching
+unrelated concerns into one row makes the Work panel useless for
+review: the user can't accept one and push back on the other without
+reopening the whole thing. The test: if a reasonable reviewer would
+want to check them independently, they're separate items.
+
+**Every new ask gets its own item.** When the user sends a new
+request mid-turn (including via `<system-reminder>` interruptions)
+while you're already on an in-progress item, don't silently expand the
+current item's scope. File a new work item for the new ask. It's fine
+to keep both `in_progress` briefly while you finish — the point is
+that the durable record matches what the user actually asked for, one
+ask per row. If the new ask is genuinely a correction to the same
+concern (not a separate concern), updating the existing item is OK.
+
+**Fixes/redos on a just-shipped item reopen that item — do NOT file a
+new task.** When the user pushes back on work you just closed to
+`human_check` (asks you to fix it, redo it, revert it, or take a
+different approach on the same concern), call `update_work_item` to
+flip that item from `human_check` back to `in_progress`, do the new
+effort, then `complete_task` back to `human_check`. The reopened
+transition opens a second effort so Local History attributes the
+redo correctly, and the Work panel keeps one row per user-visible
+concern instead of a littered trail of "Fix what I just did" tasks.
+Genuinely new concerns still get new items — this rule covers only
+"user rejected my last attempt at this same item."
 
 Claude Code's built-in TaskCreate/TaskUpdate is captured to
 `agent_turn.task_list_json` on every call and rendered live on the

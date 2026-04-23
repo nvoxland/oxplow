@@ -535,6 +535,47 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
     })).toThrow(/archived.*in_progress|ready.*first/i);
   });
 
+  test("completeTask forwards touchedFiles on the emitted change (human_check)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "in_progress",
+    });
+    const seen: Array<{ nextStatus?: string; touchedFiles?: string[] }> = [];
+    const off = workItems.subscribe((c) => {
+      if (c.kind === "updated") seen.push({ nextStatus: c.nextStatus, touchedFiles: c.touchedFiles });
+    });
+    workItems.completeTask({
+      threadId, itemId: item.id, note: "done",
+      touchedFiles: ["src/a.ts", "src/b.ts"],
+      actorKind: "agent", actorId: "mcp",
+    });
+    off();
+    const transition = seen.find((s) => s.nextStatus === "human_check");
+    expect(transition).toBeDefined();
+    expect(transition!.touchedFiles).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  test("completeTask forwards touchedFiles on the emitted change (blocked)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "in_progress",
+    });
+    const seen: Array<{ nextStatus?: string; touchedFiles?: string[] }> = [];
+    const off = workItems.subscribe((c) => {
+      if (c.kind === "updated") seen.push({ nextStatus: c.nextStatus, touchedFiles: c.touchedFiles });
+    });
+    workItems.completeTask({
+      threadId, itemId: item.id, note: "stuck",
+      status: "blocked",
+      touchedFiles: ["src/a.ts"],
+      actorKind: "agent", actorId: "mcp",
+    });
+    off();
+    const transition = seen.find((s) => s.nextStatus === "blocked");
+    expect(transition).toBeDefined();
+    expect(transition!.touchedFiles).toEqual(["src/a.ts"]);
+  });
+
   test("listReady excludes blocked items", () => {
     const { workItems, threadId } = seedThread();
     const readyItem = workItems.createItem({

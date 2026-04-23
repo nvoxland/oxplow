@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
-if [ ! -f "$DIR/dist/electron-main.cjs" ]; then
-  echo "[oxplow] missing Electron build output. Run 'bun run build' first." >&2
-  exit 1
-fi
 
 if [ ! -x "$DIR/node_modules/.bin/electron" ]; then
   echo "[oxplow] electron is not installed. Run 'bun install' first." >&2
   exit 1
 fi
+
+# Always rebuild so source edits land without the user remembering to
+# run `bun run build` manually. Bun's build is fast (electron bundles
+# in ~20ms; UI with Monaco splits in a second or two), so the launch
+# cost is minor and beats launching stale code.
+(cd "$DIR" && bun run build)
 
 exec "$DIR/node_modules/.bin/electron" "$DIR" --project "$PWD" "$@"

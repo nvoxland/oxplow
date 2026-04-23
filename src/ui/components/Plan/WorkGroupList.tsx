@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
@@ -573,7 +573,8 @@ export function WorkGroupList({
           ? visibleDoneRows.filter((r) => r.kind === "work" && r.item.status !== "archived").length
           : 0;
         return (
-          <div key={section.kind} data-testid={`plan-section-${section.kind}`}>
+          <Fragment key={section.kind}>
+          <div data-testid={`plan-section-${section.kind}`}>
             <div
               style={{ ...headerStyle, display: "flex", alignItems: "center", gap: 8 }}
               data-testid={`plan-section-header-${section.kind}`}
@@ -581,9 +582,6 @@ export function WorkGroupList({
             >
               <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
                 <span>{section.label}</span>
-                {section.rows.length > 0 ? (
-                  <span style={sectionCountBadgeStyle}>{section.rows.length}</span>
-                ) : null}
               </span>
               {isDone ? (
                 <DoneHeaderActions
@@ -616,8 +614,9 @@ export function WorkGroupList({
                 rather than the dead/done pile. Because "To do" always renders
                 (even when empty), the slot is always reachable. */}
             {section.kind === "toDo" ? addPointsSlot : null}
-            {section.kind === "inProgress" ? afterInProgressSlot : null}
           </div>
+          {section.kind === "inProgress" ? afterInProgressSlot : null}
+          </Fragment>
         );
       })}
     </div>
@@ -664,22 +663,6 @@ function DoneHeaderActions({
     </span>
   );
 }
-
-const sectionCountBadgeStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minWidth: 18,
-  height: 16,
-  padding: "0 6px",
-  borderRadius: 999,
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  color: "var(--muted)",
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: 0,
-};
 
 const miniDoneHeaderButtonStyle: CSSProperties = {
   borderRadius: 6,

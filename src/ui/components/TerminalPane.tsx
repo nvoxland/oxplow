@@ -59,12 +59,12 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         return true;
       }
 
-      // Cmd/Ctrl+V — xterm.js doesn't wire paste itself. Read the clipboard
-      // via the Electron renderer's navigator.clipboard and write through
-      // term.paste(). Returning false prevents xterm from also emitting a
-      // literal "v" as user input. Plain Cmd+Shift+V and Ctrl+V handled the
-      // same way; Alt is left alone (Alt+V is a real xterm key combo).
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "v") {
+      // Cmd+V (macOS paste shortcut) — xterm.js doesn't wire paste
+      // itself, so read the clipboard via navigator.clipboard and write
+      // through term.paste(). Ctrl+V is NOT intercepted: it should
+      // reach the running CLI as a literal ^V byte (0x16) so Claude
+      // Code's own paste handling (including images) can run.
+      if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "v") {
         event.preventDefault();
         void navigator.clipboard.readText().then((text) => {
           if (text) term.paste(text);

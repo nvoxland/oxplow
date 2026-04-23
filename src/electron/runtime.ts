@@ -1213,6 +1213,10 @@ export class ElectronRuntime {
     });
   }
 
+  private buildRecentHumanCheckReminder(threadId: string): string {
+    return buildRecentHumanCheckReminder(this.workItemStore.listItems(threadId), Date.now());
+  }
+
   private resolveActiveThreadForPrompt(streamId: string): Thread | null {
     const activeId = this.threadStore.list(streamId).activeThreadId;
     if (!activeId) return null;
@@ -1387,6 +1391,16 @@ export class ElectronRuntime {
     }
     if (envelope.event === "UserPromptSubmit") {
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
+      // If an agent-authored human_check item was closed on this thread
+      // very recently, there's a strong chance this new prompt is either
+      // a redo on it or a follow-up concern. Inject a reminder pointing
+      // at the item so the agent knows to reopen (update_work_item →
+      // in_progress) rather than silently expand scope or file a
+      // duplicate "Fix …" task. See CLAUDE.md "Fixes/redos on a just-
+      // shipped item" and the redoHint on create_work_item.
+      const redoReminder = envelope.threadId
+        ? this.buildRecentHumanCheckReminder(envelope.threadId)
+        : "";
       // Re-inject the session context each turn — the agent's system-prompt
       // SESSION CONTEXT line is frozen at launch, but the UI's active /
       // selected thread can flip mid-session. Reading the live state here
@@ -1407,7 +1421,7 @@ export class ElectronRuntime {
           sessionContext = candidate;
         }
       }
-      const additionalContext = [sessionContext, focusContext].filter(Boolean).join("\n\n");
+      const additionalContext = [sessionContext, focusContext, redoReminder].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -2193,7 +2207,7 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__oxplow__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
+    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__oxplow__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish; pass \`touchedFiles\` with paths you edited so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -2301,6 +2315,47 @@ function formatCurrentTurnSuffix(bytes: number | undefined): string | null {
     ? `${(bytes / 1_000_000).toFixed(1)}M`
     : `${Math.round(bytes / 1000)}K`;
   return `(this turn: ~${rendered} so far)`;
+}
+
+/**
+ * When the most-recently-closed agent-authored item on this thread is in
+ * `human_check` and closed within the reminder window (default 15 min),
+ * produce a prominent reminder pointing at it. Injected into
+ * UserPromptSubmit additionalContext so that when the user's new prompt
+ * is likely a correction to that item, the agent sees the reopen path
+ * (update_work_item → in_progress) before anything else — instead of
+ * filing a duplicate "Fix …" task, silently expanding another item's
+ * scope, or forgetting to re-record the effort. Returns empty when
+ * no eligible item exists.
+ */
+export function buildRecentHumanCheckReminder(
+  items: WorkItem[],
+  now: number,
+  windowMs = 15 * 60 * 1000,
+): string {
+  const cutoff = now - windowMs;
+  let candidate: { id: string; title: string; ts: number } | null = null;
+  for (const item of items) {
+    if (item.status !== "human_check") continue;
+    if (item.author !== "agent") continue;
+    const ts = Date.parse(item.updated_at);
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+    if (!candidate || ts > candidate.ts) {
+      candidate = { id: item.id, title: item.title, ts };
+    }
+  }
+  if (!candidate) return "";
+  return [
+    "<recent-human-check-reminder>",
+    `You just closed ${candidate.id} "${candidate.title}" to human_check on this thread.`,
+    "If the user's new prompt is a fix/redo/pushback on THAT item (even indirectly — \"still doesn't work\", \"that's wrong\", \"try again\", \"no\", etc.):",
+    `  1. Call update_work_item itemId=${candidate.id} status=in_progress to reopen it.`,
+    "  2. Do the new effort in the same item.",
+    "  3. Call complete_task back to human_check when done (with touchedFiles).",
+    "Do NOT file a new \"Fix …\" task for the redo — that fragments history and the Work panel lies about how many concerns were actually raised.",
+    "If the new prompt is a GENUINELY separate concern, file a new item as usual and ignore this reminder.",
+    "</recent-human-check-reminder>",
+  ].join("\n");
 }
 
 export function buildThreadMcpConfig(mcp: McpServerHandle | null): string {
@@ -2436,7 +2491,7 @@ export function applyStatusTransition(
     const openEffort = deps.effortStore.getOpenEffort(workItemId);
     const endSnapshotId = deps.flushSnapshot("task-end");
     deps.effortStore.closeEffort({ workItemId, endSnapshotId });
-    if (openEffort && next === "human_check" && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
+    if (openEffort && (next === "human_check" || next === "blocked") && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
       // Dedup, then enforce the cap. Oversized payloads drop ALL rows
       // so computeEffortFiles falls back to raw pair-diff ("assume all").
       const deduped = Array.from(new Set(touchedFiles.filter((p) => typeof p === "string" && p.length > 0)));

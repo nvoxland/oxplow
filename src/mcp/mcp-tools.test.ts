@@ -63,7 +63,7 @@ function seed() {
     executeAutoCommit: (() => { throw new Error("not used"); }) as never,
     effortStore: null as never,
   });
-  return { tools, threadStore, workItemStore, streamA, streamB, threadA, threadB };
+  return { tools, threadStore, workItemStore, streamA, streamB, threadA, threadB, dir };
 }
 
 function tool(tools: ToolDef[], name: string): ToolDef {
@@ -170,6 +170,89 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(result.reminder).toContain("parentId=this id");
   });
 
+  test("create_work_item file-and-close shortcut (status=human_check + touchedFiles) opens and closes an effort with attribution", async () => {
+    const { tools, workItemStore, threadB, dir } = seed();
+    // Mimic runtime wiring: subscribe to work-item changes and route
+    // status transitions through applyStatusTransition so the effort
+    // store actually gets updated. In production this lives in
+    // runtime.ts; the MCP test seed leaves effortStore null so we set
+    // up a lightweight wiring here. Uses the seed's projectDir so the
+    // work_item_effort FK to work_items resolves in the same SQLite file.
+    const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
+    const { applyStatusTransition } = await import("../electron/runtime.js");
+    const effortStore = new EffortStore(dir);
+    const turnStore = { currentOpenTurn: () => null } as never;
+    const off = workItemStore.subscribe((change) => {
+      if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
+        applyStatusTransition(
+          { effortStore, turnStore, flushSnapshot: () => null },
+          {
+            threadId: change.threadId,
+            workItemId: change.itemId,
+            previous: change.previousStatus,
+            next: change.nextStatus,
+            touchedFiles: change.touchedFiles,
+          },
+        );
+      }
+    });
+
+    const t = tool(tools, "oxplow__create_work_item");
+    const result = await t.handler({
+      threadId: threadB.id,
+      kind: "task",
+      title: "Retroactive split",
+      status: "human_check",
+      touchedFiles: ["src/a.ts", "src/b.ts"],
+    } as never) as { ok: boolean; id: string };
+    off();
+
+    expect(result.ok).toBe(true);
+    // Final row status is the requested target.
+    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("human_check");
+    // Exactly one effort exists (opened by ready→in_progress, closed by in_progress→human_check).
+    const efforts = effortStore.listEffortsForWorkItem(result.id);
+    expect(efforts).toHaveLength(1);
+    expect(efforts[0]!.ended_at).not.toBeNull();
+    // Attribution landed on the closed effort.
+    expect(effortStore.listEffortFiles(efforts[0]!.id).sort()).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  test("create_work_item file-and-close shortcut requires touchedFiles to synthesize the effort (status alone is a plain create)", async () => {
+    const { tools, workItemStore, threadB, dir } = seed();
+    const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
+    const { applyStatusTransition } = await import("../electron/runtime.js");
+    const effortStore = new EffortStore(dir);
+    const turnStore = { currentOpenTurn: () => null } as never;
+    const off = workItemStore.subscribe((change) => {
+      if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
+        applyStatusTransition(
+          { effortStore, turnStore, flushSnapshot: () => null },
+          {
+            threadId: change.threadId,
+            workItemId: change.itemId,
+            previous: change.previousStatus,
+            next: change.nextStatus,
+            touchedFiles: change.touchedFiles,
+          },
+        );
+      }
+    });
+
+    const t = tool(tools, "oxplow__create_work_item");
+    const result = await t.handler({
+      threadId: threadB.id,
+      kind: "note",
+      title: "Pure note — no edits",
+      status: "human_check",
+    } as never) as { id: string };
+    off();
+
+    // No touchedFiles → no synthesized effort (agent is signalling "nothing to attribute").
+    expect(effortStore.listEffortsForWorkItem(result.id)).toHaveLength(0);
+    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("human_check");
+  });
+
   test("create_work_item does NOT include a reminder for non-epic kinds (happy path stays terse)", async () => {
     const { tools, threadB } = seed();
     const t = tool(tools, "oxplow__create_work_item");
@@ -182,6 +265,53 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       expect(result.id).toMatch(/^wi-/);
       expect(result.reminder).toBeUndefined();
     }
+  });
+
+  test("create_work_item emits redoHint when a human_check item was closed on the same thread within the window", async () => {
+    const { tools, workItemStore, threadB } = seed();
+    const t = tool(tools, "oxplow__create_work_item");
+    // First: file a task and close it to human_check (simulating an
+    // effort the agent just shipped).
+    const first = await t.handler({
+      threadId: threadB.id,
+      kind: "task",
+      title: "Original task",
+    } as never) as { id: string };
+    workItemStore.updateItem({
+      threadId: threadB.id,
+      itemId: first.id,
+      status: "in_progress",
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+    workItemStore.updateItem({
+      threadId: threadB.id,
+      itemId: first.id,
+      status: "human_check",
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+    // Now the agent reflexively files a "fix" — response should include
+    // a redoHint pointing back at the first item.
+    const second = await t.handler({
+      threadId: threadB.id,
+      kind: "task",
+      title: "Fix original task",
+    } as never) as { id: string; redoHint?: string };
+    expect(second.redoHint).toBeDefined();
+    expect(second.redoHint).toContain(first.id);
+    expect(second.redoHint).toContain("in_progress");
+  });
+
+  test("create_work_item omits redoHint when no recent human_check item exists", async () => {
+    const { tools, threadB } = seed();
+    const t = tool(tools, "oxplow__create_work_item");
+    const result = await t.handler({
+      threadId: threadB.id,
+      kind: "task",
+      title: "Fresh work",
+    } as never) as { id: string; redoHint?: string };
+    expect(result.redoHint).toBeUndefined();
   });
 
   test("descriptionLooksLikeEmbeddedCriteria ignores description mentions without a bullet-looking block", () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildSessionContextBlock, computeEffortFiles, describeHookHealth, extractTodoList, isInsideWorktree, isWriteIntentTool, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, extractTodoList, isInsideWorktree, isWriteIntentTool, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -31,6 +31,15 @@ function workItem(id: string, status: WorkItemStatus, title = id): WorkItem {
     completed_at: null,
     deleted_at: null,
     note_count: 0,
+    author: null,
+  };
+}
+
+function makeHumanCheckItem(overrides: Partial<WorkItem>): WorkItem {
+  return {
+    ...workItem("wi-x", "human_check" as WorkItemStatus, "Some task"),
+    author: "agent",
+    ...overrides,
   };
 }
 
@@ -478,6 +487,60 @@ test("shouldAcceptHookFilePath: rejects paths that resolve outside the worktree"
   }
 });
 
+test("buildRecentHumanCheckReminder: points at a recent agent-authored human_check item with the reopen instructions", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const recent = makeHumanCheckItem({
+    id: "wi-abc",
+    title: "Wire up the paste handler",
+    updated_at: "2024-05-01T11:55:00Z", // 5 min ago
+  });
+  const out = buildRecentHumanCheckReminder([recent], now);
+  expect(out).toContain("<recent-human-check-reminder>");
+  expect(out).toContain("wi-abc");
+  expect(out).toContain("Wire up the paste handler");
+  expect(out).toContain("update_work_item");
+  expect(out).toContain("in_progress");
+  expect(out).toContain("Do NOT file a new");
+});
+
+test("buildRecentHumanCheckReminder: ignores user-authored human_check items", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const userItem = makeHumanCheckItem({
+    id: "wi-user",
+    author: "user",
+    updated_at: "2024-05-01T11:55:00Z",
+  });
+  expect(buildRecentHumanCheckReminder([userItem], now)).toBe("");
+});
+
+test("buildRecentHumanCheckReminder: ignores items older than the window", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const stale = makeHumanCheckItem({
+    id: "wi-old",
+    updated_at: "2024-05-01T10:00:00Z", // 2h ago, outside 15-min window
+  });
+  expect(buildRecentHumanCheckReminder([stale], now)).toBe("");
+});
+
+test("buildRecentHumanCheckReminder: ignores items not in human_check", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const inProgress = makeHumanCheckItem({
+    id: "wi-ip",
+    status: "in_progress" as WorkItemStatus,
+    updated_at: "2024-05-01T11:58:00Z",
+  });
+  expect(buildRecentHumanCheckReminder([inProgress], now)).toBe("");
+});
+
+test("buildRecentHumanCheckReminder: picks the most recent when multiple eligible items exist", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const older = makeHumanCheckItem({ id: "wi-older", updated_at: "2024-05-01T11:50:00Z" });
+  const newer = makeHumanCheckItem({ id: "wi-newer", updated_at: "2024-05-01T11:58:00Z" });
+  const out = buildRecentHumanCheckReminder([older, newer], now);
+  expect(out).toContain("wi-newer");
+  expect(out).not.toContain("wi-older");
+});
+
 test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit point blocks", async () => {
   // Import the pure pipeline function directly — no need for the full runtime.
   const { decideStopDirective } = await import("./stop-hook-pipeline.js");
@@ -694,7 +757,7 @@ describe("touchedFiles payload on human_check transition", () => {
     rmSync(h.dir, { recursive: true, force: true });
   });
 
-  test("transitions to ready/blocked ignore touchedFiles", () => {
+  test("transition to blocked attaches touchedFiles (agent signalling handoff with its edits)", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
@@ -707,17 +770,24 @@ describe("touchedFiles payload on human_check transition", () => {
       previous: "in_progress", next: "blocked",
       touchedFiles: ["a.txt"],
     });
-    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
+    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual(["a.txt"]);
+    rmSync(h.dir, { recursive: true, force: true });
+  });
 
-    // Re-open, then close to ready — also ignored.
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "blocked", next: "in_progress" });
-    const secondEffort = h.effortStore.getOpenEffort(a.id)!;
+  test("transition to ready ignores touchedFiles (reopen path, no close attribution)", () => {
+    const h = seedHistoryHarness();
+    const a = h.workItems.createItem({
+      threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
+    });
+    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
+    const openEffort = h.effortStore.getOpenEffort(a.id)!;
     applyStatusTransition(deps, {
       threadId: h.threadId, workItemId: a.id,
       previous: "in_progress", next: "ready",
       touchedFiles: ["b.txt"],
     });
-    expect(h.effortStore.listEffortFiles(secondEffort.id)).toEqual([]);
+    expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
     rmSync(h.dir, { recursive: true, force: true });
   });
 

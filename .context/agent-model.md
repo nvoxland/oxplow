@@ -667,17 +667,58 @@ union. To attribute writes correctly the agent declares its touched
 files on the status transition that closes the effort; the runtime
 stores them in `work_item_effort_file` (see data-model.md).
 
-**Agent-declared payload.** When calling `update_work_item` with
-`status: "human_check"`, the agent passes `touchedFiles: string[]` —
-the repo-relative paths it wrote or edited during this effort.
-`applyStatusTransition` (in `runtime.ts`) captures the open effort id,
-flushes the task-end snapshot, closes the effort, and then inserts
-`work_item_effort_file` rows for each deduped path via `INSERT OR
-IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100 paths) drop all
-rows, so the "assume all" fallback engages in `computeEffortFiles`.
-The PostToolUse hook no longer writes to `work_item_effort_file`; the
-previous active-effort heuristic was unreliable whenever ≥2 efforts
-were in_progress (the common case the log is meant to cover).
+**Agent-declared payload.** When calling `update_work_item` or
+`complete_task` to close an effort, the agent passes
+`touchedFiles: string[]` — the repo-relative paths it wrote or edited
+during this effort. `applyStatusTransition` (in `runtime.ts`) captures
+the open effort id, flushes the task-end snapshot, closes the effort,
+and then inserts `work_item_effort_file` rows for each deduped path
+via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
+paths) drop all rows, so the "assume all" fallback engages in
+`computeEffortFiles`. The PostToolUse hook no longer writes to
+`work_item_effort_file`; the previous active-effort heuristic was
+unreliable whenever ≥2 efforts were in_progress (the common case the
+log is meant to cover).
+
+Attach only fires on the `in_progress → human_check` and
+`in_progress → blocked` transitions, and only when an effort is
+currently open for the item. A `touchedFiles` payload on a plain
+metadata update or on an already-closed item is accepted by the
+schema but silently ignored — there's no effort row to attach it to.
+
+**File-and-close shortcut.** `create_work_item` also accepts
+`touchedFiles`. When the caller asks for `status: "human_check"` or
+`"blocked"` AND passes `touchedFiles`, the MCP handler files the row
+at `ready`, then runs `ready → in_progress → <target>` under the
+covers so the normal effort-open/close path fires and attribution
+lands just like a conventional close. Passing `status: "human_check"`
+*without* `touchedFiles` is still legal (pure note/record row, or
+agent explicitly declining attribution) — no effort is synthesized in
+that case.
+
+**Recent-human-check reminder (UserPromptSubmit).** When the agent just
+closed an item to `human_check` on the thread that's submitting a new
+prompt, the UserPromptSubmit hook injects a `<recent-human-check-
+reminder>` block into `additionalContext` pointing at the item and
+spelling out the reopen flow (`update_work_item → in_progress → redo
+→ complete_task`). This fires even when the agent never touches
+`create_work_item` next turn — the most reliable failure mode was the
+agent investigating/reverting in-place on a correction without
+recording a new effort. See `buildRecentHumanCheckReminder` in
+`src/electron/runtime.ts` and the wiring in `handleHookEnvelope`'s
+`UserPromptSubmit` branch. Window is 15 minutes by default.
+
+**Redo-hint on `create_work_item`.** When the caller files a new row
+on a thread that has an agent-authored `human_check` item closed
+within the last 10 minutes, the response carries a `redoHint` field
+pointing at that item and telling the agent to consider reopening
+(`update_work_item → in_progress`) instead of filing the new task.
+This is a soft nudge — the create still succeeds, because a
+genuinely separate concern *should* get its own row. The heuristic
+just makes the reopen path impossible to miss when the most common
+trap (user rejects the last effort → agent reflexively files a
+"Fix …" task) is most likely to be tripped. See
+`findRecentHumanCheckItem` in `src/mcp/mcp-tools.ts`.
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a

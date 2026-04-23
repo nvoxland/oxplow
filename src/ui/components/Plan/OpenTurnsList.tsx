@@ -12,19 +12,23 @@ import { reportUiError } from "../../ui-error.js";
  *   - A neutral glyph (matches the muted-text style of other row icons,
  *     not the colored hourglass emoji)
  *   - The prompt, truncated
- *   - Elapsed time
  *   - If `task_list_json` is populated, a collapsible TaskCreate breakdown
  *     (collapsed by default once ≥4 steps exist).
+ *
+ * When no turns are open and `parentSectionEmpty` is true, renders a
+ * "(waiting)" placeholder so the In progress section has an explicit
+ * idle indicator instead of appearing blank.
  */
 export function OpenTurnsList({
   streamId,
   threadId,
+  parentSectionEmpty,
 }: {
   streamId: string | null;
   threadId: string | null;
+  parentSectionEmpty: boolean;
 }) {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
-  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!threadId) { setTurns([]); return; }
@@ -39,17 +43,24 @@ export function OpenTurnsList({
       if (event.threadId !== threadId) return;
       refresh();
     });
-    // Refresh elapsed-time display every second; the underlying row list
-    // only re-fetches on turn.changed, so this is purely a display tick.
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => { cancelled = true; off(); clearInterval(tick); };
+    return () => { cancelled = true; off(); };
   }, [streamId, threadId]);
 
-  if (turns.length === 0) return null;
+  if (turns.length === 0) {
+    if (!parentSectionEmpty) return null;
+    return (
+      <div
+        data-testid="plan-open-turns-waiting"
+        style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}
+      >
+        (waiting)
+      </div>
+    );
+  }
   return (
     <div data-testid="plan-open-turns">
       {turns.map((turn) => (
-        <OpenTurnRow key={turn.id} turn={turn} now={now} />
+        <OpenTurnRow key={turn.id} turn={turn} />
       ))}
     </div>
   );
@@ -82,9 +93,7 @@ function BrailleSpinner() {
   );
 }
 
-function OpenTurnRow({ turn, now }: { turn: AgentTurn; now: number }) {
-  const elapsedMs = Math.max(0, now - Date.parse(turn.started_at));
-  const elapsed = formatElapsed(elapsedMs);
+function OpenTurnRow({ turn }: { turn: AgentTurn }) {
   const promptPreview = truncate(turn.prompt, 80);
   const tasks = useMemo(() => parseTasks(turn.task_list_json), [turn.task_list_json]);
   const [expanded, setExpanded] = useState(() => tasks.length > 0 && tasks.length < 4);
@@ -92,9 +101,7 @@ function OpenTurnRow({ turn, now }: { turn: AgentTurn; now: number }) {
     <div
       data-testid="plan-open-turn-row"
       style={{
-        padding: "4px 10px",
-        marginBottom: 2,
-        background: "var(--bg-2)",
+        padding: "4px 8px",
         fontSize: 12,
       }}
     >
@@ -103,7 +110,6 @@ function OpenTurnRow({ turn, now }: { turn: AgentTurn; now: number }) {
         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {promptPreview}
         </span>
-        <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{elapsed}</span>
       </div>
       {tasks.length > 0 ? (
         <div style={{ marginTop: 4 }}>
@@ -160,11 +166,3 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + "…";
 }
 
-function formatElapsed(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h`;
-}

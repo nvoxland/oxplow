@@ -549,7 +549,7 @@ export function PlanPane({
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {groups.length === 0 ? (
           <>
-            {mode === "thread" ? <OpenTurnsList streamId={streamId} threadId={threadId} /> : null}
+            {mode === "thread" ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={true} /> : null}
             {mode === "thread" ? (
               <RecentAnswersList streamId={streamId} threadId={threadId} />
             ) : null}
@@ -561,8 +561,9 @@ export function PlanPane({
           groups.map((group, groupIndex) => {
             const isRootThread = mode === "thread";
             const isFirstGroup = groupIndex === 0;
+            const inProgressCount = group.items.filter((i) => i.status === "in_progress").length;
             const inProgressLeadSlot = isRootThread && isFirstGroup
-              ? <OpenTurnsList streamId={streamId} threadId={threadId} />
+              ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={inProgressCount === 0} />
               : undefined;
             const afterInProgressSlot = isRootThread && isFirstGroup
               ? <RecentAnswersList streamId={streamId} threadId={threadId} />
@@ -1062,6 +1063,12 @@ function NewWorkItemModal({
 
   return (
     <div
+      // Stop click bubbling so the PlanPane's onClick={paneRef.focus()}
+      // doesn't steal focus from a textarea when the user mouses up
+      // after a drag-select — losing focus mid-selection clears the
+      // highlight.
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
       style={{
         position: "fixed",
         inset: 0,
