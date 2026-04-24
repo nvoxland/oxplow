@@ -33,13 +33,35 @@
       "dist/**/*",
       "public/**/*",
       "bin/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.md",
+      "!**/*.markdown",
+      "!**/CHANGELOG*",
+      "!**/HISTORY*",
+      "!**/AUTHORS*",
+      "!**/CONTRIBUTORS*",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/__tests__/**",
+      "!**/*.test.*",
+      "!**/*.spec.*",
+      "!**/example/**",
+      "!**/examples/**",
+      "!**/docs/**",
+      "!**/doc/**",
+      "!**/.github/**",
+      "!**/.vscode/**",
+      "!**/.idea/**",
+      "!**/*.map",
+      "!**/*.ts",
+      "!**/*.tsx",
+      "!**/tsconfig*.json"
     ],
     "asar": true,
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
       ],
       "category": "public.app-category.developer-tools"
     },
