@@ -5,6 +5,14 @@ name: Release
 # all three platforms and publishes them to a GitHub Release via
 # electron-builder's built-in GitHub provider. Also runnable manually
 # from the Actions tab for dry runs / re-runs.
+#
+# To create a release:
+# 1. Tag: git tag vX.Y.Z
+# 2. Push tag: git push origin vX.Y.Z
+# 3. Update to next version:
+#    - package.json: version = "X.Y.Z"
+
+
 on:
   push:
     tags: ["v*"]
@@ -100,3 +108,36 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # electron-builder leaves the release as a draft and without notes.
+  # After every platform has attached its assets, generate release
+  # notes from commits/PRs since the previous tag and flip the draft
+  # to published. Only runs on real tag pushes — workflow_dispatch dry
+  # runs from a branch skip this step (there's no release to finalize).
+  finalize:
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Generate notes and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # GitHub's auto-generator picks a previous tag automatically
+          # and returns a formatted markdown body.
+          notes=$(gh api \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$tag" \
+            --jq .body)
+          printf '%s\n' "$notes" > /tmp/release-notes.md
+          gh release edit "$tag" \
+            --draft=false \
+            --notes-file /tmp/release-notes.md
