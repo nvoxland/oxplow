@@ -581,6 +581,15 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           });
           return withRedoHint({ ok: true, id: created.id, sort_index: created.sort_index }, recentHumanCheck);
         }
+        // Items filed directly at `in_progress` never opened an effort
+        // because work-item-store fires `kind:"created"`, not
+        // `kind:"updated"`, so the runtime's status-transition subscription
+        // (which only reacts to updates) skipped them. That left every
+        // agent-filed task with an empty Efforts list until the next
+        // complete_task tried to close a non-existent effort. Route
+        // status:"in_progress" through ready → in_progress so the
+        // subscription sees the transition and opens an effort.
+        const wantsInProgress = args.status === "in_progress";
         const item = workItemStore.createItem({
           threadId: args.threadId,
           parentId: args.parentId,
@@ -588,12 +597,21 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           title: args.title,
           description: args.description,
           acceptanceCriteria: args.acceptanceCriteria,
-          status: args.status,
+          status: wantsInProgress ? "ready" : args.status,
           priority: args.priority,
           createdBy: "agent",
           actorId: "mcp",
           author: "agent",
         });
+        if (wantsInProgress) {
+          workItemStore.updateItem({
+            threadId: args.threadId,
+            itemId: item.id,
+            status: "in_progress",
+            actorKind: "agent",
+            actorId: "mcp",
+          });
+        }
         // Epics filed without children render as one opaque IN PROGRESS row in
         // the UI and defeat the purpose of the rollup. The oxplow-runtime
         // skill already says "file children in the same turn"; surfacing it on

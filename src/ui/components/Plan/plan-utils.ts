@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useState } from "react";
 import type {
   BacklogState,
   ThreadWorkState,
@@ -6,6 +7,44 @@ import type {
   WorkItemPriority,
   WorkItemStatus,
 } from "../../api.js";
+
+// Keys for collapsible sections in the Plan pane. Extends
+// WorkItemSectionKind with the pseudo-sections that PlanPane injects
+// alongside the work-item sections (e.g. Recent answers). All share
+// a single collapsed-state Set so toggling works consistently.
+export type PlanSectionKey = WorkItemSectionKind | "recentAnswers";
+
+/**
+ * Hook: manages a Set of collapsed section keys, persisted to
+ * localStorage under `oxplow.plan.collapsed`. Shared by WorkGroupList
+ * (for work-item sections) and RecentAnswersList (for its own pseudo-
+ * section) so every collapsible section in the Plan pane uses one
+ * source of truth.
+ */
+export function useCollapsedSections(): {
+  collapsed: Set<PlanSectionKey>;
+  toggle: (kind: PlanSectionKey) => void;
+  isCollapsed: (kind: PlanSectionKey) => boolean;
+} {
+  const [collapsed, setCollapsed] = useState<Set<PlanSectionKey>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage?.getItem("oxplow.plan.collapsed") : null;
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed as PlanSectionKey[] : []);
+    } catch { return new Set(); }
+  });
+  const toggle = (kind: PlanSectionKey) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind); else next.add(kind);
+      try { window.localStorage?.setItem("oxplow.plan.collapsed", JSON.stringify([...next])); } catch { /* noop */ }
+      return next;
+    });
+  };
+  const isCollapsed = (kind: PlanSectionKey) => collapsed.has(kind);
+  return { collapsed, toggle, isCollapsed };
+}
 
 export interface WorkItemGroup {
   epic: WorkItem | null;
@@ -256,6 +295,25 @@ export const sectionHeaderStyle: CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 1,
+};
+
+// Action-button style shared by every section header. Promoted from
+// WorkGroupList's previous private `miniDoneHeaderButtonStyle` so every
+// section's action buttons read as one family. Compact enough for icon-
+// only buttons (+ New Task, + Commit Point, etc.) without crowding the
+// section header — the header is narrow in practice.
+export const sectionActionButtonStyle: CSSProperties = {
+  borderRadius: 6,
+  border: "1px solid var(--border)",
+  background: "var(--bg)",
+  color: "var(--fg)",
+  cursor: "pointer",
+  font: "inherit",
+  padding: "2px 6px",
+  fontSize: 12,
+  lineHeight: 1,
+  minWidth: 22,
+  textAlign: "center",
 };
 
 export const groupHeaderStyle: CSSProperties = {

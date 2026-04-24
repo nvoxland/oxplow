@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   createWorkItem,
   completeThread,
@@ -9,7 +10,6 @@ import {
   createWorkspaceDirectory,
   listAgentStatuses,
   listAgentTurns,
-  listWorkItemEfforts,
   reorderWorkItems,
   moveWorkItemToThread,
   getBacklogState,
@@ -730,6 +730,9 @@ export function App() {
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
+  // Reset terminal transport to direct whenever the active pane target
+  // changes — matches the old TerminalPane's internal useEffect.
+  useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
   const selectedThreadTurns = selectedThread ? agentTurns[selectedThread.id] ?? null : null;
 
@@ -1121,7 +1124,20 @@ export function App() {
   }, [selectedFilePath, stream]);
   const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [planNewRequest, setPlanNewRequest] = useState(0);
+  // Agent-terminal transport — lifted from TerminalPane so the Agent
+  // tab's right-click menu can toggle between direct stdin and tmux.
+  // Reset to direct when the active thread changes (the old TerminalPane
+  // had this behavior via a useEffect on paneTarget).
+  const [agentTransportMode, setAgentTransportMode] = useState<"direct" | "tmux">("direct");
   const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
+  // Imperative shortcut for opening the New-Task modal. When PlanPane is
+  // mounted it registers its openCreateModal here; the menu handler can
+  // call this ref directly instead of going through setState + useEffect.
+  // Needed because menu clicks arrive as IPC messages (not "discrete user
+  // input events"), so React doesn't auto-flush effects for them — the
+  // useEffect chain can stall for 10+ seconds before committing. Direct
+  // ref call inside flushSync sidesteps the scheduler entirely.
+  const planOpenCreateRef = useRef<(() => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commandState = useMemo(
     () => ({
@@ -1154,8 +1170,18 @@ export function App() {
       if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
     },
     newWorkItem() {
+      // Open the Plan dock (mounts PlanPane if it's not already) and
+      // open the create modal. If PlanPane is mounted, call its
+      // registered opener directly so setModalMode commits inside the
+      // parent's flushSync — the fallback via setPlanNewRequest handles
+      // the edge case where PlanPane hasn't mounted yet (its
+      // openNewRequest useEffect will fire once it does).
       setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
-      setPlanNewRequest((prev) => prev + 1);
+      if (planOpenCreateRef.current) {
+        planOpenCreateRef.current();
+      } else {
+        setPlanNewRequest((prev) => prev + 1);
+      }
     },
     newStream() {
       setStreamCreateRequest((n) => n + 1);
@@ -1210,14 +1236,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (isElectron) return;
+    // Runs in both Electron and browser modes. In Electron the native
+    // menu's accelerator should also fire for the same command, but the
+    // handler is idempotent (commandMap.run() → modal setters are no-ops
+    // when the modal is already open) so a double-dispatch is harmless
+    // — and not relying on the native menu means Cmd+Shift+N works even
+    // when the menu snapshot is momentarily stale at startup.
     function handleKeyDown(event: KeyboardEvent) {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
       // Only "plan.newWorkItem" suppresses itself inside a text input — the
       // rest (save, find, quick-open) are explicitly useful while editing.
       // Rationale: a user in the middle of typing a description shouldn't
-      // lose focus to a New-Work-Item modal and drop their half-typed text.
+      // lose focus to a New-Task modal and drop their half-typed text.
       if (commandId === "plan.newWorkItem" && isEditableTarget(event.target)) return;
       const command = commandMap.get(commandId);
       if (!command || !command.enabled || !command.run) return;
@@ -1227,7 +1258,7 @@ export function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commandMap, isElectron]);
+  }, [commandMap]);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -1239,13 +1270,19 @@ export function App() {
   useEffect(() => {
     if (!isElectron) return;
     return window.oxplowApi.onMenuCommand((commandId) => {
-      // Same "don't yank a user out of a text field" rule as the non-Electron
-      // keydown path, applied here because native-menu shortcuts fire
-      // regardless of web-view focus.
-      if (commandId === "plan.newWorkItem" && isEditableTarget(document.activeElement)) return;
       const command = commandMap.get(commandId);
-      if (!command || !command.enabled || !command.run) return;
-      command.run();
+      if (!command || !command.run) return;
+      // React 18 only auto-flushes effects synchronously for discrete
+      // user input events (click, keydown on webContents). IPC messages
+      // from the main process don't qualify, so setState calls made in
+      // this callback stay queued until the next real input event wakes
+      // the scheduler — users reported menu dispatches stalling 10+
+      // seconds. flushSync commits inside the callback. The commands
+      // that open modals (plan.newWorkItem, etc.) additionally go
+      // through an imperative ref registered by the target pane so the
+      // modal setState also commits here rather than via useEffect.
+      const run = command.run;
+      flushSync(() => { run(); });
     });
   }, [commandMap, isElectron]);
 
@@ -1304,22 +1341,10 @@ export function App() {
     setPlanEditRequest({ itemId, token });
   };
 
-  const handleShowWorkItemInHistory = async (itemId: string) => {
+  const handleShowSnapshotInHistory = (snapshotId: string) => {
     const token = Date.now();
-    // Open the Local History panel regardless of whether we find an effort —
-    // the user asked to see history, so get them there.
     setBottomActivate({ id: "snapshots", token });
-    try {
-      const efforts = await listWorkItemEfforts(itemId);
-      // Newest effort with an end snapshot wins.
-      const newest = [...efforts].reverse().find((e) => e.effort.end_snapshot_id);
-      const snapshotId = newest?.effort.end_snapshot_id ?? null;
-      if (snapshotId) {
-        setSnapshotsReveal({ snapshotId, token });
-      }
-    } catch (err) {
-      logUi("warn", "show work item in history failed", { error: String(err) });
-    }
+    setSnapshotsReveal({ snapshotId, token });
   };
 
   const closeDiffTab = (id: string) => {
@@ -1336,9 +1361,21 @@ export function App() {
         label: "Agent",
         closable: false,
         agentStatus: agentThreadStatus,
+        contextMenu: selectedThread ? [
+          {
+            id: "agent.transport.toggle",
+            label: agentTransportMode === "direct" ? "Open in tmux" : "Use direct mode",
+            enabled: true,
+            run: () => setAgentTransportMode((prev) => prev === "direct" ? "tmux" : "direct"),
+          },
+        ] : undefined,
         render: () =>
           selectedThread ? (
-            <TerminalPane paneTarget={selectedThread.pane_target} visible={effectiveCenterActive === "agent"} />
+            <TerminalPane
+              paneTarget={selectedThread.pane_target}
+              visible={effectiveCenterActive === "agent"}
+              transportMode={agentTransportMode}
+            />
           ) : (
             <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
           ),
@@ -1433,7 +1470,8 @@ export function App() {
           openNewRequest={planNewRequest}
           editRequest={planEditRequest}
           onOpenFile={handleOpenFile}
-          onShowInHistory={handleShowWorkItemInHistory}
+          onShowInHistory={handleShowSnapshotInHistory}
+          registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
         />
       ),
     },

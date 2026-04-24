@@ -59,6 +59,10 @@ export interface EffortDetail {
   /** Paths that differ between start and end snapshots (empty when either
    *  side is null or hashes are identical). */
   changed_paths: string[];
+  /** Per-category counts for the Efforts panel — mirrors the shape used
+   *  by SnapshotSummary so the modal can render the same +/~/− row as
+   *  Git/Local History. Zeroed when there's no snapshot pair. */
+  counts: { created: number; updated: number; deleted: number };
 }
 
 export interface WorkItemApi {
@@ -93,15 +97,19 @@ function buildBacklogState(store: WorkItemStore): BacklogState {
   };
 }
 
-function computeChangedPaths(
+function computeEffortDiff(
   snapshotStore: SnapshotStore,
   startId: string | null,
   endId: string | null,
-): string[] {
-  if (!startId || !endId || startId === endId) return [];
+): { changed_paths: string[]; counts: EffortDetail["counts"] } {
+  const empty = { changed_paths: [], counts: { created: 0, updated: 0, deleted: 0 } };
+  if (!startId || !endId || startId === endId) return empty;
   const summary = snapshotStore.getSnapshotSummary(endId, startId);
-  if (!summary) return [];
-  return Object.keys(summary.files).sort();
+  if (!summary) return empty;
+  return {
+    changed_paths: Object.keys(summary.files).sort(),
+    counts: summary.counts,
+  };
 }
 
 function buildEffortDetail(
@@ -115,12 +123,14 @@ function buildEffortDetail(
   const end_snapshot = effort.end_snapshot_id
     ? snapshotStore.getSnapshot(effort.end_snapshot_id)
     : null;
+  const diff = computeEffortDiff(snapshotStore, effort.start_snapshot_id, effort.end_snapshot_id);
   return {
     effort,
     start_snapshot,
     end_snapshot,
     turn_ids: effortStore.listTurnsForEffort(effort.id),
-    changed_paths: computeChangedPaths(snapshotStore, effort.start_snapshot_id, effort.end_snapshot_id),
+    changed_paths: diff.changed_paths,
+    counts: diff.counts,
   };
 }
 

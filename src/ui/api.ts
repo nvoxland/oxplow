@@ -167,6 +167,7 @@ export interface EffortDetail {
   end_snapshot: FileSnapshot | null;
   turn_ids: string[];
   changed_paths: string[];
+  counts: { created: number; updated: number; deleted: number };
 }
 
 export interface ThreadWorkState {

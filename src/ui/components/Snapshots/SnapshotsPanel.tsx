@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getEffortFiles,
   getSnapshotPairDiff,
@@ -50,6 +50,16 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   const [compareBaseId, setCompareBaseId] = useState<string | null>(null);
   const [detailWidth, setDetailWidth] = useState(380);
   const [dragging, setDragging] = useState(false);
+  // Per-row refs so the reveal-from-elsewhere flow (e.g. "In history" on
+  // an Effort row) can scrollIntoView the selected snapshot. Keyed on
+  // `${snapshotId}:${effortId ?? ""}` to match the SnapshotRow key used
+  // by the list.
+  const rowRefs = useRef(new Map<string, HTMLDivElement | null>());
+  // Token-gated flash highlight: when a reveal fires, bump this and the
+  // matching row paints a brighter background for ~1s so the user's eye
+  // lands on it. State-based (not CSS animation) because the reveal can
+  // hit the same snapshot twice and we want each reveal to flash again.
+  const [flashKey, setFlashKey] = useState<{ key: string; token: number } | null>(null);
 
   useEffect(() => {
     if (!stream) {
@@ -117,8 +127,29 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   useEffect(() => {
     if (!revealSnapshotId) return;
     const target = snapshots.find((s) => s.id === revealSnapshotId.snapshotId);
-    if (target) setSelectedId(target.id);
+    if (!target) return;
+    setSelectedId(target.id);
+    setSelectedEffortId(null);
+    // Scroll + flash on the next frame so the DOM has the row rendered
+    // from the selection state change above. Key lookup uses the same
+    // `${snapshotId}:${effortId ?? ""}` shape SnapshotRow registers
+    // under — effortId is null here (reveal target is the snapshot).
+    const key = `${target.id}:`;
+    const flashToken = revealSnapshotId.token;
+    requestAnimationFrame(() => {
+      const node = rowRefs.current.get(key);
+      if (node) node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      setFlashKey({ key, token: flashToken });
+    });
   }, [revealSnapshotId?.snapshotId, revealSnapshotId?.token, snapshots]);
+
+  // Clear the flash highlight after ~1.2s so a stale token doesn't keep
+  // brightening the row forever.
+  useEffect(() => {
+    if (!flashKey) return;
+    const timer = setTimeout(() => setFlashKey(null), 1200);
+    return () => clearTimeout(timer);
+  }, [flashKey?.token]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -342,29 +373,34 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
             ) : filteredRows.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No snapshots match filter.</div>
             ) : (
-              filteredRows.map((row) => (
-                <SnapshotRow
-                  key={row.key}
-                  snap={row.snap}
-                  label={row.label}
-                  selected={selectedId === row.snap.id && selectedEffortId === row.effortId}
-                  compareBase={compareBaseId === row.snap.id}
-                  onClick={() => handleRowClick(row.snap.id, row.effortId)}
-                  status={row.status}
-                  workItemId={row.workItemId}
-                  isExternal={row.isExternal}
-                  onChangeStatus={
-                    row.workItemId && row.threadId
-                      ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.threadId!, nextStatus); }
-                      : undefined
-                  }
-                  onDoubleClick={
-                    row.workItemId && onRequestEditWorkItem
-                      ? () => onRequestEditWorkItem(row.workItemId!)
-                      : undefined
-                  }
-                />
-              ))
+              filteredRows.map((row) => {
+                const refKey = `${row.snap.id}:${row.effortId ?? ""}`;
+                return (
+                  <SnapshotRow
+                    key={row.key}
+                    snap={row.snap}
+                    label={row.label}
+                    selected={selectedId === row.snap.id && selectedEffortId === row.effortId}
+                    flashing={flashKey?.key === refKey}
+                    compareBase={compareBaseId === row.snap.id}
+                    onClick={() => handleRowClick(row.snap.id, row.effortId)}
+                    status={row.status}
+                    workItemId={row.workItemId}
+                    isExternal={row.isExternal}
+                    rowRef={(node) => { rowRefs.current.set(refKey, node); }}
+                    onChangeStatus={
+                      row.workItemId && row.threadId
+                        ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.threadId!, nextStatus); }
+                        : undefined
+                    }
+                    onDoubleClick={
+                      row.workItemId && onRequestEditWorkItem
+                        ? () => onRequestEditWorkItem(row.workItemId!)
+                        : undefined
+                    }
+                  />
+                );
+              })
             )}
           </div>
         </div>
@@ -449,6 +485,7 @@ function SnapshotRow({
   snap,
   label,
   selected,
+  flashing,
   compareBase,
   onClick,
   status,
@@ -456,10 +493,12 @@ function SnapshotRow({
   isExternal,
   onChangeStatus,
   onDoubleClick,
+  rowRef,
 }: {
   snap: FileSnapshot;
   label: string;
   selected: boolean;
+  flashing: boolean;
   compareBase: boolean;
   onClick(): void;
   status: WorkItemStatus | null;
@@ -467,6 +506,7 @@ function SnapshotRow({
   isExternal: boolean;
   onChangeStatus?(nextStatus: WorkItemStatus): void;
   onDoubleClick?(): void;
+  rowRef?(node: HTMLDivElement | null): void;
 }) {
   const date = formatRelative(snap.created_at);
   const iconKind = snapshotIconKind(snap);
@@ -479,6 +519,7 @@ function SnapshotRow({
   const isEffortRow = !!workItemId && !isExternal && !!status;
   return (
     <div
+      ref={rowRef}
       onClick={onClick}
       onDoubleClick={isExternal ? undefined : onDoubleClick}
       style={{
@@ -487,11 +528,24 @@ function SnapshotRow({
         gap: 6,
         height: 24,
         cursor: "pointer",
-        background: selected
-          ? "rgba(74, 158, 255, 0.18)"
-          : compareBase
-            ? "rgba(134, 239, 172, 0.15)"
-            : "transparent",
+        // Flashing (reveal) > selected > compareBase > default.
+        // Flashing uses a bright accent bg + left stripe so the user's
+        // eye locks onto the revealed row when jumping from another
+        // surface (e.g. "In history" on an Effort). Selection alone
+        // keeps the subtler tint used during normal browsing.
+        background: flashing
+          ? "rgba(74, 158, 255, 0.40)"
+          : selected
+            ? "rgba(74, 158, 255, 0.22)"
+            : compareBase
+              ? "rgba(134, 239, 172, 0.15)"
+              : "transparent",
+        boxShadow: flashing
+          ? "inset 3px 0 0 var(--accent)"
+          : selected
+            ? "inset 2px 0 0 var(--accent)"
+            : undefined,
+        transition: "background 0.2s ease-out",
         padding: "0 8px",
         fontSize: 12,
         whiteSpace: "nowrap",

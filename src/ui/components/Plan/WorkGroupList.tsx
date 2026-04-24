@@ -7,9 +7,11 @@ import {
   finalizeReorderIds,
   sectionDefaultStatus,
   miniButtonStyle,
+  sectionActionButtonStyle,
   sectionHeaderStyle,
   statusIcon,
   statusLabel,
+  type PlanSectionKey,
   type WorkItemGroup,
   type WorkItemSectionKind,
 } from "./plan-utils.js";
@@ -23,6 +25,8 @@ import {
 } from "./queue-markers.js";
 import { WaitPointRow } from "./WaitPointRow.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
+import { ContextMenu } from "../ContextMenu.js";
+import type { MenuItem } from "../../menu.js";
 
 /**
  * Renders one work-item group (an epic + its children, or the root group
@@ -73,7 +77,7 @@ export function WorkGroupList({
   waitPoints,
   onReorderMixed,
   onContextMenu,
-  addPointsSlot,
+  sectionActions,
   selectedId,
   markedIds,
   onSelect,
@@ -85,6 +89,8 @@ export function WorkGroupList({
   isActive,
   inProgressLeadSlot,
   afterInProgressSlot,
+  isSectionCollapsed,
+  onToggleSectionCollapsed,
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
@@ -96,7 +102,11 @@ export function WorkGroupList({
   waitPoints?: WaitPoint[];
   onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
   onContextMenu(event: React.MouseEvent, item: WorkItem): void;
-  addPointsSlot?: React.ReactNode;
+  /** Per-section action buttons (right-aligned in each section header).
+   *  The PlanPane builds this map and threads it in — add new per-section
+   *  commands here rather than in the header rendering. Done's built-in
+   *  archive controls render alongside whatever's passed for `done`. */
+  sectionActions?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
   selectedId?: string | null;
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
@@ -113,6 +123,11 @@ export function WorkGroupList({
   /** Rendered right after the In progress section, before the next
    *  section. Used by PlanPane to surface the Recent answers list. */
   afterInProgressSlot?: React.ReactNode;
+  /** Collapse-state accessors from PlanPane's useCollapsedSections. A
+   *  shared source of truth so the Recent answers pseudo-section
+   *  collapses through the same mechanism as the work-item sections. */
+  isSectionCollapsed: (kind: PlanSectionKey) => boolean;
+  onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
 }) {
   // When the thread is not the active writer, in_progress items are not agent-owned
   // and can be freely reordered — only lock them when this thread is active.
@@ -518,12 +533,12 @@ export function WorkGroupList({
   };
 
   return (
+    // Sections are collapsible — the pane scrolls as a whole, and each
+    // section's body only renders when expanded. Collapsed state persists
+    // in localStorage so the user's layout choices stick across reloads.
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        // toDo, humanCheck, done, inProgress, and blocked always render so the
-        // user sees the full section layout even when empty. toDo also anchors
-        // the add-points slot.
         const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
         if (empty && !alwaysShow && !draggedWorkItem) {
           return null;
@@ -554,14 +569,9 @@ export function WorkGroupList({
           ...headerBaseStyle,
           outline: isOverSection ? "1px solid var(--accent)" : "none",
           background: isOverSection ? "rgba(74,158,255,0.08)" : headerBaseStyle.background,
-          cursor: canDrop ? "copy" : headerBaseStyle.cursor,
+          cursor: canDrop ? "copy" : "pointer",
         };
         const isDone = section.kind === "done";
-        // Split the done bucket into "visible done" (done + canceled) and
-        // "archived" so the header can surface both an archive-all action
-        // (which only operates on visible done rows) and a toggle for the
-        // archived ones. When the toggle is on, archived rows render
-        // right after the regular done rows.
         const archivedRows = isDone
           ? section.rows.filter((r) => r.kind === "work" && r.item.status === "archived")
           : [];
@@ -572,50 +582,67 @@ export function WorkGroupList({
         const archivableCount = isDone
           ? visibleDoneRows.filter((r) => r.kind === "work" && r.item.status !== "archived").length
           : 0;
+        const customActions = sectionActions?.[section.kind];
+        const isCollapsed = isSectionCollapsed(section.kind);
+        // Count only work items (not commit/wait point dividers) for the
+        // header badge. For Done, count visible rows (excluding archived
+        // unless the user toggled them on).
+        const countRows = isDone ? visibleDoneRows : section.rows;
+        const itemCount = countRows.filter((r) => r.kind === "work").length;
         return (
           <Fragment key={section.kind}>
           <div data-testid={`plan-section-${section.kind}`}>
             <div
               style={{ ...headerStyle, display: "flex", alignItems: "center", gap: 8 }}
               data-testid={`plan-section-header-${section.kind}`}
+              onClick={() => onToggleSectionCollapsed(section.kind)}
               {...headerDropHandlers}
             >
               <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
                 <span>{section.label}</span>
+                <span style={{ color: "var(--muted)", fontWeight: 400, letterSpacing: 0 }}>
+                  {itemCount}
+                </span>
               </span>
-              {isDone ? (
-                <DoneHeaderActions
-                  archivableCount={archivableCount}
-                  archivedCount={archivedRows.length}
-                  showArchived={showArchived}
-                  onToggleArchived={() => setShowArchived((v) => !v)}
-                  onArchiveAll={() => {
-                    for (const row of visibleDoneRows) {
-                      if (row.kind !== "work") continue;
-                      if (row.item.status === "archived") continue;
-                      void onUpdateWorkItem(row.item.id, { status: "archived" });
-                    }
-                  }}
-                />
+              {customActions || isDone ? (
+                <span
+                  onClick={(event) => event.stopPropagation()}
+                  style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0 }}
+                >
+                  {customActions}
+                  {isDone ? (
+                    <DoneHeaderActions
+                      archivableCount={archivableCount}
+                      archivedCount={archivedRows.length}
+                      showArchived={showArchived}
+                      onToggleArchived={() => setShowArchived((v) => !v)}
+                      onArchiveAll={() => {
+                        for (const row of visibleDoneRows) {
+                          if (row.kind !== "work") continue;
+                          if (row.item.status === "archived") continue;
+                          void onUpdateWorkItem(row.item.id, { status: "archived" });
+                        }
+                      }}
+                    />
+                  ) : null}
+                </span>
               ) : null}
             </div>
-            {section.kind === "inProgress" ? inProgressLeadSlot : null}
-            {renderedRows.map(renderRow)}
-            {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
-              section.kind === "inProgress" && inProgressLeadSlot ? null : (
-                <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-                  {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
-                </div>
-              )
+            {!isCollapsed ? (
+              <>
+                {section.kind === "inProgress" ? inProgressLeadSlot : null}
+                {renderedRows.map(renderRow)}
+                {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
+                  section.kind === "inProgress" && inProgressLeadSlot ? null : (
+                    <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                      {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
+                    </div>
+                  )
+                ) : null}
+              </>
             ) : null}
-            {/* The "+ Commit Point" / "+ Wait Point" bar hangs off the tail
-                of the "To do" section (not the very bottom of the list) so
-                queueing a marker feels like appending to the active queue
-                rather than the dead/done pile. Because "To do" always renders
-                (even when empty), the slot is always reachable. */}
-            {section.kind === "toDo" ? addPointsSlot : null}
           </div>
-          {section.kind === "inProgress" ? afterInProgressSlot : null}
+          {section.kind === "inProgress" && !isCollapsed ? afterInProgressSlot : null}
           </Fragment>
         );
       })}
@@ -636,49 +663,69 @@ function DoneHeaderActions({
   onToggleArchived(): void;
   onArchiveAll(): void;
 }) {
-  return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0 }}>
-      {archivedCount > 0 ? (
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onToggleArchived(); }}
-          style={{ ...miniDoneHeaderButtonStyle }}
-          data-testid="plan-done-toggle-archived"
-          title={showArchived ? "Hide archived items" : "Show archived items inline with Done"}
-        >
-          {showArchived ? `▾ Hide archived (${archivedCount})` : `▸ Show archived (${archivedCount})`}
-        </button>
-      ) : null}
-      {archivableCount > 0 ? (
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onArchiveAll(); }}
-          style={{ ...miniDoneHeaderButtonStyle }}
-          data-testid="plan-done-archive-all"
-          title={`Archive all ${archivableCount} visible done item${archivableCount === 1 ? "" : "s"}`}
-        >
-          Archive all
-        </button>
-      ) : null}
-    </span>
-  );
+  const items: MenuItem[] = [
+    {
+      id: "plan-done-toggle-archived",
+      label: showArchived ? `Hide archived (${archivedCount})` : `Show archived (${archivedCount})`,
+      enabled: archivedCount > 0,
+      run: onToggleArchived,
+    },
+    {
+      id: "plan-done-archive-all",
+      label: `Archive all${archivableCount > 0 ? ` (${archivableCount})` : ""}`,
+      enabled: archivableCount > 0,
+      run: onArchiveAll,
+    },
+  ];
+  return <SectionHeaderMenu items={items} testId="plan-done-menu" />;
 }
-
-const miniDoneHeaderButtonStyle: CSSProperties = {
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg)",
-  color: "var(--fg)",
-  cursor: "pointer",
-  font: "inherit",
-  padding: "1px 6px",
-  fontSize: 10,
-};
 
 const firstSectionLabelStyle: CSSProperties = {
   ...sectionHeaderStyle,
   borderTop: "none",
 };
+
+/**
+ * Section header menu button. A single "⋯" icon that opens a popup menu
+ * with the section's available commands. Lets headers stay narrow and
+ * absorb new commands (future per-section actions) without crowding the
+ * row. Reuses the existing ContextMenu component so styling / outside-
+ * click / Escape handling all match the right-click menu.
+ */
+export function SectionHeaderMenu({ items, testId }: { items: MenuItem[]; testId?: string }) {
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  // Render the ⋯ button whenever there are any items at all, including
+  // disabled ones — hiding them was confusing ("the menu is missing
+  // + Commit Point"). ContextMenu greys disabled items so users can
+  // see the command exists and why it isn't currently applicable.
+  if (items.length === 0) return null;
+  return (
+    <>
+      <button
+        type="button"
+        data-testid={testId}
+        aria-label="Section actions"
+        title="Section actions"
+        onClick={(event) => {
+          event.stopPropagation();
+          const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+          setMenuPos({ x: rect.right, y: rect.bottom + 2 });
+        }}
+        style={sectionActionButtonStyle}
+      >
+        ⋯
+      </button>
+      {menuPos ? (
+        <ContextMenu
+          items={items}
+          position={menuPos}
+          onClose={() => setMenuPos(null)}
+          minWidth={180}
+        />
+      ) : null}
+    </>
+  );
+}
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
   "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",

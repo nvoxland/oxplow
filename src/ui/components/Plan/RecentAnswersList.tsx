@@ -8,6 +8,7 @@ import {
 } from "../../api.js";
 import { reportUiError } from "../../ui-error.js";
 import { ContextMenu } from "../ContextMenu.js";
+import { sectionHeaderStyle, type PlanSectionKey } from "./plan-utils.js";
 
 /**
  * "Recent answers" — a compact list of recently-closed `agent_turn` rows
@@ -26,9 +27,15 @@ import { ContextMenu } from "../ContextMenu.js";
 export function RecentAnswersList({
   streamId,
   threadId,
+  isSectionCollapsed,
+  onToggleSectionCollapsed,
 }: {
   streamId: string | null;
   threadId: string | null;
+  /** Shared collapse-state accessors from PlanPane's useCollapsedSections
+   *  so Recent answers behaves like the other Plan-pane sections. */
+  isSectionCollapsed: (kind: PlanSectionKey) => boolean;
+  onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
 }) {
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [openTurn, setOpenTurn] = useState<AgentTurn | null>(null);
@@ -55,10 +62,20 @@ export function RecentAnswersList({
   };
 
   if (turns.length === 0) return null;
+  const isCollapsed = isSectionCollapsed("recentAnswers");
   return (
-    <div data-testid="plan-recent-answers" style={{ padding: "4px 8px 8px 8px" }}>
-      <div style={sectionHeaderStyle}>Recent answers</div>
-      {turns.map((turn) => (
+    <div data-testid="plan-recent-answers">
+      <div
+        style={{ ...sectionHeaderStyle, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+        data-testid="plan-section-header-recentAnswers"
+        onClick={() => onToggleSectionCollapsed("recentAnswers")}
+      >
+        <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+          <span>Recent answers</span>
+          <span style={{ color: "var(--muted)", fontWeight: 400, letterSpacing: 0 }}>{turns.length}</span>
+        </span>
+      </div>
+      {!isCollapsed ? turns.map((turn) => (
         <RecentAnswerRow
           key={turn.id}
           turn={turn}
@@ -69,7 +86,7 @@ export function RecentAnswersList({
             setMenu({ x: event.clientX, y: event.clientY, turn });
           }}
         />
-      ))}
+      )) : null}
       {openTurn ? (
         <RecentAnswerModal
           turn={openTurn}
@@ -125,7 +142,6 @@ function RecentAnswerRow({
       }}
       title="Double-click to view full Q&A"
     >
-      <span aria-hidden="true" style={{ color: "var(--muted)" }}>💬</span>
       <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {promptPreview}
       </span>
@@ -223,14 +239,6 @@ function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
 }
-
-const sectionHeaderStyle: CSSProperties = {
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: 0.6,
-  color: "var(--muted)",
-  padding: "4px 4px 2px 4px",
-};
 
 const archiveIconBtnStyle: CSSProperties = {
   border: "none",

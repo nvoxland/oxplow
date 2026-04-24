@@ -95,7 +95,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "plan",
       label: "Work",
       items: [
-        { id: "plan.newWorkItem", label: "New Work Item…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
+        { id: "plan.newWorkItem", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },
       ],

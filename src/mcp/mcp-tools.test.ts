@@ -253,6 +253,42 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("human_check");
   });
 
+  test("create_work_item with status=in_progress routes through ready → in_progress so an effort is opened", async () => {
+    const { tools, workItemStore, threadB, dir } = seed();
+    const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
+    const { applyStatusTransition } = await import("../electron/runtime.js");
+    const effortStore = new EffortStore(dir);
+    const turnStore = { currentOpenTurn: () => null } as never;
+    const off = workItemStore.subscribe((change) => {
+      if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
+        applyStatusTransition(
+          { effortStore, turnStore, flushSnapshot: () => null },
+          {
+            threadId: change.threadId,
+            workItemId: change.itemId,
+            previous: change.previousStatus,
+            next: change.nextStatus,
+            touchedFiles: change.touchedFiles,
+          },
+        );
+      }
+    });
+    const t = tool(tools, "oxplow__create_work_item");
+    const result = await t.handler({
+      threadId: threadB.id,
+      kind: "task",
+      title: "Work that starts in_progress",
+      status: "in_progress",
+    } as never) as { id: string };
+    off();
+    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("in_progress");
+    // An open effort exists for this item — proves the ready → in_progress
+    // transition fired through the subscription.
+    const efforts = effortStore.listEffortsForWorkItem(result.id);
+    expect(efforts).toHaveLength(1);
+    expect(efforts[0]!.ended_at).toBeNull();
+  });
+
   test("create_work_item does NOT include a reminder for non-epic kinds (happy path stays terse)", async () => {
     const { tools, threadB } = seed();
     const t = tool(tools, "oxplow__create_work_item");

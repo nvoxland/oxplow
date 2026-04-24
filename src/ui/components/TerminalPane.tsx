@@ -10,22 +10,25 @@ import {
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
 
-export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visible: boolean }) {
+export function TerminalPane({
+  paneTarget,
+  visible,
+  transportMode,
+}: {
+  paneTarget: string;
+  visible: boolean;
+  transportMode: "direct" | "tmux";
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
-  const [transportMode, setTransportMode] = useState<"direct" | "tmux">("direct");
   const modeRef = useRef<"live" | "history">("live");
 
   function setInteractionMode(next: "live" | "history") {
     modeRef.current = next;
     setMode(next);
   }
-
-  useEffect(() => {
-    setTransportMode("direct");
-  }, [paneTarget]);
 
   useEffect(() => {
     if (!visible) return;
@@ -71,6 +74,22 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
         }).catch((error) => {
           logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
         });
+        return false;
+      }
+
+      // Shift+Enter — send ESC+CR (the Alt+Enter sequence) so Claude
+      // Code's input treats it as a newline instead of a submit. xterm's
+      // default would emit a bare \r for both Enter and Shift+Enter,
+      // which Claude Code can't distinguish. Plain Enter falls through
+      // unchanged so normal submits still work.
+      if (event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        if (sessionIdRef.current) {
+          void window.oxplowApi.sendTerminalMessage(sessionIdRef.current, JSON.stringify({
+            type: "input",
+            bytes: btoa("\x1b\r"),
+          }));
+        }
         return false;
       }
 
@@ -308,23 +327,6 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
-      <div style={{ position: "absolute", top: 10, right: 10, zIndex: 2, display: "flex", gap: 8 }}>
-        {transportMode === "direct" ? (
-          <button type="button"
-            onClick={() => setTransportMode("tmux")}
-            style={modeButtonStyle}
-          >
-            Open in tmux
-          </button>
-        ) : (
-          <button type="button"
-            onClick={() => setTransportMode("direct")}
-            style={modeButtonStyle}
-          >
-            Use direct mode
-          </button>
-        )}
-      </div>
       {mode === "history" ? (
         <div
           style={{
@@ -347,16 +349,6 @@ export function TerminalPane({ paneTarget, visible }: { paneTarget: string; visi
   );
 }
 
-const modeButtonStyle = {
-  padding: "6px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  background: "rgba(14, 14, 14, 0.92)",
-  color: "inherit",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-} satisfies React.CSSProperties;
 
 function binaryToBase64(data: string) {
   let binary = "";

@@ -30,7 +30,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
-import { WorkGroupList } from "./WorkGroupList.js";
+import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import { OpenTurnsList } from "./OpenTurnsList.js";
 import { RecentAnswersList } from "./RecentAnswersList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
@@ -41,6 +41,8 @@ import {
   inputStyle,
   miniButtonStyle,
   statusLabel,
+  useCollapsedSections,
+  type WorkItemSectionKind,
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, blocked: 2, humanCheck: 3, done: 4 };
@@ -89,7 +91,11 @@ interface Props {
    *  request again even if the itemId repeats. */
   editRequest?: { itemId: string; token: number } | null;
   onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(itemId: string): void;
+  onShowInHistory?(snapshotId: string): void;
+  /** On mount, PlanPane calls this with its openCreateModal function so
+   *  the parent can open the New-Task modal imperatively — used for
+   *  menu-click dispatches where React's effect scheduler can stall. */
+  registerOpenCreate?(fn: () => void): void;
 }
 
 interface ContextMenuState {
@@ -118,6 +124,7 @@ export function PlanPane({
   editRequest,
   onOpenFile,
   onShowInHistory,
+  registerOpenCreate,
 }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -142,6 +149,7 @@ export function PlanPane({
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
   const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
+  const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
   // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
@@ -361,6 +369,22 @@ export function PlanPane({
     setModalMode("create");
   };
 
+  // Register the imperative opener with the parent so menu-click
+  // dispatches can open the modal without going through setState +
+  // useEffect. React 18 only flushes effects synchronously for discrete
+  // user input events — IPC messages from the main process aren't
+  // discrete, so the openNewRequest useEffect below would stall on the
+  // scheduler until the next real input event. The direct call path
+  // lets setModalMode commit inside App's flushSync wrap.
+  useEffect(() => {
+    if (!registerOpenCreate) return;
+    registerOpenCreate(() => openCreateModal());
+    return () => registerOpenCreate(() => {});
+    // openCreateModal captures stable setState refs, so omitting it
+    // from deps is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registerOpenCreate]);
+
   const openEditModal = (item: WorkItem) => {
     setTitle(item.title);
     setDescription(item.description ?? "");
@@ -459,18 +483,11 @@ export function PlanPane({
       onClick={() => paneRef.current?.focus()}
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
-      <div style={{ padding: 8, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" data-testid="plan-new-task" onClick={() => openCreateModal()} style={{ ...miniButtonStyle, padding: "4px 10px" }}>
-            + New Task
-          </button>
-          <span style={{ color: "var(--muted)", fontSize: 11 }}>
-            {mode === "backlog" ? "Backlog" : ""}
-          </span>
+      {mode === "backlog" ? (
+        <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+          Backlog
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        </div>
-      </div>
+      ) : null}
       {modalMode ? (
         <NewWorkItemModal
           title={title}
@@ -551,7 +568,12 @@ export function PlanPane({
           <>
             {mode === "thread" ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={true} /> : null}
             {mode === "thread" ? (
-              <RecentAnswersList streamId={streamId} threadId={threadId} />
+              <RecentAnswersList
+                streamId={streamId}
+                threadId={threadId}
+                isSectionCollapsed={isSectionCollapsed}
+                onToggleSectionCollapsed={onToggleSectionCollapsed}
+              />
             ) : null}
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
               {mode === "backlog" ? "Backlog is empty." : "No work items."}
@@ -566,64 +588,78 @@ export function PlanPane({
               ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={inProgressCount === 0} />
               : undefined;
             const afterInProgressSlot = isRootThread && isFirstGroup
-              ? <RecentAnswersList streamId={streamId} threadId={threadId} />
+              ? (
+                <RecentAnswersList
+                  streamId={streamId}
+                  threadId={threadId}
+                  isSectionCollapsed={isSectionCollapsed}
+                  onToggleSectionCollapsed={onToggleSectionCollapsed}
+                />
+              )
               : undefined;
             const isActive = isRootThread && thread?.id === activeThreadId;
-            const canAddPoints = isRootThread && !!threadWork && threadWork.waiting.length > 0;
             const autoCommitOn = thread?.auto_commit ?? false;
-            const addPointsSlot = isRootThread && thread ? (
-              <div style={queueMarkerBarStyle} data-testid="plan-add-points-bar">
-                <CommitModeDropdown
-                  autoCommitOn={autoCommitOn}
-                  onSelect={(auto) => {
+            // To Do section header actions: collapsed into a single
+            // ⋯ menu button so the header stays narrow and can absorb
+            // future commands without crowding. All actions (new task,
+            // commit-mode toggle, add commit point, add wait point)
+            // live as menu items inside the popup.
+            const toDoMenuItems: MenuItem[] = [
+              {
+                id: "plan-new-task",
+                label: "New task",
+                shortcut: "⇧⌘N",
+                enabled: true,
+                run: () => openCreateModal(),
+              },
+              ...(isRootThread && thread ? [
+                {
+                  id: "plan-commit-mode",
+                  label: autoCommitOn ? "Switch to manual commits" : "Switch to auto commits",
+                  enabled: !!streamId && !!threadId,
+                  run: () => {
                     if (!streamId || !threadId) return;
-                    runWithError("Set commit mode", setAutoCommit(streamId, threadId, auto));
-                  }}
-                />
-                {!autoCommitOn ? (
-                  <button type="button"
-                    data-testid="plan-add-commit-point"
-                    onClick={() => {
-                      if (!streamId || !threadId) return;
-                      runWithError("Add commit point", createCommitPoint(streamId, threadId));
-                    }}
-                    disabled={!canAddPoints}
-                    style={{
-                      ...miniButtonStyle,
-                      opacity: canAddPoints ? 1 : 0.5,
-                      cursor: canAddPoints ? "pointer" : "not-allowed",
-                    }}
-                    title={
-                      canAddPoints
-                        ? "Add a commit point to the queue"
-                        : "No To Do items in the queue"
-                    }
-                  >
-                    + Commit Point
-                  </button>
-                ) : null}
-                <button type="button"
-                  data-testid="plan-add-wait-point"
-                  onClick={() => {
+                    runWithError("Set commit mode", setAutoCommit(streamId, threadId, !autoCommitOn));
+                  },
+                },
+                // Commit point only lives in manual mode (auto commits
+                // at every Stop, so queued commit markers would be
+                // redundant). Always visible in manual mode even when
+                // the To Do queue is empty — the command renders in the
+                // menu greyed so the user sees it exists and why it's
+                // disabled. canAddPoints gating dropped per user
+                // feedback; backend tolerates an empty queue.
+                ...(!autoCommitOn ? [{
+                  id: "plan-add-commit-point",
+                  label: "Add commit point",
+                  enabled: !!streamId && !!threadId,
+                  run: () => {
+                    if (!streamId || !threadId) return;
+                    runWithError("Add commit point", createCommitPoint(streamId, threadId));
+                  },
+                }] : []),
+                // Wait point applies to both modes and doesn't depend
+                // on having waiting items — user can queue a wait
+                // marker proactively.
+                {
+                  id: "plan-add-wait-point",
+                  label: "Add wait point",
+                  enabled: !!streamId && !!threadId,
+                  run: () => {
                     if (!streamId || !threadId) return;
                     runWithError("Add wait point", createWaitPoint(streamId, threadId, null));
-                  }}
-                  disabled={!canAddPoints}
-                  style={{
-                    ...miniButtonStyle,
-                    opacity: canAddPoints ? 1 : 0.5,
-                    cursor: canAddPoints ? "pointer" : "not-allowed",
-                  }}
-                  title={
-                    canAddPoints
-                      ? "Add a wait point to the queue"
-                      : "No To Do items in the queue"
-                  }
-                >
-                  + Wait Point
-                </button>
-              </div>
-            ) : null;
+                  },
+                },
+              ] : []),
+            ];
+            const toDoActions = (
+              <span data-testid="plan-add-points-bar">
+                <SectionHeaderMenu items={toDoMenuItems} testId="plan-todo-menu" />
+              </span>
+            );
+            const sectionActions: Partial<Record<WorkItemSectionKind, React.ReactNode>> = {
+              toDo: toDoActions,
+            };
             return (
               <WorkGroupList
                 key={group.epic?.id ?? "__root__"}
@@ -645,7 +681,7 @@ export function PlanPane({
                     : null;
                   setContextMenu({ x: event.clientX, y: event.clientY, item, groupIds });
                 }}
-                addPointsSlot={addPointsSlot}
+                sectionActions={sectionActions}
                 selectedId={selectedId}
                 markedIds={markedIds}
                 onSelect={handleSelect}
@@ -657,6 +693,8 @@ export function PlanPane({
                 isActive={isActive}
                 inProgressLeadSlot={inProgressLeadSlot}
                 afterInProgressSlot={afterInProgressSlot}
+                isSectionCollapsed={isSectionCollapsed}
+                onToggleSectionCollapsed={onToggleSectionCollapsed}
               />
             );
           })
@@ -784,105 +822,6 @@ export function PlanPane({
           }}
           onClose={() => setEditingCommitPoint(null)}
         />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Custom dropdown for commit mode — replaces the native <select> that was
- * closing prematurely in Electron due to re-renders triggered mid-interaction.
- */
-function CommitModeDropdown({
-  autoCommitOn,
-  onSelect,
-}: {
-  autoCommitOn: boolean;
-  onSelect(auto: boolean): void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [isOpen]);
-
-  const options: { value: boolean; label: string }[] = [
-    { value: false, label: "Manual Commit" },
-    { value: true, label: "Auto Commit" },
-  ];
-
-  return (
-    <div ref={containerRef} style={{ position: "relative" }}>
-      <button
-        type="button"
-        data-testid="plan-commit-mode-select"
-        onClick={() => setIsOpen((prev) => !prev)}
-        style={{
-          ...miniButtonStyle,
-          padding: "4px 8px",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          minWidth: 120,
-          justifyContent: "space-between",
-        }}
-      >
-        <span>{autoCommitOn ? "Auto Commit" : "Manual Commit"}</span>
-        <span style={{ opacity: 0.6, fontSize: 10 }}>▾</span>
-      </button>
-      {isOpen ? (
-        <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            zIndex: 100,
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            marginTop: 2,
-            minWidth: "100%",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-            overflow: "hidden",
-          }}
-        >
-          {options.map(({ value, label }) => {
-            const active = autoCommitOn === value;
-            return (
-              <button
-                key={label}
-                type="button"
-                onClick={() => {
-                  onSelect(value);
-                  setIsOpen(false);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "6px 10px",
-                  border: "none",
-                  background: active ? "var(--accent)" : "transparent",
-                  color: active ? "#fff" : "var(--fg)",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: 12,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
       ) : null}
     </div>
   );
@@ -1039,7 +978,7 @@ function NewWorkItemModal({
   epics?: WorkItem[];
   onOpenItem?(item: WorkItem): void;
   onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(itemId: string): void;
+  onShowInHistory?(snapshotId: string): void;
   modalTitle?: string;
   onClose(): void;
   onSubmit(andAnother: boolean): Promise<void>;
@@ -1305,16 +1244,19 @@ function NewWorkItemModal({
 }
 
 function EffortsSection({
-  item,
-  efforts,
+  efforts: allEfforts,
   onOpenFile,
   onShowInHistory,
 }: {
   item: WorkItem;
   efforts: EffortDetail[];
   onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(itemId: string): void;
+  onShowInHistory?(snapshotId: string): void;
 }) {
+  // Only show completed efforts. An in-progress effort has no end
+  // snapshot, no final file list, and "In history" can't jump to a
+  // snapshot that doesn't exist — it's noise until the effort closes.
+  const efforts = allEfforts.filter((d) => d.effort.ended_at);
   const totalPaths = new Set<string>();
   for (const effort of efforts) {
     for (const path of effort.changed_paths) totalPaths.add(path);
@@ -1330,49 +1272,59 @@ function EffortsSection({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-          {efforts.map((detail, i) => (
-            <div key={detail.effort.id} style={{ display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
-              <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "baseline" }}>
-                <span>Effort {i + 1}</span>
-                <span>· {formatNoteDate(detail.effort.started_at)}</span>
-                {detail.effort.ended_at ? <span>→ {formatNoteDate(detail.effort.ended_at)}</span> : <span style={{ color: "var(--accent)" }}>· open</span>}
-                <span style={{ marginLeft: "auto" }}>{detail.changed_paths.length} file{detail.changed_paths.length === 1 ? "" : "s"}</span>
-              </div>
-              {detail.changed_paths.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  {detail.changed_paths.map((path) => (
-                    <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                      {onOpenFile ? (
-                        <button
-                          type="button"
-                          onClick={() => void onOpenFile(path)}
-                          style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
-                        >
-                          {path}
-                        </button>
-                      ) : (
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
-                      )}
-                    </div>
-                  ))}
+          {efforts.map((detail, i) => {
+            const endSnapshotId = detail.effort.end_snapshot_id;
+            return (
+              <div key={detail.effort.id} style={{ display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "center" }}>
+                  <span>Effort {i + 1}</span>
+                  <span>· {formatNoteDate(detail.effort.started_at)}</span>
+                  <span>→ {formatNoteDate(detail.effort.ended_at!)}</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "baseline" }}>
+                    {detail.counts.created > 0 ? <span style={{ color: "#86efac" }}>+{detail.counts.created}</span> : null}
+                    {detail.counts.updated > 0 ? <span style={{ color: "#e5a06a" }}>~{detail.counts.updated}</span> : null}
+                    {detail.counts.deleted > 0 ? <span style={{ color: "#f87171" }}>−{detail.counts.deleted}</span> : null}
+                    {detail.counts.created + detail.counts.updated + detail.counts.deleted === 0 ? (
+                      <span>0 files</span>
+                    ) : null}
+                  </span>
+                  {onShowInHistory ? (
+                    <button
+                      type="button"
+                      data-testid={`work-item-show-in-history-${i}`}
+                      onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
+                      style={{ ...miniButtonStyle, padding: "1px 6px", fontSize: 10 }}
+                      disabled={!endSnapshotId}
+                      title={endSnapshotId ? "Open Local History at this effort's end snapshot" : "Effort is still open — no end snapshot yet"}
+                    >
+                      In history
+                    </button>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          ))}
+                {detail.changed_paths.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {detail.changed_paths.map((path) => (
+                      <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                        {onOpenFile ? (
+                          <button
+                            type="button"
+                            onClick={() => void onOpenFile(path)}
+                            style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
+                          >
+                            {path}
+                          </button>
+                        ) : (
+                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
-      {onShowInHistory ? (
-        <button
-          type="button"
-          data-testid="work-item-show-in-history"
-          onClick={() => onShowInHistory(item.id)}
-          style={{ ...miniButtonStyle, alignSelf: "flex-start", marginTop: 4 }}
-          disabled={efforts.length === 0}
-          title={efforts.length === 0 ? "No efforts yet" : "Open Local History and select this work item's most recent snapshot"}
-        >
-          Show in history
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -1495,13 +1447,6 @@ const labelStyle: CSSProperties = {
   gap: 4,
   fontSize: 12,
   color: "var(--muted)",
-};
-
-const queueMarkerBarStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "6px 10px",
 };
 
 const bottomBarStyle: CSSProperties = {
