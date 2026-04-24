@@ -74,7 +74,10 @@
         { "target": "deb", "arch": ["x64"] }
       ],
       "category": "Development"
-    }
+    },
+    "publish": [
+      { "provider": "github" }
+    ]
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
