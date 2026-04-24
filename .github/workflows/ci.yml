@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # `node-pty` compiles C++ against node headers at install time, so the
+      # ubuntu runner needs the usual build toolchain. Windows and macOS
+      # runners already have their equivalents.
+      - name: Install Linux build deps for node-pty
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `bun test` also runs `bunx tsc --noEmit` first (see package.json).
+      - name: Test
+        run: bun test
+
+  package:
+    # Three-platform matrix confirms electron-builder can produce
+    # installers on each target OS, catching platform-specific
+    # regressions (node-pty native-module rebuild, path separators,
+    # macOS-only signing flags, etc.) before they hit users.
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Linux build deps for node-pty
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build JS bundles
+        run: bun run build
+
+      # Unsigned build — no code-signing certs in CI. electron-builder
+      # still produces working installers; users will see a "not signed"
+      # warning on macOS/Windows. Set `CSC_IDENTITY_AUTO_DISCOVERY: false`
+      # so the macOS runner doesn't try to find a keychain cert.
+      - name: Package with electron-builder
+        run: bunx electron-builder --publish=never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upload only the installer-shaped outputs (everything in `release/`
+      # except the unpacked staging dirs electron-builder leaves behind).
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: oxplow-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+          retention-days: 14

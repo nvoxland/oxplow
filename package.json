@@ -15,7 +15,40 @@
     "dev:electron": "bun run build && electron .",
     "start": "electron .",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bunx tsc --noEmit && bun test"
+    "test": "bunx tsc --noEmit && bun test",
+    "dist": "bun run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.voxland.oxplow",
+    "productName": "Oxplow",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "public/**/*",
+      "bin/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "category": "Development"
+    }
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -34,6 +67,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.5.12",
     "electron": "^41.2.1",
+    "electron-builder": "^26.8.1",
     "playwright": "^1.59.1",
     "typescript": "^5.5.0"
   }
