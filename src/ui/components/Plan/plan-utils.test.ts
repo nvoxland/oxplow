@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import type { WorkItem, WorkItemStatus } from "../../api.js";
+import type { BacklogState, WorkItem, WorkItemStatus } from "../../api.js";
 import {
+  buildBacklogGroups,
   classifyWorkItem,
   finalizeReorderIds,
   sectionDefaultStatus,
@@ -192,6 +193,27 @@ test("dragging a Done item onto a Human Check item — drop-out-of-Done scenario
   const done = sections.find((s) => s.kind === "done");
   expect(hc?.items.map((i) => i.id)).toEqual(["hc3", "d4", "hc2"]);
   expect(done?.items.map((i) => i.id)).toEqual(["d5"]);
+});
+
+test("buildBacklogGroups returns a single empty group for an empty backlog so section headers still render", () => {
+  // The backlog pane should look like a regular Work pane — section headers
+  // + the To-Do "⋯ New task" menu must be visible even when the backlog is
+  // empty so the user can seed the first task. That only happens if
+  // buildBacklogGroups yields at least one group for WorkGroupList to render.
+  const state: BacklogState = { waiting: [], inProgress: [], done: [] };
+  const groups = buildBacklogGroups(state);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]?.items).toEqual([]);
+  expect(groups[0]?.epic).toBeNull();
+});
+
+test("buildBacklogGroups still returns an empty group when state is null", () => {
+  // PlanPane passes backlog=null before the first fetch resolves. We still
+  // want the pane to render the empty-state section chrome rather than a
+  // blank view — the user can click "⋯ New task" immediately.
+  const groups = buildBacklogGroups(null);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]?.items).toEqual([]);
 });
 
 test("splitIntoSections keeps human_check out of the in-progress bucket", () => {

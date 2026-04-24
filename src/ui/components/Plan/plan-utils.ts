@@ -172,9 +172,13 @@ export function finalizeReorderIds(
 }
 
 export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] {
-  if (!state) return [];
-  const items = [...state.waiting, ...state.inProgress, ...state.done];
-  if (items.length === 0) return [];
+  // Always yield exactly one root group, even when the backlog is empty or
+  // `state` is still loading — the Plan pane renders the section chrome
+  // (To Do / Done / etc. + the "⋯ New task" menu) through WorkGroupList,
+  // which only runs when a group exists. Without a group the empty backlog
+  // would fall back to a blank "Backlog is empty." label with no way to
+  // create the first task.
+  const items = state ? [...state.waiting, ...state.inProgress, ...state.done] : [];
   items.sort((a, b) => a.sort_index - b.sort_index);
   return [{ epic: null, items, epicChildren: new Map() }];
 }

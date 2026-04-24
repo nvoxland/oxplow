@@ -483,11 +483,6 @@ export function PlanPane({
       onClick={() => paneRef.current?.focus()}
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
-      {mode === "backlog" ? (
-        <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
-          Backlog
-        </div>
-      ) : null}
       {modalMode ? (
         <NewWorkItemModal
           title={title}
@@ -576,7 +571,7 @@ export function PlanPane({
               />
             ) : null}
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
-              {mode === "backlog" ? "Backlog is empty." : "No work items."}
+              No work items.
             </div>
           </>
         ) : (
@@ -1253,9 +1248,10 @@ function EffortsSection({
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
 }) {
-  // Only show completed efforts. An in-progress effort has no end
-  // snapshot, no final file list, and "In history" can't jump to a
-  // snapshot that doesn't exist — it's noise until the effort closes.
+  // Separate the open effort (no end snapshot, no final file list) from
+  // completed ones — render it as its own box so the user can see that
+  // work is actively attributed to this item right now.
+  const activeEffort = allEfforts.find((d) => !d.effort.ended_at) ?? null;
   const efforts = allEfforts.filter((d) => d.effort.ended_at);
   const totalPaths = new Set<string>();
   for (const effort of efforts) {
@@ -1266,11 +1262,30 @@ function EffortsSection({
       <div style={modalFieldLabelStyle}>
         Efforts {efforts.length > 0 ? `(${efforts.length}, ${totalPaths.size} file${totalPaths.size === 1 ? "" : "s"})` : ""}
       </div>
-      {efforts.length === 0 ? (
+      {activeEffort ? (
+        <div
+          data-testid="work-item-effort-in-progress"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            border: "1px solid var(--accent)",
+            borderRadius: 6,
+            padding: 6,
+            background: "var(--bg-1)",
+          }}
+        >
+          <div style={{ fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Effort in progress</span>
+            <span style={{ color: "var(--muted)" }}>· started {formatNoteDate(activeEffort.effort.started_at)}</span>
+          </div>
+        </div>
+      ) : null}
+      {efforts.length === 0 && !activeEffort ? (
         <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
           No efforts yet — moving this item to "in progress" starts one.
         </div>
-      ) : (
+      ) : efforts.length === 0 ? null : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
           {efforts.map((detail, i) => {
             const endSnapshotId = detail.effort.end_snapshot_id;
