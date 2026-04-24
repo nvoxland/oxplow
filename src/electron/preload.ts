@@ -30,6 +30,7 @@ const api: DesktopApi = {
   gitRebaseOnto: (streamId, onto) => ipcRenderer.invoke("oxplow:gitRebaseOnto", streamId, onto),
   getWorkspaceContext: () => ipcRenderer.invoke("oxplow:getWorkspaceContext"),
   createStream: (input) => ipcRenderer.invoke("oxplow:createStream", input),
+  listAdoptableWorktrees: () => ipcRenderer.invoke("oxplow:listAdoptableWorktrees"),
   checkoutStreamBranch: (streamId, branch) => ipcRenderer.invoke("oxplow:checkoutStreamBranch", streamId, branch),
   getThreadState: (streamId) => ipcRenderer.invoke("oxplow:getThreadState", streamId),
   createThread: (streamId, title) => ipcRenderer.invoke("oxplow:createThread", streamId, title),

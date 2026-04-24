@@ -603,6 +603,69 @@ export function gitRebase(projectDir: string, onto: string): GitOpResult {
   return runGit(projectDir, ["rebase", onto]);
 }
 
+export interface GitWorktreeEntry {
+  path: string;
+  branch: string | null;
+  headSha: string | null;
+  isMain: boolean;
+  isDetached: boolean;
+  isLocked: boolean;
+  isPrunable: boolean;
+}
+
+/**
+ * Parse `git worktree list --porcelain` — each record is newline-separated and
+ * records are separated by a blank line. The first record is the main worktree.
+ */
+export function listExistingWorktrees(projectDir: string): GitWorktreeEntry[] {
+  if (!isGitRepo(projectDir)) return [];
+  let raw: string;
+  try {
+    raw = execFileSync("git", ["-C", projectDir, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return [];
+  }
+  const entries: GitWorktreeEntry[] = [];
+  let current: Partial<GitWorktreeEntry> | null = null;
+  let isFirst = true;
+  const flush = () => {
+    if (!current || !current.path) return;
+    entries.push({
+      path: current.path,
+      branch: current.branch ?? null,
+      headSha: current.headSha ?? null,
+      isMain: !!current.isMain,
+      isDetached: !!current.isDetached,
+      isLocked: !!current.isLocked,
+      isPrunable: !!current.isPrunable,
+    });
+  };
+  for (const line of raw.split("\n")) {
+    if (line.length === 0) {
+      flush();
+      current = null;
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      if (current) flush();
+      current = { path: line.slice("worktree ".length), isMain: isFirst };
+      isFirst = false;
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("HEAD ")) current.headSha = line.slice("HEAD ".length);
+    else if (line.startsWith("branch ")) current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+    else if (line === "detached") current.isDetached = true;
+    else if (line.startsWith("locked")) current.isLocked = true;
+    else if (line.startsWith("prunable")) current.isPrunable = true;
+  }
+  if (current) flush();
+  return entries;
+}
+
 export function checkoutBranch(worktreePath: string, branch: string): void {
   const result = runGit(worktreePath, ["checkout", branch]);
   if (!result.ok) {

@@ -1,7 +1,7 @@
 import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
 export type { OxplowEvent } from "../electron/ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs } from "../git/git.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry } from "../git/git.js";
 export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
 export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
@@ -329,9 +329,14 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext> {
 
 export async function createStream(input:
   | { title: string; summary?: string; source: "existing"; ref: string }
-  | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
+  | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }
+  | { title: string; summary?: string; source: "worktree"; worktreePath: string },
 ): Promise<Stream> {
   return desktopApi().createStream(input);
+}
+
+export async function listAdoptableWorktrees(): Promise<import("../git/git.js").GitWorktreeEntry[]> {
+  return desktopApi().listAdoptableWorktrees();
 }
 
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {

@@ -37,6 +37,8 @@ import {
   deleteBranch,
   gitMerge,
   gitRebase,
+  listExistingWorktrees,
+  type GitWorktreeEntry,
   type BranchChanges,
   type GroupedGitRefs,
   type ChangeScopes,
@@ -789,6 +791,18 @@ export class ElectronRuntime {
     return gitRebase(stream.worktree_path, onto);
   }
 
+  /**
+   * Enumerate existing git worktrees that aren't already tracked as oxplow
+   * streams. Powers the new-stream "adopt existing worktree" flow. The main
+   * worktree (the project itself) is excluded since it's the primary stream.
+   */
+  listAdoptableWorktrees(): GitWorktreeEntry[] {
+    const known = new Set(
+      this.store.list().map((s) => s.worktree_path).filter((p): p is string => !!p),
+    );
+    return listExistingWorktrees(this.projectDir).filter((wt) => !wt.isMain && !known.has(wt.path));
+  }
+
   getBranchChanges(streamId: string, baseRef?: string): BranchChanges & { resolvedBaseRef: string | null } {
     const stream = this.resolveStream(streamId);
     const resolvedBaseRef = baseRef?.trim() || detectBaseBranch(stream.worktree_path);
@@ -944,7 +958,11 @@ export class ElectronRuntime {
     }
   }
 
-  createStream(body: { title: string; summary?: string; source: "existing"; ref: string } | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }): Stream {
+  createStream(body:
+    | { title: string; summary?: string; source: "existing"; ref: string }
+    | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }
+    | { title: string; summary?: string; source: "worktree"; worktreePath: string },
+  ): Stream {
     if (!isGitRepo(this.projectDir)) {
       throw new Error("git functionality is disabled for this workspace root");
     }
@@ -980,7 +998,7 @@ export class ElectronRuntime {
         worktreePath,
         projectBase: this.projectBase,
       });
-    } else {
+    } else if (body.source === "new") {
       const branchName = body.branch.trim();
       if (!branchName) throw new Error("branch is required");
       if (!body.startPointRef.trim()) throw new Error("startPointRef is required");
@@ -1001,6 +1019,33 @@ export class ElectronRuntime {
         branch: branchName,
         branchRef: body.startPointRef,
         branchSource: "new",
+        worktreePath,
+        projectBase: this.projectBase,
+      });
+    } else {
+      // Adopt an existing git worktree — skip ensureWorktree, just detect the
+      // branch and register the stream pointing at the user-supplied path.
+      const worktreePath = body.worktreePath;
+      if (!worktreePath.trim()) throw new Error("worktreePath is required");
+      if (!isGitRepo(worktreePath)) throw new Error(`not a git worktree: ${worktreePath}`);
+      const already = this.store.list().find((s) => s.worktree_path === worktreePath);
+      if (already) {
+        this.store.setCurrentStreamId(already.id);
+        return already;
+      }
+      const branchName = detectCurrentBranch(worktreePath);
+      if (!branchName) throw new Error(`worktree has a detached HEAD: ${worktreePath}`);
+      const existing = this.store.findByBranch(branchName);
+      if (existing) {
+        this.store.setCurrentStreamId(existing.id);
+        return existing;
+      }
+      stream = this.store.create({
+        title,
+        summary,
+        branch: branchName,
+        branchRef: `refs/heads/${branchName}`,
+        branchSource: "local",
         worktreePath,
         projectBase: this.projectBase,
       });

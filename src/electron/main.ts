@@ -213,6 +213,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   );
   handle("oxplow:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   handle("oxplow:createStream", (_event, input) => currentRuntime.createStream(input));
+  handle("oxplow:listAdoptableWorktrees", () => currentRuntime.listAdoptableWorktrees());
   handle("oxplow:checkoutStreamBranch", (_event, streamId: string, branch: string) =>
     currentRuntime.checkoutStreamBranch(streamId, branch),
   );

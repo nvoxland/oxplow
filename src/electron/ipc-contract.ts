@@ -150,8 +150,10 @@ export interface DesktopApi {
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
     | { title: string; summary?: string; source: "existing"; ref: string }
-    | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
+    | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }
+    | { title: string; summary?: string; source: "worktree"; worktreePath: string },
   ): Promise<Stream>;
+  listAdoptableWorktrees(): Promise<import("../git/git.js").GitWorktreeEntry[]>;
   checkoutStreamBranch(streamId: string, branch: string): Promise<Stream>;
   getThreadState(streamId: string): Promise<ThreadState>;
   createThread(streamId: string, title: string): Promise<ThreadState>;
