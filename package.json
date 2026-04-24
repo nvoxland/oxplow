@@ -3,6 +3,10 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "author": {
+    "name": "Nathan Voxland",
+    "email": "nathan@voxland.net"
+  },
   "main": "./dist/electron-main.cjs",
   "bin": {
     "oxplow": "./bin/oxplow"
