@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+# Workspace-local cache dirs so one actions/cache step covers bun's
+# install cache, the Electron binary download (~100MB per platform),
+# and electron-builder's tool cache — all of which are re-fetched on
+# every run otherwise. Using $GITHUB_WORKSPACE sub-paths avoids the
+# OS-specific path dance (~/.cache/electron vs %LOCALAPPDATA%/electron
+# vs ~/Library/Caches/electron).
+env:
+  BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.ci-cache/bun
+  ELECTRON_CACHE: ${{ github.workspace }}/.ci-cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.ci-cache/electron-builder
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,9 +28,16 @@ jobs:
         with:
           bun-version: latest
 
-      # `node-pty` compiles C++ against node headers at install time, so the
-      # ubuntu runner needs the usual build toolchain. Windows and macOS
-      # runners already have their equivalents.
+      - name: Restore caches
+        uses: actions/cache@v5
+        with:
+          path: .ci-cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+
+      # `node-pty` compiles C++ against node headers at install time, so
+      # the ubuntu runner needs the usual build toolchain. Windows and
+      # macOS runners already have their equivalents.
       - name: Install Linux build deps for node-pty
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
 
@@ -50,6 +68,17 @@ jobs:
         with:
           bun-version: latest
 
+      # Key includes bun.lock so dependency changes invalidate cleanly;
+      # restore-keys falls back to the latest cache for this OS when the
+      # lockfile changes, so most of the Electron binary can still be
+      # reused across lockfile bumps.
+      - name: Restore caches
+        uses: actions/cache@v5
+        with:
+          path: .ci-cache
+          key: ${{ runner.os }}-build-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-build-
+
       - name: Install Linux build deps for node-pty
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
@@ -70,8 +99,6 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Upload only the installer-shaped outputs (everything in `release/`
-      # except the unpacked staging dirs electron-builder leaves behind).
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
