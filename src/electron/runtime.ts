@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
@@ -2608,8 +2608,16 @@ function cleanupSessions(streams: Stream[]) {
   }
 }
 
+/**
+ * New worktrees live as siblings of the main repo: `<parent>/<repo>-<branch>`.
+ * Keeps them out of the main repo tree (so they don't get picked up by
+ * ignored-file scans, builds, or `git` invocations inside projectDir) while
+ * staying visible to the user in a familiar location.
+ */
 function streamWorktreePath(projectDir: string, branch: string): string {
-  return join(projectDir, ".oxplow", "worktrees", sanitizeBranch(branch));
+  const parent = dirname(projectDir);
+  const repoName = basename(projectDir);
+  return join(parent, `${repoName}-${sanitizeBranch(branch)}`);
 }
 
 function sanitizeBranch(branch: string): string {
