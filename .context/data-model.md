@@ -17,18 +17,42 @@ migrations (`src/persistence/migrations.ts`) gated by `PRAGMA user_version`
 
 ### `streams` — `StreamStore` (`src/persistence/stream-store.ts`)
 
-Top-level workspace context. One row per branch the user is working on.
+Top-level workspace context. Exactly one row per user-facing stream tab.
 Each stream owns:
 
-- a worktree path (its own checkout under `.oxplow/worktrees/`)
+- a `kind` column (migration v34) — `"primary" | "worktree"`:
+  - **primary**: the repo itself. `worktree_path === projectDir`,
+    `title === projectBase` (never rewritten), created exactly once at
+    startup by `ElectronRuntime.initialize()` via `StreamStore.findPrimary()`.
+    Cannot be deleted (`StreamStore.deleteStream()` throws for `kind === "primary"`).
+  - **worktree**: a real git worktree under `.oxplow/worktrees/<branch>/`
+    created by `createStream()` via `ensureWorktree()`. Title defaults
+    to the branch name; the runtime rewrites the title when the branch
+    switches only if the old title matched the old branch (preserves
+    user renames).
+- a `branch` / `branch_ref` pair that is **not** pinned — any stream can
+  switch branches. Updated by `StreamStore.setStreamBranch(streamId,
+  branch, branchRef)`, which emits `stream.changed` (kind:
+  `"branch-changed"`). The runtime drives it from two sites:
+  `ElectronRuntime.checkoutStreamBranch(streamId, branch)` (user-triggered
+  via "Switch branch…" in the StreamRail context menu) and
+  `maybeSyncStreamBranch(streamId)` (fired by every `git-refs.changed`
+  event so external `git checkout` in a worktree is picked up live).
+  Git-level errors (dirty tree, missing branch, branch already checked
+  out in another worktree) bubble through unchanged so the UI inline
+  error shows git's own message.
+- a worktree path (projectDir for primary; `.oxplow/worktrees/<slug>/`
+  for worktree kind — the `<slug>` is fixed at creation and does not
+  rename on branch switch)
 - two tmux pane targets (`working` and `talking`)
 - per-pane Claude resume session ids (so reconnecting picks up history)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
 - a `sort_index` column (migration v14) — streams are listed ordered by
   `sort_index, rowid`; drag-to-reorder in the StreamRail calls
   `reorderStreams(orderedStreamIds)` which reassigns sequential indexes.
-  Emits a `stream.changed` event (kind: "reordered") so the UI can
-  refresh.
+  The UI enforces **primary-first** regardless of sort_index (the
+  primary tab can't be dragged and nothing can drop before it). Emits a
+  `stream.changed` event (kind: "reordered") so the UI can refresh.
 - a `custom_prompt` column (migration v18, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via `setStreamPrompt(streamId,
@@ -334,6 +358,51 @@ segments matched anywhere in the relative path, and apply to both
 the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
+
+### `wiki_note` — `WikiNoteStore` (`src/persistence/wiki-note-store.ts`)
+
+User-curated personal knowledgebase — agent-written writeups, diagrams,
+and explanations that accumulate per project. **Bodies live on disk**
+as plain markdown files at `.oxplow/notes/<slug>.md` (not committed to
+git — this is a personal KB, not team docs). The table only holds
+metadata; the filesystem is the source of truth for content.
+
+Columns: `id, slug (UNIQUE), title, captured_head_sha,
+captured_refs_json, created_at, updated_at`.
+
+Workflow: the agent writes/edits note files directly with its
+Write/Edit tools (no MCP round-trip for bodies). A dedicated watcher
+(`src/git/notes-watch.ts`) picks up every file event, re-parses the
+file, and upserts metadata. **Every write — agent or user — re-baselines
+freshness**, because any write implicitly asserts "this is current as
+of now." There is no agent-vs-user distinction.
+
+Freshness is a general indicator, not a proof:
+- `captured_head_sha` is HEAD at last write. If HEAD advances, the
+  note is flagged `stale`.
+- `captured_refs_json` stores `{path, blobSha, mtimeMs}` for every file
+  path mentioned in the note (extracted via `parseNoteRefs` in
+  `src/persistence/wiki-note-refs.ts`). `computeFreshness` rehashes
+  each referenced file; any mismatch → `stale`; any missing file →
+  `very-stale`.
+
+MCP tools (`src/mcp/wiki-note-mcp-tools.ts`) are metadata-only —
+`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`,
+`delete_note`. There is no `create_note` or `update_note`: the agent
+Writes the file, then optionally calls `resync_note` to pin freshness
+immediately (otherwise the watcher catches up within a ~200ms
+debounce).
+
+UI: `NotesPane` (`src/ui/components/Notes/NotesPane.tsx`) is a
+left-dock `ToolWindow` — a list of notes with freshness badges and
+a `+ New` inline-input row for creating a new slug. Selecting a row
+opens the note as a center tab (`note:<slug>`) rendered by
+`NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which owns the
+view/edit/delete UI and renders bodies with `react-markdown` +
+`remark-gfm` + `mermaid` (mermaid fenced blocks are post-rendered
+into inline SVG). IPC surface: `listWikiNotes`, `readWikiNoteBody`,
+`writeWikiNoteBody`, `deleteWikiNote`, plus the `wiki-note.changed`
+event on the bus.
 
 ## The shared `sort_index` queue
 

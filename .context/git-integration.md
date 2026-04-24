@@ -74,6 +74,19 @@ loading spinner) by:
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
 
+### 4. Notes watcher
+
+`src/git/notes-watch.ts` — not really a git watcher, but lives next
+to the others because it wraps `fs.watch` the same way. Watches
+`.oxplow/notes/` for `.md` file create/change/delete, debounces
+~200ms per slug, and calls `syncNoteFromDisk` → `WikiNoteStore.upsert`
+(or `deleteBySlug`). Captures current HEAD (`readWorktreeHeadSha`)
+and per-reference blob SHA-256 hashes as the freshness baseline.
+
+Every write is treated identically — agent and user edits both
+re-baseline freshness — so the watcher is the single sync path for
+`wiki_note` metadata. See `data-model.md` → `wiki_note`.
+
 ### Why three
 
 They watch overlapping but disjoint things:

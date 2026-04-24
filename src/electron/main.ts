@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from "electron";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
@@ -169,6 +169,18 @@ function createWindow(openDevTools: boolean, title: string) {
     event.preventDefault();
   });
 
+  // Don't let in-page link clicks (e.g. in rendered markdown) navigate the
+  // window away from the app shell. http/https goes to the OS browser;
+  // anything else (file://, mailto:, junk) is simply blocked.
+  window.webContents.on("will-navigate", (event, url) => {
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   void window.loadFile(resolve(app.getAppPath(), "public", "index.html"));
   if (openDevTools) {
     window.webContents.openDevTools({ mode: "detach" });
@@ -188,8 +200,22 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
   handle("oxplow:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
   handle("oxplow:listBranches", () => currentRuntime.listBranches());
+  handle("oxplow:listGitRefs", () => currentRuntime.listGitRefs());
+  handle("oxplow:renameGitBranch", (_event, from: string, to: string) => currentRuntime.renameGitBranch(from, to));
+  handle("oxplow:deleteGitBranch", (_event, branch: string, options?: { force?: boolean }) =>
+    currentRuntime.deleteGitBranch(branch, options),
+  );
+  handle("oxplow:gitMergeInto", (_event, streamId: string, other: string) =>
+    currentRuntime.gitMergeInto(streamId, other),
+  );
+  handle("oxplow:gitRebaseOnto", (_event, streamId: string, onto: string) =>
+    currentRuntime.gitRebaseOnto(streamId, onto),
+  );
   handle("oxplow:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   handle("oxplow:createStream", (_event, input) => currentRuntime.createStream(input));
+  handle("oxplow:checkoutStreamBranch", (_event, streamId: string, branch: string) =>
+    currentRuntime.checkoutStreamBranch(streamId, branch),
+  );
   handle("oxplow:getThreadState", (_event, streamId: string) => currentRuntime.getThreadState(streamId));
   handle("oxplow:createThread", (_event, streamId: string, title: string) => currentRuntime.createThread(streamId, title));
   handle("oxplow:reorderThread", (_event, streamId: string, threadId: string, targetIndex: number) => currentRuntime.reorderThread(streamId, threadId, targetIndex));
@@ -253,6 +279,10 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:createWorkspaceDirectory", (_event, streamId: string, path: string) => currentRuntime.createWorkspaceDirectory(streamId, path));
   handle("oxplow:renameWorkspacePath", (_event, streamId: string, fromPath: string, toPath: string) => currentRuntime.renameWorkspacePath(streamId, fromPath, toPath));
   handle("oxplow:deleteWorkspacePath", (_event, streamId: string, path: string) => currentRuntime.deleteWorkspacePath(streamId, path));
+  handle("oxplow:listWikiNotes", (_event, streamId: string) => currentRuntime.listWikiNotes(streamId));
+  handle("oxplow:readWikiNoteBody", (_event, streamId: string, slug: string) => currentRuntime.readWikiNoteBody(streamId, slug));
+  handle("oxplow:writeWikiNoteBody", (_event, streamId: string, slug: string, body: string) => currentRuntime.writeWikiNoteBody(streamId, slug, body));
+  handle("oxplow:deleteWikiNote", (_event, streamId: string, slug: string) => currentRuntime.deleteWikiNote(streamId, slug));
   handle("oxplow:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
   handle("oxplow:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));
   handle("oxplow:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));

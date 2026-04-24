@@ -1,7 +1,7 @@
 import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
 export type { OxplowEvent } from "../electron/ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine } from "../git/git.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs } from "../git/git.js";
 export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
 export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
@@ -13,6 +13,7 @@ export interface Stream {
   branch_ref: string;
   branch_source: "local" | "remote" | "new";
   worktree_path: string;
+  kind: "primary" | "worktree";
   created_at: string;
   updated_at: string;
   custom_prompt: string | null;
@@ -302,6 +303,26 @@ export async function listBranches(): Promise<BranchRef[]> {
   return desktopApi().listBranches();
 }
 
+export async function listGitRefs(): Promise<import("../git/git.js").GroupedGitRefs> {
+  return desktopApi().listGitRefs();
+}
+
+export async function renameGitBranch(from: string, to: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().renameGitBranch(from, to);
+}
+
+export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().deleteGitBranch(branch, options);
+}
+
+export async function gitMergeInto(streamId: string, other: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitMergeInto(streamId, other);
+}
+
+export async function gitRebaseOnto(streamId: string, onto: string): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitRebaseOnto(streamId, onto);
+}
+
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   return desktopApi().getWorkspaceContext();
 }
@@ -311,6 +332,10 @@ export async function createStream(input:
   | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
 ): Promise<Stream> {
   return desktopApi().createStream(input);
+}
+
+export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
+  return desktopApi().checkoutStreamBranch(streamId, branch);
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
@@ -563,6 +588,30 @@ export async function localBlame(
 
 export async function listCommitPoints(threadId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
   return desktopApi().listCommitPoints(threadId);
+}
+
+export type WikiNoteSummary = import("../electron/ipc-contract.js").WikiNoteSummary;
+
+export async function listWikiNotes(streamId: string): Promise<WikiNoteSummary[]> {
+  return desktopApi().listWikiNotes(streamId);
+}
+
+export async function readWikiNoteBody(streamId: string, slug: string): Promise<string> {
+  return desktopApi().readWikiNoteBody(streamId, slug);
+}
+
+export async function writeWikiNoteBody(streamId: string, slug: string, body: string): Promise<void> {
+  return desktopApi().writeWikiNoteBody(streamId, slug, body);
+}
+
+export async function deleteWikiNote(streamId: string, slug: string): Promise<void> {
+  return desktopApi().deleteWikiNote(streamId, slug);
+}
+
+export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type === "wiki-note.changed") onEvent();
+  });
 }
 
 export async function createCommitPoint(

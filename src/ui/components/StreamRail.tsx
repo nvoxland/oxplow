@@ -1,8 +1,9 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createStream, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type Stream } from "../api.js";
+import { checkoutStreamBranch, createStream, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
+import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 
@@ -35,14 +36,20 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
+  const [switchBranchStream, setSwitchBranchStream] = useState<Stream | null>(null);
+  const [switchBranchRef, setSwitchBranchRef] = useState<string>("");
+  const [switchBranchError, setSwitchBranchError] = useState<string | null>(null);
+  const [switchBranchBusy, setSwitchBranchBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [selectedRef, setSelectedRef] = useState("");
+  const [selectedRefLabel, setSelectedRefLabel] = useState("");
   const [newBranch, setNewBranch] = useState("");
   const [startPointRef, setStartPointRef] = useState("");
+  const [startPointLabel, setStartPointLabel] = useState("");
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   function openStreamSettings(candidate: Stream) {
@@ -77,10 +84,12 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
     };
   }, [showCreate]);
 
-  const selectableStartPoints = useMemo(
-    () => branches.filter((branch) => branch.kind === "local" || !branch.name.endsWith("/HEAD")),
-    [branches],
-  );
+  // Primary is always the leftmost tab regardless of persisted sort_index.
+  const orderedStreams = useMemo(() => {
+    const primary = streams.filter((s) => s.kind === "primary");
+    const rest = streams.filter((s) => s.kind !== "primary");
+    return [...primary, ...rest];
+  }, [streams]);
 
   useEffect(() => {
     if (createRequest === undefined || createRequest === 0) return;
@@ -97,7 +106,9 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
       const nextBranches = await listBranches();
       setBranches(nextBranches);
       setSelectedRef((prev) => prev || nextBranches[0]?.ref || "");
+      setSelectedRefLabel((prev) => prev || nextBranches[0]?.name || "");
       setStartPointRef((prev) => prev || nextBranches[0]?.ref || "");
+      setStartPointLabel((prev) => prev || nextBranches[0]?.name || "");
       setTitle((prev) => prev || `Stream ${streams.length + 1}`);
       logUi("info", "loaded branch list", { branchCount: nextBranches.length });
     } catch (e) {
@@ -105,6 +116,42 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
       logUi("error", "failed to load branch list", { error: String(e) });
     } finally {
       setLoadingBranches(false);
+    }
+  }
+
+  async function openSwitchBranch(target: Stream) {
+    setSwitchBranchStream(target);
+    setSwitchBranchRef(`refs/heads/${target.branch}`);
+    setSwitchBranchError(null);
+    if (branches.length > 0) return;
+    try {
+      setLoadingBranches(true);
+      const nextBranches = await listBranches();
+      setBranches(nextBranches);
+    } catch (e) {
+      setSwitchBranchError(String(e));
+    } finally {
+      setLoadingBranches(false);
+    }
+  }
+
+  async function handleSwitchBranch() {
+    if (!switchBranchStream || !switchBranchRef) return;
+    const branch = branches.find((b) => b.ref === switchBranchRef);
+    if (!branch) {
+      setSwitchBranchError("Select a branch");
+      return;
+    }
+    const localName = branch.kind === "local" ? branch.name : branch.name.split("/").slice(1).join("/");
+    try {
+      setSwitchBranchBusy(true);
+      setSwitchBranchError(null);
+      await checkoutStreamBranch(switchBranchStream.id, localName);
+      setSwitchBranchStream(null);
+    } catch (e) {
+      setSwitchBranchError(String(e));
+    } finally {
+      setSwitchBranchBusy(false);
     }
   }
 
@@ -138,22 +185,25 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
     <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-3)", borderBottom: "1px solid var(--border-strong)" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "0 10px", overflow: "hidden" }}>
         <div className="oxplow-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
-          {streams.map((candidate) => {
+          {orderedStreams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "idle";
             const canDrop = !!onDropWorkItemOnStream && !!streamActiveThreadIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
             const isStreamDragTarget = isDragOver && draggingStreamId !== null && draggingStreamId !== candidate.id;
+            const isPrimary = candidate.kind === "primary";
+            const canDrag = !!onReorderStreams && !isPrimary;
+            const showBranchInTitle = isPrimary || candidate.title !== candidate.branch;
             return (
               <button type="button"
                 key={candidate.id}
-                draggable={!!onReorderStreams}
+                draggable={canDrag}
                 onClick={() => onSwitch(candidate.id)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setContextMenu({ x: event.clientX, y: event.clientY, stream: candidate });
                 }}
-                onDragStart={onReorderStreams ? (event) => {
+                onDragStart={canDrag ? (event) => {
                   event.dataTransfer.setData(STREAM_DRAG_MIME, JSON.stringify({ streamId: candidate.id }));
                   event.dataTransfer.effectAllowed = "move";
                   setDraggingStreamId(candidate.id);
@@ -186,7 +236,9 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     event.preventDefault();
                     setDragOverStreamId(null);
                     if (!draggingStreamId || draggingStreamId === candidate.id) return;
-                    const ids = streams.map((s) => s.id);
+                    // Never drop anything ahead of the primary tab.
+                    if (candidate.kind === "primary") return;
+                    const ids = orderedStreams.map((s) => s.id);
                     const fromIdx = ids.indexOf(draggingStreamId);
                     const toIdx = ids.indexOf(candidate.id);
                     if (fromIdx < 0 || toIdx < 0) return;
@@ -229,7 +281,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                   borderLeft: isStreamDragTarget ? "2px solid var(--accent)" : undefined,
                   boxShadow: isDragOver && !isStreamDragTarget ? "inset 0 0 0 2px var(--accent)" : undefined,
                 }}
-                title={candidate.title}
+                title={showBranchInTitle ? `${candidate.title} (${candidate.branch})` : candidate.title}
               >
                 <AgentStatusDot status={status} />
                 <span>{candidate.title}</span>
@@ -290,11 +342,19 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           {mode === "existing" ? (
             <label style={labelStyle}>
               <span>Existing branch</span>
-              <select value={selectedRef} onChange={(e) => setSelectedRef(e.target.value)} style={selectStyle} disabled={loadingBranches}>
-                {branches.map((branch) => (
-                  <option key={branch.ref} value={branch.ref}>[{branch.kind}] {branch.name}</option>
-                ))}
-              </select>
+              <BranchPicker
+                label={<span>{selectedRefLabel || "Select branch…"}</span>}
+                anchor="bottom"
+                align="left"
+                currentBranch={null}
+                disabled={loadingBranches}
+                buttonStyle={pickerButtonStyle}
+                onPick={(target) => {
+                  const { ref, label } = resolvePickedRef(target);
+                  setSelectedRef(ref);
+                  setSelectedRefLabel(label);
+                }}
+              />
             </label>
           ) : (
             <>
@@ -304,11 +364,19 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
               </label>
               <label style={labelStyle}>
                 <span>Start point</span>
-                <select value={startPointRef} onChange={(e) => setStartPointRef(e.target.value)} style={selectStyle} disabled={loadingBranches}>
-                  {selectableStartPoints.map((branch) => (
-                    <option key={branch.ref} value={branch.ref}>[{branch.kind}] {branch.name}</option>
-                  ))}
-                </select>
+                <BranchPicker
+                  label={<span>{startPointLabel || "Select starting ref…"}</span>}
+                  anchor="bottom"
+                  align="left"
+                  currentBranch={null}
+                  disabled={loadingBranches}
+                  buttonStyle={pickerButtonStyle}
+                  onPick={(target) => {
+                    const { ref, label } = resolvePickedRef(target);
+                    setStartPointRef(ref);
+                    setStartPointLabel(label);
+                  }}
+                />
               </label>
             </>
           )}
@@ -335,6 +403,12 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
               run: () => onRenameStream?.(contextMenu.stream.id, contextMenu.stream.title),
             },
             {
+              id: "stream.switch-branch",
+              label: "Switch branch…",
+              enabled: gitEnabled,
+              run: () => { void openSwitchBranch(contextMenu.stream); },
+            },
+            {
               id: "stream.settings",
               label: "Settings",
               enabled: true,
@@ -357,6 +431,43 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           onClose={() => setContextMenu(null)}
           minWidth={180}
         />
+      ) : null}
+      {switchBranchStream ? (
+        <div style={backdropStyle}>
+          <form
+            onSubmit={(e) => { e.preventDefault(); void handleSwitchBranch(); }}
+            style={{ ...modalStyle, minWidth: 420 }}
+          >
+            <div style={modalHeaderStyle}>
+              <span>Switch branch — {switchBranchStream.title}</span>
+              <button type="button" onClick={() => setSwitchBranchStream(null)} style={closeBtnStyle} aria-label="Close">×</button>
+            </div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={labelStyle}>
+                <span>Branch</span>
+                <select
+                  value={switchBranchRef}
+                  onChange={(e) => setSwitchBranchRef(e.target.value)}
+                  style={selectStyle}
+                  disabled={loadingBranches}
+                >
+                  {branches.map((branch) => (
+                    <option key={branch.ref} value={branch.ref}>[{branch.kind}] {branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ color: switchBranchError ? "#ff6b6b" : "var(--muted)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+                {switchBranchError ?? `Currently on ${switchBranchStream.branch}. Git will reject switches that conflict (dirty tree, missing branch, or branch already checked out in another worktree).`}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setSwitchBranchStream(null)} style={buttonStyle}>Cancel</button>
+                <button type="submit" style={buttonStyle} disabled={switchBranchBusy || loadingBranches || !switchBranchRef}>
+                  {switchBranchBusy ? "Switching…" : "Switch"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       ) : null}
       {settingsStream ? (
         <div style={backdropStyle}>
@@ -494,3 +605,25 @@ const closeBtnStyle: CSSProperties = {
 };
 
 const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
+
+const pickerButtonStyle: CSSProperties = {
+  background: "var(--bg)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  padding: "6px 8px",
+  borderRadius: 4,
+  fontFamily: "inherit",
+  fontSize: 12,
+  minWidth: 220,
+  justifyContent: "flex-start",
+  height: "auto",
+};
+
+function resolvePickedRef(target: PickedRef): { ref: string; label: string } {
+  if (target.kind === "tag") {
+    return { ref: `refs/tags/${target.name}`, label: `tag: ${target.name}` };
+  }
+  const branch = target.branch;
+  if (!branch) return { ref: "", label: target.name };
+  return { ref: branch.ref, label: `[${branch.kind}] ${branch.name}` };
+}

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import type { GitFileStatus } from "./workspace-files.js";
 
 export interface BranchRef {
@@ -75,6 +75,70 @@ export function listBranches(projectDir: string): BranchRef[] {
     if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
     return a.name.localeCompare(b.name);
   });
+}
+
+export interface GroupedGitRefs {
+  local: BranchRef[];
+  remotes: Array<{ remote: string; branches: BranchRef[] }>;
+  tags: string[];
+  recent: string[];
+}
+
+/**
+ * Returns branches grouped by kind/remote, tags, and the recently-checked-out
+ * branch names from HEAD's reflog — shaped for IntelliJ-style branch pickers.
+ * `recent` is deduped, most-recent-first, and limited to entries that still
+ * exist as local branches.
+ */
+export function listGitRefsGrouped(projectDir: string): GroupedGitRefs {
+  if (!isGitRepo(projectDir)) return { local: [], remotes: [], tags: [], recent: [] };
+  const all = listBranches(projectDir);
+  const local = all.filter((b) => b.kind === "local");
+  const localNames = new Set(local.map((b) => b.name));
+  const remoteMap = new Map<string, BranchRef[]>();
+  for (const branch of all) {
+    if (branch.kind !== "remote") continue;
+    const remote = branch.remote ?? branch.name.split("/")[0] ?? "";
+    if (!remote) continue;
+    const list = remoteMap.get(remote) ?? [];
+    list.push(branch);
+    remoteMap.set(remote, list);
+  }
+  const remotes = [...remoteMap.entries()]
+    .map(([remote, branches]) => ({ remote, branches: branches.sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => a.remote.localeCompare(b.remote));
+  let tags: string[] = [];
+  try {
+    tags = gitLines(projectDir, ["tag", "--list", "--sort=-creatordate"]);
+  } catch {}
+  const recent = recentCheckouts(projectDir, localNames, 5);
+  return { local, remotes, tags, recent };
+}
+
+function recentCheckouts(projectDir: string, validLocal: Set<string>, limit: number): string[] {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "git",
+      ["-C", projectDir, "reflog", "show", "--pretty=format:%gs", "HEAD"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 4 * 1024 * 1024 },
+    );
+  } catch {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of raw.split("\n")) {
+    const match = line.match(/^checkout: moving from (.+) to (.+)$/);
+    if (!match) continue;
+    const to = match[2]!.trim();
+    if (seen.has(to)) continue;
+    seen.add(to);
+    if (!validLocal.has(to)) continue;
+    out.push(to);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export function branchExists(projectDir: string, branch: string): boolean {
@@ -505,6 +569,46 @@ export function restorePath(projectDir: string, path: string): GitOpResult {
   // `checkout HEAD -- <path>` restores both staged and working-tree copies,
   // matching IntelliJ's "Rollback" behaviour for a single file.
   return runGit(projectDir, ["checkout", "HEAD", "--", path]);
+}
+
+/**
+ * Switch the branch checked out in `worktreePath` to `branch`. Throws the
+ * underlying git error (including dirty-tree, missing-branch,
+ * already-checked-out-elsewhere) verbatim; callers surface it to the UI.
+ */
+/**
+ * Rename a local branch from `from` to `to` using `git branch -m`. Returns a
+ * GitOpResult so the UI can surface "branch already exists" etc. verbatim.
+ */
+export function renameBranch(projectDir: string, from: string, to: string): GitOpResult {
+  return runGit(projectDir, ["branch", "-m", from, to]);
+}
+
+/**
+ * Delete a local branch. `force: true` uses `-D` (discard unmerged work);
+ * without it, git refuses to drop an unmerged branch so the UI can prompt
+ * the user to confirm the force.
+ */
+export function deleteBranch(projectDir: string, branch: string, force?: boolean): GitOpResult {
+  return runGit(projectDir, ["branch", force ? "-D" : "-d", branch]);
+}
+
+/** `git merge <other>` into the currently-checked-out branch of `projectDir`. */
+export function gitMerge(projectDir: string, other: string): GitOpResult {
+  return runGit(projectDir, ["merge", other]);
+}
+
+/** `git rebase <onto>` — rebase the currently-checked-out branch onto `onto`. */
+export function gitRebase(projectDir: string, onto: string): GitOpResult {
+  return runGit(projectDir, ["rebase", onto]);
+}
+
+export function checkoutBranch(worktreePath: string, branch: string): void {
+  const result = runGit(worktreePath, ["checkout", branch]);
+  if (!result.ok) {
+    const message = (result.stderr || result.stdout || "git checkout failed").trim();
+    throw new Error(message);
+  }
 }
 
 export function addPath(projectDir: string, path: string): GitOpResult {

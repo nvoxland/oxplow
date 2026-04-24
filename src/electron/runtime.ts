@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
@@ -13,6 +13,7 @@ import {
   ensureWorktree,
   isGitRepo,
   isGitWorktree,
+  checkoutBranch,
   listBranches,
   listBranchChanges,
   listGitStatuses,
@@ -31,7 +32,13 @@ import {
   listFileCommits,
   gitBlame,
   listAllRefs,
+  listGitRefsGrouped,
+  renameBranch,
+  deleteBranch,
+  gitMerge,
+  gitRebase,
   type BranchChanges,
+  type GroupedGitRefs,
   type ChangeScopes,
   type CommitDetail,
   type GitLogCommit,
@@ -54,6 +61,9 @@ import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
 import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
+import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
+import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
+import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
@@ -82,7 +92,7 @@ import {
 } from "../git/workspace-files.js";
 import { WorkspaceWatcherRegistry } from "../git/workspace-watch.js";
 import { GitRefsWatcherRegistry } from "../git/git-refs-watch.js";
-import { detectCurrentBranch } from "../git/git.js";
+import { detectCurrentBranch, readWorktreeHeadSha } from "../git/git.js";
 import { loadProjectConfig, writeProjectConfig, type OxplowConfig } from "../config/config.js";
 import { killSession } from "../terminal/tmux.js";
 import { attachPane } from "../terminal/pty-bridge.js";
@@ -97,6 +107,8 @@ export class ElectronRuntime {
   readonly threadStore: ThreadStore;
   private readonly workItemStore: WorkItemStore;
   readonly commitPointStore: CommitPointStore;
+  readonly wikiNoteStore: WikiNoteStore;
+  private notesWatcher: NotesWatcher | null = null;
   readonly waitPointStore: WaitPointStore;
   readonly threadQueue: ThreadQueueOrchestrator;
   readonly turnStore: TurnStore;
@@ -180,6 +192,14 @@ export class ElectronRuntime {
     this.threadStore = new ThreadStore(projectDir, logger.child({ subsystem: "thread-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
+    this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
+    this.notesWatcher = new NotesWatcher(
+      projectDir,
+      this.wikiNoteStore,
+      {},
+      logger.child({ subsystem: "notes-watch" }),
+    );
+    this.notesWatcher.start();
     this.waitPointStore = new WaitPointStore(projectDir, logger.child({ subsystem: "wait-points" }));
     this.threadQueue = new ThreadQueueOrchestrator(
       this.store,
@@ -246,20 +266,29 @@ export class ElectronRuntime {
     this.startedAt = new Date().toISOString();
     const gitWorkspace = isGitRepo(this.projectDir);
     const branch = gitWorkspace ? detectCurrentBranch(this.projectDir) ?? this.projectBase : this.projectBase;
+    const branchRef = gitWorkspace ? `refs/heads/${branch}` : branch;
 
-    let stream = this.store.findByBranch(branch);
+    // Primary stream is the repo itself: worktree_path === projectDir,
+    // title === repo basename, kind === "primary". Its recorded branch
+    // tracks whatever HEAD is currently pointing at and is updated live
+    // by the git-refs watcher when HEAD moves.
+    let stream = this.store.findPrimary();
     if (!stream) {
       stream = this.store.create({
-        title: branch,
+        title: this.projectBase,
         branch,
-        branchRef: gitWorkspace ? `refs/heads/${branch}` : branch,
+        branchRef,
         branchSource: "local",
         worktreePath: this.projectDir,
         projectBase: this.projectBase,
+        kind: "primary",
       });
-      this.logger.info("created initial stream", { streamId: stream.id, branch });
+      this.logger.info("created primary stream", { streamId: stream.id, branch });
+    } else if (stream.branch !== branch) {
+      stream = this.store.setStreamBranch(stream.id, branch, branchRef);
+      this.logger.info("primary stream branch re-synced on boot", { streamId: stream.id, branch });
     } else {
-      this.logger.info("reusing initial stream", { streamId: stream.id, branch });
+      this.logger.info("reusing primary stream", { streamId: stream.id, branch });
     }
 
     this.store.ensureCurrentStreamId(stream.id);
@@ -298,6 +327,7 @@ export class ElectronRuntime {
         streamId: change.streamId,
         t: change.t,
       });
+      this.maybeSyncStreamBranch(change.streamId);
     });
     this.hookEvents.subscribe((event) => {
       this.events.publish({
@@ -367,6 +397,13 @@ export class ElectronRuntime {
         threadId: change.threadId,
         id: change.id,
         kind: change.kind,
+      });
+    });
+    this.wikiNoteStore.subscribe((change) => {
+      this.events.publish({
+        type: "wiki-note.changed",
+        kind: change.kind,
+        slug: change.slug,
       });
     });
     this.turnStore.subscribe((change) => {
@@ -445,6 +482,10 @@ export class ElectronRuntime {
         ...buildLspMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
           lspManager: this.lspManager,
+        }),
+        ...buildWikiNoteMcpTools({
+          resolveStream: (streamId) => this.resolveStream(streamId),
+          wikiNoteStore: this.wikiNoteStore,
         }),
       ],
       onHook: (envelope) => this.handleHookEnvelope(envelope),
@@ -553,6 +594,10 @@ export class ElectronRuntime {
             resolveStream: (streamId) => this.resolveStream(streamId),
             lspManager: this.lspManager,
           }),
+          ...buildWikiNoteMcpTools({
+            resolveStream: (streamId) => this.resolveStream(streamId),
+            wikiNoteStore: this.wikiNoteStore,
+          }),
         ],
         onHook: (envelope) => this.handleHookEnvelope(envelope),
       });
@@ -590,6 +635,8 @@ export class ElectronRuntime {
     this.lspClients.clear();
     this.workspaceWatchers.dispose();
     this.gitRefsWatchers.dispose();
+    this.notesWatcher?.dispose();
+    this.notesWatcher = null;
     await this.lspManager.dispose();
     if (this.mcp) {
       await this.mcp.stop();
@@ -720,6 +767,28 @@ export class ElectronRuntime {
     return listBranches(this.projectDir);
   }
 
+  listGitRefs(): GroupedGitRefs {
+    return listGitRefsGrouped(this.projectDir);
+  }
+
+  renameGitBranch(from: string, to: string): GitOpResult {
+    return renameBranch(this.projectDir, from, to);
+  }
+
+  deleteGitBranch(branch: string, options?: { force?: boolean }): GitOpResult {
+    return deleteBranch(this.projectDir, branch, options?.force);
+  }
+
+  gitMergeInto(streamId: string, other: string): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return gitMerge(stream.worktree_path, other);
+  }
+
+  gitRebaseOnto(streamId: string, onto: string): GitOpResult {
+    const stream = this.resolveStream(streamId);
+    return gitRebase(stream.worktree_path, onto);
+  }
+
   getBranchChanges(streamId: string, baseRef?: string): BranchChanges & { resolvedBaseRef: string | null } {
     const stream = this.resolveStream(streamId);
     const resolvedBaseRef = baseRef?.trim() || detectBaseBranch(stream.worktree_path);
@@ -828,6 +897,51 @@ export class ElectronRuntime {
     const gitEnabled = isGitRepo(this.projectDir);
     this.gitEnabledCached = gitEnabled;
     return { gitEnabled };
+  }
+
+  /**
+   * Switch the branch checked out in `streamId`'s worktree. Works for both
+   * primary (worktree_path === projectDir) and worktree streams. Lets git's
+   * own errors (dirty tree, missing branch, already-checked-out-elsewhere)
+   * propagate unchanged.
+   */
+  checkoutStreamBranch(streamId: string, branch: string): Stream {
+    const stream = this.resolveStream(streamId);
+    const previousBranch = stream.branch;
+    const previousTitle = stream.title;
+    checkoutBranch(stream.worktree_path, branch);
+    const detected = detectCurrentBranch(stream.worktree_path) ?? branch;
+    const branchRef = `refs/heads/${detected}`;
+    let updated = this.store.setStreamBranch(stream.id, detected, branchRef);
+    // Keep the tab label in sync for worktree streams whose title has always
+    // tracked their branch. Primary streams are exempt — their title is the
+    // repo basename and never changes.
+    if (updated.kind === "worktree" && previousTitle === previousBranch && previousTitle !== detected) {
+      updated = this.store.update(updated.id, (current) => ({ ...current, title: detected }));
+    }
+    this.logger.info("checked out branch", { streamId: stream.id, branch: detected });
+    return updated;
+  }
+
+  /**
+   * React to an external HEAD move (`git checkout` from the terminal, a
+   * pull that moved the branch, etc.) by refreshing the stream's recorded
+   * branch. Called by the git-refs watcher on any ref/HEAD event.
+   */
+  private maybeSyncStreamBranch(streamId: string): void {
+    const stream = this.store.get(streamId);
+    if (!stream) return;
+    const detected = detectCurrentBranch(stream.worktree_path);
+    if (!detected || detected === stream.branch) return;
+    try {
+      this.store.setStreamBranch(stream.id, detected, `refs/heads/${detected}`);
+      this.logger.info("stream branch updated from HEAD", { streamId: stream.id, branch: detected });
+    } catch (error) {
+      this.logger.warn("failed to sync stream branch from HEAD", {
+        streamId: stream.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   createStream(body: { title: string; summary?: string; source: "existing"; ref: string } | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }): Stream {
@@ -1933,6 +2047,69 @@ export class ElectronRuntime {
     this.writeWorkspaceFile(streamId, path, content);
   }
 
+  // -------- wiki notes (IPC-exposed) --------
+
+  listWikiNotes(streamId: string): Array<{
+    slug: string;
+    title: string;
+    updated_at: string;
+    created_at: string;
+    freshness: "fresh" | "stale" | "very-stale";
+    head_advanced: boolean;
+    changed_refs: string[];
+    deleted_refs: string[];
+    total_refs: number;
+  }> {
+    const stream = this.resolveStream(streamId);
+    const projectDir = stream.worktree_path;
+    return this.wikiNoteStore.list().map((n) => {
+      const freshness = computeWikiNoteFreshness(
+        { capturedHeadSha: n.captured_head_sha, capturedRefs: n.captured_refs },
+        readWorktreeHeadSha(projectDir),
+        (path) => hashWorkspaceFile(projectDir, path),
+      );
+      return {
+        slug: n.slug,
+        title: n.title,
+        updated_at: n.updated_at,
+        created_at: n.created_at,
+        freshness: freshness.status,
+        head_advanced: freshness.headAdvanced,
+        changed_refs: freshness.changedRefs,
+        deleted_refs: freshness.deletedRefs,
+        total_refs: freshness.totalRefs,
+      };
+    });
+  }
+
+  readWikiNoteBody(streamId: string, slug: string): string {
+    const stream = this.resolveStream(streamId);
+    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(slug)) throw new Error(`invalid note slug: ${slug}`);
+    const path = join(wikiNotesDir(stream.worktree_path), `${slug}.md`);
+    if (!existsSync(path)) throw new Error(`note not found: ${slug}`);
+    return readFileSync(path, "utf8");
+  }
+
+  writeWikiNoteBody(streamId: string, slug: string, body: string): void {
+    const stream = this.resolveStream(streamId);
+    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(slug)) throw new Error(`invalid note slug: ${slug}`);
+    const dir = join(stream.worktree_path, ".oxplow", "notes");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${slug}.md`);
+    writeFileSync(path, body, "utf8");
+    syncNoteFromDisk(stream.worktree_path, this.wikiNoteStore, slug);
+  }
+
+  deleteWikiNote(streamId: string, slug: string): void {
+    const stream = this.resolveStream(streamId);
+    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(slug)) throw new Error(`invalid note slug: ${slug}`);
+    const path = join(wikiNotesDir(stream.worktree_path), `${slug}.md`);
+    try {
+      rmSync(path, { force: true });
+    } catch {}
+    this.wikiNoteStore.deleteBySlug(slug);
+  }
+
   // -------- commit points (IPC-exposed delegations) --------
 
   listCommitPoints(threadId: string): CommitPoint[] {
@@ -2207,7 +2384,7 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `When you realize you're about to change project files and aren't already on a work item, file one via \`mcp__oxplow__create_work_item\` (or \`file_epic_with_children\` for large work worth breaking up) with status \`in_progress\` and track your work against it. No "auto" placeholder items — commit to a real, durable row. **When the work actually ships, close the row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish; pass \`touchedFiles\` with paths you edited so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
+    `When you realize you're about to change project files and aren't already on a work item, file one with status \`in_progress\` and track your work against it. Pick the shape by structure, not by whether you planned it: \`mcp__oxplow__create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`mcp__oxplow__file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently (distinct phases, handoffs, or subsystems). Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task — plenty of plans describe single tasks. No "auto" placeholder items — commit to a real, durable row. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish; pass \`touchedFiles\` with paths you edited so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

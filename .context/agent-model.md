@@ -423,6 +423,18 @@ primary tool for queue-driven dispatch.
 queries (definition, references, hover) the agent can use without
 shelling out.
 
+`buildWikiNoteMcpTools` (`src/mcp/wiki-note-mcp-tools.ts`) surfaces the
+per-project wiki (`wiki_note` table + `.oxplow/notes/*.md` files — see
+`data-model.md`). Tools are metadata-only: `list_notes`,
+`get_note_metadata`, `resync_note`, `search_notes`, `delete_note`.
+**There is intentionally no create/update tool** — the agent writes
+bodies directly with its Write/Edit tools on
+`.oxplow/notes/<slug>.md` (far cheaper than round-tripping full bodies
+through MCP args). The notes watcher re-syncs metadata on every file
+event; `resync_note` forces an immediate re-baseline when the agent
+wants freshness pinned to the current HEAD without waiting for the
+debounce.
+
 ## Write guard
 
 Non-writer threads share the writer's worktree (same checkout, separate

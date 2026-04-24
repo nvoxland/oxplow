@@ -66,9 +66,29 @@ Active agent turns render as live rows in the Work panel passively —
 no synthesized work items. File durable work items explicitly when
 you want to:
 
-- Split a bigger ask into an epic + children (\`file_epic_with_children\`).
+- Split pre-planned or multi-phase work into an epic + children
+  (\`file_epic_with_children\`).
 - Pre-queue work the user wants done in a later turn (\`create_work_item\`).
 - Record a follow-up you noticed but can't fix right now.
+
+## Task vs epic
+
+Pick by structure, not by whether the work was planned first. Plenty
+of plan-mode outputs describe a single task.
+
+- **\`create_work_item\` with \`kind: "task"\`** — one coherent change,
+  even if it touches a few files. Rename, bug fix, small feature in one
+  subsystem. Sequential chores (edit → typecheck → test) are still one
+  task, not sub-steps.
+- **\`file_epic_with_children\`** — ≥3 sub-steps a reviewer would
+  naturally check off independently: distinct phases, clear handoffs,
+  or separable subsystems (e.g. schema → runtime → IPC → UI → docs).
+  Each child closes to \`human_check\` on its own as it ships.
+- Decision test: could a single child close to \`human_check\` and
+  have the user meaningfully inspect just that piece? If yes, epic.
+  If no, it's a task and the bullets are just an execution outline.
+- Don't retroactively wrap a task in an epic mid-execution if it turns
+  out to be small — just finish it.
 
 ## Shaping the row
 
@@ -78,6 +98,12 @@ you want to:
 - \`kind\`: \`epic\` only with children (use \`file_epic_with_children\`);
   otherwise \`task\`.
 - \`priority\`: \`medium\` unless the user signalled otherwise.
+
+## One QA-separate concern per row
+
+Siblings under an epic still need to be independently reviewable:
+two things a reviewer would accept/reject separately go in two child
+tasks, not one "misc" child. Same rule as top-level items.
 
 # Work-item transitions
 

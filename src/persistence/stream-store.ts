@@ -7,6 +7,7 @@ import { StoreEmitter } from "./store-emitter.js";
 
 export type PaneKind = "working" | "talking";
 export type StreamBranchSource = "local" | "remote" | "new";
+export type StreamKind = "primary" | "worktree";
 
 export interface Stream {
   id: string;
@@ -16,6 +17,7 @@ export interface Stream {
   branch_ref: string;
   branch_source: StreamBranchSource;
   worktree_path: string;
+  kind: StreamKind;
   created_at: string;
   updated_at: string;
   custom_prompt: string | null;
@@ -30,7 +32,7 @@ export interface Stream {
 }
 
 export interface StreamChange {
-  kind: "reordered" | "prompt-changed";
+  kind: "reordered" | "prompt-changed" | "branch-changed";
   streamId?: string;
 }
 
@@ -120,6 +122,7 @@ export class StreamStore {
     branchSource?: StreamBranchSource;
     worktreePath: string;
     projectBase: string;
+    kind?: StreamKind;
   }): Stream {
     const id = createId("s");
     const now = new Date().toISOString();
@@ -131,6 +134,7 @@ export class StreamStore {
       branch_ref: input.branchRef ?? `refs/heads/${input.branch}`,
       branch_source: input.branchSource ?? "local",
       worktree_path: input.worktreePath,
+      kind: input.kind ?? "worktree",
       created_at: now,
       updated_at: now,
       custom_prompt: null,
@@ -151,9 +155,9 @@ export class StreamStore {
     this.stateDb.run(
       `INSERT INTO streams (
         id, title, summary, branch, branch_ref, branch_source, worktree_path,
-        working_pane, talking_pane, working_session_id, talking_session_id,
+        kind, working_pane, talking_pane, working_session_id, talking_session_id,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         summary = excluded.summary,
@@ -161,6 +165,7 @@ export class StreamStore {
         branch_ref = excluded.branch_ref,
         branch_source = excluded.branch_source,
         worktree_path = excluded.worktree_path,
+        kind = excluded.kind,
         working_pane = excluded.working_pane,
         talking_pane = excluded.talking_pane,
         working_session_id = excluded.working_session_id,
@@ -174,6 +179,7 @@ export class StreamStore {
       stream.branch_ref,
       stream.branch_source,
       stream.worktree_path,
+      stream.kind,
       stream.panes.working,
       stream.panes.talking,
       stream.resume.working_session_id,
@@ -181,6 +187,40 @@ export class StreamStore {
       stream.created_at,
       stream.updated_at,
     );
+  }
+
+  findPrimary(): Stream | undefined {
+    const row = this.stateDb.get<Record<string, unknown>>(
+      "SELECT * FROM streams WHERE kind = 'primary' ORDER BY created_at LIMIT 1",
+    );
+    return row ? rowToStream(row) : undefined;
+  }
+
+  setStreamBranch(streamId: string, branch: string, branchRef: string): Stream {
+    const existing = this.get(streamId);
+    if (!existing) throw new Error(`unknown stream: ${streamId}`);
+    const now = new Date().toISOString();
+    this.stateDb.run(
+      "UPDATE streams SET branch = ?, branch_ref = ?, updated_at = ? WHERE id = ?",
+      branch,
+      branchRef,
+      now,
+      streamId,
+    );
+    this.emitter.emit({ kind: "branch-changed", streamId });
+    const updated = this.get(streamId);
+    if (!updated) throw new Error(`stream disappeared after update: ${streamId}`);
+    return updated;
+  }
+
+  deleteStream(id: string): void {
+    const stream = this.get(id);
+    if (!stream) throw new Error(`unknown stream: ${id}`);
+    if (stream.kind === "primary") throw new Error("cannot delete the primary stream");
+    // Full stream deletion (worktree cleanup + cascade) is not yet wired up.
+    // Leaving the guard in place so callers can't bypass the primary check once
+    // the rest is implemented.
+    throw new Error("delete not implemented yet");
   }
 
   getCurrentSnapshotId(streamId: string): string | null {
@@ -285,6 +325,7 @@ function rowToStream(row: Record<string, unknown>): Stream {
     branch_ref: String(row.branch_ref ?? ""),
     branch_source: String(row.branch_source ?? "local") as StreamBranchSource,
     worktree_path: String(row.worktree_path ?? ""),
+    kind: (row.kind === "primary" ? "primary" : "worktree") as StreamKind,
     created_at: String(row.created_at ?? new Date(0).toISOString()),
     updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
     custom_prompt: row.custom_prompt != null ? String(row.custom_prompt) : null,
@@ -336,6 +377,7 @@ function withDefaults(stream: Partial<Stream>, projectDir: string): Stream {
     branch_ref: stream.branch_ref ?? (stream.branch ? `refs/heads/${stream.branch}` : ""),
     branch_source: stream.branch_source ?? "local",
     worktree_path: stream.worktree_path ?? projectDir,
+    kind: stream.kind === "primary" ? "primary" : "worktree",
     created_at: stream.created_at ?? new Date(0).toISOString(),
     updated_at: stream.updated_at ?? stream.created_at ?? new Date(0).toISOString(),
     custom_prompt: stream.custom_prompt ?? null,

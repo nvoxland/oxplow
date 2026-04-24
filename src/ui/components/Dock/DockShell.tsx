@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { DockSide, ToolWindow } from "./ToolWindow.js";
 
 interface PersistedState {
@@ -21,6 +22,8 @@ export interface DockShellProps {
   railMode?: "auto" | "always" | "never";
   /** Programmatically open and activate a tool window. Token changes retrigger. */
   activateRequest?: { id: string; token: number };
+  /** Bottom docks only: extra content rendered on the right side of the rail. */
+  railExtra?: ReactNode;
 }
 
 const STORAGE_PREFIX = "oxplow.layout.v1.dock.";
@@ -35,6 +38,7 @@ export function DockShell({
   maxSize = 900,
   railMode = "auto",
   activateRequest,
+  railExtra,
 }: DockShellProps) {
   const initialSize = defaultSize ?? (side === "bottom" ? 180 : 280);
   const initialActiveId = toolWindows[0]?.id ?? null;
@@ -103,8 +107,9 @@ export function DockShell({
 
   const showRail =
     railMode === "always" || (railMode === "auto" && toolWindows.length > 1);
+  const hasRailExtra = side === "bottom" && !!railExtra;
 
-  if (toolWindows.length === 0) return null;
+  if (toolWindows.length === 0 && !hasRailExtra) return null;
 
   const resizeHandle = (
     <div
@@ -148,9 +153,9 @@ export function DockShell({
           flexShrink: 0,
         };
 
-  const rail = showRail ? (
-    <div style={railStyle}>
-      {toolWindows.map((tw) => {
+  const rail = (showRail || hasRailExtra) ? (
+    <div style={{ ...railStyle, ...(side === "bottom" ? { alignItems: "center" } : {}) }}>
+      {showRail ? toolWindows.map((tw) => {
         const active = state.open && tw.id === (activeTool?.id ?? "");
         const baseStyle: React.CSSProperties = {
           background: active ? "var(--bg)" : "transparent",
@@ -184,7 +189,13 @@ export function DockShell({
             {tw.label}
           </button>
         );
-      })}
+      }) : null}
+      {hasRailExtra ? (
+        <>
+          <span style={{ flex: 1 }} />
+          <span style={{ display: "inline-flex", alignItems: "center" }}>{railExtra}</span>
+        </>
+      ) : null}
     </div>
   ) : null;
 

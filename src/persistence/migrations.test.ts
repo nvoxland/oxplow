@@ -96,6 +96,40 @@ describe("runMigrations", () => {
     expect(threadSelCols).toContain("selected_thread_id");
   });
 
+  test("v33 creates the wiki_note table with expected columns + unique slug", () => {
+    const driver = freshDriver();
+    runMigrations(driver);
+    const cols = driver
+      .all<{ name: string; notnull: number }>("PRAGMA table_info(wiki_note)")
+      .reduce<Record<string, number>>((acc, row) => {
+        acc[row.name] = row.notnull;
+        return acc;
+      }, {});
+    expect(Object.keys(cols)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "slug",
+        "title",
+        "captured_head_sha",
+        "captured_refs_json",
+        "created_at",
+        "updated_at",
+      ]),
+    );
+    // captured_head_sha is nullable (note may be written before any commit)
+    expect(cols.captured_head_sha).toBe(0);
+    // slug is UNIQUE
+    const now = "2024-01-01T00:00:00Z";
+    driver.exec(
+      `INSERT INTO wiki_note (id, slug, title, captured_refs_json, created_at, updated_at) VALUES ('n1', 'hello', 'Hello', '[]', '${now}', '${now}')`,
+    );
+    expect(() =>
+      driver.exec(
+        `INSERT INTO wiki_note (id, slug, title, captured_refs_json, created_at, updated_at) VALUES ('n2', 'hello', 'Hello Again', '[]', '${now}', '${now}')`,
+      ),
+    ).toThrow();
+  });
+
   test("removes state='deleted' snapshot_entry tombstones while keeping siblings and enclosing snapshot", () => {
     const driver = freshDriver();
     // Apply migrations up to v23 only (the pre-tombstone-removal schema),

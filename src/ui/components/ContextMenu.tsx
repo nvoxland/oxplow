@@ -8,6 +8,7 @@ interface ContextMenuProps {
   position: MenuPosition;
   onClose(): void;
   minWidth?: number;
+  zIndex?: number;
 }
 
 interface MenuListProps {
@@ -16,7 +17,7 @@ interface MenuListProps {
   minWidth?: number;
 }
 
-export function ContextMenu({ items, position, onClose, minWidth = 220 }: ContextMenuProps) {
+export function ContextMenu({ items, position, onClose, minWidth = 220, zIndex = 1000 }: ContextMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [resolvedPosition, setResolvedPosition] = useState(position);
 
@@ -64,7 +65,7 @@ export function ContextMenu({ items, position, onClose, minWidth = 220 }: Contex
         left: resolvedPosition.x,
         top: resolvedPosition.y,
         minWidth,
-        zIndex: 1000,
+        zIndex,
       }}
       onMouseDown={(event) => event.stopPropagation()}
     >

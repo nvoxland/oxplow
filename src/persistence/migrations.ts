@@ -845,6 +845,54 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE agent_turn ADD COLUMN archived_at TEXT;`);
     },
   },
+  {
+    version: 33,
+    name: "wiki_note",
+    up: (db) => {
+      // User-curated personal knowledgebase. Bodies are plain markdown
+      // files under `.oxplow/notes/<slug>.md` — filesystem is the source
+      // of truth for content. This table only holds metadata (title,
+      // references, freshness baseline) and is re-synced by the notes
+      // watcher whenever a file changes on disk. Named `wiki_note` to
+      // distinguish from the existing `work_note` table (which is
+      // attached to work items).
+      //
+      // captured_head_sha / captured_refs_json are the freshness
+      // baseline: the HEAD and the set of referenced {path, blob_sha}
+      // tuples as of the most recent write/edit. A note is "stale" when
+      // HEAD has advanced or any referenced file's blob hash has
+      // changed since the baseline was captured.
+      db.exec(`
+        CREATE TABLE wiki_note (
+          id TEXT PRIMARY KEY,
+          slug TEXT NOT NULL UNIQUE,
+          title TEXT NOT NULL,
+          captured_head_sha TEXT,
+          captured_refs_json TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_wiki_note_updated ON wiki_note(updated_at DESC);
+      `);
+    },
+  },
+  {
+    version: 34,
+    name: "streams.kind",
+    up: (db) => {
+      // Distinguish the leftmost "primary" stream — whose worktree IS the
+      // project directory — from user-created worktree streams under
+      // .oxplow/worktrees/. Primary's branch may be changed from the UI;
+      // the primary row is never deleted. All existing rows default to
+      // 'worktree' so the database boots safely; initialize() then
+      // promotes or creates a primary row at runtime.
+      db.exec(`
+        ALTER TABLE streams ADD COLUMN kind TEXT NOT NULL DEFAULT 'worktree'
+          CHECK (kind IN ('primary','worktree'));
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

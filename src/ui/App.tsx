@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   createWorkItem,
@@ -71,6 +71,7 @@ import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
+import { StatusBar } from "./components/StatusBar.js";
 import { SettingsModal } from "./components/SettingsModal.js";
 import { ConfirmDialog } from "./components/ConfirmDialog.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -83,6 +84,8 @@ import { ThreadRail } from "./components/ThreadRail.js";
 import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
+import { NotesPane } from "./components/Notes/NotesPane.js";
+import { NoteTab } from "./components/Notes/NoteTab.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -162,6 +165,7 @@ export function App() {
   const [stream, setStream] = useState<Stream | null>(null);
   const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
+  const [noteTabs, setNoteTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
@@ -809,9 +813,14 @@ export function App() {
       }
       return;
     }
+    if (centerActive.startsWith("note:")) {
+      const slug = centerActive.slice("note:".length);
+      if (!noteTabs.includes(slug)) setCenterActive("agent");
+      return;
+    }
     // Unknown id shape — fall back defensively.
     setCenterActive("agent");
-  }, [stream, fileSessions, centerActive, diffTabs]);
+  }, [stream, fileSessions, centerActive, diffTabs, noteTabs]);
 
   // Restore previously-open file tabs the first time each stream becomes
   // active. We add the paths to the session in openOrder, mark each as
@@ -1290,8 +1299,9 @@ export function App() {
     const ids = new Set(["agent"]);
     for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
+    for (const slug of noteTabs) ids.add(`note:${slug}`);
     return ids;
-  }, [currentSession.openOrder, diffTabs]);
+  }, [currentSession.openOrder, diffTabs, noteTabs]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1351,6 +1361,16 @@ export function App() {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
     setCenterActive((current) => (current === id ? "agent" : current));
   };
+
+  const handleOpenNote = useCallback((slug: string) => {
+    setNoteTabs((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
+    setCenterActive(`note:${slug}`);
+  }, []);
+
+  const closeNoteTab = useCallback((slug: string) => {
+    setNoteTabs((prev) => prev.filter((s) => s !== slug));
+    setCenterActive((current) => (current === `note:${slug}` ? "agent" : current));
+  }, []);
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
@@ -1415,6 +1435,16 @@ export function App() {
         ) : null,
       });
     }
+    for (const slug of noteTabs) {
+      tabs.push({
+        id: `note:${slug}`,
+        label: slug,
+        closable: true,
+        render: () => stream ? (
+          <NoteTab stream={stream} slug={slug} onClosed={() => closeNoteTab(slug)} onOpenNoteInNewTab={handleOpenNote} />
+        ) : null,
+      });
+    }
     for (const diff of diffTabs) {
       const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
       const suffix = diff.spec.labelOverride ?? "diff";
@@ -1446,6 +1476,9 @@ export function App() {
     editorFindRequest,
     editorNavigationTarget,
     diffTabs,
+    noteTabs,
+    closeNoteTab,
+    handleOpenNote,
   ]);
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
@@ -1493,6 +1526,17 @@ export function App() {
           onDeletePath={handleDeletePath}
           onToggleGeneratedDir={handleToggleGeneratedDir}
           commitRequest={commitFilesRequest}
+        />
+      ),
+    },
+    {
+      id: "notes",
+      label: "Notes",
+      render: () => (
+        <NotesPane
+          stream={stream}
+          selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
+          onOpenNote={handleOpenNote}
         />
       ),
     },
@@ -1590,6 +1634,7 @@ export function App() {
               onClose={(id) => {
                 if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
                 else if (id.startsWith("diff:")) closeDiffTab(id);
+                else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
               }}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
@@ -1605,6 +1650,7 @@ export function App() {
         maxSize={480}
         railMode="always"
         activateRequest={bottomActivate}
+        railExtra={<StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />}
       />
       <QuickOpenOverlay
         open={quickOpenVisible}

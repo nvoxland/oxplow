@@ -83,7 +83,7 @@ export interface GitRefsChangedEvent {
 
 export interface StreamChangedEvent {
   type: "stream.changed";
-  kind: "reordered" | "prompt-changed";
+  kind: "reordered" | "prompt-changed" | "branch-changed";
   streamId?: string;
 }
 
@@ -97,6 +97,12 @@ export interface WaitPointChangedEvent {
   threadId: string;
   id: string | null;
   kind: "created" | "updated" | "deleted";
+}
+
+export interface WikiNoteChangedEvent {
+  type: "wiki-note.changed";
+  kind: "upserted" | "deleted";
+  slug: string | null;
 }
 
 export interface FileSnapshotCreatedEvent {
@@ -122,7 +128,8 @@ export type OxplowEvent =
   | WaitPointChangedEvent
   | GitRefsChangedEvent
   | StreamChangedEvent
-  | ConfigChangedEvent;
+  | ConfigChangedEvent
+  | WikiNoteChangedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

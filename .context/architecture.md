@@ -19,6 +19,14 @@ This note is the default guidance for future implementation decisions unless a l
 
 That means the app already has a strong custom domain model. In particular, **streams** are first-class and do not naturally map 1:1 to stock VS Code assumptions.
 
+### Primary vs worktree streams
+
+There is exactly one **primary** stream (`kind: "primary"`). It represents the repo itself: its `worktree_path` IS the daemon's project directory, its `title` is the project basename, and its recorded branch tracks whatever HEAD is currently checked out. The primary is the leftmost tab and cannot be deleted.
+
+Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it gets its own `git worktree add` under `.oxplow/worktrees/<slug>/` (slug fixed at creation).
+
+Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `ElectronRuntime.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
+
 ## Workspace isolation rule
 
 Oxplow usage must always be isolated to the directory where the daemon was started and that directory's descendants.

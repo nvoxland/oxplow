@@ -66,24 +66,42 @@ narrate turn boundaries.
 
 **File a durable work item before you start editing.** When you realize
 you're about to change project files in a turn and you aren't already
-working against an existing item, call
-`mcp__oxplow__create_work_item` (or `file_epic_with_children` if the
-work is large enough to be worth splitting into macro subtasks) with
-status `in_progress` and track your progress against it across however
-many turns it takes — including stops to ask the user questions. The
-item should describe the real piece of work you're committing to
-shipping, not a placeholder "auto" row that may or may not get
-reshaped into something real. When it's settled, call `complete_task`
-to ship an explicit summary.
+working against an existing item, file one with status `in_progress`
+and track your progress against it across however many turns it takes
+— including stops to ask the user questions. The item should describe
+the real piece of work you're committing to shipping, not a placeholder
+"auto" row that may or may not get reshaped into something real. When
+it's settled, call `complete_task` to ship an explicit summary.
 
-**One user-visible concern per work item.** If the user asks for two
-things that a reviewer would QA separately (e.g. "show (waiting) when
-idle" AND "drop the elapsed-time counter"), file them as two items —
-even if you intend to implement both in the same edit pass. Batching
-unrelated concerns into one row makes the Work panel useless for
-review: the user can't accept one and push back on the other without
-reopening the whole thing. The test: if a reasonable reviewer would
-want to check them independently, they're separate items.
+**Pick between `create_work_item` and `file_epic_with_children`:** the
+trigger is structure, not plan-mode. Plenty of plans describe a small
+change that still boils down to one task.
+
+- **Task** (`create_work_item` with `kind: "task"`): the work is one
+  coherent change, even if it touches a few files. A rename, a bug
+  fix, a new component, a small feature that lives in one subsystem —
+  all tasks, whether or not you planned them first.
+- **Epic** (`file_epic_with_children`): the work has ≥3 sub-steps that
+  a reviewer would naturally check off independently — distinct
+  phases, clear handoffs, or separable subsystems ("schema → runtime →
+  IPC → UI → docs"). The test: could you close one sub-step to
+  `human_check`, pause, and have the user meaningfully inspect just
+  that piece? If yes, it's an epic. If the "sub-steps" are really
+  sequential chores in one change (edit, typecheck, test), it's still
+  one task.
+
+Close each epic child to `human_check` as it ships so the Work panel
+shows progress accumulating. If a "plan" turns out to be a single
+task mid-execution, don't retroactively wrap it in an epic — just
+finish the task.
+
+**One user-visible concern per ROW.** Independent concerns (even if
+filed in the same edit pass) must be separate work items — a reviewer
+has to be able to accept one and push back on another. That applies
+both to sibling tasks and to children within one epic: two QA-separate
+concerns are two child tasks, not one "misc" child. Test: if a
+reasonable reviewer would want to check them independently, they're
+separate rows.
 
 **Every new ask gets its own item.** When the user sends a new
 request mid-turn (including via `<system-reminder>` interruptions)

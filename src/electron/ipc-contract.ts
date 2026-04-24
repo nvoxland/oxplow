@@ -7,6 +7,7 @@ import type {
   SnapshotSummary,
   BranchChanges,
   BranchRef,
+  GroupedGitRefs,
   Thread,
   ThreadState,
   GitFileStatus,
@@ -49,6 +50,7 @@ export type {
   SnapshotSummary,
   BranchChanges,
   BranchRef,
+  GroupedGitRefs,
   Thread,
   ThreadState,
   ThreadWorkState,
@@ -83,6 +85,18 @@ export type {
   WorkspaceWatchEvent,
   StoredEvent,
 };
+
+export interface WikiNoteSummary {
+  slug: string;
+  title: string;
+  updated_at: string;
+  created_at: string;
+  freshness: "fresh" | "stale" | "very-stale";
+  head_advanced: boolean;
+  changed_refs: string[];
+  deleted_refs: string[];
+  total_refs: number;
+}
 
 export interface UiLogPayload {
   clientId: string;
@@ -128,11 +142,17 @@ export interface DesktopApi {
   setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").OxplowConfig>;
   setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").OxplowConfig>;
   listBranches(): Promise<BranchRef[]>;
+  listGitRefs(): Promise<GroupedGitRefs>;
+  renameGitBranch(from: string, to: string): Promise<GitOpResult>;
+  deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<GitOpResult>;
+  gitMergeInto(streamId: string, other: string): Promise<GitOpResult>;
+  gitRebaseOnto(streamId: string, onto: string): Promise<GitOpResult>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
     | { title: string; summary?: string; source: "existing"; ref: string }
     | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string },
   ): Promise<Stream>;
+  checkoutStreamBranch(streamId: string, branch: string): Promise<Stream>;
   getThreadState(streamId: string): Promise<ThreadState>;
   createThread(streamId: string, title: string): Promise<ThreadState>;
   reorderThread(streamId: string, threadId: string, targetIndex: number): Promise<ThreadState>;
@@ -243,6 +263,10 @@ export interface DesktopApi {
   createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange>;
   renameWorkspacePath(streamId: string, fromPath: string, toPath: string): Promise<WorkspaceRenameResult>;
   deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange>;
+  listWikiNotes(streamId: string): Promise<WikiNoteSummary[]>;
+  readWikiNoteBody(streamId: string, slug: string): Promise<string>;
+  writeWikiNoteBody(streamId: string, slug: string, body: string): Promise<void>;
+  deleteWikiNote(streamId: string, slug: string): Promise<void>;
   listCommitPoints(threadId: string): Promise<CommitPoint[]>;
   createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;

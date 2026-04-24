@@ -72,6 +72,104 @@ test("update persists renamed title", () => {
   expect(reloaded.get(created.id)?.title).toBe("New name");
 });
 
+test("create defaults kind to 'worktree' and honours explicit 'primary'", () => {
+  const projectDir = mkProjectDir();
+  const store = new StreamStore(projectDir);
+
+  const worktree = store.create({
+    title: "wt",
+    branch: "feat",
+    worktreePath: join(projectDir, "feat"),
+    projectBase: "proj",
+  });
+  const primary = store.create({
+    title: "proj",
+    branch: "main",
+    worktreePath: projectDir,
+    projectBase: "proj",
+    kind: "primary",
+  });
+
+  expect(store.get(worktree.id)?.kind).toBe("worktree");
+  expect(store.get(primary.id)?.kind).toBe("primary");
+});
+
+test("findPrimary returns null when no primary exists and the primary row once created", () => {
+  const projectDir = mkProjectDir();
+  const store = new StreamStore(projectDir);
+  expect(store.findPrimary()).toBeUndefined();
+
+  store.create({
+    title: "feat",
+    branch: "feat",
+    worktreePath: join(projectDir, "feat"),
+    projectBase: "proj",
+  });
+  expect(store.findPrimary()).toBeUndefined();
+
+  const primary = store.create({
+    title: "proj",
+    branch: "main",
+    worktreePath: projectDir,
+    projectBase: "proj",
+    kind: "primary",
+  });
+  expect(store.findPrimary()?.id).toBe(primary.id);
+
+  store.create({
+    title: "other",
+    branch: "other",
+    worktreePath: join(projectDir, "other"),
+    projectBase: "proj",
+  });
+  expect(store.findPrimary()?.id).toBe(primary.id);
+});
+
+test("setStreamBranch updates branch + branch_ref and emits stream.changed", () => {
+  const projectDir = mkProjectDir();
+  const store = new StreamStore(projectDir);
+  const primary = store.create({
+    title: "proj",
+    branch: "main",
+    worktreePath: projectDir,
+    projectBase: "proj",
+    kind: "primary",
+  });
+  const other = store.create({
+    title: "feat",
+    branch: "feat",
+    worktreePath: join(projectDir, "feat"),
+    projectBase: "proj",
+  });
+
+  const events: unknown[] = [];
+  store.subscribe((event) => events.push(event));
+
+  const updated = store.setStreamBranch(primary.id, "next", "refs/heads/next");
+  expect(updated.branch).toBe("next");
+  expect(updated.branch_ref).toBe("refs/heads/next");
+
+  const reloaded = new StreamStore(projectDir);
+  expect(reloaded.get(primary.id)?.branch).toBe("next");
+  expect(reloaded.get(primary.id)?.branch_ref).toBe("refs/heads/next");
+  // Sibling untouched.
+  expect(reloaded.get(other.id)?.branch).toBe("feat");
+  expect(events).toEqual([{ kind: "branch-changed", streamId: primary.id }]);
+});
+
+test("deleteStream refuses to remove the primary stream", () => {
+  const projectDir = mkProjectDir();
+  const store = new StreamStore(projectDir);
+  const primary = store.create({
+    title: "proj",
+    branch: "main",
+    worktreePath: projectDir,
+    projectBase: "proj",
+    kind: "primary",
+  });
+  expect(() => store.deleteStream(primary.id)).toThrow(/primary/);
+});
+
 function mkProjectDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "oxplow-stream-store-"));
   tempDirs.push(dir);
