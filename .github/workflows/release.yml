@@ -16,7 +16,32 @@ env:
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.ci-cache/electron-builder
 
 jobs:
+  # Tag-vs-package.json sanity check. Fails fast if someone pushed a
+  # v0.0.2 tag while package.json still says 0.0.1 — avoids cutting a
+  # release with a version mismatch that electron-builder would bake
+  # into the installer filenames and update metadata. The verify step
+  # no-ops on workflow_dispatch runs that weren't fired against a
+  # tag ref (manual dry runs from a branch), so the job always
+  # reports success and doesn't block downstream jobs.
+  check-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          tag_version="${tag#v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          echo "tag: $tag (version=$tag_version)"
+          echo "package.json version: $pkg_version"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag $tag does not match package.json version $pkg_version"
+            exit 1
+          fi
+
   test:
+    needs: check-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
