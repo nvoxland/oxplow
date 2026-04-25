@@ -1448,6 +1448,7 @@ export function App() {
           thread={selectedThread}
           activeThreadId={currentThreadState.activeThreadId}
           threadWork={selectedThreadWork}
+          agentStatus={agentThreadStatus}
           backlog={backlogState}
           onCreateWorkItem={handleCreateWorkItem}
           onUpdateWorkItem={handleUpdateWorkItem}

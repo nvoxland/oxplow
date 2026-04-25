@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import { Fragment, useMemo, useState } from "react";
-import type { CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import type { AgentStatus, CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyWorkItem,
@@ -87,6 +87,7 @@ export function WorkGroupList({
   onReparentWorkItem,
   onAddChildTask,
   isActive,
+  agentStatus,
   isSectionCollapsed,
   onToggleSectionCollapsed,
 }: {
@@ -114,6 +115,11 @@ export function WorkGroupList({
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
+  /** Live agent state for this thread, used to drive the In Progress
+   *  empty-state placeholder ("Thinking..." with a braille spinner when
+   *  the agent is mid-turn, "Waiting" when idle). Falls back to "idle"
+   *  when undefined. */
+  agentStatus?: AgentStatus;
   /** Collapse-state accessors from PlanPane's useCollapsedSections. */
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;
   onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
@@ -622,7 +628,13 @@ export function WorkGroupList({
                 {renderedRows.map(renderRow)}
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-                    {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
+                    {section.kind === "inProgress"
+                      ? (isActive === false
+                          ? "<NOT ACTIVE>"
+                          : (agentStatus === "working"
+                              ? <span><BrailleSpinner /> Thinking...</span>
+                              : "Waiting"))
+                      : "(nothing here)"}
                   </div>
                 ) : null}
               </>
@@ -632,6 +644,28 @@ export function WorkGroupList({
         );
       })}
     </div>
+  );
+}
+
+/** Tiny inline braille spinner used in placeholder/empty states. The full
+ *  10-frame braille cycle ticked at ~80ms/frame is the same animation
+ *  Claude Code's TTY shows during a turn, so the visual reads the same
+ *  here as in the agent terminal. Self-contained so the In Progress
+ *  empty-state can render it without pulling a spinner library. */
+const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+function BrailleSpinner() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % BRAILLE_FRAMES.length), 80);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span
+      aria-hidden="true"
+      style={{ display: "inline-block", fontFamily: "monospace", width: "1ch", color: "var(--accent)" }}
+    >
+      {BRAILLE_FRAMES[frame]}
+    </span>
   );
 }
 

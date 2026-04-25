@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentStatus,
   BacklogState,
   Thread,
   ThreadWorkState,
@@ -74,6 +75,9 @@ interface Props {
   thread: Thread | null;
   activeThreadId: string | null;
   threadWork: ThreadWorkState | null;
+  /** Live agent status for the displayed thread. Drives the In Progress
+   *  empty-state placeholder ("Thinking..." vs "Waiting"). */
+  agentStatus?: AgentStatus;
   backlog: BacklogState | null;
   onCreateWorkItem(input: CreateInput): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
@@ -108,6 +112,7 @@ export function PlanPane({
   thread,
   activeThreadId,
   threadWork,
+  agentStatus,
   backlog,
   onCreateWorkItem,
   onUpdateWorkItem,
@@ -660,6 +665,7 @@ export function PlanPane({
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
                 isActive={isActive}
+                agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
               />
