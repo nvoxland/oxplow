@@ -141,5 +141,10 @@ export const NON_WRITER_PROMPT_BLOCK = [
   ``,
   `Read-only tools (Read, Grep, Glob) and mcp__oxplow__* (work items, backlog) remain fully available. Record proposed changes as a note on the current work item or as a new work item's description; the writer thread will pick them up.`,
   ``,
+  `Common read-only alternatives to commands that would otherwise mutate state:`,
+  `- inspect a file on another branch: \`git show <branch>:<path>\` (no checkout needed)`,
+  `- diff against another branch: \`git diff <branch> -- <path>\``,
+  `- read the current subsystem doc: \`mcp__oxplow__get_subsystem_doc({ threadId, name })\` instead of \`Read .context/<name>.md\``,
+  ``,
   `If you are unsure whether a command writes, do not run it.`,
 ].join("\n");

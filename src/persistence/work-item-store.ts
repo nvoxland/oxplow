@@ -439,11 +439,13 @@ export class WorkItemStore {
     const now = new Date().toISOString();
     const nextParentId = input.parentId !== undefined ? input.parentId : existing.parent_id;
     const nextStatus = input.status ? requireWorkItemStatus(input.status) : existing.status;
-    // Transition guard: block any non-ready, non-human_check source from
-    // jumping directly to in_progress. Callers must explicitly un-block
-    // (or un-terminal) by moving through `ready` first. See wi-6285706789c5.
+    // Transition guard: block jumping to in_progress from terminal states
+    // (done/canceled/archived). For `blocked → in_progress`, accept the
+    // request — agents pushing back into work after a block IS the
+    // deliberate unblock gesture; forcing a separate hop through `ready`
+    // was friction without value. See wi-6285706789c5.
     if (nextStatus === "in_progress" && existing.status !== nextStatus) {
-      if (existing.status !== "ready" && existing.status !== "human_check") {
+      if (existing.status === "done" || existing.status === "canceled" || existing.status === "archived") {
         throw new Error(
           `cannot transition \`${existing.status}\` → \`in_progress\` directly; move to \`ready\` first`,
         );

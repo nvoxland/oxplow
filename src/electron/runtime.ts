@@ -192,6 +192,26 @@ export class ElectronRuntime {
    *  with no tool calls, this prevents the directive from re-emitting
    *  on the same prompt. */
   private readonly lastEmittedWikiCaptureByThread = new Set<string>();
+  /** Per-thread fingerprint of the last auto-commit nag we emitted. When
+   *  the next Stop produces the same fingerprint, the directive is
+   *  suppressed — the agent already saw it; repeating without diff
+   *  movement is noise. Cleared when a commit lands (auto-committed
+   *  thread event) or the user starts a fresh prompt. */
+  private readonly lastAutoCommitNagFingerprintByThread = new Map<string, string>();
+  /** Per-thread record of the last ready-work nag (item id + consecutive
+   *  count). After the cap is hit the pipeline stops emitting until the
+   *  ready-set changes. Cleared on UserPromptSubmit so each fresh prompt
+   *  re-arms the nag. */
+  private readonly recentReadyWorkNagByThread = new Map<string, { itemId: string; count: number }>();
+  /** Per-thread fingerprint (sorted in_progress item id list) of the last
+   *  in-progress audit nag. Used together with the per-turn touched-flag
+   *  to suppress audits when the set hasn't changed and nothing was
+   *  touched. Cleared on UserPromptSubmit. */
+  private readonly lastAuditFingerprintByThread = new Map<string, string>();
+  /** Per-thread flag flipped to `true` on PostToolUse for any oxplow
+   *  work-item write (create / update / complete). Read at Stop together
+   *  with `lastAuditFingerprintByThread`; cleared on UserPromptSubmit. */
+  private readonly inProgressTouchedThisTurnByThread = new Map<string, boolean>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -389,6 +409,13 @@ export class ElectronRuntime {
           change.nextStatus,
           change.touchedFiles,
         );
+        // Mark this turn as having touched an in_progress item — either a
+        // transition INTO in_progress (new work started) or OUT of it
+        // (closed / blocked / paused). Used by the Stop-hook to decide
+        // whether the audit nag has anything to surface.
+        if (change.previousStatus === "in_progress" || change.nextStatus === "in_progress") {
+          this.inProgressTouchedThisTurnByThread.set(change.threadId, true);
+        }
       }
       if (change.kind === "created") {
         // Capture a task-event snapshot on creation so Local History
@@ -1630,6 +1657,13 @@ export class ElectronRuntime {
         // suppression flag so a fresh prompt is allowed to re-trigger.
         this.turnReadWriteByThread.set(envelope.threadId, { reads: 0, writes: 0 });
         this.lastEmittedWikiCaptureByThread.delete(envelope.threadId);
+        // Stop-hook nag debounces are scoped to the conversation gap
+        // between user prompts. A fresh prompt re-arms them so the agent
+        // sees the relevant directive again (commit pending, ready work,
+        // audit) on the new turn — but within one gap we suppress repeats.
+        this.recentReadyWorkNagByThread.delete(envelope.threadId);
+        this.lastAuditFingerprintByThread.delete(envelope.threadId);
+        this.inProgressTouchedThisTurnByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
@@ -1748,6 +1782,8 @@ export class ElectronRuntime {
     this.turnReadWriteByThread.delete(threadId);
     const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
     const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
+    const inProgressTouched = this.inProgressTouchedThisTurnByThread.get(threadId);
+    this.inProgressTouchedThisTurnByThread.delete(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1761,6 +1797,10 @@ export class ElectronRuntime {
       turnWasExploration,
       justEmittedWikiCapture,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
+      lastAutoCommitNagFingerprint: this.lastAutoCommitNagFingerprintByThread.get(threadId),
+      recentReadyWorkNag: this.recentReadyWorkNagByThread.get(threadId),
+      lastAuditFingerprint: this.lastAuditFingerprintByThread.get(threadId),
+      inProgressTouchedThisTurn: inProgressTouched,
     };
     // The item's own thread_id is what matters for the directive text (not
     // `threadId` — they agree today but could diverge if listReady ever
@@ -1794,6 +1834,14 @@ export class ElectronRuntime {
             error: err instanceof Error ? err.message : String(err),
           });
         }
+      } else if (effect.kind === "record-auto-commit-nag") {
+        this.lastAutoCommitNagFingerprintByThread.set(threadId, effect.fingerprint);
+      } else if (effect.kind === "record-ready-work-nag") {
+        const prev = this.recentReadyWorkNagByThread.get(threadId);
+        const count = prev && prev.itemId === effect.itemId ? prev.count + 1 : 1;
+        this.recentReadyWorkNagByThread.set(threadId, { itemId: effect.itemId, count });
+      } else if (effect.kind === "record-audit-nag") {
+        this.lastAuditFingerprintByThread.set(threadId, effect.fingerprint);
       }
     }
     return outcome.directive ? { ...outcome.directive } : null;
@@ -2245,6 +2293,10 @@ export class ElectronRuntime {
       throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
     }
     this.logger.info("auto-commit: committed", { threadId, sha: result.sha, message: finalMessage });
+    // Commit landed → drop the per-thread auto-commit nag fingerprint so
+    // the next pending commit point is allowed to nag once before being
+    // re-debounced.
+    this.lastAutoCommitNagFingerprintByThread.delete(threadId);
     this.events.publish({
       type: "thread.changed",
       streamId: thread.stream_id,
@@ -2437,7 +2489,7 @@ export function buildWikiCaptureStopReason(): string {
     `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
     ``,
     `Follow the \`oxplow-wiki-capture\` skill:`,
-    `1. Search existing notes by title (\`oxplow__search_notes\`), body content (\`oxplow__search_note_bodies\`), and file backlinks (\`oxplow__find_notes_for_file\` for each non-trivial file you read this turn).`,
+    `1. Search existing notes by title (\`mcp__oxplow__search_notes\`), body content (\`mcp__oxplow__search_note_bodies\`), and file backlinks (\`mcp__oxplow__find_notes_for_file\` for each non-trivial file you read this turn).`,
     `2. If a clearly-relevant note already covers the topic, append a new \`## <yyyy-mm-dd> — <focus>\` section. Only create a new note if no topic match.`,
     `3. Write the body to \`.oxplow/notes/<slug>.md\` (kebab-case slug, ≤50 chars, topic-shaped).`,
     `4. Call \`mcp__oxplow__resync_note\` to pin freshness.`,

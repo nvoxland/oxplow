@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ThreadStore } from "../persistence/thread-store.js";
@@ -96,6 +96,59 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const fetched = workItemStore.getItem(threadB.id, itemId);
     expect(fetched?.thread_id).toBe(threadB.id);
     expect(fetched?.title).toBe("streamId-free create");
+  });
+
+  test("get_subsystem_doc returns the file contents when present", async () => {
+    const { tools, threadA, streamA } = seed();
+    // streamA's worktree_path is /tmp/s-A by default — overwrite to a real dir.
+    const worktree = mkdtempSync(join(tmpdir(), "oxplow-subsys-doc-"));
+    (streamA as { worktree_path: string }).worktree_path = worktree;
+    mkdirSync(join(worktree, ".context"), { recursive: true });
+    writeFileSync(join(worktree, ".context", "data-model.md"), "# data model\nbody", "utf8");
+    const t = tool(tools, "oxplow__get_subsystem_doc");
+    const result = await t.handler({ threadId: threadA.id, name: "data-model" } as never);
+    expect(result).toEqual({
+      name: "data-model",
+      path: ".context/data-model.md",
+      content: "# data model\nbody",
+      exists: true,
+    });
+  });
+
+  test("get_subsystem_doc returns exists=false (no error) when the doc is missing", async () => {
+    const { tools, threadA, streamA } = seed();
+    const worktree = mkdtempSync(join(tmpdir(), "oxplow-subsys-doc-"));
+    (streamA as { worktree_path: string }).worktree_path = worktree;
+    const t = tool(tools, "oxplow__get_subsystem_doc");
+    const result = await t.handler({ threadId: threadA.id, name: "nonexistent" } as never);
+    expect(result).toEqual({
+      name: "nonexistent",
+      path: ".context/nonexistent.md",
+      content: "",
+      exists: false,
+    });
+  });
+
+  test("get_subsystem_doc rejects path-traversal in the name", async () => {
+    const { tools, threadA } = seed();
+    const t = tool(tools, "oxplow__get_subsystem_doc");
+    expect(() => t.handler({ threadId: threadA.id, name: "../etc/passwd" } as never))
+      .toThrow(/bare doc name/);
+    expect(() => t.handler({ threadId: threadA.id, name: "sub/dir" } as never))
+      .toThrow(/bare doc name/);
+  });
+
+  test("create_work_item defaults kind to \"task\" when omitted", async () => {
+    const { tools, workItemStore, threadB } = seed();
+    const t = tool(tools, "oxplow__create_work_item");
+    const result = await t.handler({
+      threadId: threadB.id,
+      title: "no-kind-supplied",
+    } as never);
+    const itemId = (result as { id: string }).id;
+    expect(itemId).toBeDefined();
+    const fetched = workItemStore.getItem(threadB.id, itemId);
+    expect(fetched?.kind).toBe("task");
   });
 
   test("mismatched streamId is ignored in favour of the thread's real stream", async () => {

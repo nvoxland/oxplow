@@ -494,7 +494,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
           threadId: { type: "string", description: "Required thread id for the work you are managing." },
           parentId: { type: "string", description: "Optional parent epic/task id in the same thread." },
-          kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
+          kind: { type: "string", description: "One of epic, task, subtask, bug, or note. Defaults to \"task\" when omitted." },
           title: { type: "string", description: "Short title for the work item." },
           description: { type: "string", description: "Optional longer description of the approach." },
           acceptanceCriteria: { type: "string", description: "Optional plain-text checklist (one criterion per line) defining observable conditions for 'done'." },
@@ -506,13 +506,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             items: { type: "string" },
           },
         },
-        required: ["threadId", "kind", "title"],
+        required: ["threadId", "title"],
       },
       handler: (args: {
         streamId?: string;
         threadId: string;
         parentId?: string;
-        kind: WorkItemKind;
+        kind?: WorkItemKind;
         title: string;
         description?: string;
         acceptanceCriteria?: string | null;
@@ -521,6 +521,10 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         touchedFiles?: string[];
       }) => {
         resolveThreadAndStream(args);
+        // Default to "task" — by far the most common kind. Forcing the agent
+        // to declare it on every call produced a guaranteed first-call
+        // failure ("missing required field: kind") for trivial fixes.
+        const kind: WorkItemKind = args.kind ?? "task";
         // Silent-failure guard: agents sometimes cram the acceptance
         // checklist into `description` instead of the dedicated top-level
         // `acceptanceCriteria` field. The DB accepts it either way, so the
@@ -552,7 +556,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           const created = workItemStore.createItem({
             threadId: args.threadId,
             parentId: args.parentId,
-            kind: args.kind,
+            kind,
             title: args.title,
             description: args.description,
             acceptanceCriteria: args.acceptanceCriteria,
@@ -591,7 +595,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const item = workItemStore.createItem({
           threadId: args.threadId,
           parentId: args.parentId,
-          kind: args.kind,
+          kind,
           title: args.title,
           description: args.description,
           acceptanceCriteria: args.acceptanceCriteria,
@@ -616,7 +620,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         // the tool response keeps the rule on the critical path instead of
         // shelved in a skill doc. Non-epic responses stay terse — no field is
         // added there so the happy-path log doesn't grow.
-        if (args.kind === "epic") {
+        if (kind === "epic") {
           return withRedoHint({
             ok: true,
             id: item.id,
@@ -1279,6 +1283,41 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       handler: (args: { streamId?: string; threadId: string }) => {
         resolveThreadAndStream(args);
         return { commitPoints: commitPointStore.listForThread(args.threadId) };
+      },
+    },
+    {
+      name: "oxplow__get_subsystem_doc",
+      description:
+        "Return the contents of a `.context/<name>.md` doc from the stream's worktree. Cheap alternative to a Read call when you only need the durable subsystem knowledge — saves the model from re-reading the same .context doc 20+ times per session. Returns `{ name, path, content, exists }`. When the doc doesn't exist, `exists` is false and `content` is empty (no error) so the caller can branch on it instead of seeing a hard file-not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id (used to find the stream's worktree)." },
+          name: {
+            type: "string",
+            description: "Doc name without the `.md` suffix or `.context/` prefix. Examples: \"data-model\", \"agent-model\", \"ipc-and-stores\", \"theming\", \"git-integration\", \"editor-and-monaco\", \"code-quality\", \"architecture\", \"usability\".",
+          },
+        },
+        required: ["threadId", "name"],
+      },
+      handler: (args: { streamId?: string; threadId: string; name: string }) => {
+        const { stream } = resolveThreadAndStream(args);
+        const safeName = String(args.name || "").trim();
+        // Reject any path-traversal / directory chars so the tool can't be
+        // used to read arbitrary files outside `.context/`.
+        if (!safeName || /[\\/]|\.\./.test(safeName)) {
+          throw new Error("get_subsystem_doc: `name` must be a bare doc name (no slashes, no ..)");
+        }
+        const fs = require("node:fs") as typeof import("node:fs");
+        const path = require("node:path") as typeof import("node:path");
+        const relPath = path.join(".context", `${safeName}.md`);
+        const absPath = path.join(stream.worktree_path, relPath);
+        if (!fs.existsSync(absPath)) {
+          return { name: safeName, path: relPath, content: "", exists: false };
+        }
+        const content = fs.readFileSync(absPath, "utf8");
+        return { name: safeName, path: relPath, content, exists: true };
       },
     },
   ];

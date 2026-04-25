@@ -554,4 +554,90 @@ describe("decideStopDirective", () => {
       expect(out.directive?.reason).toBe("audit: w-a");
     });
   });
+
+  describe("nag debouncing (transcript-evidenced regressions)", () => {
+    test("audit nag is suppressed when the same fingerprint already fired and no in_progress was touched this turn", () => {
+      const inFlight = workItem("w-a", 0, "in_progress");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [inFlight],
+          lastAuditFingerprint: "w-a",
+          inProgressTouchedThisTurn: false,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("audit nag still fires when an in_progress item was touched this turn (even with same fingerprint)", () => {
+      const inFlight = workItem("w-a", 0, "in_progress");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [inFlight],
+          lastAuditFingerprint: "w-a",
+          inProgressTouchedThisTurn: true,
+        }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("audit: w-a");
+      expect(out.sideEffects).toContainEqual({ kind: "record-audit-nag", fingerprint: "w-a" });
+    });
+
+    test("audit nag emits a record-audit-nag side effect with sorted fingerprint", () => {
+      const items = [workItem("w-b", 1, "in_progress"), workItem("w-a", 0, "in_progress")];
+      const out = decideStopDirective(snapshot({ workItems: items }), builders);
+      expect(out.sideEffects).toContainEqual({ kind: "record-audit-nag", fingerprint: "w-a|w-b" });
+    });
+
+    test("ready-work nag is suppressed once the per-item count hits the cap", () => {
+      const ready = workItem("w-r", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          readyWorkItems: [ready],
+          recentReadyWorkNag: { itemId: "w-r", count: 3 },
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("ready-work nag still fires when the recent nag tracks a different item", () => {
+      const ready = workItem("w-r", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({
+          readyWorkItems: [ready],
+          recentReadyWorkNag: { itemId: "different", count: 99 },
+        }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("next: w-r");
+      expect(out.sideEffects).toContainEqual({ kind: "record-ready-work-nag", itemId: "w-r" });
+    });
+
+    test("auto-commit nag is suppressed when its fingerprint matches the last fire", () => {
+      const cp = commitPoint("cp-x", 1, "pending", "auto");
+      const out = decideStopDirective(
+        snapshot({
+          commitPoints: [cp],
+          lastAutoCommitNagFingerprint: "cp:cp-x",
+        }),
+        { ...builders, buildAutoCommitReason: (cp) => `auto: ${cp?.id ?? "no-cp"}` },
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("ad-hoc auto-commit nag is suppressed by the auto:no-cp fingerprint", () => {
+      const settled = workItem("w-s", 0, "human_check");
+      const out = decideStopDirective(
+        snapshot({
+          autoCommit: true,
+          workItems: [settled],
+          worktreeClean: false,
+          lastAutoCommitNagFingerprint: "auto:no-cp",
+        }),
+        { ...builders, buildAutoCommitReason: (cp) => `auto: ${cp?.id ?? "no-cp"}` },
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
 });

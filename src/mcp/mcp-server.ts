@@ -285,7 +285,7 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
           return {
             result: {
               tools: tools.map((t) => ({
-                name: t.name,
+                name: exposedToolName(t.name),
                 description: t.description,
                 inputSchema: t.inputSchema,
               })),
@@ -294,7 +294,10 @@ export async function startMcpServer(opts: StartOptions): Promise<McpServerHandl
         case "tools/call": {
           const name = req.params?.name;
           const args = req.params?.arguments ?? {};
-          const tool = tools.find((t) => t.name === name);
+          // Accept the exposed short form (e.g. `create_work_item`) AND the
+          // legacy long form (`oxplow__create_work_item`) so old prompts /
+          // logs that still reference the prefixed name keep working.
+          const tool = tools.find((t) => t.name === name || exposedToolName(t.name) === name);
           if (!tool) {
             return { error: { code: -32601, message: `unknown tool: ${name}` } };
           }
@@ -472,6 +475,17 @@ export function validateToolArgs(tool: ToolDef, args: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Strip the legacy `oxplow__` per-tool prefix when exposing tools over MCP.
+ * The MCP server is registered to Claude under name "oxplow", so the harness
+ * already namespaces every call as `mcp__oxplow__<tool>` — leaving an extra
+ * `oxplow__` on each tool name produced `mcp__oxplow__oxplow__create_work_item`
+ * which wasted cache and confused agent self-reference.
+ */
+export function exposedToolName(internalName: string): string {
+  return internalName.startsWith("oxplow__") ? internalName.slice("oxplow__".length) : internalName;
 }
 
 function jsonTypeOf(value: unknown): string {

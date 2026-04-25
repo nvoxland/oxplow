@@ -270,6 +270,16 @@ The pipeline runs in priority order:
    `in_progress` rows pile up because nothing forces a settle. The audit
    takes priority over the ready-work branch — reconcile what's open
    before picking up new work.
+   - **Audit nag debounce.** Re-asking the agent to audit the same
+     unchanged in-progress set every Stop produced status-transition
+     ping-pong with no new information. The pipeline tracks the
+     fingerprint of the most recent audit nag (`lastAuditFingerprint`,
+     a sorted item-id list) and a per-turn flag for whether any
+     in_progress item was created/updated/closed (`inProgressTouchedThisTurn`,
+     bumped from the work-item `subscribe` callback when `previousStatus`
+     or `nextStatus` is `in_progress`). The nag is suppressed when
+     fingerprint matches AND the flag is false. Both reset on
+     `UserPromptSubmit` so a fresh user turn re-arms it.
 5. **Writer thread with no `in_progress` and ready work.** Block with a
    terse directive built by `buildNextWorkItemStopReason` — a one-liner
    pointing at `mcp__oxplow__read_work_options` (with the embedded
@@ -287,7 +297,25 @@ The pipeline runs in priority order:
    the record is cleared — the agent already has the list; re-emitting
    it would waste a turn.
 
+   **Per-item nag cap.** The pipeline tracks the most recent ready-work
+   nag in `recentReadyWorkNagByThread` (`{ itemId, count }`). After 3
+   consecutive fires for the same item id, the directive is suppressed
+   until the ready-set changes or the next user prompt resets the
+   counter. Without the cap the same nag could fire 7+ times in a
+   session — pure token burn once the user has clearly chosen not to
+   pick up the suggested item.
+
 6. **Otherwise.** Allow stop.
+
+**Auto-commit nag debounce.** Both the `mode="auto"` commit-point
+branch and the ad-hoc auto-commit branch (priorities 1 and 2 above)
+fingerprint each emitted nag in `lastAutoCommitNagFingerprintByThread`
+(`cp:<id>` for queued points, `auto:no-cp` for ad-hoc). Re-emitting
+the same fingerprint without the commit landing or the diff changing
+adds nothing the agent didn't already see. The fingerprint clears on
+`UserPromptSubmit` and on a successful commit
+(`executeAutoCommitForThread`). This kept the auto-commit prompt from
+firing 7× in a single session against an unchanged diff.
 
 **Subagent-in-flight carve-out.** The runtime tracks per-thread `Task`
 tool calls (PreToolUse → +1, PostToolUse → -1) in
@@ -396,7 +424,23 @@ primary tool for queue-driven dispatch.
 ## MCP tools
 
 `buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
-`oxplow__*` tool surface:
+tool surface. Internally each `ToolDef.name` carries an `oxplow__`
+prefix (historical), but `mcp-server.ts` strips that prefix at the
+`tools/list` boundary via `exposedToolName` so the harness sees clean
+names like `create_work_item`. With the harness's own `mcp__oxplow__`
+namespace on top, the agent calls `mcp__oxplow__create_work_item` —
+not the legacy `mcp__oxplow__oxplow__create_work_item`. The long form
+still resolves on `tools/call` for back-compat.
+
+The default `kind` for `create_work_item` is `"task"` — omit it
+unless you specifically need an epic/subtask/bug/note. Forcing the
+field on every call produced a guaranteed first-call failure for
+trivial fixes.
+
+`update_work_item` accepts `blocked → in_progress` directly (deliberate
+unblock gesture; no separate hop through `ready` required). Only
+terminal states (`done`/`canceled`/`archived`) still require an
+intermediate `ready` step.
 
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
@@ -414,6 +458,13 @@ primary tool for queue-driven dispatch.
   exercise it without spinning up MCP.
 - `commit({ commit_point_id, message } | { auto: true, threadId, message })`,
   `list_commit_points(threadId)`, `tasks_since_last_commit(threadId)`.
+- `get_subsystem_doc({ threadId, name })` — returns
+  `{ name, path, content, exists }` for `.context/<name>.md` in the
+  thread's stream worktree. Cheap alternative to `Read` when you only
+  need the doc body — saves the model from re-reading the same
+  `.context/` doc 20+ times per session and never hard-errors on a
+  missing doc (returns `exists: false` instead). Path-traversal
+  characters in `name` are rejected.
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
   "fork_thread" above. Creates a new queued
   thread on the same stream, seeds a note item, optionally moves ready/

@@ -450,15 +450,28 @@ describe("copyLastItemNotes (used by fork_thread)", () => {
 });
 
 describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
-  test("updateItem rejects blocked -> in_progress with a descriptive error", () => {
+  test("updateItem accepts blocked -> in_progress (deliberate unblock)", () => {
+    // The previous guard required a manual blocked → ready → in_progress
+    // hop, but every agent caller hit the error on the first try. The
+    // unblock gesture IS the deliberate transition; no extra hop needed.
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
       threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "blocked",
     });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
+  });
+
+  test("updateItem still rejects done -> in_progress (terminal state)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "done",
+    });
     expect(() => workItems.updateItem({
       threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
-    })).toThrow(/blocked.*in_progress|move to.*ready.*first/i);
-    expect(workItems.getItem(threadId, item.id)!.status).toBe("blocked");
+    })).toThrow(/done.*in_progress|move to.*ready.*first/i);
   });
 
   test("updateItem accepts blocked -> ready (explicit unblock)", () => {

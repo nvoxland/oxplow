@@ -90,6 +90,26 @@ export interface ThreadSnapshot {
    *  (the first emission either produced a note or got the agent's
    *  `oxplow-note: skipped` reply; either way it's settled). */
   justEmittedWikiCapture?: boolean;
+  /** Last auto-commit nag fingerprint we emitted for this thread (cp id +
+   *  HEAD-or-"dirty"). When the current fingerprint matches, suppress —
+   *  the agent already has the directive; repeating it without new diff
+   *  to commit is pure noise. Cleared when the commit lands. */
+  lastAutoCommitNagFingerprint?: string;
+  /** Item id of the most recent ready-work nag, plus the consecutive count.
+   *  After K (=3) fires for the same item without movement, suppress until
+   *  the ready-set changes. Without this cap the same nag can fire 7+
+   *  times in a session (transcript ff6fbc2a / 5557d7fb evidence). */
+  recentReadyWorkNag?: { itemId: string; count: number };
+  /** Last in-progress audit fingerprint we emitted (sorted item id list).
+   *  When the current fingerprint matches AND no in_progress item was
+   *  touched this turn, suppress — re-asking the agent to audit the same
+   *  unchanged set every turn produces a status-transition ping-pong. */
+  lastAuditFingerprint?: string;
+  /** True when at least one `in_progress` work item was created or updated
+   *  during this turn. Used together with `lastAuditFingerprint` to gate
+   *  the audit nag — no movement on any in_progress row means the audit
+   *  has nothing new to find. */
+  inProgressTouchedThisTurn?: boolean;
 }
 
 export interface StopDirective {
@@ -98,7 +118,10 @@ export interface StopDirective {
 }
 
 export type StopHookSideEffect =
-  | { kind: "trigger-wait-point"; id: string };
+  | { kind: "trigger-wait-point"; id: string }
+  | { kind: "record-auto-commit-nag"; fingerprint: string }
+  | { kind: "record-ready-work-nag"; itemId: string }
+  | { kind: "record-audit-nag"; fingerprint: string };
 
 export interface StopHookOutcome {
   directive: StopDirective | null;
@@ -169,9 +192,13 @@ export function decideStopDirective(
       if (snapshot.worktreeClean) {
         return { directive: null, sideEffects };
       }
+      const fp = `cp:${activeCommit.id}`;
+      if (snapshot.lastAutoCommitNagFingerprint === fp) {
+        return { directive: null, sideEffects };
+      }
       return {
         directive: { decision: "block", reason: builders.buildAutoCommitReason(activeCommit) },
-        sideEffects,
+        sideEffects: [...sideEffects, { kind: "record-auto-commit-nag", fingerprint: fp }],
       };
     }
     return {
@@ -194,9 +221,13 @@ export function decideStopDirective(
     hasSettledWork(snapshot.workItems) &&
     !snapshot.worktreeClean
   ) {
+    const fp = "auto:no-cp";
+    if (snapshot.lastAutoCommitNagFingerprint === fp) {
+      return { directive: null, sideEffects };
+    }
     return {
       directive: { decision: "block", reason: builders.buildAutoCommitReason(null) },
-      sideEffects,
+      sideEffects: [...sideEffects, { kind: "record-auto-commit-nag", fingerprint: fp }],
     };
   }
 
@@ -228,9 +259,19 @@ export function decideStopDirective(
   // bookkeeping step that prevents stale in_progress rows piling up.
   const inProgress = snapshot.workItems.filter((item) => item.status === "in_progress");
   if (inProgress.length > 0 && builders.buildInProgressAuditReason) {
+    const auditFp = inProgress.map((i) => i.id).sort().join("|");
+    // Suppress when we already audited this exact set AND the agent
+    // didn't touch any in_progress item this turn — re-asking produces
+    // status-transition ping-pong with no new information.
+    if (
+      snapshot.lastAuditFingerprint === auditFp &&
+      snapshot.inProgressTouchedThisTurn === false
+    ) {
+      return { directive: null, sideEffects };
+    }
     return {
       directive: { decision: "block", reason: builders.buildInProgressAuditReason(inProgress) },
-      sideEffects,
+      sideEffects: [...sideEffects, { kind: "record-audit-nag", fingerprint: auditFp }],
     };
   }
 
@@ -240,9 +281,17 @@ export function decideStopDirective(
     if (shouldSuppressReadyWorkForJustRead(snapshot.readyWorkItems, snapshot.justReadReadySet)) {
       return { directive: null, sideEffects };
     }
+    // Cap consecutive ready-work nags for the same item at 3. After
+    // that the user clearly isn't going to act on it; further repeats
+    // just burn tokens.
+    const READY_NAG_CAP = 3;
+    const recent = snapshot.recentReadyWorkNag;
+    if (recent && recent.itemId === next.id && recent.count >= READY_NAG_CAP) {
+      return { directive: null, sideEffects };
+    }
     return {
       directive: { decision: "block", reason: builders.buildNextWorkItemReason(next) },
-      sideEffects,
+      sideEffects: [...sideEffects, { kind: "record-ready-work-nag", itemId: next.id }],
     };
   }
 
