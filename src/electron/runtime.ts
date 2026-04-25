@@ -145,6 +145,16 @@ export class ElectronRuntime {
    *  list the agent already has. Populated through the
    *  markReadWorkOptions callback wired into the MCP tool surface. */
   private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
+  /** Per-thread activity flag for the current turn. Seeded `false` on
+   *  UserPromptSubmit, flipped to `true` on the first qualifying
+   *  PostToolUse (write-intent / oxplow filing / dispatch — see
+   *  `isActivityTool`). Read on Stop: `false` means the turn was pure
+   *  Q&A (the agent answered or asked a question) and the entire
+   *  Stop-directive pipeline is suppressed so the agent stays stopped
+   *  waiting for the user. Absent key (no UserPromptSubmit yet) is
+   *  treated as "unknown → don't suppress" so behaviour stays stable
+   *  in tests and edge cases. */
+  private readonly turnActivityByThread = new Map<string, boolean>();
   /** Per-thread count of `Task` (subagent) tool calls that are
    *  PreToolUse-started but haven't yet seen a PostToolUse. Used by the
    *  Stop-hook pipeline to suppress the in-progress audit and ready-work
@@ -1502,6 +1512,11 @@ export class ElectronRuntime {
       }
       if (envelope.event === "PostToolUse") {
         this.handlePostToolUseDirty(envelope);
+        const payload = (envelope.payload ?? {}) as { tool_name?: unknown; tool_input?: unknown };
+        const activityToolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+        if (activityToolName && envelope.threadId && isActivityTool(activityToolName, payload.tool_input)) {
+          this.turnActivityByThread.set(envelope.threadId, true);
+        }
         // Match a PreToolUse for `Task` (subagent dispatch) — decrement
         // the per-thread pending-subagent counter so the Stop-hook
         // suppression lifts once the subagent returns.
@@ -1538,6 +1553,10 @@ export class ElectronRuntime {
       if (deny) return { body: deny };
     }
     if (envelope.event === "UserPromptSubmit") {
+      // Seed the per-turn activity flag — flips to true on the first
+      // qualifying PostToolUse. Read on Stop to suppress the full
+      // directive pipeline for pure Q&A turns.
+      if (envelope.threadId) this.turnActivityByThread.set(envelope.threadId, false);
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
       // very recently, there's a strong chance this new prompt is either
@@ -1642,6 +1661,11 @@ export class ElectronRuntime {
         });
       }
     }
+    // Consume the activity flag for this turn (once per Stop). Absent =
+    // unknown — pipeline treats undefined as "don't suppress" so older
+    // tests / edge cases stay stable.
+    const turnHadActivity = this.turnActivityByThread.get(threadId);
+    this.turnActivityByThread.delete(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1651,6 +1675,7 @@ export class ElectronRuntime {
       autoCommit: thread?.auto_commit ?? false,
       justReadReadySet,
       worktreeClean,
+      turnHadActivity,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
     };
     // The item's own thread_id is what matters for the directive text (not
@@ -2541,11 +2566,13 @@ export function applyStatusTransition(
     // "open effort" marker. We need the id to attach the touched-files
     // payload to the row just closed.
     const openEffort = deps.effortStore.getOpenEffort(workItemId);
-    // 5-minute gap rule: skip the end-of-effort snapshot when the
-    // stream's most recent snapshot is younger than the threshold.
-    // Leaves effort.end_snapshot_id null; computeEffortFiles already
-    // returns null for an open-ended effort, so the History view will
-    // wait until the next snapshot lands.
+    // Any move out of in_progress (human_check / blocked / ready /
+    // canceled / archived) triggers a possible task-end snapshot — the
+    // work just paused, so capture the worktree state. The 5-minute gap
+    // rule suppresses the flush when the stream's most recent snapshot
+    // is younger than the threshold so back-to-back transitions don't
+    // pile up near-identical rows. Leaves effort.end_snapshot_id null
+    // in the skip case; computeEffortFiles already tolerates a null end.
     const lastSnapTs = deps.getMostRecentSnapshotTimestamp?.() ?? null;
     const skipEnd = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
     const endSnapshotId = skipEnd

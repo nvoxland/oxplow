@@ -90,8 +90,6 @@ export interface WorkItemEvent {
 export type SnapshotSource =
   | "task-start"
   | "task-end"
-  | "turn-start"
-  | "turn-end"
   | "startup";
 
 export interface FileSnapshot {

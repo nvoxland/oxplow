@@ -67,6 +67,16 @@ export interface ThreadSnapshot {
    *  work appears unlinked — the next `git-refs.changed` backfill attaches
    *  the pending rows to the fresh sha. See wi-ec4c8e6f44fd. */
   worktreeClean?: boolean;
+  /** False when the just-ended turn fired no qualifying tool calls
+   *  (write-intent, oxplow filing, dispatch). A pure Q&A / question-asking
+   *  turn — the agent answered or asked the user something and there's
+   *  nothing more to do until the user replies. When false, the entire
+   *  Stop directive pipeline is skipped so we don't force-march the agent
+   *  past a question (commit, auto-commit, in-progress audit, ready-work
+   *  are all suppressed). `undefined` is treated as "unknown → don't
+   *  suppress" so behaviour stays stable when the activity flag wasn't
+   *  threaded through (older tests, missing UserPromptSubmit, etc.). */
+  turnHadActivity?: boolean;
 }
 
 export interface StopDirective {
@@ -99,6 +109,16 @@ export function decideStopDirective(
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
+
+  // Q&A turn: the agent answered or asked the user something with no
+  // qualifying tool activity. The Stop here means "I'm waiting on you" —
+  // suppress every directive (commit, auto-commit, in-progress audit,
+  // ready-work) so the agent stays stopped until the user replies. The
+  // wait-point side-effect is also skipped; it'll fire on the next turn
+  // that actually does work.
+  if (snapshot.turnHadActivity === false) {
+    return { directive: null, sideEffects };
+  }
 
   const activeCommit = findActiveMarker(snapshot.commitPoints, snapshot.workItems, (cp) => cp.status !== "done");
   // Only the writer thread ever commits. Non-active threads share the worktree

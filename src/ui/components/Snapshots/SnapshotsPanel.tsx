@@ -273,7 +273,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
 
   // Hide `-start` rows: they're only shown via their paired `-end`.
   const visibleSnapshots = snapshots.filter(
-    (snap) => snap.source !== "task-start" && snap.source !== "turn-start",
+    (snap) => snap.source !== "task-start",
   );
 
   // Synthesize one row per effort when multiple efforts end at the same
@@ -450,10 +450,6 @@ function snapshotLabel(snap: FileSnapshot): string {
       return "Task started";
     case "task-end":
       return "Task ended";
-    case "turn-start":
-      return "Turn started";
-    case "turn-end":
-      return "Turn ended";
     case "startup":
       return "App startup";
     default:
@@ -463,7 +459,6 @@ function snapshotLabel(snap: FileSnapshot): string {
 
 function endFamily(source: string): "task" | "turn" | null {
   if (source === "task-end") return "task";
-  if (source === "turn-end") return "turn";
   return null;
 }
 
@@ -473,9 +468,6 @@ function snapshotIconKind(snap: FileSnapshot): "task" | "turn" | "system" {
     case "task-start":
     case "task-end":
       return "task";
-    case "turn-start":
-    case "turn-end":
-      return "turn";
     default:
       return "system";
   }

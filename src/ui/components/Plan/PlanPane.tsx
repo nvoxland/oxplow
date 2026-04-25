@@ -1079,6 +1079,14 @@ function NewWorkItemModal({
                 )}
               </div>
             ) : null}
+            {item ? (
+              <EffortsSection
+                item={item}
+                efforts={efforts}
+                onOpenFile={onOpenFile}
+                onShowInHistory={onShowInHistory}
+              />
+            ) : null}
           </div>
           {/* Right column: metadata */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
@@ -1153,12 +1161,6 @@ function NewWorkItemModal({
                   {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
                   {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
                 </div>
-                <EffortsSection
-                  item={item}
-                  efforts={efforts}
-                  onOpenFile={onOpenFile}
-                  onShowInHistory={onShowInHistory}
-                />
               </>
             ) : null}
           </div>
@@ -1230,7 +1232,10 @@ function EffortsSection({
   // completed ones — render it as its own box so the user can see that
   // work is actively attributed to this item right now.
   const activeEffort = allEfforts.find((d) => !d.effort.ended_at) ?? null;
-  const efforts = allEfforts.filter((d) => d.effort.ended_at);
+  const efforts = allEfforts
+    .filter((d) => d.effort.ended_at)
+    .slice()
+    .sort((a, b) => (b.effort.started_at ?? "").localeCompare(a.effort.started_at ?? ""));
   const totalPaths = new Set<string>();
   for (const effort of efforts) {
     for (const path of effort.changed_paths) totalPaths.add(path);

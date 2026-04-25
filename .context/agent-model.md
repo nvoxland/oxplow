@@ -177,6 +177,20 @@ stores, calls the pure function, then applies any returned side effects
 (currently only `trigger-wait-point`). Keeping the decision separate
 from the side effects lets every branch be unit-tested with a fixture.
 
+**Q&A short-circuit.** Before any branch runs, the pipeline checks
+`snapshot.turnHadActivity`. The runtime tracks a per-thread flag
+(`turnActivityByThread`) seeded `false` on UserPromptSubmit and
+flipped `true` on the first qualifying PostToolUse — write-intent
+tools (Edit/Write/Bash with non-readonly command), oxplow filing
+tools, and dispatch tools (see `isActivityTool`). When the flag is
+still `false` at Stop, the turn was pure Q&A — the agent answered or
+asked the user something with no real work — and **every directive is
+suppressed** so the agent stays stopped waiting for the user. Commit,
+auto-commit, in-progress audit, ready-work, and the wait-point side-
+effect are all skipped. `undefined` (no UserPromptSubmit fired) is
+treated as "unknown → don't suppress" so older tests / edge cases
+stay stable.
+
 The pipeline runs in priority order:
 
 1. **Pending commit point (writer thread only).** Block with an
@@ -593,10 +607,17 @@ snapshot id. Mechanics:
   previous snapshot.
 - Snapshots are anchored to **efforts**, not turns. A status
   transition into `in_progress` flushes a `task-start` snapshot and
-  records its id on `work_item_effort.start_snapshot_id`; closing the
-  effort flushes a `task-end` snapshot recorded on
-  `work_item_effort.end_snapshot_id`. Both are linked back to the
-  effort via `file_snapshot.effort_id`.
+  records its id on `work_item_effort.start_snapshot_id`. Any move
+  *out* of `in_progress` (human_check / blocked / ready / canceled /
+  archived) flushes a `task-end` snapshot recorded on
+  `work_item_effort.end_snapshot_id`, subject to the 5-minute gap
+  rule: when the stream's most recent snapshot is younger than
+  `END_SNAPSHOT_MIN_GAP_MS`, the flush is skipped and
+  `end_snapshot_id` is left null. Both task-start and task-end are
+  linked back to the effort via `file_snapshot.effort_id`. The flush
+  is automatic inside `applyStatusTransition` (which the MCP work-
+  item tools all delegate to) — agents never need to flush
+  explicitly.
 - On project open, `takeStartupSnapshot` runs once per stream — a full
   worktree walk that emits `source: "startup"`. If nothing changed
   while the app was down, `version_hash` dedup returns the existing

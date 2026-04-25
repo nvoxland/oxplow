@@ -152,6 +152,35 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
+  test("Q&A turn (turnHadActivity=false) suppresses every directive", () => {
+    const ready = workItem("w1", 0);
+    const inProgress = workItem("w2", 1, "in_progress");
+    const cp = commitPoint("cp1", 2);
+    const wp = waitPoint("wp1", 3);
+    const out = decideStopDirective(
+      snapshot({
+        commitPoints: [cp],
+        waitPoints: [wp],
+        workItems: [inProgress, ready],
+        readyWorkItems: [ready],
+        autoCommit: true,
+        turnHadActivity: false,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+    expect(out.sideEffects).toEqual([]);
+  });
+
+  test("turnHadActivity=true behaves the same as undefined (no suppression)", () => {
+    const inProgress = workItem("w2", 1, "in_progress");
+    const out = decideStopDirective(
+      snapshot({ workItems: [inProgress], turnHadActivity: true }),
+      builders,
+    );
+    expect(out.directive).toEqual({ decision: "block", reason: "audit: w2" });
+  });
+
   test("commit point takes priority over wait point at same position", () => {
     const cp = commitPoint("cp1", 1);
     const wp = waitPoint("wp1", 1);
