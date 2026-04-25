@@ -1,7 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import type { WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus, WorkNote } from "../../api.js";
+import { MarkdownView } from "../Notes/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
+
+/**
+ * One entry in the merged Activity timeline rendered inside the work-item
+ * modal. Notes (`add_work_note` / `complete_task` summaries) and efforts
+ * (start/close windows + changed-file lists) are interleaved into a single
+ * chronological list so reviewers see everything that happened on this
+ * item in one place — no separate "Notes" / "Efforts" subsections.
+ *
+ * The list is newest-first. For closed efforts we sort on `ended_at` (the
+ * effort *finishing* is the user-visible event); the active effort sorts
+ * on `started_at` and gets `active: true` so the renderer can flag it
+ * with a subtle "in progress" badge.
+ */
+export type ActivityRow =
+  | { kind: "note"; id: string; timestamp: string; note: WorkNote }
+  | { kind: "effort"; id: string; timestamp: string; active: boolean; detail: EffortDetail };
+
+export function buildActivityTimeline(notes: WorkNote[], efforts: EffortDetail[]): ActivityRow[] {
+  const rows: ActivityRow[] = [];
+  for (const note of notes) {
+    rows.push({ kind: "note", id: note.id, timestamp: note.created_at, note });
+  }
+  for (const detail of efforts) {
+    const active = !detail.effort.ended_at;
+    const timestamp = detail.effort.ended_at ?? detail.effort.started_at;
+    rows.push({ kind: "effort", id: detail.effort.id, timestamp, active, detail });
+  }
+  rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0));
+  return rows;
+}
 
 export interface WorkItemDetailChanges {
   title?: string;
@@ -78,6 +109,7 @@ export function WorkItemDetail({
         value={item.description}
         placeholder="Add a description…"
         multiline
+        renderMarkdown
         onCommit={(value) => {
           if (value === item.description) return;
           void onUpdateWorkItem(item.id, { description: value });
@@ -89,6 +121,7 @@ export function WorkItemDetail({
         value={item.acceptance_criteria ?? ""}
         placeholder="Acceptance criteria, one per line"
         multiline
+        renderMarkdown
         onCommit={(value) => {
           const next = value.length === 0 ? null : value;
           if (next === item.acceptance_criteria) return;
@@ -99,21 +132,187 @@ export function WorkItemDetail({
   );
 }
 
+/**
+ * Single chronological list (newest first) mixing work-item notes and
+ * efforts inside the work-item modal. Replaces the previous two-section
+ * layout (Notes pane + separate Efforts pane with an "active effort"
+ * callout box) so the timeline reads top-to-bottom without overlap.
+ *
+ * Active effort renders inline at the top with a subtle "in progress"
+ * badge — no callout box.
+ */
+export function ActivityTimeline({
+  notes,
+  efforts,
+  formatTimestamp,
+  onOpenFile,
+  onShowInHistory,
+}: {
+  notes: WorkNote[];
+  efforts: EffortDetail[];
+  formatTimestamp(iso: string): string;
+  onOpenFile?(path: string): void | Promise<void>;
+  onShowInHistory?(snapshotId: string): void;
+}) {
+  const rows = buildActivityTimeline(notes, efforts);
+  if (rows.length === 0) {
+    return (
+      <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>
+        No activity yet — moving this item to "in progress" starts an effort, and notes will land here.
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid="work-item-activity"
+      style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}
+    >
+      {rows.map((row) => row.kind === "note" ? (
+        <ActivityNoteRow key={`note-${row.id}`} note={row.note} formatTimestamp={formatTimestamp} />
+      ) : (
+        <ActivityEffortRow
+          key={`effort-${row.id}`}
+          detail={row.detail}
+          active={row.active}
+          formatTimestamp={formatTimestamp}
+          onOpenFile={onOpenFile}
+          onShowInHistory={onShowInHistory}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActivityNoteRow({ note, formatTimestamp }: { note: WorkNote; formatTimestamp(iso: string): string }) {
+  return (
+    <div style={{ fontSize: 12, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
+        <span style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Note</span>
+        <span style={{ fontWeight: 600, color: "var(--accent)" }}>{note.author}</span>
+        <span style={{ color: "var(--muted)", fontSize: 11 }}>{formatTimestamp(note.created_at)}</span>
+      </div>
+      {note.body.length > 0 ? (
+        <MarkdownView body={note.body} maxHeight={320} />
+      ) : (
+        <div style={{ color: "var(--muted)", fontStyle: "italic" }}>(empty)</div>
+      )}
+    </div>
+  );
+}
+
+function ActivityEffortRow({
+  detail,
+  active,
+  formatTimestamp,
+  onOpenFile,
+  onShowInHistory,
+}: {
+  detail: EffortDetail;
+  active: boolean;
+  formatTimestamp(iso: string): string;
+  onOpenFile?(path: string): void | Promise<void>;
+  onShowInHistory?(snapshotId: string): void;
+}) {
+  const endSnapshotId = detail.effort.end_snapshot_id;
+  const counts = detail.counts;
+  const totalChanged = counts.created + counts.updated + counts.deleted;
+  return (
+    <div
+      data-testid={active ? "work-item-effort-in-progress" : `work-item-effort-${detail.effort.id}`}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        borderLeft: `2px solid ${active ? "var(--accent)" : "var(--border)"}`,
+        paddingLeft: 8,
+      }}
+    >
+      <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, fontWeight: 600 }}>Effort</span>
+        {active ? (
+          <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>in progress</span>
+        ) : null}
+        <span>{formatTimestamp(detail.effort.started_at)}</span>
+        {detail.effort.ended_at ? <span>→ {formatTimestamp(detail.effort.ended_at)}</span> : null}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "baseline" }}>
+          {counts.created > 0 ? <span style={{ color: "#86efac" }}>+{counts.created}</span> : null}
+          {counts.updated > 0 ? <span style={{ color: "#e5a06a" }}>~{counts.updated}</span> : null}
+          {counts.deleted > 0 ? <span style={{ color: "#f87171" }}>−{counts.deleted}</span> : null}
+          {!active && totalChanged === 0 ? <span>0 files</span> : null}
+        </span>
+        {onShowInHistory && !active ? (
+          <button
+            type="button"
+            data-testid={`work-item-show-in-history-${detail.effort.id}`}
+            onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
+            style={{ ...miniButtonStyle, padding: "1px 6px", fontSize: 10 }}
+            disabled={!endSnapshotId}
+            title={endSnapshotId ? "Open Local History at this effort's end snapshot" : "Effort is still open — no end snapshot yet"}
+          >
+            In history
+          </button>
+        ) : null}
+      </div>
+      {detail.changed_paths.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {detail.changed_paths.map((path) => (
+            <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+              {onOpenFile ? (
+                <button
+                  type="button"
+                  onClick={() => void onOpenFile(path)}
+                  style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
+                >
+                  {path}
+                </button>
+              ) : (
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {detail.effort.summary && detail.effort.summary.length > 0 ? (
+        <div data-testid={`work-item-effort-summary-${detail.effort.id}`} style={{ fontSize: 12 }}>
+          <MarkdownView body={detail.effort.summary} maxHeight={240} />
+        </div>
+      ) : !active ? (
+        <div data-testid={`work-item-effort-summary-${detail.effort.id}`} style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+          No summary recorded for this effort.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EditableField({
   label,
   value,
   placeholder,
   multiline,
+  renderMarkdown = false,
   onCommit,
 }: {
   label: string;
   value: string;
   placeholder: string;
   multiline: boolean;
+  /**
+   * When true and the field is not being edited and the value is non-empty,
+   * render the value as markdown (headings, lists, code, links, emphasis)
+   * instead of as a plain textarea. Click the rendered surface to edit.
+   * Long content gets a max-height + internal scroll so the modal/row
+   * doesn't grow unbounded.
+   */
+  renderMarkdown?: boolean;
   onCommit(value: string): void;
 }) {
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
+  // When rendering markdown for the value, the textarea is hidden until the
+  // user clicks the rendered surface. `revealEditor` swaps the markdown view
+  // for the textarea (which then autoFocuses → setEditing(true)).
+  const [revealEditor, setRevealEditor] = useState(false);
   // Latch "the user clicked Cancel" across the mousedown → blur → click chain
   // so the blur handler knows to skip auto-commit and revert instead. Using a
   // ref avoids a state update during the mousedown event.
@@ -126,6 +325,7 @@ function EditableField({
 
   const commit = () => {
     setEditing(false);
+    setRevealEditor(false);
     if (draft === value) return;
     onCommit(draft);
   };
@@ -133,11 +333,17 @@ function EditableField({
   const revert = () => {
     setDraft(value);
     setEditing(false);
+    setRevealEditor(false);
   };
+
+  // Show the markdown view when the field has rendered content and the
+  // user isn't editing yet. Clicking it reveals the editor.
+  const showMarkdown = renderMarkdown && multiline && !editing && !revealEditor && value.length > 0;
 
   const inputProps = {
     value: draft,
     placeholder,
+    autoFocus: revealEditor,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
     onFocus: () => setEditing(true),
     onBlur: () => {
@@ -196,11 +402,41 @@ function EditableField({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)" }}>{label}</div>
-      {multiline ? <textarea {...inputProps} /> : <input {...inputProps} />}
+      {showMarkdown ? (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setRevealEditor(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setRevealEditor(true);
+            }
+          }}
+          title="Click to edit"
+          style={markdownSurfaceStyle}
+        >
+          <MarkdownView body={value} maxHeight={320} />
+        </div>
+      ) : multiline ? (
+        <textarea {...inputProps} />
+      ) : (
+        <input {...inputProps} />
+      )}
       {actions}
     </div>
   );
 }
+
+const markdownSurfaceStyle: CSSProperties = {
+  border: "1px solid transparent",
+  borderRadius: 4,
+  padding: "4px 6px",
+  cursor: "text",
+  background: "transparent",
+  fontSize: 12,
+  lineHeight: 1.45,
+};
 
 const actionRowStyle: CSSProperties = {
   display: "flex",

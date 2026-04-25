@@ -180,6 +180,45 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
 
+## Transient agent follow-ups
+
+`FollowupStore` (`src/electron/followup-store.ts`) is a pure in-memory
+map keyed by `threadId`. It backs three orchestrator-only MCP tools —
+`oxplow__add_followup`, `oxplow__remove_followup`,
+`oxplow__list_followups` — and lets the agent stash a "I'll get back to
+that next" reminder mid-turn without filing a durable work item. No
+SQLite involvement, no migration, lost on runtime restart.
+
+Surfaces:
+
+- The store exposes `add/remove/list/clear/subscribe`. The runtime
+  re-publishes its `subscribe` events as `followup.changed`
+  (`{ threadId, kind: "added" | "removed" | "cleared", id }`) on the
+  EventBus.
+- `getThreadWorkState` (the main IPC for the Work panel) layers the
+  thread's current followups onto its response inside the
+  `followups` field, so PlanPane / WorkGroupList see them alongside
+  durable work items without a second round-trip. The work-item-api
+  wrapper owns that overlay; the persistence-layer
+  `WorkItemStore.getState` always returns `followups: []`.
+- IPC: only one new method — `removeFollowup(threadId, id)` — used by
+  the ✕ dismiss button on each follow-up row. Adds happen
+  exclusively via the MCP tool surface; the UI never adds.
+- App.tsx subscribes to `followup.changed` and re-fetches
+  `getThreadWorkState` for the affected thread (stream id is recovered
+  from the cached `threadStates` map).
+
+Rendering: `WorkGroupList.tsx` renders each follow-up as an italic
+muted "↳ follow-up: <note>" line at the very top of the To Do section
+(only on the root group, never on epic-children panes), with a single
+✕ dismiss button. No status icon, no drag, no context menu.
+
+When to use a follow-up vs. a task: see the agent skill at
+`.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`. Rule:
+if the deferred ask warrants a row the user reviews/accepts, file a
+task; if it's just a within-conversation bookmark, add a follow-up
+and remove it in the same turn you handle it. Never carry both.
+
 ## Work panel in_progress bucket is task-only
 
 The Work panel's in_progress bucket is driven purely by `work_item`

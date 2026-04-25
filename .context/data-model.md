@@ -375,9 +375,14 @@ left-dock `ToolWindow` — a list of notes with freshness badges and
 a `+ New` inline-input row for creating a new slug. Selecting a row
 opens the note as a center tab (`note:<slug>`) rendered by
 `NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which owns the
-view/edit/delete UI and renders bodies with `react-markdown` +
-`remark-gfm` + `mermaid` (mermaid fenced blocks are post-rendered
-into inline SVG). IPC surface: `listWikiNotes`, `readWikiNoteBody`,
+view/edit/delete UI. Markdown rendering is delegated to the shared
+`MarkdownView` (`src/ui/components/Notes/MarkdownView.tsx`) which
+wraps `react-markdown` + `remark-gfm` and post-renders mermaid
+fenced blocks into inline SVG when `renderMermaid` is set. The
+same component is reused for the Plan work-item description /
+acceptance fields (`WorkItemDetail`) so headings, lists, code,
+links, and emphasis come through there too — without mermaid.
+IPC surface: `listWikiNotes`, `readWikiNoteBody`,
 `writeWikiNoteBody`, `deleteWikiNote`, plus the `wiki-note.changed`
 event on the bus.
 

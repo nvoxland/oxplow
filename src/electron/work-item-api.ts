@@ -28,6 +28,12 @@ export interface WorkItemApiDeps {
   workItemStore: WorkItemStore;
   effortStore: WorkItemEffortStore;
   snapshotStore: SnapshotStore;
+  /** Transient in-memory follow-up store. Optional so existing tests
+   *  that don't exercise follow-ups can omit it. When provided, the
+   *  thread's current follow-ups are layered onto every
+   *  `getThreadWorkState` response so the UI sees them alongside the
+   *  durable work state. */
+  followupStore?: import("./followup-store.js").FollowupStore;
 }
 
 export interface CreateWorkItemInput {
@@ -134,11 +140,16 @@ export function createWorkItemApi({
   workItemStore,
   effortStore,
   snapshotStore,
+  followupStore,
 }: WorkItemApiDeps): WorkItemApi {
+  const withFollowups = (state: ThreadWorkState): ThreadWorkState => {
+    if (!followupStore) return state;
+    return { ...state, followups: followupStore.list(state.threadId) };
+  };
   return {
     getThreadWorkState(streamId, threadId) {
       resolveThread(streamId, threadId);
-      return workItemStore.getState(threadId);
+      return withFollowups(workItemStore.getState(threadId));
     },
 
     getWorkItem(streamId, threadId, itemId) {

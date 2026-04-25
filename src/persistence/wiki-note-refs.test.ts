@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseNoteRefs } from "./wiki-note-refs.js";
 
 describe("parseNoteRefs", () => {
@@ -43,5 +45,33 @@ describe("parseNoteRefs", () => {
     const body = "src/foo.ts calls into src/bar/baz.tsx and tests live in src/foo.test.ts";
     const paths = parseNoteRefs(body).map((r) => r.path).sort();
     expect(paths).toEqual(["src/bar/baz.tsx", "src/foo.test.ts", "src/foo.ts"]);
+  });
+
+  test("returns quickly on adversarial dot/slash-heavy input", () => {
+    // Both the inner path-segment class `[a-zA-Z0-9_.-]+` and the trailing
+    // `\.[a-zA-Z0-9]{1,6}` consume dots, so a body full of dotted segments
+    // could in principle trigger backtracking. Pin linear-ish behaviour.
+    let body = "see ";
+    for (let i = 0; i < 50; i++) body += "/a.b.c.d.e.f.g.h.i.j.k";
+    body += "/zzzzzzzzzzz "; // ext too long → regex must give up
+    const start = Date.now();
+    parseNoteRefs(body.repeat(20));
+    expect(Date.now() - start).toBeLessThan(250);
+  });
+
+  test("returns quickly on real-world doc content (DEV.md)", () => {
+    // Regression guard for "Opening DEV.md locks up the app". The parser is on
+    // the hot path for every `.oxplow/notes/<slug>.md` watcher event; pasting
+    // a doc-style body with many fenced blocks and bracketed relative links
+    // must not trip catastrophic backtracking.
+    const repoRoot = join(import.meta.dir, "..", "..");
+    const body = readFileSync(join(repoRoot, "DEV.md"), "utf8");
+    const start = Date.now();
+    const refs = parseNoteRefs(body);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(250);
+    // Should at least find the referenced .context docs.
+    const paths = refs.map((r) => r.path);
+    expect(paths.some((p) => p.endsWith("architecture.md"))).toBe(true);
   });
 });

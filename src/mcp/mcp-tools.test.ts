@@ -8,6 +8,7 @@ import { CommitPointStore } from "../persistence/commit-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import type { Stream } from "../persistence/stream-store.js";
 import { buildWorkItemMcpTools, composeDelegateQueryPrompt, descriptionLooksLikeEmbeddedCriteria, slimWorkItemEvent } from "./mcp-tools.js";
+import { FollowupStore } from "../electron/followup-store.js";
 import type { ToolDef } from "./mcp-server.js";
 
 function makeStream(id: string, title: string): Stream {
@@ -32,6 +33,7 @@ function seed() {
   const threadStore = new ThreadStore(dir);
   const workItemStore = new WorkItemStore(dir);
   const effortStore = new WorkItemEffortStore(dir);
+  const followupStore = new FollowupStore();
   const streamA = makeStream("s-A", "Alpha");
   const streamB = makeStream("s-B", "Beta");
   const stateA = threadStore.ensureStream(streamA);
@@ -63,8 +65,9 @@ function seed() {
     executeCommit: (() => { throw new Error("not used"); }) as never,
     executeAutoCommit: (() => { throw new Error("not used"); }) as never,
     effortStore,
+    followupStore,
   });
-  return { tools, threadStore, workItemStore, effortStore, streamA, streamB, threadA, threadB, dir };
+  return { tools, threadStore, workItemStore, effortStore, followupStore, streamA, streamB, threadA, threadB, dir };
 }
 
 function tool(tools: ToolDef[], name: string): ToolDef {
@@ -759,7 +762,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(result.prompt).toContain("complete_task");
     expect(result.prompt).toContain("oxplow-result:");
     // Trailing constraints
-    expect(result.prompt).toMatch(/Co-Authored-By/i);
+    expect(result.prompt).toMatch(/DO NOT COMMIT/);
     expect(result.prompt).toMatch(/Singular table names/i);
   });
 
@@ -1041,6 +1044,44 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       noteId: "note-x",
     });
     expect(prompt).not.toContain("## Focus");
+  });
+
+  test("add_followup creates an in-memory entry and returns its id", async () => {
+    const { tools, followupStore, threadB } = seed();
+    const t = tool(tools, "oxplow__add_followup");
+    const result = (await t.handler({ threadId: threadB.id, note: "loop back to dispatch" } as never)) as { ok: true; id: string };
+    expect(result.id).toMatch(/^fu-/);
+    const list = followupStore.list(threadB.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.note).toBe("loop back to dispatch");
+  });
+
+  test("add_followup rejects empty notes", async () => {
+    const { tools, threadB } = seed();
+    const t = tool(tools, "oxplow__add_followup");
+    await expect(async () => t.handler({ threadId: threadB.id, note: "   " } as never)).toThrow();
+  });
+
+  test("remove_followup drops the entry; returns ok=false when missing", async () => {
+    const { tools, followupStore, threadB } = seed();
+    const add = tool(tools, "oxplow__add_followup");
+    const remove = tool(tools, "oxplow__remove_followup");
+    const a = (await add.handler({ threadId: threadB.id, note: "x" } as never)) as { id: string };
+    const ok = (await remove.handler({ threadId: threadB.id, id: a.id } as never)) as { ok: boolean };
+    expect(ok.ok).toBe(true);
+    expect(followupStore.list(threadB.id)).toHaveLength(0);
+    const second = (await remove.handler({ threadId: threadB.id, id: a.id } as never)) as { ok: boolean };
+    expect(second.ok).toBe(false);
+  });
+
+  test("list_followups returns the thread's entries in insertion order", async () => {
+    const { tools, threadB } = seed();
+    const add = tool(tools, "oxplow__add_followup");
+    const list = tool(tools, "oxplow__list_followups");
+    await add.handler({ threadId: threadB.id, note: "first" } as never);
+    await add.handler({ threadId: threadB.id, note: "second" } as never);
+    const result = (await list.handler({ threadId: threadB.id } as never)) as { followups: Array<{ note: string }> };
+    expect(result.followups.map((f) => f.note)).toEqual(["first", "second"]);
   });
 
   test("complete_task rejects if current status is terminal (done/canceled/archived)", async () => {

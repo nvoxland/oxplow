@@ -263,6 +263,10 @@ export interface DesktopApi {
   updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): Promise<CommitPoint[]>;
   commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
   reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
+  /** Drop a transient agent follow-up reminder. The store is in-memory
+   *  on the runtime — adds happen via MCP tool calls; the UI only ever
+   *  removes (the × button on each reminder line). */
+  removeFollowup(threadId: string, id: string): Promise<void>;
   listWaitPoints(threadId: string): Promise<WaitPoint[]>;
   createWaitPoint(streamId: string, threadId: string, note?: string | null): Promise<WaitPoint>;
   setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;

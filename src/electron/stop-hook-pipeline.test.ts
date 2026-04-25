@@ -412,6 +412,75 @@ describe("decideStopDirective", () => {
     });
   });
 
+  describe("in-progress audit no-change suppression", () => {
+    test("first fire emits the audit and a record-signature side effect", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [a] }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("audit: w-a");
+      const recorded = out.sideEffects.find((e) => e.kind === "record-audit-signature");
+      expect(recorded).toBeDefined();
+      expect((recorded as { signature: string }).signature).toContain("w-a");
+    });
+
+    test("second fire with identical signature suppresses the directive", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
+      const sig = `w-a|2024-02-01T00:00:00Z|0`;
+      const out = decideStopDirective(
+        snapshot({ workItems: [a], lastInProgressAuditSignature: sig }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+      // No new signature recorded — nothing changed.
+      expect(out.sideEffects).toEqual([]);
+    });
+
+    test("changed updated_at on an in_progress item re-arms the audit", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-02T00:00:00Z" });
+      const sig = `w-a|2024-02-01T00:00:00Z|0`;
+      const out = decideStopDirective(
+        snapshot({ workItems: [a], lastInProgressAuditSignature: sig }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("audit: w-a");
+      expect(out.sideEffects.find((e) => e.kind === "record-audit-signature")).toBeDefined();
+    });
+
+    test("note added (note_count change) re-arms the audit", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z", note_count: 1 });
+      const sig = `w-a|2024-02-01T00:00:00Z|0`;
+      const out = decideStopDirective(
+        snapshot({ workItems: [a], lastInProgressAuditSignature: sig }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("audit: w-a");
+    });
+
+    test("growing the in_progress set re-arms the audit", () => {
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
+      const b = workItem("w-b", 1, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
+      const sig = `w-a|2024-02-01T00:00:00Z|0`;
+      const out = decideStopDirective(
+        snapshot({ workItems: [a, b], lastInProgressAuditSignature: sig }),
+        builders,
+      );
+      expect(out.directive?.reason).toBe("audit: w-a,w-b");
+    });
+
+    test("shrinking the in_progress set: surviving signature still matches → suppressed; otherwise re-armed", () => {
+      // Drop w-b → only w-a remains; signature for just w-a matches.
+      const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
+      const sig = `w-a|2024-02-01T00:00:00Z|0`;
+      const out = decideStopDirective(
+        snapshot({ workItems: [a], lastInProgressAuditSignature: sig }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
+
   describe("ready-work suppression rules", () => {
     test("just-read-ready: ready set matches last read, suppressed", () => {
       const ready = workItem("w1", 0, "ready");

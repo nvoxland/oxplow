@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { AgentStatus, CommitPoint, ThreadFollowup, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyWorkItem,
@@ -90,6 +90,8 @@ export function WorkGroupList({
   agentStatus,
   isSectionCollapsed,
   onToggleSectionCollapsed,
+  followups,
+  onDismissFollowup,
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
@@ -123,6 +125,13 @@ export function WorkGroupList({
   /** Collapse-state accessors from PlanPane's useCollapsedSections. */
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;
   onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
+  /** Transient agent follow-ups for this thread (in-memory on the
+   *  runtime, lost on restart). Rendered at the very top of the To Do
+   *  section as italic muted "↳ follow-up: …" lines with a single ✕
+   *  dismiss button. Only the root group renders them — children of
+   *  epics inherit nothing. */
+  followups?: ThreadFollowup[];
+  onDismissFollowup?: (id: string) => void;
 }) {
   // When the thread is not the active writer, in_progress items are not agent-owned
   // and can be freely reordered — only lock them when this thread is active.
@@ -638,6 +647,15 @@ export function WorkGroupList({
             </div>
             {!isCollapsed ? (
               <>
+                {section.kind === "toDo" && followups && followups.length > 0
+                  ? followups.map((fu) => (
+                      <FollowupRow
+                        key={fu.id}
+                        followup={fu}
+                        onDismiss={onDismissFollowup}
+                      />
+                    ))
+                  : null}
                 {renderedRows.map(renderRow)}
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
@@ -679,6 +697,62 @@ function BrailleSpinner() {
     >
       {BRAILLE_FRAMES[frame]}
     </span>
+  );
+}
+
+/** Transient follow-up line inside the To Do section. Italic muted prefix
+ *  ↳ follow-up: + the note, plus a single ✕ dismiss button. No status
+ *  icon, no drag, no context menu — these aren't durable rows.
+ *  See followup-store.ts for the lifecycle. */
+function FollowupRow({
+  followup,
+  onDismiss,
+}: {
+  followup: ThreadFollowup;
+  onDismiss?: (id: string) => void;
+}) {
+  return (
+    <div
+      data-testid={`followup-row-${followup.id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 10px 3px 22px",
+        fontSize: 11,
+        fontStyle: "italic",
+        color: "var(--muted)",
+        userSelect: "none",
+      }}
+      title={`Follow-up reminder (transient): ${followup.note}`}
+    >
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        ↳ follow-up: {followup.note}
+      </span>
+      {onDismiss ? (
+        <button
+          type="button"
+          aria-label="Dismiss follow-up"
+          title="Dismiss follow-up"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss(followup.id);
+          }}
+          data-testid={`followup-dismiss-${followup.id}`}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--muted)",
+            cursor: "pointer",
+            fontSize: 12,
+            lineHeight: 1,
+            padding: "0 4px",
+          }}
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
   );
 }
 

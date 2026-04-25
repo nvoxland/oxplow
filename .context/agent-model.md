@@ -241,6 +241,18 @@ The pipeline runs in priority order:
    `in_progress` rows pile up because nothing forces a settle. The audit
    takes priority over the ready-work branch — reconcile what's open
    before picking up new work.
+
+   **No-change suppression.** The runtime keeps a per-thread fingerprint
+   (`lastAuditSignatureByThread`, signature = sorted
+   `id|updated_at|note_count` over the in_progress set) of the last set
+   it audited. On the next Stop, if the current signature matches the
+   recorded one — same items, no `update_work_item` /
+   `complete_task` (which bumps `updated_at`), no `add_work_note`
+   (which bumps `note_count`) — the directive is suppressed. Any
+   change re-arms the audit. This stops the tight ack-loop where the
+   agent answers "still in progress" → Stop fires → identical audit
+   nudge → same answer, costing the user a wall of repeated lines and
+   model tokens. See wi-c468e8fc093d.
 5. **Writer thread with no `in_progress` and ready work.** Block with a
    terse directive built by `buildNextWorkItemStopReason` — a one-liner
    pointing at `mcp__oxplow__read_work_options` (with the embedded
@@ -385,6 +397,20 @@ primary tool for queue-driven dispatch.
   exercise it without spinning up MCP.
 - `commit({ commit_point_id, message } | { auto: true, threadId, message })`,
   `list_commit_points(threadId)`, `tasks_since_last_commit(threadId)`.
+- `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
+  `list_followups({ threadId })` — orchestrator-only, in-memory transient
+  follow-up reminders. No DB row, lost on runtime restart. Surfaces as
+  italic muted "↳ follow-up: …" lines at the top of the To Do section
+  in the Work panel. Use when you defer a sub-ask mid-turn that doesn't
+  warrant a full `create_work_item`. Always call `remove_followup` in
+  the same turn you handle it. Never file both a follow-up and a real
+  task for the same concern. NOT exposed to subagents — the dispatch
+  brief deliberately omits any mention of follow-ups so subagents can't
+  stash bookmarks they'll never come back to handle. See the agent
+  skill at `.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`
+  for the decision rule (follow-up vs. task). Storage:
+  `src/electron/followup-store.ts`; runtime publishes the bus event
+  `followup.changed` so the UI re-fetches `getThreadWorkState`.
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
   "fork_thread" above. Creates a new queued
   thread on the same stream, seeds a note item, optionally moves ready/

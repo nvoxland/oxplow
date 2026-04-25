@@ -97,6 +97,13 @@ export interface WikiNoteChangedEvent {
   slug: string | null;
 }
 
+export interface FollowupChangedEvent {
+  type: "followup.changed";
+  threadId: string;
+  kind: "added" | "removed" | "cleared";
+  id: string | null;
+}
+
 export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
@@ -120,7 +127,8 @@ export type OxplowEvent =
   | GitRefsChangedEvent
   | StreamChangedEvent
   | ConfigChangedEvent
-  | WikiNoteChangedEvent;
+  | WikiNoteChangedEvent
+  | FollowupChangedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

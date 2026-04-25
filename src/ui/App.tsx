@@ -941,6 +941,38 @@ export function App() {
     return unsubscribe;
   }, []);
 
+  // Followups are transient (in-memory), but we still want the To Do
+  // section to live-update when the agent adds/removes one mid-turn.
+  // Re-fetch the same ThreadWorkState envelope (followups are layered
+  // in by the work-item API wrapper) after every followup.changed
+  // event. Stream id is recovered from the cached threadState map —
+  // the event itself only carries threadId.
+  useEffect(() => {
+    const unsubscribe = subscribeOxplowEvents((event) => {
+      if (event.type !== "followup.changed") return;
+      const threadId = event.threadId;
+      let streamIdForThread: string | null = null;
+      for (const [sid, state] of Object.entries(threadStates)) {
+        if (state.threads.some((t) => t.id === threadId)) {
+          streamIdForThread = sid;
+          break;
+        }
+      }
+      if (!streamIdForThread) return;
+      void getThreadWorkState(streamIdForThread, threadId)
+        .then((workState) => {
+          setThreadWorkStates((prev) => ({ ...prev, [threadId]: workState }));
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh thread work state after followup.changed", {
+            threadId,
+            error: String(error),
+          });
+        });
+    });
+    return unsubscribe;
+  }, [threadStates]);
+
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
       if (event.type !== "thread.changed") return;

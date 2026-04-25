@@ -67,6 +67,7 @@ import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFrom
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
+import { FollowupStore, type Followup } from "./followup-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -113,6 +114,11 @@ export class ElectronRuntime {
   readonly threadQueue: ThreadQueueOrchestrator;
   readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
+  /** Transient in-memory follow-up store. Backs the agent-only
+   *  `add_followup` / `remove_followup` MCP tools and surfaces entries
+   *  in the To Do section of the Work panel. No DB row, lost on
+   *  runtime restart — see followup-store.ts. */
+  readonly followupStore: FollowupStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
   readonly lspManager: LspSessionManager;
@@ -152,6 +158,13 @@ export class ElectronRuntime {
    *  those nudges produces a visual loop where the parent acks each
    *  Stop while still waiting on the subagent. See wi-593a50b62e22. */
   private readonly pendingSubagentsByThread = new Map<string, number>();
+  /** Per-thread fingerprint of the in_progress set the runtime last
+   *  emitted an audit directive for. The Stop pipeline compares the
+   *  current snapshot against this and suppresses a duplicate audit
+   *  nudge when nothing changed (no item's `updated_at` ticked, no note
+   *  landed, set membership is identical). Cleared lazily by the next
+   *  audit fire that records a fresh signature. See wi-c468e8fc093d. */
+  private readonly lastAuditSignatureByThread = new Map<string, string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -202,11 +215,13 @@ export class ElectronRuntime {
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
+    this.followupStore = new FollowupStore();
     this.workItemApi = createWorkItemApi({
       resolveThread: (streamId, threadId) => this.resolveThread(streamId, threadId),
       workItemStore: this.workItemStore,
       effortStore: this.effortStore,
       snapshotStore: this.snapshotStore,
+      followupStore: this.followupStore,
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
@@ -387,6 +402,14 @@ export class ElectronRuntime {
         kind: change.kind,
       });
     });
+    this.followupStore.subscribe((change) => {
+      this.events.publish({
+        type: "followup.changed",
+        threadId: change.threadId,
+        kind: change.kind,
+        id: change.id,
+      });
+    });
     this.wikiNoteStore.subscribe((change) => {
       this.events.publish({
         type: "wiki-note.changed",
@@ -454,6 +477,7 @@ export class ElectronRuntime {
           effortStore: this.effortStore,
           markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
           forkThread: (input) => this.forkThread(input),
+          followupStore: this.followupStore,
         }),
         ...buildLspMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
@@ -1652,6 +1676,7 @@ export class ElectronRuntime {
       justReadReadySet,
       worktreeClean,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
+      lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
     };
     // The item's own thread_id is what matters for the directive text (not
     // `threadId` — they agree today but could diverge if listReady ever
@@ -1675,6 +1700,8 @@ export class ElectronRuntime {
             error: err instanceof Error ? err.message : String(err),
           });
         }
+      } else if (effect.kind === "record-audit-signature") {
+        this.lastAuditSignatureByThread.set(threadId, effect.signature);
       }
     }
     return outcome.directive ? { ...outcome.directive } : null;

@@ -10,6 +10,7 @@ import type {
 import type { CommitPoint, CommitPointStore } from "../persistence/commit-point-store.js";
 import type { WaitPointStore } from "../persistence/wait-point-store.js";
 import type { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
+import type { FollowupStore } from "../electron/followup-store.js";
 
 export interface McpToolDeps {
   resolveStream(streamId: string | undefined): Stream;
@@ -48,6 +49,10 @@ export interface McpToolDeps {
     summary: string;
     moveItemIds?: string[];
   }) => { newThreadId: string };
+  /** Transient in-memory follow-up store. Backs the `add_followup` /
+   *  `remove_followup` / `list_followups` MCP tools. Optional only so
+   *  unit tests that don't exercise follow-ups can omit it. */
+  followupStore?: FollowupStore;
 }
 
 // Strip noisy fields off audit events before handing them to the agent.
@@ -93,8 +98,7 @@ const DISPATCH_PREAMBLE = [
 
 const DISPATCH_CONSTRAINTS = [
   "Constraints:",
-  "- No Co-Authored-By / Claude attribution on commits.",
-  "- No `git commit --amend`. Create new commits.",
+  "- DO NOT COMMIT. Leave the working tree dirty when you finish; the user (or the orchestrator, if directed by a Stop-hook auto-commit directive) owns commit timing. Never run `git commit`, `git add && commit`, or `mcp__oxplow__commit` from inside this subagent — even if the change feels complete or obvious to commit.",
   "- No new runtime dependencies.",
   "- No DB mocks in tests — use `mkdtempSync`.",
   "- Singular table names on any new tables.",
@@ -264,7 +268,7 @@ function withRedoHint<T extends Record<string, unknown>>(
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, effortStore, markReadWorkOptions, forkThread } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, effortStore, markReadWorkOptions, forkThread, followupStore } = deps;
 
   // Prefer the thread row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
@@ -1263,6 +1267,67 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         resolveThreadAndStream(args);
         const notes = workItemStore.listThreadNotes(args.threadId, args.limit ?? 5);
         return { notes };
+      },
+    },
+    {
+      name: "oxplow__add_followup",
+      description:
+        "Stash a transient follow-up reminder for the current thread. Use when you defer a sub-ask " +
+        "mid-turn that doesn't warrant a full work item — just \"I'll get back to that next\" within " +
+        "the same conversation. Returns `{ ok: true, id }`. Surfaces as an italic muted reminder line " +
+        "at the top of the To Do section in the Work panel; transient (in-memory only, lost on " +
+        "runtime restart). When you handle the follow-up, call `oxplow__remove_followup` with the id " +
+        "in the same turn. NEVER add a follow-up alongside an actual work item for the same concern — " +
+        "if the deferred ask warrants a row the user reviews/accepts, file a task instead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          threadId: { type: "string", description: "Required thread id the follow-up is scoped to." },
+          note: { type: "string", description: "Required short reminder text — what you'll come back to. Trimmed; empty notes are rejected." },
+        },
+        required: ["threadId", "note"],
+      },
+      handler: (args: { threadId: string; note: string }) => {
+        if (!followupStore) throw new Error("oxplow__add_followup: runtime not wired");
+        resolveThreadAndStream({ threadId: args.threadId });
+        const entry = followupStore.add(args.threadId, args.note);
+        return { ok: true, id: entry.id };
+      },
+    },
+    {
+      name: "oxplow__remove_followup",
+      description:
+        "Dismiss a transient follow-up by id. Call this in the same turn you actually handle the " +
+        "deferred ask, so the To Do reminder line disappears from the Work panel.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          threadId: { type: "string", description: "Required thread id." },
+          id: { type: "string", description: "Required follow-up id (returned by add_followup)." },
+        },
+        required: ["threadId", "id"],
+      },
+      handler: (args: { threadId: string; id: string }) => {
+        if (!followupStore) throw new Error("oxplow__remove_followup: runtime not wired");
+        resolveThreadAndStream({ threadId: args.threadId });
+        const ok = followupStore.remove(args.threadId, args.id);
+        return { ok };
+      },
+    },
+    {
+      name: "oxplow__list_followups",
+      description: "List the current thread's transient follow-up reminders in insertion order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          threadId: { type: "string", description: "Required thread id." },
+        },
+        required: ["threadId"],
+      },
+      handler: (args: { threadId: string }) => {
+        if (!followupStore) throw new Error("oxplow__list_followups: runtime not wired");
+        resolveThreadAndStream({ threadId: args.threadId });
+        return { followups: followupStore.list(args.threadId) };
       },
     },
     {

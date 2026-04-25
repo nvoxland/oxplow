@@ -21,6 +21,7 @@ import {
   listCommitPoints,
   listWaitPoints,
   listWorkItemEfforts,
+  removeFollowup,
   reorderThreadQueue,
   setAutoCommit,
   subscribeOxplowEvents,
@@ -33,6 +34,7 @@ import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
+import { ActivityTimeline } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
   buildGroups,
@@ -668,6 +670,10 @@ export function PlanPane({
                 agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
+                followups={isRootThread && !group.epic ? threadWork?.followups ?? [] : []}
+                onDismissFollowup={isRootThread && threadId
+                  ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))
+                  : undefined}
               />
             );
           })
@@ -1061,22 +1067,14 @@ function NewWorkItemModal({
             </div>
             {item ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-                <div style={modalFieldLabelStyle}>Notes {notes.length > 0 ? `(${notes.length})` : ""}</div>
-                {notes.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}>
-                    {notes.map((note) => (
-                      <div key={note.id} style={{ fontSize: 12, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
-                          <span style={{ fontWeight: 600, color: "var(--accent)" }}>{note.author}</span>
-                          <span style={{ color: "var(--muted)", fontSize: 11 }}>{formatNoteDate(note.created_at)}</span>
-                        </div>
-                        <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{note.body}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>No notes yet.</div>
-                )}
+                <div style={modalFieldLabelStyle}>Activity {notes.length + efforts.length > 0 ? `(${notes.length + efforts.length})` : ""}</div>
+                <ActivityTimeline
+                  notes={notes}
+                  efforts={efforts}
+                  formatTimestamp={formatNoteDate}
+                  onOpenFile={onOpenFile}
+                  onShowInHistory={onShowInHistory}
+                />
               </div>
             ) : null}
           </div>
@@ -1153,12 +1151,6 @@ function NewWorkItemModal({
                   {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
                   {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
                 </div>
-                <EffortsSection
-                  item={item}
-                  efforts={efforts}
-                  onOpenFile={onOpenFile}
-                  onShowInHistory={onShowInHistory}
-                />
               </>
             ) : null}
           </div>
@@ -1212,127 +1204,6 @@ function NewWorkItemModal({
           ) : null}
         </div>
       </form>
-    </div>
-  );
-}
-
-function EffortsSection({
-  efforts: allEfforts,
-  onOpenFile,
-  onShowInHistory,
-}: {
-  item: WorkItem;
-  efforts: EffortDetail[];
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
-}) {
-  // Separate the open effort (no end snapshot, no final file list) from
-  // completed ones — render it as its own box so the user can see that
-  // work is actively attributed to this item right now.
-  const activeEffort = allEfforts.find((d) => !d.effort.ended_at) ?? null;
-  const efforts = allEfforts.filter((d) => d.effort.ended_at);
-  const totalPaths = new Set<string>();
-  for (const effort of efforts) {
-    for (const path of effort.changed_paths) totalPaths.add(path);
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={modalFieldLabelStyle}>
-        Efforts {efforts.length > 0 ? `(${efforts.length}, ${totalPaths.size} file${totalPaths.size === 1 ? "" : "s"})` : ""}
-      </div>
-      {activeEffort ? (
-        <div
-          data-testid="work-item-effort-in-progress"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            border: "1px solid var(--accent)",
-            borderRadius: 6,
-            padding: 6,
-            background: "var(--bg-1)",
-          }}
-        >
-          <div style={{ fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Effort in progress</span>
-            <span style={{ color: "var(--muted)" }}>· started {formatNoteDate(activeEffort.effort.started_at)}</span>
-          </div>
-        </div>
-      ) : null}
-      {efforts.length === 0 && !activeEffort ? (
-        <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
-          No efforts yet — moving this item to "in progress" starts one.
-        </div>
-      ) : efforts.length === 0 ? null : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-          {efforts.map((detail, i) => {
-            const endSnapshotId = detail.effort.end_snapshot_id;
-            return (
-              <div key={detail.effort.id} style={{ display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "center" }}>
-                  <span>Effort {i + 1}</span>
-                  <span>· {formatNoteDate(detail.effort.started_at)}</span>
-                  <span>→ {formatNoteDate(detail.effort.ended_at!)}</span>
-                  <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "baseline" }}>
-                    {detail.counts.created > 0 ? <span style={{ color: "#86efac" }}>+{detail.counts.created}</span> : null}
-                    {detail.counts.updated > 0 ? <span style={{ color: "#e5a06a" }}>~{detail.counts.updated}</span> : null}
-                    {detail.counts.deleted > 0 ? <span style={{ color: "#f87171" }}>−{detail.counts.deleted}</span> : null}
-                    {detail.counts.created + detail.counts.updated + detail.counts.deleted === 0 ? (
-                      <span>0 files</span>
-                    ) : null}
-                  </span>
-                  {onShowInHistory ? (
-                    <button
-                      type="button"
-                      data-testid={`work-item-show-in-history-${i}`}
-                      onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
-                      style={{ ...miniButtonStyle, padding: "1px 6px", fontSize: 10 }}
-                      disabled={!endSnapshotId}
-                      title={endSnapshotId ? "Open Local History at this effort's end snapshot" : "Effort is still open — no end snapshot yet"}
-                    >
-                      In history
-                    </button>
-                  ) : null}
-                </div>
-                {detail.changed_paths.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {detail.changed_paths.map((path) => (
-                      <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                        {onOpenFile ? (
-                          <button
-                            type="button"
-                            onClick={() => void onOpenFile(path)}
-                            style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
-                          >
-                            {path}
-                          </button>
-                        ) : (
-                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {detail.effort.summary && detail.effort.summary.length > 0 ? (
-                  <div
-                    data-testid={`work-item-effort-summary-${i}`}
-                    style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "pre-wrap" }}
-                  >
-                    {detail.effort.summary}
-                  </div>
-                ) : (
-                  <div
-                    data-testid={`work-item-effort-summary-${i}`}
-                    style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}
-                  >
-                    No summary recorded for this effort.
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
