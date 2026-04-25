@@ -69,11 +69,18 @@ nav:
       - Pair programming, inverted: philosophy/pair-programming.md
       - Beyond vibe coding: philosophy/beyond-vibe-coding.md
       - Architecture vision: philosophy/architecture-vision.md
+  - Blog:
+      - blog/index.md
 
 plugins:
   - search:
       separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
   - autorefs
+  - blog:
+      blog_dir: blog
+      post_date_format: long
+      archive: true
+      categories: true
 
 markdown_extensions:
   - abbr
