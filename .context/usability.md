@@ -152,8 +152,11 @@ Things I keep forgetting. Read this before adding any UI.
 - **Highlight the drop target** (dashed border + accent glow) whenever a
   compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags (files, text)
-  don't accidentally trigger app drops. See `WORK_ITEM_DRAG_MIME` in
-  `src/ui/components/BatchRail.tsx`.
+  don't accidentally trigger app drops. Existing MIMEs:
+  `WORK_ITEM_DRAG_MIME` (work-item reorder) in
+  `src/ui/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME` ("Add to
+  agent context") in `src/ui/agent-context-dnd.ts`. Add a new MIME
+  rather than overloading an existing one.
 
 ## Empty and error states
 
@@ -175,3 +178,40 @@ Things I keep forgetting. Read this before adding any UI.
 - **Right-click is preferred over visible icons** for per-item destructive
   actions (delete, etc.) to reduce visual noise in lists.
 - Close on outside click, scroll, window resize.
+
+## Add to agent context
+
+The agent terminal accepts dropped references AND a "Add to agent context"
+right-click action; both share one path through
+`src/ui/agent-input-bus.ts` (`insertIntoAgent`) and
+`src/ui/agent-context-ref.ts` (`formatContextMention`).
+
+- **Sources** (anything the user might want to reference): drag rows or
+  pills from the Files tree, NotesPane, and the recent-activity bar
+  above the agent. Set the payload with `setContextRefDrag(e, ref)` from
+  `src/ui/agent-context-dnd.ts`. Reuse the same helper and the same
+  MIME (`application/x-oxplow-context-ref`) for any new referenceable
+  surface — separate from `WORK_ITEM_DRAG_MIME`, which carries the
+  reorder payload.
+- **Sink**: `TerminalPane` is the only drop target. It writes through
+  `term.paste(text)` so the same xterm input pipeline handles both
+  direct and tmux transports — do not branch by transport.
+- **Mention shape** (`formatContextMention`):
+  - file → `@<workspace-relative path> ` (Claude reads the file
+    automatically on the next prompt).
+  - note → `@.oxplow/notes/<slug>.md `.
+  - work-item → `[oxplow work-item <id>: "<title>" (<status>)] `
+    (plain-text reference; agent can fetch via
+    `oxplow__get_work_item`).
+  - Always trailing space so the user can keep typing.
+- **Right-click parity**: every drag source should also offer "Add to
+  agent context" in its context menu — keyboard-first users shouldn't
+  have to drag. Funnel both paths through the same
+  `insertIntoAgent + formatContextMention` calls.
+- **Visual feedback**: drop target shows a dashed accent border +
+  centered "Drop to add to agent context" overlay only while a payload
+  with our MIME is hovering. Foreign drags (text, OS files) must not
+  trigger the overlay.
+- **Don't fire `recordUsage`** for these gestures — adding to context
+  isn't the same as opening the target; the recents list shouldn't
+  reorder just because the user told the agent to look at something.

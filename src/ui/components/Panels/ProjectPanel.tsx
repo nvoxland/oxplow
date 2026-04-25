@@ -30,6 +30,8 @@ import {
 import type { DiffRequest } from "../Diff/diff-request.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { formatContextMention } from "../../agent-context-ref.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PromptDialog } from "../PromptDialog.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
@@ -432,7 +434,7 @@ export function ProjectPanel({
   async function handleContextAction(
     action:
       | "open" | "new-file" | "new-folder" | "rename" | "delete"
-      | "copy" | "copy-reference" | "find-usages"
+      | "copy" | "copy-reference" | "find-usages" | "add-to-agent"
       | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
       | "mark-generated" | "unmark-generated"
       | "diff-uncommitted" | "diff-branch" | "diff-origin",
@@ -443,6 +445,10 @@ export function ProjectPanel({
         case "open":
           onOpenFile(contextMenu.path);
           break;
+        case "add-to-agent":
+          insertIntoAgent(formatContextMention({ kind: "file", path: contextMenu.path }));
+          setContextMenu(null);
+          return;
         case "diff-uncommitted":
           openUncommittedDiff(contextMenu.path);
           break;
@@ -597,6 +603,7 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [
             { id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") },
+            { id: "files.add-to-agent", label: "Add to agent context", enabled: true, run: () => handleContextAction("add-to-agent") },
             ...(gitEnabled && !!onOpenDiff
               ? [
                   {

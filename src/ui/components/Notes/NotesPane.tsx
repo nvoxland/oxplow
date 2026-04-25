@@ -12,6 +12,11 @@ import {
   type WikiNoteSummary,
 } from "../../api.js";
 import { logUi } from "../../logger.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { formatContextMention } from "../../agent-context-ref.js";
+import { ContextMenu } from "../ContextMenu.js";
+import { deleteWikiNote } from "../../api.js";
 
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
@@ -40,6 +45,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
   const [showAllVisited, setShowAllVisited] = useState(false);
   const [showAllModified, setShowAllModified] = useState(false);
   const [showAllRest, setShowAllRest] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ slug: string; title: string; x: number; y: number } | null>(null);
   const newSlugInputRef = useRef<HTMLInputElement | null>(null);
 
   const streamId = stream?.id ?? null;
@@ -143,6 +149,38 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
   useEffect(() => {
     if (newSlugDraft !== null) newSlugInputRef.current?.focus();
   }, [newSlugDraft]);
+
+  function openContextMenu(e: React.MouseEvent, note: { slug: string; title: string }) {
+    e.preventDefault();
+    setContextMenu({ slug: note.slug, title: note.title, x: e.clientX, y: e.clientY });
+  }
+
+  const contextMenuItems = contextMenu
+    ? [
+        { id: "notes.open", label: "Open", enabled: true, run: () => { onOpenNote(contextMenu.slug); setContextMenu(null); } },
+        {
+          id: "notes.add-to-agent",
+          label: "Add to agent context",
+          enabled: true,
+          run: () => {
+            insertIntoAgent(formatContextMention({ kind: "note", slug: contextMenu.slug }));
+            setContextMenu(null);
+          },
+        },
+        {
+          id: "notes.delete",
+          label: "Delete",
+          enabled: !!streamId,
+          run: async () => {
+            if (!streamId) return;
+            try { await deleteWikiNote(streamId, contextMenu.slug); } catch (error) {
+              logUi("error", "deleteWikiNote failed", { error: String(error) });
+            }
+            setContextMenu(null);
+          },
+        },
+      ]
+    : [];
 
   const notesBySlug = useMemo(() => {
     const map = new Map<string, WikiNoteSummary>();
@@ -257,6 +295,10 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             notesBySlug={notesBySlug}
             selectedSlug={selectedSlug}
             onOpenNote={onOpenNote}
+            onContextMenu={(e, hit) => {
+              const summary = notesBySlug.get(hit.slug);
+              openContextMenu(e, summary ?? { slug: hit.slug, title: hit.title } as WikiNoteSummary);
+            }}
           />
         ) : notes.length === 0 ? (
           <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>
@@ -277,6 +319,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     selected={v.note.slug === selectedSlug}
                     rightLabel={formatRelative(v.last_at)}
                     onSelect={() => onOpenNote(v.note.slug)}
+                    onContextMenu={(e) => openContextMenu(e, v.note)}
                   />
                 ))}
               />
@@ -294,6 +337,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     selected={n.slug === selectedSlug}
                     rightLabel={formatRelative(n.updated_at)}
                     onSelect={() => onOpenNote(n.slug)}
+                    onContextMenu={(e) => openContextMenu(e, n)}
                   />
                 ))}
               />
@@ -308,6 +352,13 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
           </>
         )}
       </div>
+      {contextMenu && (
+        <ContextMenu
+          items={contextMenuItems}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -360,12 +411,14 @@ function SearchResults({
   notesBySlug,
   selectedSlug,
   onOpenNote,
+  onContextMenu,
 }: {
   hits: WikiNoteSearchHit[] | null;
   searching: boolean;
   notesBySlug: Map<string, WikiNoteSummary>;
   selectedSlug: string | null;
   onOpenNote: (slug: string) => void;
+  onContextMenu: (e: React.MouseEvent, hit: WikiNoteSearchHit) => void;
 }) {
   if (hits === null && searching) {
     return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>Searching…</div>;
@@ -385,6 +438,7 @@ function SearchResults({
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
           onSelect={() => onOpenNote(hit.slug)}
+          onContextMenu={(e) => onContextMenu(e, hit)}
         />
       ))}
     </>
@@ -396,17 +450,22 @@ function SearchRow({
   summary,
   selected,
   onSelect,
+  onContextMenu,
 }: {
   hit: WikiNoteSearchHit;
   summary: WikiNoteSummary | null;
   selected: boolean;
   onSelect: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
   return (
     <div
       onClick={onSelect}
       onDoubleClick={onSelect}
+      onContextMenu={onContextMenu}
+      draggable
+      onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
       style={{
         padding: "6px 10px",
         cursor: "pointer",
@@ -440,16 +499,21 @@ function NoteRow({
   selected,
   rightLabel,
   onSelect,
+  onContextMenu,
 }: {
   note: WikiNoteSummary;
   selected: boolean;
   rightLabel?: string;
   onSelect: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
       onClick={onSelect}
       onDoubleClick={onSelect}
+      onContextMenu={onContextMenu}
+      draggable
+      onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: note.slug })}
       style={{
         padding: "6px 10px",
         cursor: "pointer",
@@ -460,7 +524,7 @@ function NoteRow({
         alignItems: "center",
         gap: 6,
       }}
-      title={`${note.slug} — ${note.total_refs} referenced file${note.total_refs === 1 ? "" : "s"}`}
+      title={`${note.slug} — ${note.total_refs} referenced file${note.total_refs === 1 ? "" : "s"}\nDrag onto agent to add to context`}
     >
       <span
         style={{

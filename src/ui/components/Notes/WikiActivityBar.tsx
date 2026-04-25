@@ -11,6 +11,10 @@ import {
 } from "../../api.js";
 import type { WorkItemStatus } from "../../../persistence/work-item-store.js";
 import { logUi } from "../../logger.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
+import { formatContextMention, type ContextRef } from "../../agent-context-ref.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { ContextMenu } from "../ContextMenu.js";
 
 const FRESHNESS_COLOR: Record<WikiNoteSummary["freshness"], string> = {
   "fresh": "var(--color-status-success, #5a9a5a)",
@@ -61,6 +65,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [items, setItems] = useState<ItemEntry[]>([]);
   const [openSection, setOpenSection] = useState<"notes" | "files" | "items" | null>(null);
+  const [pendingMenu, setPendingMenu] = useState<{ ref: ContextRef; x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const refreshNotes = useCallback(async () => {
@@ -187,6 +192,12 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
     else onOpenWorkItem(entry.itemId);
   };
 
+  const handleContextMenu = (e: React.MouseEvent, entry: Entry) => {
+    e.preventDefault();
+    setOpenSection(null);
+    setPendingMenu({ ref: entryToContextRef(entry), x: e.clientX, y: e.clientY });
+  };
+
   return (
     <div
       ref={containerRef}
@@ -213,6 +224,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "notes"}
           onToggle={() => setOpenSection((v) => v === "notes" ? null : "notes")}
           onOpen={handleOpen}
+          onContextMenu={handleContextMenu}
           testidPrefix="wiki-activity"
         />
       )}
@@ -227,6 +239,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "files"}
           onToggle={() => setOpenSection((v) => v === "files" ? null : "files")}
           onOpen={handleOpen}
+          onContextMenu={handleContextMenu}
           testidPrefix="file-activity"
         />
       )}
@@ -241,7 +254,25 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "items"}
           onToggle={() => setOpenSection((v) => v === "items" ? null : "items")}
           onOpen={handleOpen}
+          onContextMenu={handleContextMenu}
           testidPrefix="item-activity"
+        />
+      )}
+      {pendingMenu && (
+        <ContextMenu
+          items={[
+            {
+              id: "activity.add-to-agent",
+              label: "Add to agent context",
+              enabled: true,
+              run: () => {
+                insertIntoAgent(formatContextMention(pendingMenu.ref));
+                setPendingMenu(null);
+              },
+            },
+          ]}
+          position={{ x: pendingMenu.x, y: pendingMenu.y }}
+          onClose={() => setPendingMenu(null)}
         />
       )}
     </div>
@@ -255,6 +286,7 @@ function Section({
   open,
   onToggle,
   onOpen,
+  onContextMenu,
   testidPrefix,
 }: {
   label: string;
@@ -263,13 +295,19 @@ function Section({
   open: boolean;
   onToggle: () => void;
   onOpen: (entry: Entry) => void;
+  onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
   testidPrefix: string;
 }) {
   return (
     <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
       <span style={{ opacity: 0.55, flex: "0 0 auto" }}>{label}:</span>
       {inline.map((entry) => (
-        <Pill key={entryKey(entry)} entry={entry} onOpen={() => onOpen(entry)} />
+        <Pill
+          key={entryKey(entry)}
+          entry={entry}
+          onOpen={() => onOpen(entry)}
+          onContextMenu={(e) => onContextMenu(e, entry)}
+        />
       ))}
       {overflow.length > 0 && (
         <button
@@ -316,6 +354,9 @@ function Section({
               type="button"
               role="menuitem"
               onClick={() => onOpen(entry)}
+              onContextMenu={(e) => onContextMenu(e, entry)}
+              draggable
+              onDragStart={(e) => setContextRefDrag(e, entryToContextRef(entry))}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -345,12 +386,23 @@ function Section({
   );
 }
 
-function Pill({ entry, onOpen }: { entry: Entry; onOpen: () => void }) {
+function Pill({
+  entry,
+  onOpen,
+  onContextMenu,
+}: {
+  entry: Entry;
+  onOpen: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`${entryFullLabel(entry)} — ${formatRelative(entry.ts)}`}
+      onContextMenu={onContextMenu}
+      draggable
+      onDragStart={(e) => setContextRefDrag(e, entryToContextRef(entry))}
+      title={`${entryFullLabel(entry)} — ${formatRelative(entry.ts)}\nDrag onto agent to add to context`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -360,7 +412,7 @@ function Pill({ entry, onOpen }: { entry: Entry; onOpen: () => void }) {
         border: "1px solid var(--color-border, #333)",
         borderRadius: 10,
         padding: "1px 8px",
-        cursor: "pointer",
+        cursor: "grab",
         fontSize: 11,
         flex: "0 1 auto",
         minWidth: 0,
@@ -374,6 +426,12 @@ function Pill({ entry, onOpen }: { entry: Entry; onOpen: () => void }) {
       <span style={{ opacity: 0.55, flex: "0 0 auto" }}>· {formatRelative(entry.ts)}</span>
     </button>
   );
+}
+
+export function entryToContextRef(entry: Entry): ContextRef {
+  if (entry.kind === "note") return { kind: "note", slug: entry.slug };
+  if (entry.kind === "file") return { kind: "file", path: entry.path };
+  return { kind: "work-item", itemId: entry.itemId, title: entry.title, status: entry.status };
 }
 
 function EntryIcon({ entry }: { entry: Entry }) {

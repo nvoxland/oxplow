@@ -1,5 +1,6 @@
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
 
 export function ChangedFilesSection({
   files,
@@ -69,6 +70,10 @@ export function TreeEntries({
               data-testid={`file-tree-entry-${entry.path}`}
               data-kind={entry.kind}
               data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
+              draggable={entry.kind === "file"}
+              onDragStart={entry.kind === "file"
+                ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
+                : undefined}
               onClick={() => {
                 if (entry.kind === "directory") {
                   void onToggleDirectory(entry.path);
@@ -203,6 +208,8 @@ function FileRow({
   return (
     <button type="button"
       onClick={onClick}
+      draggable
+      onDragStart={(e) => setContextRefDrag(e, { kind: "file", path })}
       onContextMenu={(event) => {
         event.preventDefault();
         onContextMenu({

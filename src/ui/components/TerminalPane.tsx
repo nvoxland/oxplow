@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../../electron/ipc-contract.js";
@@ -9,6 +9,9 @@ import {
   shouldRouteWheelToTmuxHistory,
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
+import { subscribeAgentInput } from "../agent-input-bus.js";
+import { dragHasContextRef, readContextRef } from "../agent-context-dnd.js";
+import { formatContextMention } from "../agent-context-ref.js";
 
 /**
  * Read the system clipboard as text. Prefers Electron's main-process
@@ -47,6 +50,7 @@ export function TerminalPane({
   const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
+  const [dragHovering, setDragHovering] = useState(false);
 
   function setInteractionMode(next: "live" | "history") {
     modeRef.current = next;
@@ -61,6 +65,49 @@ export function TerminalPane({
     }
     setInteractionMode("live");
   }, [paneTarget, transportMode, visible]);
+
+  // Subscribe to the "Add to agent context" bus only while this pane is
+  // visible — `insertIntoAgent` from a drag-drop or right-click anywhere
+  // in the UI naturally targets the agent the user is currently looking
+  // at. `term.paste(text)` writes through xterm's input pipeline so the
+  // existing `onData` handler ships the bytes to the agent process for
+  // both direct and tmux transports — no transport branching here.
+  useEffect(() => {
+    if (!visible) return;
+    const unsub = subscribeAgentInput((text) => {
+      const term = termRef.current;
+      if (!term) return;
+      term.paste(text);
+      term.focus();
+    });
+    return unsub;
+  }, [visible]);
+
+  function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
+    if (!dragHasContextRef(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragHovering) setDragHovering(true);
+  }
+
+  function handleDragLeave(e: ReactDragEvent<HTMLDivElement>) {
+    // Fires for child-element transitions too; only clear when the
+    // pointer truly leaves the host.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragHovering(false);
+  }
+
+  function handleDrop(e: ReactDragEvent<HTMLDivElement>) {
+    setDragHovering(false);
+    const ref = readContextRef(e);
+    if (!ref || (ref.kind === "file" && ref.path === "")) return;
+    e.preventDefault();
+    const text = formatContextMention(ref);
+    const term = termRef.current;
+    if (!term) return;
+    term.paste(text);
+    term.focus();
+  }
 
   useEffect(() => {
     const host = hostRef.current;
@@ -351,8 +398,32 @@ export function TerminalPane({
   }, [paneTarget, transportMode]);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div
+      style={{ position: "relative", width: "100%", height: "100%" }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+      {dragHovering ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            border: "2px dashed var(--color-status-info, #5a8ac9)",
+            background: "rgba(90, 138, 201, 0.10)",
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--color-text, #ddd)",
+            fontSize: 13,
+            zIndex: 5,
+          }}
+        >
+          Drop to add to agent context
+        </div>
+      ) : null}
       {mode === "history" ? (
         <div
           style={{
