@@ -71,6 +71,29 @@ the `CSC_IDENTITY_AUTO_DISCOVERY=false` workaround in CI and
 supplying the usual `CSC_LINK` / `CSC_KEY_PASSWORD` / Windows cert
 secrets.
 
+## Documentation site
+
+User-facing docs live under `docs/` and are built with MkDocs
+Material. Python deps are managed by Poetry — keep them isolated
+from the rest of the repo (the project itself is TypeScript).
+
+Prereqs: Python 3.11+ and [Poetry](https://python-poetry.org/) 2.x.
+
+```
+poetry install --with docs
+poetry run mkdocs serve         # live preview at http://localhost:8000
+poetry run mkdocs build --strict  # one-shot build into site/
+```
+
+Markdown content lives under `docs/`. Custom styling is in
+`docs/stylesheets/extra.css` and the home-page hero is in
+`docs/overrides/home.html`. The `mkdocs.yml`, `pyproject.toml`,
+and `poetry.lock` live at the repo root.
+
+`.github/workflows/docs.yml` deploys to GitHub Pages on every push
+to `main` that touches `docs/**`. Local builds never push — only
+the workflow runs `mkdocs gh-deploy`.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every

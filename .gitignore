@@ -11,3 +11,6 @@ tests-e2e/screenshots/
 tests-e2e/scratch-edit-target.txt
 tests-e2e/scratch-commit-target.txt
 .self-ralph/
+site/
+.venv/
+__pycache__/

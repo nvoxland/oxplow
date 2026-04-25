@@ -1,0 +1,123 @@
+site_name: Oxplow
+site_description: An IDE for directing coding agents across parallel branches of the same project. Streams, work queues, commit/wait points, and Local History — built around the way agent-assisted development actually works.
+site_author: Nathan Voxland
+site_url: https://nvoxland.github.io/oxplow/
+repo_name: nvoxland/oxplow
+repo_url: https://github.com/nvoxland/oxplow
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+dev_addr: '0.0.0.0:8000'
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    # Dark mode (default)
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
+    # Light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Why Oxplow: why.md
+  - Getting Started:
+      - Install: getting-started/install.md
+      - Your first stream: getting-started/first-stream.md
+      - Concepts: getting-started/concepts.md
+  - Guide:
+      - Work queue: guide/work-queue.md
+      - Commit & wait points: guide/commit-and-wait-points.md
+      - Local History: guide/local-history.md
+      - Editor: guide/editor.md
+      - Terminal: guide/terminal.md
+      - Agent control: guide/agent-control.md
+      - Notes: guide/notes.md
+  - Reference:
+      - MCP tools: reference/mcp-tools.md
+      - Keybindings: reference/keybindings.md
+      - Settings: reference/settings.md
+  - Philosophy:
+      - Pair programming, inverted: philosophy/pair-programming.md
+      - Beyond vibe coding: philosophy/beyond-vibe-coding.md
+      - Architecture vision: philosophy/architecture-vision.md
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - autorefs
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nvoxland/oxplow
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2026 Nathan Voxland

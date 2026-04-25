@@ -1,0 +1,240 @@
+/* ── Brand palette: amber on slate ─────────────────── */
+:root,
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #f59e0b;
+  --md-primary-fg-color--light: #fbbf24;
+  --md-primary-fg-color--dark:  #b45309;
+  --md-accent-fg-color:         #5eead4;
+  --md-default-bg-color:        #0f1419;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        #b45309;
+  --md-primary-fg-color--light: #f59e0b;
+  --md-primary-fg-color--dark:  #92400e;
+  --md-accent-fg-color:         #0d9488;
+}
+
+/* Header + tabs: dark slate to keep the IDE feel */
+.md-header,
+.md-tabs {
+  background-color: #0f1419;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.18);
+}
+
+.md-source__facts { display: none; }
+
+/* h2 amber underline — echoes the app status-bar accent */
+.md-typeset h2 {
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  padding-bottom: 0.25em;
+  font-weight: 700;
+}
+
+/* Monospace headings reinforce the IDE/terminal positioning */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: -0.01em;
+}
+
+/* ── Hero (home page) ──────────────────────────────── */
+.ox-hero {
+  background:
+    radial-gradient(circle at 85% 0%, rgba(245, 158, 11, 0.08), transparent 50%),
+    #0b0f14;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.18);
+  padding: 5rem 1.5rem 4.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.ox-hero__inner {
+  max-width: 72rem;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 4rem;
+  align-items: center;
+  position: relative;
+}
+
+.ox-hero__glyph {
+  position: absolute;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 28rem;
+  font-weight: 800;
+  line-height: 1;
+  top: -2rem;
+  right: -3rem;
+  color: #f59e0b;
+  opacity: 0.05;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+
+.ox-hero__brand,
+.ox-hero__title,
+.ox-hero__sub,
+.ox-hero__cta,
+.ox-hero__sample {
+  position: relative;
+  z-index: 1;
+}
+
+.ox-hero__brand {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: #f59e0b;
+  margin-bottom: 1rem;
+}
+
+.ox-hero__title {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 3rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #f1f5f9;
+  margin: 0 0 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.ox-hero__title em {
+  color: #f59e0b;
+  font-style: normal;
+}
+
+.ox-hero__sub {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: #cbd5e1;
+  margin: 0 0 2rem;
+  max-width: 36rem;
+}
+
+.ox-hero__cta {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ox-hero__cta a {
+  display: inline-block;
+  padding: 0.7rem 1.4rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+
+.ox-hero__cta a.primary {
+  background: #f59e0b;
+  color: #0b0f14;
+}
+
+.ox-hero__cta a.primary:hover {
+  background: #fbbf24;
+  transform: translateY(-1px);
+}
+
+.ox-hero__cta a.ghost {
+  background: transparent;
+  color: #f1f5f9;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.ox-hero__cta a.ghost:hover {
+  border-color: #f59e0b;
+}
+
+/* Faux-IDE sample pane */
+.ox-hero__sample {
+  background: #0d1117;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  color: #cbd5e1;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.ox-hero__sample-header {
+  color: #5eead4;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin-bottom: 0.8rem;
+  border-bottom: 1px solid rgba(94, 234, 212, 0.18);
+  padding-bottom: 0.5rem;
+}
+
+.ox-hero__row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.ox-hero__row .status {
+  color: #f59e0b;
+  width: 7ch;
+  flex-shrink: 0;
+}
+.ox-hero__row .status.done    { color: #5eead4; }
+.ox-hero__row .status.wait    { color: #94a3b8; }
+.ox-hero__row .status.run     { color: #f59e0b; }
+
+@media (max-width: 960px) {
+  .ox-hero__inner { grid-template-columns: 1fr; gap: 2rem; }
+  .ox-hero__title { font-size: 2.2rem; }
+  .ox-hero__glyph { font-size: 18rem; right: -2rem; opacity: 0.04; }
+}
+
+/* ── Sections under the hero ───────────────────────── */
+.ox-section {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.ox-section h2 {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 1.6rem;
+  margin: 0 0 1.5rem;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  padding-bottom: 0.4rem;
+}
+
+.ox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.5rem;
+}
+
+.ox-card {
+  background: rgba(245, 158, 11, 0.04);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 6px;
+  padding: 1.25rem 1.4rem;
+}
+
+.ox-card h3 {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 1rem;
+  color: #f59e0b;
+  margin: 0 0 0.5rem;
+}
+
+.ox-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #cbd5e1;
+}
