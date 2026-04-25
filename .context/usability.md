@@ -4,6 +4,22 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Forms
 
+- **Discrete create / edit actions use a modal, never an inline sub-panel.**
+  When the user clicks "+ New thread", "New stream", "New work item",
+  rename, settings, or any other action that opens a focused little
+  form to fill in, render it as a centered modal dialog (backdrop +
+  panel + Escape-to-cancel + Enter-to-submit) — not as an inline
+  pane that pushes other UI around. Modals win on focus
+  (one thing to fill in), consistency (every create flow looks the
+  same), and predictability (Escape always cancels, Enter always
+  submits, no half-typed state stranded behind some hidden toggle).
+  References: `PromptDialog.tsx`, the `NewWorkItemModal` in
+  `Plan/PlanPane.tsx`, `StreamRail`'s "New stream" modal, and
+  `ThreadRail`'s `CreateThreadModal`. Inline click-to-edit fields on
+  existing rows (title, description, priority pickers) are not
+  sub-panels and stay inline — the rule is specifically about *create
+  a new X* and *edit X in a focused form* flows that warrant a
+  dedicated dialog.
 - **Never call `window.prompt()`.** Electron disables it — it returns
   `null` synchronously without showing anything, so any code path
   gated on its return value silently no-ops (the user clicks the
