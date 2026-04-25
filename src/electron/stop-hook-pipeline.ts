@@ -54,6 +54,13 @@ export interface ThreadSnapshot {
    *  identical, the ready-work directive is suppressed — the agent already
    *  has the list. Optional; absent means "no just-read suppression." */
   justReadReadySet?: string[];
+  /** True when the orchestrator has dispatched a `Task` subagent that
+   *  hasn't yet returned. While set, the in-progress audit and ready-work
+   *  directives are suppressed — re-emitting them mid-flight produces a
+   *  visual loop where the parent dutifully acks each Stop nudge while
+   *  it's still waiting on the subagent. Commit/wait points still fire:
+   *  those are user-placed markers, not queue-management nudges. */
+  subagentInFlight?: boolean;
   /** True when the thread's worktree has no staged OR unstaged diff
    *  (ad-hoc `git commit` from Bash or the Files panel already landed).
    *  When set, the auto-commit directive is suppressed even if settled
@@ -144,6 +151,17 @@ export function decideStopDirective(
   }
 
   if (!snapshot.thread || snapshot.thread.status !== "active") {
+    return { directive: null, sideEffects };
+  }
+
+  // Subagent-in-flight carve-out: when the orchestrator has dispatched a
+  // `Task` subagent that hasn't returned, suppress the queue-management
+  // nudges (audit + ready-work). Re-emitting them mid-flight makes the
+  // parent ack each Stop with "still actively being worked" reply,
+  // producing a visual loop. Markers (commit/wait points above) still
+  // fire — those are user-placed and represent explicit work the agent
+  // must address.
+  if (snapshot.subagentInFlight) {
     return { directive: null, sideEffects };
   }
 

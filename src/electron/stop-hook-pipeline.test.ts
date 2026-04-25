@@ -375,6 +375,43 @@ describe("decideStopDirective", () => {
     });
   });
 
+  describe("subagent-in-flight suppression", () => {
+    test("in-progress audit is suppressed while a subagent is in flight", () => {
+      // The orchestrator dispatched a Task subagent that owns the
+      // in_progress item. Re-firing the audit nudge mid-flight produces
+      // the visual loop the user complained about.
+      const inFlight = workItem("w-a", 0, "in_progress");
+      const out = decideStopDirective(
+        snapshot({ workItems: [inFlight], subagentInFlight: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+      expect(out.sideEffects).toEqual([]);
+    });
+
+    test("ready-work directive is suppressed while a subagent is in flight", () => {
+      // The parent shouldn't pick up a new item while a subagent is
+      // still working — same noise loop, different branch.
+      const ready = workItem("w-b", 0, "ready");
+      const out = decideStopDirective(
+        snapshot({ workItems: [ready], readyWorkItems: [ready], subagentInFlight: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("commit/wait points still fire even with a subagent in flight", () => {
+      // Markers are user-placed and represent explicit work, not the
+      // queue-management nudges this suppression targets.
+      const cp = commitPoint("cp1", 1);
+      const out = decideStopDirective(
+        snapshot({ commitPoints: [cp], subagentInFlight: true }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
+    });
+  });
+
   describe("ready-work suppression rules", () => {
     test("just-read-ready: ready set matches last read, suppressed", () => {
       const ready = workItem("w1", 0, "ready");

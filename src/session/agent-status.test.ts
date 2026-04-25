@@ -70,4 +70,35 @@ describe("deriveThreadAgentStatus", () => {
       event({ kind: "meta", t: 1, hookEventName: "SubagentStart", raw: {} }),
     ])).toBe("working");
   });
+
+  test("stop while a Task subagent is still in flight stays working", () => {
+    // Parent dispatches a Task subagent (PreToolUse fires). Before the
+    // subagent's PostToolUse returns, a Stop hook arrives (subagent or
+    // parent pause). Tab-icon should reflect "still doing work" until
+    // the Task tool actually returns.
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
+      event({ kind: "stop", t: 2 }),
+    ])).toBe("working");
+  });
+
+  test("stop after Task subagent returns is done", () => {
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
+      event({ kind: "tool-use-end", t: 2, toolName: "Task", status: "ok" }),
+      event({ kind: "stop", t: 3 }),
+    ])).toBe("done");
+  });
+
+  test("multiple Task subagents in flight: stop stays working until all return", () => {
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
+      event({ kind: "tool-use-start", t: 2, toolName: "Task" }),
+      event({ kind: "tool-use-end", t: 3, toolName: "Task", status: "ok" }),
+      event({ kind: "stop", t: 4 }),
+    ])).toBe("working");
+  });
 });

@@ -260,6 +260,17 @@ The pipeline runs in priority order:
 
 6. **Otherwise.** Allow stop.
 
+**Subagent-in-flight carve-out.** The runtime tracks per-thread `Task`
+tool calls (PreToolUse → +1, PostToolUse → -1) in
+`pendingSubagentsByThread`. When the count is non-zero on a Stop, the
+audit (priority 4) and ready-work (priority 5) branches are suppressed
+— re-emitting them while the parent is mid-`Task` produces a visual
+loop where the parent acks each Stop with "still actively being worked
+by background subagent" while still waiting on the subagent. Markers
+(commit/wait points) still fire: those are user-placed and represent
+explicit work the agent must address. Same signal is surfaced to the
+tab icon — see "Agent status" below.
+
 ### fork_thread
 
 The runtime exposes `mcp__oxplow__fork_thread({ sourceThreadId, title,
@@ -555,6 +566,14 @@ provide finer-grained overrides without displacing earlier context.
 of hook events into one of `idle | working | waiting | done`. The runtime
 recomputes on every hook arrival and emits `agent-status.changed`. The UI
 shows it as a colored dot on each thread tab.
+
+**Subagent-in-flight carve-out.** The reducer counts unreturned `Task`
+tool calls (PreToolUse + / PostToolUse -). When a `stop` event arrives
+while the count is >0, status stays `working` instead of flipping to
+`done`. Without this the tab icon would flip to "agent done" the moment
+the parent paused for a subagent, even though the subagent was still
+doing real work. The status flips to `done` once the final `Task`
+PostToolUse returns and a subsequent `stop` lands. See wi-593a50b62e22.
 
 ## Snapshot tracking
 

@@ -145,6 +145,13 @@ export class ElectronRuntime {
    *  list the agent already has. Populated through the
    *  markReadWorkOptions callback wired into the MCP tool surface. */
   private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
+  /** Per-thread count of `Task` (subagent) tool calls that are
+   *  PreToolUse-started but haven't yet seen a PostToolUse. Used by the
+   *  Stop-hook pipeline to suppress the in-progress audit and ready-work
+   *  directives while a subagent owns the in_progress item — re-firing
+   *  those nudges produces a visual loop where the parent acks each
+   *  Stop while still waiting on the subagent. See wi-593a50b62e22. */
+  private readonly pendingSubagentsByThread = new Map<string, number>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -1495,6 +1502,26 @@ export class ElectronRuntime {
       }
       if (envelope.event === "PostToolUse") {
         this.handlePostToolUseDirty(envelope);
+        // Match a PreToolUse for `Task` (subagent dispatch) — decrement
+        // the per-thread pending-subagent counter so the Stop-hook
+        // suppression lifts once the subagent returns.
+        const toolName = typeof (envelope.payload as { tool_name?: unknown })?.tool_name === "string"
+          ? (envelope.payload as { tool_name: string }).tool_name
+          : "";
+        if (toolName === "Task" && envelope.threadId) {
+          const cur = this.pendingSubagentsByThread.get(envelope.threadId) ?? 0;
+          if (cur <= 1) this.pendingSubagentsByThread.delete(envelope.threadId);
+          else this.pendingSubagentsByThread.set(envelope.threadId, cur - 1);
+        }
+      }
+    }
+    if (envelope.event === "PreToolUse" && envelope.threadId) {
+      const toolName0 = typeof (envelope.payload as { tool_name?: unknown })?.tool_name === "string"
+        ? (envelope.payload as { tool_name: string }).tool_name
+        : "";
+      if (toolName0 === "Task") {
+        const cur = this.pendingSubagentsByThread.get(envelope.threadId) ?? 0;
+        this.pendingSubagentsByThread.set(envelope.threadId, cur + 1);
       }
     }
     if (envelope.event === "PreToolUse" && envelope.threadId) {
@@ -1624,6 +1651,7 @@ export class ElectronRuntime {
       autoCommit: thread?.auto_commit ?? false,
       justReadReadySet,
       worktreeClean,
+      subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
     };
     // The item's own thread_id is what matters for the directive text (not
     // `threadId` — they agree today but could diverge if listReady ever
