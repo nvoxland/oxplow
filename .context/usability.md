@@ -4,6 +4,17 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Forms
 
+- **Never call `window.prompt()`.** Electron disables it — it returns
+  `null` synchronously without showing anything, so any code path
+  gated on its return value silently no-ops (the user clicks the
+  action and nothing happens). Use the themed `PromptDialog` at
+  `src/ui/components/PromptDialog.tsx` instead. Same shape as
+  `ConfirmDialog`: render conditionally from a `pending*` state, OK /
+  Cancel buttons, Escape and backdrop-click cancel, autofocus +
+  select. `window.confirm` / `window.alert` aren't disabled but block
+  the renderer and don't match the app's visual language — prefer
+  `ConfirmDialog` for destructive actions and an inline error / toast
+  over `alert` for failures.
 - **Every `<button>` needs an explicit `type`.** HTML defaults `<button>` to
   `type="submit"`, which silently submits any enclosing form on click. Use
   `type="button"` for every action button; use `type="submit"` only on the
@@ -97,6 +108,9 @@ Things I keep forgetting. Read this before adding any UI.
     have to hover)
   - `confirm-dialog`, `confirm-dialog-confirm`, `confirm-dialog-cancel`
     on the themed destructive-action `ConfirmDialog`
+  - `prompt-dialog`, `prompt-dialog-input`, `prompt-dialog-submit`,
+    `prompt-dialog-cancel` on the themed `PromptDialog` (replaces
+    `window.prompt`)
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
     `center-tab-close-<id>` on the × close button

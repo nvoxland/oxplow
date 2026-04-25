@@ -3,6 +3,7 @@ import type { WaitPoint } from "../../api.js";
 import { deleteWaitPoint, setWaitPointNote } from "../../api.js";
 import { runWithError } from "../../ui-error.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { PromptDialog } from "../PromptDialog.js";
 import { miniButtonStyle } from "./plan-utils.js";
 import { queueRowExpandedStyle } from "./queue-markers.js";
 
@@ -13,6 +14,7 @@ import { queueRowExpandedStyle } from "./queue-markers.js";
  */
 export function WaitPointRow({ wp }: { wp: WaitPoint }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingNote, setEditingNote] = useState(false);
   return (
     <div style={queueRowExpandedStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -21,10 +23,7 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
           {wp.status === "pending" ? (
             <button type="button"
               style={miniButtonStyle}
-              onClick={() => {
-                const next = window.prompt("Wait point note:", wp.note ?? "");
-                if (next != null) runWithError("Update wait note", setWaitPointNote(wp.id, next || null));
-              }}
+              onClick={() => setEditingNote(true)}
             >
               Edit
             </button>
@@ -41,6 +40,19 @@ export function WaitPointRow({ wp }: { wp: WaitPoint }) {
         <div style={{ marginTop: 4, fontSize: 11, color: "#d97706" }}>
           Agent stopped here. Prompt the agent directly to resume.
         </div>
+      ) : null}
+      {editingNote ? (
+        <PromptDialog
+          message="Wait point note"
+          initialValue={wp.note ?? ""}
+          allowEmpty
+          confirmLabel="Save"
+          onSubmit={(next) => {
+            setEditingNote(false);
+            runWithError("Update wait note", setWaitPointNote(wp.id, next || null));
+          }}
+          onCancel={() => setEditingNote(false)}
+        />
       ) : null}
       {confirmDelete ? (
         <ConfirmDialog

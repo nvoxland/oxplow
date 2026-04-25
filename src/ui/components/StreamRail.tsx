@@ -15,7 +15,7 @@ interface Props {
   gitEnabled: boolean;
   onSwitch(id: string): void;
   onStreamCreated(stream: Stream): void;
-  onRenameStream?(streamId: string, currentTitle: string): void;
+  onRenameStream?(streamId: string, newTitle: string): Promise<void> | void;
   onRequestCreateThread?(): void;
   onOpenSettings?(): void;
   onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
@@ -31,6 +31,11 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [settingsStream, setSettingsStream] = useState<Stream | null>(null);
   const [settingsPrompt, setSettingsPrompt] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -433,7 +438,12 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
               id: "stream.rename",
               label: "Rename…",
               enabled: !!onRenameStream,
-              run: () => onRenameStream?.(contextMenu.stream.id, contextMenu.stream.title),
+              run: () => {
+                setRenaming({ id: contextMenu.stream.id, title: contextMenu.stream.title });
+                setRenameValue(contextMenu.stream.title);
+                setRenameError(null);
+                setTimeout(() => renameInputRef.current?.select(), 0);
+              },
             },
             {
               id: "stream.switch-branch",
@@ -496,6 +506,54 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 <button type="button" onClick={() => setSwitchBranchStream(null)} style={buttonStyle}>Cancel</button>
                 <button type="submit" style={buttonStyle} disabled={switchBranchBusy || loadingBranches || !switchBranchRef}>
                   {switchBranchBusy ? "Switching…" : "Switch"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {renaming ? (
+        <div style={backdropStyle}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const next = renameValue.trim();
+              if (!next || next === renaming.title) { setRenaming(null); return; }
+              setRenameBusy(true);
+              setRenameError(null);
+              try {
+                await onRenameStream?.(renaming.id, next);
+                setRenaming(null);
+              } catch (err) {
+                setRenameError(String(err));
+              } finally {
+                setRenameBusy(false);
+              }
+            }}
+            style={{ ...modalStyle, minWidth: 360 }}
+          >
+            <div style={modalHeaderStyle}>
+              <span>Rename stream</span>
+              <button type="button" onClick={() => setRenaming(null)} style={closeBtnStyle} aria-label="Close">×</button>
+            </div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={labelStyle}>
+                <span>Title</span>
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+                  style={inputStyle}
+                  autoFocus
+                  data-testid="stream-rename-input"
+                />
+              </label>
+              {renameError ? <div style={{ color: "#ff6b6b", fontSize: 12 }}>{renameError}</div> : null}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setRenaming(null)} style={buttonStyle}>Cancel</button>
+                <button type="submit" style={buttonStyle} disabled={renameBusy || !renameValue.trim()}>
+                  {renameBusy ? "Renaming…" : "Rename"}
                 </button>
               </div>
             </div>

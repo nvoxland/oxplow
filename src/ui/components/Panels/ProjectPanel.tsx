@@ -31,6 +31,7 @@ import type { DiffRequest } from "../Diff/diff-request.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { PromptDialog } from "../PromptDialog.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
@@ -74,6 +75,9 @@ export function ProjectPanel({
   // Destructive-action confirmations that used to be window.confirm().
   const [pendingConfirm, setPendingConfirm] = useState<
     { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
+  >(null);
+  const [pendingPrompt, setPendingPrompt] = useState<
+    { message: string; initialValue: string; confirmLabel: string; run: (value: string) => void | Promise<void> } | null
   >(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
   const entriesByDirRef = useRef<Record<string, WorkspaceEntry[]>>({});
@@ -452,25 +456,41 @@ export function ProjectPanel({
           const suggested = contextMenu.kind === "directory"
             ? joinChildPath(contextMenu.path, "new-file.txt")
             : joinChildPath(dirname(contextMenu.path), "new-file.txt");
-          const nextPath = window.prompt("New file path", suggested)?.trim();
-          if (!nextPath) return;
-          await onCreateFile(nextPath);
-          break;
+          setPendingPrompt({
+            message: "New file path",
+            initialValue: suggested,
+            confirmLabel: "Create",
+            run: (value) => onCreateFile(value),
+          });
+          setContextMenu(null);
+          return;
         }
         case "new-folder": {
           const suggested = contextMenu.kind === "directory"
             ? joinChildPath(contextMenu.path, "new-folder")
             : joinChildPath(dirname(contextMenu.path), "new-folder");
-          const nextPath = window.prompt("New folder path", suggested)?.trim();
-          if (!nextPath) return;
-          await onCreateDirectory(nextPath);
-          break;
+          setPendingPrompt({
+            message: "New folder path",
+            initialValue: suggested,
+            confirmLabel: "Create",
+            run: (value) => onCreateDirectory(value),
+          });
+          setContextMenu(null);
+          return;
         }
         case "rename": {
-          const nextPath = window.prompt("Rename path", contextMenu.path)?.trim();
-          if (!nextPath || nextPath === contextMenu.path) return;
-          await onRenamePath(contextMenu.path, nextPath);
-          break;
+          const original = contextMenu.path;
+          setPendingPrompt({
+            message: "Rename path",
+            initialValue: original,
+            confirmLabel: "Rename",
+            run: (value) => {
+              if (value === original) return;
+              return onRenamePath(original, value);
+            },
+          });
+          setContextMenu(null);
+          return;
         }
         case "delete": {
           const path = contextMenu.path;
@@ -804,6 +824,19 @@ export function ProjectPanel({
             void run();
           }}
           onCancel={() => setPendingConfirm(null)}
+        />
+      ) : null}
+      {pendingPrompt ? (
+        <PromptDialog
+          message={pendingPrompt.message}
+          initialValue={pendingPrompt.initialValue}
+          confirmLabel={pendingPrompt.confirmLabel}
+          onSubmit={(value) => {
+            const { run } = pendingPrompt;
+            setPendingPrompt(null);
+            void run(value);
+          }}
+          onCancel={() => setPendingPrompt(null)}
         />
       ) : null}
     </div>

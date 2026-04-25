@@ -273,21 +273,15 @@ export function App() {
     }
   }
 
-  async function handleRenameStreamById(streamId: string, currentTitle: string) {
-    const nextTitle = window.prompt("Rename stream", currentTitle)?.trim();
-    if (!nextTitle || nextTitle === currentTitle) return;
-    try {
-      const updated = await renameStream(streamId, nextTitle);
-      if (stream?.id === updated.id) setStream(updated);
-      setStreams((prev) =>
-        prev
-          .map((candidate) => (candidate.id === updated.id ? updated : candidate))
-          .sort((a, b) => a.created_at.localeCompare(b.created_at)),
-      );
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+  async function handleRenameStreamById(streamId: string, newTitle: string) {
+    const updated = await renameStream(streamId, newTitle);
+    if (stream?.id === updated.id) setStream(updated);
+    setStreams((prev) =>
+      prev
+        .map((candidate) => (candidate.id === updated.id ? updated : candidate))
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    );
+    setError(null);
   }
 
   async function handleRenameThreadById(threadId: string, newTitle: string) {
@@ -1541,7 +1535,7 @@ export function App() {
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
           onStreamCreated={handleStreamCreated}
-          onRenameStream={(id, title) => void handleRenameStreamById(id, title)}
+          onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => setSettingsOpen(true)}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}

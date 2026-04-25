@@ -996,15 +996,13 @@ export class ElectronRuntime {
       if (!isGitRepo(worktreePath)) throw new Error(`not a git worktree: ${worktreePath}`);
       const already = this.store.list().find((s) => s.worktree_path === worktreePath);
       if (already) {
-        this.store.setCurrentStreamId(already.id);
-        return already;
+        throw new Error(`worktree is already adopted as stream "${already.title}"`);
       }
       const branchName = detectCurrentBranch(worktreePath);
       if (!branchName) throw new Error(`worktree has a detached HEAD: ${worktreePath}`);
       const existing = this.store.findByBranch(branchName);
       if (existing) {
-        this.store.setCurrentStreamId(existing.id);
-        return existing;
+        throw new Error(`branch "${branchName}" is already mapped to stream "${existing.title}"`);
       }
       stream = this.store.create({
         title,
