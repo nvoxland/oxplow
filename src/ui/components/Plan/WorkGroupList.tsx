@@ -347,9 +347,11 @@ export function WorkGroupList({
           <div
             draggable
             onDragStart={(event) => {
-              setDraggingKey(key);
+              // Same drag-cancel workaround as the work-item rows —
+              // see the longer comment on `sharedDragHandlers` below.
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", row.id);
+              queueMicrotask(() => setDraggingKey(key));
             }}
             onDragEnd={resetDrag}
             onDragOver={(event) => {
@@ -386,9 +388,10 @@ export function WorkGroupList({
           <div
             draggable
             onDragStart={(event) => {
-              setDraggingKey(key);
+              // Same drag-cancel workaround as the work-item rows.
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", row.id);
+              queueMicrotask(() => setDraggingKey(key));
             }}
             onDragEnd={resetDrag}
             onDragOver={(event) => {
@@ -422,7 +425,16 @@ export function WorkGroupList({
     const isMarked = markedIds?.has(row.item.id) ?? false;
     const sharedDragHandlers = {
       onDragStart: (event: React.DragEvent) => {
-        setDraggingKey(key);
+        // Populate dataTransfer FIRST and let dragstart return before
+        // mutating React state that re-renders the dragged row.
+        // Recent Chromium (≥ 124) treats a same-tick style/attribute
+        // change on the drag source as "source detached" and silently
+        // cancels the drag — the user never sees the drag image
+        // animate. Deferring setDraggingKey to the next microtask
+        // keeps the row's `cursor`/`background`/`isDragging` props
+        // identical at the moment the browser snapshots the source,
+        // so the drag actually starts. Reorder + cross-section drop
+        // logic still runs as before once `dragging` state lands.
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", row.item.id);
         const ids = isMarked && markedIds && markedIds.size > 1
@@ -436,6 +448,7 @@ export function WorkGroupList({
             fromThreadId: scopeThreadId,
           }),
         );
+        queueMicrotask(() => setDraggingKey(key));
       },
       onDragEnd: resetDrag,
       onDragOver: (event: React.DragEvent) => {
@@ -911,7 +924,9 @@ function EpicChildrenPane({
             onUpdateWorkItem={onUpdateWorkItem}
             onContextMenu={onContextMenu}
             onDragStart={(event) => {
-              setDraggingKey(key);
+              // Same drag-cancel workaround as the parent pane's rows —
+              // populate dataTransfer first, defer state mutation that
+              // would re-render the dragged row in-tick.
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", child.id);
               const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
@@ -919,6 +934,7 @@ function EpicChildrenPane({
                 WORK_ITEM_DRAG_MIME,
                 JSON.stringify({ itemId: child.id, itemIds: ids, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
+              queueMicrotask(() => setDraggingKey(key));
             }}
             onDragEnd={resetDrag}
             onDragOver={(event) => {
