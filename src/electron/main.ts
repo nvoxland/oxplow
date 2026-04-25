@@ -286,6 +286,12 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:readWikiNoteBody", (_event, streamId: string, slug: string) => currentRuntime.readWikiNoteBody(streamId, slug));
   handle("oxplow:writeWikiNoteBody", (_event, streamId: string, slug: string, body: string) => currentRuntime.writeWikiNoteBody(streamId, slug, body));
   handle("oxplow:deleteWikiNote", (_event, streamId: string, slug: string) => currentRuntime.deleteWikiNote(streamId, slug));
+  handle("oxplow:searchWikiNotes", (_event, streamId: string, query: string, limit?: number) => currentRuntime.searchWikiNotes(streamId, query, limit));
+  handle("oxplow:recordUsage", (_event, input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }) => currentRuntime.recordUsage(input));
+  handle("oxplow:listRecentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listRecentUsage(input));
+  handle("oxplow:listFrequentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listFrequentUsage(input));
+  handle("oxplow:listCurrentlyOpenUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null }) => currentRuntime.listCurrentlyOpenUsage(input));
+  handle("oxplow:getWorkItemSummaries", (_event, ids: string[]) => currentRuntime.getWorkItemSummaries(ids));
   handle("oxplow:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
   handle("oxplow:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));
   handle("oxplow:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));

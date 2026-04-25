@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, isWriteIntentTool, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, buildWikiCaptureStopReason, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -828,6 +828,52 @@ describe("isWriteIntentTool", () => {
   test("Bash with other/unknown command is write-intent (err toward auto-file)", () => {
     expect(isWriteIntentTool("Bash", { command: "npm install foo" })).toBe(true);
     expect(isWriteIntentTool("Bash", { command: "rm -rf dist" })).toBe(true);
+  });
+});
+
+describe("isReadIntentTool", () => {
+  test("Read/Grep/Glob always count as reads", () => {
+    expect(isReadIntentTool("Read", null)).toBe(true);
+    expect(isReadIntentTool("Grep", null)).toBe(true);
+    expect(isReadIntentTool("Glob", null)).toBe(true);
+  });
+  test("write-intent tools don't count as reads", () => {
+    expect(isReadIntentTool("Write", null)).toBe(false);
+    expect(isReadIntentTool("Edit", null)).toBe(false);
+  });
+  test("read-only Bash counts as a read", () => {
+    expect(isReadIntentTool("Bash", { command: "ls -la" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "git diff" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "bun test foo" })).toBe(true);
+  });
+  test("write-intent Bash doesn't count as a read", () => {
+    expect(isReadIntentTool("Bash", { command: "rm -rf dist" })).toBe(false);
+    expect(isReadIntentTool("Bash", { command: "npm install" })).toBe(false);
+  });
+  test("MCP / other tool names don't count as reads or writes (out-of-scope)", () => {
+    expect(isReadIntentTool("mcp__oxplow__list_notes", null)).toBe(false);
+    expect(isReadIntentTool("Task", null)).toBe(false);
+  });
+});
+
+describe("buildWikiCaptureStopReason", () => {
+  test("names the wiki-capture skill and the resync_note pin", () => {
+    const text = buildWikiCaptureStopReason();
+    expect(text).toContain("oxplow-wiki-capture");
+    expect(text).toContain("resync_note");
+    expect(text).toContain(".oxplow/notes/");
+  });
+  test("documents the skipped escape hatch verbatim", () => {
+    const text = buildWikiCaptureStopReason();
+    expect(text).toContain("oxplow-note: skipped");
+  });
+  test("teaches the search-before-create flow", () => {
+    const text = buildWikiCaptureStopReason();
+    // All three search/find tools should be named so the agent knows
+    // which corner to check before deciding append-vs-new.
+    expect(text).toContain("search_notes");
+    expect(text).toContain("search_note_bodies");
+    expect(text).toContain("find_notes_for_file");
   });
 });
 

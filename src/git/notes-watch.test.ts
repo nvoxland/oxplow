@@ -74,7 +74,7 @@ describe("scanAndSyncAll", () => {
     writeFileSync(join(projectDir, ".oxplow", "notes", "a.md"), "# A");
     writeFileSync(join(projectDir, ".oxplow", "notes", "b.md"), "# B");
     // Pre-seed a row whose file will be missing → should be deleted
-    store.upsert({ slug: "orphan", title: "Orphan", capturedHeadSha: null, capturedRefs: [] });
+    store.upsert({ slug: "orphan", title: "Orphan", body: "", capturedHeadSha: null, capturedRefs: [] });
 
     scanAndSyncAll(projectDir, store);
 

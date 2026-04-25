@@ -344,15 +344,19 @@ as plain markdown files at `.oxplow/notes/<slug>.md` (not committed to
 git — this is a personal KB, not team docs). The table only holds
 metadata; the filesystem is the source of truth for content.
 
-Columns: `id, slug (UNIQUE), title, captured_head_sha,
-captured_refs_json, created_at, updated_at`.
+Columns: `id, slug (UNIQUE), title, body, captured_head_sha,
+captured_refs_json, created_at, updated_at`. The `body` column
+mirrors the on-disk markdown so MCP can run substring/content
+searches without reading every file — the filesystem is still the
+source of truth, and the watcher keeps the column in sync on every
+upsert.
 
 Workflow: the agent writes/edits note files directly with its
 Write/Edit tools (no MCP round-trip for bodies). A dedicated watcher
 (`src/git/notes-watch.ts`) picks up every file event, re-parses the
-file, and upserts metadata. **Every write — agent or user — re-baselines
-freshness**, because any write implicitly asserts "this is current as
-of now." There is no agent-vs-user distinction.
+file, and upserts metadata + body. **Every write — agent or user —
+re-baselines freshness**, because any write implicitly asserts "this
+is current as of now." There is no agent-vs-user distinction.
 
 Freshness is a general indicator, not a proof:
 - `captured_head_sha` is HEAD at last write. If HEAD advances, the
@@ -364,22 +368,63 @@ Freshness is a general indicator, not a proof:
   `very-stale`.
 
 MCP tools (`src/mcp/wiki-note-mcp-tools.ts`) are metadata-only —
-`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`,
-`delete_note`. There is no `create_note` or `update_note`: the agent
-Writes the file, then optionally calls `resync_note` to pin freshness
+`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`
+(title), `search_note_bodies` (content + ~200-char snippet),
+`find_notes_for_file` (backlinks via `captured_refs`), `delete_note`.
+There is no `create_note` or `update_note`: the agent Writes the
+file, then optionally calls `resync_note` to pin freshness
 immediately (otherwise the watcher catches up within a ~200ms
 debounce).
 
 UI: `NotesPane` (`src/ui/components/Notes/NotesPane.tsx`) is a
-left-dock `ToolWindow` — a list of notes with freshness badges and
-a `+ New` inline-input row for creating a new slug. Selecting a row
-opens the note as a center tab (`note:<slug>`) rendered by
-`NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which owns the
-view/edit/delete UI and renders bodies with `react-markdown` +
-`remark-gfm` + `mermaid` (mermaid fenced blocks are post-rendered
+left-dock `ToolWindow` with a debounced full-text search input and a
+recency-driven TOC ("Recently visited" / "Recently modified" / "All
+notes"); each section caps at 8 rows with a "show all" toggle. The
+freshness dot + relative-timestamp pattern is shared by all rows.
+Selecting a row opens the note as a center tab (`note:<slug>`)
+rendered by `NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which
+owns the view/edit/delete UI and renders bodies with `react-markdown`
++ `remark-gfm` + `mermaid` (mermaid fenced blocks are post-rendered
 into inline SVG). IPC surface: `listWikiNotes`, `readWikiNoteBody`,
-`writeWikiNoteBody`, `deleteWikiNote`, plus the `wiki-note.changed`
-event on the bus.
+`writeWikiNoteBody`, `deleteWikiNote`, `searchWikiNotes`, plus the
+`wiki-note.changed` event on the bus. Full-text search is backed by
+the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
+delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
+returns ranked results with `<mark>…</mark>`-highlighted snippets.
+
+### `usage_event` — `UsageStore` (`src/persistence/usage-store.ts`)
+
+Generic (kind, key) usage tracking. Append-only event log with columns
+`stream_id (nullable), thread_id (nullable), kind, key, event,
+occurred_at`. Aggregates (most-recent, most-frequent, currently-open)
+are derived by query rather than stored, so adding a new "kind"
+(editor file, work item, future surfaces) needs no schema change.
+Indexes: `(kind, key, occurred_at DESC)`, `(stream_id, kind,
+occurred_at DESC)`, `(thread_id, kind, occurred_at DESC)`. Both scopes
+are recorded simultaneously — `stream_id` is the workspace tab,
+`thread_id` is the active thread within it — so consumers can roll
+up by either dimension or intersect them.
+
+The store coalesces rapid repeats: if the most recent matching
+`(kind, key, event, stream_id)` row is younger than `coalesceMs`
+(default 30s), `record()` bumps its `occurred_at` instead of inserting
+a new row. This keeps history clean when a user re-selects the same
+target several times in quick succession.
+
+Current write hookpoints (all in `src/ui/App.tsx`, all pass both
+`streamId` and `threadId`):
+
+- `wiki-note` — `handleOpenNote` records a visit when a note becomes
+  the active center tab. Drives the Notes pane's "Recently visited"
+  section via `listRecentUsage({ kind: "wiki-note", … })`.
+- `editor-file` — `handleOpenFile` records a visit when a file
+  becomes the active center tab. Not yet surfaced in UI; collected
+  for future "recent files" / "files this thread cares about" views.
+- `work-item` — `handleRequestEditWorkItem` records a visit when the
+  user opens the edit modal. Not yet surfaced.
+
+UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
+refresh on cross-window visits without polling.
 
 ## The shared `sort_index` queue
 

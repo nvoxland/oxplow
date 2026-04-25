@@ -143,6 +143,58 @@ export function buildWikiNoteMcpTools(deps: WikiNoteMcpDeps): ToolDef[] {
       },
     },
     {
+      name: "oxplow__search_note_bodies",
+      description:
+        "Substring search over wiki-note BODIES (case-insensitive). Use this when title-only search misses what you're looking for — captures content that's discussed inside a note but not named in its title. Returns slug, title, updated_at, and a ~200-char snippet around the first match. Read the note file at `.oxplow/notes/<slug>.md` for the full body.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: STREAM_ID_SCHEMA,
+          query: { type: "string", description: "Substring to match (case-insensitive)." },
+          limit: { type: "number", description: "Max results to return. Defaults to 20." },
+        },
+        required: ["query"],
+      },
+      handler: (args: BaseArgs & { query: string; limit?: number }) => {
+        const projectDir = projectDirFor(deps, args.streamId);
+        const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(args.limit, 100) : 20;
+        const results = wikiNoteStore.searchBodies(args.query, limit);
+        return {
+          notes: results.map((r) => ({
+            slug: r.slug,
+            title: r.title,
+            updated_at: r.updated_at,
+            snippet: r.snippet,
+            path: join(notesDir(projectDir), `${r.slug}.md`),
+          })),
+        };
+      },
+    },
+    {
+      name: "oxplow__find_notes_for_file",
+      description:
+        "Find existing wiki notes that reference a given workspace-relative file path. Use this before writing a new note about a file you've been exploring — if a note already covers that file, append to it instead of creating a duplicate. Path matches the captured_refs the watcher parsed from the note body.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: STREAM_ID_SCHEMA,
+          path: {
+            type: "string",
+            description: "Workspace-relative path (e.g. `src/electron/runtime.ts`).",
+          },
+        },
+        required: ["path"],
+      },
+      handler: (args: BaseArgs & { path: string }) => {
+        if (typeof args.path !== "string" || args.path.length === 0) {
+          throw new Error("path is required");
+        }
+        const projectDir = projectDirFor(deps, args.streamId);
+        const matches = wikiNoteStore.findByRefPath(args.path);
+        return { notes: matches.map((n) => summarizeNote(projectDir, n)) };
+      },
+    },
+    {
       name: "oxplow__delete_note",
       description:
         "Delete a note: removes both the markdown file at `.oxplow/notes/<slug>.md` and the metadata row.",

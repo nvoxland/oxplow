@@ -9,6 +9,11 @@ import {
   buildRuntimeSkill,
   buildSubagentProtocolSkill,
 } from "./agent-skills.js";
+import {
+  WIKI_CAPTURE_SKILL_NAME,
+  WIKI_CAPTURE_SKILL_FILE,
+  buildWikiCaptureSkill,
+} from "./wiki-capture-skill.js";
 
 export interface ElectronPluginOptions {
   /** Project dir. The plugin is written to
@@ -41,6 +46,8 @@ export interface ElectronPlugin {
   taskDispatchSkillPath: string;
   /** Absolute path to the subagent work-protocol SKILL.md. */
   subagentProtocolSkillPath: string;
+  /** Absolute path to the wiki-capture SKILL.md. */
+  wikiCaptureSkillPath: string;
 }
 
 // SessionStart is registered but Claude Code silently drops HTTP hooks for
@@ -137,6 +144,15 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const subagentProtocolSkillPath = join(subagentProtocolDir, SUBAGENT_PROTOCOL_SKILL_FILE);
   writeFileSync(subagentProtocolSkillPath, buildSubagentProtocolSkill(), "utf8");
 
+  // Wiki-capture skill — fires when the agent uses the wiki MCP tools or
+  // when the user prompt looks like a code-exploration question. Carries
+  // the find-or-create flow + body conventions so a new note doesn't
+  // fragment off an existing topic.
+  const wikiCaptureDir = join(pluginDir, "skills", WIKI_CAPTURE_SKILL_NAME);
+  mkdirSync(wikiCaptureDir, { recursive: true });
+  const wikiCaptureSkillPath = join(wikiCaptureDir, WIKI_CAPTURE_SKILL_FILE);
+  writeFileSync(wikiCaptureSkillPath, buildWikiCaptureSkill(), "utf8");
+
   return {
     pluginDir,
     hooksPath,
@@ -147,6 +163,7 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     taskLifecycleSkillPath,
     taskDispatchSkillPath,
     subagentProtocolSkillPath,
+    wikiCaptureSkillPath,
   };
 }
 

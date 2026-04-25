@@ -97,11 +97,19 @@ export interface WikiNoteChangedEvent {
   slug: string | null;
 }
 
+export interface UsageRecordedEvent {
+  type: "usage.recorded";
+  kind: string;
+  key: string;
+  streamId: string | null;
+  threadId: string | null;
+}
+
 export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
   snapshotId: string;
-  kind: "task-start" | "task-end" | "startup";
+  kind: "task-start" | "task-end" | "task-event" | "startup";
   effortId: string | null;
   threadId: string | null;
 }
@@ -120,7 +128,8 @@ export type OxplowEvent =
   | GitRefsChangedEvent
   | StreamChangedEvent
   | ConfigChangedEvent
-  | WikiNoteChangedEvent;
+  | WikiNoteChangedEvent
+  | UsageRecordedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

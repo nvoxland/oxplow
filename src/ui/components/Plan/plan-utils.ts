@@ -83,6 +83,51 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   }
 }
 
+/**
+ * Effective section for an epic, derived from its children's statuses.
+ * Epics move between sections as a block — the epic + all its children
+ * render together under whichever section the rollup picks. Children
+ * retain their literal statuses (badges, drag rules, etc.); only the
+ * epic's *placement* changes.
+ *
+ * Priority order:
+ *   1. any child blocked → blocked
+ *   2. all children terminal (done/canceled/archived) → done
+ *   3. all children human_check → humanCheck
+ *   4. any child in_progress, or any done child mixed with non-done
+ *      non-blocked siblings → inProgress
+ *   5. all children ready → toDo
+ *
+ * Edge cases: an epic with no children falls back to its own literal
+ * status; an empty epic that's `ready` goes to To Do, etc.
+ */
+export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSectionKind {
+  if (children.length === 0) return classifyWorkItem(epic.status);
+  let anyBlocked = false;
+  let anyInProgress = false;
+  let anyDone = false;
+  let allTerminal = true;
+  let allHumanCheck = true;
+  let allReady = true;
+  for (const child of children) {
+    const s = child.status;
+    if (s === "blocked") anyBlocked = true;
+    if (s === "in_progress") anyInProgress = true;
+    if (s === "done" || s === "canceled" || s === "archived") anyDone = true;
+    if (s !== "done" && s !== "canceled" && s !== "archived") allTerminal = false;
+    if (s !== "human_check") allHumanCheck = false;
+    if (s !== "ready") allReady = false;
+  }
+  if (anyBlocked) return "blocked";
+  if (allTerminal) return "done";
+  if (allHumanCheck) return "humanCheck";
+  if (anyInProgress || anyDone) return "inProgress";
+  if (allReady) return "toDo";
+  // Fallback: mixed ready/human_check with no started or done items —
+  // treat as in-progress so review-pending work doesn't hide in To Do.
+  return "inProgress";
+}
+
 // Default landing status when a work item is dragged *into* a section. Returns
 // null for inProgress: the agent owns that status, and in-progress items are
 // drag-locked anyway, so we don't let users promote items into it by drop.
@@ -94,6 +139,22 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
     case "blocked": return "blocked";
     case "done": return "done";
   }
+}
+
+/**
+ * Classify a row for section placement, applying epic rollup when the
+ * row is an epic. Non-epics use their literal status. Pass the
+ * epicChildrenMap from `buildGroups` so the rollup sees the same
+ * children the renderer will display.
+ */
+export function classifyRow(
+  item: WorkItem,
+  epicChildrenMap: Map<string, WorkItem[]>,
+): WorkItemSectionKind {
+  if (item.kind === "epic") {
+    return classifyEpic(item, epicChildrenMap.get(item.id) ?? []);
+  }
+  return classifyWorkItem(item.status);
 }
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
@@ -199,10 +260,10 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
     if (item.kind === "epic") continue;
     if (item.parent_id && epicIdSet.has(item.parent_id)) {
       epicChildrenMap.get(item.parent_id)!.push(item);
-      // in_progress children also surface in the top-level In Progress section
-      // so they're visible without expanding the epic. All other statuses stay
-      // exclusively inside the epic pane.
-      if (item.status === "in_progress") rootItems.push(item);
+      // Children render exclusively inside the epic pane; the epic
+      // itself moves between sections as a block based on its rollup
+      // (`classifyEpic`), bringing its expand toggle + child rows with
+      // it. No surface-to-root lift.
     } else {
       rootItems.push(item);
     }

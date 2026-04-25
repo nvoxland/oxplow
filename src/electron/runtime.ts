@@ -63,6 +63,7 @@ import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-s
 import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
 import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
+import { UsageStore } from "../persistence/usage-store.js";
 import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
@@ -108,6 +109,7 @@ export class ElectronRuntime {
   private readonly workItemStore: WorkItemStore;
   readonly commitPointStore: CommitPointStore;
   readonly wikiNoteStore: WikiNoteStore;
+  readonly usageStore: UsageStore;
   private notesWatcher: NotesWatcher | null = null;
   readonly waitPointStore: WaitPointStore;
   readonly threadQueue: ThreadQueueOrchestrator;
@@ -162,6 +164,21 @@ export class ElectronRuntime {
    *  those nudges produces a visual loop where the parent acks each
    *  Stop while still waiting on the subagent. See wi-593a50b62e22. */
   private readonly pendingSubagentsByThread = new Map<string, number>();
+  /** Per-thread read/write counters for the current turn. Bumped by
+   *  PostToolUse: reads on Read/Grep/Glob and read-only Bash, writes on
+   *  any write-intent tool (Edit/Write/MultiEdit/non-readonly Bash).
+   *  Read on Stop together with `turnHadActivity` to derive
+   *  `turnWasExploration` (reads >= 2 && writes === 0). Cleared on
+   *  UserPromptSubmit alongside `turnActivityByThread`. */
+  private readonly turnReadWriteByThread = new Map<string, { reads: number; writes: number }>();
+  /** Per-thread guard against firing the wiki-capture directive twice in
+   *  a row. Set when the directive is emitted; cleared on
+   *  UserPromptSubmit. The capture turn itself runs Write tools so
+   *  `turnHadActivity` flips true on its Stop and the directive wouldn't
+   *  re-fire anyway — but if the agent replies `oxplow-note: skipped`
+   *  with no tool calls, this prevents the directive from re-emitting
+   *  on the same prompt. */
+  private readonly lastEmittedWikiCaptureByThread = new Set<string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -193,6 +210,7 @@ export class ElectronRuntime {
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
+    this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
     this.notesWatcher = new NotesWatcher(
       projectDir,
       this.wikiNoteStore,
@@ -358,6 +376,15 @@ export class ElectronRuntime {
           change.touchedFiles,
         );
       }
+      if (change.kind === "created") {
+        // Capture a task-event snapshot on creation so Local History
+        // shows the moment the row appeared. Gap-gated by the same 5-min
+        // rule as task-end (see applyStatusTransition) — back-to-back
+        // creates / status changes don't pile up near-identical rows.
+        const lastSnapTs = this.snapshotStore.getMostRecentSnapshotTimestampForStream(thread.stream_id);
+        const skip = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
+        if (!skip) this.safeFlushSnapshot(thread.stream_id, "task-event", null);
+      }
       this.events.publish({
         type: "work-item.changed",
         streamId: thread.stream_id,
@@ -402,6 +429,15 @@ export class ElectronRuntime {
         type: "wiki-note.changed",
         kind: change.kind,
         slug: change.slug,
+      });
+    });
+    this.usageStore.subscribe((change) => {
+      this.events.publish({
+        type: "usage.recorded",
+        kind: change.kind,
+        key: change.key,
+        streamId: change.streamId,
+        threadId: change.threadId,
       });
     });
 
@@ -1517,6 +1553,13 @@ export class ElectronRuntime {
         if (activityToolName && envelope.threadId && isActivityTool(activityToolName, payload.tool_input)) {
           this.turnActivityByThread.set(envelope.threadId, true);
         }
+        if (activityToolName && envelope.threadId) {
+          const counters = this.turnReadWriteByThread.get(envelope.threadId)
+            ?? { reads: 0, writes: 0 };
+          if (isReadIntentTool(activityToolName, payload.tool_input)) counters.reads += 1;
+          else if (isWriteIntentTool(activityToolName, payload.tool_input)) counters.writes += 1;
+          this.turnReadWriteByThread.set(envelope.threadId, counters);
+        }
         // Match a PreToolUse for `Task` (subagent dispatch) — decrement
         // the per-thread pending-subagent counter so the Stop-hook
         // suppression lifts once the subagent returns.
@@ -1556,7 +1599,14 @@ export class ElectronRuntime {
       // Seed the per-turn activity flag — flips to true on the first
       // qualifying PostToolUse. Read on Stop to suppress the full
       // directive pipeline for pure Q&A turns.
-      if (envelope.threadId) this.turnActivityByThread.set(envelope.threadId, false);
+      if (envelope.threadId) {
+        this.turnActivityByThread.set(envelope.threadId, false);
+        // Reset the per-turn read/write counters for the wiki-capture
+        // exploration heuristic, and clear the "just emitted capture"
+        // suppression flag so a fresh prompt is allowed to re-trigger.
+        this.turnReadWriteByThread.set(envelope.threadId, { reads: 0, writes: 0 });
+        this.lastEmittedWikiCaptureByThread.delete(envelope.threadId);
+      }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
       // very recently, there's a strong chance this new prompt is either
@@ -1666,6 +1716,14 @@ export class ElectronRuntime {
     // tests / edge cases stay stable.
     const turnHadActivity = this.turnActivityByThread.get(threadId);
     this.turnActivityByThread.delete(threadId);
+    // Derive the wiki-capture exploration flag from the per-turn read/write
+    // counters: a read-heavy turn (≥2 reads) with zero writes counts as
+    // exploration. Counters are cleared together with the activity flag so
+    // they don't leak into the next turn.
+    const counters = this.turnReadWriteByThread.get(threadId);
+    this.turnReadWriteByThread.delete(threadId);
+    const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
+    const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1676,6 +1734,8 @@ export class ElectronRuntime {
       justReadReadySet,
       worktreeClean,
       turnHadActivity,
+      turnWasExploration,
+      justEmittedWikiCapture,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
     };
     // The item's own thread_id is what matters for the directive text (not
@@ -1691,7 +1751,17 @@ export class ElectronRuntime {
       buildNextWorkItemReason: (item) =>
         buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId),
       buildInProgressAuditReason: buildInProgressAuditStopReason,
+      buildWikiCaptureReason: buildWikiCaptureStopReason,
     });
+    // If the wiki-capture directive fired, latch the suppression flag so
+    // we don't re-emit on the same prompt (cleared on UserPromptSubmit).
+    if (
+      outcome.directive &&
+      snapshot.turnHadActivity === false &&
+      snapshot.turnWasExploration === true
+    ) {
+      this.lastEmittedWikiCaptureByThread.add(threadId);
+    }
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "trigger-wait-point") {
         try { this.waitPointStore.trigger(effect.id); } catch (err) {
@@ -1955,6 +2025,7 @@ export class ElectronRuntime {
     changed_refs: string[];
     deleted_refs: string[];
     total_refs: number;
+    referenced_files: string[];
   }> {
     const stream = this.resolveStream(streamId);
     const projectDir = stream.worktree_path;
@@ -1974,6 +2045,7 @@ export class ElectronRuntime {
         changed_refs: freshness.changedRefs,
         deleted_refs: freshness.deletedRefs,
         total_refs: freshness.totalRefs,
+        referenced_files: n.captured_refs.map((r) => r.path),
       };
     });
   }
@@ -2004,6 +2076,37 @@ export class ElectronRuntime {
       rmSync(path, { force: true });
     } catch {}
     this.wikiNoteStore.deleteBySlug(slug);
+  }
+
+  searchWikiNotes(_streamId: string, query: string, limit?: number): Array<{
+    slug: string;
+    title: string;
+    snippet: string;
+    updated_at: string;
+  }> {
+    return this.wikiNoteStore.searchBodies(query, limit);
+  }
+
+  // -------- generic usage tracking (IPC-exposed) --------
+
+  recordUsage(input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }): void {
+    this.usageStore.record(input);
+  }
+
+  listRecentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Array<{ key: string; last_at: string; count: number }> {
+    return this.usageStore.mostRecent(input);
+  }
+
+  listFrequentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Array<{ key: string; last_at: string; count: number }> {
+    return this.usageStore.mostFrequent(input);
+  }
+
+  listCurrentlyOpenUsage(input: { kind: string; streamId?: string | null; threadId?: string | null }): string[] {
+    return this.usageStore.currentlyOpen(input);
+  }
+
+  getWorkItemSummaries(ids: string[]) {
+    return this.workItemStore.getSummariesByIds(ids);
   }
 
   // -------- commit points (IPC-exposed delegations) --------
@@ -2230,6 +2333,31 @@ export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
     `Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
   ];
   return lines.join("\n");
+}
+
+/**
+ * Stop-hook directive text for the wiki-capture branch. Fires on
+ * read-heavy / no-write turns (`turnHadActivity === false`,
+ * `turnWasExploration === true`). The agent is expected to follow the
+ * `oxplow-wiki-capture` skill: search existing notes, decide append vs
+ * new, write the body to `.oxplow/notes/<slug>.md`, then call
+ * `mcp__oxplow__resync_note`. The escape hatch (`oxplow-note: skipped`)
+ * is honoured implicitly: the suppression flag latches when the
+ * directive fires and clears on the next user prompt, so a "skipped"
+ * reply doesn't loop.
+ */
+export function buildWikiCaptureStopReason(): string {
+  return [
+    `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
+    ``,
+    `Follow the \`oxplow-wiki-capture\` skill:`,
+    `1. Search existing notes by title (\`oxplow__search_notes\`), body content (\`oxplow__search_note_bodies\`), and file backlinks (\`oxplow__find_notes_for_file\` for each non-trivial file you read this turn).`,
+    `2. If a clearly-relevant note already covers the topic, append a new \`## <yyyy-mm-dd> — <focus>\` section. Only create a new note if no topic match.`,
+    `3. Write the body to \`.oxplow/notes/<slug>.md\` (kebab-case slug, ≤50 chars, topic-shaped).`,
+    `4. Call \`mcp__oxplow__resync_note\` to pin freshness.`,
+    ``,
+    `If the exploration was genuinely too trivial to capture (a single-file lookup with no synthesis), reply with the single line \`oxplow-note: skipped\` and stop — that's the escape hatch.`,
+  ].join("\n");
 }
 
 export function buildCommitPointStopReason(cp: CommitPoint): string {
@@ -2589,6 +2717,16 @@ export function applyStatusTransition(
         }
       }
     }
+  } else if (previous && next && previous !== next) {
+    // Any other status transition (e.g. ready ↔ blocked, human_check →
+    // done, etc.) where neither side is `in_progress`. No effort opens
+    // or closes, but capture the worktree state with a `task-event`
+    // snapshot so the user sees these moments in Local History. Same
+    // 5-minute gap rule as task-end so back-to-back changes don't pile
+    // up near-identical rows.
+    const lastSnapTs = deps.getMostRecentSnapshotTimestamp?.() ?? null;
+    const skip = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
+    if (!skip) deps.flushSnapshot("task-event", { effortId: null });
   }
 }
 
@@ -2728,6 +2866,23 @@ const READONLY_BASH_TWO_WORD: ReadonlySet<string> = new Set([
  * positives are cheap (an extra auto-filed item) — we err toward
  * write-intent when unsure so we don't miss genuine edits.
  */
+/** Tools that count as "read activity" for the wiki-capture exploration
+ *  heuristic. Read/Grep/Glob always count; Bash counts only when its
+ *  command starts with a known read-only verb (same allowlist used by
+ *  `isWriteIntentTool` for the inverse decision). MCP read tools that
+ *  aren't filing/dispatch are intentionally excluded — those don't
+ *  represent code exploration. */
+const ALWAYS_READ_INTENT_TOOLS: ReadonlySet<string> = new Set([
+  "Read", "Grep", "Glob",
+]);
+
+export function isReadIntentTool(toolName: string, toolInput: unknown): boolean {
+  if (ALWAYS_READ_INTENT_TOOLS.has(toolName)) return true;
+  if (toolName !== "Bash") return false;
+  // Read-only Bash counts as a read; write-intent Bash doesn't.
+  return !isWriteIntentTool(toolName, toolInput);
+}
+
 export function isWriteIntentTool(toolName: string, toolInput: unknown): boolean {
   if (ALWAYS_WRITE_INTENT_TOOLS.has(toolName)) return true;
   if (toolName !== "Bash") return false;

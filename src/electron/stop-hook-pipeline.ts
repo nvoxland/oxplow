@@ -77,6 +77,19 @@ export interface ThreadSnapshot {
    *  suppress" so behaviour stays stable when the activity flag wasn't
    *  threaded through (older tests, missing UserPromptSubmit, etc.). */
   turnHadActivity?: boolean;
+  /** True when the turn read code (Read/Grep/Glob, read-only Bash) at
+   *  least twice and produced zero write-intent activity. Combined with
+   *  `turnHadActivity === false` this is the wiki-capture trigger: a
+   *  read-heavy Q&A turn the agent should durably capture before stopping.
+   *  Only checked when `turnHadActivity` is false; ignored otherwise so
+   *  edits/commits still take precedence on real-work turns. */
+  turnWasExploration?: boolean;
+  /** True when the wiki-capture directive already fired earlier on this
+   *  thread and hasn't been cleared by a fresh user prompt. Suppresses a
+   *  second emission so the agent isn't asked to capture twice in a row
+   *  (the first emission either produced a note or got the agent's
+   *  `oxplow-note: skipped` reply; either way it's settled). */
+  justEmittedWikiCapture?: boolean;
 }
 
 export interface StopDirective {
@@ -106,6 +119,10 @@ export function decideStopDirective(
      *  is null). Optional so callers that don't route through the
      *  runtime (some unit tests) still work. */
     buildAutoCommitReason?: (cp: CommitPoint | null) => string;
+    /** Emitted for read-heavy / no-write turns when wiki-capture is
+     *  enabled. Optional so callers that don't wire this up (older tests)
+     *  fall through to the plain Q&A "allow stop" path. */
+    buildWikiCaptureReason?: () => string;
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
@@ -116,7 +133,26 @@ export function decideStopDirective(
   // ready-work) so the agent stays stopped until the user replies. The
   // wait-point side-effect is also skipped; it'll fire on the next turn
   // that actually does work.
+  //
+  // EXCEPTION: read-heavy exploration turns (`turnWasExploration`) get
+  // the wiki-capture directive — the agent answered a "how does X work"
+  // question and should durably capture findings into `.oxplow/notes/`
+  // before the conversation moves on. The capture turn re-enters the
+  // pipeline with `turnHadActivity === true` (it ran Write), so the
+  // directive only fires once. `justEmittedWikiCapture` guards against
+  // a second emission within the same user prompt.
   if (snapshot.turnHadActivity === false) {
+    if (
+      snapshot.turnWasExploration === true &&
+      !snapshot.justEmittedWikiCapture &&
+      snapshot.thread?.status === "active" &&
+      builders.buildWikiCaptureReason
+    ) {
+      return {
+        directive: { decision: "block", reason: builders.buildWikiCaptureReason() },
+        sideEffects,
+      };
+    }
     return { directive: null, sideEffects };
   }
 

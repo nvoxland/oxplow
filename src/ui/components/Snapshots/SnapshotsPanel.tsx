@@ -450,8 +450,15 @@ function snapshotLabel(snap: FileSnapshot): string {
       return "Task started";
     case "task-end":
       return "Task ended";
+    case "task-event":
+      // Task created or status changed (non-in_progress transition).
+      // Gap-gated like task-end so back-to-back events don't pile up.
+      return "Task update";
     case "startup":
-      return "App startup";
+      // Startup snapshots capture changes that happened while the app
+      // was down — the source is "startup" but semantically these are
+      // external (non-agent) edits to the worktree.
+      return "External changes";
     default:
       return "Snapshot";
   }

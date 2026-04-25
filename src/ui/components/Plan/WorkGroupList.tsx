@@ -3,7 +3,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AgentStatus, CommitPoint, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
-  classifyWorkItem,
+  classifyRow,
   finalizeReorderIds,
   sectionDefaultStatus,
   miniButtonStyle,
@@ -145,7 +145,11 @@ export function WorkGroupList({
     };
     for (const row of work) {
       if (row.kind !== "work") continue;
-      buckets[classifyWorkItem(row.item.status)].push(row);
+      // Epics roll up their children's statuses into an effective section
+      // (`classifyEpic`) so the epic + its children render as one block in
+      // whichever section the rollup picks. Non-epics use their literal
+      // status. See plan-utils.ts.
+      buckets[classifyRow(row.item, epicChildrenMap)].push(row);
     }
     // Commit / wait points only belong to the To do section — they represent
     // a future action. Done / triggered markers are historical; hide them so
@@ -216,15 +220,19 @@ export function WorkGroupList({
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
-      const fromSection = classifyWorkItem(dragged.item.status);
-      const toSection = classifyWorkItem(target.item.status);
-      if (fromSection !== toSection) {
+      const fromSection = classifyRow(dragged.item, epicChildrenMap);
+      const toSection = classifyRow(target.item, epicChildrenMap);
+      // Epics never carry a literal status of their own — their section
+      // is computed from children. Don't try to mutate an epic's status
+      // when it crosses a section boundary; the rollup will follow once
+      // its children change.
+      if (fromSection !== toSection && dragged.item.kind !== "epic") {
         const nextStatus = sectionDefaultStatus(toSection);
         if (nextStatus) {
           if (isMultiDrag && markedIds) {
             for (const id of markedIds) {
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
-              if (row && row.kind === "work" && row.item.status !== nextStatus) {
+              if (row && row.kind === "work" && row.item.kind !== "epic" && row.item.status !== nextStatus) {
                 void onUpdateWorkItem(id, { status: nextStatus });
                 statusOverrides.set(id, nextStatus);
               }
@@ -242,7 +250,7 @@ export function WorkGroupList({
     // overriding the insert position to the head of the Done bucket in the
     // reordered list (Done renders descending, so "top" = index 0 of the
     // Done run in visual order).
-    const targetSection = target.kind === "work" ? classifyWorkItem(target.item.status) : null;
+    const targetSection = target.kind === "work" ? classifyRow(target.item, epicChildrenMap) : null;
     const dropsIntoDone = targetSection === "done";
 
     // Reorder: multi-drag moves all marked rows as a block to the drop position.
@@ -257,7 +265,7 @@ export function WorkGroupList({
         // visually, since Done renders descending). If there's no Done row
         // yet, append — this is the first Done item.
         const doneIdx = unmarked.findIndex(
-          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+          (r) => r.kind === "work" && classifyRow(r.item, epicChildrenMap) === "done",
         );
         insertAt = doneIdx < 0 ? unmarked.length : doneIdx;
       } else {
@@ -270,7 +278,7 @@ export function WorkGroupList({
       const [moved] = next.splice(from, 1);
       if (dropsIntoDone) {
         const doneIdx = next.findIndex(
-          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+          (r) => r.kind === "work" && classifyRow(r.item, epicChildrenMap) === "done",
         );
         const insertAt = doneIdx < 0 ? next.length : doneIdx;
         next.splice(insertAt, 0, moved!);
@@ -318,12 +326,19 @@ export function WorkGroupList({
     const nextStatus = sectionDefaultStatus(section);
     resetDrag();
     if (!nextStatus) return;
-    if (classifyWorkItem(draggedWorkItem.status) === section) return;
+    // Epics never carry a literal status — their section is computed
+    // from children. Section drops on an epic are no-ops.
+    if (draggedWorkItem.kind === "epic") return;
+    if (classifyRow(draggedWorkItem, epicChildrenMap) === section) return;
     const isMultiDrag = markedIds && markedIds.has(draggedWorkItem.id) && markedIds.size > 1;
     if (isMultiDrag && markedIds) {
       for (const id of markedIds) {
         const row = allRows.find((r) => r.kind === "work" && r.id === id);
-        if (row && row.kind === "work" && classifyWorkItem(row.item.status) !== section) {
+        if (
+          row && row.kind === "work" &&
+          row.item.kind !== "epic" &&
+          classifyRow(row.item, epicChildrenMap) !== section
+        ) {
           void onUpdateWorkItem(id, { status: nextStatus });
         }
       }
@@ -337,7 +352,7 @@ export function WorkGroupList({
     // Human Check / Done drops always land at the top of the section, so a
     // between-rows indicator on those targets would lie about where the
     // dragged item will end up. Suppress it there.
-    const targetSection = row.kind === "work" ? classifyWorkItem(row.item.status) : null;
+    const targetSection = row.kind === "work" ? classifyRow(row.item, epicChildrenMap) : null;
     const suppressDropLine = targetSection === "humanCheck" || targetSection === "done";
     const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
@@ -553,7 +568,8 @@ export function WorkGroupList({
         }
         const canDrop = !!draggedWorkItem
           && section.kind !== "inProgress"
-          && classifyWorkItem(draggedWorkItem.status) !== section.kind;
+          && draggedWorkItem.kind !== "epic"
+          && classifyRow(draggedWorkItem, epicChildrenMap) !== section.kind;
         const isOverSection = canDrop && overSection === section.kind;
         const headerDropHandlers = canDrop
           ? {
@@ -642,11 +658,9 @@ export function WorkGroupList({
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     {section.kind === "inProgress"
-                      ? (isActive === false
-                          ? "<NOT ACTIVE>"
-                          : (agentStatus === "working"
-                              ? <span><BrailleSpinner /> Thinking...</span>
-                              : "Waiting"))
+                      ? (isActive !== false && agentStatus === "working"
+                          ? <span><BrailleSpinner /> Thinking...</span>
+                          : "Waiting")
                       : "(nothing here)"}
                   </div>
                 ) : null}

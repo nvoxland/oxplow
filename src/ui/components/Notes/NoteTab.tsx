@@ -35,9 +35,10 @@ interface Props {
   slug: string;
   onClosed: () => void;
   onOpenNoteInNewTab: (slug: string) => void;
+  onOpenFile: (path: string) => void;
 }
 
-export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTab }: Props) {
+export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTab, onOpenFile }: Props) {
   const [history, setHistory] = useState<string[]>([initialSlug]);
   const [historyIdx, setHistoryIdx] = useState(0);
   const currentSlug = history[historyIdx] ?? initialSlug;
@@ -268,7 +269,82 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
           />
         )}
       </div>
+      {!notFound && !loadError && summary && summary.referenced_files.length > 0 && (
+        <BacklinksFooter
+          summary={summary}
+          onOpenFile={onOpenFile}
+        />
+      )}
     </div>
+  );
+}
+
+function BacklinksFooter({
+  summary,
+  onOpenFile,
+}: {
+  summary: WikiNoteSummary;
+  onOpenFile: (path: string) => void;
+}) {
+  const changed = useMemo(() => new Set(summary.changed_refs), [summary.changed_refs]);
+  const deleted = useMemo(() => new Set(summary.deleted_refs), [summary.deleted_refs]);
+  return (
+    <footer
+      style={{
+        borderTop: "1px solid var(--color-border, #333)",
+        padding: "6px 10px",
+        fontSize: 12,
+        color: "var(--color-text-muted, #888)",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6,
+        alignItems: "center",
+      }}
+    >
+      <span>
+        Referenced file{summary.referenced_files.length === 1 ? "" : "s"} ({summary.referenced_files.length}):
+      </span>
+      {summary.referenced_files.map((path) => {
+        const status = deleted.has(path) ? "deleted" : changed.has(path) ? "changed" : "fresh";
+        const color =
+          status === "deleted"
+            ? "var(--color-status-error, #c95a5a)"
+            : status === "changed"
+              ? "var(--color-status-warn, #c99a4a)"
+              : "var(--color-text, #ddd)";
+        return (
+          <button
+            key={path}
+            type="button"
+            onClick={() => {
+              if (status === "deleted") return;
+              onOpenFile(path);
+            }}
+            disabled={status === "deleted"}
+            title={
+              status === "deleted"
+                ? `${path} (deleted from workspace)`
+                : status === "changed"
+                  ? `${path} (changed since this note was written)`
+                  : `Open ${path}`
+            }
+            style={{
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: 11,
+              padding: "1px 6px",
+              borderRadius: 3,
+              border: "1px solid var(--color-border, #333)",
+              background: "transparent",
+              color,
+              cursor: status === "deleted" ? "not-allowed" : "pointer",
+              textDecoration: status === "deleted" ? "line-through" : "none",
+            }}
+          >
+            {path}
+          </button>
+        );
+      })}
+    </footer>
   );
 }
 

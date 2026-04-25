@@ -10,6 +10,7 @@ const builders = {
   buildNextWorkItemReason: (item: WorkItem) => `next: ${item.id}`,
   buildInProgressAuditReason: (items: WorkItem[]) =>
     `audit: ${items.map((i) => i.id).join(",")}`,
+  buildWikiCaptureReason: () => "wiki-capture",
 };
 
 function thread(overrides: Partial<Thread> = {}): Thread {
@@ -150,6 +151,65 @@ describe("decideStopDirective", () => {
     const out = decideStopDirective(snapshot({}), builders);
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
+  });
+
+  test("read-heavy Q&A turn (turnWasExploration=true) emits the wiki-capture directive", () => {
+    const out = decideStopDirective(
+      snapshot({ turnHadActivity: false, turnWasExploration: true }),
+      builders,
+    );
+    expect(out.directive).toEqual({ decision: "block", reason: "wiki-capture" });
+  });
+
+  test("wiki-capture directive is suppressed when justEmittedWikiCapture is true", () => {
+    const out = decideStopDirective(
+      snapshot({
+        turnHadActivity: false,
+        turnWasExploration: true,
+        justEmittedWikiCapture: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("wiki-capture directive only fires on active threads", () => {
+    const out = decideStopDirective(
+      snapshot({
+        thread: thread({ status: "queued" }),
+        turnHadActivity: false,
+        turnWasExploration: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("wiki-capture directive only fires when turnHadActivity is false (real-work turns take precedence)", () => {
+    const inProgress = workItem("w1", 0, "in_progress");
+    const out = decideStopDirective(
+      snapshot({
+        workItems: [inProgress],
+        turnHadActivity: true,
+        turnWasExploration: true,
+      }),
+      builders,
+    );
+    // Real-work turn → audit branch wins, capture is ignored.
+    expect(out.directive).toEqual({ decision: "block", reason: "audit: w1" });
+  });
+
+  test("wiki-capture is skipped when buildWikiCaptureReason isn't wired (older callers)", () => {
+    const out = decideStopDirective(
+      snapshot({ turnHadActivity: false, turnWasExploration: true }),
+      {
+        buildCommitPointReason: builders.buildCommitPointReason,
+        buildNextWorkItemReason: builders.buildNextWorkItemReason,
+        buildInProgressAuditReason: builders.buildInProgressAuditReason,
+        // no buildWikiCaptureReason
+      },
+    );
+    expect(out.directive).toBeNull();
   });
 
   test("Q&A turn (turnHadActivity=false) suppresses every directive", () => {

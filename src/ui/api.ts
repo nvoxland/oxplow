@@ -90,6 +90,7 @@ export interface WorkItemEvent {
 export type SnapshotSource =
   | "task-start"
   | "task-end"
+  | "task-event"
   | "startup";
 
 export interface FileSnapshot {
@@ -576,6 +577,8 @@ export async function listCommitPoints(threadId: string): Promise<import("../per
 }
 
 export type WikiNoteSummary = import("../electron/ipc-contract.js").WikiNoteSummary;
+export type WikiNoteSearchHit = import("../electron/ipc-contract.js").WikiNoteSearchHit;
+export type UsageRollup = import("../electron/ipc-contract.js").UsageRollup;
 
 export async function listWikiNotes(streamId: string): Promise<WikiNoteSummary[]> {
   return desktopApi().listWikiNotes(streamId);
@@ -596,6 +599,76 @@ export async function deleteWikiNote(streamId: string, slug: string): Promise<vo
 export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
   return subscribeOxplowEvents((event) => {
     if (event.type === "wiki-note.changed") onEvent();
+  });
+}
+
+export async function searchWikiNotes(
+  streamId: string,
+  query: string,
+  limit?: number,
+): Promise<WikiNoteSearchHit[]> {
+  return desktopApi().searchWikiNotes(streamId, query, limit);
+}
+
+export async function recordUsage(input: {
+  kind: string;
+  key: string;
+  event?: string;
+  streamId?: string | null;
+  threadId?: string | null;
+}): Promise<void> {
+  return desktopApi().recordUsage(input);
+}
+
+export async function listRecentUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+  limit?: number;
+  since?: string;
+}): Promise<UsageRollup[]> {
+  return desktopApi().listRecentUsage(input);
+}
+
+export async function listFrequentUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+  limit?: number;
+  since?: string;
+}): Promise<UsageRollup[]> {
+  return desktopApi().listFrequentUsage(input);
+}
+
+export async function listCurrentlyOpenUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+}): Promise<string[]> {
+  return desktopApi().listCurrentlyOpenUsage(input);
+}
+
+export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
+  id: string;
+  title: string;
+  status: import("../persistence/work-item-store.js").WorkItemStatus;
+  thread_id: string | null;
+}>> {
+  return desktopApi().getWorkItemSummaries(ids);
+}
+
+/**
+ * Subscribe to `usage.recorded` events. Optionally filter by `kind` so a
+ * Notes-pane consumer only refetches on wiki-note visits.
+ */
+export function subscribeUsageEvents(
+  onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
+  filter?: { kind?: string },
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type !== "usage.recorded") return;
+    if (filter?.kind && event.kind !== filter.kind) return;
+    onEvent({ kind: event.kind, key: event.key, streamId: event.streamId, threadId: event.threadId });
   });
 }
 

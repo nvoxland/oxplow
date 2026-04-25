@@ -303,6 +303,29 @@ export class WorkItemStore {
     return row ? toWorkItem(row) : null;
   }
 
+  /**
+   * Thread-agnostic lookup of `{id, title, status, thread_id}` for a set
+   * of item ids. Skips deleted rows. Used by the recent-activity surfaces
+   * that need to render usage events as titles regardless of which thread
+   * the item currently belongs to (or whether it's now in the backlog).
+   */
+  getSummariesByIds(ids: string[]): Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }> {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.stateDb.all<{ id: string; title: string; status: string; thread_id: string | null }>(
+      `SELECT id, title, status, thread_id
+         FROM work_items
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+      ...ids,
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: requireWorkItemStatus(r.status),
+      thread_id: r.thread_id,
+    }));
+  }
+
   getItem(threadId: string, itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       `SELECT work_items.*,

@@ -138,4 +138,65 @@ describe("wiki note MCP tools", () => {
     expect(entry).toBeDefined();
     expect(readFileSync(entry.path, "utf8")).toContain("body");
   });
+
+  test("search_note_bodies finds matches in note body and returns snippets", async () => {
+    writeFileSync(
+      join(projectDir, ".oxplow", "notes", "stop.md"),
+      "# Stop hook\n\nThe stop-hook pipeline runs in priority order.",
+    );
+    writeFileSync(
+      join(projectDir, ".oxplow", "notes", "queue.md"),
+      "# Queue\n\nSort_index keeps work and commit points ordered.",
+    );
+    syncNoteFromDisk(projectDir, store, "stop");
+    syncNoteFromDisk(projectDir, store, "queue");
+    const tool = findTool(tools, "oxplow__search_note_bodies");
+    const out: any = await tool.handler({ query: "PIPELINE" });
+    expect(out.notes.length).toBe(1);
+    expect(out.notes[0].slug).toBe("stop");
+    expect(out.notes[0].snippet.toLowerCase()).toContain("pipeline");
+    expect(out.notes[0].path.endsWith("stop.md")).toBe(true);
+  });
+
+  test("search_note_bodies respects limit", async () => {
+    for (const slug of ["a", "b", "c"]) {
+      writeFileSync(join(projectDir, ".oxplow", "notes", `${slug}.md`), `# ${slug}\n\ncommon-token`);
+      syncNoteFromDisk(projectDir, store, slug);
+    }
+    const tool = findTool(tools, "oxplow__search_note_bodies");
+    const out: any = await tool.handler({ query: "common-token", limit: 2 });
+    expect(out.notes.length).toBe(2);
+  });
+
+  test("find_notes_for_file returns notes that reference the given path", async () => {
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    writeFileSync(join(projectDir, "src", "foo.ts"), "x");
+    writeFileSync(join(projectDir, "src", "bar.ts"), "y");
+    writeFileSync(
+      join(projectDir, ".oxplow", "notes", "n1.md"),
+      "# N1\n\nSee src/foo.ts for the entry point.",
+    );
+    writeFileSync(
+      join(projectDir, ".oxplow", "notes", "n2.md"),
+      "# N2\n\nSee src/bar.ts for the helper.",
+    );
+    syncNoteFromDisk(projectDir, store, "n1");
+    syncNoteFromDisk(projectDir, store, "n2");
+    const tool = findTool(tools, "oxplow__find_notes_for_file");
+    const out: any = await tool.handler({ path: "src/foo.ts" });
+    expect(out.notes.map((n: any) => n.slug)).toEqual(["n1"]);
+  });
+
+  test("find_notes_for_file returns empty for files no note references", async () => {
+    writeFileSync(join(projectDir, ".oxplow", "notes", "n.md"), "# N\n\nno refs here");
+    syncNoteFromDisk(projectDir, store, "n");
+    const tool = findTool(tools, "oxplow__find_notes_for_file");
+    const out: any = await tool.handler({ path: "src/anywhere.ts" });
+    expect(out.notes).toEqual([]);
+  });
+
+  test("find_notes_for_file rejects empty path", () => {
+    const tool = findTool(tools, "oxplow__find_notes_for_file");
+    expect(() => tool.handler({ path: "" })).toThrow();
+  });
 });

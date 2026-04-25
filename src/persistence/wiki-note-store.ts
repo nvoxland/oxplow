@@ -27,8 +27,17 @@ export interface WikiNoteChange {
 export interface UpsertInput {
   slug: string;
   title: string;
+  body: string;
   capturedHeadSha: string | null;
   capturedRefs: NoteRefSnapshot[];
+}
+
+export interface BodySearchResult {
+  slug: string;
+  title: string;
+  /** ~200 char window centered on the first match, with newlines collapsed. */
+  snippet: string;
+  updated_at: string;
 }
 
 export class WikiNoteStore {
@@ -75,9 +84,10 @@ export class WikiNoteStore {
     if (existing) {
       this.stateDb.run(
         `UPDATE wiki_note
-         SET title = ?, captured_head_sha = ?, captured_refs_json = ?, updated_at = ?
+         SET title = ?, body = ?, captured_head_sha = ?, captured_refs_json = ?, updated_at = ?
          WHERE id = ?`,
         input.title,
+        input.body,
         input.capturedHeadSha,
         refsJson,
         now,
@@ -86,11 +96,12 @@ export class WikiNoteStore {
     } else {
       const id = createId("wn");
       this.stateDb.run(
-        `INSERT INTO wiki_note (id, slug, title, captured_head_sha, captured_refs_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO wiki_note (id, slug, title, body, captured_head_sha, captured_refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         input.slug,
         input.title,
+        input.body,
         input.capturedHeadSha,
         refsJson,
         now,
@@ -109,6 +120,108 @@ export class WikiNoteStore {
     this.stateDb.run(`DELETE FROM wiki_note WHERE id = ?`, existing.id);
     this.emitter.emit({ kind: "deleted", slug });
   }
+
+  /**
+   * Full-text search over note titles + bodies via the `wiki_note_fts`
+   * FTS5 virtual table (migration v39). Returns slug, title, updated_at,
+   * and a snippet centered on the match (with `<mark>` highlights).
+   * Used by the `oxplow__search_note_bodies` MCP tool and by the
+   * Notes-pane search input.
+   *
+   * Falls back to a substring LIKE on title+body when the user query
+   * isn't a valid FTS5 expression (raw punctuation, unbalanced quotes,
+   * etc.) — better to return loose results than to throw a SQL error
+   * into the UI.
+   */
+  searchBodies(query: string, limit = 20): BodySearchResult[] {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+    const ftsQuery = toFtsQuery(trimmed);
+    if (ftsQuery !== null) {
+      try {
+        const rows = this.stateDb.all<Record<string, unknown>>(
+          `SELECT n.slug AS slug, n.title AS title, n.updated_at AS updated_at,
+                  snippet(wiki_note_fts, 2, '<mark>', '</mark>', '…', 12) AS snippet
+             FROM wiki_note_fts f
+             JOIN wiki_note n ON n.rowid = f.rowid
+            WHERE wiki_note_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?`,
+          ftsQuery,
+          limit,
+        );
+        return rows.map((row) => ({
+          slug: String(row.slug),
+          title: String(row.title),
+          updated_at: String(row.updated_at),
+          snippet: String(row.snippet ?? ""),
+        }));
+      } catch {
+        // fall through to LIKE fallback
+      }
+    }
+    const like = `%${trimmed.toLowerCase()}%`;
+    const rows = this.stateDb.all<Record<string, unknown>>(
+      `SELECT slug, title, body, updated_at
+       FROM wiki_note
+       WHERE lower(body) LIKE ? OR lower(title) LIKE ?
+       ORDER BY updated_at DESC, id
+       LIMIT ?`,
+      like,
+      like,
+      limit,
+    );
+    return rows.map((row) => ({
+      slug: String(row.slug),
+      title: String(row.title),
+      updated_at: String(row.updated_at),
+      snippet: makeSnippet(String(row.body ?? ""), trimmed),
+    }));
+  }
+
+  /**
+   * Find notes whose `captured_refs` include the given workspace-relative
+   * path. Used by the `oxplow__find_notes_for_file` MCP tool to surface
+   * existing notes that already reference a file the agent is exploring.
+   * Corpus is small (dozens-to-hundreds of notes), so a full scan + JS
+   * filter is fine — no need for a junction table.
+   */
+  findByRefPath(path: string): WikiNote[] {
+    const all = this.list();
+    return all.filter((note) =>
+      note.captured_refs.some((ref) => ref.path === path),
+    );
+  }
+}
+
+/**
+ * Convert a user-typed query into an FTS5 MATCH expression. We tokenize
+ * on whitespace, drop FTS5-meaningful characters from each token, quote
+ * the result, and AND them together with `*` suffix for prefix-match.
+ * Returns null if no usable token survives so the caller falls back to
+ * the plain LIKE path.
+ */
+function toFtsQuery(input: string): string | null {
+  const tokens: string[] = [];
+  for (const raw of input.split(/\s+/)) {
+    const cleaned = raw.replace(/["()*:^~]/g, "").trim();
+    if (cleaned.length === 0) continue;
+    tokens.push(`"${cleaned}"*`);
+  }
+  return tokens.length === 0 ? null : tokens.join(" AND ");
+}
+
+function makeSnippet(body: string, query: string): string {
+  if (body.length === 0) return "";
+  const lower = body.toLowerCase();
+  const idx = lower.indexOf(query.toLowerCase());
+  const window = 100;
+  const start = idx < 0 ? 0 : Math.max(0, idx - window);
+  const end = idx < 0 ? Math.min(body.length, 200) : Math.min(body.length, idx + query.length + window);
+  const slice = body.slice(start, end).replace(/\s+/g, " ").trim();
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < body.length ? "…" : "";
+  return `${prefix}${slice}${suffix}`;
 }
 
 function toWikiNote(row: Record<string, unknown>): WikiNote {

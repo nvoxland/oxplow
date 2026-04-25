@@ -45,7 +45,7 @@ export function syncNoteFromDisk(
     const abs = join(projectDir, r.path);
     return { path: r.path, blobSha: hashFile(abs), mtimeMs: mtimeMsOf(abs) };
   });
-  store.upsert({ slug, title, capturedHeadSha, capturedRefs });
+  store.upsert({ slug, title, body, capturedHeadSha, capturedRefs });
 }
 
 /**

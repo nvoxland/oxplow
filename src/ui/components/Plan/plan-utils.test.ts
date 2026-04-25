@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import type { BacklogState, WorkItem, WorkItemStatus } from "../../api.js";
 import {
   buildBacklogGroups,
+  buildGroups,
+  classifyEpic,
+  classifyRow,
   classifyWorkItem,
   finalizeReorderIds,
   sectionDefaultStatus,
@@ -227,4 +230,99 @@ test("splitIntoSections keeps human_check out of the in-progress bucket", () => 
   const humanCheck = sections.find((section) => section.kind === "humanCheck");
   expect(inProgress?.items.map((i) => i.id)).toEqual(["p1"]);
   expect(humanCheck?.items.map((i) => i.id)).toEqual(["c1"]);
+});
+
+function epicItem(id: string, sort_index: number, status: WorkItemStatus = "ready"): WorkItem {
+  return { ...item(id, status, sort_index), kind: "epic" };
+}
+
+test("classifyEpic: any blocked child → blocked", () => {
+  const epic = epicItem("e1", 0);
+  expect(
+    classifyEpic(epic, [
+      item("c1", "in_progress", 1),
+      item("c2", "blocked", 2),
+      item("c3", "done", 3),
+    ]),
+  ).toBe("blocked");
+});
+
+test("classifyEpic: all children terminal → done", () => {
+  const epic = epicItem("e1", 0);
+  expect(classifyEpic(epic, [
+    item("c1", "done", 1),
+    item("c2", "canceled", 2),
+    item("c3", "archived", 3),
+  ])).toBe("done");
+});
+
+test("classifyEpic: all children human_check → humanCheck", () => {
+  const epic = epicItem("e1", 0);
+  expect(classifyEpic(epic, [
+    item("c1", "human_check", 1),
+    item("c2", "human_check", 2),
+  ])).toBe("humanCheck");
+});
+
+test("classifyEpic: in_progress child → inProgress", () => {
+  const epic = epicItem("e1", 0);
+  expect(classifyEpic(epic, [
+    item("c1", "ready", 1),
+    item("c2", "in_progress", 2),
+    item("c3", "ready", 3),
+  ])).toBe("inProgress");
+});
+
+test("classifyEpic: mixed done + non-blocked unfinished → inProgress", () => {
+  const epic = epicItem("e1", 0);
+  // Phase 1 done, Phase 2 ready: epic stays in_progress, not done.
+  expect(classifyEpic(epic, [
+    item("c1", "done", 1),
+    item("c2", "ready", 2),
+  ])).toBe("inProgress");
+  // Phase 1 done, Phase 2 human_check: still in progress until everything closes.
+  expect(classifyEpic(epic, [
+    item("c1", "done", 1),
+    item("c2", "human_check", 2),
+  ])).toBe("inProgress");
+});
+
+test("classifyEpic: all children ready → toDo", () => {
+  const epic = epicItem("e1", 0);
+  expect(classifyEpic(epic, [
+    item("c1", "ready", 1),
+    item("c2", "ready", 2),
+  ])).toBe("toDo");
+});
+
+test("classifyEpic: empty epic falls back to its literal status", () => {
+  expect(classifyEpic(epicItem("e1", 0, "ready"), [])).toBe("toDo");
+  expect(classifyEpic(epicItem("e1", 0, "in_progress"), [])).toBe("inProgress");
+});
+
+test("classifyRow uses epic rollup for epics, literal status for non-epics", () => {
+  const epic = epicItem("e1", 0);
+  const child = item("c1", "in_progress", 1);
+  const map = new Map<string, WorkItem[]>([[epic.id, [item("c2", "blocked", 2)]]]);
+  expect(classifyRow(epic, map)).toBe("blocked");
+  expect(classifyRow(child, map)).toBe("inProgress");
+});
+
+test("buildGroups groups epic children under their parent without lifting in_progress to root", () => {
+  // Epics now move between sections as a block — children no longer
+  // surface separately at the top level.
+  const epic = epicItem("e1", 0);
+  const c1 = { ...item("c1", "in_progress", 1), parent_id: epic.id };
+  const c2 = { ...item("c2", "ready", 2), parent_id: epic.id };
+  const groups = buildGroups({
+    epics: [epic],
+    waiting: [c2],
+    inProgress: [c1],
+    done: [],
+  } as any);
+  expect(groups).toHaveLength(1);
+  // Top-level rows: only the epic. No children lifted.
+  expect(groups[0]!.items.map((i) => i.id)).toEqual(["e1"]);
+  // Children stay in the epic's children map for the renderer.
+  expect(groups[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["c1", "c2"]);
 });

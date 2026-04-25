@@ -39,6 +39,7 @@ import {
   setGeneratedDirs,
   selectThread,
   promoteThread,
+  recordUsage,
   reorderThreads,
   reorderStreams,
   switchStream,
@@ -83,6 +84,7 @@ import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { NotesPane } from "./components/Notes/NotesPane.js";
 import { NoteTab } from "./components/Notes/NoteTab.js";
+import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -333,6 +335,13 @@ export function App() {
     });
     setCenterActive(`file:${path}`);
     setError(null);
+    void recordUsage({
+      kind: "editor-file",
+      key: path,
+      event: "open",
+      streamId: stream.id,
+      threadId: selectedThread?.id ?? null,
+    }).catch(() => {});
     if (existing && !existing.isLoading) return;
     try {
       const file = await readWorkspaceFile(stream.id, path);
@@ -1306,6 +1315,13 @@ export function App() {
     const token = Date.now();
     setLeftDockActivate({ id: "plan", token });
     setPlanEditRequest({ itemId, token });
+    void recordUsage({
+      kind: "work-item",
+      key: itemId,
+      event: "open",
+      streamId: stream?.id ?? null,
+      threadId: selectedThread?.id ?? null,
+    }).catch(() => {});
   };
 
   const handleShowSnapshotInHistory = (snapshotId: string) => {
@@ -1322,7 +1338,17 @@ export function App() {
   const handleOpenNote = useCallback((slug: string) => {
     setNoteTabs((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
     setCenterActive(`note:${slug}`);
-  }, []);
+    const sid = stream?.id ?? null;
+    if (sid) {
+      void recordUsage({
+        kind: "wiki-note",
+        key: slug,
+        event: "open",
+        streamId: sid,
+        threadId: selectedThread?.id ?? null,
+      }).catch(() => {});
+    }
+  }, [stream?.id, selectedThread?.id]);
 
   const closeNoteTab = useCallback((slug: string) => {
     setNoteTabs((prev) => prev.filter((s) => s !== slug));
@@ -1348,11 +1374,21 @@ export function App() {
         ] : undefined,
         render: () =>
           selectedThread ? (
-            <TerminalPane
-              paneTarget={selectedThread.pane_target}
-              visible={effectiveCenterActive === "agent"}
-              transportMode={agentTransportMode}
-            />
+            <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+              <WikiActivityBar
+                streamId={stream?.id ?? null}
+                onOpenNote={handleOpenNote}
+                onOpenFile={(path) => { void handleOpenFile(path); }}
+                onOpenWorkItem={handleRequestEditWorkItem}
+              />
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <TerminalPane
+                  paneTarget={selectedThread.pane_target}
+                  visible={effectiveCenterActive === "agent"}
+                  transportMode={agentTransportMode}
+                />
+              </div>
+            </div>
           ) : (
             <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
           ),
@@ -1398,7 +1434,7 @@ export function App() {
         label: slug,
         closable: true,
         render: () => stream ? (
-          <NoteTab stream={stream} slug={slug} onClosed={() => closeNoteTab(slug)} onOpenNoteInNewTab={handleOpenNote} />
+          <NoteTab stream={stream} slug={slug} onClosed={() => closeNoteTab(slug)} onOpenNoteInNewTab={handleOpenNote} onOpenFile={handleOpenFile} />
         ) : null,
       });
     }

@@ -84,6 +84,20 @@ export type {
   StoredEvent,
 };
 
+export interface WikiNoteSearchHit {
+  slug: string;
+  title: string;
+  /** Snippet with `<mark>…</mark>` highlights around the matched terms. */
+  snippet: string;
+  updated_at: string;
+}
+
+export interface UsageRollup {
+  key: string;
+  last_at: string;
+  count: number;
+}
+
 export interface WikiNoteSummary {
   slug: string;
   title: string;
@@ -94,6 +108,10 @@ export interface WikiNoteSummary {
   changed_refs: string[];
   deleted_refs: string[];
   total_refs: number;
+  /** Workspace-relative paths the watcher parsed from the note body
+   *  (the same set that backs `total_refs` and freshness). Used by the
+   *  UI to render a clickable backlinks affordance. */
+  referenced_files: string[];
 }
 
 export interface UiLogPayload {
@@ -257,6 +275,12 @@ export interface DesktopApi {
   readWikiNoteBody(streamId: string, slug: string): Promise<string>;
   writeWikiNoteBody(streamId: string, slug: string, body: string): Promise<void>;
   deleteWikiNote(streamId: string, slug: string): Promise<void>;
+  searchWikiNotes(streamId: string, query: string, limit?: number): Promise<WikiNoteSearchHit[]>;
+  recordUsage(input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }): Promise<void>;
+  listRecentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
+  listFrequentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
+  listCurrentlyOpenUsage(input: { kind: string; streamId?: string | null; threadId?: string | null }): Promise<string[]>;
+  getWorkItemSummaries(ids: string[]): Promise<Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }>>;
   listCommitPoints(threadId: string): Promise<CommitPoint[]>;
   createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
   deleteCommitPoint(id: string): Promise<void>;

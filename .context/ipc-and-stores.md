@@ -211,6 +211,45 @@ state.
 Both follow the standard 7-layer IPC flow (migration → store →
 runtime → ipc-contract → preload → main → ui/api).
 
+## Generic usage tracking
+
+`UsageStore` (`src/persistence/usage-store.ts`) records `(kind, key,
+event)` rows with optional `stream_id` and a 30s coalesce window. The
+runtime exposes four read methods + one writer over IPC:
+
+- `recordUsage({ kind, key, event?, streamId?, threadId? })`
+- `listRecentUsage({ kind, streamId?, threadId?, limit?, since? })` —
+  most-recent keys aggregated by `key`, returning
+  `{ key, last_at, count }[]`. Pass `streamId` to scope to one
+  workspace, `threadId` to scope to one thread, or both to
+  intersect.
+- `listFrequentUsage({ kind, streamId?, threadId?, limit?, since? })`
+  — same shape ranked by count.
+- `listCurrentlyOpenUsage({ kind, streamId?, threadId? })` — keys
+  whose latest event is `"open"` with no later `"close"`. Returns
+  `[]` for kinds that don't emit close events yet.
+
+Subscribe in the UI via `subscribeUsageEvents(fn, { kind })`. The bus
+event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
+
+Active write hookpoints (all in `src/ui/App.tsx`, all pass both
+`streamId` and the active `threadId` so per-stream and per-thread
+queries both work):
+
+- `wiki-note` → `handleOpenNote`
+- `editor-file` → `handleOpenFile`
+- `work-item` → `handleRequestEditWorkItem`
+
+The wiki-note rows currently feed `NotesPane`'s "Recently visited"
+section; editor-file and work-item rows are recorded but not yet
+surfaced in any UI — the architecture is ready, the consumer is the
+follow-up.
+
+When wiring a new kind, record the visit at the moment the user
+*opens* the target — not on hover or focus — because the 30s coalesce
+relies on `occurred_at` being a real "user intent to read this"
+signal.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas.

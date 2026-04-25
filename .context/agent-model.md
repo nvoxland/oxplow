@@ -191,6 +191,21 @@ effect are all skipped. `undefined` (no UserPromptSubmit fired) is
 treated as "unknown → don't suppress" so older tests / edge cases
 stay stable.
 
+**Wiki-capture exception.** A read-heavy / no-write turn
+(`turnHadActivity === false` AND `turnWasExploration === true`) emits
+the **wiki-capture directive** (`buildWikiCaptureStopReason`) instead
+of allowing stop. The runtime tracks per-turn read/write counters in
+`turnReadWriteByThread` (PostToolUse bumps based on `isReadIntentTool`
+/ `isWriteIntentTool`) and derives `turnWasExploration = reads >= 2 &&
+writes === 0`. The directive points the agent at the
+`oxplow-wiki-capture` skill: search existing notes by title / body /
+file backlinks, append-or-create, write `.oxplow/notes/<slug>.md`,
+call `mcp__oxplow__resync_note`. Escape hatch: agent replies
+`oxplow-note: skipped` for trivially-shallow exploration. The
+`lastEmittedWikiCaptureByThread` set latches when the directive fires
+so it doesn't re-emit on the same prompt; the latch + counters clear
+on the next `UserPromptSubmit`.
+
 The pipeline runs in priority order:
 
 1. **Pending commit point (writer thread only).** Block with an
@@ -416,14 +431,27 @@ shelling out.
 `buildWikiNoteMcpTools` (`src/mcp/wiki-note-mcp-tools.ts`) surfaces the
 per-project wiki (`wiki_note` table + `.oxplow/notes/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_notes`,
-`get_note_metadata`, `resync_note`, `search_notes`, `delete_note`.
-**There is intentionally no create/update tool** — the agent writes
-bodies directly with its Write/Edit tools on
-`.oxplow/notes/<slug>.md` (far cheaper than round-tripping full bodies
-through MCP args). The notes watcher re-syncs metadata on every file
-event; `resync_note` forces an immediate re-baseline when the agent
-wants freshness pinned to the current HEAD without waiting for the
-debounce.
+`get_note_metadata`, `resync_note`, `search_notes` (title),
+`search_note_bodies` (content), `find_notes_for_file` (backlinks),
+`delete_note`. **There is intentionally no create/update tool** —
+the agent writes bodies directly with its Write/Edit tools on
+`.oxplow/notes/<slug>.md` (far cheaper than round-tripping full
+bodies through MCP args). The notes watcher re-syncs metadata + body
+on every file event; `resync_note` forces an immediate re-baseline
+when the agent wants freshness pinned to the current HEAD without
+waiting for the debounce.
+
+The `oxplow-wiki-capture` skill (`src/session/wiki-capture-skill.ts`)
+loads when the agent uses these tools or when the user asks an
+exploration question ("how does X work", "where is X", "explain X")
+or types `/note`. It carries the find-or-create flow (search by
+title → body → file backlinks before creating), slug/body
+conventions, and the "fold in `oxplow__get_thread_notes` from any
+query subagents this turn dispatched" guidance. The Stop-hook
+wiki-capture directive (see "Wiki-capture exception" in the Stop-hook
+pipeline section) auto-loads the skill on read-heavy / no-write
+turns; the `/note` slash command at `.claude/commands/note.md`
+triggers the same flow on demand.
 
 ## Write guard
 
