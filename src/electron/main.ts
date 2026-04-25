@@ -291,6 +291,9 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:listRecentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listRecentUsage(input));
   handle("oxplow:listFrequentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listFrequentUsage(input));
   handle("oxplow:listCurrentlyOpenUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null }) => currentRuntime.listCurrentlyOpenUsage(input));
+  handle("oxplow:runCodeQualityScan", (_event, input: { streamId: string; tool: "lizard" | "jscpd"; scope: "codebase" | "diff"; baseRef?: string | null }) => currentRuntime.runCodeQualityScan(input));
+  handle("oxplow:listCodeQualityFindings", (_event, input: { streamId: string; tool?: "lizard" | "jscpd"; paths?: string[] }) => currentRuntime.listCodeQualityFindings(input));
+  handle("oxplow:listCodeQualityScans", (_event, input: { streamId: string; limit?: number }) => currentRuntime.listCodeQualityScans(input));
   handle("oxplow:getWorkItemSummaries", (_event, ids: string[]) => currentRuntime.getWorkItemSummaries(ids));
   handle("oxplow:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
   handle("oxplow:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));

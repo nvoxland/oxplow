@@ -87,6 +87,7 @@ import { NoteTab } from "./components/Notes/NoteTab.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
+import { CodeQualityPanel } from "./components/CodeQuality/CodeQualityPanel.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1557,6 +1558,11 @@ export function App() {
       id: "snapshots",
       label: "Local history",
       render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} onRequestEditWorkItem={handleRequestEditWorkItem} />,
+    },
+    {
+      id: "code-quality",
+      label: "Code quality",
+      render: () => <CodeQualityPanel stream={stream} onOpenFile={handleOpenFile} />,
     },
   ];
 

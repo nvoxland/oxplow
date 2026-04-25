@@ -105,6 +105,15 @@ export interface UsageRecordedEvent {
   threadId: string | null;
 }
 
+export interface CodeQualityScannedEvent {
+  type: "code-quality.scanned";
+  streamId: string;
+  scanId: number;
+  tool: "lizard" | "jscpd";
+  scope: "codebase" | "diff";
+  status: "running" | "completed" | "failed";
+}
+
 export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
@@ -129,7 +138,8 @@ export type OxplowEvent =
   | StreamChangedEvent
   | ConfigChangedEvent
   | WikiNoteChangedEvent
-  | UsageRecordedEvent;
+  | UsageRecordedEvent
+  | CodeQualityScannedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

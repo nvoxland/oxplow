@@ -36,6 +36,7 @@ refactors — go straight to TDD or a subagent dispatch.
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |
+| Code quality scans (lizard / jscpd subprocess + findings store + Code quality panel) | `.context/code-quality.md` |
 
 When you finish a change that alters how a subsystem works, **update
 the matching `.context/` doc in the same commit**. Concrete triggers:
@@ -130,6 +131,17 @@ finishing, the user interrupted), the task stays `in_progress`. Only
 close to `human_check` when the work is actually shipped. There is
 no "turn closed → task closed" coupling — turns aren't tracked as a
 user-visible concept.
+
+**File backlog ideas as you have them.** When you notice a follow-up
+worth doing later — a deferred polish item, a known limitation you
+called out in a completion note, a "we should also…" thought, a TODO
+that surfaces while finishing something else — file it as a `ready`
+work item right then with `create_work_item`. Don't bury follow-ups in
+prose at the end of a reply or in a completion note where they'll be
+forgotten. The backlog is the durable record; replies are not.
+Priority defaults to `low` unless the idea is genuinely urgent. Keep
+the description concrete (what file, what change, why) so a future
+reader — including you — can pick it up cold.
 
 **Stop-hook task audit.** At the end of every turn, the runtime
 nudges the writer thread to verify each `in_progress` item is still

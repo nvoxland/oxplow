@@ -64,6 +64,18 @@ import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work
 import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
 import { UsageStore } from "../persistence/usage-store.js";
+import {
+  CodeQualityStore,
+  type CodeQualityFindingRow,
+  type CodeQualityScanRow,
+  type CodeQualityScope,
+  type CodeQualityTool,
+} from "../persistence/code-quality-store.js";
+import {
+  CodeQualityToolMissingError,
+  runJscpd,
+  runLizard,
+} from "../subprocess/code-quality.js";
 import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
@@ -110,6 +122,7 @@ export class ElectronRuntime {
   readonly commitPointStore: CommitPointStore;
   readonly wikiNoteStore: WikiNoteStore;
   readonly usageStore: UsageStore;
+  readonly codeQualityStore: CodeQualityStore;
   private notesWatcher: NotesWatcher | null = null;
   readonly waitPointStore: WaitPointStore;
   readonly threadQueue: ThreadQueueOrchestrator;
@@ -211,6 +224,7 @@ export class ElectronRuntime {
     this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
     this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
+    this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
     this.notesWatcher = new NotesWatcher(
       projectDir,
       this.wikiNoteStore,
@@ -438,6 +452,16 @@ export class ElectronRuntime {
         key: change.key,
         streamId: change.streamId,
         threadId: change.threadId,
+      });
+    });
+    this.codeQualityStore.subscribe((change) => {
+      this.events.publish({
+        type: "code-quality.scanned",
+        streamId: change.streamId,
+        scanId: change.scanId,
+        tool: change.tool,
+        scope: change.scope,
+        status: change.kind === "started" ? "running" : change.kind,
       });
     });
 
@@ -2085,6 +2109,68 @@ export class ElectronRuntime {
     updated_at: string;
   }> {
     return this.wikiNoteStore.searchBodies(query, limit);
+  }
+
+  // -------- code quality scans (IPC-exposed) --------
+
+  async runCodeQualityScan(input: {
+    streamId: string;
+    tool: CodeQualityTool;
+    scope: CodeQualityScope;
+    baseRef?: string | null;
+  }): Promise<CodeQualityScanRow> {
+    const stream = this.resolveStream(input.streamId);
+    const scanId = this.codeQualityStore.startScan({
+      streamId: input.streamId,
+      tool: input.tool,
+      scope: input.scope,
+      baseRef: input.scope === "diff" ? input.baseRef ?? null : null,
+    });
+
+    try {
+      let files: string[] | undefined;
+      if (input.scope === "diff") {
+        const baseRef = input.baseRef?.trim() || detectBaseBranch(stream.worktree_path);
+        if (!baseRef) {
+          this.codeQualityStore.failScan(scanId, "No base ref available for diff scope");
+          return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
+        }
+        const changes = listBranchChanges(stream.worktree_path, baseRef);
+        files = changes.files
+          .filter((f) => f.status !== "deleted")
+          .map((f) => f.path);
+        if (files.length === 0) {
+          this.codeQualityStore.completeScan(scanId, []);
+          return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
+        }
+      }
+
+      const findings = input.tool === "lizard"
+        ? await runLizard(stream.worktree_path, { files })
+        : await runJscpd(stream.worktree_path, { files });
+      this.codeQualityStore.completeScan(scanId, findings);
+    } catch (error) {
+      const message = error instanceof CodeQualityToolMissingError
+        ? `${input.tool} is not installed (install via pip/npm and ensure it's on PATH)`
+        : error instanceof Error ? error.message : String(error);
+      this.codeQualityStore.failScan(scanId, message);
+    }
+
+    const row = this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId);
+    if (!row) throw new Error(`code_quality_scan ${scanId} vanished after run`);
+    return row;
+  }
+
+  listCodeQualityFindings(input: {
+    streamId: string;
+    tool?: CodeQualityTool;
+    paths?: string[];
+  }): CodeQualityFindingRow[] {
+    return this.codeQualityStore.listLatestFindings(input);
+  }
+
+  listCodeQualityScans(input: { streamId: string; limit?: number }): CodeQualityScanRow[] {
+    return this.codeQualityStore.listScans(input);
   }
 
   // -------- generic usage tracking (IPC-exposed) --------

@@ -291,6 +291,79 @@ describe("runMigrations", () => {
     expect(cols).toContain("effort_id");
   });
 
+  test("v41 creates code_quality_scan and code_quality_finding tables with expected columns and indexes", () => {
+    const driver = freshDriver();
+    runMigrations(driver);
+
+    const scanCols = driver
+      .all<{ name: string; notnull: number }>("PRAGMA table_info(code_quality_scan)")
+      .reduce<Record<string, number>>((acc, row) => {
+        acc[row.name] = row.notnull;
+        return acc;
+      }, {});
+    expect(Object.keys(scanCols)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "stream_id",
+        "tool",
+        "scope",
+        "base_ref",
+        "status",
+        "error_message",
+        "started_at",
+        "completed_at",
+      ]),
+    );
+    expect(scanCols.stream_id).toBe(1);
+    expect(scanCols.tool).toBe(1);
+    expect(scanCols.scope).toBe(1);
+    expect(scanCols.status).toBe(1);
+    expect(scanCols.started_at).toBe(1);
+    expect(scanCols.base_ref).toBe(0);
+    expect(scanCols.error_message).toBe(0);
+    expect(scanCols.completed_at).toBe(0);
+
+    const findingCols = driver
+      .all<{ name: string; notnull: number }>("PRAGMA table_info(code_quality_finding)")
+      .reduce<Record<string, number>>((acc, row) => {
+        acc[row.name] = row.notnull;
+        return acc;
+      }, {});
+    expect(Object.keys(findingCols)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "scan_id",
+        "path",
+        "start_line",
+        "end_line",
+        "kind",
+        "metric_value",
+        "extra_json",
+      ]),
+    );
+    expect(findingCols.scan_id).toBe(1);
+    expect(findingCols.path).toBe(1);
+    expect(findingCols.start_line).toBe(1);
+    expect(findingCols.end_line).toBe(1);
+    expect(findingCols.kind).toBe(1);
+    expect(findingCols.metric_value).toBe(1);
+    expect(findingCols.extra_json).toBe(0);
+
+    const indexes = driver
+      .all<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('code_quality_scan', 'code_quality_finding')`,
+      )
+      .map((row) => row.name);
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        "idx_code_quality_scan_stream_tool_started",
+        "idx_code_quality_finding_scan",
+        "idx_code_quality_finding_scan_path",
+        "idx_code_quality_finding_scan_kind_value",
+      ]),
+    );
+  });
+
   test("refuses to open a database at a higher version than this build knows", () => {
     const driver = freshDriver();
     runMigrations(driver);

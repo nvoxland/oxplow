@@ -250,6 +250,34 @@ When wiring a new kind, record the visit at the moment the user
 relies on `occurred_at` being a real "user intent to read this"
 signal.
 
+## Code quality scans
+
+`CodeQualityStore` (`src/persistence/code-quality-store.ts`) is
+another straightforward 7-layer instance, plus a `src/subprocess/`
+module (the first user) that wraps the external CLIs. The runtime
+method `runCodeQualityScan` shows the canonical pattern for "store
++ subprocess + git-diff scoping":
+
+1. `store.startScan(...)` → `code-quality.scanned` event with
+   `status: "running"` fires immediately so the UI can show a
+   spinner before the subprocess settles.
+2. Resolve the stream's worktree, optionally call
+   `listBranchChanges(worktree, baseRef)` for `scope: "diff"` and
+   pass the changed-files list into the subprocess function.
+3. `runLizard` / `runJscpd` return *normalized* findings
+   (`{ path, startLine, endLine, kind, metricValue, extra }`); the
+   runtime never sees tool-specific shapes.
+4. On success, `store.completeScan(scanId, findings)` inserts
+   findings, flips status, and prunes old scans for the same
+   `(stream, tool, scope)` triple — all in one transaction.
+5. On `CodeQualityToolMissingError` (ENOENT), `failScan` records a
+   user-friendly "tool not installed" message that the UI surfaces
+   in its scan-status strip.
+
+When adding a third CLI tool, you only touch the subprocess module
+(new `runFoo` + parser) and the `CodeQualityTool` union — the
+store, runtime, IPC, and UI are tool-agnostic.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas.

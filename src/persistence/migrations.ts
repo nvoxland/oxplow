@@ -1043,6 +1043,50 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 41,
+    name: "code_quality_scan + code_quality_finding",
+    up: (db) => {
+      // Deterministic, language-agnostic code-quality findings sourced
+      // from external CLIs (lizard, jscpd). One scan = one CLI invocation
+      // for one (stream, tool, scope) combination. Findings are wiped on
+      // re-scan via the store's retention pass; the schema doesn't enforce
+      // FK cascade so the store stays in control of what counts as
+      // "current" for a given stream + tool + scope.
+      db.exec(`
+        CREATE TABLE code_quality_scan (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          stream_id TEXT NOT NULL,
+          tool TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          base_ref TEXT,
+          status TEXT NOT NULL,
+          error_message TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX idx_code_quality_scan_stream_tool_started
+          ON code_quality_scan(stream_id, tool, started_at DESC);
+
+        CREATE TABLE code_quality_finding (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scan_id INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          start_line INTEGER NOT NULL,
+          end_line INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          metric_value REAL NOT NULL,
+          extra_json TEXT
+        );
+        CREATE INDEX idx_code_quality_finding_scan
+          ON code_quality_finding(scan_id);
+        CREATE INDEX idx_code_quality_finding_scan_path
+          ON code_quality_finding(scan_id, path);
+        CREATE INDEX idx_code_quality_finding_scan_kind_value
+          ON code_quality_finding(scan_id, kind, metric_value DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

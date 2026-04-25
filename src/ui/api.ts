@@ -648,6 +648,48 @@ export async function listCurrentlyOpenUsage(input: {
   return desktopApi().listCurrentlyOpenUsage(input);
 }
 
+export type CodeQualityTool = import("../electron/ipc-contract.js").CodeQualityTool;
+export type CodeQualityScope = import("../electron/ipc-contract.js").CodeQualityScope;
+export type CodeQualityScanStatus = import("../electron/ipc-contract.js").CodeQualityScanStatus;
+export type CodeQualityFindingKind = import("../electron/ipc-contract.js").CodeQualityFindingKind;
+export type CodeQualityScanRow = import("../electron/ipc-contract.js").CodeQualityScanRow;
+export type CodeQualityFindingRow = import("../electron/ipc-contract.js").CodeQualityFindingRow;
+
+export async function runCodeQualityScan(input: {
+  streamId: string;
+  tool: CodeQualityTool;
+  scope: CodeQualityScope;
+  baseRef?: string | null;
+}): Promise<CodeQualityScanRow> {
+  return desktopApi().runCodeQualityScan(input);
+}
+
+export async function listCodeQualityFindings(input: {
+  streamId: string;
+  tool?: CodeQualityTool;
+  paths?: string[];
+}): Promise<CodeQualityFindingRow[]> {
+  return desktopApi().listCodeQualityFindings(input);
+}
+
+export async function listCodeQualityScans(input: {
+  streamId: string;
+  limit?: number;
+}): Promise<CodeQualityScanRow[]> {
+  return desktopApi().listCodeQualityScans(input);
+}
+
+export function subscribeCodeQualityEvents(
+  streamId: string,
+  fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type !== "code-quality.scanned") return;
+    if (event.streamId !== streamId) return;
+    fn({ scanId: event.scanId, tool: event.tool, scope: event.scope, status: event.status });
+  });
+}
+
 export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
   id: string;
   title: string;

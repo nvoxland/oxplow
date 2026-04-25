@@ -426,6 +426,50 @@ Current write hookpoints (all in `src/ui/App.tsx`, all pass both
 UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
 refresh on cross-window visits without polling.
 
+### `code_quality_scan` + `code_quality_finding` — `CodeQualityStore` (`src/persistence/code-quality-store.ts`)
+
+Deterministic, language-agnostic findings sourced from external CLIs
+(`lizard` and `jscpd`). Two tables, one store, one runtime method
+(`runCodeQualityScan`). The store doesn't run subprocesses itself —
+the runtime calls `src/subprocess/code-quality.ts` and hands
+normalized findings back via `completeScan`.
+
+`code_quality_scan` rows: `id, stream_id, tool ('lizard' | 'jscpd'),
+scope ('codebase' | 'diff'), base_ref (nullable, set when scope =
+'diff'), status ('running' | 'completed' | 'failed'), error_message,
+started_at, completed_at`. One row per CLI invocation per
+`(stream, tool, scope)` combination. Index on
+`(stream_id, tool, started_at DESC)` makes "latest scan per tool"
+cheap.
+
+`code_quality_finding` rows: `id, scan_id, path, start_line, end_line,
+kind ('complexity' | 'function-length' | 'parameter-count' |
+'duplicate-block'), metric_value (REAL), extra_json`. Lizard emits
+three findings per function (one per metric kind) with
+`extra.functionName` for grouping. jscpd emits two findings per
+duplicate-pair (one per side) with `extra.peerPath` /
+`extra.peerStartLine` / `extra.peerEndLine` so the UI can render
+"duplicates X lines from Y:Lstart-Lend" without re-querying.
+
+Retention is store-driven, not schema-driven: each `completeScan`
+prunes old scans for the same `(stream, tool, scope)` triple beyond
+`keepLast` (default 10), deleting their findings in the same
+transaction. Different scopes retain independently — running the
+diff scan many times doesn't evict the codebase scan.
+
+`listLatestFindings({ streamId, tool?, paths? })` joins on the most
+recent `completed` scan per `(stream, tool, scope)`, ignoring
+running/failed scans entirely so the panel never shows partial
+results. The `paths` filter (used by the Diff vs base tab) intersects
+findings against `listBranchChanges`'s file list at query time, so
+findings persisted by a codebase scan can also drive a focused
+"changed files only" view without re-running.
+
+The store publishes `code-quality.scanned` events on start /
+complete / fail; `CodeQualityPanel` (`src/ui/components/CodeQuality/`)
+subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
+refetches.
+
 ## The shared `sort_index` queue
 
 The most important invariant in the data model: **`work_items.sort_index`,

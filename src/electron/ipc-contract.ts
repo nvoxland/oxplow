@@ -98,6 +98,38 @@ export interface UsageRollup {
   count: number;
 }
 
+export type CodeQualityTool = "lizard" | "jscpd";
+export type CodeQualityScope = "codebase" | "diff";
+export type CodeQualityScanStatus = "running" | "completed" | "failed";
+export type CodeQualityFindingKind =
+  | "complexity"
+  | "function-length"
+  | "parameter-count"
+  | "duplicate-block";
+
+export interface CodeQualityScanRow {
+  id: number;
+  stream_id: string;
+  tool: CodeQualityTool;
+  scope: CodeQualityScope;
+  base_ref: string | null;
+  status: CodeQualityScanStatus;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface CodeQualityFindingRow {
+  id: number;
+  scanId: number;
+  path: string;
+  startLine: number;
+  endLine: number;
+  kind: CodeQualityFindingKind;
+  metricValue: number;
+  extra: Record<string, unknown> | null;
+}
+
 export interface WikiNoteSummary {
   slug: string;
   title: string;
@@ -280,6 +312,9 @@ export interface DesktopApi {
   listRecentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
   listFrequentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
   listCurrentlyOpenUsage(input: { kind: string; streamId?: string | null; threadId?: string | null }): Promise<string[]>;
+  runCodeQualityScan(input: { streamId: string; tool: CodeQualityTool; scope: CodeQualityScope; baseRef?: string | null }): Promise<CodeQualityScanRow>;
+  listCodeQualityFindings(input: { streamId: string; tool?: CodeQualityTool; paths?: string[] }): Promise<CodeQualityFindingRow[]>;
+  listCodeQualityScans(input: { streamId: string; limit?: number }): Promise<CodeQualityScanRow[]>;
   getWorkItemSummaries(ids: string[]): Promise<Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }>>;
   listCommitPoints(threadId: string): Promise<CommitPoint[]>;
   createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
