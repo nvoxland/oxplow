@@ -23,6 +23,7 @@ function makeStream(id: string, title: string): Stream {
     updated_at: "2024-01-01T00:00:00Z",
     panes: { working: `oxplow-${id}:working`, talking: `oxplow-${id}:talking` },
     resume: { working_session_id: "", talking_session_id: "" },
+    custom_prompt: null,
   };
 }
 
@@ -30,6 +31,7 @@ function seed() {
   const dir = mkdtempSync(join(tmpdir(), "oxplow-mcp-tools-"));
   const threadStore = new ThreadStore(dir);
   const workItemStore = new WorkItemStore(dir);
+  const effortStore = new WorkItemEffortStore(dir);
   const streamA = makeStream("s-A", "Alpha");
   const streamB = makeStream("s-B", "Beta");
   const stateA = threadStore.ensureStream(streamA);
@@ -57,13 +59,12 @@ function seed() {
     streamStore: { list: () => [streamA, streamB] } as never,
     workItemStore,
     commitPointStore: null as never,
-    turnStore: null as never,
     waitPointStore: null as never,
     executeCommit: (() => { throw new Error("not used"); }) as never,
     executeAutoCommit: (() => { throw new Error("not used"); }) as never,
-    effortStore: null as never,
+    effortStore,
   });
-  return { tools, threadStore, workItemStore, streamA, streamB, threadA, threadB, dir };
+  return { tools, threadStore, workItemStore, effortStore, streamA, streamB, threadA, threadB, dir };
 }
 
 function tool(tools: ToolDef[], name: string): ToolDef {
@@ -181,11 +182,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
     const { applyStatusTransition } = await import("../electron/runtime.js");
     const effortStore = new EffortStore(dir);
-    const turnStore = { currentOpenTurn: () => null } as never;
     const off = workItemStore.subscribe((change) => {
       if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
         applyStatusTransition(
-          { effortStore, turnStore, flushSnapshot: () => null },
+          { effortStore, flushSnapshot: () => null },
           {
             threadId: change.threadId,
             workItemId: change.itemId,
@@ -223,11 +223,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
     const { applyStatusTransition } = await import("../electron/runtime.js");
     const effortStore = new EffortStore(dir);
-    const turnStore = { currentOpenTurn: () => null } as never;
     const off = workItemStore.subscribe((change) => {
       if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
         applyStatusTransition(
-          { effortStore, turnStore, flushSnapshot: () => null },
+          { effortStore, flushSnapshot: () => null },
           {
             threadId: change.threadId,
             workItemId: change.itemId,
@@ -258,11 +257,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const { WorkItemEffortStore: EffortStore } = await import("../persistence/work-item-effort-store.js");
     const { applyStatusTransition } = await import("../electron/runtime.js");
     const effortStore = new EffortStore(dir);
-    const turnStore = { currentOpenTurn: () => null } as never;
     const off = workItemStore.subscribe((change) => {
       if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
         applyStatusTransition(
-          { effortStore, turnStore, flushSnapshot: () => null },
+          { effortStore, flushSnapshot: () => null },
           {
             threadId: change.threadId,
             workItemId: change.itemId,
@@ -439,7 +437,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       streamStore: { list: () => [streamA] } as never,
       workItemStore,
       commitPointStore: null as never,
-      turnStore: null as never,
       waitPointStore: null as never,
       effortStore: null as never,
       executeCommit: (() => { throw new Error("not used"); }) as never,
@@ -512,7 +509,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       workItemStore,
       commitPointStore,
       effortStore,
-      turnStore: null as never,
       waitPointStore: null as never,
       executeCommit: (() => { throw new Error("not used"); }) as never,
       executeAutoCommit: (() => { throw new Error("not used"); }) as never,
@@ -567,7 +563,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       workItemStore,
       commitPointStore,
       effortStore,
-      turnStore: null as never,
       waitPointStore: null as never,
       executeCommit: (() => { throw new Error("not used"); }) as never,
       executeAutoCommit: (() => { throw new Error("not used"); }) as never,
@@ -661,27 +656,52 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(workItemStore.listItems(threadB.id).length).toBe(before);
   });
 
-  test("complete_task appends a note and flips status to human_check in one call", async () => {
-    const { tools, workItemStore, threadB } = seed();
+  test("complete_task writes the note onto the just-closed effort and does NOT add a note row", async () => {
+    const { tools, workItemStore, effortStore, threadB } = seed();
+    // Wire the status-transition hook so the effort opens/closes when
+    // status flips. (Production wires this in runtime.ts; the seed
+    // doesn't.)
+    const { applyStatusTransition } = await import("../electron/runtime.js");
+    const off = workItemStore.subscribe((change) => {
+      if (change.kind === "updated" && change.itemId && change.previousStatus !== change.nextStatus) {
+        applyStatusTransition(
+          { effortStore, flushSnapshot: () => null },
+          {
+            threadId: change.threadId,
+            workItemId: change.itemId,
+            previous: change.previousStatus,
+            next: change.nextStatus,
+            touchedFiles: change.touchedFiles,
+          },
+        );
+      }
+    });
+
     const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "Thing" } as never)) as { id: string };
-    // Put it in progress first (realistic starting state).
     const update = tool(tools, "oxplow__update_work_item");
     await update.handler({ threadId: threadB.id, itemId: a.id, status: "in_progress" } as never);
 
-    const t = tool(tools, "oxplow__complete_task");
-    const result = (await t.handler({
+    const tcomplete = tool(tools, "oxplow__complete_task");
+    const result = (await tcomplete.handler({
       threadId: threadB.id,
       itemId: a.id,
       note: "Shipped: see commit abc123",
     } as never)) as { ok: boolean; id: string; status: string };
+    off();
+
     expect(result.ok).toBe(true);
     expect(result.status).toBe("human_check");
     expect(workItemStore.getItem(threadB.id, a.id)!.status).toBe("human_check");
+    // Note is NOT appended to work-item history anymore.
     const events = workItemStore.listEvents(threadB.id, a.id);
     const notes = events.filter((e) => e.event_type === "note");
-    expect(notes).toHaveLength(1);
-    expect(JSON.parse(notes[0]!.payload_json).note).toBe("Shipped: see commit abc123");
+    expect(notes).toHaveLength(0);
+    // Summary lives on the just-closed effort.
+    const efforts = effortStore.listEffortsForWorkItem(a.id);
+    expect(efforts).toHaveLength(1);
+    expect(efforts[0]!.ended_at).not.toBeNull();
+    expect(efforts[0]!.summary).toBe("Shipped: see commit abc123");
   });
 
   test("complete_task accepts status=blocked", async () => {
@@ -857,7 +877,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       streamStore: { list: () => [streamA] } as never,
       workItemStore,
       commitPointStore: null as never,
-      turnStore: null as never,
       waitPointStore: null as never,
       executeCommit: (() => { throw new Error(); }) as never,
       executeAutoCommit: (() => { throw new Error(); }) as never,
@@ -908,7 +927,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       streamStore: { list: () => [streamA] } as never,
       workItemStore,
       commitPointStore: { listForThread: () => [] } as never,
-      turnStore: null as never,
       waitPointStore: { listForThread: () => [] } as never,
       executeCommit: (() => { throw new Error(); }) as never,
       executeAutoCommit: (() => { throw new Error(); }) as never,
@@ -963,7 +981,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
   });
 
   test("record_query_finding rejects an item-scoped note id", async () => {
-    const { tools, workItemStore, threadA } = seed();
+    const { tools, threadA } = seed();
     const create = tool(tools, "oxplow__create_work_item");
     const item = (await create.handler({ threadId: threadA.id, kind: "task", title: "t" } as never)) as { id: string };
     // Insert an item-scoped row directly via add_work_note — but add_work_note

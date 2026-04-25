@@ -10,6 +10,10 @@ export interface WorkItemEffort {
   ended_at: string | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
+  /** Free-form summary written when the effort closes — typically the
+   *  `note` text passed to `complete_task`. Null while the effort is
+   *  open or when the close path didn't supply one. */
+  summary: string | null;
 }
 
 export type EffortChangeKind = "opened" | "closed";
@@ -86,6 +90,20 @@ export class WorkItemEffortStore {
       this.emitter.emit({ effortId: existing.id, workItemId: input.workItemId, kind: "closed" });
     }
     return row;
+  }
+
+  /**
+   * Persist a free-form summary on an effort row. Used by
+   * `complete_task` to attach the closing summary to the effort that
+   * just closed. Writes are idempotent — passing the same text twice
+   * is a no-op-equivalent UPDATE. No-op if `effortId` is unknown.
+   */
+  setEffortSummary(effortId: string, summary: string): void {
+    this.stateDb.run(
+      `UPDATE work_item_effort SET summary = ? WHERE id = ?`,
+      summary,
+      effortId,
+    );
   }
 
   getById(id: string): WorkItemEffort | null {
@@ -308,33 +326,6 @@ export class WorkItemEffortStore {
     }));
   }
 
-  linkEffortTurn(effortId: string, turnId: string): void {
-    this.stateDb.run(
-      `INSERT OR IGNORE INTO work_item_effort_turn (effort_id, turn_id) VALUES (?, ?)`,
-      effortId,
-      turnId,
-    );
-  }
-
-  listTurnsForEffort(effortId: string): string[] {
-    const rows = this.stateDb.all<{ turn_id: string }>(
-      `SELECT turn_id FROM work_item_effort_turn WHERE effort_id = ? ORDER BY rowid ASC`,
-      effortId,
-    );
-    return rows.map((row) => row.turn_id);
-  }
-
-  listEffortsForTurn(turnId: string): WorkItemEffort[] {
-    return this.stateDb
-      .all<Record<string, unknown>>(
-        `SELECT e.* FROM work_item_effort e
-         JOIN work_item_effort_turn link ON link.effort_id = e.id
-         WHERE link.turn_id = ?
-         ORDER BY e.started_at ASC`,
-        turnId,
-      )
-      .map(rowToEffort);
-  }
 }
 
 function rowToEffort(row: Record<string, unknown>): WorkItemEffort {
@@ -345,5 +336,6 @@ function rowToEffort(row: Record<string, unknown>): WorkItemEffort {
     ended_at: row.ended_at == null ? null : String(row.ended_at),
     start_snapshot_id: row.start_snapshot_id == null ? null : String(row.start_snapshot_id),
     end_snapshot_id: row.end_snapshot_id == null ? null : String(row.end_snapshot_id),
+    summary: row.summary == null ? null : String(row.summary),
   };
 }

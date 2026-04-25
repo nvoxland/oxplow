@@ -17,7 +17,6 @@ import {
   searchWorkspaceText,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
-  type AgentTurn,
   type ChangeScopes,
   type GitLogCommit,
   type GitOpResult,
@@ -40,7 +39,6 @@ interface Props {
   stream: Stream | null;
   gitEnabled: boolean;
   selectedFilePath: string | null;
-  currentThreadTurns: AgentTurn[] | null;
   generatedDirs: string[];
   onOpenFile(path: string): void;
   onOpenDiff?(request: DiffRequest): void;
@@ -56,7 +54,6 @@ export function ProjectPanel({
   stream,
   gitEnabled,
   selectedFilePath,
-  currentThreadTurns,
   generatedDirs,
   onOpenFile,
   onOpenDiff,
@@ -71,7 +68,6 @@ export function ProjectPanel({
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
-  const [selectedTurnChanges, setSelectedTurnChanges] = useState<Array<{ path: string; kind: "created" | "updated" | "deleted" }>>([]);
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
@@ -175,7 +171,7 @@ export function ProjectPanel({
     };
   }, [loadDir, loadWorkspaceIndex, stream]);
 
-  type FilterMode = "all" | "uncommitted" | "branch" | "unpushed" | "turn";
+  type FilterMode = "all" | "uncommitted" | "branch" | "unpushed";
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [scopes, setScopes] = useState<ChangeScopes | null>(null);
   // Paths that the filter includes (always the superset — deleted files end
@@ -184,7 +180,6 @@ export function ProjectPanel({
   // Paths known to be deleted in the current scope. These are phantom entries
   // — they don't exist on disk, so we inject them into the tree manually.
   const [scopedDeletions, setScopedDeletions] = useState<Set<string>>(() => new Set());
-  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
   const generatedSet = useMemo(() => new Set(generatedDirs), [generatedDirs]);
   const uncommittedPaths = useMemo(
@@ -195,42 +190,6 @@ export function ProjectPanel({
     () => new Set(indexedFiles.filter((f) => f.gitStatus === "deleted").map((f) => f.path)),
     [indexedFiles],
   );
-
-  // The last 10 turns from the current thread, newest first. Used to populate
-  // the "Turn" filter's sub-dropdown.
-  const recentTurns = useMemo(() => {
-    const turns = currentThreadTurns ?? [];
-    return [...turns]
-      .sort((a, b) => (a.started_at < b.started_at ? 1 : -1))
-      .slice(0, 10);
-  }, [currentThreadTurns]);
-
-  // Default the selected turn when the user picks the Turn mode.
-  useEffect(() => {
-    if (filterMode !== "turn") return;
-    // Recompute the per-turn changed files whenever the selection moves.
-    const selected = selectedTurnId ? recentTurns.find((t) => t.id === selectedTurnId) : null;
-    if (!selected || !selected.start_snapshot_id || !selected.end_snapshot_id) {
-      setSelectedTurnChanges([]);
-    } else {
-      let cancelled = false;
-      void import("../../api.js").then(({ getSnapshotSummary }) =>
-        getSnapshotSummary(selected.end_snapshot_id!).then((summary) => {
-          if (cancelled || !summary) return;
-          setSelectedTurnChanges(
-            Object.entries(summary.files).map(([path, row]) => ({ path, kind: row.kind })),
-          );
-        }).catch(() => {
-          if (!cancelled) setSelectedTurnChanges([]);
-        }),
-      );
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (selectedTurnId && recentTurns.some((t) => t.id === selectedTurnId)) return;
-    setSelectedTurnId(recentTurns[0]?.id ?? null);
-  }, [filterMode, recentTurns, selectedTurnId]);
 
   useEffect(() => {
     if (!stream || !gitEnabled) { setScopes(null); return; }
@@ -252,7 +211,6 @@ export function ProjectPanel({
   // Load paths+deletions for the currently-selected scope.
   // - Uncommitted: read directly from the workspace index (already subscribed).
   // - Branch/Unpushed: `getBranchChanges` against the appropriate ref.
-  // - Turn: filter the thread's file-change log by `turn_id`.
   // Deletions are tracked separately so we can inject phantom rows into the
   // tree (the filesystem no longer has them).
   useEffect(() => {
@@ -271,13 +229,6 @@ export function ProjectPanel({
       setScopedDeletions(uncommittedDeletions);
       return;
     }
-    if (filterMode === "turn") {
-      // Per-turn file filter: compute from the selected turn's start/end
-      // snapshots. Synchronous placeholder — see selectedTurnChanges below.
-      setScopedPaths(selectedTurnChanges.map((c) => c.path));
-      setScopedDeletions(new Set(selectedTurnChanges.filter((c) => c.kind === "deleted").map((c) => c.path)));
-      return;
-    }
     if (!gitEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
     const ref = filterMode === "branch" ? scopes?.branchBase : scopes?.upstream;
     if (!ref) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
@@ -294,7 +245,7 @@ export function ProjectPanel({
         setScopedDeletions(new Set());
       });
     return () => { cancelled = true; };
-  }, [stream?.id, gitEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles, selectedTurnId, selectedTurnChanges]);
+  }, [stream?.id, gitEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
 
   const changedPathSet = useMemo(() => {
     const paths = scopedPaths ?? [];
@@ -404,7 +355,6 @@ export function ProjectPanel({
     refs: RefOption[] | null;
     loading: boolean;
   } | null>(null);
-  const [agentHistoryState, setAgentHistoryState] = useState<{ path: string } | null>(null);
   const [opResult, setOpResult] = useState<{ title: string; result: GitOpResult } | null>(null);
   const [pushPullDialog, setPushPullDialog] = useState<"push" | "pull" | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
@@ -478,7 +428,7 @@ export function ProjectPanel({
   async function handleContextAction(
     action:
       | "open" | "new-file" | "new-folder" | "rename" | "delete"
-      | "copy" | "copy-reference" | "find-usages" | "agent-history"
+      | "copy" | "copy-reference" | "find-usages"
       | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
       | "mark-generated" | "unmark-generated"
       | "diff-uncommitted" | "diff-branch" | "diff-origin",
@@ -560,10 +510,6 @@ export function ProjectPanel({
           setFindUsagesState({ query, path: contextMenu.path, results: hits, loading: false });
           return;
         }
-        case "agent-history":
-          setAgentHistoryState({ path: contextMenu.path });
-          setContextMenu(null);
-          return;
         case "git-show-history": {
           if (!stream) return;
           setFileHistoryState({ path: contextMenu.path, commits: null, loading: true });
@@ -662,7 +608,6 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [{ id: "files.find-usages", label: "Find Usages", enabled: true, run: () => handleContextAction("find-usages") }]
         : []),
-      { id: "files.agent-history", label: "Agent History", enabled: (currentThreadTurns ?? []).length > 0, run: () => handleContextAction("agent-history") },
       ...(gitEnabled ? [{
         id: "files.git",
         label: "Git",
@@ -736,22 +681,7 @@ export function ProjectPanel({
           setFilterMode={setFilterMode}
           gitEnabled={gitEnabled}
           scopes={scopes}
-          recentTurns={recentTurns}
         />
-        {filterMode === "turn" && recentTurns.length > 0 ? (
-          <select
-            value={selectedTurnId ?? ""}
-            onChange={(e) => setSelectedTurnId(e.target.value || null)}
-            style={filterSelectStyle}
-            title="Show files touched in this agent turn"
-          >
-            {recentTurns.map((turn, index) => (
-              <option key={turn.id} value={turn.id}>
-                #{recentTurns.length - index} · {truncate(turn.prompt, 40)}
-              </option>
-            ))}
-          </select>
-        ) : null}
       </div>
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
         {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
@@ -779,7 +709,7 @@ export function ProjectPanel({
         )}
       </div>
       <div style={filterStatusBarStyle}>
-        <span>Showing: {filterModeLabel(filterMode, scopes, selectedTurnId, recentTurns)}</span>
+        <span>Showing: {filterModeLabel(filterMode, scopes)}</span>
       </div>
       {contextMenu ? (
         <ContextMenu
@@ -831,13 +761,6 @@ export function ProjectPanel({
             }
             setCompareState(null);
           }}
-        />
-      ) : null}
-      {agentHistoryState ? (
-        <AgentHistoryModal
-          path={agentHistoryState.path}
-          turns={currentThreadTurns ?? []}
-          onClose={() => setAgentHistoryState(null)}
         />
       ) : null}
       {commitDialogOpen && stream ? (
@@ -1090,65 +1013,6 @@ function CompareWithModal({
             </span>
             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{ref.name}</span>
           </button>
-        ))
-      )}
-    </ModalShell>
-  );
-}
-
-function AgentHistoryModal({
-  path,
-  turns,
-  onClose,
-}: {
-  path: string;
-  turns: AgentTurn[];
-  onClose(): void;
-}) {
-  useEscape(onClose);
-  const [matchingTurns, setMatchingTurns] = useState<AgentTurn[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { getSnapshotSummary } = await import("../../api.js");
-      // Parallelize the per-turn summary fetches. Sequential awaits here
-      // meant a 50-turn thread took 50 IPC round-trips in series.
-      const results = await Promise.all(
-        turns.map(async (turn) => {
-          if (!turn.end_snapshot_id) return null;
-          try {
-            const summary = await getSnapshotSummary(turn.end_snapshot_id, turn.start_snapshot_id);
-            return summary && Object.hasOwn(summary.files, path) ? turn : null;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      if (cancelled) return;
-      setMatchingTurns(results.filter((t): t is AgentTurn => t !== null));
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [path, turns]);
-  return (
-    <ModalShell onClose={onClose} title={`Agent history · ${path}`}>
-      {loading ? (
-        <div style={modalEmptyStyle}>Loading…</div>
-      ) : matchingTurns.length === 0 ? (
-        <div style={modalEmptyStyle}>No agent turns touched this path.</div>
-      ) : (
-        matchingTurns.map((turn) => (
-          <div key={turn.id} style={{ ...modalRowStyle, cursor: "default" }}>
-            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {truncate(turn.prompt, 90)}
-            </span>
-            <span style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap" }}>
-              {new Date(turn.started_at).toLocaleString()}
-            </span>
-          </div>
         ))
       )}
     </ModalShell>
@@ -1448,46 +1312,22 @@ const commitButtonStyle = {
   fontWeight: 600,
 } as const;
 
-const filterSelectStyle = {
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg)",
-  color: "inherit",
-  font: "inherit",
-  padding: "3px 6px",
-  fontSize: 11,
-  maxWidth: 220,
-} as const;
-
-function truncate(input: string, max: number): string {
-  const oneLine = input.replace(/\s+/g, " ").trim();
-  if (oneLine.length <= max) return oneLine || "(empty prompt)";
-  return oneLine.slice(0, max - 1) + "…";
-}
-
-type FilterMode = "all" | "uncommitted" | "branch" | "unpushed" | "turn";
+type FilterMode = "all" | "uncommitted" | "branch" | "unpushed";
 
 const FILTER_CHIP_LABELS: Record<Exclude<FilterMode, "all">, string> = {
   uncommitted: "Uncommitted",
   branch: "Branch",
   unpushed: "Unpushed",
-  turn: "Turn",
 };
 
 function filterModeLabel(
   mode: FilterMode,
   scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null,
-  selectedTurnId: string | null,
-  recentTurns: { id: string; prompt: string }[],
 ): string {
   if (mode === "all") return "all files";
   if (mode === "uncommitted") return "uncommitted changes";
   if (mode === "branch") return `branch changes${scopes?.branchBase ? ` (vs ${scopes.branchBase})` : ""}`;
   if (mode === "unpushed") return `unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : ""}`;
-  if (mode === "turn") {
-    const turn = recentTurns.find((t) => t.id === selectedTurnId);
-    return `files from turn${turn ? ` · ${truncate(turn.prompt, 40)}` : ""}`;
-  }
   return mode;
 }
 
@@ -1496,13 +1336,11 @@ function FilterMenuButton({
   setFilterMode,
   gitEnabled,
   scopes,
-  recentTurns,
 }: {
   filterMode: FilterMode;
   setFilterMode: (mode: FilterMode) => void;
   gitEnabled: boolean;
   scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null;
-  recentTurns: { id: string; prompt: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1532,7 +1370,6 @@ function FilterMenuButton({
     label: `Unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : " (no upstream)"}`,
     disabled: !scopes?.upstream,
   });
-  options.push({ value: "turn", label: `Turn${recentTurns.length === 0 ? " (no turns yet)" : ""}`, disabled: recentTurns.length === 0 });
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
@@ -1540,7 +1377,7 @@ function FilterMenuButton({
         onClick={() => setOpen((v) => !v)}
         aria-label="Filter files"
         data-testid="files-filter-toggle"
-        title={`Filter: ${filterModeLabel(filterMode, scopes, null, recentTurns)}`}
+        title={`Filter: ${filterModeLabel(filterMode, scopes)}`}
         style={{
           ...iconButtonStyle,
           background: filterMode !== "all" ? "var(--accent)" : "var(--bg-2)",

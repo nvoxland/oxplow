@@ -10,6 +10,29 @@ import {
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
 
+/**
+ * Read the system clipboard as text. Prefers Electron's main-process
+ * clipboard (via IPC) because navigator.clipboard.readText() in the
+ * renderer rejects with "Document is not focused" on a fast Cmd-Tab →
+ * Cmd+V and returns empty for non-text-primary flavors set by other
+ * apps. Falls back to navigator.clipboard if the IPC path isn't wired.
+ */
+async function readClipboard(): Promise<string> {
+  const api = window.oxplowApi as { clipboardReadText?: () => Promise<string> };
+  if (api?.clipboardReadText) {
+    try {
+      return await api.clipboardReadText();
+    } catch {
+      // fall through to navigator.clipboard
+    }
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
 export function TerminalPane({
   paneTarget,
   visible,
@@ -63,13 +86,16 @@ export function TerminalPane({
       }
 
       // Cmd+V (macOS paste shortcut) — xterm.js doesn't wire paste
-      // itself, so read the clipboard via navigator.clipboard and write
-      // through term.paste(). Ctrl+V is NOT intercepted: it should
-      // reach the running CLI as a literal ^V byte (0x16) so Claude
-      // Code's own paste handling (including images) can run.
+      // itself, so read the clipboard and write through term.paste().
+      // Use Electron's main-process clipboard (via IPC) — navigator.clipboard
+      // rejects with "Document is not focused" on a fast Cmd-Tab → Cmd+V
+      // and returns empty for non-text-primary flavors set by other apps.
+      // Ctrl+V is NOT intercepted: it should reach the running CLI as a
+      // literal ^V byte (0x16) so Claude Code's own paste handling
+      // (including images) can run.
       if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "v") {
         event.preventDefault();
-        void navigator.clipboard.readText().then((text) => {
+        void readClipboard().then((text) => {
           if (text) term.paste(text);
         }).catch((error) => {
           logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
@@ -217,7 +243,7 @@ export function TerminalPane({
       // for a single item.
       const handleContextMenu = (event: MouseEvent) => {
         event.preventDefault();
-        void navigator.clipboard.readText().then((text) => {
+        void readClipboard().then((text) => {
           if (text) term.paste(text);
         }).catch((error) => {
           logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });

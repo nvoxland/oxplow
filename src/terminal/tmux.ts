@@ -102,6 +102,19 @@ function writeWindowSignature(target: string, launcherSignature: string): void {
   } catch {}
 }
 
+/**
+ * Force tmux to push a full redraw to attached clients. `tmux attach-session`
+ * does not guarantee a first paint when the inner program hasn't produced
+ * output yet — without this the client stays blank (or shows leftover xterm
+ * pixels) until the user types something. `-S` would only refresh the status
+ * line; we want a full redraw of the pane content, so no flag.
+ */
+export function refreshClients() {
+  try {
+    tmux(["refresh-client"]);
+  } catch {}
+}
+
 export function resizeWindow(target: string, cols: number, rows: number) {
   if (cols < 2 || rows < 2) return;
   try {

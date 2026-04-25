@@ -124,7 +124,17 @@ concern instead of a littered trail of "Fix what I just did" tasks.
 Genuinely new concerns still get new items — this rule covers only
 "user rejected my last attempt at this same item."
 
-Claude Code's built-in TaskCreate/TaskUpdate is captured to
-`agent_turn.task_list_json` on every call and rendered live on the
-open-turn row as an expandable sub-list. It stays out of the
-persistent work-item stream.
+**Tasks persist across turn boundaries.** If a turn ends with work
+mid-flight (you asked the user a question, Stop fired before
+finishing, the user interrupted), the task stays `in_progress`. Only
+close to `human_check` when the work is actually shipped. There is
+no "turn closed → task closed" coupling — turns aren't tracked as a
+user-visible concept.
+
+**Stop-hook task audit.** At the end of every turn, the runtime
+nudges the writer thread to verify each `in_progress` item is still
+in progress. Reconcile each: still active → leave alone; acceptance
+criteria met → `complete_task` (status `human_check`, never
+self-mark `done`); stuck → `blocked`; paused/deferred → `ready`;
+obsolete → `canceled`. Without this audit step stale `in_progress`
+rows pile up because nothing forces a settle.

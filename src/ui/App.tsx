@@ -9,7 +9,6 @@ import {
   getThreadState,
   createWorkspaceDirectory,
   listAgentStatuses,
-  listAgentTurns,
   reorderWorkItems,
   moveWorkItemToThread,
   getBacklogState,
@@ -21,9 +20,7 @@ import {
   moveBacklogItemToThread,
   subscribeBacklogEvents,
   subscribeAgentStatus,
-  subscribeTurnEvents,
   type AgentStatus,
-  type AgentTurn,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -160,7 +157,6 @@ export function App() {
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
-  const [agentTurns, setAgentTurns] = useState<Record<string, AgentTurn[]>>({});
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
@@ -738,7 +734,6 @@ export function App() {
   // changes — matches the old TerminalPane's internal useEffect.
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
-  const selectedThreadTurns = selectedThread ? agentTurns[selectedThread.id] ?? null : null;
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -905,38 +900,6 @@ export function App() {
     };
   }, [threadWorkStates, currentThreadState.threads, stream]);
 
-  useEffect(() => {
-    if (!stream || !selectedThread || agentTurns[selectedThread.id]) return;
-    void listAgentTurns(stream.id, selectedThread.id)
-      .then((turns) => {
-        setAgentTurns((prev) => ({ ...prev, [selectedThread.id]: turns }));
-      })
-      .catch((e) => {
-        logUi("warn", "failed to load agent turns", {
-          streamId: stream.id,
-          threadId: selectedThread.id,
-          error: String(e),
-        });
-      });
-  }, [agentTurns, selectedThread, stream]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeTurnEvents("all", (event) => {
-      void listAgentTurns(event.streamId, event.threadId)
-        .then((turns) => {
-          setAgentTurns((prev) => ({ ...prev, [event.threadId]: turns }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh agent turns after change event", {
-            streamId: event.streamId,
-            threadId: event.threadId,
-            kind: event.kind,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, []);
 
   useEffect(() => {
     return subscribeWorkspaceContext((next) => setWorkspaceContext(next));
@@ -1469,6 +1432,7 @@ export function App() {
   }, [
     selectedThread,
     agentThreadStatus,
+    agentTransportMode,
     effectiveCenterActive,
     stream,
     currentSession.openOrder,
@@ -1516,7 +1480,6 @@ export function App() {
           stream={stream}
           gitEnabled={workspaceContext.gitEnabled}
           selectedFilePath={selectedFilePath}
-          currentThreadTurns={selectedThreadTurns}
           generatedDirs={generatedDirs}
           onOpenFile={handleOpenFile}
           onOpenDiff={handleOpenDiff}
@@ -1546,7 +1509,6 @@ export function App() {
     workspaceContext.gitEnabled,
     selectedThread,
     selectedThreadWork,
-    selectedThreadTurns,
   ]);
 
   const bottomToolWindows: ToolWindow[] = [
@@ -1594,7 +1556,6 @@ export function App() {
             selectedThreadId={currentThreadState.selectedThreadId}
             agentStatuses={agentStatuses}
             threadWorkStates={threadWorkStates}
-            agentTurns={agentTurns}
             onSelectThread={handleSelectThread}
             onCreateThread={handleCreateThread}
             onPromoteThread={handlePromoteThread}

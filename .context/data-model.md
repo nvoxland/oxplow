@@ -184,56 +184,25 @@ this point), the marker is "consumed" — the next Stop hook treats it as
 past, so prompting the agent at all resumes auto-progression. There is no
 "continue" button.
 
-### `agent_turn` — `TurnStore` (`src/persistence/turn-store.ts`)
-
-One row per agent turn (UserPromptSubmit → Stop). Captures the prompt,
-answer, Claude session id, token usage, and the `start_snapshot_id` +
-`end_snapshot_id` taken at the turn boundaries. The Activity tab builds
-its per-turn file-change list by diffing those two snapshots. A turn has
-no direct work-item FK anymore — efforts connect work items to turns via
-the `work_item_effort_turn` join table (see below).
-
-`task_list_json` (migration v30, nullable TEXT) stores the serialized
-TaskCreate/TaskUpdate breakdown for the turn. Written incrementally by
-the PostToolUse TaskCreate bridge on every call (not only at Stop) so
-the Work panel's in_progress bucket can render the live sub-list on
-the open-turn row. Persists on the row after the turn closes for a
-later History view. `TurnStore.setTaskList(turnId, json)` emits a
-`turn.changed` / `task-list-updated` event so UI subscribers refresh.
-`TurnStore.listOpenTurns(threadId, sinceIso)` returns rows with
-`ended_at IS NULL` AND `started_at >= sinceIso` — the runtime passes
-its own `startedAt` as the cutoff to filter orphaned open turns from
-prior runs out of the live list.
-
-`produced_activity` (migration v31, nullable INTEGER) records whether
-any mutation / filing / dispatch tool call fired during the turn — the
-same in-memory `turnActivityByThread` flag that drives the Stop-hook's
-ready-work suppression rule. Persisted by the runtime's Stop hook after
-`closeTurn` (before `computeStopDirective` consumes the in-memory flag)
-via `TurnStore.setProducedActivity(turnId, boolean|null)`: `1` =
-activity, `0` = pure Q&A, NULL = unknown (pre-v31 rows, or turns where
-UserPromptSubmit never fired). Drives the Work panel's "Recent answers"
-section: `TurnStore.listRecentInactiveTurns(threadId, limit=10)`
-returns closed turns with `produced_activity = 0`, newest-ended first.
-NULL rows are excluded so legacy turns don't back-fill the list.
-
-### `work_item_effort` + `work_item_effort_turn` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
+### `work_item_effort` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
 
 An **effort** is one `in_progress → human_check` (or done/canceled) cycle
 of a work item. Columns: `work_item_id`, `started_at`, `ended_at`,
-`start_snapshot_id`, `end_snapshot_id`. Auto-managed by the runtime on
-`work-item.changed` status transitions:
+`start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
+written by `complete_task` describing what shipped in this effort; one
+summary per effort, replaces the old per-item note-history append).
+Auto-managed by the runtime on `work-item.changed` status transitions:
 
 - `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
   and linked to `start_snapshot_id`.
 - `in_progress → {human_check, done, canceled}` closes the effort; a
-  `task-end` snapshot is flushed and linked to `end_snapshot_id`.
+  `task-end` snapshot is flushed and linked to `end_snapshot_id`,
+  subject to a 5-minute minimum gap between snapshots — if the latest
+  snapshot is fresher than that gap, the close path skips flushing a
+  new row (the effort's `end_snapshot_id` is left null in that case).
 
 Re-opening a task (human_check → ready → in_progress) produces a second
 effort. At most one open effort per work item at a time.
-
-`work_item_effort_turn` is a many-to-many join so a single effort can
-span multiple turns.
 
 `work_item_effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
@@ -247,13 +216,11 @@ writes when ≥2 efforts were in_progress). See agent-model.md's
 from `runtime.ts`): when ≥2 efforts share an end snapshot AND this
 effort has ≥1 row here, the pair-diff is filtered to those paths;
 0 rows → fall back to raw pair-diff ("assume all"); 1 effort → raw
-pair-diff. The runtime writes a link row (a) for every
-currently-open effort when a turn opens and (b) for the currently-open
-turn when an effort opens mid-turn.
+pair-diff.
 
 Read API: `listEffortsForWorkItem(itemId)`, `listOpenEfforts()`,
-`listEffortsForSnapshot(snapshotId)`, `listTurnsForEffort(effortId)`,
-`listEffortsForTurn(turnId)`, `listEffortsForPath(path)` (closed
+`listEffortsForSnapshot(snapshotId)`,
+`listEffortsForPath(path)` (closed
 efforts that touched `path` via `work_item_effort_file`, joined to the
 owning work item's title/status, newest-first by `ended_at` — drives
 the local-blame overlay described in `.context/editor-and-monaco.md`).
@@ -280,12 +247,24 @@ in `work_item_effort_file`.
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
 
 Time-ordered, self-contained snapshots. `file_snapshot` columns:
-`id, stream_id, worktree_path, version_hash, source, created_at`.
-`snapshot_entry` holds the per-path rows: `path, hash, mtime_ms, size,
-state`.
+`id, stream_id, worktree_path, version_hash, source, created_at,
+effort_id`. `snapshot_entry` holds the per-path rows: `path, hash,
+mtime_ms, size, state`.
 
-`source` is one of `task-start | task-end | turn-start | turn-end |
-startup | external`. `version_hash` is a SHA-256 over the canonical
+`effort_id` (nullable, FK → `work_item_effort.id` ON DELETE SET NULL)
+ties `task-start` / `task-end` rows back to the effort that produced
+them. `startup` snapshots leave it null. The mirror columns on the
+effort row — `work_item_effort.start_snapshot_id` and
+`work_item_effort.end_snapshot_id` — are the canonical lookup path for
+"the snapshots that bracket this effort"; `file_snapshot.effort_id` is
+the reverse pointer. The 5-minute minimum gap rule in
+`applyStatusTransition` may leave the effort's `end_snapshot_id`
+null — when the most recent snapshot is fresher than
+`END_SNAPSHOT_MIN_GAP_MS`, the close path skips flushing a new row to
+avoid spamming history with near-identical states.
+
+`source` is one of `task-start | task-end | startup | external`.
+`version_hash` is a SHA-256 over the canonical
 `(path, hash, size, state)` entry set — `mtime_ms` is deliberately
 excluded so touching a file without changing its bytes doesn't produce
 a new snapshot. Deleted files have no `snapshot_entry` row at all (the
@@ -315,12 +294,10 @@ nothing meaningful to show. `listSnapshotsForStream` excludes it
 UI list skips it.
 
 **Rows come with pre-joined labels.** `listSnapshotsForStream` joins
-against `work_item_effort` and `agent_turn` in a single query to
-populate `label` + `label_kind` on each `FileSnapshot`. Effort links
-win over turn links (task title + " — start"/" — end"); effort-end
-wins over effort-start when the same snapshot is both. Unlinked
-snapshots get `label: null` and the UI falls back to the `source`
-column.
+against `work_item_effort` to populate `label` + `label_kind` on each
+`FileSnapshot` (task title + " — start"/" — end"); effort-end wins
+over effort-start when the same snapshot is both. Unlinked snapshots
+get `label: null` and the UI falls back to the `source` column.
 
 Blobs live on disk at `.oxplow/snapshots/objects/xx/yyyy…` (sha256
 addressed, shared across streams for dedup).
@@ -497,7 +474,7 @@ The runtime relays each store's changes onto the typed EventBus
 (`src/core/event-bus.ts`) as `*.changed` events:
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
-- `work-item.changed`, `backlog.changed`, `thread.changed`, `turn.changed`
+- `work-item.changed`, `backlog.changed`, `thread.changed`
 - `file-snapshot.created`, `agent-status.changed`
 - `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`
@@ -514,7 +491,7 @@ docs, future stores) reference by name. Listed here so renames touch
 the docs in one diff:
 
 - **Files-pane filter mode** — `FilterMode = "all" | "uncommitted" |
-  "branch" | "unpushed" | "turn"` lives in `ProjectPanel` state and
+  "branch" | "unpushed"` lives in `ProjectPanel` state and
   drives the file-tree visibility filter. The eye-icon trigger button
   is `data-testid="files-filter-toggle"`; each popover option is
   `data-testid="files-filter-option-<value>"` (e.g.

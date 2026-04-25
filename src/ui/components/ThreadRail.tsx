@@ -2,7 +2,6 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentStatus,
-  AgentTurn,
   Thread,
   ThreadWorkState,
 } from "../api.js";
@@ -19,7 +18,6 @@ interface Props {
   selectedThreadId: string | null;
   agentStatuses: Record<string, AgentStatus>;
   threadWorkStates: Record<string, ThreadWorkState>;
-  agentTurns: Record<string, AgentTurn[]>;
   onSelectThread(threadId: string): void | Promise<void>;
   onCreateThread(title: string): Promise<void>;
   onPromoteThread(threadId: string): void | Promise<void>;
@@ -44,7 +42,6 @@ export function ThreadRail({
   selectedThreadId,
   agentStatuses,
   threadWorkStates,
-  agentTurns,
   onSelectThread,
   onCreateThread,
   onPromoteThread,
@@ -161,7 +158,6 @@ export function ThreadRail({
             isSelected={thread.id === selectedThreadId}
             agentStatus={agentStatuses[thread.id] ?? "idle"}
             workState={threadWorkStates[thread.id]}
-            turns={agentTurns[thread.id]}
             hasQueued={hasQueued}
             isRenaming={renamingId === thread.id}
             isDragTarget={overThreadId === thread.id && draggingId !== null && draggingId !== thread.id}
@@ -287,7 +283,6 @@ function ThreadChip({
   isSelected,
   agentStatus,
   workState,
-  turns,
   hasQueued,
   onSelect,
   onPromote,
@@ -308,7 +303,6 @@ function ThreadChip({
   isSelected: boolean;
   agentStatus: AgentStatus;
   workState: ThreadWorkState | undefined;
-  turns: AgentTurn[] | undefined;
   hasQueued: boolean;
   onSelect(): void;
   onPromote(): void;
@@ -531,7 +525,6 @@ function ThreadChip({
           isActive={isActive}
           agentStatus={agentStatus}
           workState={workState}
-          turns={turns}
           hasQueued={hasQueued}
           onPromote={onPromote}
           onComplete={onComplete}
@@ -546,7 +539,6 @@ function HoverCard({
   isActive,
   agentStatus,
   workState,
-  turns,
   hasQueued,
   onPromote,
   onComplete,
@@ -555,7 +547,6 @@ function HoverCard({
   isActive: boolean;
   agentStatus: AgentStatus;
   workState: ThreadWorkState | undefined;
-  turns: AgentTurn[] | undefined;
   hasQueued: boolean;
   onPromote(): void;
   onComplete(): void;
@@ -564,8 +555,6 @@ function HoverCard({
   const waiting = workState?.waiting.length ?? 0;
   const inProgress = workState?.inProgress ?? [];
   const done = workState?.done.length ?? 0;
-  const turnCount = turns?.length ?? 0;
-  const lastTurn = turns && turns.length > 0 ? turns[turns.length - 1] : null;
   // "writer" means this thread is the one allowed to commit changes; every
   // other live thread stays read-only. "completed" threads are archived.
   const statusLabel = isActive ? "writer" : thread.status === "completed" ? "completed" : "read-only";
@@ -604,13 +593,7 @@ function HoverCard({
           {done}/{total} done
         </span>
         <span>{waiting} waiting</span>
-        <span>turns: {turnCount}</span>
       </div>
-      {lastTurn ? (
-        <div style={{ fontSize: 11, color: "var(--muted)" }}>
-          last turn: {relativeTime(lastTurn.started_at)}
-        </div>
-      ) : null}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {isActive ? (
           <button type="button" data-testid={`thread-chip-complete-${thread.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this thread done and hand the writer role to the next queued thread">
@@ -717,20 +700,6 @@ function CreateThreadInput({
       {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}
     </div>
   );
-}
-
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return iso;
-  const diff = Date.now() - then;
-  const sec = Math.round(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  return `${day}d ago`;
 }
 
 const railStyle: CSSProperties = {

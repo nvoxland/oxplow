@@ -276,24 +276,19 @@ describe("runMigrations", () => {
     expect(notes[0]!.body).toMatch(/legacy auto-item/);
   });
 
-  test("v30 adds agent_turn.task_list_json column nullable", () => {
+  test("v34 drops agent_turn, work_item_effort_turn, and file_snapshot.turn_id", () => {
     const driver = freshDriver();
     runMigrations(driver);
+    const tables = driver
+      .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .map((row) => row.name);
+    expect(tables).not.toContain("agent_turn");
+    expect(tables).not.toContain("work_item_effort_turn");
     const cols = driver
-      .all<{ name: string; notnull: number }>("PRAGMA table_info(agent_turn)")
-      .find((c) => c.name === "task_list_json");
-    expect(cols).toBeDefined();
-    expect(cols?.notnull).toBe(0);
-  });
-
-  test("v31 adds agent_turn.produced_activity column nullable", () => {
-    const driver = freshDriver();
-    runMigrations(driver);
-    const cols = driver
-      .all<{ name: string; notnull: number }>("PRAGMA table_info(agent_turn)")
-      .find((c) => c.name === "produced_activity");
-    expect(cols).toBeDefined();
-    expect(cols?.notnull).toBe(0);
+      .all<{ name: string }>("PRAGMA table_info(file_snapshot)")
+      .map((row) => row.name);
+    expect(cols).not.toContain("turn_id");
+    expect(cols).toContain("effort_id");
   });
 
   test("refuses to open a database at a higher version than this build knows", () => {

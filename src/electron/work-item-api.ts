@@ -1,5 +1,4 @@
 import type { Thread } from "../persistence/thread-store.js";
-import type { AgentTurn, TurnStore } from "../persistence/turn-store.js";
 import type {
   WorkItemEffort,
   WorkItemEffortStore,
@@ -27,7 +26,6 @@ export interface BacklogState {
 export interface WorkItemApiDeps {
   resolveThread(streamId: string, threadId: string): Thread;
   workItemStore: WorkItemStore;
-  turnStore: TurnStore;
   effortStore: WorkItemEffortStore;
   snapshotStore: SnapshotStore;
 }
@@ -55,7 +53,6 @@ export interface EffortDetail {
   effort: WorkItemEffort;
   start_snapshot: FileSnapshot | null;
   end_snapshot: FileSnapshot | null;
-  turn_ids: string[];
   /** Paths that differ between start and end snapshots (empty when either
    *  side is null or hashes are identical). */
   changed_paths: string[];
@@ -83,7 +80,6 @@ export interface WorkItemApi {
   addWorkItemNote(streamId: string, threadId: string, itemId: string, note: string): WorkItemEvent[];
   listWorkItemEvents(streamId: string, threadId: string, itemId?: string): WorkItemEvent[];
   getWorkNotes(itemId: string): WorkNote[];
-  listAgentTurns(streamId: string, threadId: string, limit?: number): AgentTurn[];
   listWorkItemEfforts(itemId: string): EffortDetail[];
 }
 
@@ -114,7 +110,7 @@ function computeEffortDiff(
 
 function buildEffortDetail(
   effort: WorkItemEffort,
-  effortStore: WorkItemEffortStore,
+  _effortStore: WorkItemEffortStore,
   snapshotStore: SnapshotStore,
 ): EffortDetail {
   const start_snapshot = effort.start_snapshot_id
@@ -128,7 +124,6 @@ function buildEffortDetail(
     effort,
     start_snapshot,
     end_snapshot,
-    turn_ids: effortStore.listTurnsForEffort(effort.id),
     changed_paths: diff.changed_paths,
     counts: diff.counts,
   };
@@ -137,7 +132,6 @@ function buildEffortDetail(
 export function createWorkItemApi({
   resolveThread,
   workItemStore,
-  turnStore,
   effortStore,
   snapshotStore,
 }: WorkItemApiDeps): WorkItemApi {
@@ -281,11 +275,6 @@ export function createWorkItemApi({
 
     getWorkNotes(itemId) {
       return workItemStore.getWorkNotes(itemId);
-    },
-
-    listAgentTurns(streamId, threadId, limit) {
-      resolveThread(streamId, threadId);
-      return turnStore.listForThread(threadId, limit);
     },
 
     listWorkItemEfforts(itemId) {

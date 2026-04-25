@@ -135,24 +135,6 @@ export interface SnapshotDiffResult {
   afterState: SnapshotDiffSide;
 }
 
-export interface AgentTurn {
-  id: string;
-  thread_id: string;
-  prompt: string;
-  answer: string | null;
-  session_id: string | null;
-  started_at: string;
-  ended_at: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cache_read_input_tokens: number | null;
-  start_snapshot_id: string | null;
-  end_snapshot_id: string | null;
-  task_list_json: string | null;
-  produced_activity?: number | null;
-  archived_at?: string | null;
-}
-
 export interface WorkItemEffort {
   id: string;
   work_item_id: string;
@@ -160,13 +142,13 @@ export interface WorkItemEffort {
   ended_at: string | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
+  summary: string | null;
 }
 
 export interface EffortDetail {
   effort: WorkItemEffort;
   start_snapshot: FileSnapshot | null;
   end_snapshot: FileSnapshot | null;
-  turn_ids: string[];
   changed_paths: string[];
   counts: { created: number; updated: number; deleted: number };
 }
@@ -700,29 +682,6 @@ export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
   return desktopApi().getWorkNotes(itemId);
 }
 
-export async function listAgentTurns(
-  streamId: string,
-  threadId: string,
-  limit?: number,
-): Promise<AgentTurn[]> {
-  return desktopApi().listAgentTurns(streamId, threadId, limit);
-}
-
-export async function listOpenTurns(threadId: string): Promise<AgentTurn[]> {
-  return desktopApi().listOpenTurns(threadId);
-}
-
-export async function listRecentInactiveTurns(
-  threadId: string,
-  limit?: number,
-): Promise<AgentTurn[]> {
-  return desktopApi().listRecentInactiveTurns(threadId, limit);
-}
-
-export async function archiveAgentTurn(turnId: string): Promise<AgentTurn | null> {
-  return desktopApi().archiveAgentTurn(turnId);
-}
-
 export async function getBranchChanges(
   streamId: string,
   baseRef?: string,
@@ -783,7 +742,7 @@ export interface FileSnapshotCreatedEventPayload {
   streamId: string;
   snapshotId: string;
   kind: SnapshotSource;
-  turnId: string | null;
+  effortId: string | null;
   threadId: string | null;
 }
 
@@ -798,32 +757,8 @@ export function subscribeSnapshotEvents(
       streamId: event.streamId,
       snapshotId: event.snapshotId,
       kind: event.kind,
-      turnId: event.turnId,
+      effortId: event.effortId,
       threadId: event.threadId,
-    });
-  });
-}
-
-
-export interface TurnChangeEvent {
-  streamId: string;
-  threadId: string;
-  turnId: string;
-  kind: "opened" | "closed" | "task-list-updated";
-}
-
-export function subscribeTurnEvents(
-  streamId: string | "all",
-  onEvent: (event: TurnChangeEvent) => void,
-): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type !== "turn.changed") return;
-    if (streamId !== "all" && event.streamId !== streamId) return;
-    onEvent({
-      streamId: event.streamId,
-      threadId: event.threadId,
-      turnId: event.turnId,
-      kind: event.kind,
     });
   });
 }

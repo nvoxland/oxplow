@@ -631,10 +631,13 @@ export class WorkItemStore {
     return { epicId: epicId!, childIds: children.map((c) => c.id) };
   }
 
-  /** Collapse add_work_note + updateItem(status) into one transaction.
-   *  `status` defaults to `human_check`. Rejects `done` (callers must not
-   *  self-mark) and rejects if the current status is already terminal
-   *  (done/canceled/archived) — those should go through update_work_item. */
+  /** Validate + apply the closing status transition. The caller's
+   *  `note` text is NOT appended to the work-item history anymore — it
+   *  belongs on the effort row that just closed (written by the
+   *  caller after this returns; see `mcp-tools.ts`'s
+   *  `oxplow__complete_task` handler). `status` defaults to
+   *  `human_check`. Rejects `done` (callers must not self-mark) and
+   *  rejects if the current status is already terminal. */
   completeTask(input: CompleteTaskInput): WorkItem {
     const status = input.status ?? "human_check";
     if (status !== "human_check" && status !== "blocked") {
@@ -649,11 +652,6 @@ export class WorkItemStore {
         `complete_task: item ${input.itemId} is already in terminal status '${existing.status}' — use update_work_item to change it`,
       );
     }
-    // `addNote` and `updateItem` each open their own transaction (and bun:sqlite
-    // doesn't support nested BEGIN). Call them sequentially here rather than
-    // wrapping in an outer transaction. Worst case: note write succeeds and the
-    // status transition fails, leaving an extra note on the item — acceptable.
-    this.addNote(input.threadId, input.itemId, input.note, input.actorKind, input.actorId);
     const updated = this.updateItem({
       threadId: input.threadId,
       itemId: input.itemId,

@@ -2,11 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, extractTodoList, isInsideWorktree, isWriteIntentTool, linkOpenEffortsToTurn, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, isWriteIntentTool, shouldAcceptHookFilePath } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
-import { TurnStore } from "../persistence/turn-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
 import type { McpServerHandle } from "../mcp/mcp-server.js";
@@ -186,111 +185,11 @@ test("buildSessionContextBlock omits ROLE CHANGE when initialRole is not supplie
   expect(out).not.toContain("ROLE CHANGE");
 });
 
-test("buildSessionContextBlock omits last_turn_cache_read line when no prior turn exists", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-  });
-  expect(out).not.toContain("last_turn_cache_read");
-});
-
-test("buildSessionContextBlock omits last_turn_cache_read line for tiny values (<1000)", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 500,
-  });
-  expect(out).not.toContain("last_turn_cache_read");
-});
-
-test("buildSessionContextBlock formats last_turn_cache_read in K for mid-sized values", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 120_000,
-  });
-  expect(out).toContain("last_turn_cache_read: 120K");
-  expect(out).not.toContain("dispatch new work to subagents");
-});
-
-test("buildSessionContextBlock formats last_turn_cache_read in M for ≥1M and omits hint below 10M", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 6_600_000,
-  });
-  expect(out).toContain("last_turn_cache_read: 6.6M");
-  expect(out).not.toContain("dispatch new work to subagents");
-});
-
-test("buildSessionContextBlock renders currentTurnBytes alongside last_turn_cache_read when provided", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 19_300_000,
-    currentTurnBytes: 2_000_000,
-  });
-  expect(out).toContain("last_turn_cache_read: 19.3M (this turn: ~2.0M so far)");
-});
-
-test("buildSessionContextBlock omits this-turn suffix when currentTurnBytes is absent or tiny", () => {
-  const outNone = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 19_300_000,
-  });
-  expect(outNone).toContain("last_turn_cache_read: 19.3M");
-  expect(outNone).not.toContain("this turn:");
-
-  const outTiny = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 19_300_000,
-    currentTurnBytes: 500,
-  });
-  expect(outTiny).not.toContain("this turn:");
-});
-
-test("buildSessionContextBlock appends dispatch-to-subagent hint once last_turn_cache_read crosses 10M", () => {
-  const out = buildSessionContextBlock({
-    stream: { id: "s-1", title: "Main" },
-    thread: { id: "b-1", title: "Default" },
-    activeThread: { id: "b-1", title: "Default" },
-    lastTurnCacheRead: 15_000_000,
-  });
-  expect(out).toContain("last_turn_cache_read: 15.0M");
-  expect(out).toContain("dispatch new work to subagents");
-  // Hint sits before the closing tag.
-  const hintIdx = out.indexOf("dispatch new work to subagents");
-  const closeIdx = out.indexOf("</session-context>");
-  expect(hintIdx).toBeLessThan(closeIdx);
-});
-
-test("buildNextWorkItemStopReason prepends a UI-change nudge banner when context.uiChangeNudge is true", () => {
-  const text = buildNextWorkItemStopReason(
-    { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
-    "s-z",
-    { uiChangeNudge: true },
-  );
-  expect(text).toMatch(/^⚠ UI change detected/);
-  expect(text).toMatch(/restart oxplow/i);
-  expect(text).toContain("exercise the feature in the browser");
-  // The dispatch body still follows after the banner.
-  expect(text).toContain("read_work_options");
-});
 
 test("buildNextWorkItemStopReason omits the nudge banner when uiChangeNudge is false / absent", () => {
   const text = buildNextWorkItemStopReason(
     { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
     "s-z",
-    {},
   );
   expect(text).not.toContain("UI change detected");
   expect(text).toMatch(/^The thread queue has ready work/);
@@ -576,7 +475,6 @@ function seedHistoryHarness() {
   const state = threadStore.ensureStream(stream);
   const threadId = state.threads[0]!.id;
   const workItems = new WorkItemStore(dir);
-  const turnStore = new TurnStore(dir);
   const effortStore = new WorkItemEffortStore(dir);
   const snapshotStore = new SnapshotStore(dir);
   // Mirror production's workspace-watch ignore: skip .oxplow and common
@@ -604,7 +502,7 @@ function seedHistoryHarness() {
     });
     return result.id;
   };
-  return { dir, stream, streamStore, threadStore, threadId, workItems, turnStore, effortStore, snapshotStore, flushSnapshot };
+  return { dir, stream, streamStore, threadStore, threadId, workItems, effortStore, snapshotStore, flushSnapshot };
 }
 
 describe("history-tracking runtime wiring", () => {
@@ -616,7 +514,7 @@ describe("history-tracking runtime wiring", () => {
     });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot },
       { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
     const open = h.effortStore.getOpenEffort(item.id);
@@ -634,12 +532,12 @@ describe("history-tracking runtime wiring", () => {
     });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot },
       { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
     );
     writeFileSync(join(h.dir, "a.txt"), "v2");
     applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot },
       { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "human_check" },
     );
     expect(h.effortStore.getOpenEffort(item.id)).toBeNull();
@@ -656,7 +554,7 @@ describe("history-tracking runtime wiring", () => {
       threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "v2");
@@ -669,52 +567,13 @@ describe("history-tracking runtime wiring", () => {
     rmSync(h.dir, { recursive: true, force: true });
   });
 
-  test("opening a turn after an effort opens attaches it via linkEffortTurn", () => {
-    const h = seedHistoryHarness();
-    const item = h.workItems.createItem({
-      threadId: h.threadId, kind: "task", title: "T",
-      createdBy: "user", actorId: "test",
-    });
-    writeFileSync(join(h.dir, "a.txt"), "v1");
-    applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
-    );
-    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "P" });
-    linkOpenEffortsToTurn(h.effortStore, turn.id);
-    const effort = h.effortStore.getOpenEffort(item.id)!;
-    expect(h.effortStore.listTurnsForEffort(effort.id)).toEqual([turn.id]);
-    expect(h.effortStore.listEffortsForTurn(turn.id).map((e) => e.id)).toEqual([effort.id]);
-    rmSync(h.dir, { recursive: true, force: true });
-  });
-
-  test("effort opening during an already-open turn links back to that turn", () => {
-    const h = seedHistoryHarness();
-    const item = h.workItems.createItem({
-      threadId: h.threadId, kind: "task", title: "T",
-      createdBy: "user", actorId: "test",
-    });
-    // Turn open first...
-    const turn = h.turnStore.openTurn({ threadId: h.threadId, prompt: "P" });
-    writeFileSync(join(h.dir, "a.txt"), "v1");
-    // ...then the task transitions to in_progress. applyStatusTransition
-    // should see the open turn via currentOpenTurn and link itself.
-    applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
-      { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" },
-    );
-    const effort = h.effortStore.getOpenEffort(item.id)!;
-    expect(h.effortStore.listTurnsForEffort(effort.id)).toEqual([turn.id]);
-    rmSync(h.dir, { recursive: true, force: true });
-  });
-
   test("status changes with same-status or undefined-next are no-ops", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "T",
       createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: undefined });
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "in_progress" });
     expect(h.effortStore.listEffortsForWorkItem(item.id)).toHaveLength(0);
@@ -743,7 +602,7 @@ describe("touchedFiles payload on human_check transition", () => {
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     writeFileSync(join(h.dir, "a.txt"), "v1");
@@ -762,7 +621,7 @@ describe("touchedFiles payload on human_check transition", () => {
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     applyStatusTransition(deps, {
@@ -779,7 +638,7 @@ describe("touchedFiles payload on human_check transition", () => {
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     applyStatusTransition(deps, {
@@ -796,7 +655,7 @@ describe("touchedFiles payload on human_check transition", () => {
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     const openEffort = h.effortStore.getOpenEffort(a.id)!;
     const many: string[] = [];
@@ -817,7 +676,7 @@ describe("computeEffortFiles", () => {
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "v1");
     writeFileSync(join(h.dir, "b.txt"), "v1");
@@ -841,7 +700,7 @@ describe("computeEffortFiles", () => {
     const b = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     // Both transitioning to in_progress, then each writes distinct files.
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
@@ -879,7 +738,7 @@ describe("computeEffortFiles", () => {
     const b = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
     const effA = h.effortStore.getOpenEffort(a.id)!;
@@ -908,7 +767,7 @@ describe("computeEffortFiles", () => {
     const b = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "B", createdBy: "user", actorId: "test",
     });
-    const deps = { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot };
+    const deps = { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot };
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" });
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "by-a");
@@ -938,7 +797,7 @@ describe("computeEffortFiles", () => {
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
     });
     applyStatusTransition(
-      { effortStore: h.effortStore, turnStore: h.turnStore, flushSnapshot: h.flushSnapshot },
+      { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot },
       { threadId: h.threadId, workItemId: a.id, previous: "ready", next: "in_progress" },
     );
     const effA = h.effortStore.getOpenEffort(a.id)!;

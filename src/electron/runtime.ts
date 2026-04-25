@@ -54,7 +54,6 @@ import { deriveThreadAgentStatus, type AgentStatus } from "../session/agent-stat
 import { LspSessionManager, registerLanguageServer } from "../lsp/lsp.js";
 import { createUiClientLogger, createDaemonLogger, type Logger, type LogLevel } from "../core/logger.js";
 import { decideResumeUpdate } from "../session/resume-tracker.js";
-import { readTurnUsage } from "../session/transcript-usage.js";
 import { createElectronPlugin, HOOK_EVENTS, type ElectronPlugin } from "../session/claude-plugin.js";
 import { startMcpServer, type HookEnvelope, type McpServerHandle } from "../mcp/mcp-server.js";
 import { buildWorkItemMcpTools } from "../mcp/mcp-tools.js";
@@ -67,7 +66,6 @@ import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiN
 import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
-import { TurnStore, type AgentTurn } from "../persistence/turn-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import {
   SnapshotStore,
@@ -113,7 +111,6 @@ export class ElectronRuntime {
   private notesWatcher: NotesWatcher | null = null;
   readonly waitPointStore: WaitPointStore;
   readonly threadQueue: ThreadQueueOrchestrator;
-  readonly turnStore: TurnStore;
   readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
   readonly workItemApi: WorkItemApi;
@@ -133,7 +130,7 @@ export class ElectronRuntime {
   private readonly recentUiWrites = new Map<string, number>();
   private readonly dirtyPathsByStream = new Map<string, Set<string>>();
   /** Last <session-context> block we sent to each Claude session. Used to
-   *  skip re-injecting identical blocks turn-over-turn. Keyed by Claude
+   *  skip re-injecting identical blocks across turns. Keyed by Claude
    *  session id; absent key means "nothing sent yet / fall back to emit". */
   private readonly lastSessionContextBySessionId = new Map<string, string>();
   /** The thread's writer/read-only role at the moment a Claude session id was
@@ -148,22 +145,6 @@ export class ElectronRuntime {
    *  list the agent already has. Populated through the
    *  markReadWorkOptions callback wired into the MCP tool surface. */
   private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
-  /** Running per-thread running sum of tool-result bytes observed during
-   *  the currently open turn. Populated on each PostToolUse envelope and
-   *  cleared on UserPromptSubmit (new turn) and Stop. Fed into
-   *  buildSessionContextBlock so mid-turn dispatch decisions have a
-   *  non-stale cost signal alongside `last_turn_cache_read`. Within 20%
-   *  is fine per the work item — we just sum stringified tool_response
-   *  length without any token conversion. */
-  private readonly currentTurnBytesByThread = new Map<string, number>();
-  /** Per-thread flag: did the currently-open turn fire any mutation /
-   *  filing / dispatch tool call? Set true on the first qualifying
-   *  PostToolUse (see `isActivityTool`); seeded to `false` on
-   *  UserPromptSubmit (new turn); consumed by the Stop-hook's
-   *  ready-work suppression and cleared after Stop. A pure Q&A turn
-   *  leaves it at `false`, suppressing the directive. See
-   *  wi-0f1492f5e60e. */
-  private readonly turnActivityByThread = new Map<string, boolean>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -211,14 +192,12 @@ export class ElectronRuntime {
       this.waitPointStore,
       logger.child({ subsystem: "thread-queue" }),
     );
-    this.turnStore = new TurnStore(projectDir, logger.child({ subsystem: "turn-store" }));
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
     this.workItemApi = createWorkItemApi({
       resolveThread: (streamId, threadId) => this.resolveThread(streamId, threadId),
       workItemStore: this.workItemStore,
-      turnStore: this.turnStore,
       effortStore: this.effortStore,
       snapshotStore: this.snapshotStore,
     });
@@ -408,17 +387,6 @@ export class ElectronRuntime {
         slug: change.slug,
       });
     });
-    this.turnStore.subscribe((change) => {
-      const thread = this.threadStore.findById(change.threadId);
-      if (!thread) return;
-      this.events.publish({
-        type: "turn.changed",
-        streamId: thread.stream_id,
-        threadId: change.threadId,
-        turnId: change.turnId,
-        kind: change.kind,
-      });
-    });
 
     this.gitEnabledCached = isGitRepo(this.projectDir);
     // Watch the project root for the `.git` direntry appearing or
@@ -475,7 +443,6 @@ export class ElectronRuntime {
           commitPointStore: this.commitPointStore,
           executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
           executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-          turnStore: this.turnStore,
           waitPointStore: this.waitPointStore,
           effortStore: this.effortStore,
           markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
@@ -586,7 +553,6 @@ export class ElectronRuntime {
             commitPointStore: this.commitPointStore,
             executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
             executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-            turnStore: this.turnStore,
             waitPointStore: this.waitPointStore,
             effortStore: this.effortStore,
             markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
@@ -1360,15 +1326,11 @@ export class ElectronRuntime {
       }
       initialRole = this.initialRoleBySessionId.get(sessionId);
     }
-    const lastTurnCacheRead = this.turnStore.getLastClosedTurnCacheRead(thread.id) ?? undefined;
-    const currentTurnBytes = this.currentTurnBytesByThread.get(thread.id);
     return buildSessionContextBlock({
       stream,
       thread,
       activeThread,
       initialRole,
-      lastTurnCacheRead,
-      currentTurnBytes,
     });
   }
 
@@ -1533,7 +1495,9 @@ export class ElectronRuntime {
       if (update) {
         this.threadStore.updateResume(streamId, envelope.threadId, update.sessionId);
       }
-      this.applyTurnTracking(envelope, stored.normalized.sessionId);
+      if (envelope.event === "PostToolUse") {
+        this.handlePostToolUseDirty(envelope);
+      }
     }
     if (envelope.event === "PreToolUse" && envelope.threadId) {
       // Fresh read of thread.status — promoting another thread to writer takes
@@ -1625,15 +1589,6 @@ export class ElectronRuntime {
    */
   private computeStopDirective(threadId: string): Record<string, unknown> | null {
     const thread = this.threadStore.findById(threadId);
-    // The Stop hook fires while the current turn is still "open" (closeTurn
-    // runs inside applyTurnTracking's Stop branch alongside this). Grab its
-    // started_at so decideStopDirective can skip items the agent filed for
-    // triage during the turn. A missing/closed turn falls back to the
-    // pre-fix behaviour.
-    const openTurn = this.turnStore.currentOpenTurn(threadId);
-    const currentTurnFilePaths = openTurn?.start_snapshot_id
-      ? this.computeTurnFilePaths(openTurn)
-      : [];
     // Auto-commit (both ad-hoc via thread.auto_commit and manually-placed
     // mode=auto commit points) is now routed through the agent via a
     // Stop-hook directive — see buildAutoCommitStopReason. The runtime no
@@ -1647,16 +1602,6 @@ export class ElectronRuntime {
     // directive — the agent already has the list.
     const justReadReadySet = this.lastReadWorkOptionsByThread.get(threadId);
     this.lastReadWorkOptionsByThread.delete(threadId);
-    // Activity flag for the turn being closed: false when the turn was
-    // pure Q&A / planning / review, true when any mutation / filing /
-    // dispatch tool fired. Consumed by the Stop-hook's ready-work
-    // directive (suppress on pure Q&A) and then cleared. `undefined` if
-    // we never saw UserPromptSubmit for this thread — the pipeline's
-    // default is non-suppressive so the directive still fires. See
-    // wi-0f1492f5e60e.
-    const turnProducedActivity = this.turnActivityByThread.get(threadId);
-    this.turnActivityByThread.delete(threadId);
-    const cumulativeCacheRead = this.turnStore.getCumulativeCacheRead(threadId);
     // Cheap clean-tree probe: suppresses the auto-commit directive when an
     // ad-hoc `git commit` (Bash / Files panel) already landed the work, so
     // the Stop hook doesn't refire a no-op commit directive. See
@@ -1678,12 +1623,8 @@ export class ElectronRuntime {
       waitPoints: this.waitPointStore.listForThread(threadId),
       workItems: this.workItemStore.listItems(threadId),
       readyWorkItems: this.workItemStore.listReady(threadId),
-      currentTurnStartedAt: openTurn?.started_at ?? null,
-      currentTurnFilePaths,
       autoCommit: thread?.auto_commit ?? false,
-      turnProducedActivity,
       justReadReadySet,
-      cumulativeCacheRead,
       worktreeClean,
     };
     // The item's own thread_id is what matters for the directive text (not
@@ -1696,9 +1637,9 @@ export class ElectronRuntime {
       // item.thread_id is typed nullable (WorkItem covers backlog items too),
       // but decideStopDirective only emits this reason for in-thread rows, so
       // a fall-back to `threadId` keeps the directive stable.
-      buildNextWorkItemReason: (item, context) =>
-        buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId, context),
-      buildHumanCheckNudgeReason: buildHumanCheckNudgeStopReason,
+      buildNextWorkItemReason: (item) =>
+        buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId),
+      buildInProgressAuditReason: buildInProgressAuditStopReason,
     });
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "trigger-wait-point") {
@@ -1713,147 +1654,40 @@ export class ElectronRuntime {
     return outcome.directive ? { ...outcome.directive } : null;
   }
 
-  private applyTurnTracking(envelope: HookEnvelope, sessionId: string | undefined): void {
+  /**
+   * PostToolUse handler: marks the worktree dirty when an edit tool ran,
+   * so workspace watchers refresh promptly without waiting for fs events.
+   */
+  private handlePostToolUseDirty(envelope: HookEnvelope): void {
     const threadId = envelope.threadId;
-    if (!threadId) return;
-    switch (envelope.event) {
-      case "UserPromptSubmit": {
-        const payload = (envelope.payload ?? {}) as { prompt?: unknown };
-        const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
-        if (!prompt.trim()) return;
-        // Defensive: if a prior turn never saw Stop, close it out so every
-        // open turn corresponds to the latest prompt.
-        const stillOpen = this.turnStore.currentOpenTurn(threadId);
-        if (stillOpen) {
-          this.turnStore.closeTurn(stillOpen.id, { answer: null });
-        }
-        // Reset the running-turn tool-byte estimate so the next session
-        // context block starts from zero for this turn.
-        this.currentTurnBytesByThread.delete(threadId);
-        // Seed the turn-activity flag to `false` at the start of each
-        // turn. PostToolUse flips it to `true` on the first mutation /
-        // filing / dispatch tool call; the Stop-hook reads it to decide
-        // whether to suppress the ready-work directive (pure Q&A turn →
-        // suppress). See `isActivityTool` and wi-0f1492f5e60e.
-        this.turnActivityByThread.set(threadId, false);
-        const turn = this.turnStore.openTurn({ threadId, prompt, sessionId });
-        const thread = this.threadStore.findById(threadId);
-        if (thread) {
-          const startSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-start");
-          if (startSnapshotId) this.turnStore.setStartSnapshot(turn.id, startSnapshotId);
-          this.linkOpenEffortsToTurn(turn.id);
-        }
-        return;
-      }
-      case "PostToolUse": {
-        const payload = (envelope.payload ?? {}) as {
-          tool_name?: unknown;
-          tool_input?: unknown;
-          tool_response?: unknown;
-        };
-        const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
-        const toolStatus = derivePostToolStatus(payload.tool_response);
-        // Running cost estimate: sum the serialized tool_response length
-        // into a per-thread counter. Cheap and within ~20% of token
-        // weight at the scale we care about (multi-M turns). Cleared on
-        // UserPromptSubmit (new turn) and Stop.
-        try {
-          const bytes = estimateToolResponseBytes(payload.tool_response);
-          if (bytes > 0) {
-            const prev = this.currentTurnBytesByThread.get(threadId) ?? 0;
-            this.currentTurnBytesByThread.set(threadId, prev + bytes);
-          }
-        } catch {
-          // Never let estimation failures disrupt hook handling.
-        }
-        // Activity flag: flip to `true` on any successful mutation /
-        // filing / dispatch tool call. Used by the Stop-hook to
-        // distinguish pure Q&A turns (suppress ready-work directive)
-        // from turns that produced real work (fire directive even if the
-        // prompt looked conversational). See wi-0f1492f5e60e.
-        if (toolStatus !== "error" && isActivityTool(toolName, payload.tool_input)) {
-          this.turnActivityByThread.set(threadId, true);
-        }
-        // TaskCreate/TaskUpdate → agent_turn.task_list_json bridge.
-        // TodoWrite payloads are declarative (the full list of todos in
-        // final shape), so each call wins and we persist the latest JSON
-        // on the row immediately — the Work panel's open-turn row renders
-        // from this column, so live updates must be visible mid-turn, not
-        // deferred to Stop.
-        if (toolStatus !== "error" && toolName === "TodoWrite") {
-          const openTurn = this.turnStore.currentOpenTurn(threadId);
-          if (openTurn) {
-            const todos = extractTodoList(payload.tool_input);
-            if (todos && todos.length > 0) {
-              this.turnStore.setTaskList(openTurn.id, JSON.stringify(todos));
-            }
-          }
-        }
-        if (!FILE_EDIT_TOOLS.has(toolName)) return;
-        if (toolStatus === "error") return;
-        const extractedPath = extractEditedFilePath(payload.tool_input);
-        if (!extractedPath) return;
-        const thread = this.threadStore.findById(threadId);
-        const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
-        const normalizedPath = stream
-          ? toWorktreeRelativePath(extractedPath, stream.worktree_path)
-          : extractedPath;
-        if (stream && !shouldAcceptHookFilePath(normalizedPath, stream.worktree_path, this.config.generatedDirs)) {
-          return;
-        }
-        if (thread) this.markDirty(thread.stream_id, normalizedPath);
-        // Per-effort write-log is populated on the status transition to
-        // human_check via `update_work_item`'s `touchedFiles` payload — see
-        // applyStatusTransition. The PostToolUse hook no longer guesses.
-        return;
-      }
-      case "Stop": {
-        const open = this.turnStore.currentOpenTurn(threadId);
-        if (!open) return;
-        const thread = this.threadStore.findById(threadId);
-        this.turnStore.closeTurn(open.id, { answer: null });
-        // Persist the per-turn activity flag before computeStopDirective
-        // consumes (and clears) it. Closed turns that produced no
-        // activity surface in the Work panel's "Recent answers" section
-        // so the user can re-read Q&A turns without them cluttering
-        // Done. `undefined` in the map means UserPromptSubmit never
-        // fired (unknown) — persist as NULL so the query skips the row.
-        const activity = this.turnActivityByThread.get(threadId);
-        this.turnStore.setProducedActivity(open.id, activity === undefined ? null : activity);
-        const transcriptPath = typeof (envelope.payload as { transcript_path?: unknown })?.transcript_path === "string"
-          ? (envelope.payload as { transcript_path: string }).transcript_path
-          : null;
-        if (transcriptPath) {
-          const usage = readTurnUsage(transcriptPath, open.started_at, this.logger);
-          if (usage && (usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadInputTokens !== null)) {
-            this.turnStore.setTurnUsage(open.id, usage);
-          }
-        }
-        if (thread) {
-          const endSnapshotId = this.safeFlushSnapshot(thread.stream_id, "turn-end");
-          if (endSnapshotId) this.turnStore.setEndSnapshot(open.id, endSnapshotId);
-          // The next UserPromptSubmit will reset this too, but clear on
-          // Stop so any context block rendered between Stop and the next
-          // prompt starts cleanly.
-          this.currentTurnBytesByThread.delete(threadId);
-        }
-        return;
-      }
-      case "SessionEnd": {
-        const open = this.turnStore.currentOpenTurn(threadId);
-        if (!open) return;
-        this.turnStore.closeTurn(open.id, { answer: null });
-        return;
-      }
-      default:
-        return;
+    if (!threadId || envelope.event !== "PostToolUse") return;
+    const payload = (envelope.payload ?? {}) as {
+      tool_name?: unknown;
+      tool_input?: unknown;
+      tool_response?: unknown;
+    };
+    const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+    const toolStatus = derivePostToolStatus(payload.tool_response);
+    if (!FILE_EDIT_TOOLS.has(toolName)) return;
+    if (toolStatus === "error") return;
+    const extractedPath = extractEditedFilePath(payload.tool_input);
+    if (!extractedPath) return;
+    const thread = this.threadStore.findById(threadId);
+    const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
+    const normalizedPath = stream
+      ? toWorktreeRelativePath(extractedPath, stream.worktree_path)
+      : extractedPath;
+    if (stream && !shouldAcceptHookFilePath(normalizedPath, stream.worktree_path, this.config.generatedDirs)) {
+      return;
     }
+    if (thread) this.markDirty(thread.stream_id, normalizedPath);
   }
 
   /**
    * Auto-snapshot + effort bookkeeping for a work item status change.
    * `in_progress` opens a new effort with a start snapshot; any transition
-   * out of `in_progress` closes it with an end snapshot.
+   * out of `in_progress` closes it with an end snapshot (subject to a
+   * 5-minute minimum gap between snapshots).
    */
   private handleStatusTransition(
     streamId: string,
@@ -1866,20 +1700,22 @@ export class ElectronRuntime {
     applyStatusTransition(
       {
         effortStore: this.effortStore,
-        turnStore: this.turnStore,
-        flushSnapshot: (source) => this.safeFlushSnapshot(streamId, source),
+        flushSnapshot: (source, options) =>
+          this.safeFlushSnapshot(streamId, source, options?.effortId ?? null),
+        getMostRecentSnapshotTimestamp: () =>
+          this.snapshotStore.getMostRecentSnapshotTimestampForStream(streamId),
       },
       { threadId, workItemId, previous, next, touchedFiles },
     );
   }
 
-  private linkOpenEffortsToTurn(turnId: string): void {
-    linkOpenEffortsToTurn(this.effortStore, turnId);
-  }
-
-  private safeFlushSnapshot(streamId: string, source: SnapshotSource): string | null {
+  private safeFlushSnapshot(
+    streamId: string,
+    source: SnapshotSource,
+    effortId: string | null,
+  ): string | null {
     try {
-      return this.flushSnapshotForStream(streamId, source);
+      return this.flushSnapshotForStream(streamId, source, effortId);
     } catch (error) {
       this.logger.warn("snapshot flush failed", {
         streamId,
@@ -1888,22 +1724,6 @@ export class ElectronRuntime {
       });
       return null;
     }
-  }
-
-  /**
-   * Returns paths that differ between the current open turn's start snapshot
-   * and the current worktree state (used by the Stop-hook pipeline to know
-   * which files the agent touched during this turn).
-   */
-  private computeTurnFilePaths(openTurn: AgentTurn): string[] {
-    if (!openTurn.start_snapshot_id) return [];
-    const thread = this.threadStore.findById(openTurn.thread_id);
-    if (!thread) return [];
-    const stream = this.store.get(thread.stream_id);
-    if (!stream) return [];
-    const ignore = (relpath: string) =>
-      shouldIgnoreWorkspaceWatchPath(relpath, this.config.generatedDirs);
-    return this.snapshotStore.reconcileWorktree(openTurn.start_snapshot_id, stream.worktree_path, ignore);
   }
 
   private markDirty(streamId: string, path: string): void {
@@ -1921,7 +1741,11 @@ export class ElectronRuntime {
    * snapshot (version_hash equal), the existing id is returned with no new
    * row created. Returns null if no stream is found.
    */
-  private flushSnapshotForStream(streamId: string, source: SnapshotSource): string | null {
+  private flushSnapshotForStream(
+    streamId: string,
+    source: SnapshotSource,
+    effortId: string | null = null,
+  ): string | null {
     const stream = this.store.get(streamId);
     if (!stream) return null;
     const dirty = this.dirtyPathsByStream.get(streamId);
@@ -1935,6 +1759,7 @@ export class ElectronRuntime {
       worktreePath: stream.worktree_path,
       dirtyPaths: dirty ? dirtyPaths : null,
       ignore,
+      effortId,
     });
     if (dirty) dirty.clear();
     if (result.created) {
@@ -1943,7 +1768,7 @@ export class ElectronRuntime {
         streamId,
         snapshotId: result.id,
         kind: source,
-        turnId: null,
+        effortId: null,
         threadId: null,
       });
     }
@@ -1978,7 +1803,7 @@ export class ElectronRuntime {
             streamId,
             snapshotId: result.id,
             kind: "startup",
-            turnId: null,
+            effortId: null,
             threadId: null,
           });
         }
@@ -1999,31 +1824,6 @@ export class ElectronRuntime {
         if (stamp < cutoff) this.recentUiWrites.delete(key);
       }
     }
-  }
-
-  listAgentTurns(threadId: string, limit?: number): AgentTurn[] {
-    return this.turnStore.listForThread(threadId, limit);
-  }
-
-  /** Active turns (`ended_at IS NULL` AND `started_at >= runtime.startedAt`)
-   *  for a thread. Used by the Work panel's in_progress bucket to render
-   *  each live agent turn as its own synthetic row (showing the prompt +
-   *  elapsed time + optional TaskCreate breakdown). Orphaned rows from
-   *  prior runs are filtered out via `startedAt`. */
-  listOpenTurns(threadId: string): AgentTurn[] {
-    return this.turnStore.listOpenTurns(threadId, this.startedAt);
-  }
-
-  /** Recent closed turns for a thread that produced no activity — the
-   *  "Recent answers" section in the Work panel. Re-readable Q&A turns
-   *  without cluttering Done. */
-  listRecentInactiveTurns(threadId: string, limit?: number): AgentTurn[] {
-    return this.turnStore.listRecentInactiveTurns(threadId, limit);
-  }
-
-  /** Archive a closed Q&A turn so it drops out of the Recent-answers list. */
-  archiveAgentTurn(turnId: string): AgentTurn | null {
-    return this.turnStore.archiveTurn(turnId);
   }
 
   listSnapshots(streamId: string, limit?: number): FileSnapshot[] {
@@ -2284,19 +2084,32 @@ export function describeHookHealth(
 export function buildNextWorkItemStopReason(
   item: { id: string; title: string; kind: string; thread_id: string },
   _streamId: string,
-  context: { uiChangeNudge?: boolean } = {},
 ): string {
-  const lines: string[] = [];
-  if (context.uiChangeNudge) {
-    lines.push(
-      `⚠ UI change detected in this turn (src/ui/** paths). Restart oxplow and exercise the feature in the browser before the subagent marks any item human_check; say so explicitly in your work-item note if you couldn't visually verify.`,
-      ``,
-    );
-  }
-  lines.push(
-    `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__oxplow__read_work_options\` and dispatch to a \`general-purpose\` subagent per the oxplow-runtime skill.`,
-  );
-  return lines.join("\n");
+  return `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__oxplow__read_work_options\` and dispatch to a \`general-purpose\` subagent per the oxplow-runtime skill.`;
+}
+
+/**
+ * Audit nudge for the Stop-hook in-progress branch. Lists every
+ * `in_progress` work item on the thread and asks the agent to reconcile
+ * each one. Tasks persist across turn boundaries — without this nudge,
+ * stale `in_progress` rows pile up because nothing forces a settle step.
+ */
+export function buildInProgressAuditStopReason(items: WorkItem[]): string {
+  const lines = items.map((item) => `- "${item.title}" (itemId: ${item.id})`);
+  return [
+    `You have ${items.length} work item${items.length === 1 ? "" : "s"} marked \`in_progress\` on this thread:`,
+    ``,
+    ...lines,
+    ``,
+    `Audit each before stopping. For each item:`,
+    `- If it's still actively being worked on, leave it \`in_progress\`.`,
+    `- If its acceptance criteria are met, call \`mcp__oxplow__complete_task\` (status \`human_check\`) — never self-mark \`done\`.`,
+    `- If you're stuck and need a user decision, \`mcp__oxplow__update_work_item\` with \`status: "blocked"\`.`,
+    `- If it's paused but resumable later, \`status: "ready"\`.`,
+    `- If it's no longer relevant, \`status: "canceled"\`.`,
+    ``,
+    `When referring to any of these items to the user in chat, use the quoted title — never the \`wi-…\` id. The id is internal to tool calls.`,
+  ].join("\n");
 }
 
 /**
@@ -2341,17 +2154,6 @@ export function buildAutoCommitMessage(
     .join("\n");
   const suffix = settled.length > 5 ? `\n…and ${settled.length - 5} more` : "";
   return `chore: complete ${settled.length} work items\n\n${items}${suffix}`;
-}
-
-export function buildHumanCheckNudgeStopReason(item: WorkItem): string {
-  const lines = [
-    `You have one work item still \`in_progress\` but you didn't update it during this turn: "${item.title}" (id=${item.id}).`,
-    ``,
-    `If its acceptance criteria are met, call \`mcp__oxplow__update_work_item\` with \`status: "human_check"\` — don't leave finished work parked in IN PROGRESS.`,
-    ``,
-    `If the work isn't done, either: (a) call \`mcp__oxplow__add_work_note\` summarizing what's still needed (this suppresses the nudge), or (b) call \`update_work_item\` with \`status: "blocked"\` if you're stuck and a user decision is required.`,
-  ];
-  return lines.join("\n");
 }
 
 /**
@@ -2467,26 +2269,8 @@ export function buildSessionContextBlock(input: {
    * sites keep the original single-line writer: rendering.
    */
   initialRole?: "writer" | "read-only";
-  /**
-   * cache_read_input_tokens from the most recent closed agent_turn for this
-   * thread. When provided and ≥1000, a `last_turn_cache_read: <N>K|<N.N>M`
-   * line is rendered; values <1000 are omitted (noise floor). Once the value
-   * reaches 10M, a short hint suggesting dispatch-to-subagent is appended
-   * before </session-context> — at that scale inline turns are compounding
-   * cache-read cost that subagents would amortize.
-   */
-  lastTurnCacheRead?: number;
-  /**
-   * Rough running estimate of the current turn's tool-result bytes so far,
-   * accumulated per-thread from PostToolUse payloads. When set and ≥1000,
-   * rendered as a `(this turn: ~N.NM so far)` suffix on the
-   * `last_turn_cache_read` line so mid-turn dispatch decisions see a
-   * non-stale cost signal. Omitted on the first turn of a session (no
-   * prior close) and for tiny values.
-   */
-  currentTurnBytes?: number;
 }): string {
-  const { stream, thread, activeThread, initialRole, lastTurnCacheRead, currentTurnBytes } = input;
+  const { stream, thread, activeThread, initialRole } = input;
   const currentRole: "writer" | "read-only" =
     activeThread && activeThread.id !== thread.id ? "read-only" : "writer";
   const lines = [
@@ -2497,8 +2281,6 @@ export function buildSessionContextBlock(input: {
       ? `writer: "${activeThread.title}" (id: ${activeThread.id}) — your thread is read-only`
       : `writer: (you) — your thread is the active writer`,
   ];
-  const cacheLine = formatLastTurnCacheRead(lastTurnCacheRead, currentTurnBytes);
-  if (cacheLine) lines.push(cacheLine);
   if (initialRole && initialRole !== currentRole) {
     if (currentRole === "writer") {
       lines.push(
@@ -2510,33 +2292,8 @@ export function buildSessionContextBlock(input: {
       );
     }
   }
-  if (typeof lastTurnCacheRead === "number" && lastTurnCacheRead >= 10_000_000) {
-    lines.push("tip: dispatch new work to subagents — inline turns compound cache-read cost");
-  }
   lines.push(`</session-context>`);
   return lines.join("\n");
-}
-
-function formatLastTurnCacheRead(
-  value: number | undefined,
-  currentTurnBytes: number | undefined,
-): string | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  if (value < 1000) return null; // noise floor
-  const base = value >= 1_000_000
-    ? `last_turn_cache_read: ${(value / 1_000_000).toFixed(1)}M`
-    : `last_turn_cache_read: ${Math.round(value / 1000)}K`;
-  const suffix = formatCurrentTurnSuffix(currentTurnBytes);
-  return suffix ? `${base} ${suffix}` : base;
-}
-
-function formatCurrentTurnSuffix(bytes: number | undefined): string | null {
-  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return null;
-  if (bytes < 1000) return null; // noise floor, also covers first-turn (0)
-  const rendered = bytes >= 1_000_000
-    ? `${(bytes / 1_000_000).toFixed(1)}M`
-    : `${Math.round(bytes / 1000)}K`;
-  return `(this turn: ~${rendered} so far)`;
 }
 
 /**
@@ -2569,13 +2326,14 @@ export function buildRecentHumanCheckReminder(
   if (!candidate) return "";
   return [
     "<recent-human-check-reminder>",
-    `You just closed ${candidate.id} "${candidate.title}" to human_check on this thread.`,
+    `You just closed "${candidate.title}" to human_check on this thread.`,
     "If the user's new prompt is a fix/redo/pushback on THAT item (even indirectly — \"still doesn't work\", \"that's wrong\", \"try again\", \"no\", etc.):",
-    `  1. Call update_work_item itemId=${candidate.id} status=in_progress to reopen it.`,
+    `  1. Call update_work_item itemId="${candidate.id}" status=in_progress to reopen it.`,
     "  2. Do the new effort in the same item.",
     "  3. Call complete_task back to human_check when done (with touchedFiles).",
     "Do NOT file a new \"Fix …\" task for the redo — that fragments history and the Work panel lies about how many concerns were actually raised.",
     "If the new prompt is a GENUINELY separate concern, file a new item as usual and ignore this reminder.",
+    "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id. The id is internal to tool calls; the user doesn't see or know it.",
     "</recent-human-check-reminder>",
   ].join("\n");
 }
@@ -2685,9 +2443,39 @@ function toWorktreeRelativePath(absOrRel: string, worktreePath: string): string 
  */
 export interface StatusTransitionDeps {
   effortStore: WorkItemEffortStore;
-  turnStore: TurnStore;
-  flushSnapshot: (source: SnapshotSource) => string | null;
+  /**
+   * Capture a snapshot tagged with `source`. When `options.effortId` is
+   * provided the row is attributed to that effort. The runtime
+   * implementation translates this into a `flushSnapshotForStream` call;
+   * tests pass a synchronous fake.
+   */
+  flushSnapshot: (
+    source: SnapshotSource,
+    options?: { effortId?: string | null },
+  ) => string | null;
+  /**
+   * ISO timestamp of the most recent snapshot in the stream this work
+   * item belongs to, or null if there are none. Consulted on the
+   * effort-end path to enforce the 5-minute minimum gap rule —
+   * `task-end` snapshots are skipped when this is younger than
+   * `END_SNAPSHOT_MIN_GAP_MS`. Effort starts always fire regardless.
+   * Optional: when omitted, the gap rule is not enforced (the end
+   * snapshot is always flushed). Tests that don't care about snapshots
+   * pass a no-op `flushSnapshot` and skip this dep.
+   */
+  getMostRecentSnapshotTimestamp?: () => string | null;
 }
+
+/**
+ * Minimum elapsed time between the most recent snapshot for a stream
+ * and a fresh `task-end` snapshot. Below this gap the effort-close
+ * path skips the flush and leaves `effort.end_snapshot_id` null —
+ * computeEffortFiles already tolerates a null end (returns null) and
+ * the next status transition or startup snapshot will close the
+ * history range. Effort START snapshots are exempt: they anchor the
+ * diff range and need a stable id even if the stream just snapshotted.
+ */
+export const END_SNAPSHOT_MIN_GAP_MS = 5 * 60 * 1000;
 
 /**
  * Server-side cap on declared touched-file lists. Payloads larger than
@@ -2707,19 +2495,36 @@ export function applyStatusTransition(
     touchedFiles?: string[];
   },
 ): void {
-  const { previous, next, threadId, workItemId, touchedFiles } = params;
+  const { previous, next, workItemId, touchedFiles } = params;
   if (!next) return;
   if (next === "in_progress" && previous !== "in_progress") {
-    const startSnapshotId = deps.flushSnapshot("task-start");
-    const effort = deps.effortStore.openEffort({ workItemId, startSnapshotId });
-    const openTurn = deps.turnStore.currentOpenTurn(threadId);
-    if (openTurn) deps.effortStore.linkEffortTurn(effort.id, openTurn.id);
+    // Open the effort first with a null start snapshot so we have an id
+    // to attribute the start snapshot row to; then re-attach the id.
+    // Effort starts always fire regardless of recent-snapshot gap — the
+    // start row anchors the diff range.
+    const opened = deps.effortStore.openEffort({ workItemId, startSnapshotId: null });
+    const startSnapshotId = deps.flushSnapshot("task-start", { effortId: opened.id });
+    if (startSnapshotId && !opened.start_snapshot_id) {
+      // Round-trip through openEffort to write the resolved id back onto
+      // the row. openEffort is idempotent and patches start_snapshot_id
+      // when the existing row's value is null.
+      deps.effortStore.openEffort({ workItemId, startSnapshotId });
+    }
   } else if (previous === "in_progress" && next !== "in_progress") {
     // Capture the effort id *before* closing — closeEffort clears the
     // "open effort" marker. We need the id to attach the touched-files
     // payload to the row just closed.
     const openEffort = deps.effortStore.getOpenEffort(workItemId);
-    const endSnapshotId = deps.flushSnapshot("task-end");
+    // 5-minute gap rule: skip the end-of-effort snapshot when the
+    // stream's most recent snapshot is younger than the threshold.
+    // Leaves effort.end_snapshot_id null; computeEffortFiles already
+    // returns null for an open-ended effort, so the History view will
+    // wait until the next snapshot lands.
+    const lastSnapTs = deps.getMostRecentSnapshotTimestamp?.() ?? null;
+    const skipEnd = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
+    const endSnapshotId = skipEnd
+      ? null
+      : deps.flushSnapshot("task-end", { effortId: openEffort?.id ?? null });
     deps.effortStore.closeEffort({ workItemId, endSnapshotId });
     if (openEffort && (next === "human_check" || next === "blocked") && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
       // Dedup, then enforce the cap. Oversized payloads drop ALL rows
@@ -2734,13 +2539,6 @@ export function applyStatusTransition(
   }
 }
 
-/** Attach every currently-open effort to `turnId`. No-op when there are none. */
-export function linkOpenEffortsToTurn(effortStore: WorkItemEffortStore, turnId: string): void {
-  for (const effort of effortStore.listOpenEfforts()) {
-    effortStore.linkEffortTurn(effort.id, turnId);
-  }
-}
-
 /**
  * Per-effort file list. Computes the pair-diff over
  * (start_snapshot_id, end_snapshot_id); when 2+ efforts end at the same
@@ -2752,6 +2550,38 @@ export function linkOpenEffortsToTurn(effortStore: WorkItemEffortStore, turnId: 
  * behaviour. The 1-effort case also returns the raw pair-diff. Returns
  * null when the effort is unknown or still open (no end snapshot).
  */
+/**
+ * Pure helper: return true when `nowMs - lastIso` is below
+ * `END_SNAPSHOT_MIN_GAP_MS`. Exported for testability — the real
+ * runtime path passes `Date.now()` as `nowMs`.
+ */
+export function shouldSkipEndSnapshot(lastIso: string, nowMs: number): boolean {
+  const lastMs = Date.parse(lastIso);
+  if (!Number.isFinite(lastMs)) return false;
+  return nowMs - lastMs < END_SNAPSHOT_MIN_GAP_MS;
+}
+
+/**
+ * Repo-relative paths touched by `effort`. Resolves the same way as
+ * `computeEffortFiles` (snapshot pair-diff filtered by per-effort write
+ * log when present) but returns just the path list — useful for
+ * commit-message preludes, blame overlays, and any consumer that
+ * doesn't care about A/M/D classification or per-file SnapshotEntry
+ * data. Returns an empty array when the effort is unknown, still open
+ * (no end snapshot), or had no recorded changes. Anchored on
+ * `effort.start_snapshot_id`/`end_snapshot_id` — the post-turn-removal
+ * replacement for the deleted `computeTurnFilePaths`.
+ */
+export function computeEffortFilePaths(
+  effortStore: WorkItemEffortStore,
+  snapshotStore: SnapshotStore,
+  effortId: string,
+): string[] {
+  const summary = computeEffortFiles(effortStore, snapshotStore, effortId);
+  if (!summary) return [];
+  return Object.keys(summary.files).sort();
+}
+
 export function computeEffortFiles(
   effortStore: WorkItemEffortStore,
   snapshotStore: SnapshotStore,

@@ -1,5 +1,4 @@
 import type {
-  AgentTurn,
   BacklogState,
   EffortDetail,
   FileSnapshot,
@@ -42,7 +41,6 @@ import type { AgentStatus, OxplowEvent } from "../core/event-bus.js";
 import type { CommandId, MenuGroupSnapshot } from "../ui/commands.js";
 
 export type {
-  AgentTurn,
   BacklogState,
   EffortDetail,
   FileSnapshot,
@@ -142,6 +140,7 @@ export interface DesktopApi {
   setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").OxplowConfig>;
   setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").OxplowConfig>;
   listBranches(): Promise<BranchRef[]>;
+  clipboardReadText(): Promise<string>;
   listGitRefs(): Promise<GroupedGitRefs>;
   renameGitBranch(from: string, to: string): Promise<GitOpResult>;
   deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<GitOpResult>;
@@ -223,17 +222,6 @@ export interface DesktopApi {
   addWorkItemNote(streamId: string, threadId: string, itemId: string, note: string): Promise<WorkItemEvent[]>;
   listWorkItemEvents(streamId: string, threadId: string, itemId?: string): Promise<WorkItemEvent[]>;
   getWorkNotes(itemId: string): Promise<WorkNote[]>;
-  listAgentTurns(streamId: string, threadId: string, limit?: number): Promise<AgentTurn[]>;
-  /** Open agent turns for a thread — `ended_at IS NULL` AND started after
-   *  runtime startup. Feeds the Work panel's in_progress bucket with live
-   *  turn rows that disappear when the turn closes. */
-  listOpenTurns(threadId: string): Promise<AgentTurn[]>;
-  /** Recent closed turns for a thread with `produced_activity = 0` —
-   *  feeds the Work panel's "Recent answers" section so Q&A turns stay
-   *  re-readable without cluttering Done. */
-  listRecentInactiveTurns(threadId: string, limit?: number): Promise<AgentTurn[]>;
-  /** Archive a closed turn so it drops out of the Recent-answers list. */
-  archiveAgentTurn(turnId: string): Promise<AgentTurn | null>;
   listWorkItemEfforts(itemId: string): Promise<EffortDetail[]>;
   listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]>;
   getSnapshotSummary(snapshotId: string, previousSnapshotId?: string | null): Promise<SnapshotSummary | null>;

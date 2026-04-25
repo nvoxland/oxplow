@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { ThreadStore } from "./thread-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import { StreamStore } from "./stream-store.js";
-import { TurnStore } from "./turn-store.js";
 import { WorkItemStore } from "./work-item-store.js";
 import { WorkItemEffortStore } from "./work-item-effort-store.js";
 
@@ -29,10 +28,9 @@ function seed() {
     createdBy: "user",
     actorId: "test",
   });
-  const turns = new TurnStore(dir);
   const snapshots = new SnapshotStore(dir);
   const efforts = new WorkItemEffortStore(dir);
-  return { dir, workItems, turns, snapshots, efforts, threadId, itemId: item.id, streamId: stream.id };
+  return { dir, workItems, snapshots, efforts, threadId, itemId: item.id, streamId: stream.id };
 }
 
 function createSnapshot(dir: string, snapshots: SnapshotStore, streamId: string, name: string, content: string): string {
@@ -77,6 +75,19 @@ describe("WorkItemEffortStore", () => {
     expect(second.id).not.toBe(first.id);
     const all = efforts.listEffortsForWorkItem(itemId);
     expect(all).toHaveLength(2);
+  });
+
+  test("setEffortSummary persists and surfaces on read methods", () => {
+    const { efforts, itemId } = seed();
+    const opened = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });
+    expect(opened.summary).toBeNull();
+    efforts.setEffortSummary(opened.id, "Shipped: see commit deadbeef");
+    expect(efforts.getById(opened.id)?.summary).toBe("Shipped: see commit deadbeef");
+    expect(efforts.getOpenEffort(itemId)?.summary).toBe("Shipped: see commit deadbeef");
+    const closed = efforts.closeEffort({ workItemId: itemId, endSnapshotId: null });
+    expect(closed?.summary).toBe("Shipped: see commit deadbeef");
+    const all = efforts.listEffortsForWorkItem(itemId);
+    expect(all[0]!.summary).toBe("Shipped: see commit deadbeef");
   });
 
   test("direct insert of a second open effort fails (UNIQUE partial index)", async () => {
@@ -195,16 +206,4 @@ describe("WorkItemEffortStore", () => {
     expect(rows.map((r) => r.title)).toEqual([]);
   });
 
-  test("linkEffortTurn + listTurnsForEffort + listEffortsForTurn", () => {
-    const { efforts, turns, itemId, threadId } = seed();
-    const effort = efforts.openEffort({ workItemId: itemId, startSnapshotId: null });
-    const turnA = turns.openTurn({ threadId, prompt: "A" });
-    const turnB = turns.openTurn({ threadId, prompt: "B" });
-    efforts.linkEffortTurn(effort.id, turnA.id);
-    efforts.linkEffortTurn(effort.id, turnB.id);
-    efforts.linkEffortTurn(effort.id, turnA.id); // duplicate — ignored
-
-    expect(efforts.listTurnsForEffort(effort.id).sort()).toEqual([turnA.id, turnB.id].sort());
-    expect(efforts.listEffortsForTurn(turnA.id).map((e) => e.id)).toEqual([effort.id]);
-  });
 });

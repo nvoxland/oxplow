@@ -147,9 +147,11 @@ SQLite-indexed table (`file_snapshot`) plus an on-disk content-
 addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
 are time-ordered and deduplicated on a `version_hash` (no parent
 chain). Rows returned by `listSnapshotsForStream` are pre-enriched
-with `label` + `label_kind` joined from `work_item_effort` and
-`agent_turn`, and exclude the first-ever baseline (nothing to diff
-against). Unlike other stores it doesn't expose a `subscribe()`; the
+with `label` + `label_kind` joined from `work_item_effort`, and
+exclude the first-ever baseline (nothing to diff against). Snapshots
+anchor to efforts via `file_snapshot.effort_id` (and the mirror
+columns `work_item_effort.start_snapshot_id` /
+`end_snapshot_id`). Unlike other stores it doesn't expose a `subscribe()`; the
 runtime publishes `file-snapshot.created` on the EventBus after each
 successful flush that actually inserted a row.
 
@@ -177,6 +179,19 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
+
+## Work panel in_progress bucket is task-only
+
+The Work panel's in_progress bucket is driven purely by `work_item`
+rows (`status = 'in_progress'` for the active thread). There are no
+synthesized turn rows, no live-prompt overlay, and no IPC for
+listing open turns — `listAgentTurns`, `listOpenTurns`,
+`listRecentInactiveTurns`, `archiveAgentTurn`, and
+`subscribeTurnEvents` no longer exist, and there is no
+`TurnChangedEvent`. If you need a "what is the agent doing right
+now" signal, use the `work_item` rows themselves plus
+`agent-status.changed` for the colored-dot working/waiting/idle
+state.
 
 ## Thread and stream reorder IPC
 

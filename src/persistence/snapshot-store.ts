@@ -16,8 +16,6 @@ import { getStateDatabase } from "./state-db.js";
 export type SnapshotSource =
   | "task-start"
   | "task-end"
-  | "turn-start"
-  | "turn-end"
   | "startup";
 
 /**
@@ -59,13 +57,19 @@ export interface FileSnapshot {
   source: SnapshotSource;
   created_at: string;
   /**
+   * Effort that produced this snapshot, when applicable. `task-start` /
+   * `task-end` snapshots are flushed by `applyStatusTransition` and carry
+   * the effort id; `startup` snapshots and pre-migration rows are null.
+   */
+  effort_id?: string | null;
+  /**
    * Populated by `listSnapshotsForStream`: the human-readable label for
    * the row (task title + phase when an effort links here; prompt when
    * a turn links here; otherwise null and the UI falls back to `source`).
    */
   label?: string | null;
   /** `"task" | "turn" | "system"` — drives the icon choice in the UI. */
-  label_kind?: "task" | "turn" | "system" | null;
+  label_kind?: "task" | "system" | null;
 }
 
 /**
@@ -95,6 +99,12 @@ export interface FlushInput {
   dirtyPaths?: string[] | null;
   /** Ignore filter, consulted during full walks. */
   ignore?: (relpath: string) => boolean;
+  /**
+   * When set, attribute the new row to this effort. Persisted as
+   * `file_snapshot.effort_id`. Only relevant for `task-start` / `task-end`
+   * sources; `startup` snapshots leave this null.
+   */
+  effortId?: string | null;
 }
 
 export interface FlushResult {
@@ -184,14 +194,15 @@ export class SnapshotStore {
         return;
       }
       this.stateDb.run(
-        `INSERT INTO file_snapshot (id, stream_id, worktree_path, version_hash, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO file_snapshot (id, stream_id, worktree_path, version_hash, source, created_at, effort_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         newId,
         input.streamId,
         input.worktreePath,
         versionHash,
         input.source,
         now,
+        input.effortId ?? null,
       );
       for (const [path, entry] of entries) {
         this.stateDb.run(
@@ -284,6 +295,21 @@ export class SnapshotStore {
       id,
     );
     return row ? rowToSnapshot(row) : null;
+  }
+
+  /**
+   * ISO timestamp of the most recent snapshot for a stream, or null when
+   * there are none. Used by the effort-close path to enforce a 5-minute
+   * minimum gap between `task-end` snapshots — if the latest snapshot is
+   * younger than that, the new end-of-effort flush is skipped.
+   */
+  getMostRecentSnapshotTimestampForStream(streamId: string): string | null {
+    const row = this.stateDb.get<{ created_at: string }>(
+      `SELECT created_at FROM file_snapshot WHERE stream_id = ?
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      streamId,
+    );
+    return row?.created_at ?? null;
   }
 
   getLatestSnapshot(streamId: string): FileSnapshot | null {
@@ -494,17 +520,7 @@ export class SnapshotStore {
                 JOIN work_items wi ON wi.id = e.work_item_id
                 WHERE e.end_snapshot_id = f.id
                 ORDER BY COALESCE(e.ended_at, '') DESC, e.rowid DESC LIMIT 1
-              ) AS effort_end_title,
-              (
-                SELECT t.prompt FROM agent_turn t
-                WHERE t.end_snapshot_id = f.id
-                ORDER BY COALESCE(t.ended_at, '') DESC, t.rowid DESC LIMIT 1
-              ) AS turn_end_prompt,
-              (
-                SELECT t.prompt FROM agent_turn t
-                WHERE t.start_snapshot_id = f.id
-                ORDER BY t.started_at DESC, t.rowid DESC LIMIT 1
-              ) AS turn_start_prompt
+              ) AS effort_end_title
        FROM file_snapshot f
        WHERE f.stream_id = ?
          AND EXISTS (
@@ -632,14 +648,10 @@ export function computeVersionHash(entries: Array<[string, SnapshotEntry]>): str
 
 function deriveSnapshotLabel(row: Record<string, unknown>): {
   label: string | null;
-  kind: "task" | "turn" | "system" | null;
+  kind: "task" | "system" | null;
 } {
   const effortEnd = asString(row.effort_end_title);
   if (effortEnd) return { label: `${effortEnd} — end`, kind: "task" };
-  const turnEnd = asString(row.turn_end_prompt);
-  if (turnEnd) return { label: firstLine(turnEnd), kind: "turn" };
-  const turnStart = asString(row.turn_start_prompt);
-  if (turnStart) return { label: firstLine(turnStart), kind: "turn" };
   return { label: null, kind: null };
 }
 
@@ -647,11 +659,6 @@ function asString(value: unknown): string | null {
   if (value == null) return null;
   const s = String(value).trim();
   return s.length > 0 ? s : null;
-}
-
-function firstLine(text: string): string {
-  const newline = text.indexOf("\n");
-  return newline === -1 ? text : text.slice(0, newline);
 }
 
 function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
@@ -662,6 +669,7 @@ function rowToSnapshot(row: Record<string, unknown>): FileSnapshot {
     version_hash: String(row.version_hash ?? ""),
     source: String(row.source ?? "startup") as SnapshotSource,
     created_at: String(row.created_at ?? ""),
+    effort_id: row.effort_id == null ? null : String(row.effort_id),
   };
 }
 

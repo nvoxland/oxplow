@@ -153,12 +153,9 @@ to `runtime.handleHookEnvelope`, which:
 2. If the normalized payload carries a session id that differs from
    `thread.resume_session_id`, persists the new id so a later oxplow restart
    relaunches claude with `--resume <id>`.
-3. Calls `applyTurnTracking` to open/close `agent_turn` rows and flush
-   turn-start / turn-end snapshots (see "Snapshot tracking" below). On `Stop`
-   we also read the session transcript (path rides on the hook payload) and
-   sum assistant-message `usage` since the turn's `started_at`, persisting
-   input/output/cache-read token counts on `agent_turn`. See
-   `summarizeTurnUsage` in `src/session/transcript-usage.ts`.
+3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
+   below). The runtime no longer tracks per-turn rows; snapshots and
+   per-effort attribution are anchored to `work_item_effort`.
 4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
    blocks the tool (see Write guard below).
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
@@ -234,59 +231,39 @@ The pipeline runs in priority order:
    includes `human_check` — agents never self-mark `done`, so demanding
    `done` would let the agent march past the line indefinitely while the
    user catches up on verification.
-4. **Writer thread with a ready work item.** Block with a terse directive
-   built by `buildNextWorkItemStopReason` — a one-liner pointing at
-   `mcp__oxplow__read_work_options` (with the embedded threadId) and the
-   merged `oxplow-runtime` skill. Protocol
-   (mark `in_progress` before work, `human_check` after, one-at-a-time
+4. **Writer thread with `in_progress` work items.** Block with the audit
+   directive built by `buildInProgressAuditStopReason` — lists every
+   `in_progress` item on the thread (id + title) and instructs the agent
+   to reconcile each: still active → leave alone; acceptance criteria met
+   → `complete_task` (status `human_check`, never self-mark `done`);
+   stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
+   persist across turn boundaries; without this audit step stale
+   `in_progress` rows pile up because nothing forces a settle. The audit
+   takes priority over the ready-work branch — reconcile what's open
+   before picking up new work.
+5. **Writer thread with no `in_progress` and ready work.** Block with a
+   terse directive built by `buildNextWorkItemStopReason` — a one-liner
+   pointing at `mcp__oxplow__read_work_options` (with the embedded
+   threadId) and the merged `oxplow-runtime` skill. Protocol (mark
+   `in_progress` before work, `human_check` after, one-at-a-time
    attribution) lives in those skills, not the directive — keep the
-   stop-hook message stable and cheap. Items the
-   agent itself filed during the *current* turn
-   are skipped (ready-list filtered by `created_by="agent"` AND
-   `created_at >= currentTurnStartedAt`). Those are triage-inbox entries
-   from flows like `/autoimprove`; forcing the agent to pick them up would
-   invert the user's "leave in waiting" intent. "Queue" here means
-   waiting + ready items only — `human_check` belongs to the user's
-   review queue and is terminal from the pipeline's perspective.
+   stop-hook message stable and cheap. "Queue" here means ready items
+   only — `human_check` belongs to the user's review queue and is
+   terminal from the pipeline's perspective.
 
-   **Ready-work suppression rules** (apply to this branch only — commit /
-   wait / auto-commit are unaffected):
+   **Just-read suppression.** The runtime keeps a per-thread record
+   (`lastReadWorkOptionsByThread`) of the ready-item ids the agent saw
+   in its most recent `read_work_options` call. On the next Stop, if
+   the current ready-set is identical, the directive is suppressed and
+   the record is cleared — the agent already has the list; re-emitting
+   it would waste a turn.
 
-   - **Activity-based suppression.** The runtime tracks whether the
-     currently-open turn has fired any mutation / filing / dispatch tool
-     call (`turnActivityByThread`; seeded `false` on UserPromptSubmit,
-     flipped to `true` on the first qualifying PostToolUse). Qualifying
-     tools: every write-intent tool (Edit / Write / MultiEdit /
-     NotebookEdit / Bash with a non-readonly command — see
-     `isWriteIntentTool`), the oxplow filing tools
-     (`create_work_item`, `file_epic_with_children`, `complete_task`,
-     `update_work_item`, `transition_work_items`, `add_work_note`), and
-     the dispatch tools (`Task`, `dispatch_work_item`). If the flag is
-     still `false` at Stop, the ready-work directive is skipped — the
-     turn was pure Q&A / planning / review and force-marching the agent
-     to the next ready item inverts the user's intent. Any activity
-     re-arms the directive even when the prompt looked conversational.
-     Replaces an older regex-on-the-user-prompt check that over-fired
-     whenever a question-shaped prompt produced real work. An
-     `undefined` flag (UserPromptSubmit never fired) is treated as
-     "unknown → do not suppress" so behaviour stays stable when turn
-     tracking is missing.
-   - **Just-read suppression.** The runtime keeps a per-thread record
-     (`lastReadWorkOptionsByThread`) of the ready-item ids the agent saw
-     in its most recent `read_work_options` call. On the next Stop, if
-     the current ready-set is identical, the directive is suppressed and
-     the record is cleared — the agent already has the list; re-emitting
-     it would waste a turn.
+6. **Otherwise.** Allow stop.
 
-5. **Otherwise.** Allow stop.
+### fork_thread
 
-### fork_thread + high-cache-read hint
-
-At scale a single thread accumulates cache-read cost across its
-lifetime; once it's climbed past ~20M the replay-on-every-turn tax
-starts to dominate. To let the orchestrator shed the tail, the runtime
-exposes `mcp__oxplow__fork_thread({ sourceThreadId, title, summary,
-moveItemIds? })` — one transaction that:
+The runtime exposes `mcp__oxplow__fork_thread({ sourceThreadId, title,
+summary, moveItemIds? })` — one transaction that:
 
 1. Creates a new thread on the same stream, status `queued` (never
    auto-writer — promote explicitly if you want it to commit).
@@ -309,18 +286,6 @@ moveItemIds? })` — one transaction that:
 Returns `{ newThreadId }`. Implementation lives on
 `ElectronRuntime.forkThread` (`src/electron/runtime.ts`); the MCP tool
 is just a thin surface.
-
-**Cumulative cache-read hint.** `TurnStore.getCumulativeCacheRead(threadId)`
-sums `cache_read_input_tokens` across every closed turn on the thread.
-When ≥20M AND the ready-work directive is about to be emitted (i.e.
-not suppressed by the rules above), the directive text has a
-trailing line appended:
-
-> `note: this thread has burned <N.N>M cache-read. If upcoming work is unrelated, consider oxplow__fork_thread({ sourceThreadId: "<id>", title: "...", summary: "short carry-over context" })`
-
-The hint is a nudge, not a requirement — the orchestrator decides
-whether the tail really is unrelated. Commit-point and wait-point
-directives don't carry the hint; only the ready-work branch does.
 
 Numbering note: ad-hoc auto-commit (no DB row) runs *after* the
 commit_point branch because a pending commit_point always wins — if the
@@ -410,7 +375,7 @@ primary tool for queue-driven dispatch.
 - `commit({ commit_point_id, message } | { auto: true, threadId, message })`,
   `list_commit_points(threadId)`, `tasks_since_last_commit(threadId)`.
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
-  "fork_thread + high-cache-read hint" above. Creates a new queued
+  "fork_thread" above. Creates a new queued
   thread on the same stream, seeds a note item, optionally moves ready/
   blocked items across in one transaction.
   The auto shape is used for ad-hoc commits when `thread.auto_commit=true`
@@ -544,34 +509,6 @@ across subsequent turns. Both directions are covered:
 No banner is emitted when the role has not changed, so steady-state
 turns don't grow.
 
-### last_turn_cache_read cost hint
-
-`buildSessionContextBlock` also accepts an optional `lastTurnCacheRead`
-input — populated by `buildRefreshedSessionContext` via
-`TurnStore.getLastClosedTurnCacheRead(threadId)` (the most recent
-`agent_turn` row for the thread with `ended_at IS NOT NULL`, returning
-its `cache_read_input_tokens` or null). When ≥1000 it renders a
-`last_turn_cache_read: <N>K` line; ≥1,000,000 flips to `<N.N>M`. Values
-below 1000 are omitted as noise. When the value hits ≥10,000,000 a
-separate `tip: dispatch new work to subagents — inline turns compound
-cache-read cost` line is appended before `</session-context>` — at
-that scale the cache-read cost of replaying conversation history on
-every inline tool call starts to dominate, and dispatching to a
-subagent amortizes the replay. The hint is a nudge, not a hard rule;
-the orchestrator decides based on the work shape.
-
-`buildSessionContextBlock` also accepts an optional `currentTurnBytes`
-— a rough running estimate of the current turn's tool-result bytes so
-far, accumulated by the runtime in a per-thread
-`currentTurnBytesByThread` Map on each `PostToolUse` envelope
-(`estimateToolResponseBytes` just measures the serialized
-`tool_response`). When non-trivial it's rendered as a suffix on the
-`last_turn_cache_read` line, e.g. `last_turn_cache_read: 19.3M (this
-turn: ~2.0M so far)`, so a mid-turn session-context refresh surfaces a
-non-stale cost signal. The map is cleared on `UserPromptSubmit` (new
-turn) and `Stop` (turn closed). First turn of a session renders only
-the last-turn value, since `currentTurnBytes` is undefined.
-
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
@@ -630,21 +567,17 @@ snapshot id. Mechanics:
 
 - A per-stream in-memory **dirty set** accumulates relative paths. It
   is populated by the workspace fs-watcher (always, regardless of
-  thread state) and by the PostToolUse hook's `markDirty` branch in
-  `applyTurnTracking`. No separate per-path log is kept — the dirty
-  set is passed to `SnapshotStore.flushSnapshot` as an optimizer hint
-  so only changed paths need restat, and every other entry carries
-  forward from the previous snapshot.
-- On `UserPromptSubmit`, after the new `agent_turn` row is opened,
-  `flushSnapshotForStream(streamId, "turn-start")` runs. The returned
-  id (whether freshly created or a dedup match against the latest
-  existing snapshot for the stream) is stored on
-  `agent_turn.start_snapshot_id`, and `linkOpenEffortsToTurn` attaches
-  every currently-open `work_item_effort` to the new turn via
-  `work_item_effort_turn`.
-- On `Stop`, after the turn is closed, `flushSnapshotForStream` runs
-  again with `source: "turn-end"`; the id is written to
-  `agent_turn.end_snapshot_id`.
+  thread state) and by the PostToolUse hook's `markDirty` branch. No
+  separate per-path log is kept — the dirty set is passed to
+  `SnapshotStore.flushSnapshot` as an optimizer hint so only changed
+  paths need restat, and every other entry carries forward from the
+  previous snapshot.
+- Snapshots are anchored to **efforts**, not turns. A status
+  transition into `in_progress` flushes a `task-start` snapshot and
+  records its id on `work_item_effort.start_snapshot_id`; closing the
+  effort flushes a `task-end` snapshot recorded on
+  `work_item_effort.end_snapshot_id`. Both are linked back to the
+  effort via `file_snapshot.effort_id`.
 - On project open, `takeStartupSnapshot` runs once per stream — a full
   worktree walk that emits `source: "startup"`. If nothing changed
   while the app was down, `version_hash` dedup returns the existing
@@ -660,14 +593,19 @@ snapshot id. Mechanics:
   per-cycle record, not a single lifetime span. A DB-level UNIQUE
   partial index on `work_item_effort(work_item_id) WHERE ended_at IS
   NULL` enforces "at most one open effort per item."
-- Turn-level diffs come from
-  `getSnapshotPairDiff(turn.start_snapshot_id, turn.end_snapshot_id,
-  path)` and `getSnapshotSummary(endId, startId)`; effort-level diffs
-  are the analogous pair on `work_item_effort.start_snapshot_id` /
-  `end_snapshot_id`, exposed to the UI via `workItemApi.listWorkItemEfforts`.
+- Effort close enforces a **5-minute minimum gap**: if the latest
+  snapshot is fresher than `END_SNAPSHOT_MIN_GAP_MS`, the close path
+  skips flushing a new row to avoid spamming history with
+  near-identical states. The effort's `end_snapshot_id` may be left
+  null in that case.
+- Effort-level diffs come from
+  `getSnapshotPairDiff(work_item_effort.start_snapshot_id,
+  work_item_effort.end_snapshot_id, path)` and the analogous
+  `getSnapshotSummary` call, exposed to the UI via
+  `workItemApi.listWorkItemEfforts`.
 
-See [data-model.md](./data-model.md) for the `file_snapshot`,
-`work_item_effort`, and `work_item_effort_turn` schemas, and
+See [data-model.md](./data-model.md) for the `file_snapshot` and
+`work_item_effort` schemas, and
 [ipc-and-stores.md](./ipc-and-stores.md) for the `file-snapshot.created`
 EventBus event and the snapshot/effort IPC methods.
 
@@ -752,54 +690,52 @@ snapshot `S`:
 (pure helper over the two stores) for test reuse, and wired to IPC via
 the same pattern as `getSnapshotSummary`.
 
-## Active turns in the in_progress bucket (observational)
+## Task lifecycle
 
-Oxplow passively tracks what the agent is doing: no synthesized work
-items, no auto-file / auto-complete / adoption. The Work panel's
-in_progress bucket renders the union of real work items plus **open
-`agent_turn` rows** — each turn with `ended_at IS NULL` AND
-`started_at >= runtime.startedAt` shows up as a synthetic row
-displaying the user's prompt, a "thinking…" indicator, elapsed time,
-and the current TaskCreate breakdown (from `agent_turn.task_list_json`).
-When the turn Stops, `ended_at` is set and the row disappears from the
-bucket. No status flips, no notes, no cleanup.
+Tasks (`work_item` rows) are the user-visible primitive. The Work
+panel's in_progress bucket is driven purely by `work_item` rows —
+there are no synthesized "live turn" rows, no auto-file /
+auto-complete / adoption. Per-effort attribution and snapshots are
+anchored to `work_item_effort`, which the runtime opens/closes on
+status transitions.
 
-The `runtime.startedAt` cutoff is load-bearing: when oxplow crashes
-mid-turn, `ended_at` never gets set; filtering to turns started after
-the current runtime boot keeps those orphans out of the UI.
+Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 
-**TaskCreate/TaskUpdate bridge.** The PostToolUse hook writes the
-declarative TodoWrite payload to `agent_turn.task_list_json` on every
-call (not only at Stop), so the open-turn row in the Work panel
-renders the live sub-list as the agent ticks steps off. The column
-persists after the turn closes for a later History view.
+- **Start of work** — file an `in_progress` task before editing
+  project files.
+- **Pivot** — before starting a different task, dispose of the
+  current one: stopping for good → `canceled`; switching but coming
+  back → `ready`; can't proceed → `blocked`. Then start the new task
+  `in_progress`.
+- **Defer/batch** — create the new task as `ready` with a short note
+  capturing the ask. Flip to `in_progress` when actually picked up.
+- **Merge** — update the current task's title / description /
+  acceptance criteria when new info refines it. No new row.
+- **Q&A** — pure conversational asks need no task. Tasks are for
+  independent, completable work.
+- **Persist across turns** — if a turn ends with work mid-flight
+  (asked a question, Stop fired before finishing), the task stays
+  `in_progress`. Only `human_check` when the work is actually shipped.
+
+### Stop-hook directives related to tasks
+
+The Stop-hook pipeline (see "Stop-hook pipeline" above) carries two
+task-shaped branches on the writer thread:
+
+- **Task audit (priority 4).** If any item is `in_progress`, the
+  runtime emits `buildInProgressAuditStopReason` listing each
+  in_progress item (id + title) and instructing the agent to
+  reconcile: still active → leave alone; criteria met →
+  `complete_task` (status `human_check`); stuck → `blocked`; paused
+  → `ready`; obsolete → `canceled`. Audit fires *before* the
+  ready-work branch — settle what's open before picking up new work.
+- **Ready work (priority 5).** When nothing is `in_progress` and
+  ready items exist, emit `buildNextWorkItemStopReason` pointing at
+  `mcp__oxplow__read_work_options`. The just-read suppression rule
+  prevents re-emitting the same ready set on consecutive Stops.
 
 If a turn spawns real follow-up work, the agent calls
-`mcp__oxplow__create_work_item` / `file_epic_with_children` the way it
-always has. Those land as first-class work items alongside the turn
-row, with a normal ready → in_progress → human_check lifecycle.
-
-## Recent answers — inactive closed turns
-
-The Work panel renders a "Recent answers" section below the in_progress
-bucket (open-turn rows) and above Human Check, populated by
-`runtime.listRecentInactiveTurns(threadId, limit?)` which delegates to
-`TurnStore.listRecentInactiveTurns`. The section surfaces closed
-`agent_turn` rows with `produced_activity = 0` — turns where the agent
-answered a question / did planning / reviewed without firing any
-mutation / filing / dispatch tool call.
-
-At Stop, the runtime captures `turnActivityByThread[threadId]` (the
-same flag that drives the ready-work suppression rule) and persists
-it via `setProducedActivity(turnId, flag)` right after `closeTurn` and
-before `computeStopDirective` reads+clears the in-memory entry. A
-missing map entry (UserPromptSubmit never fired) is stored as NULL;
-NULL rows are excluded from the Recent-answers query so pre-migration
-turns don't back-fill the list.
-
-UI: double-click a row to open a modal with the full prompt + answer
-(Escape-dismissible, no drag, no right-click — observational only).
-See `src/ui/components/Plan/RecentAnswersList.tsx`.
+`mcp__oxplow__create_work_item` / `file_epic_with_children`.
 
 ## Related
 

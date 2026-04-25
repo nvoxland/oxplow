@@ -1,7 +1,7 @@
 import { spawn } from "node-pty";
 import type { Logger } from "../core/logger.js";
 import type { BridgeSocket } from "./bridge-socket.js";
-import { capturePaneHistory, copyModePage, copyModeScroll, exitCopyMode, resizeWindow } from "./tmux.js";
+import { capturePaneHistory, copyModePage, copyModeScroll, exitCopyMode, refreshClients, resizeWindow } from "./tmux.js";
 
 interface ClientMsg {
   type: "input" | "input-binary" | "resize" | "history-page" | "history-scroll" | "history-exit";
@@ -25,6 +25,13 @@ export function attachPane(ws: BridgeSocket, paneTarget: string, cols: number, r
     rows,
     env: process.env as Record<string, string>,
   });
+
+  // Force tmux to repaint the freshly-attached client. Without this, when the
+  // inner program (e.g. claude that just spawned) hasn't produced output yet,
+  // tmux's attach is silent and xterm shows whatever pixels the host DOM was
+  // last painted with — which on a transport-mode toggle looks like the click
+  // did nothing until the user types and provokes output.
+  refreshClients();
 
   pty.onData((data) => {
     if (ws.readyState !== ws.OPEN) return;

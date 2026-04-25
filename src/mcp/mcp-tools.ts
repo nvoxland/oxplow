@@ -1,7 +1,6 @@
 import type { ToolDef } from "./mcp-server.js";
 import type { ThreadStore, Thread } from "../persistence/thread-store.js";
 import type { Stream, StreamStore } from "../persistence/stream-store.js";
-import type { TurnStore } from "../persistence/turn-store.js";
 import type {
   WorkItemKind,
   WorkItemPriority,
@@ -33,7 +32,6 @@ export interface McpToolDeps {
    *  threads asks for this shape. Throws on any git failure so the
    *  agent can read the stderr and retry. */
   executeAutoCommit(threadId: string, message: string): { sha: string; message: string };
-  turnStore: TurnStore;
   waitPointStore: WaitPointStore;
   effortStore: WorkItemEffortStore;
   /** Notify the runtime that the agent just called read_work_options, so
@@ -266,7 +264,7 @@ function withRedoHint<T extends Record<string, unknown>>(
 }
 
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, turnStore, effortStore, markReadWorkOptions, forkThread } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, effortStore, markReadWorkOptions, forkThread } = deps;
 
   // Prefer the thread row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
@@ -837,6 +835,21 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           actorKind: "agent",
           actorId: "mcp",
         });
+        // Attach the caller's `note` text to the effort that just
+        // closed. Efforts (not the work-item note history) own the
+        // per-attempt summary now — one summary per effort, written
+        // here on the closing transition. The most-recently-closed
+        // effort for this item is the one `completeTask` just closed.
+        if (typeof args.note === "string" && args.note.length > 0) {
+          const allEfforts = effortStore.listEffortsForWorkItem(args.itemId);
+          const closed = allEfforts
+            .filter((e) => e.ended_at !== null)
+            .sort((a, b) => (a.ended_at! < b.ended_at! ? 1 : a.ended_at! > b.ended_at! ? -1 : 0));
+          const justClosed = closed[0];
+          if (justClosed) {
+            effortStore.setEffortSummary(justClosed.id, args.note);
+          }
+        }
         return { ok: true, id: item.id, status: item.status };
       },
     },
@@ -1041,24 +1054,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         resolveThreadAndStream(args);
         workItemStore.linkItems(args.threadId, args.fromItemId, args.toItemId, args.linkType);
         return { ok: true };
-      },
-    },
-    {
-      name: "oxplow__list_agent_turn",
-      description:
-        "List recent agent turns for a thread (newest first). Each turn represents one user prompt and the agent's Stop-terminated response, with the snapshot summary and optionally a single in-progress work item it was attributed to.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
-          threadId: { type: "string", description: "Required thread id." },
-          limit: { type: "number", description: "Optional cap on the number of turns returned (default 50)." },
-        },
-        required: ["threadId"],
-      },
-      handler: (args: { streamId?: string; threadId: string; limit?: number }) => {
-        resolveThreadAndStream(args);
-        return turnStore.listForThread(args.threadId, args.limit);
       },
     },
     {

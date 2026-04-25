@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from "electron";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
@@ -200,6 +200,12 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
   handle("oxplow:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
   handle("oxplow:listBranches", () => currentRuntime.listBranches());
+  // Renderer-side navigator.clipboard.readText() rejects with
+  // "Document is not focused" when the webContents just regained focus
+  // (Cmd-Tab from another app + immediate Cmd+V) and returns empty for
+  // non-text-flavor-primary payloads. Reading via Electron's main-process
+  // clipboard goes straight to NSPasteboard, bypassing both limitations.
+  handle("oxplow:clipboardReadText", () => clipboard.readText());
   handle("oxplow:listGitRefs", () => currentRuntime.listGitRefs());
   handle("oxplow:renameGitBranch", (_event, from: string, to: string) => currentRuntime.renameGitBranch(from, to));
   handle("oxplow:deleteGitBranch", (_event, branch: string, options?: { force?: boolean }) =>
@@ -259,10 +265,6 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:addWorkItemNote", (_event, streamId: string, threadId: string, itemId: string, note: string) => currentRuntime.workItemApi.addWorkItemNote(streamId, threadId, itemId, note));
   handle("oxplow:listWorkItemEvents", (_event, streamId: string, threadId: string, itemId?: string) => currentRuntime.workItemApi.listWorkItemEvents(streamId, threadId, itemId));
   handle("oxplow:getWorkNotes", (_event, itemId: string) => currentRuntime.workItemApi.getWorkNotes(itemId));
-  handle("oxplow:listAgentTurns", (_event, streamId: string, threadId: string, limit?: number) => currentRuntime.workItemApi.listAgentTurns(streamId, threadId, limit));
-  handle("oxplow:listOpenTurns", (_event, threadId: string) => currentRuntime.listOpenTurns(threadId));
-  handle("oxplow:listRecentInactiveTurns", (_event, threadId: string, limit?: number) => currentRuntime.listRecentInactiveTurns(threadId, limit));
-  handle("oxplow:archiveAgentTurn", (_event, turnId: string) => currentRuntime.archiveAgentTurn(turnId));
   handle("oxplow:listWorkItemEfforts", (_event, itemId: string) => currentRuntime.workItemApi.listWorkItemEfforts(itemId));
   handle("oxplow:listSnapshots", (_event, streamId: string, limit?: number) => currentRuntime.listSnapshots(streamId, limit));
   handle("oxplow:getSnapshotSummary", (_event, snapshotId: string, previousSnapshotId?: string | null) => currentRuntime.getSnapshotSummary(snapshotId, previousSnapshotId));

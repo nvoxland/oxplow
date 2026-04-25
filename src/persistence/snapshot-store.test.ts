@@ -45,7 +45,7 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     const result = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -54,7 +54,7 @@ describe("SnapshotStore", () => {
     expect(result.id).toMatch(/^snap-/);
     const snap = store.getSnapshot(result.id);
     expect(snap?.version_hash).toBe(result.versionHash);
-    expect(snap?.source).toBe("turn-start");
+    expect(snap?.source).toBe("task-start");
     rmSync(projectDir, { recursive: true, force: true });
   });
 
@@ -62,7 +62,7 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -82,14 +82,14 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
     writeFileSync(join(worktreePath, "a.txt"), "world");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -105,14 +105,14 @@ describe("SnapshotStore", () => {
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     writeFileSync(join(worktreePath, "b.txt"), "stable");
     store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt", "b.txt"],
     });
     writeFileSync(join(worktreePath, "a.txt"), "changed");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -129,14 +129,14 @@ describe("SnapshotStore", () => {
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     writeFileSync(join(worktreePath, "b.txt"), "stable");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt", "b.txt"],
     });
     unlinkSync(join(worktreePath, "a.txt"));
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -157,14 +157,14 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
     unlinkSync(join(worktreePath, "a.txt"));
     const withTombstone = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -186,14 +186,14 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     const withFile = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
     unlinkSync(join(worktreePath, "a.txt"));
     const afterDelete = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -207,14 +207,14 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "v1");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
     writeFileSync(join(worktreePath, "a.txt"), "v2");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -229,7 +229,7 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -237,7 +237,7 @@ describe("SnapshotStore", () => {
     writeFileSync(join(worktreePath, "b.txt"), "new");
     writeFileSync(join(worktreePath, "a.txt"), "changed");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt", "b.txt"],
@@ -250,7 +250,7 @@ describe("SnapshotStore", () => {
   test("listSnapshotsForStream leaves effort-start-only snapshots unlabeled", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
-    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    store.flushSnapshot({ source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
     writeFileSync(join(worktreePath, "a.txt"), "b");
     const startSnap = store.flushSnapshot({
       source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"],
@@ -282,40 +282,10 @@ describe("SnapshotStore", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  test("listSnapshotsForStream labels turn-linked snapshots with the prompt's first line", () => {
+  test("listSnapshotsForStream prefers effort-end over effort-start on the same snapshot", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
-    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
-    writeFileSync(join(worktreePath, "a.txt"), "b");
-    const endSnap = store.flushSnapshot({
-      source: "turn-end", streamId, worktreePath, dirtyPaths: ["a.txt"],
-    });
-
-    const db = getStateDatabase(projectDir);
-    if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
-      db.run(
-        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
-         VALUES ('b-turn', ?, 'T', 'active', 0, '', 0, ?, ?)`,
-        streamId, new Date().toISOString(), new Date().toISOString(),
-      );
-    }
-    db.run(
-      `INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, end_snapshot_id)
-       VALUES ('turn-1', 'b-turn', 'Multi-line prompt\nsecond line here', ?, ?, ?)`,
-      new Date().toISOString(), new Date().toISOString(), endSnap.id,
-    );
-
-    const listed = store.listSnapshotsForStream(streamId);
-    const row = listed.find((s) => s.id === endSnap.id);
-    expect(row?.label).toBe("Multi-line prompt");
-    expect(row?.label_kind).toBe("turn");
-    rmSync(projectDir, { recursive: true, force: true });
-  });
-
-  test("listSnapshotsForStream prefers effort-end over effort-start and over turns on the same snapshot", () => {
-    const { store, worktreePath, streamId, projectDir } = seed();
-    writeFileSync(join(worktreePath, "a.txt"), "a");
-    store.flushSnapshot({ source: "turn-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
+    store.flushSnapshot({ source: "task-start", streamId, worktreePath, dirtyPaths: ["a.txt"] });
     writeFileSync(join(worktreePath, "a.txt"), "b");
     const snap = store.flushSnapshot({
       source: "task-end", streamId, worktreePath, dirtyPaths: ["a.txt"],
@@ -329,8 +299,8 @@ describe("SnapshotStore", () => {
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
-    // Same snapshot is: (a) an effort's end, (b) another effort's start,
-    // (c) a turn's end. Expected winner: effort-end title.
+    // Same snapshot is both an effort's end and another effort's start.
+    // Expected winner: effort-end title.
     db.run(
       `INSERT INTO work_items (id, thread_id, kind, title, status, priority, created_by, created_at, updated_at)
        VALUES ('wi-end', 'b-win', 'task', 'Finished task', 'human_check', 'medium', 'user', ?, ?)`,
@@ -350,11 +320,6 @@ describe("SnapshotStore", () => {
       `INSERT INTO work_item_effort (id, work_item_id, started_at, start_snapshot_id)
        VALUES ('eff-start', 'wi-start', ?, ?)`,
       new Date().toISOString(), snap.id,
-    );
-    db.run(
-      `INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, end_snapshot_id)
-       VALUES ('turn-x', 'b-win', 'Prompt', ?, ?, ?)`,
-      new Date().toISOString(), new Date().toISOString(), snap.id,
     );
 
     const listed = store.listSnapshotsForStream(streamId);
@@ -464,7 +429,7 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -474,7 +439,7 @@ describe("SnapshotStore", () => {
 
     writeFileSync(join(worktreePath, "a.txt"), "b");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -491,14 +456,14 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "a");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
     });
     writeFileSync(join(worktreePath, "a.txt"), "b");
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -515,7 +480,7 @@ describe("SnapshotStore", () => {
     const { store, worktreePath, streamId, projectDir } = seed();
     writeFileSync(join(worktreePath, "a.txt"), "hello");
     const first = store.flushSnapshot({
-      source: "turn-start",
+      source: "task-start",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],
@@ -532,7 +497,7 @@ describe("SnapshotStore", () => {
     // agree, but it still proves the recheck path doesn't corrupt the happy
     // case when the hashes match.
     const second = store.flushSnapshot({
-      source: "turn-end",
+      source: "task-end",
       streamId,
       worktreePath,
       dirtyPaths: ["a.txt"],

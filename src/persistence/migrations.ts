@@ -893,6 +893,66 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 35,
+    name: "file_snapshot.effort_id",
+    up: (db) => {
+      // Snapshots re-anchor from turn-scoped to effort-scoped. The
+      // existing `turn_id` column is left intact for now (sibling task
+      // wi-db150f2b312c will drop it together with agent_turn). New
+      // `effort_id` is nullable: startup snapshots and any pre-migration
+      // rows have no owning effort.
+      db.exec(`
+        ALTER TABLE file_snapshot ADD COLUMN effort_id TEXT
+          REFERENCES work_item_effort(id) ON DELETE SET NULL;
+        CREATE INDEX idx_file_snapshot_effort ON file_snapshot(effort_id);
+      `);
+    },
+  },
+  {
+    version: 36,
+    name: "drop agent_turn + work_item_effort_turn + file_snapshot.turn_id",
+    up: (db) => {
+      // Agent-turn tracking is fully removed. The runtime/IPC/UI no longer
+      // reads or writes any of these tables, and snapshots have been
+      // re-anchored to efforts via `file_snapshot.effort_id` (v35). Drop
+      // the now-unused junction, the agent_turn table itself, and the
+      // legacy `turn_id` column on `file_snapshot`. SQLite >= 3.35
+      // supports ALTER TABLE DROP COLUMN, which is what bun:sqlite ships,
+      // so the column drop is a one-liner.
+      // v20 already rebuilt file_snapshot without `turn_id`, so no column
+      // drop is needed — only the index (if it lingers from v8/v9 on
+      // databases that bypassed the rebuild for some reason). The
+      // `DROP INDEX IF EXISTS` handles both cases gracefully.
+      db.exec(`
+        PRAGMA defer_foreign_keys = 1;
+
+        DROP INDEX IF EXISTS idx_work_item_effort_turn_turn;
+        DROP TABLE IF EXISTS work_item_effort_turn;
+
+        DROP INDEX IF EXISTS idx_agent_turn_thread;
+        DROP INDEX IF EXISTS idx_agent_turn_batch;
+        DROP INDEX IF EXISTS idx_agent_turn_item;
+        DROP TABLE IF EXISTS agent_turn;
+
+        DROP INDEX IF EXISTS idx_file_snapshot_turn;
+      `);
+    },
+  },
+  {
+    version: 37,
+    name: "work_item_effort.summary",
+    up: (db) => {
+      // Per-effort summary text written when an effort closes (the
+      // `note` arg on `complete_task`). Replaces appending the same text
+      // to the work-item note history — efforts are now the unit of
+      // attribution and carry their own one-line summary of what
+      // shipped in that effort.
+      db.exec(`
+        ALTER TABLE work_item_effort ADD COLUMN summary TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

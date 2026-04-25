@@ -54,14 +54,6 @@ export interface AgentStatusChangedEvent {
   status: AgentStatus;
 }
 
-export interface TurnChangedEvent {
-  type: "turn.changed";
-  streamId: string;
-  threadId: string;
-  turnId: string;
-  kind: "opened" | "closed" | "task-list-updated";
-}
-
 export interface WorkspaceContextChangedEvent {
   type: "workspace-context.changed";
   gitEnabled: boolean;
@@ -109,8 +101,8 @@ export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
   snapshotId: string;
-  kind: "task-start" | "task-end" | "turn-start" | "turn-end" | "startup";
-  turnId: string | null;
+  kind: "task-start" | "task-end" | "startup";
+  effortId: string | null;
   threadId: string | null;
 }
 
@@ -121,7 +113,6 @@ export type OxplowEvent =
   | BacklogChangedEvent
   | ThreadChangedEvent
   | AgentStatusChangedEvent
-  | TurnChangedEvent
   | FileSnapshotCreatedEvent
   | WorkspaceContextChangedEvent
   | CommitPointChangedEvent

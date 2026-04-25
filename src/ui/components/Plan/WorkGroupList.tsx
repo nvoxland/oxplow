@@ -87,8 +87,6 @@ export function WorkGroupList({
   onReparentWorkItem,
   onAddChildTask,
   isActive,
-  inProgressLeadSlot,
-  afterInProgressSlot,
   isSectionCollapsed,
   onToggleSectionCollapsed,
 }: {
@@ -116,16 +114,7 @@ export function WorkGroupList({
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
-  /** Rendered inside the In progress section, before the in_progress work
-   *  items. Used by PlanPane to surface live open-turn rows at the top
-   *  of the section. */
-  inProgressLeadSlot?: React.ReactNode;
-  /** Rendered right after the In progress section, before the next
-   *  section. Used by PlanPane to surface the Recent answers list. */
-  afterInProgressSlot?: React.ReactNode;
-  /** Collapse-state accessors from PlanPane's useCollapsedSections. A
-   *  shared source of truth so the Recent answers pseudo-section
-   *  collapses through the same mechanism as the work-item sections. */
+  /** Collapse-state accessors from PlanPane's useCollapsedSections. */
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;
   onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
 }) {
@@ -630,19 +619,15 @@ export function WorkGroupList({
             </div>
             {!isCollapsed ? (
               <>
-                {section.kind === "inProgress" ? inProgressLeadSlot : null}
                 {renderedRows.map(renderRow)}
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
-                  section.kind === "inProgress" && inProgressLeadSlot ? null : (
-                    <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-                      {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
-                    </div>
-                  )
+                  <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                    {section.kind === "inProgress" && isActive === false ? "<NOT ACTIVE>" : "(nothing here)"}
+                  </div>
                 ) : null}
               </>
             ) : null}
           </div>
-          {section.kind === "inProgress" && !isCollapsed ? afterInProgressSlot : null}
           </Fragment>
         );
       })}

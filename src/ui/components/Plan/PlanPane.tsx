@@ -31,8 +31,6 @@ import { ConfirmDialog } from "../ConfirmDialog.js";
 import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
-import { OpenTurnsList } from "./OpenTurnsList.js";
-import { RecentAnswersList } from "./RecentAnswersList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
@@ -561,37 +559,13 @@ export function PlanPane({
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {groups.length === 0 ? (
           <>
-            {mode === "thread" ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={true} /> : null}
-            {mode === "thread" ? (
-              <RecentAnswersList
-                streamId={streamId}
-                threadId={threadId}
-                isSectionCollapsed={isSectionCollapsed}
-                onToggleSectionCollapsed={onToggleSectionCollapsed}
-              />
-            ) : null}
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
               No work items.
             </div>
           </>
         ) : (
-          groups.map((group, groupIndex) => {
+          groups.map((group) => {
             const isRootThread = mode === "thread";
-            const isFirstGroup = groupIndex === 0;
-            const inProgressCount = group.items.filter((i) => i.status === "in_progress").length;
-            const inProgressLeadSlot = isRootThread && isFirstGroup
-              ? <OpenTurnsList streamId={streamId} threadId={threadId} parentSectionEmpty={inProgressCount === 0} />
-              : undefined;
-            const afterInProgressSlot = isRootThread && isFirstGroup
-              ? (
-                <RecentAnswersList
-                  streamId={streamId}
-                  threadId={threadId}
-                  isSectionCollapsed={isSectionCollapsed}
-                  onToggleSectionCollapsed={onToggleSectionCollapsed}
-                />
-              )
-              : undefined;
             const isActive = isRootThread && thread?.id === activeThreadId;
             const autoCommitOn = thread?.auto_commit ?? false;
             // To Do section header actions: collapsed into a single
@@ -686,8 +660,6 @@ export function PlanPane({
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
                 isActive={isActive}
-                inProgressLeadSlot={inProgressLeadSlot}
-                afterInProgressSlot={afterInProgressSlot}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
               />
@@ -1335,6 +1307,21 @@ function EffortsSection({
                     ))}
                   </div>
                 ) : null}
+                {detail.effort.summary && detail.effort.summary.length > 0 ? (
+                  <div
+                    data-testid={`work-item-effort-summary-${i}`}
+                    style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "pre-wrap" }}
+                  >
+                    {detail.effort.summary}
+                  </div>
+                ) : (
+                  <div
+                    data-testid={`work-item-effort-summary-${i}`}
+                    style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}
+                  >
+                    No summary recorded for this effort.
+                  </div>
+                )}
               </div>
             );
           })}

@@ -4,11 +4,9 @@
 // so policy text that only matters for overrides lives here and doesn't
 // tax every turn.
 //
-// As of the passive-turn-tracking reset, the runtime no longer
-// synthesizes work items — active agent_turn rows render as live
-// entries in the Work panel's in_progress bucket. These skills
-// describe when to file durable work items explicitly. See
-// `.context/agent-model.md` §"Active turns in the in_progress bucket".
+// The runtime no longer synthesizes work items or tracks per-turn rows.
+// These skills describe when to file durable work items explicitly. See
+// `.context/agent-model.md` for details.
 
 /**
  * Single merged skill covering filing / lifecycle / dispatch. Pre-merge
@@ -144,6 +142,15 @@ pending so the stop-hook nudge suppresses itself — it only fires for
 items the agent didn't touch during the turn.
 
 Never self-mark \`done\` — the user owns that transition.
+
+## Talking about items in chat
+
+When you mention a work item to the user, refer to it by its quoted
+title (e.g. \`"Fix wait-point overflow"\`), **never** by its \`wi-…\`
+id. The id is an internal handle for tool calls; the user doesn't see
+it in their UI and won't know what you're pointing at. This applies
+everywhere: confirming a fix, asking whether to proceed, summarizing
+what shipped, naming the item you just reopened, etc.
 
 ## Redos on a just-shipped item
 
