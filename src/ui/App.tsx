@@ -12,7 +12,6 @@ import {
   reorderWorkItems,
   moveWorkItemToThread,
   getBacklogState,
-  createBacklogItem,
   updateBacklogItem,
   deleteBacklogItem,
   reorderBacklog,
@@ -730,17 +729,6 @@ export function App() {
     }
   }
 
-  async function handleCreateBacklogItem(input: Parameters<typeof createBacklogItem>[0]) {
-    try {
-      const next = await createBacklogItem(input);
-      setBacklogState(next);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
   async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
     try {
       const next = await updateBacklogItem(itemId, changes);
@@ -1201,7 +1189,6 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  const [planNewRequest, setPlanNewRequest] = useState(0);
   // Agent-terminal transport — lifted from TerminalPane so the Agent
   // tab's right-click menu can toggle between direct stdin and tmux.
   // Reset to direct when the active thread changes (the old TerminalPane
@@ -1588,8 +1575,6 @@ export function App() {
             onNavigateToLocation={handleNavigateToLocation}
             openFileOrder={currentSession.openOrder}
             openFiles={currentSession.files}
-            onSelectOpenFile={handleSelectOpenFile}
-            onCloseOpenFile={handleCloseOpenFile}
             onRevealCommit={handleRevealCommit}
             onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
@@ -1735,19 +1720,14 @@ export function App() {
               threadWork={selectedThreadWork}
               agentStatus={agentThreadStatus}
               backlog={backlogState}
-              onCreateWorkItem={handleCreateWorkItem}
               onUpdateWorkItem={handleUpdateWorkItem}
               onDeleteWorkItem={handleDeleteWorkItem}
               onReorderWorkItems={handleReorderWorkItems}
-              onCreateBacklogItem={handleCreateBacklogItem}
               onUpdateBacklogItem={handleUpdateBacklogItem}
               onDeleteBacklogItem={handleDeleteBacklogItem}
               onReorderBacklog={handleReorderBacklog}
               onMoveItemToBacklog={handleMoveItemToBacklog}
-              openNewRequest={planNewRequest}
               editRequest={planEditRequest}
-              onOpenFile={handleOpenFile}
-              onShowInHistory={handleShowSnapshotInHistory}
               registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
               onOpenNewWorkItemPage={(payload) => handleOpenPage(newWorkItemRef(payload))}
             />
@@ -1957,7 +1937,6 @@ export function App() {
     currentThreadState.activeThreadId,
     selectedThreadWork,
     backlogState,
-    planNewRequest,
     planEditRequest,
   ]);
 

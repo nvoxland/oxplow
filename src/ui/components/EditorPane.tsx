@@ -1,5 +1,4 @@
 import type { CSSProperties } from "react";
-import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
@@ -22,8 +21,6 @@ interface Props {
   openFileOrder: string[];
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
-  onSelectOpenFile(path: string): void;
-  onCloseOpenFile(path: string): void;
   onRevealCommit?(sha: string): void;
   onRevealWorkItem?(itemId: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
@@ -41,8 +38,6 @@ export function EditorPane({
   openFileOrder,
   openFiles,
   onNavigateToLocation,
-  onSelectOpenFile,
-  onCloseOpenFile,
   onRevealCommit,
   onRevealWorkItem,
   onCompareWithClipboard,
@@ -123,7 +118,7 @@ export function EditorPane({
         () => { void onSaveRef.current(); },
       );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
-      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
+      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId));
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
@@ -930,7 +925,6 @@ function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promi
 function registerLspProviders(
   monaco: any,
   getClient: (languageId: string) => LspClient,
-  streamRef: MutableRefObject<Stream>,
 ) {
   for (const languageId of ["typescript", "javascript"]) {
     monaco.languages.registerDefinitionProvider(languageId, {
@@ -943,7 +937,7 @@ function registerLspProviders(
             character: position.column - 1,
           },
         });
-        return definitionResultToMonacoLocations(monaco, streamRef.current, result);
+        return definitionResultToMonacoLocations(monaco, result);
       },
     });
     monaco.languages.registerHoverProvider(languageId, {
@@ -1007,7 +1001,7 @@ function normalizeDefinitionTarget(stream: Stream, result: unknown): EditorNavig
   return null;
 }
 
-function definitionResultToMonacoLocations(monaco: any, stream: Stream, result: unknown): any[] {
+function definitionResultToMonacoLocations(monaco: any, result: unknown): any[] {
   const locations = Array.isArray(result) ? result : result ? [result] : [];
   return locations
     .map((item) => referenceToMonacoLocation(monaco, item))

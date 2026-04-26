@@ -228,8 +228,7 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
             ) : !log ? null : layout.rows.length === 0 ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No commits.</div>
             ) : (
-              layout.rows.map((row, index) => {
-                const next = layout.rows[index + 1] ?? null;
+              layout.rows.map((row) => {
                 const matched = !matches || matches.has(row.commit.sha);
                 const sha = row.commit.sha;
                 return (
@@ -242,7 +241,6 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
                   >
                     <CommitRow
                       row={row}
-                      nextRow={next}
                       graphWidth={graphWidth}
                       selected={selectedSha === sha}
                       matched={matched}
@@ -288,7 +286,6 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
 
 function CommitRow({
   row,
-  nextRow,
   graphWidth,
   selected,
   matched,
@@ -298,7 +295,6 @@ function CommitRow({
   onClick,
 }: {
   row: GraphRow;
-  nextRow: GraphRow | null;
   graphWidth: number;
   selected: boolean;
   matched: boolean;

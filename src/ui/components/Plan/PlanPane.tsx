@@ -8,7 +8,6 @@ import type {
   CommitPoint,
   WaitPoint,
   WorkItem,
-  WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
 } from "../../api.js";
@@ -38,7 +37,6 @@ import {
   buildGroups,
   classifyWorkItem,
   filterAutoAuthored,
-  inputStyle,
   miniButtonStyle,
   statusLabel,
   useCollapsedSections,
@@ -62,16 +60,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false;
 }
 
-interface CreateInput {
-  kind: WorkItemKind;
-  title: string;
-  description?: string;
-  acceptanceCriteria?: string | null;
-  parentId?: string | null;
-  status?: WorkItemStatus;
-  priority?: WorkItemPriority;
-}
-
 interface Props {
   thread: Thread | null;
   activeThreadId: string | null;
@@ -80,11 +68,9 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onCreateWorkItem(input: CreateInput): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onDeleteWorkItem(itemId: string): Promise<void>;
   onReorderWorkItems(orderedItemIds: string[]): Promise<void>;
-  onCreateBacklogItem(input: CreateInput): Promise<void>;
   onUpdateBacklogItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onDeleteBacklogItem(itemId: string): Promise<void>;
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
@@ -93,8 +79,6 @@ interface Props {
   /** Open the edit modal for the specified work item. Change the token to
    *  request again even if the itemId repeats. */
   editRequest?: { itemId: string; token: number } | null;
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
   /** On mount, PlanPane calls this with its openCreateModal function so
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
@@ -126,19 +110,15 @@ export function PlanPane({
   threadWork,
   agentStatus,
   backlog,
-  onCreateWorkItem,
   onUpdateWorkItem,
   onDeleteWorkItem,
   onReorderWorkItems,
-  onCreateBacklogItem,
   onUpdateBacklogItem,
   onDeleteBacklogItem,
   onReorderBacklog,
   onMoveItemToBacklog,
   openNewRequest,
   editRequest,
-  onOpenFile,
-  onShowInHistory,
   registerOpenCreate,
   onOpenNewWorkItemPage,
   hideAuto = false,
@@ -281,7 +261,6 @@ export function PlanPane({
     return null;
   }, [groups, selectedId]);
 
-  const activeCreate = mode === "backlog" ? onCreateBacklogItem : onCreateWorkItem;
   const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
   const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
   const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;

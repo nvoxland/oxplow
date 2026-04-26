@@ -4,7 +4,6 @@ import {
   createStream,
   listAdoptableWorktrees,
   listBranches,
-  type BranchRef,
   type GitWorktreeEntry,
   type Stream,
 } from "../api.js";
@@ -79,7 +78,6 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
   const [startPointRef, setStartPointRef] = useState("");
   const [startPointLabel, setStartPointLabel] = useState("");
   const [worktreePath, setWorktreePath] = useState("");
-  const [branches, setBranches] = useState<BranchRef[]>([]);
   const [worktrees, setWorktrees] = useState<GitWorktreeEntry[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -93,7 +91,6 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
     void Promise.all([listBranches(), listAdoptableWorktrees()])
       .then(([nextBranches, nextWorktrees]) => {
         if (cancelled) return;
-        setBranches(nextBranches);
         setWorktrees(nextWorktrees);
         const first = nextBranches[0];
         if (first) {
