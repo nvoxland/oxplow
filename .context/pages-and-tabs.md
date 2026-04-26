@@ -101,10 +101,10 @@ The full IA redesign ships in phases (see plan
 - ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
   a Page-wrapped renderer in `src/ui/pages/`:
   Start, Settings, Code quality, Local history, Git history, Files,
-  Notes, All work, Subsystem docs. Legacy left/bottom dock entries
-  (Plan, Project, Notes, Hook events, Git history, Local history,
-  Code quality) are still mounted alongside the pages so the app
-  stays usable mid-migration; phase 5/7 cleans them up.
+  Notes, All work, Subsystem docs. Legacy left-dock entries
+  (Plan, Project, Notes) remain alongside the pages so the app stays
+  usable; the bottom dock has since been removed (see "Bottom dock
+  removed" note below).
 - ✅ Phase 4 — New pages + backlinks indexer:
   `WorkItemPage`, `NotePage`, `FindingPage`, three `DashboardPage`
   variants (Planning / Review / Quality), and the
@@ -165,10 +165,24 @@ The full IA redesign ships in phases (see plan
   Monaco-theme sections.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
-tabs. The existing left rail toolwindows (Work, Files, Notes, plus the
-HUD tab) and bottom drawer (Hook events, Git history, Local history,
-Code quality) remain in place so existing keyboard/menu paths keep
-working alongside the page tabs.
+tabs. The left rail toolwindows (Work, Files, Notes, plus the HUD tab)
+remain in place so existing keyboard/menu paths keep working alongside
+the page tabs.
+
+**Bottom dock removed.** The bottom-drawer `DockShell` that previously
+hosted Hook events / Git history / Local history / Code quality is
+gone. Every panel it carried has a Page equivalent
+(`HookEventsPage`, `GitHistoryPage`, `LocalHistoryPage`,
+`CodeQualityPage`); menu commands like "Open history" / "Open
+snapshots", and the cross-pane "show in history" reveal hooks
+(`handleRevealCommit`, `handleShowSnapshotInHistory`), all route
+through `handleOpenPage(indexRef("git-history"))` /
+`indexRef("local-history")`. The `StatusBar` (background-task
+indicator + branch chip) used to live as the bottom dock's `railExtra`;
+it's now mounted directly at the bottom of `App.tsx` inside its own
+status-bar wrapper. The `BottomPanel`, `HistoryPanel`, `SnapshotsPanel`,
+and `CodeQualityPanel` modules are no longer imported from `App.tsx` —
+the only callers left are inside their own page wrappers.
 
 ## Per-thread active tab (today)
 

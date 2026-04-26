@@ -74,7 +74,6 @@ import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
-import { BottomPanel } from "./components/BottomPanel.js";
 import { DockShell } from "./components/Dock/DockShell.js";
 import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
@@ -84,9 +83,6 @@ import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { NotesPane } from "./components/Notes/NotesPane.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
-import { HistoryPanel } from "./components/History/HistoryPanel.js";
-import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
-import { CodeQualityPanel } from "./components/CodeQuality/CodeQualityPanel.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { StartPage } from "./pages/StartPage.js";
@@ -208,7 +204,6 @@ export function App() {
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
-  const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
@@ -1276,10 +1271,10 @@ export function App() {
       setThreadCreateRequest((n) => n + 1);
     },
     openHistory() {
-      setBottomActivate({ id: "history", token: Date.now() });
+      handleOpenPageRef.current?.(indexRef("git-history"));
     },
     openSnapshots() {
-      setBottomActivate({ id: "snapshots", token: Date.now() });
+      handleOpenPageRef.current?.(indexRef("local-history"));
     },
     commitFiles() {
       if (!stream || !workspaceContext.gitEnabled) return;
@@ -1418,7 +1413,7 @@ export function App() {
   const handleRevealCommit = (sha: string) => {
     const token = Date.now();
     setHistoryReveal({ sha, token });
-    setBottomActivate({ id: "history", token });
+    handleOpenPage(indexRef("git-history"));
   };
 
   const handleRequestEditWorkItem = (itemId: string) => {
@@ -1436,8 +1431,8 @@ export function App() {
 
   const handleShowSnapshotInHistory = (snapshotId: string) => {
     const token = Date.now();
-    setBottomActivate({ id: "snapshots", token });
     setSnapshotsReveal({ snapshotId, token });
+    handleOpenPage(indexRef("local-history"));
   };
 
   const closeDiffTab = (id: string) => {
@@ -2055,29 +2050,6 @@ export function App() {
     selectedThreadWork,
   ]);
 
-  const bottomToolWindows: ToolWindow[] = [
-    {
-      id: "hook-events",
-      label: "Hook events",
-      render: () => <BottomPanel streamId={stream?.id ?? null} />,
-    },
-    {
-      id: "history",
-      label: "Git history",
-      render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />,
-    },
-    {
-      id: "snapshots",
-      label: "Local history",
-      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} onRequestEditWorkItem={handleRequestEditWorkItem} />,
-    },
-    {
-      id: "code-quality",
-      label: "Code quality",
-      render: () => <CodeQualityPanel stream={stream} onOpenFile={handleOpenFile} />,
-    },
-  ];
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
@@ -2100,7 +2072,6 @@ export function App() {
         />
         {stream ? (
           <ThreadRail
-            streamId={stream.id}
             threads={currentThreadState.threads}
             activeThreadId={currentThreadState.activeThreadId}
             selectedThreadId={currentThreadState.selectedThreadId}
@@ -2153,18 +2124,21 @@ export function App() {
           ) : <div style={{ padding: 12 }}>loading…</div>}
         </div>
       </div>
-      <DockShell
-        side="bottom"
-        toolWindows={bottomToolWindows}
-        storageKey="bottom"
-        defaultOpen={false}
-        defaultSize={200}
-        minSize={120}
-        maxSize={480}
-        railMode="always"
-        activateRequest={bottomActivate}
-        railExtra={<StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />}
-      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 8,
+          padding: "4px 10px",
+          borderTop: "1px solid var(--border)",
+          background: "var(--bg-2)",
+          flexShrink: 0,
+          minHeight: 26,
+        }}
+      >
+        <StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />
+      </div>
       <QuickOpenOverlay
         open={quickOpenVisible}
         stream={stream}

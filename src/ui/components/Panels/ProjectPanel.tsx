@@ -994,9 +994,8 @@ function FileHistoryModal({
   onClose(): void;
   onOpenDiff(sha: string, parent: string | null): void;
 }) {
-  useEscape(onClose);
   return (
-    <ModalShell onClose={onClose} title={`History · ${state.path}`}>
+    <Slideover open onClose={onClose} title={`History · ${state.path}`} testId="file-history-slideover">
       {state.loading && !state.commits ? (
         <div style={modalEmptyStyle}>Loading…</div>
       ) : !state.commits || state.commits.length === 0 ? (
@@ -1019,7 +1018,7 @@ function FileHistoryModal({
           </button>
         ))
       )}
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1033,16 +1032,15 @@ function CompareWithModal({
   onPick(ref: string): void;
 }) {
   const [filter, setFilter] = useState("");
-  useEscape(onClose);
   const filtered = (state.refs ?? []).filter((ref) => ref.name.toLowerCase().includes(filter.toLowerCase()));
   return (
-    <ModalShell onClose={onClose} title={`Compare With… · ${state.path}`}>
+    <Slideover open onClose={onClose} title={`Compare With… · ${state.path}`} testId="compare-with-slideover">
       <input
         autoFocus
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Filter branches/tags…"
-        style={{ margin: "6px 12px", ...modalInputStyle }}
+        style={{ marginBottom: 8, ...modalInputStyle, width: "100%", boxSizing: "border-box" }}
       />
       {state.loading && !state.refs ? (
         <div style={modalEmptyStyle}>Loading refs…</div>
@@ -1058,7 +1056,7 @@ function CompareWithModal({
           </button>
         ))
       )}
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1077,7 +1075,6 @@ function PushPullDialog({
   const [setUpstream, setSetUpstream] = useState(false);
   const [rebase, setRebase] = useState(false);
   const [running, setRunning] = useState(false);
-  useEscape(onClose);
 
   const run = async () => {
     setRunning(true);
@@ -1089,10 +1086,28 @@ function PushPullDialog({
   };
 
   return (
-    <ModalShell onClose={onClose} title={kind === "push" ? "Push" : "Pull"}>
+    <Slideover
+      open
+      onClose={onClose}
+      title={kind === "push" ? "Push" : "Pull"}
+      testId={`push-pull-${kind}-slideover`}
+      footer={(
+        <>
+          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void run()}
+            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff" }}
+          >
+            {running ? "Running…" : kind === "push" ? "Push" : "Pull"}
+          </button>
+        </>
+      )}
+    >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 12 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
       >
         {kind === "push" ? (
           <>
@@ -1111,14 +1126,10 @@ function PushPullDialog({
             Rebase instead of merge
           </label>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
-          <button type="submit" disabled={running} style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff" }}>
-            {running ? "Running…" : kind === "push" ? "Push" : "Pull"}
-          </button>
-        </div>
+        {/* Hidden submit so Enter form-submit works. */}
+        <button type="submit" style={{ display: "none" }} aria-hidden="true" tabIndex={-1} disabled={running}>submit</button>
       </form>
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1227,11 +1238,10 @@ function CommitDialog({
 }
 
 function GitOpResultModal({ title, result, onClose }: { title: string; result: GitOpResult; onClose(): void }) {
-  useEscape(onClose);
   const colour = result.ok ? "#86efac" : "#f87171";
   return (
-    <ModalShell onClose={onClose} title={title}>
-      <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+    <Slideover open onClose={onClose} title={title} testId="git-op-result-slideover">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ color: colour, fontSize: 12, fontWeight: 600 }}>
           {result.ok ? "Success" : `Failed (exit ${result.exitCode ?? "?"})`}
         </div>
@@ -1242,56 +1252,8 @@ function GitOpResultModal({ title, result, onClose }: { title: string; result: G
           <pre style={{ ...modalPreStyle, color: "#f87171" }}>{result.stderr}</pre>
         ) : null}
       </div>
-    </ModalShell>
+    </Slideover>
   );
-}
-
-function ModalShell({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        zIndex: 2000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          width: "min(640px, 92vw)",
-          maxHeight: "80vh",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useEscape(handler: () => void) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); handler(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handler]);
 }
 
 const modalEmptyStyle = { padding: 14, color: "var(--muted)", fontSize: 12 } as const;

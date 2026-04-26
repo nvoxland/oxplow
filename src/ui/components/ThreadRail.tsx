@@ -5,14 +5,11 @@ import type {
   Thread,
   ThreadWorkState,
 } from "../api.js";
-import { setThreadPrompt } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
-import { logUi } from "../logger.js";
 
 interface Props {
-  streamId: string;
   threads: Thread[];
   activeThreadId: string | null;
   selectedThreadId: string | null;
@@ -28,8 +25,8 @@ interface Props {
   onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
   onRequestCreateThread?(): void;
-  /** Open the per-thread settings page. When provided, the kebab
-   *  "Settings" item routes here instead of the legacy modal. */
+  /** Open the per-thread settings page. The kebab "Settings" item
+   *  routes here. */
   onOpenThreadSettings?(threadId: string): void;
   /** Bumping this number opens the "new thread" modal. */
   createRequest?: number;
@@ -39,7 +36,6 @@ export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
 export const THREAD_DRAG_MIME = "application/x-oxplow-thread";
 
 export function ThreadRail({
-  streamId,
   threads,
   activeThreadId,
   selectedThreadId,
@@ -60,36 +56,6 @@ export function ThreadRail({
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overThreadId, setOverThreadId] = useState<string | null>(null);
-  // Legacy in-rail settings modal — used only as a fallback when the
-  // host did not wire `onOpenThreadSettings`. Once every caller passes
-  // the page-routing handler this state and the surrounding overlay
-  // can be removed.
-  const [settingsThread, setSettingsThread] = useState<Thread | null>(null);
-  const [settingsPrompt, setSettingsPrompt] = useState("");
-  const [settingsSaving, setSettingsSaving] = useState(false);
-
-  function openThreadSettings(thread: Thread) {
-    if (onOpenThreadSettings) {
-      onOpenThreadSettings(thread.id);
-      return;
-    }
-    setSettingsThread(thread);
-    setSettingsPrompt(thread.custom_prompt ?? "");
-    setSettingsSaving(false);
-  }
-
-  async function saveThreadSettings() {
-    if (!settingsThread) return;
-    setSettingsSaving(true);
-    try {
-      await setThreadPrompt(streamId, settingsThread.id, settingsPrompt.trim() || null);
-      setSettingsThread(null);
-    } catch (e) {
-      logUi("error", "failed to save thread prompt", { threadId: settingsThread.id, error: String(e) });
-    } finally {
-      setSettingsSaving(false);
-    }
-  }
 
   const { ordered, completed } = useMemo(() => {
     // All non-completed threads share a single sort_index sequence and are
@@ -137,8 +103,8 @@ export function ThreadRail({
       {
         id: "thread.settings",
         label: "Settings",
-        enabled: true,
-        run: () => openThreadSettings(thread),
+        enabled: !!onOpenThreadSettings,
+        run: () => onOpenThreadSettings?.(thread.id),
       },
       {
         id: "thread.add-thread",
@@ -243,37 +209,6 @@ export function ThreadRail({
           </div>
         ) : null}
       </div>
-      {settingsThread ? (
-        <div style={backdropStyle}>
-          <div style={settingsModalStyle}>
-            <div style={settingsModalHeaderStyle}>
-              <span>Thread settings — {settingsThread.title}</span>
-              <button type="button" onClick={() => setSettingsThread(null)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={settingsLabelStyle}>
-                <span>Custom prompt</span>
-                <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                  This prompt is appended to the agent's system prompt for this thread.
-                </span>
-                <textarea
-                  value={settingsPrompt}
-                  onChange={(e) => setSettingsPrompt(e.target.value)}
-                  rows={6}
-                  style={{ ...settingsInputStyle, resize: "vertical", fontFamily: "inherit" }}
-                  placeholder="Enter standing instructions for this thread…"
-                />
-              </label>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setSettingsThread(null)} style={settingsBtnStyle}>Cancel</button>
-                <button type="button" onClick={() => void saveThreadSettings()} style={settingsBtnStyle} disabled={settingsSaving}>
-                  {settingsSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -873,39 +808,6 @@ const overflowItemStyle: CSSProperties = {
   textAlign: "left",
 };
 
-const backdropStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1100,
-};
-
-const settingsModalStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 8,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
-  minWidth: 480,
-  maxWidth: 640,
-  maxHeight: "80vh",
-  display: "flex",
-  flexDirection: "column",
-};
-
-const settingsModalHeaderStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "10px 14px",
-  borderBottom: "1px solid var(--border)",
-  fontSize: 13,
-  fontWeight: 600,
-  background: "var(--bg-1, var(--bg-2))",
-};
-
 const settingsInputStyle: CSSProperties = {
   background: "var(--bg)",
   color: "var(--fg)",
@@ -916,24 +818,3 @@ const settingsInputStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
 };
-
-const settingsBtnStyle: CSSProperties = {
-  background: "var(--bg-2)",
-  color: "var(--fg)",
-  border: "1px solid var(--border)",
-  padding: "6px 12px",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
-
-const closeBtnStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "var(--muted)",
-  fontSize: 20,
-  lineHeight: 1,
-  cursor: "pointer",
-};
-
-const settingsLabelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };

@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { checkoutStreamBranch, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type Stream } from "../api.js";
-import { logUi } from "../logger.js";
+import { useEffect, useMemo, useState } from "react";
+import { checkoutStreamBranch, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
@@ -19,8 +18,8 @@ interface Props {
   onRenameStream?(streamId: string, newTitle: string): Promise<void> | void;
   onRequestCreateThread?(): void;
   onOpenSettings?(): void;
-  /** Open the per-stream settings page. When provided, the kebab
-   *  "Settings" item routes here instead of the legacy modal. */
+  /** Open the per-stream settings page. The kebab "Settings" item
+   *  routes here. */
   onOpenStreamSettings?(streamId: string): void;
   /** Open the New-stream page (replaces the in-rail modal when wired). */
   onOpenNewStreamPage?(): void;
@@ -37,43 +36,16 @@ export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renameBusy, setRenameBusy] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const [settingsStream, setSettingsStream] = useState<Stream | null>(null);
-  const [settingsPrompt, setSettingsPrompt] = useState("");
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  // Inline rename state — set to a stream id to swap the tab title for an
+  // input. Mirrors the thread-chip rename pattern (Enter commits, Escape
+  // reverts, blur commits).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [branches, setBranches] = useState<BranchRef[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [switchBranchStream, setSwitchBranchStream] = useState<Stream | null>(null);
   const [switchBranchRef, setSwitchBranchRef] = useState<string>("");
   const [switchBranchError, setSwitchBranchError] = useState<string | null>(null);
   const [switchBranchBusy, setSwitchBranchBusy] = useState(false);
-
-  function openStreamSettings(candidate: Stream) {
-    if (onOpenStreamSettings) {
-      onOpenStreamSettings(candidate.id);
-      return;
-    }
-    setSettingsStream(candidate);
-    setSettingsPrompt(candidate.custom_prompt ?? "");
-    setSettingsSaving(false);
-  }
-
-  async function saveStreamSettings() {
-    if (!settingsStream) return;
-    setSettingsSaving(true);
-    try {
-      await setStreamPrompt(settingsStream.id, settingsPrompt.trim() || null);
-      setSettingsStream(null);
-    } catch (e) {
-      logUi("error", "failed to save stream prompt", { streamId: settingsStream.id, error: String(e) });
-    } finally {
-      setSettingsSaving(false);
-    }
-  }
 
   // Primary is always the leftmost tab regardless of persisted sort_index.
   const orderedStreams = useMemo(() => {
@@ -230,22 +202,49 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 title={showBranchInTitle ? `${candidate.title} (${candidate.branch})` : candidate.title}
               >
                 <AgentStatusDot status={status} />
-                <span>{candidate.title}</span>
+                {renamingId === candidate.id ? (
+                  <input
+                    autoFocus
+                    defaultValue={candidate.title}
+                    data-testid="stream-rename-input"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") {
+                        const next = (e.target as HTMLInputElement).value.trim();
+                        setRenamingId(null);
+                        if (next && next !== candidate.title) {
+                          void onRenameStream?.(candidate.id, next);
+                        }
+                      } else if (e.key === "Escape") {
+                        setRenamingId(null);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      setRenamingId(null);
+                      if (next && next !== candidate.title) {
+                        void onRenameStream?.(candidate.id, next);
+                      }
+                    }}
+                    style={renameInputStyle}
+                  />
+                ) : (
+                  <span>{candidate.title}</span>
+                )}
                 <Kebab
                   items={buildStreamMenu(candidate, {
                     gitEnabled,
                     onRename: () => {
                       if (!onRenameStream) return;
-                      setRenaming({ id: candidate.id, title: candidate.title });
-                      setRenameValue(candidate.title);
-                      setRenameError(null);
-                      setTimeout(() => renameInputRef.current?.select(), 0);
+                      setRenamingId(candidate.id);
                     },
                     onSwitchBranch: () => { void openSwitchBranch(candidate); },
-                    onSettings: () => openStreamSettings(candidate),
+                    onSettings: () => onOpenStreamSettings?.(candidate.id),
                     onAddStream: () => onOpenNewStreamPage?.(),
                     onAddThread: () => onRequestCreateThread?.(),
                     canRename: !!onRenameStream,
+                    canSettings: !!onOpenStreamSettings,
                     canAddThread: !!onRequestCreateThread,
                   })}
                   testId={`stream-tab-kebab-${candidate.id}`}
@@ -323,85 +322,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           </form>
         ) : null}
       </Slideover>
-      {renaming ? (
-        <div style={backdropStyle}>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const next = renameValue.trim();
-              if (!next || next === renaming.title) { setRenaming(null); return; }
-              setRenameBusy(true);
-              setRenameError(null);
-              try {
-                await onRenameStream?.(renaming.id, next);
-                setRenaming(null);
-              } catch (err) {
-                setRenameError(String(err));
-              } finally {
-                setRenameBusy(false);
-              }
-            }}
-            style={{ ...modalStyle, minWidth: 360 }}
-          >
-            <div style={modalHeaderStyle}>
-              <span>Rename stream</span>
-              <button type="button" onClick={() => setRenaming(null)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={labelStyle}>
-                <span>Title</span>
-                <input
-                  ref={renameInputRef}
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
-                  style={inputStyle}
-                  autoFocus
-                  data-testid="stream-rename-input"
-                />
-              </label>
-              {renameError ? <div style={{ color: "#ff6b6b", fontSize: 12 }}>{renameError}</div> : null}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setRenaming(null)} style={buttonStyle}>Cancel</button>
-                <button type="submit" style={buttonStyle} disabled={renameBusy || !renameValue.trim()}>
-                  {renameBusy ? "Renaming…" : "Rename"}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      ) : null}
-      {settingsStream ? (
-        <div style={backdropStyle}>
-          <div style={modalStyle}>
-            <div style={modalHeaderStyle}>
-              <span>Stream settings — {settingsStream.title}</span>
-              <button type="button" onClick={() => setSettingsStream(null)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={labelStyle}>
-                <span>Custom prompt</span>
-                <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                  This prompt is appended to the agent's system prompt for this stream.
-                </span>
-                <textarea
-                  value={settingsPrompt}
-                  onChange={(e) => setSettingsPrompt(e.target.value)}
-                  rows={6}
-                  style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
-                  placeholder="Enter standing instructions for this stream…"
-                />
-              </label>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setSettingsStream(null)} style={buttonStyle}>Cancel</button>
-                <button type="button" onClick={() => void saveStreamSettings()} style={buttonStyle} disabled={settingsSaving}>
-                  {settingsSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -456,69 +376,17 @@ const inputStyle: CSSProperties = {
 
 const selectStyle: CSSProperties = { ...inputStyle, minWidth: 220 };
 
-const backdropStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1100,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 8,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
-  minWidth: 520,
-  maxWidth: 720,
-  maxHeight: "80vh",
-  display: "flex",
-  flexDirection: "column",
-};
-
-const modalHeaderStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "10px 14px",
-  borderBottom: "1px solid var(--border)",
-  fontSize: 13,
-  fontWeight: 600,
-  background: "var(--bg-1, var(--bg-2))",
-};
-
-const modalBodyStyle: CSSProperties = {
-  padding: 14,
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 8,
-  overflow: "auto",
-};
-
-const closeBtnStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "var(--muted)",
-  fontSize: 20,
-  lineHeight: 1,
-  cursor: "pointer",
-};
-
 const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
 
-const pickerButtonStyle: CSSProperties = {
+const renameInputStyle: CSSProperties = {
   background: "var(--bg)",
   color: "var(--fg)",
   border: "1px solid var(--border)",
-  padding: "6px 8px",
   borderRadius: 4,
+  padding: "2px 6px",
   fontFamily: "inherit",
   fontSize: 12,
-  minWidth: 220,
-  justifyContent: "flex-start",
-  height: "auto",
+  minWidth: 140,
 };
 
 function buildStreamMenu(_stream: Stream, opts: {
@@ -529,12 +397,13 @@ function buildStreamMenu(_stream: Stream, opts: {
   onAddStream(): void;
   onAddThread(): void;
   canRename: boolean;
+  canSettings: boolean;
   canAddThread: boolean;
 }): MenuItem[] {
   return [
     { id: "stream.rename", label: "Rename…", enabled: opts.canRename, run: opts.onRename },
     { id: "stream.switch-branch", label: "Switch branch…", enabled: opts.gitEnabled, run: opts.onSwitchBranch },
-    { id: "stream.settings", label: "Settings", enabled: true, run: opts.onSettings },
+    { id: "stream.settings", label: "Settings", enabled: opts.canSettings, run: opts.onSettings },
     { id: "stream.add-stream", label: "Add stream", enabled: opts.gitEnabled, run: opts.onAddStream },
     { id: "stream.add-thread", label: "Add thread", enabled: opts.canAddThread, run: opts.onAddThread },
   ];
