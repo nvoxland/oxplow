@@ -46,12 +46,12 @@ export function ChangedFilesSection({
   files,
   selectedFilePath,
   onOpenFile,
-  onContextMenu,
+  onOpenMenu,
 }: {
   files: WorkspaceIndexedFile[];
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%" }}>
@@ -65,7 +65,7 @@ export function ChangedFilesSection({
           gitStatus={file.gitStatus}
           active={selectedFilePath === file.path}
           onClick={() => onOpenFile(file.path)}
-          onContextMenu={onContextMenu}
+          onOpenMenu={onOpenMenu}
         />
       ))}
     </div>
@@ -81,7 +81,7 @@ export function TreeEntries({
   generatedSet,
   onToggleDirectory,
   onOpenFile,
-  onContextMenu,
+  onOpenMenu,
 }: {
   parentPath: string;
   entries: WorkspaceEntry[];
@@ -92,7 +92,7 @@ export function TreeEntries({
   generatedSet: Set<string>;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
@@ -204,7 +204,7 @@ export function TreeEntries({
               ) : null}
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
               <KebabButton
-                onClick={(rect) => onContextMenu({
+                onClick={(rect) => onOpenMenu({
                   path: entry.path,
                   kind: entry.kind,
                   name: entry.name,
@@ -228,7 +228,7 @@ export function TreeEntries({
                     generatedSet={generatedSet}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
-                    onContextMenu={onContextMenu}
+                    onOpenMenu={onOpenMenu}
                   />
                 )}
               </div>
@@ -245,13 +245,13 @@ function FileRow({
   gitStatus,
   active,
   onClick,
-  onContextMenu,
+  onOpenMenu,
 }: {
   path: string;
   gitStatus: GitFileStatus | null;
   active: boolean;
   onClick(): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div
@@ -287,7 +287,7 @@ function FileRow({
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
       <KebabButton
-        onClick={(rect) => onContextMenu({
+        onClick={(rect) => onOpenMenu({
           path,
           kind: "file",
           name: basename(path),

@@ -6,21 +6,17 @@ import type {
   Thread,
   ThreadWorkState,
   CommitPoint,
-  EffortDetail,
   WaitPoint,
   WorkItem,
   WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
-  WorkNote,
 } from "../../api.js";
 import {
   createCommitPoint,
   createWaitPoint,
-  getWorkNotes,
   listCommitPoints,
   listWaitPoints,
-  listWorkItemEfforts,
   removeFollowup,
   reorderThreadQueue,
   setAutoCommit,
@@ -37,11 +33,11 @@ import { formatContextMention } from "../../agent-context-ref.js";
 import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
-import { ActivityTimeline } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
   buildGroups,
   classifyWorkItem,
+  filterAutoAuthored,
   inputStyle,
   miniButtonStyle,
   statusLabel,
@@ -103,10 +99,17 @@ interface Props {
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
-  /** Route the "new task" / "+ Task on epic" buttons to a NewWorkItemPage
-   *  tab instead of the inline modal. When omitted, the legacy modal
-   *  path stays in place (used by tests and standalone usages). */
-  onOpenNewWorkItemPage?(payload: { parentId?: string | null }): void;
+  /** Route the "new task" / "+ Task on epic" buttons (and the edit-
+   *  double-click flow) to a NewWorkItemPage tab instead of the inline
+   *  modal. When omitted, the legacy modal path stays in place (used by
+   *  tests and standalone usages). When `editingItemId` is set the page
+   *  opens in edit mode against that item. */
+  onOpenNewWorkItemPage?(payload: { parentId?: string | null; editingItemId?: string | null }): void;
+  /** When true, agent-authored work items are filtered out of the visible
+   *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
+   *  pre-IA-redesign Plan pane. Epics are always kept so their children
+   *  don't silently lose their container row. */
+  hideAuto?: boolean;
 }
 
 interface ContextMenuState {
@@ -138,23 +141,8 @@ export function PlanPane({
   onShowInHistory,
   registerOpenCreate,
   onOpenNewWorkItemPage,
+  hideAuto = false,
 }: Props) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [acceptance, setAcceptance] = useState("");
-  const [priority, setPriority] = useState<WorkItemPriority>("medium");
-  const [status, setStatus] = useState<WorkItemStatus>("ready");
-  // Modal surface: `create` = blank New Work Item form; `edit` = same modal
-  // shape but pre-filled from `editingItemId` and writing back via
-  // activeUpdate on submit. Plain clicks on a work-item row open edit mode
-  // (the legacy inline expansion + title click-to-edit were removed per the
-  // "change work item editing UI" task).
-  const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  // When opening the create modal from an epic's "+ Task" button, remember
-  // the epic id so the new item gets filed as a child. Null means top-level.
-  const [createParentId, setCreateParentId] = useState<string | null>(null);
-  const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mode, setMode] = useState<"thread" | "backlog">("thread");
@@ -172,11 +160,6 @@ export function PlanPane({
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
   // Commit point edit modal: opened by double-clicking a commit point row.
   const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
-  // Notes for the currently-open edit modal.
-  const [editingItemNotes, setEditingItemNotes] = useState<WorkNote[]>([]);
-  // Efforts (in_progress → human_check cycles) for the currently-open edit
-  // modal's work item; each carries its own start/end snapshot pair.
-  const [editingItemEfforts, setEditingItemEfforts] = useState<EffortDetail[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
@@ -201,8 +184,9 @@ export function PlanPane({
   }, [threadId]);
 
   const groups = useMemo(() => {
-    return mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
-  }, [mode, threadWork, backlog]);
+    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    return hideAuto ? filterAutoAuthored(raw) : raw;
+  }, [mode, threadWork, backlog, hideAuto]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
@@ -372,18 +356,10 @@ export function PlanPane({
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   const openCreateModal = (parentId: string | null = null) => {
-    // When wired, route the create flow to a full-tab page (phase 5e).
-    // Falls back to the legacy inline modal in tests / standalone use.
-    if (onOpenNewWorkItemPage) {
-      onOpenNewWorkItemPage({ parentId });
-      return;
-    }
-    setTitle(""); setDescription(""); setAcceptance("");
-    setPriority("medium");
-    setStatus("ready");
-    setEditingItemId(null);
-    setCreateParentId(parentId);
-    setModalMode("create");
+    // The legacy inline NewWorkItemModal was retired by the IA redesign;
+    // creation always routes through a full-tab NewWorkItemPage now. Tests
+    // / standalone harnesses must wire `onOpenNewWorkItemPage`.
+    onOpenNewWorkItemPage?.({ parentId });
   };
 
   // Register the imperative opener with the parent so menu-click
@@ -403,32 +379,10 @@ export function PlanPane({
   }, [registerOpenCreate]);
 
   const openEditModal = (item: WorkItem) => {
-    setTitle(item.title);
-    setDescription(item.description ?? "");
-    setAcceptance(item.acceptance_criteria ?? "");
-    setPriority(item.priority);
-    setStatus(item.status);
+    // Edit flow now routes through a NewWorkItemPage tab in edit mode;
+    // the in-file NewWorkItemModal was deleted in the IA-redesign cleanup.
     setSelectedId(item.id);
-    setEditingItemId(item.id);
-    setEditingItem(item);
-    setEditingItemNotes([]);
-    setEditingItemEfforts([]);
-    setModalMode("edit");
-    void getWorkNotes(item.id)
-      .then((notes) => setEditingItemNotes(notes))
-      .catch(() => { /* non-fatal */ });
-    void listWorkItemEfforts(item.id)
-      .then((efforts) => setEditingItemEfforts(efforts))
-      .catch(() => { /* non-fatal */ });
-  };
-
-  const closeModal = () => {
-    setModalMode(null);
-    setEditingItemId(null);
-    setEditingItem(null);
-    setEditingItemNotes([]);
-    setEditingItemEfforts([]);
-    paneRef.current?.focus();
+    onOpenNewWorkItemPage?.({ parentId: item.parent_id, editingItemId: item.id });
   };
 
   useEffect(() => {
@@ -500,81 +454,6 @@ export function PlanPane({
       onClick={() => paneRef.current?.focus()}
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
-      {modalMode ? (
-        <NewWorkItemModal
-          title={title}
-          setTitle={setTitle}
-          description={description}
-          setDescription={setDescription}
-          acceptance={acceptance}
-          setAcceptance={setAcceptance}
-          priority={priority}
-          setPriority={setPriority}
-          status={status}
-          setStatus={setStatus}
-          onNavigate={modalMode === "edit" && editingItemId ? (direction) => {
-            const idx = navigableIds.indexOf(editingItemId);
-            if (idx < 0) return;
-            const nextIdx = direction === "next" ? idx + 1 : idx - 1;
-            if (nextIdx < 0 || nextIdx >= navigableIds.length) return;
-            const nextId = navigableIds[nextIdx]!;
-            const allItems = groups.flatMap((g) => [
-              ...g.items,
-              ...[...g.epicChildren.values()].flat(),
-            ]);
-            const nextItem = allItems.find((i) => i.id === nextId);
-            if (nextItem) openEditModal(nextItem);
-          } : undefined}
-          canNavigatePrev={modalMode === "edit" && editingItemId ? navigableIds.indexOf(editingItemId) > 0 : false}
-          canNavigateNext={modalMode === "edit" && editingItemId ? (() => {
-            const idx = navigableIds.indexOf(editingItemId);
-            return idx >= 0 && idx < navigableIds.length - 1;
-          })() : false}
-          showSaveAndAnother={modalMode === "create"}
-          notes={modalMode === "edit" ? editingItemNotes : []}
-          efforts={modalMode === "edit" ? editingItemEfforts : []}
-          item={modalMode === "edit" ? editingItem : null}
-          epics={threadWork?.epics ?? []}
-          onOpenItem={(target) => openEditModal(target)}
-          onOpenFile={onOpenFile}
-          onShowInHistory={onShowInHistory}
-          modalTitle={
-            modalMode === "edit"
-              ? "Edit work item"
-              : mode === "backlog" ? "New backlog item" : "New work item"
-          }
-          onClose={closeModal}
-          onSubmit={async (andAnother) => {
-            const nextTitle = title.trim();
-            if (!nextTitle) return;
-            if (modalMode === "edit" && editingItemId) {
-              await activeUpdate(editingItemId, {
-                title: nextTitle,
-                description,
-                acceptanceCriteria: acceptance || null,
-                priority,
-                status,
-              });
-              closeModal();
-              return;
-            }
-            await activeCreate({
-              kind: "task",
-              title: nextTitle,
-              description,
-              acceptanceCriteria: acceptance || null,
-              priority,
-              status: "ready",
-              parentId: createParentId,
-            });
-            setTitle(""); setDescription(""); setAcceptance("");
-            if (!andAnother) {
-              setPriority("medium");
-              closeModal();
-            }
-          }}
-        />
-      ) : null}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {(() => {
           const allItems = groups.flatMap((g) => [
@@ -989,471 +868,6 @@ const kbPickerStyle: CSSProperties = {
   boxShadow: "0 12px 32px rgba(0,0,0,0.6)",
 };
 
-function NewWorkItemModal({
-  title,
-  setTitle,
-  description,
-  setDescription,
-  acceptance,
-  setAcceptance,
-  priority,
-  setPriority,
-  status,
-  setStatus,
-  onNavigate,
-  canNavigatePrev = false,
-  canNavigateNext = false,
-  showSaveAndAnother = true,
-  notes = [],
-  efforts = [],
-  item = null,
-  epics = [],
-  onOpenItem,
-  onOpenFile,
-  onShowInHistory,
-  modalTitle = "New work item",
-  onClose,
-  onSubmit,
-}: {
-  title: string;
-  setTitle(value: string): void;
-  description: string;
-  setDescription(value: string): void;
-  acceptance: string;
-  setAcceptance(value: string): void;
-  priority: WorkItemPriority;
-  setPriority(value: WorkItemPriority): void;
-  status: WorkItemStatus;
-  setStatus(value: WorkItemStatus): void;
-  onNavigate?(direction: "prev" | "next"): void;
-  canNavigatePrev?: boolean;
-  canNavigateNext?: boolean;
-  showSaveAndAnother?: boolean;
-  notes?: WorkNote[];
-  efforts?: EffortDetail[];
-  item?: WorkItem | null;
-  epics?: WorkItem[];
-  onOpenItem?(item: WorkItem): void;
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
-  modalTitle?: string;
-  onClose(): void;
-  onSubmit(andAnother: boolean): Promise<void>;
-}) {
-  const readOnly = item?.status === "in_progress";
-  const canSubmit = !readOnly && title.trim().length > 0;
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const parentEpic = item?.parent_id ? epics.find((e) => e.id === item.parent_id) ?? null : null;
-  const updatedDiffers = item && item.updated_at && item.updated_at !== item.created_at;
-
-  return (
-    <div
-      // Stop click bubbling so the PlanPane's onClick={paneRef.focus()}
-      // doesn't steal focus from a textarea when the user mouses up
-      // after a drag-select — losing focus mid-selection clears the
-      // highlight.
-      onClick={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000,
-      }}
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSubmit) return;
-          void onSubmit(false);
-        }}
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 16,
-          width: "75vw",
-          maxWidth: 1100,
-          minWidth: 600,
-          height: "75vh",
-          maxHeight: 800,
-          minHeight: 500,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontWeight: 600 }}>{modalTitle}</div>
-          <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
-        </div>
-        <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-          {/* Left column: editable fields + notes */}
-          <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: 10, minWidth: 0, overflow: "auto" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-title" style={modalFieldLabelStyle}>Title</label>
-              <input
-                autoFocus
-                id="work-item-title"
-                data-testid="work-item-title"
-                value={title}
-                readOnly={readOnly}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title (required)"
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-description" style={modalFieldLabelStyle}>Description</label>
-              <textarea
-                id="work-item-description"
-                data-testid="work-item-description"
-                value={description}
-                readOnly={readOnly}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Description"
-                style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-acceptance" style={modalFieldLabelStyle}>Acceptance Criteria</label>
-              <textarea
-                id="work-item-acceptance"
-                data-testid="work-item-acceptance"
-                value={acceptance}
-                readOnly={readOnly}
-                onChange={(e) => setAcceptance(e.target.value)}
-                placeholder="Acceptance criteria, one per line"
-                style={{ ...inputStyle, minHeight: 100, resize: "vertical" }}
-              />
-            </div>
-            {item ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-                <div style={modalFieldLabelStyle}>Activity {notes.length + efforts.length > 0 ? `(${notes.length + efforts.length})` : ""}</div>
-                <ActivityTimeline
-                  notes={notes}
-                  efforts={efforts}
-                  formatTimestamp={formatNoteDate}
-                  onOpenFile={onOpenFile}
-                  onShowInHistory={onShowInHistory}
-                />
-              </div>
-            ) : null}
-            {item ? (
-              <EffortsSection
-                item={item}
-                efforts={efforts}
-                onOpenFile={onOpenFile}
-                onShowInHistory={onShowInHistory}
-              />
-            ) : null}
-          </div>
-          {/* Right column: metadata */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
-            {item ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label htmlFor="work-item-status" style={modalFieldLabelStyle}>Status</label>
-                <select
-                  id="work-item-status"
-                  data-testid="work-item-status"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as WorkItemStatus)}
-                  style={inputStyle}
-                >
-                  <option value="ready">ready</option>
-                  {item?.status === "in_progress" ? (
-                    <option value="in_progress">in_progress</option>
-                  ) : null}
-                  <option value="blocked">blocked</option>
-                  <option value="human_check">human_check</option>
-                  <option value="done">done</option>
-                  <option value="archived">archived</option>
-                  <option value="canceled">canceled</option>
-                </select>
-              </div>
-            ) : null}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-priority" style={modalFieldLabelStyle}>Priority</label>
-              <select id="work-item-priority" data-testid="work-item-priority" value={priority} disabled={readOnly} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </div>
-            {item ? (
-              <>
-                {parentEpic ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={modalFieldLabelStyle}>Inside</div>
-                    {onOpenItem ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenItem(parentEpic)}
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          padding: 0,
-                          color: "var(--accent)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          font: "inherit",
-                          textDecoration: "underline",
-                          fontSize: 12,
-                        }}
-                      >{parentEpic.title}</button>
-                    ) : (
-                      <div style={{ fontSize: 12 }}>{parentEpic.title}</div>
-                    )}
-                  </div>
-                ) : item.parent_id ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={modalFieldLabelStyle}>Inside</div>
-                    <div style={{ fontSize: 12, color: "var(--muted)" }}>Parent epic</div>
-                  </div>
-                ) : null}
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={modalFieldLabelStyle}>Author</div>
-                  <span style={authorBadgeStyle}>{item.created_by}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--muted)", fontSize: 11 }}>
-                  <div>Created {formatNoteDate(item.created_at)}</div>
-                  {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
-                  {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginTop: 4 }}>
-          {onNavigate ? (
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                type="button"
-                data-testid="work-item-prev"
-                disabled={!canNavigatePrev}
-                onClick={() => onNavigate("prev")}
-                style={{ ...miniButtonStyle, opacity: canNavigatePrev ? 1 : 0.4 }}
-                title="Previous work item"
-              >← Previous</button>
-              <button
-                type="button"
-                data-testid="work-item-next"
-                disabled={!canNavigateNext}
-                onClick={() => onNavigate("next")}
-                style={{ ...miniButtonStyle, opacity: canNavigateNext ? 1 : 0.4 }}
-                title="Next work item"
-              >Next →</button>
-            </div>
-          ) : null}
-          <span style={{ flex: 1 }} />
-          {readOnly ? (
-            <span style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
-              Read-only — item is in progress
-            </span>
-          ) : null}
-          <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>
-            {readOnly ? "Close" : "Cancel"}
-          </button>
-          {!readOnly && showSaveAndAnother ? (
-            <button
-              type="button"
-              data-testid="work-item-save-another"
-              disabled={!canSubmit}
-              onClick={() => { if (canSubmit) void onSubmit(true); }}
-              style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
-            >Save and Another</button>
-          ) : null}
-          {!readOnly ? (
-            <button
-              type="submit"
-              data-testid="work-item-save"
-              disabled={!canSubmit}
-              style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5 }}
-            >Save</button>
-          ) : null}
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function EffortsSection({
-  efforts: allEfforts,
-  onOpenFile,
-  onShowInHistory,
-}: {
-  item: WorkItem;
-  efforts: EffortDetail[];
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
-}) {
-  // Separate the open effort (no end snapshot, no final file list) from
-  // completed ones — render it as its own box so the user can see that
-  // work is actively attributed to this item right now.
-  const activeEffort = allEfforts.find((d) => !d.effort.ended_at) ?? null;
-  const efforts = allEfforts
-    .filter((d) => d.effort.ended_at)
-    .slice()
-    .sort((a, b) => (b.effort.started_at ?? "").localeCompare(a.effort.started_at ?? ""));
-  const totalPaths = new Set<string>();
-  for (const effort of efforts) {
-    for (const path of effort.changed_paths) totalPaths.add(path);
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={modalFieldLabelStyle}>
-        Efforts {efforts.length > 0 ? `(${efforts.length}, ${totalPaths.size} file${totalPaths.size === 1 ? "" : "s"})` : ""}
-      </div>
-      {activeEffort ? (
-        <div
-          data-testid="work-item-effort-in-progress"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            border: "1px solid var(--accent)",
-            borderRadius: 6,
-            padding: 6,
-            background: "var(--bg-1)",
-          }}
-        >
-          <div style={{ fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Effort in progress</span>
-            <span style={{ color: "var(--muted)" }}>· started {formatNoteDate(activeEffort.effort.started_at)}</span>
-          </div>
-        </div>
-      ) : null}
-      {efforts.length === 0 && !activeEffort ? (
-        <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
-          No efforts yet — moving this item to "in progress" starts one.
-        </div>
-      ) : efforts.length === 0 ? null : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-          {efforts.map((detail, i) => {
-            const endSnapshotId = detail.effort.end_snapshot_id;
-            return (
-              <div key={detail.effort.id} style={{ display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 6, alignItems: "center" }}>
-                  <span>Effort {i + 1}</span>
-                  <span>· {formatNoteDate(detail.effort.started_at)}</span>
-                  <span>→ {formatNoteDate(detail.effort.ended_at!)}</span>
-                  <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "baseline" }}>
-                    {detail.counts.created > 0 ? <span style={{ color: "#86efac" }}>+{detail.counts.created}</span> : null}
-                    {detail.counts.updated > 0 ? <span style={{ color: "#e5a06a" }}>~{detail.counts.updated}</span> : null}
-                    {detail.counts.deleted > 0 ? <span style={{ color: "#f87171" }}>−{detail.counts.deleted}</span> : null}
-                    {detail.counts.created + detail.counts.updated + detail.counts.deleted === 0 ? (
-                      <span>0 files</span>
-                    ) : null}
-                  </span>
-                  {onShowInHistory ? (
-                    <button
-                      type="button"
-                      data-testid={`work-item-show-in-history-${i}`}
-                      onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
-                      style={{ ...miniButtonStyle, padding: "1px 6px", fontSize: 10 }}
-                      disabled={!endSnapshotId}
-                      title={endSnapshotId ? "Open Local History at this effort's end snapshot" : "Effort is still open — no end snapshot yet"}
-                    >
-                      In history
-                    </button>
-                  ) : null}
-                </div>
-                {detail.changed_paths.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {detail.changed_paths.map((path) => (
-                      <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                        {onOpenFile ? (
-                          <button
-                            type="button"
-                            onClick={() => void onOpenFile(path)}
-                            style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
-                          >
-                            {path}
-                          </button>
-                        ) : (
-                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {detail.effort.summary && detail.effort.summary.length > 0 ? (
-                  <div
-                    data-testid={`work-item-effort-summary-${i}`}
-                    style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "pre-wrap" }}
-                  >
-                    {detail.effort.summary}
-                  </div>
-                ) : (
-                  <div
-                    data-testid={`work-item-effort-summary-${i}`}
-                    style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}
-                  >
-                    No summary recorded for this effort.
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const modalFieldLabelStyle: CSSProperties = {
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  fontSize: 10,
-  color: "var(--muted)",
-  fontWeight: 600,
-};
-
-const authorBadgeStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "2px 8px",
-  borderRadius: 999,
-  background: "var(--bg-2)",
-  border: "1px solid var(--border)",
-  color: "var(--fg)",
-  fontSize: 11,
-  alignSelf: "flex-start",
-};
-
-function formatNoteDate(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    const now = Date.now();
-    const diffMs = now - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return "just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 7) return `${diffDay}d ago`;
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  } catch {
-    return isoString;
-  }
-}
 
 function buildWorkItemMenu(
   item: WorkItem,

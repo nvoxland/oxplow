@@ -94,6 +94,7 @@ import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
+import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { NotesIndexPage } from "./pages/NotesIndexPage.js";
 import { AllWorkPage } from "./pages/AllWorkPage.js";
@@ -1494,6 +1495,7 @@ export function App() {
       case "code-quality":
       case "local-history":
       case "git-history":
+      case "hook-events":
       case "files":
       case "notes-index":
       case "all-work":
@@ -1690,6 +1692,13 @@ export function App() {
             <GitHistoryPage stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />
           ),
         });
+      } else if (ref.kind === "hook-events") {
+        tabs.push({
+          id: ref.id,
+          label: "Hook events",
+          closable: true,
+          render: () => <HookEventsPage streamId={stream?.id ?? null} />,
+        });
       } else if (ref.kind === "files") {
         tabs.push({
           id: ref.id,
@@ -1780,6 +1789,8 @@ export function App() {
               onOpenPage={handleOpenPage}
               onOpenFile={handleOpenFile}
               onShowInHistory={handleShowSnapshotInHistory}
+              onOpenDiff={handleOpenDiff}
+              onOpenCommitDiff={handleOpenDiff}
             />
           ),
         });
@@ -1861,10 +1872,27 @@ export function App() {
           parentId?: string | null;
           initialCategory?: string | null;
           initialPriority?: string | null;
+          editingItemId?: string | null;
         } | null) ?? {};
+        const editingItemId = payload.editingItemId ?? null;
+        // Look up the live work item from the loaded thread state. The
+        // edit page mutates against this id; if the item isn't loaded
+        // (e.g. it lives in a different thread) we fall through to
+        // create-mode rather than rendering a broken edit page.
+        const allItems = selectedThreadWork
+          ? [
+              ...selectedThreadWork.epics,
+              ...selectedThreadWork.waiting,
+              ...selectedThreadWork.inProgress,
+              ...selectedThreadWork.done,
+            ]
+          : [];
+        const editingItem = editingItemId
+          ? allItems.find((i) => i.id === editingItemId) ?? null
+          : null;
         tabs.push({
           id: ref.id,
-          label: "New work item",
+          label: editingItem ? "Edit work item" : "New work item",
           closable: true,
           render: () => (
             <NewWorkItemPage
@@ -1874,6 +1902,7 @@ export function App() {
                 initialPriority: payload.initialPriority ?? null,
               }}
               epics={selectedThreadWork?.epics ?? []}
+              editingItem={editingItem}
               onClose={() => closePageTab(ref.id)}
               onSubmit={async (input) => {
                 await handleCreateWorkItem({
@@ -1885,6 +1914,9 @@ export function App() {
                   status: input.status ?? "ready",
                   priority: input.priority ?? "medium",
                 });
+              }}
+              onUpdate={async (itemId, changes) => {
+                await handleUpdateWorkItem(itemId, changes);
               }}
             />
           ),
@@ -2057,7 +2089,6 @@ export function App() {
           streamActiveThreadIds={streamActiveThreadIds}
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
-          onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => handleOpenPage(indexRef("settings"))}

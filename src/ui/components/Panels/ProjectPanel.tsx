@@ -759,7 +759,7 @@ export function ProjectPanel({
               generatedSet={generatedSet}
               onToggleDirectory={toggleDirectory}
               onOpenFile={openForCurrentFilter}
-              onContextMenu={setContextMenu}
+              onOpenMenu={setContextMenu}
             />
           </>
         )}

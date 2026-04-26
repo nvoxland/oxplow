@@ -1,13 +1,13 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { checkoutStreamBranch, createStream, listAdoptableWorktrees, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type GitWorktreeEntry, type Stream } from "../api.js";
+import { checkoutStreamBranch, listBranches, setStreamPrompt, type AgentStatus, type BranchRef, type Stream } from "../api.js";
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
-import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 import { ThemeToggle } from "./ThemeToggle.js";
+import { Slideover } from "./Slideover.js";
 
 interface Props {
   stream: Stream | null;
@@ -16,7 +16,6 @@ interface Props {
   streamActiveThreadIds?: Record<string, string | null>;
   gitEnabled: boolean;
   onSwitch(id: string): void;
-  onStreamCreated(stream: Stream): void;
   onRenameStream?(streamId: string, newTitle: string): Promise<void> | void;
   onRequestCreateThread?(): void;
   onOpenSettings?(): void;
@@ -27,17 +26,17 @@ interface Props {
   onOpenNewStreamPage?(): void;
   onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
-  /** Bumping this number opens the inline "new stream" form when no
-   *  `onOpenNewStreamPage` is wired (legacy path). */
+  /** Bumping this number opens the New-stream page via
+   *  `onOpenNewStreamPage`. The legacy in-rail modal was retired in
+   *  the IA redesign; this prop now does nothing without that handler. */
   createRequest?: number;
 }
 
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -52,19 +51,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const [switchBranchRef, setSwitchBranchRef] = useState<string>("");
   const [switchBranchError, setSwitchBranchError] = useState<string | null>(null);
   const [switchBranchBusy, setSwitchBranchBusy] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [title, setTitle] = useState("");
-  const [summary, setSummary] = useState("");
-  const [mode, setMode] = useState<"existing" | "new" | "worktree">("existing");
-  const [worktrees, setWorktrees] = useState<GitWorktreeEntry[]>([]);
-  const [selectedWorktreePath, setSelectedWorktreePath] = useState("");
-  const [selectedRef, setSelectedRef] = useState("");
-  const [selectedRefLabel, setSelectedRefLabel] = useState("");
-  const [newBranch, setNewBranch] = useState("");
-  const [startPointRef, setStartPointRef] = useState("");
-  const [startPointLabel, setStartPointLabel] = useState("");
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   function openStreamSettings(candidate: Stream) {
     if (onOpenStreamSettings) {
@@ -89,19 +75,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
     }
   }
 
-  useEffect(() => {
-    if (!showCreate) return;
-    const t = setTimeout(() => nameInputRef.current?.focus(), 0);
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setShowCreate(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [showCreate]);
-
   // Primary is always the leftmost tab regardless of persisted sort_index.
   const orderedStreams = useMemo(() => {
     const primary = streams.filter((s) => s.kind === "primary");
@@ -111,39 +84,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
 
   useEffect(() => {
     if (createRequest === undefined || createRequest === 0) return;
-    if (onOpenNewStreamPage) {
-      onOpenNewStreamPage();
-      return;
-    }
-    void openCreate();
-  }, [createRequest]);
-
-  async function openCreate() {
-    if (!gitEnabled) return;
-    setShowCreate(true);
-    setFormError(null);
-    try {
-      setLoadingBranches(true);
-      const [nextBranches, nextWorktrees] = await Promise.all([
-        branches.length > 0 ? Promise.resolve(branches) : listBranches(),
-        listAdoptableWorktrees(),
-      ]);
-      if (branches.length === 0) setBranches(nextBranches);
-      setWorktrees(nextWorktrees);
-      setSelectedRef((prev) => prev || nextBranches[0]?.ref || "");
-      setSelectedRefLabel((prev) => prev || nextBranches[0]?.name || "");
-      setStartPointRef((prev) => prev || nextBranches[0]?.ref || "");
-      setStartPointLabel((prev) => prev || nextBranches[0]?.name || "");
-      setSelectedWorktreePath((prev) => prev || nextWorktrees[0]?.path || "");
-      setTitle((prev) => prev || `Stream ${streams.length + 1}`);
-      logUi("info", "loaded branch list", { branchCount: nextBranches.length, worktreeCount: nextWorktrees.length });
-    } catch (e) {
-      setFormError(String(e));
-      logUi("error", "failed to load branch list", { error: String(e) });
-    } finally {
-      setLoadingBranches(false);
-    }
-  }
+    onOpenNewStreamPage?.();
+  }, [createRequest, onOpenNewStreamPage]);
 
   async function openSwitchBranch(target: Stream) {
     setSwitchBranchStream(target);
@@ -178,40 +120,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
       setSwitchBranchError(String(e));
     } finally {
       setSwitchBranchBusy(false);
-    }
-  }
-
-  async function handleCreate() {
-    if (!title.trim()) return setFormError("Name is required");
-    if (mode === "existing" && !selectedRef) return setFormError("Select an existing branch");
-    if (mode === "new" && !newBranch.trim()) return setFormError("Enter a new branch name");
-    if (mode === "new" && !startPointRef) return setFormError("Choose a starting branch");
-    if (mode === "worktree" && !selectedWorktreePath) return setFormError("Select a worktree");
-    try {
-      setCreating(true);
-      setFormError(null);
-      const created = mode === "existing"
-        ? await createStream({ title: title.trim(), summary: summary.trim(), source: "existing", ref: selectedRef })
-        : mode === "new"
-        ? await createStream({
-            title: title.trim(),
-            summary: summary.trim(),
-            source: "new",
-            branch: newBranch.trim(),
-            startPointRef,
-          })
-        : await createStream({
-            title: title.trim(),
-            summary: summary.trim(),
-            source: "worktree",
-            worktreePath: selectedWorktreePath,
-          });
-      onStreamCreated(created);
-      setShowCreate(false);
-    } catch (e) {
-      setFormError(String(e));
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -335,10 +243,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     },
                     onSwitchBranch: () => { void openSwitchBranch(candidate); },
                     onSettings: () => openStreamSettings(candidate),
-                    onAddStream: () => {
-                      if (onOpenNewStreamPage) { onOpenNewStreamPage(); return; }
-                      void openCreate();
-                    },
+                    onAddStream: () => onOpenNewStreamPage?.(),
                     onAddThread: () => onRequestCreateThread?.(),
                     canRename: !!onRenameStream,
                     canAddThread: !!onRequestCreateThread,
@@ -352,16 +257,10 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
         </div>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 0 6px 8px" }}>
           <button type="button"
-            onClick={() => {
-              if (onOpenNewStreamPage) {
-                onOpenNewStreamPage();
-                return;
-              }
-              void openCreate();
-            }}
+            onClick={() => onOpenNewStreamPage?.()}
             title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
-            style={{ ...buttonStyle, opacity: gitEnabled ? 1 : 0.6, cursor: gitEnabled ? "pointer" : "not-allowed" }}
-            disabled={!gitEnabled}
+            style={{ ...buttonStyle, opacity: gitEnabled && onOpenNewStreamPage ? 1 : 0.6, cursor: gitEnabled && onOpenNewStreamPage ? "pointer" : "not-allowed" }}
+            disabled={!gitEnabled || !onOpenNewStreamPage}
           >
             + New stream
           </button>
@@ -381,142 +280,49 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           ) : null}
         </span>
       </div>
-      {showCreate ? (
-        <div style={backdropStyle}>
+      <Slideover
+        open={!!switchBranchStream}
+        onClose={() => setSwitchBranchStream(null)}
+        title={switchBranchStream ? `Switch branch — ${switchBranchStream.title}` : "Switch branch"}
+        testId="stream-switch-branch-slideover"
+        footer={(
+          <>
+            <button type="button" onClick={() => setSwitchBranchStream(null)} style={buttonStyle}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => { void handleSwitchBranch(); }}
+              style={buttonStyle}
+              disabled={switchBranchBusy || loadingBranches || !switchBranchRef}
+            >
+              {switchBranchBusy ? "Switching…" : "Switch"}
+            </button>
+          </>
+        )}
+      >
+        {switchBranchStream ? (
           <form
-            onSubmit={(e) => { e.preventDefault(); void handleCreate(); }}
-            style={modalStyle}
+            onSubmit={(e) => { e.preventDefault(); void handleSwitchBranch(); }}
+            style={{ display: "flex", flexDirection: "column", gap: 10 }}
           >
-            <div style={modalHeaderStyle}>
-              <span>New stream</span>
-              <button type="button" onClick={() => setShowCreate(false)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={modalBodyStyle}>
-          <label style={labelStyle}>
-            <span>Name</span>
-            <input ref={nameInputRef} value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={labelStyle}>
-            <span>Summary</span>
-            <input value={summary} onChange={(e) => setSummary(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={labelStyle}>
-            <span>Branch source</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value as "existing" | "new" | "worktree")} style={selectStyle}>
-              <option value="existing">Existing branch</option>
-              <option value="new">Create new branch</option>
-              <option value="worktree" disabled={worktrees.length === 0}>
-                {worktrees.length === 0 ? "Existing worktree (none available)" : "Existing worktree"}
-              </option>
-            </select>
-          </label>
-          {mode === "existing" ? (
             <label style={labelStyle}>
-              <span>Existing branch</span>
-              <BranchPicker
-                label={<span>{selectedRefLabel || "Select branch…"}</span>}
-                anchor="bottom"
-                align="left"
-                currentBranch={null}
-                disabled={loadingBranches}
-                buttonStyle={pickerButtonStyle}
-                onPick={(target) => {
-                  const { ref, label } = resolvePickedRef(target);
-                  setSelectedRef(ref);
-                  setSelectedRefLabel(label);
-                }}
-              />
-            </label>
-          ) : mode === "new" ? (
-            <>
-              <label style={labelStyle}>
-                <span>New branch</span>
-                <input value={newBranch} onChange={(e) => setNewBranch(e.target.value)} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span>Start point</span>
-                <BranchPicker
-                  label={<span>{startPointLabel || "Select starting ref…"}</span>}
-                  anchor="bottom"
-                  align="left"
-                  currentBranch={null}
-                  disabled={loadingBranches}
-                  buttonStyle={pickerButtonStyle}
-                  onPick={(target) => {
-                    const { ref, label } = resolvePickedRef(target);
-                    setStartPointRef(ref);
-                    setStartPointLabel(label);
-                  }}
-                />
-              </label>
-            </>
-          ) : (
-            <label style={{ ...labelStyle, gridColumn: "1 / 3" }}>
-              <span>Existing worktree</span>
+              <span>Branch</span>
               <select
-                value={selectedWorktreePath}
-                onChange={(e) => setSelectedWorktreePath(e.target.value)}
+                value={switchBranchRef}
+                onChange={(e) => setSwitchBranchRef(e.target.value)}
                 style={selectStyle}
                 disabled={loadingBranches}
               >
-                {worktrees.map((wt) => (
-                  <option key={wt.path} value={wt.path}>
-                    {wt.branch ? `[${wt.branch}]` : "[detached]"} {wt.path}
-                  </option>
+                {branches.map((branch) => (
+                  <option key={branch.ref} value={branch.ref}>[{branch.kind}] {branch.name}</option>
                 ))}
               </select>
             </label>
-          )}
-          <div style={{ gridColumn: "1 / 3", color: formError ? "#ff6b6b" : "var(--muted)", fontSize: 12 }}>
-            {formError ?? "Each stream gets its own worktree and Claude resume metadata."}
-          </div>
-          <div style={{ gridColumn: "1 / 3", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button type="button" onClick={() => setShowCreate(false)} style={buttonStyle}>Cancel</button>
-            <button type="submit" style={buttonStyle} disabled={creating || loadingBranches}>
-              {creating ? "Creating…" : "Create stream"}
-            </button>
-          </div>
+            <div style={{ color: switchBranchError ? "#ff6b6b" : "var(--muted)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+              {switchBranchError ?? `Currently on ${switchBranchStream.branch}. Git will reject switches that conflict (dirty tree, missing branch, or branch already checked out in another worktree).`}
             </div>
           </form>
-        </div>
-      ) : null}
-      {switchBranchStream ? (
-        <div style={backdropStyle}>
-          <form
-            onSubmit={(e) => { e.preventDefault(); void handleSwitchBranch(); }}
-            style={{ ...modalStyle, minWidth: 420 }}
-          >
-            <div style={modalHeaderStyle}>
-              <span>Switch branch — {switchBranchStream.title}</span>
-              <button type="button" onClick={() => setSwitchBranchStream(null)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={labelStyle}>
-                <span>Branch</span>
-                <select
-                  value={switchBranchRef}
-                  onChange={(e) => setSwitchBranchRef(e.target.value)}
-                  style={selectStyle}
-                  disabled={loadingBranches}
-                >
-                  {branches.map((branch) => (
-                    <option key={branch.ref} value={branch.ref}>[{branch.kind}] {branch.name}</option>
-                  ))}
-                </select>
-              </label>
-              <div style={{ color: switchBranchError ? "#ff6b6b" : "var(--muted)", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                {switchBranchError ?? `Currently on ${switchBranchStream.branch}. Git will reject switches that conflict (dirty tree, missing branch, or branch already checked out in another worktree).`}
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setSwitchBranchStream(null)} style={buttonStyle}>Cancel</button>
-                <button type="submit" style={buttonStyle} disabled={switchBranchBusy || loadingBranches || !switchBranchRef}>
-                  {switchBranchBusy ? "Switching…" : "Switch"}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      ) : null}
+        ) : null}
+      </Slideover>
       {renaming ? (
         <div style={backdropStyle}>
           <form
@@ -734,11 +540,3 @@ function buildStreamMenu(_stream: Stream, opts: {
   ];
 }
 
-function resolvePickedRef(target: PickedRef): { ref: string; label: string } {
-  if (target.kind === "tag") {
-    return { ref: `refs/tags/${target.name}`, label: `tag: ${target.name}` };
-  }
-  const branch = target.branch;
-  if (!branch) return { ref: "", label: target.name };
-  return { ref: branch.ref, label: `[${branch.kind}] ${branch.name}` };
-}

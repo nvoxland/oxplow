@@ -6,6 +6,7 @@ import {
   classifyEpic,
   classifyRow,
   classifyWorkItem,
+  filterAutoAuthored,
   finalizeReorderIds,
   sectionDefaultStatus,
   splitIntoSections,
@@ -325,4 +326,36 @@ test("buildGroups groups epic children under their parent without lifting in_pro
   expect(groups[0]!.items.map((i) => i.id)).toEqual(["e1"]);
   // Children stay in the epic's children map for the renderer.
   expect(groups[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["c1", "c2"]);
+});
+
+test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones", () => {
+  const groups = [{
+    epic: null,
+    items: [
+      { ...item("u1", "ready", 0), created_by: "user" },
+      { ...item("a1", "ready", 1), created_by: "agent" },
+      { ...item("u2", "in_progress", 2), created_by: "user" },
+    ] as WorkItem[],
+    epicChildren: new Map<string, WorkItem[]>(),
+  }];
+  const filtered = filterAutoAuthored(groups);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["u1", "u2"]);
+});
+
+test("filterAutoAuthored keeps epic rows even if agent-authored, and filters their children", () => {
+  const epic = { ...item("e1", "ready", 0), kind: "epic" as const, created_by: "agent" };
+  const groups = [{
+    epic: null,
+    items: [epic] as WorkItem[],
+    epicChildren: new Map<string, WorkItem[]>([[
+      "e1",
+      [
+        { ...item("u-child", "ready", 1), created_by: "user" },
+        { ...item("a-child", "ready", 2), created_by: "agent" },
+      ] as WorkItem[],
+    ]]),
+  }];
+  const filtered = filterAutoAuthored(groups);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["e1"]);
+  expect(filtered[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["u-child"]);
 });

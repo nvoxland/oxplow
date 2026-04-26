@@ -46,7 +46,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 ```
 "agent" | "file" | "diff" | "note" | "work-item" | "finding"
 | "all-work" | "notes-index" | "files" | "code-quality"
-| "local-history" | "git-history" | "subsystem-docs"
+| "local-history" | "git-history" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
 | "new-stream" | "new-work-item"
 | "stream-settings" | "thread-settings"

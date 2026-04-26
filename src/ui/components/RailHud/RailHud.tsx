@@ -326,6 +326,7 @@ function PagesDirectory({
     { id: "code-quality", label: "⚠  Code quality", ref: indexRef("code-quality") },
     { id: "local-history", label: "⏱  Local history", ref: indexRef("local-history") },
     { id: "git-history", label: "🌿  Git history", ref: indexRef("git-history") },
+    { id: "hook-events", label: "🪝  Hook events", ref: indexRef("hook-events") },
     { id: "subsystem-docs", label: "📑  Subsystem docs", ref: indexRef("subsystem-docs") },
     { id: "settings", label: "⚙  Settings", ref: indexRef("settings") },
     { id: "dashboard-planning", label: "📊  Planning", ref: dashboardRef("planning") },

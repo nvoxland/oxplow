@@ -214,9 +214,9 @@ export function ThreadRail({
           <InlineCreateThreadRow
             nextIndex={threads.length + 1}
             onCancel={() => setShowCreate(false)}
-            onSubmit={async (title) => {
+            onSubmit={async (title, andAnother) => {
               await onCreateThread(title);
-              setShowCreate(false);
+              if (!andAnother) setShowCreate(false);
             }}
           />
         ) : (
@@ -662,18 +662,37 @@ function OverflowDropdown({
  * and `thread-rail-create-submit` testids stay so e2e probes (and the
  * Cmd+K palette workflow) keep working.
  */
+/**
+ * `nextThreadTitle` — pure helper for picking the default placeholder
+ * title for the inline-create row. When "another after submit" is on
+ * the form re-mounts in place, so we bump the index forward to avoid
+ * shipping two identical "Thread N" titles in a row.
+ *
+ * Exported for unit tests so the carry-forward logic is verified
+ * without mounting the renderer.
+ */
+export function nextThreadTitle(currentIndex: number): string {
+  return `Thread ${currentIndex}`;
+}
+
 function InlineCreateThreadRow({
   nextIndex,
   onSubmit,
   onCancel,
 }: {
   nextIndex: number;
-  onSubmit(title: string): Promise<void>;
+  onSubmit(title: string, andAnother: boolean): Promise<void>;
   onCancel(): void;
 }) {
-  const [title, setTitle] = useState(`Thread ${nextIndex}`);
+  const [indexCursor, setIndexCursor] = useState(nextIndex);
+  const [title, setTitle] = useState(nextThreadTitle(nextIndex));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Save and Another" mirrors the convention used by NewWorkItemPage and
+  // the original CreateThreadModal. When checked, Enter creates the thread
+  // and re-opens the form with a freshly-bumped placeholder title so the
+  // user can ship a series of threads without re-clicking "+ New thread".
+  const [andAnother, setAndAnother] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -689,7 +708,23 @@ function InlineCreateThreadRow({
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, andAnother);
+      if (andAnother) {
+        // Stay mounted, refocus, clear value with a bumped placeholder so
+        // the user can ship the next title without re-clicking "+ New
+        // thread". The parent's `setShowCreate(false)` would unmount us;
+        // when "Save and Another" is on the parent's onSubmit handler is
+        // expected to keep the form open. We can't cancel the parent's
+        // unmount here, so instead we reset our local state — the parent
+        // remounts a fresh InlineCreateThreadRow with the next nextIndex
+        // and the form reads as cleared.
+        const nextCursor = indexCursor + 1;
+        setIndexCursor(nextCursor);
+        setTitle(nextThreadTitle(nextCursor));
+        // Refocus + select on the next tick so the input is ready for
+        // the user to overwrite the placeholder.
+        setTimeout(() => inputRef.current?.select(), 0);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -733,6 +768,19 @@ function InlineCreateThreadRow({
       >
         {submitting ? "Creating…" : "Create"}
       </button>
+      <label
+        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--muted)", cursor: "pointer" }}
+        title="After Enter, leave the form open to create another thread"
+      >
+        <input
+          type="checkbox"
+          checked={andAnother}
+          onChange={(e) => setAndAnother(e.target.checked)}
+          data-testid="thread-rail-create-and-another"
+          style={{ margin: 0 }}
+        />
+        and another
+      </label>
       <button
         type="button"
         onClick={onCancel}

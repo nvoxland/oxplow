@@ -38,8 +38,13 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "all-work" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "subsystem-docs" | "settings" | "start"): TabRef {
+export function indexRef(kind: "all-work" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings" | "start"): TabRef {
   return { id: kind, kind, payload: null };
+}
+
+/** Convenience helper for the new HookEventsPage. */
+export function hookEventsRef(): TabRef {
+  return indexRef("hook-events");
 }
 
 export type DashboardKind = "planning" | "review" | "quality";
@@ -62,6 +67,10 @@ export interface NewWorkItemPayload {
   initialCategory?: string | null;
   /** Optional default priority. */
   initialPriority?: string | null;
+  /** When present, the page renders in edit mode against this item: it
+   *  loads the existing values, retitles the page to "Edit work item",
+   *  and submits via `updateWorkItem` instead of `createWorkItem`. */
+  editingItemId?: string | null;
 }
 
 export function newStreamRef(): TabRef {
@@ -74,6 +83,17 @@ export function newWorkItemRef(payload: NewWorkItemPayload = {}): TabRef {
   // form re-mounting in place; the page reads its initial values on
   // mount, so callers wanting different defaults should `closeTab`
   // before opening with new payload.
+  //
+  // Edit-mode tabs use an item-scoped id so a user can have several
+  // edit tabs open at once (one per item) without colliding with the
+  // create tab.
+  if (payload.editingItemId) {
+    return {
+      id: `new-work-item:edit:${payload.editingItemId}`,
+      kind: "new-work-item",
+      payload,
+    };
+  }
   return { id: "new-work-item", kind: "new-work-item", payload };
 }
 

@@ -244,6 +244,32 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
   return [{ epic: null, items, epicChildren: new Map() }];
 }
 
+/**
+ * Filter out runtime/agent-authored work items. Used by the AllWorkPage
+ * "Hide auto" toggle (`plan-toggle-hide-auto`) to suppress the auto-
+ * filed "agent observed X" rows so the user can see only their own
+ * work + epic rollups.
+ *
+ * Always passes through `epic`-kind rows regardless of author — an epic
+ * with auto-filed children would otherwise lose its container row and
+ * the children would silently disappear too. The visible-children set is
+ * filtered in the same pass; the epic's group placement still derives
+ * from whatever children remain (an epic with all-auto children just
+ * renders empty, like an explicitly empty epic).
+ *
+ * Pure — exported for tests.
+ */
+export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
+  return groups.map((group) => {
+    const items = group.items.filter((item) => item.kind === "epic" || item.created_by !== "agent");
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epicId, children] of group.epicChildren.entries()) {
+      epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));
+    }
+    return { epic: group.epic, items, epicChildren };
+  });
+}
+
 export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[] {
   if (!threadWork) return [];
   const all = [...threadWork.waiting, ...threadWork.inProgress, ...threadWork.done];

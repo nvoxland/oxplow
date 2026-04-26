@@ -432,7 +432,7 @@ export function BranchPicker({
                         branches={g.branches}
                         busy={busy}
                         onPick={pickBranch}
-                        onContextMenu={mode === "manage" ? openBranchMenu : undefined}
+                        onOpenMenu={mode === "manage" ? openBranchMenu : undefined}
                         forceOpen={!!q}
                       />
                     )) : null}
@@ -552,12 +552,12 @@ export function BranchPicker({
   );
 }
 
-function RemoteGroup({ remote, branches, busy, onPick, onContextMenu, forceOpen }: {
+function RemoteGroup({ remote, branches, busy, onPick, onOpenMenu, forceOpen }: {
   remote: string;
   branches: BranchRef[];
   busy: boolean;
   onPick(branch: BranchRef): void | Promise<void>;
-  onContextMenu?(event: ReactMouseEvent, branch: BranchRef): void;
+  onOpenMenu?(event: ReactMouseEvent, branch: BranchRef): void;
   forceOpen: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -575,13 +575,13 @@ function RemoteGroup({ remote, branches, busy, onPick, onContextMenu, forceOpen 
         return (
           <RowButton
             key={b.ref}
-            onClick={(e) => onContextMenu ? onContextMenu(e, b) : void onPick(b)}
+            onClick={(e) => onOpenMenu ? onOpenMenu(e, b) : void onPick(b)}
             disabled={busy}
             current={false}
             icon="⎇"
             name={display}
             indent={30}
-            showChevron={!!onContextMenu}
+            showChevron={!!onOpenMenu}
           />
         );
       }) : null}

@@ -5,7 +5,9 @@ import {
   diffRef,
   fileRef,
   findingRef,
+  hookEventsRef,
   indexRef,
+  newWorkItemRef,
   noteRef,
   workItemRef,
 } from "./pageRefs.js";
@@ -54,5 +56,21 @@ describe("pageRefs", () => {
   test("dashboardRef encodes the variant", () => {
     expect(dashboardRef("planning").id).toBe("dashboard:planning");
     expect(dashboardRef("review").id).toBe("dashboard:review");
+  });
+
+  test("hookEventsRef returns the hook-events index ref", () => {
+    const ref = hookEventsRef();
+    expect(ref.id).toBe("hook-events");
+    expect(ref.kind).toBe("hook-events");
+  });
+
+  test("newWorkItemRef has stable create id but item-scoped edit id", () => {
+    expect(newWorkItemRef().id).toBe("new-work-item");
+    expect(newWorkItemRef({ editingItemId: "wi-42" }).id).toBe("new-work-item:edit:wi-42");
+    // Two edit refs for different items get different ids so multiple edit
+    // tabs can coexist.
+    expect(newWorkItemRef({ editingItemId: "wi-1" }).id).not.toBe(
+      newWorkItemRef({ editingItemId: "wi-2" }).id,
+    );
   });
 });

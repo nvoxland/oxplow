@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EffortDetail, Stream, Thread, ThreadWorkState, WorkItem, WorkItemPriority, WorkItemStatus, WorkNote } from "../api.js";
 import {
   getWorkNotes,
@@ -10,8 +10,12 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { workItemRef } from "../tabs/pageRefs.js";
 import { ActivityTimeline, WorkItemDetail } from "../components/Plan/WorkItemDetail.js";
-import { BacklinksList } from "../tabs/BacklinksList.js";
+import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks } from "../tabs/useBacklinks.js";
+import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
+import { CommitDetailSlideover } from "../components/History/CommitDetailSlideover.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
+import type { DiffRequest } from "../components/Diff/diff-request.js";
 
 export interface WorkItemPageProps {
   stream: Stream | null;
@@ -23,6 +27,12 @@ export interface WorkItemPageProps {
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
   onShowInHistory?(snapshotId: string): void;
+  /** Forwarded to the embedded SnapshotDetailSlideover so its file rows
+   *  can ask the host to open a diff editor. */
+  onOpenDiff?(spec: DiffSpec): void;
+  /** Forwarded to the embedded CommitDetailSlideover so its file rows
+   *  can route diffs into the host's diff editor. */
+  onOpenCommitDiff?(request: DiffRequest): void;
 }
 
 /**
@@ -44,12 +54,61 @@ export function WorkItemPage({
   onOpenPage,
   onOpenFile,
   onShowInHistory,
+  onOpenDiff,
+  onOpenCommitDiff,
 }: WorkItemPageProps) {
   const item = items.find((i) => i.id === itemId) ?? null;
   const backlinkEntries = useBacklinks(workItemRef(itemId), stream, threadWork);
-  const backlinks = <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />;
   const [notes, setNotes] = useState<WorkNote[]>([]);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
+  // Slideover state lives on this host page (the brief calls for it).
+  // Single instance — opening another snapshot replaces the current one.
+  const [slideoverSnapshot, setSlideoverSnapshot] = useState<{
+    snapshotId: string;
+    label: string | null;
+    source: string;
+    workItemId: string | null;
+  } | null>(null);
+  const [slideoverCommit, setSlideoverCommit] = useState<{
+    sha: string;
+    subject: string;
+  } | null>(null);
+
+  // Synthesize snapshot backlinks from this item's efforts. Each completed
+  // effort's `end_snapshot_id` becomes a clickable row that opens the
+  // SnapshotDetailSlideover. Skipped when no end snapshot (effort still
+  // in progress) so the row never lands without a target.
+  const snapshotBacklinks = useMemo<SnapshotBacklinkEntry[]>(() => {
+    return efforts
+      .filter((d) => !!d.effort.end_snapshot_id)
+      .map((d, i) => ({
+        kind: "snapshot" as const,
+        snapshotId: d.effort.end_snapshot_id!,
+        label: `Effort ${i + 1} end snapshot`,
+        source: "task-end",
+        snapshotLabel: null,
+        workItemId: itemId,
+        subtitle: `${d.changed_paths.length} file${d.changed_paths.length === 1 ? "" : "s"}`,
+      }));
+  }, [efforts, itemId]);
+
+  const backlinks = (
+    <BacklinksList
+      entries={backlinkEntries}
+      snapshotEntries={snapshotBacklinks}
+      onOpenPage={onOpenPage}
+      onOpenSnapshot={(payload) => setSlideoverSnapshot({
+        snapshotId: payload.snapshotId,
+        label: payload.label ?? null,
+        source: payload.source ?? "",
+        workItemId: payload.workItemId ?? null,
+      })}
+      onOpenCommit={(payload) => setSlideoverCommit({
+        sha: payload.sha,
+        subject: payload.subject ?? "",
+      })}
+    />
+  );
 
   useEffect(() => {
     if (!item) return;
@@ -85,12 +144,37 @@ export function WorkItemPage({
     await updateWorkItem(stream.id, thread.id, targetId, changes);
   };
 
+  const slideover = (
+    <>
+      <SnapshotDetailSlideover
+        open={!!slideoverSnapshot}
+        onClose={() => setSlideoverSnapshot(null)}
+        stream={stream}
+        snapshotId={slideoverSnapshot?.snapshotId ?? null}
+        snapshotLabel={slideoverSnapshot?.label ?? null}
+        snapshotSource={slideoverSnapshot?.source ?? ""}
+        workItemId={slideoverSnapshot?.workItemId ?? null}
+        onOpenDiff={onOpenDiff}
+        onOpenWorkItem={(targetId) => onOpenPage(workItemRef(targetId))}
+      />
+      <CommitDetailSlideover
+        open={!!slideoverCommit}
+        onClose={() => setSlideoverCommit(null)}
+        stream={stream}
+        sha={slideoverCommit?.sha ?? null}
+        subject={slideoverCommit?.subject ?? ""}
+        onOpenDiff={onOpenCommitDiff}
+      />
+    </>
+  );
+
   if (!item) {
     return (
       <Page testId="page-work-item" title={itemId} kind="work item" backlinks={backlinks}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           This work item is not loaded in the current thread. Open the thread that owns it to edit, or use the rail to navigate.
         </div>
+        {slideover}
       </Page>
     );
   }
@@ -121,6 +205,7 @@ export function WorkItemPage({
           />
         </div>
       </div>
+      {slideover}
     </Page>
   );
 }

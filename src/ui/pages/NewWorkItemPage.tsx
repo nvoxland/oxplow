@@ -44,15 +44,28 @@ export interface NewWorkItemPageProps {
   };
   /** All epics in the current thread, for the optional parent dropdown. */
   epics?: WorkItem[];
+  /** When present the page renders in edit mode: form is prefilled from
+   *  the item, title becomes "Edit work item", and submit calls onUpdate
+   *  instead of onSubmit. The status field is exposed only in edit mode. */
+  editingItem?: WorkItem | null;
   /** Closes the page (caller closes the tab). */
   onClose?(): void;
-  /** Submit the form. The page resets in-place when `andAnother` is true. */
+  /** Submit the form. The page resets in-place when `andAnother` is true.
+   *  Only invoked in create mode. */
   onSubmit(input: {
     kind: WorkItemKind;
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
     parentId?: string | null;
+    status?: WorkItemStatus;
+    priority?: WorkItemPriority;
+  }): Promise<void>;
+  /** Update an existing item. Required when `editingItem` is set. */
+  onUpdate?(itemId: string, changes: {
+    title?: string;
+    description?: string;
+    acceptanceCriteria?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
   }): Promise<void>;
@@ -69,9 +82,12 @@ export interface NewWorkItemPageProps {
 export function NewWorkItemPage({
   defaults = {},
   epics = [],
+  editingItem = null,
   onClose,
   onSubmit,
+  onUpdate,
 }: NewWorkItemPageProps) {
+  const isEditing = !!editingItem;
   const [lastKind, setLastKind] = useState<WorkItemKind | null>(null);
   const [lastPriority, setLastPriority] = useState<WorkItemPriority | null>(null);
   const [lastParentId, setLastParentId] = useState<string | null>(null);
@@ -84,15 +100,42 @@ export function NewWorkItemPage({
     lastPriority,
   });
 
-  const [kind, setKind] = useState<WorkItemKind>(coerceKind(resolved.initialCategory));
-  const [priority, setPriority] = useState<WorkItemPriority>(coercePriority(resolved.initialPriority));
-  const [parentId, setParentId] = useState<string | null>(resolved.parentId);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [acceptance, setAcceptance] = useState("");
+  const [kind, setKind] = useState<WorkItemKind>(
+    isEditing ? editingItem.kind : coerceKind(resolved.initialCategory),
+  );
+  const [priority, setPriority] = useState<WorkItemPriority>(
+    isEditing ? editingItem.priority : coercePriority(resolved.initialPriority),
+  );
+  const [parentId, setParentId] = useState<string | null>(
+    isEditing ? editingItem.parent_id : resolved.parentId,
+  );
+  const [status, setStatus] = useState<WorkItemStatus>(
+    isEditing ? editingItem.status : "ready",
+  );
+  const [title, setTitle] = useState(isEditing ? editingItem.title : "");
+  const [description, setDescription] = useState(isEditing ? editingItem.description ?? "" : "");
+  const [acceptance, setAcceptance] = useState(isEditing ? editingItem.acceptance_criteria ?? "" : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+
+  // When the host swaps `editingItem` to a new id (e.g. user opened a
+  // different edit tab while this one was already mounted, or the item
+  // was refreshed from a subscription), repopulate the form fields.
+  // Strict-equality check so a no-op re-render doesn't blow away a
+  // user's mid-edit text.
+  const editingItemId = editingItem?.id ?? null;
+  useEffect(() => {
+    if (!editingItem) return;
+    setTitle(editingItem.title);
+    setDescription(editingItem.description ?? "");
+    setAcceptance(editingItem.acceptance_criteria ?? "");
+    setKind(editingItem.kind);
+    setPriority(editingItem.priority);
+    setStatus(editingItem.status);
+    setParentId(editingItem.parent_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingItemId]);
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -105,6 +148,18 @@ export function NewWorkItemPage({
     setSubmitting(true);
     setError(null);
     try {
+      if (isEditing && editingItem) {
+        if (!onUpdate) throw new Error("onUpdate required for edit mode");
+        await onUpdate(editingItem.id, {
+          title: title.trim(),
+          description,
+          acceptanceCriteria: acceptance.trim() ? acceptance : null,
+          status,
+          priority,
+        });
+        onClose?.();
+        return;
+      }
       await onSubmit({
         kind,
         title: title.trim(),
@@ -137,8 +192,8 @@ export function NewWorkItemPage({
   return (
     <Page
       testId="page-new-work-item"
-      title="New work item"
-      kind="new work item"
+      title={isEditing ? "Edit work item" : "New work item"}
+      kind={isEditing ? "edit work item" : "new work item"}
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>
@@ -191,6 +246,7 @@ export function NewWorkItemPage({
               value={kind}
               onChange={(e) => setKind(coerceKind(e.target.value))}
               style={inputStyle}
+              disabled={isEditing}
             >
               {KIND_OPTIONS.map((k) => (
                 <option key={k} value={k}>
@@ -199,6 +255,26 @@ export function NewWorkItemPage({
               ))}
             </select>
           </Field>
+          {isEditing ? (
+            <Field label="Status">
+              <select
+                data-testid="work-item-status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as WorkItemStatus)}
+                style={inputStyle}
+              >
+                <option value="ready">ready</option>
+                {editingItem?.status === "in_progress" ? (
+                  <option value="in_progress">in_progress</option>
+                ) : null}
+                <option value="blocked">blocked</option>
+                <option value="human_check">human_check</option>
+                <option value="done">done</option>
+                <option value="archived">archived</option>
+                <option value="canceled">canceled</option>
+              </select>
+            </Field>
+          ) : null}
           <Field label="Priority">
             <select
               data-testid="work-item-priority"
@@ -238,15 +314,17 @@ export function NewWorkItemPage({
           <button type="button" onClick={onClose} style={buttonStyle}>
             Cancel
           </button>
-          <button
-            type="button"
-            data-testid="work-item-save-another"
-            onClick={() => void handleSubmit(true)}
-            disabled={!canSubmit}
-            style={buttonStyle}
-          >
-            Save and Another
-          </button>
+          {!isEditing ? (
+            <button
+              type="button"
+              data-testid="work-item-save-another"
+              onClick={() => void handleSubmit(true)}
+              disabled={!canSubmit}
+              style={buttonStyle}
+            >
+              Save and Another
+            </button>
+          ) : null}
           <button
             type="submit"
             data-testid="work-item-save"
