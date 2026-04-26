@@ -625,39 +625,6 @@ describe("decideStopDirective", () => {
   });
 
   describe("nag debouncing (transcript-evidenced regressions)", () => {
-    test("audit nag is suppressed when the same fingerprint already fired and no in_progress was touched this turn", () => {
-      const inFlight = workItem("w-a", 0, "in_progress");
-      const out = decideStopDirective(
-        snapshot({
-          workItems: [inFlight],
-          lastAuditFingerprint: "w-a",
-          inProgressTouchedThisTurn: false,
-        }),
-        builders,
-      );
-      expect(out.directive).toBeNull();
-    });
-
-    test("audit nag still fires when an in_progress item was touched this turn (even with same fingerprint)", () => {
-      const inFlight = workItem("w-a", 0, "in_progress");
-      const out = decideStopDirective(
-        snapshot({
-          workItems: [inFlight],
-          lastAuditFingerprint: "w-a",
-          inProgressTouchedThisTurn: true,
-        }),
-        builders,
-      );
-      expect(out.directive?.reason).toBe("audit: w-a");
-      expect(out.sideEffects).toContainEqual({ kind: "record-audit-nag", fingerprint: "w-a" });
-    });
-
-    test("audit nag emits a record-audit-nag side effect with sorted fingerprint", () => {
-      const items = [workItem("w-b", 1, "in_progress"), workItem("w-a", 0, "in_progress")];
-      const out = decideStopDirective(snapshot({ workItems: items }), builders);
-      expect(out.sideEffects).toContainEqual({ kind: "record-audit-nag", fingerprint: "w-a|w-b" });
-    });
-
     test("ready-work nag is suppressed once the per-item count hits the cap", () => {
       const ready = workItem("w-r", 0, "ready");
       const out = decideStopDirective(

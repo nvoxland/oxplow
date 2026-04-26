@@ -216,15 +216,6 @@ export class ElectronRuntime {
    *  ready-set changes. Cleared on UserPromptSubmit so each fresh prompt
    *  re-arms the nag. */
   private readonly recentReadyWorkNagByThread = new Map<string, { itemId: string; count: number }>();
-  /** Per-thread fingerprint (sorted in_progress item id list) of the last
-   *  in-progress audit nag. Used together with the per-turn touched-flag
-   *  to suppress audits when the set hasn't changed and nothing was
-   *  touched. Cleared on UserPromptSubmit. */
-  private readonly lastAuditFingerprintByThread = new Map<string, string>();
-  /** Per-thread flag flipped to `true` on PostToolUse for any oxplow
-   *  work-item write (create / update / complete). Read at Stop together
-   *  with `lastAuditFingerprintByThread`; cleared on UserPromptSubmit. */
-  private readonly inProgressTouchedThisTurnByThread = new Map<string, boolean>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -424,13 +415,6 @@ export class ElectronRuntime {
           change.nextStatus,
           change.touchedFiles,
         );
-        // Mark this turn as having touched an in_progress item — either a
-        // transition INTO in_progress (new work started) or OUT of it
-        // (closed / blocked / paused). Used by the Stop-hook to decide
-        // whether the audit nag has anything to surface.
-        if (change.previousStatus === "in_progress" || change.nextStatus === "in_progress") {
-          this.inProgressTouchedThisTurnByThread.set(change.threadId, true);
-        }
       }
       if (change.kind === "created") {
         // Capture a task-event snapshot on creation so Local History
@@ -1686,8 +1670,6 @@ export class ElectronRuntime {
         // sees the relevant directive again (commit pending, ready work,
         // audit) on the new turn — but within one gap we suppress repeats.
         this.recentReadyWorkNagByThread.delete(envelope.threadId);
-        this.lastAuditFingerprintByThread.delete(envelope.threadId);
-        this.inProgressTouchedThisTurnByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
@@ -1806,8 +1788,6 @@ export class ElectronRuntime {
     this.turnReadWriteByThread.delete(threadId);
     const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
     const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
-    const inProgressTouched = this.inProgressTouchedThisTurnByThread.get(threadId);
-    this.inProgressTouchedThisTurnByThread.delete(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
       commitPoints: this.commitPointStore.listForThread(threadId),
@@ -1823,8 +1803,6 @@ export class ElectronRuntime {
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
       lastAutoCommitNagFingerprint: this.lastAutoCommitNagFingerprintByThread.get(threadId),
       recentReadyWorkNag: this.recentReadyWorkNagByThread.get(threadId),
-      lastAuditFingerprint: this.lastAuditFingerprintByThread.get(threadId),
-      inProgressTouchedThisTurn: inProgressTouched,
       lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
     };
     // The item's own thread_id is what matters for the directive text (not
@@ -1867,8 +1845,6 @@ export class ElectronRuntime {
         const prev = this.recentReadyWorkNagByThread.get(threadId);
         const count = prev && prev.itemId === effect.itemId ? prev.count + 1 : 1;
         this.recentReadyWorkNagByThread.set(threadId, { itemId: effect.itemId, count });
-      } else if (effect.kind === "record-audit-nag") {
-        this.lastAuditFingerprintByThread.set(threadId, effect.fingerprint);
       }
     }
     return outcome.directive ? { ...outcome.directive } : null;

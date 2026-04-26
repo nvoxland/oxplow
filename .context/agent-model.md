@@ -270,17 +270,6 @@ The pipeline runs in priority order:
    `in_progress` rows pile up because nothing forces a settle. The audit
    takes priority over the ready-work branch — reconcile what's open
    before picking up new work.
-   - **Audit nag debounce.** Re-asking the agent to audit the same
-     unchanged in-progress set every Stop produced status-transition
-     ping-pong with no new information. The pipeline tracks the
-     fingerprint of the most recent audit nag (`lastAuditFingerprint`,
-     a sorted item-id list) and a per-turn flag for whether any
-     in_progress item was created/updated/closed (`inProgressTouchedThisTurn`,
-     bumped from the work-item `subscribe` callback when `previousStatus`
-     or `nextStatus` is `in_progress`). The nag is suppressed when
-     fingerprint matches AND the flag is false. Both reset on
-     `UserPromptSubmit` so a fresh user turn re-arms it.
-
    **No-change suppression.** The runtime keeps a per-thread fingerprint
    (`lastAuditSignatureByThread`, signature = sorted
    `id|updated_at|note_count` over the in_progress set) of the last set
