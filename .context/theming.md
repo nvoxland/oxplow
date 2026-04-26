@@ -38,7 +38,7 @@ both themes or it doesn't go in.
 | `--surface-card`        | `#ffffff` | `#1c1f24` | Cards, inner content surfaces              |
 | `--surface-rail`        | `#f1f3f7` | `#181b20` | Left HUD rail                              |
 | `--surface-tab-active`  | `#ffffff` | `#1f2228` | Currently-focused tab body                 |
-| `--surface-tab-inactive`| `#e7eaf0` | `#181b20` | Tab strip and unselected tabs              |
+| `--surface-tab-inactive`| `#d4d9e3` | `#0e1014` | Tab strip and unselected tabs              |
 | `--surface-elevated`    | `#ffffff` | `#232730` | Popovers, slideovers, kebab menus          |
 | `--surface-overlay`     | rgba dim  | rgba dim  | Backdrops behind slideovers / overlays     |
 
@@ -139,6 +139,20 @@ app theme. `EditorPane.tsx` and `DiffPane.tsx` both call
 ThemeToggle re-tints both editors live. Monaco theme ids: `vs` for
 light, `vs-dark` for dark. The helper has no monaco import so it's
 unit-testable from `monaco-theme.test.ts`.
+
+## Xterm theme follows the app
+
+`src/ui/xterm-theme.ts` mirrors the Monaco bridge for the embedded
+terminal. Exports `getActiveXtermTheme()` and `subscribeXtermTheme(fn)`,
+each returning an `XtermTheme` (xterm.js `ITheme` shape). Background,
+foreground, cursor, and selection read from `--surface-card`,
+`--text-primary`, `--accent`, and `--accent-soft-bg` at call time;
+the 16 ANSI slots use vetted One Light / One Dark palettes hard-coded
+in the helper (UI accents would clash with terminal-color conventions
+like red=error/green=success). `TerminalPane.tsx` passes the active
+theme into `new Terminal({ theme })` and assigns
+`term.options.theme = next` from a subscriber so flipping the toggle
+re-tints the live terminal — no re-mount.
 
 ## Color use rules
 

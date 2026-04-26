@@ -1087,6 +1087,28 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 42,
+    name: "drop commit/wait point markers + auto_commit",
+    up: (db) => {
+      // Commits are now driven exclusively by the user (CLI / Bash). The
+      // queueable commit/wait point markers and the per-thread auto_commit
+      // toggle are gone — Stop hook no longer emits commit directives, and
+      // the runtime no longer runs `git commit`. Drop the marker tables
+      // and the column outright; existing rows are not migrated forward
+      // because no surface in the new system reads them. SQLite supports
+      // DROP COLUMN since 3.35; bun's bundled sqlite is current enough.
+      db.exec(`
+        DROP INDEX IF EXISTS idx_commit_point_thread_sort;
+        DROP INDEX IF EXISTS idx_commit_point_thread_status;
+        DROP INDEX IF EXISTS idx_wait_point_thread_sort;
+        DROP INDEX IF EXISTS idx_wait_point_thread_status;
+        DROP TABLE IF EXISTS commit_point;
+        DROP TABLE IF EXISTS wait_point;
+        ALTER TABLE threads DROP COLUMN auto_commit;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

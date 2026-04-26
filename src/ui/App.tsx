@@ -1347,13 +1347,15 @@ export function App() {
     });
   }, [commandMap, isElectron]);
 
+  const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
     const ids = new Set(["agent"]);
     for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
     for (const slug of noteTabs) ids.add(`note:${slug}`);
+    for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
-  }, [currentSession.openOrder, diffTabs, noteTabs]);
+  }, [currentSession.openOrder, diffTabs, noteTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1953,7 +1955,6 @@ export function App() {
           onSwitch={handleSwitch}
           onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
-          onOpenSettings={() => handleOpenPage(indexRef("settings"))}
           onOpenStreamSettings={(targetStreamId) => handleOpenPage(streamSettingsRef(targetStreamId))}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, CommitPoint, ThreadFollowup, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { AgentStatus, ThreadFollowup, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyRow,
@@ -16,14 +16,6 @@ import {
   type WorkItemSectionKind,
 } from "./plan-utils.js";
 import { PriorityIcon } from "./plan-icons.js";
-import {
-  commitDividerBadgeStyle,
-  commitDividerLineStyle,
-  commitDividerStyle,
-  commitModeBadgeStyle,
-  waitDividerBadgeStyle,
-} from "./queue-markers.js";
-import { WaitPointRow } from "./WaitPointRow.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
@@ -32,12 +24,7 @@ import type { MenuItem } from "../../menu.js";
  * Renders one work-item group (an epic + its children, or the root group
  * with no epic). Items are split by status into four sections —
  * In progress → To do → Blocked → Human check → Done — with dividers between non-empty
- * sections. Commit / wait points are interleaved into the To do section
- * only (they represent work yet to run); clicking a divider expands its
- * CommitPointRow / WaitPointRow inline. The "+ Commit when done" and
- * "+ Wait here" buttons hang off the tail of the To do section via
- * `addPointsSlot` so the shape of the queue doesn't require scrolling past
- * done work.
+ * sections.
  *
  * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
  * section boundaries also changes its status to that section's default
@@ -47,10 +34,7 @@ import type { MenuItem } from "../../menu.js";
  * sections stay hidden until a drag is active, at which point they appear
  * as drop targets.
  */
-export type QueueRow =
-  | { kind: "work"; id: string; sortIndex: number; item: WorkItem }
-  | { kind: "commit"; id: string; sortIndex: number; cp: CommitPoint }
-  | { kind: "wait"; id: string; sortIndex: number; wp: WaitPoint };
+export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: WorkItem };
 
 interface SectionBucket {
   kind: WorkItemSectionKind;
@@ -69,12 +53,8 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
 export function WorkGroupList({
   group,
   scopeThreadId,
-  expandedId,
-  onToggleExpand,
   onUpdateWorkItem,
   onReorderWorkItems,
-  commitPoints,
-  waitPoints,
   onReorderMixed,
   onOpenMenu,
   sectionActions,
@@ -82,7 +62,6 @@ export function WorkGroupList({
   markedIds,
   onSelect,
   onRequestEdit,
-  onDoubleClickCommitPoint,
   epicChildrenMap,
   onReparentWorkItem,
   onAddChildTask,
@@ -95,13 +74,9 @@ export function WorkGroupList({
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
-  expandedId: string | null;
-  onToggleExpand(id: string): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
   onReorderWorkItems: (orderedItemIds: string[]) => Promise<void>;
-  commitPoints?: CommitPoint[];
-  waitPoints?: WaitPoint[];
-  onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
+  onReorderMixed?(entries: Array<{ id: string }>): void;
   onOpenMenu(rect: DOMRect, item: WorkItem): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
@@ -112,7 +87,6 @@ export function WorkGroupList({
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
-  onDoubleClickCommitPoint?(cp: CommitPoint): void;
   epicChildrenMap: Map<string, WorkItem[]>;
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
@@ -153,24 +127,11 @@ export function WorkGroupList({
       inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
     };
     for (const row of work) {
-      if (row.kind !== "work") continue;
       // Epics roll up their children's statuses into an effective section
       // (`classifyEpic`) so the epic + its children render as one block in
       // whichever section the rollup picks. Non-epics use their literal
       // status. See plan-utils.ts.
       buckets[classifyRow(row.item, epicChildrenMap)].push(row);
-    }
-    // Commit / wait points only belong to the To do section — they represent
-    // a future action. Done / triggered markers are historical; hide them so
-    // the To do list is actually the to-do list (the commit sha is in git
-    // log; the wait point already fired).
-    for (const cp of commitPoints ?? []) {
-      if (cp.status === "done") continue;
-      buckets.toDo.push({ kind: "commit", id: cp.id, sortIndex: cp.sort_index, cp });
-    }
-    for (const wp of waitPoints ?? []) {
-      if (wp.status === "triggered") continue;
-      buckets.toDo.push({ kind: "wait", id: wp.id, sortIndex: wp.sort_index, wp });
     }
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
@@ -198,7 +159,7 @@ export function WorkGroupList({
       }
     }
     return { sections: orderedSections, allRows: flat };
-  }, [group.items, commitPoints, waitPoints]);
+  }, [group.items, epicChildrenMap]);
 
   // Index every work item visible in this group (root + every epic's
   // children) so the drag-start handler can encode the resolved
@@ -326,19 +287,8 @@ export function WorkGroupList({
         status: statusOverrides.get(row.id) ?? row.item.status,
       }));
     const persistedWorkIds = finalizeReorderIds(workRowsInVisualOrder);
-    if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
-      // Rebuild the mixed entries list using the persisted work-item order.
-      // Non-work rows stay in their `next` positions; work rows are replaced
-      // in-order with the finalized id sequence.
-      let workCursor = 0;
-      const entries: Array<{ kind: "work" | "commit" | "wait"; id: string }> = next.map((row) => {
-        if (row.kind === "work") {
-          const id = persistedWorkIds[workCursor++]!;
-          return { kind: "work" as const, id };
-        }
-        return { kind: row.kind, id: row.id };
-      });
-      onReorderMixed(entries);
+    if (onReorderMixed) {
+      onReorderMixed(persistedWorkIds.map((id) => ({ id })));
     } else {
       void onReorderWorkItems(persistedWorkIds);
     }
@@ -375,91 +325,10 @@ export function WorkGroupList({
     // Human Check / Done drops always land at the top of the section, so a
     // between-rows indicator on those targets would lie about where the
     // dragged item will end up. Suppress it there.
-    const targetSection = row.kind === "work" ? classifyRow(row.item, epicChildrenMap) : null;
+    const targetSection = classifyRow(row.item, epicChildrenMap);
     const suppressDropLine = targetSection === "humanCheck" || targetSection === "done";
     const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
-    if (row.kind === "commit") {
-      return (
-        <div key={key}>
-          <div
-            draggable
-            onDragStart={(event) => {
-              // Same drag-cancel workaround as the work-item rows —
-              // see the longer comment on `sharedDragHandlers` below.
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", row.id);
-              queueMicrotask(() => setDraggingKey(key));
-            }}
-            onDragEnd={resetDrag}
-            onDragOver={(event) => {
-              if (!draggingKey || draggingKey === key) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              if (overKey !== key) setOverKey(key);
-            }}
-            onDragLeave={() => { if (overKey === key) setOverKey(null); }}
-            onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
-            onClick={() => onDoubleClickCommitPoint?.(row.cp)}
-            style={{
-              ...commitDividerStyle,
-              cursor: isDragging ? "grabbing" : "pointer",
-              borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
-              background: isDragging ? "rgba(74,158,255,0.08)" : "transparent",
-            }}
-            title="Commit point — click to edit, drag to reposition"
-          >
-            <span style={commitDividerBadgeStyle(row.cp.status)}>
-              commit
-            </span>
-            <span style={commitModeBadgeStyle(row.cp.mode)}>
-              {row.cp.mode === "auto" ? "Auto" : "Approve"}
-            </span>
-          </div>
-        </div>
-      );
-    }
-    if (row.kind === "wait") {
-      const isExpanded = expandedId === key;
-      return (
-        <div key={key}>
-          <div
-            draggable
-            onDragStart={(event) => {
-              // Same drag-cancel workaround as the work-item rows.
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", row.id);
-              queueMicrotask(() => setDraggingKey(key));
-            }}
-            onDragEnd={resetDrag}
-            onDragOver={(event) => {
-              if (!draggingKey || draggingKey === key) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              if (overKey !== key) setOverKey(key);
-            }}
-            onDragLeave={() => { if (overKey === key) setOverKey(null); }}
-            onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
-            onClick={() => onToggleExpand(key)}
-            style={{
-              ...commitDividerStyle,
-              cursor: isDragging ? "grabbing" : "pointer",
-              borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
-              background: isDragging ? "rgba(217,119,6,0.08)" : "transparent",
-            }}
-            title="Wait point — drag to reposition"
-          >
-            <span style={commitDividerLineStyle} />
-            <span style={waitDividerBadgeStyle(row.wp.status)}>
-              wait{row.wp.note ? ` · ${row.wp.note}` : ""}
-              {row.wp.status === "triggered" ? " · stopped" : ""}
-            </span>
-            <span style={commitDividerLineStyle} />
-          </div>
-          {isExpanded ? <WaitPointRow wp={row.wp} /> : null}
-        </div>
-      );
-    }
     const isMarked = markedIds?.has(row.item.id) ?? false;
     const sharedDragHandlers = {
       onDragStart: (event: React.DragEvent) => {
@@ -641,11 +510,10 @@ export function WorkGroupList({
           : 0;
         const customActions = sectionActions?.[section.kind];
         const isCollapsed = isSectionCollapsed(section.kind);
-        // Count only work items (not commit/wait point dividers) for the
-        // header badge. For Done, count visible rows (excluding archived
-        // unless the user toggled them on).
+        // For Done, count visible rows (excluding archived unless the
+        // user toggled them on).
         const countRows = isDone ? visibleDoneRows : section.rows;
-        const itemCount = countRows.filter((r) => r.kind === "work").length;
+        const itemCount = countRows.length;
         return (
           <Fragment key={section.kind}>
           <div data-testid={`plan-section-${section.kind}`}>
@@ -839,9 +707,8 @@ const firstSectionLabelStyle: CSSProperties = {
 export function SectionHeaderMenu({ items, testId }: { items: MenuItem[]; testId?: string }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   // Render the ⋯ button whenever there are any items at all, including
-  // disabled ones — hiding them was confusing ("the menu is missing
-  // + Commit Point"). ContextMenu greys disabled items so users can
-  // see the command exists and why it isn't currently applicable.
+  // disabled ones — ContextMenu greys disabled items so users can see
+  // the command exists and why it isn't currently applicable.
   if (items.length === 0) return null;
   return (
     <>

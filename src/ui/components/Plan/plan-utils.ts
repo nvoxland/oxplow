@@ -391,8 +391,7 @@ export const sectionHeaderStyle: CSSProperties = {
 // Action-button style shared by every section header. Promoted from
 // WorkGroupList's previous private `miniDoneHeaderButtonStyle` so every
 // section's action buttons read as one family. Compact enough for icon-
-// only buttons (+ New Task, + Commit Point, etc.) without crowding the
-// section header — the header is narrow in practice.
+// only buttons without crowding the section header.
 export const sectionActionButtonStyle: CSSProperties = {
   borderRadius: 6,
   border: "1px solid var(--border)",

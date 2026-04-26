@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { WorkItemStore } from "../persistence/work-item-store.js";
-import { CommitPointStore } from "../persistence/commit-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import type { Stream } from "../persistence/stream-store.js";
 import { buildWorkItemMcpTools, composeDelegateQueryPrompt, descriptionLooksLikeEmbeddedCriteria, slimWorkItemEvent } from "./mcp-tools.js";
@@ -60,10 +59,6 @@ function seed() {
     threadStore,
     streamStore: { list: () => [streamA, streamB] } as never,
     workItemStore,
-    commitPointStore: null as never,
-    waitPointStore: null as never,
-    executeCommit: (() => { throw new Error("not used"); }) as never,
-    executeAutoCommit: (() => { throw new Error("not used"); }) as never,
     effortStore,
     followupStore,
   });
@@ -479,161 +474,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(workItemStore.getItem(threadB.id, c.id)!.status).toBe("human_check");
   });
 
-  test("oxplow__commit with { auto: true, threadId, message } calls executeAutoCommit and returns the sha", async () => {
-    const { threadStore, workItemStore, streamA, threadA } = seed();
-    const autoCalls: Array<{ threadId: string; message: string }> = [];
-    const tools = buildWorkItemMcpTools({
-      resolveStream: () => streamA,
-      resolveThreadById: (id) => {
-        const t = threadStore.findById(id);
-        if (!t) throw new Error(`unknown thread: ${id}`);
-        return t;
-      },
-      threadStore,
-      streamStore: { list: () => [streamA] } as never,
-      workItemStore,
-      commitPointStore: null as never,
-      waitPointStore: null as never,
-      effortStore: null as never,
-      executeCommit: (() => { throw new Error("not used"); }) as never,
-      executeAutoCommit: (threadId, message) => {
-        autoCalls.push({ threadId, message });
-        return { sha: "sha-auto-123", message };
-      },
-    });
-    const t = tool(tools, "oxplow__commit");
-    const result = (await t.handler({
-      auto: true,
-      threadId: threadA.id,
-      message: "Refactor the commit flow",
-    } as never)) as { ok: boolean; commitSha: string; message: string };
-    expect(result.ok).toBe(true);
-    expect(result.commitSha).toBe("sha-auto-123");
-    expect(autoCalls).toEqual([{ threadId: threadA.id, message: "Refactor the commit flow" }]);
-  });
-
-  test("oxplow__commit rejects `auto: true` with a commit_point_id (mutually exclusive)", async () => {
-    const { tools, threadA } = seed();
-    const t = tool(tools, "oxplow__commit");
-    await expect(async () =>
-      t.handler({ auto: true, threadId: threadA.id, commit_point_id: "cp-1", message: "x" } as never),
-    ).toThrow(/either.*commit_point_id.*OR.*auto/i);
-  });
-
-  test("oxplow__commit rejects `auto: true` without a threadId", async () => {
-    const { tools } = seed();
-    const t = tool(tools, "oxplow__commit");
-    await expect(async () =>
-      t.handler({ auto: true, message: "x" } as never),
-    ).toThrow(/threadId.*required/i);
-  });
-
-  test("oxplow__commit rejects empty message", async () => {
-    const { tools, threadA } = seed();
-    const t = tool(tools, "oxplow__commit");
-    await expect(async () =>
-      t.handler({ auto: true, threadId: threadA.id, message: "   " } as never),
-    ).toThrow(/message.*non-empty/i);
-  });
-
-  test("oxplow__tasks_since_last_commit with no prior commit returns all closed efforts (first-commit case)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oxplow-tscl-"));
-    const threadStore = new ThreadStore(dir);
-    const stream = makeStream("s-A", "Alpha");
-    const state = threadStore.ensureStream(stream);
-    const threadA = state.threads[0]!;
-    const workItemStore = new WorkItemStore(dir);
-    const commitPointStore = new CommitPointStore(dir);
-    const effortStore = new WorkItemEffortStore(dir);
-
-    const item1 = workItemStore.createItem({
-      threadId: threadA.id, kind: "task", title: "First task", createdBy: "user", actorId: "test",
-    });
-    const item2 = workItemStore.createItem({
-      threadId: threadA.id, kind: "bug", title: "Second task", createdBy: "user", actorId: "test",
-    });
-    effortStore.openEffort({ workItemId: item1.id, startSnapshotId: null });
-    effortStore.closeEffort({ workItemId: item1.id, endSnapshotId: null });
-    effortStore.openEffort({ workItemId: item2.id, startSnapshotId: null });
-    effortStore.closeEffort({ workItemId: item2.id, endSnapshotId: null });
-
-    const tools = buildWorkItemMcpTools({
-      resolveStream: () => stream,
-      resolveThreadById: (id) => threadStore.findById(id) ?? (() => { throw new Error(`unknown thread: ${id}`); })(),
-      threadStore,
-      streamStore: { list: () => [stream] } as never,
-      workItemStore,
-      commitPointStore,
-      effortStore,
-      waitPointStore: null as never,
-      executeCommit: (() => { throw new Error("not used"); }) as never,
-      executeAutoCommit: (() => { throw new Error("not used"); }) as never,
-    });
-    const t = tool(tools, "oxplow__tasks_since_last_commit");
-    const result = (await t.handler({ threadId: threadA.id } as never)) as {
-      previousCommit: { sha: string | null; completed_at: string | null } | null;
-      items: Array<{ id: string; title: string; kind: string; status: string; ended_at: string }>;
-    };
-    expect(result.previousCommit).toBeNull();
-    expect(result.items).toHaveLength(2);
-    const titles = result.items.map((i) => i.title).sort();
-    expect(titles).toEqual(["First task", "Second task"]);
-  });
-
-  test("oxplow__tasks_since_last_commit filters by the latest-done commit_point's completed_at", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oxplow-tscl-filter-"));
-    const threadStore = new ThreadStore(dir);
-    const stream = makeStream("s-A", "Alpha");
-    const state = threadStore.ensureStream(stream);
-    const threadA = state.threads[0]!;
-    const workItemStore = new WorkItemStore(dir);
-    const commitPointStore = new CommitPointStore(dir);
-    const effortStore = new WorkItemEffortStore(dir);
-
-    // Settle an item BEFORE the commit point.
-    const old = workItemStore.createItem({
-      threadId: threadA.id, kind: "task", title: "Pre-commit work", createdBy: "user", actorId: "test",
-    });
-    effortStore.openEffort({ workItemId: old.id, startSnapshotId: null });
-    effortStore.closeEffort({ workItemId: old.id, endSnapshotId: null });
-
-    // Now simulate a commit landing.
-    const cp = commitPointStore.create({ threadId: threadA.id, sortIndex: 1 });
-    // Sleep a beat so the completed_at strictly precedes the next effort.
-    await new Promise((r) => setTimeout(r, 5));
-    commitPointStore.markCommitted(cp.id, "landed", "sha-a");
-    await new Promise((r) => setTimeout(r, 5));
-
-    // Then settle a new item AFTER the commit landed.
-    const fresh = workItemStore.createItem({
-      threadId: threadA.id, kind: "task", title: "Post-commit work", createdBy: "user", actorId: "test",
-    });
-    effortStore.openEffort({ workItemId: fresh.id, startSnapshotId: null });
-    effortStore.closeEffort({ workItemId: fresh.id, endSnapshotId: null });
-
-    const tools = buildWorkItemMcpTools({
-      resolveStream: () => stream,
-      resolveThreadById: (id) => threadStore.findById(id) ?? (() => { throw new Error(`unknown thread: ${id}`); })(),
-      threadStore,
-      streamStore: { list: () => [stream] } as never,
-      workItemStore,
-      commitPointStore,
-      effortStore,
-      waitPointStore: null as never,
-      executeCommit: (() => { throw new Error("not used"); }) as never,
-      executeAutoCommit: (() => { throw new Error("not used"); }) as never,
-    });
-    const t = tool(tools, "oxplow__tasks_since_last_commit");
-    const result = (await t.handler({ threadId: threadA.id } as never)) as {
-      previousCommit: { sha: string | null; completed_at: string | null } | null;
-      items: Array<{ id: string; title: string }>;
-    };
-    expect(result.previousCommit).not.toBeNull();
-    expect(result.previousCommit!.sha).toBe("sha-a");
-    // Only the post-commit item should be returned.
-    expect(result.items.map((i) => i.title)).toEqual(["Post-commit work"]);
-  });
-
   test("transition_work_items rejects an unknown threadId before firing any side effects", async () => {
     const { tools, workItemStore, threadB } = seed();
     const create = tool(tools, "oxplow__create_work_item");
@@ -791,9 +631,9 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     const item = (await create.handler({
       threadId: threadB.id,
       kind: "task",
-      title: "Fix the wait-point bug",
-      description: "The wait point on boot does not advance.",
-      acceptanceCriteria: "- boots past wait point\n- test added",
+      title: "Fix the login redirect bug",
+      description: "Login redirects to the wrong landing page.",
+      acceptanceCriteria: "- redirects to dashboard\n- test added",
       priority: "high",
     } as never)) as { id: string };
 
@@ -806,16 +646,15 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
     expect(result.itemId).toBe(item.id);
     expect(result.prompt).toContain(item.id);
-    expect(result.prompt).toContain("Fix the wait-point bug");
-    expect(result.prompt).toContain("The wait point on boot does not advance.");
-    expect(result.prompt).toContain("boots past wait point");
+    expect(result.prompt).toContain("Fix the login redirect bug");
+    expect(result.prompt).toContain("Login redirects to the wrong landing page.");
+    expect(result.prompt).toContain("redirects to dashboard");
     // Preamble: subagent-protocol essentials
     expect(result.prompt).toContain("oxplow work item");
     expect(result.prompt).toContain("in_progress");
     expect(result.prompt).toContain("complete_task");
     expect(result.prompt).toContain("oxplow-result:");
     // Trailing constraints
-    expect(result.prompt).toMatch(/DO NOT COMMIT/);
     expect(result.prompt).toMatch(/Singular table names/i);
   });
 
@@ -932,10 +771,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       threadStore,
       streamStore: { list: () => [streamA] } as never,
       workItemStore,
-      commitPointStore: null as never,
-      waitPointStore: null as never,
-      executeCommit: (() => { throw new Error(); }) as never,
-      executeAutoCommit: (() => { throw new Error(); }) as never,
       effortStore: null as never,
       forkThread: (input) => {
         calls.push(input);
@@ -965,35 +800,6 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       title: "x",
       summary: "y",
     } as never)).toThrow(/runtime not wired/);
-  });
-
-  test("read_work_options notifies markReadWorkOptions with the current ready set", async () => {
-    const { threadStore, workItemStore, streamA, threadA } = seed();
-    workItemStore.createItem({ threadId: threadA.id, kind: "task", title: "r1", createdBy: "user", actorId: "test" });
-    workItemStore.createItem({ threadId: threadA.id, kind: "task", title: "r2", createdBy: "user", actorId: "test" });
-    const calls: Array<{ threadId: string; readyIds: string[] }> = [];
-    const tools2 = buildWorkItemMcpTools({
-      resolveStream: () => streamA,
-      resolveThreadById: (tid) => {
-        const t = threadStore.findById(tid);
-        if (!t) throw new Error("no");
-        return t;
-      },
-      threadStore,
-      streamStore: { list: () => [streamA] } as never,
-      workItemStore,
-      commitPointStore: { listForThread: () => [] } as never,
-      waitPointStore: { listForThread: () => [] } as never,
-      executeCommit: (() => { throw new Error(); }) as never,
-      executeAutoCommit: (() => { throw new Error(); }) as never,
-      effortStore: null as never,
-      markReadWorkOptions: (threadId, readyIds) => calls.push({ threadId, readyIds }),
-    });
-    const t = tool(tools2, "oxplow__read_work_options");
-    await t.handler({ threadId: threadA.id } as never);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.threadId).toBe(threadA.id);
-    expect(calls[0]!.readyIds.length).toBeGreaterThanOrEqual(2);
   });
 
   test("delegate_query pre-allocates a thread-scoped note and returns a prompt including question + focus + noteId", async () => {

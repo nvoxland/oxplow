@@ -110,6 +110,26 @@ test("createElectronPlugin writes the wiki-capture skill", () => {
   expect(body).toMatch(/append/i);
 });
 
+test("createElectronPlugin writes the /work-next command so any project running oxplow can invoke it", () => {
+  // Plugin-emitted commands live under <pluginDir>/commands/. They ship to
+  // every consumer; the repo-local .claude/commands/ directory is scoped
+  // to oxplow-on-oxplow dogfooding and isn't relevant here.
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
+  const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
+
+  const expectedPath = join(plugin.pluginDir, "commands", "work-next.md");
+  expect(plugin.workNextCommandPath).toBe(expectedPath);
+  expect(existsSync(plugin.workNextCommandPath)).toBe(true);
+  const body = readFileSync(plugin.workNextCommandPath, "utf8");
+  expect(body.startsWith("---\n")).toBe(true);
+  expect(body).toContain("description:");
+  // Body should point the agent at the same dispatch protocol the old
+  // Stop-hook directive named.
+  expect(body).toContain("read_work_options");
+  expect(body).toContain("general-purpose");
+  expect(body).toContain("oxplow-runtime");
+});
+
 test("createElectronPlugin is idempotent across calls", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const first = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });

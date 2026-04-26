@@ -751,29 +751,8 @@ function buildPushArgs(options?: { force?: boolean; setUpstream?: boolean; remot
  * Returns the new commit sha on success, or a GitOpResult-shaped error
  * if either `git add` or `git commit` fails.
  */
-/**
- * Cheap clean-tree probe: returns true iff `git diff --quiet` and
- * `git diff --cached --quiet` both exit zero. Used by the Stop-hook
- * auto-commit suppressor (wi-ec4c8e6f44fd) so we don't fire the
- * auto-commit directive on a thread whose settled work has already
- * landed. Untracked files don't count — `git diff --quiet` doesn't
- * see them, and the commit directive's job is still to capture
- * staged/unstaged changes, not a stray new file the user forgot
- * about.
- */
-export function isWorktreeClean(projectDir: string): boolean {
-  try {
-    execFileSync("git", ["-C", projectDir, "diff", "--quiet"], { stdio: "ignore" });
-    execFileSync("git", ["-C", projectDir, "diff", "--cached", "--quiet"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Read the current HEAD sha for a worktree. Returns null on any failure
- *  (not a git repo, detached state we can't resolve, etc.). Used by the
- *  `git-refs.changed` backfill path in wi-ec4c8e6f44fd. */
+ *  (not a git repo, detached state we can't resolve, etc.). */
 export function readWorktreeHeadSha(projectDir: string): string | null {
   try {
     const sha = execFileSync("git", ["-C", projectDir, "rev-parse", "HEAD"], {

@@ -1,7 +1,7 @@
 # IPC and stores: end-to-end pattern
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `commit_point` as a worked example.
+needs persistence + IPC + UI, with `wiki_note` as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -25,8 +25,7 @@ touches roughly seven files. They sit in this order:
 3. **Runtime method** — `src/electron/runtime.ts`. Adds a method to
    `ElectronRuntime` that resolves stream/thread as needed and delegates
    to the store. Where cross-store atomicity matters, the runtime owns
-   that orchestration (e.g. `reorderBatchQueue` updates work_items,
-   commit_point, and wait_point in one go).
+   that orchestration.
 
 4. **IPC contract** — `src/electron/ipc-contract.ts`. Add the method
    signature to the `OxplowApi` interface. This is the source of truth for
@@ -49,39 +48,14 @@ touches roughly seven files. They sit in this order:
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
 
-## Worked example: `commit_point`
+## Worked example: `wiki_note`
 
-What landed across each layer when commit points were added:
-
-- **Migration v6** in `migrations.ts`: `CREATE TABLE commit_point (...)`,
-  plus indexes on `(thread_id, sort_index)` and `(thread_id, status)`.
-- **Store**: `src/persistence/commit-point-store.ts` —
-  `create/update/markCommitted/delete/setSortIndexes/listForBatch/get`.
-  Status machine is `pending → done`; the drafted message lives in
-  chat, not the DB. Every mutation calls `emit({ threadId, kind, id })`.
-- **Runtime / thread-queue-orchestrator**: methods
-  `createCommitPoint/deleteCommitPoint/listCommitPoints/
-  reorderBatchQueue/executeCommit` plus the Stop-hook integration via
-  `computeStopDirective`. `executeCommit` runs `gitCommitAll` inline
-  from the `oxplow__commit` MCP handler.
-- **Event**: `CommitPointChangedEvent` added to `src/core/event-bus.ts`,
-  published in `runtime.ts` from the store's `subscribe`.
-- **IPC contract / preload / main**: `listCommitPoints`,
-  `createCommitPoint`, `deleteCommitPoint`. (Approve/reject/setMode/
-  reset were removed — approval is chat-driven.)
-- **UI api**: `listCommitPoints/createCommitPoint/deleteCommitPoint/
-  reorderBatchQueue` in `src/ui/api.ts`.
-- **UI consumption**: `PlanPane.tsx` loads commit points on thread change
-  and refetches via `subscribeOxplowEvents` filtered to
-  `event.type === "commit-point.changed" && event.threadId === threadId`.
-- **MCP**: `commit` and `list_commit_points` registered in
-  `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
-  `commitPointStore` to its `McpToolDeps`). The agent drafts messages
-  in chat and calls `commit` once the user approves; there is no
-  `propose_commit` tool — the draft has no DB-side representation.
-
-That's the full template — duplicate the shape for any new persisted
-feature.
+Concrete instance of the 7-layer flow. Look at the `wiki_note` table,
+`WikiNoteStore`, the runtime's `listWikiNotes`/`writeWikiNoteBody`
+helpers, the matching IPC contract entries, the preload bindings, the
+main-process handlers, and the UI api wrappers. Every other persisted
+feature in this codebase follows the same shape — duplicate it for new
+work.
 
 ## Event bus
 

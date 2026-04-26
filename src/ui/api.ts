@@ -2,8 +2,6 @@ import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
 export type { OxplowEvent } from "../electron/ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry } from "../git/git.js";
-export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
-export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 
 export interface Stream {
   id: string;
@@ -31,7 +29,6 @@ export interface Thread {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
-  auto_commit: boolean;
   custom_prompt: string | null;
 }
 
@@ -369,10 +366,6 @@ export async function renameThread(streamId: string, threadId: string, title: st
   return desktopApi().renameThread(streamId, threadId, title);
 }
 
-export async function setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]> {
-  return desktopApi().setAutoCommit(streamId, threadId, enabled);
-}
-
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
   return desktopApi().setStreamPrompt(streamId, prompt);
 }
@@ -581,10 +574,6 @@ export async function localBlame(
   return desktopApi().localBlame(streamId, path);
 }
 
-export async function listCommitPoints(threadId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
-  return desktopApi().listCommitPoints(threadId);
-}
-
 export type WikiNoteSummary = import("../electron/ipc-contract.js").WikiNoteSummary;
 export type WikiNoteSearchHit = import("../electron/ipc-contract.js").WikiNoteSearchHit;
 export type UsageRollup = import("../electron/ipc-contract.js").UsageRollup;
@@ -723,60 +712,12 @@ export function subscribeUsageEvents(
   });
 }
 
-export async function createCommitPoint(
-  streamId: string,
-  threadId: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().createCommitPoint(streamId, threadId);
-}
-
-export async function deleteCommitPoint(id: string): Promise<void> {
-  return desktopApi().deleteCommitPoint(id);
-}
-
-export async function updateCommitPoint(
-  id: string,
-  changes: { mode?: "auto" | "approve" },
-): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
-  return desktopApi().updateCommitPoint(id, changes);
-}
-
-export async function commitCommitPoint(
-  id: string,
-  message: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().commitCommitPoint(id, message);
-}
-
 export async function reorderThreadQueue(
   streamId: string,
   threadId: string,
-  entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+  entries: Array<{ id: string }>,
 ): Promise<void> {
   return desktopApi().reorderThreadQueue(streamId, threadId, entries);
-}
-
-export async function listWaitPoints(threadId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
-  return desktopApi().listWaitPoints(threadId);
-}
-
-export async function createWaitPoint(
-  streamId: string,
-  threadId: string,
-  note?: string | null,
-): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
-  return desktopApi().createWaitPoint(streamId, threadId, note);
-}
-
-export async function setWaitPointNote(
-  id: string,
-  note: string | null,
-): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
-  return desktopApi().setWaitPointNote(id, note);
-}
-
-export async function deleteWaitPoint(id: string): Promise<void> {
-  return desktopApi().deleteWaitPoint(id);
 }
 
 export async function removeFollowup(threadId: string, id: string): Promise<void> {

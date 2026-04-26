@@ -17,8 +17,6 @@ import type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
-  CommitPoint,
-  WaitPoint,
   RefOption,
   ThreadWorkState,
   Stream,
@@ -61,8 +59,6 @@ export type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
-  CommitPoint,
-  WaitPoint,
   RefOption,
   AgentStatus,
   MenuGroupSnapshot,
@@ -213,7 +209,6 @@ export interface DesktopApi {
   promoteThread(streamId: string, threadId: string): Promise<ThreadState>;
   completeThread(streamId: string, threadId: string): Promise<ThreadState>;
   renameThread(streamId: string, threadId: string, title: string): Promise<Thread>;
-  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]>;
   setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]>;
   setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]>;
   getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState>;
@@ -316,12 +311,7 @@ export interface DesktopApi {
   listCodeQualityFindings(input: { streamId: string; tool?: CodeQualityTool; paths?: string[] }): Promise<CodeQualityFindingRow[]>;
   listCodeQualityScans(input: { streamId: string; limit?: number }): Promise<CodeQualityScanRow[]>;
   getWorkItemSummaries(ids: string[]): Promise<Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }>>;
-  listCommitPoints(threadId: string): Promise<CommitPoint[]>;
-  createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
-  deleteCommitPoint(id: string): Promise<void>;
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): Promise<CommitPoint[]>;
-  commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
-  reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
+  reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ id: string }>): Promise<void>;
   /** Drop a transient agent follow-up reminder. The store is in-memory
    *  on the runtime — adds happen via MCP tool calls; the UI only ever
    *  removes (the × button on each reminder line). */
@@ -330,10 +320,6 @@ export interface DesktopApi {
    *  tasks (git ops, code-quality scans, LSP startup, notes resync).
    *  Subscribe to `background-task.changed` events and refetch. */
   listBackgroundTasks(): Promise<import("./background-task-store.js").BackgroundTask[]>;
-  listWaitPoints(threadId: string): Promise<WaitPoint[]>;
-  createWaitPoint(streamId: string, threadId: string, note?: string | null): Promise<WaitPoint>;
-  setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;
-  deleteWaitPoint(id: string): Promise<void>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; threadId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;

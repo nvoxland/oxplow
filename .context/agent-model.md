@@ -60,20 +60,12 @@ oxplow agent:
   dot on each thread tab. Poll for the transition *out* of `working` to
   know a turn finished. Looking at terminal rows alone is fragile
   (scrollback, progress indicators, partial lines).
-- **Committing from a driven session.** Two paths, pick one up front:
-  - **Ad-hoc.** Tell the agent to run `git commit` directly. No commit
-    point needed, no approval UI. Good for "do this one thing and
-    land it."
-  - **Automated multi-step.** Insert a commit point into the queue
-    (`createCommitPoint`, or click `+ Commit when done` in the Plan
-    panel) *before* prompting the agent. When the Stop hook sees a
-    pending commit point, it blocks with a directive telling the
-    agent to inspect the diff, draft a message in its reply, and ask
-    the user to approve. On approval the agent calls
-    `mcp__oxplow__commit({ commit_point_id, message })`, which runs
-    `gitCommitAll` and flips the point to `done`. Auto-mode commit
-    points skip the chat round-trip — the runtime commits immediately
-    with a generated message.
+- **Committing from a driven session.** Commits are user-driven only.
+  Either run `git commit` yourself in the terminal, click commit in
+  the Files panel, or tell the agent in chat "go run `git commit -m
+  …`". The runtime never invokes `git commit` and there are no
+  queueable commit/wait point markers. The Stop-hook does not emit
+  any commit-related directives.
 - **Work-item lifecycle.** Create → Stop-hook picks next ready item →
   agent marks `in_progress` → agent works → agent marks `human_check`
   when waiting for user review. Agents **never self-mark `done`** —
@@ -82,16 +74,6 @@ oxplow agent:
 
 ## Common pitfalls
 
-- **`mcp__oxplow__commit` only works when a commit point is pending.**
-  The tool requires an existing commit_point row; for ad-hoc commits
-  have the agent run `git commit` directly via Bash.
-  - **UI signal:** the Work panel renders an inline hint
-    (`data-testid="plan-no-commit-point-hint"`) above the bottom bar
-    whenever the current thread has at least one `human_check` / `done`
-    item and no live (non-`done`) commit point — a nudge to click
-    `+ Commit when done` so the next Stop-hook turn has something to
-    fire. Derived purely on the client from `batchWork` +
-    `commitPoints` state; no new store/IPC.
 - **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
   non-`active` thread.** See "Write guard" below. If the agent reports
   "permission denied" on a file write inside a non-writer thread,
@@ -100,10 +82,11 @@ oxplow agent:
 - **Queueing work without a prompt does nothing if the agent is
   idle.** See the first-turn caveat above.
 - **`human_check` is terminal for the pipeline, not for the user.**
-  Pipeline considers all preceding work "done" once it's in
-  `human_check`, so commit-point activation doesn't wait for user
-  review. That's intentional — it lets the agent land code while the
-  user catches up on review asynchronously.
+  The pipeline treats `human_check` as agent-settled so follow-on
+  steps don't block on human review.
+- **Runtime never commits.** The harness has no `git commit` path —
+  no auto-commit at Stop, no commit-point markers, no `mcp__oxplow__commit`
+  tool. Drive commits yourself via CLI / Bash / Files-panel commit.
 
 ## Launching the agent
 
@@ -172,10 +155,11 @@ to `runtime.handleHookEnvelope`, which:
 
 The decision logic lives in `decideStopDirective` (a pure function in
 `src/electron/stop-hook-pipeline.ts`). The runtime's
-`computeStopDirective(threadId)` builds a `BatchSnapshot` from the live
-stores, calls the pure function, then applies any returned side effects
-(currently only `trigger-wait-point`). Keeping the decision separate
-from the side effects lets every branch be unit-tested with a fixture.
+`computeStopDirective(threadId)` builds a `ThreadSnapshot` from the
+live stores, calls the pure function, then applies any returned side
+effects (currently only `record-audit-signature`). Keeping the decision
+separate from the side effects lets every branch be unit-tested with a
+fixture.
 
 **Q&A short-circuit.** Before any branch runs, the pipeline checks
 `snapshot.turnHadActivity`. The runtime tracks a per-thread flag
@@ -185,11 +169,34 @@ tools (Edit/Write/Bash with non-readonly command), oxplow filing
 tools, and dispatch tools (see `isActivityTool`). When the flag is
 still `false` at Stop, the turn was pure Q&A — the agent answered or
 asked the user something with no real work — and **every directive is
-suppressed** so the agent stays stopped waiting for the user. Commit,
-auto-commit, in-progress audit, ready-work, and the wait-point side-
-effect are all skipped. `undefined` (no UserPromptSubmit fired) is
-treated as "unknown → don't suppress" so older tests / edge cases
-stay stable.
+suppressed** so the agent stays stopped waiting for the user. Audit
+and filing-enforcement are both skipped. `undefined` (no
+UserPromptSubmit fired) is treated as "unknown → don't suppress" so
+older tests / edge cases stay stable.
+
+**Awaiting-user gate.** A turn that *did* have qualifying tool
+activity (e.g. filed a work item) but ended with the agent asking the
+user a question still needs to stop cleanly — the Q&A short-circuit
+won't fire because activity ≠ false. The agent signals this
+explicitly via `mcp__oxplow__await_user({ threadId, question })`.
+The runtime tracks `awaitingUserByThread`; when set, the Stop pipeline's
+top branch returns "allow stop" and **suppresses every directive**
+(in-progress audit, filing-enforcement). The flag is cleared on the
+next UserPromptSubmit.
+
+**Filing-enforcement branch (writer thread).** When the turn made
+write-intent edits to project files (`turnHadWrites === true`) but
+**no** work-item-mutating tool was called this turn
+(`turnHadFiling === false`) AND no `in_progress` item exists to claim
+the work, the pipeline blocks with `buildFilingEnforcementStopReason`.
+The agent must either file/transition an item describing the edits or
+revert them before stopping. There is no trivial-edit carve-out — every
+write requires a tracked item. Filing-counted tools:
+`create_work_item`, `update_work_item`, `complete_task`,
+`file_epic_with_children`, `transition_work_items`, `dispatch_work_item`
+(each calls `markFiledThisTurn` from its MCP handler). The
+filing-enforcement branch sits *before* the in-progress audit branch so
+legitimate "filed and still open" turns flow into the audit normally.
 
 **Wiki-capture exception.** A read-heavy / no-write turn
 (`turnHadActivity === false` AND `turnWasExploration === true`) emits
@@ -208,68 +215,20 @@ on the next `UserPromptSubmit`.
 
 The pipeline runs in priority order:
 
-1. **Pending commit point (writer thread only).** Block with an
-   agent-drafted commit directive. Two shapes:
-   - `mode="approve"` (default) → `buildCommitPointStopReason`: agent
-     inspects the diff, drafts a message in chat, asks the user to
-     approve, then calls `mcp__oxplow__commit({ commit_point_id, message })`.
-   - `mode="auto"` → `buildAutoCommitStopReason` (same directive text
-     used for the no-row ad-hoc case below): agent inspects the diff,
-     drafts a message, and commits **in the same turn without asking**.
-     Same tool call with the commit_point_id — the runtime flips the
-     row to `done`.
-   **Gated on `thread.status === "active"`**: only the writer thread
-   ever commits. Non-active threads fall through so the commit point
-   stays pending until that thread is promoted to writer.
-2. **Ad-hoc auto-commit (writer thread only, no DB row).** When
-   `thread.auto_commit` is true AND settled work (`human_check`/`done`
-   items) is present AND no pending commit_point is queued AND the
-   worktree has staged/unstaged changes, the pipeline emits
-   `buildAutoCommitStopReason(null)`. Clean-tree suppression: if
-   `git diff --quiet && git diff --cached --quiet` both pass
-   (`isWorktreeClean` in `src/git/git.ts`), the directive is skipped
-   even when settled work exists — the sha already landed via an
-   ad-hoc `git commit` (Bash / Files panel) and there's nothing
-   to commit. Same suppression applies to the `mode="auto"`
-   commit_point branch above. Agent drafts a message from the diff
-   and calls `mcp__oxplow__commit({ auto: true, threadId, message })`,
-   which routes to `executeAutoCommitForThread` — runs `git commit`
-   and publishes a `thread.changed`/`auto-committed` event. **No
-   commit_point row is created, and no item↔sha bookkeeping happens**
-   (item↔commit attribution can't be made reliable when users commit
-   outside oxplow — see data-model.md for why we removed the
-   `work_item_commit` junction). This is the unified-flow endpoint:
-   auto and approve modes now only differ in whether the agent asks
-   the user first.
-   - Supplementary context tool: `mcp__oxplow__tasks_since_last_commit`
-     returns work items whose efforts closed after the most recent done
-     commit_point (or all closed efforts when the thread has never
-     committed). The agent uses it when it's lost memory of earlier
-     completed tasks; the diff is still the primary source of truth.
-   - Fallback: if the agent calls `oxplow__commit` with `auto: true` but
-     an empty `message`, the runtime falls back to `buildAutoCommitMessage`
-     — now filtered by the latest done commit_point's `completed_at`
-     (items whose `updated_at` is strictly after it), so the body
-     reflects *this* commit's changes rather than every settled item
-     ever.
-3. **Pending wait point.** Flip it to `triggered` and **allow stop**. The
-   UI shows "agent stopped here"; the user resumes by prompting the agent
-   directly (`triggered` points are skipped on subsequent Stop hooks, so
-   one prompt is enough — no "continue" button). A marker (commit or wait)
-   is "active" once every preceding work item is terminal, where terminal
-   includes `human_check` — agents never self-mark `done`, so demanding
-   `done` would let the agent march past the line indefinitely while the
-   user catches up on verification.
-4. **Writer thread with `in_progress` work items.** Block with the audit
+1. **Filing-enforcement (writer thread only).** Block with
+   `buildFilingEnforcementStopReason` when the turn made write-intent
+   edits to project files but no work-item-mutating tool was called
+   AND no in_progress item exists to claim the work (see
+   "Filing-enforcement branch" below for the full set of filing-counted
+   tools).
+2. **Writer thread with `in_progress` work items.** Block with the audit
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
    to reconcile each: still active → leave alone; acceptance criteria met
    → `complete_task` (status `human_check`, never self-mark `done`);
    stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
    persist across turn boundaries; without this audit step stale
-   `in_progress` rows pile up because nothing forces a settle. The audit
-   takes priority over the ready-work branch — reconcile what's open
-   before picking up new work.
+   `in_progress` rows pile up because nothing forces a settle.
    **No-change suppression.** The runtime keeps a per-thread fingerprint
    (`lastAuditSignatureByThread`, signature = sorted
    `id|updated_at|note_count` over the in_progress set) of the last set
@@ -281,53 +240,28 @@ The pipeline runs in priority order:
    agent answers "still in progress" → Stop fires → identical audit
    nudge → same answer, costing the user a wall of repeated lines and
    model tokens. See wi-c468e8fc093d.
-5. **Writer thread with no `in_progress` and ready work.** Block with a
-   terse directive built by `buildNextWorkItemStopReason` — a one-liner
-   pointing at `mcp__oxplow__read_work_options` (with the embedded
-   threadId) and the merged `oxplow-runtime` skill. Protocol (mark
-   `in_progress` before work, `human_check` after, one-at-a-time
-   attribution) lives in those skills, not the directive — keep the
-   stop-hook message stable and cheap. "Queue" here means ready items
-   only — `human_check` belongs to the user's review queue and is
-   terminal from the pipeline's perspective.
+3. **Otherwise.** Allow stop.
 
-   **Just-read suppression.** The runtime keeps a per-thread record
-   (`lastReadWorkOptionsByThread`) of the ready-item ids the agent saw
-   in its most recent `read_work_options` call. On the next Stop, if
-   the current ready-set is identical, the directive is suppressed and
-   the record is cleared — the agent already has the list; re-emitting
-   it would waste a turn.
+**No commit / wait-point branches.** The runtime never drives `git
+commit` and there are no queueable commit / wait-point markers. Commits
+are user-driven (CLI / Bash / Files-panel commit). The pipeline never
+emits commit-shaped directives.
 
-   **Per-item nag cap.** The pipeline tracks the most recent ready-work
-   nag in `recentReadyWorkNagByThread` (`{ itemId, count }`). After 3
-   consecutive fires for the same item id, the directive is suppressed
-   until the ready-set changes or the next user prompt resets the
-   counter. Without the cap the same nag could fire 7+ times in a
-   session — pure token burn once the user has clearly chosen not to
-   pick up the suggested item.
-
-6. **Otherwise.** Allow stop.
-
-**Auto-commit nag debounce.** Both the `mode="auto"` commit-point
-branch and the ad-hoc auto-commit branch (priorities 1 and 2 above)
-fingerprint each emitted nag in `lastAutoCommitNagFingerprintByThread`
-(`cp:<id>` for queued points, `auto:no-cp` for ad-hoc). Re-emitting
-the same fingerprint without the commit landing or the diff changing
-adds nothing the agent didn't already see. The fingerprint clears on
-`UserPromptSubmit` and on a successful commit
-(`executeAutoCommitForThread`). This kept the auto-commit prompt from
-firing 7× in a single session against an unchanged diff.
+**Cross-turn queue progression is user-driven.** There is intentionally
+no Stop-hook directive that pushes the agent onto the next ready work
+item. When the agent finishes its current obligations and Stops, it
+stops — the user resumes queue work by typing a prompt or running the
+plugin-emitted `/work-next` slash command (which calls
+`read_work_options` and dispatches to a `general-purpose` subagent per
+the `oxplow-runtime` skill).
 
 **Subagent-in-flight carve-out.** The runtime tracks per-thread `Task`
 tool calls (PreToolUse → +1, PostToolUse → -1) in
 `pendingSubagentsByThread`. When the count is non-zero on a Stop, the
-audit (priority 4) and ready-work (priority 5) branches are suppressed
-— re-emitting them while the parent is mid-`Task` produces a visual
-loop where the parent acks each Stop with "still actively being worked
-by background subagent" while still waiting on the subagent. Markers
-(commit/wait points) still fire: those are user-placed and represent
-explicit work the agent must address. Same signal is surfaced to the
-tab icon — see "Agent status" below.
+audit branch is suppressed — re-emitting it while the parent is
+mid-`Task` produces a visual loop where the parent acks each Stop with
+"still actively being worked by background subagent" while still
+waiting on the subagent.
 
 ### fork_thread
 
@@ -355,22 +289,6 @@ summary, moveItemIds? })` — one transaction that:
 Returns `{ newThreadId }`. Implementation lives on
 `ElectronRuntime.forkThread` (`src/electron/runtime.ts`); the MCP tool
 is just a thin surface.
-
-Numbering note: ad-hoc auto-commit (no DB row) runs *after* the
-commit_point branch because a pending commit_point always wins — if the
-user has explicitly queued a commit marker, honour it; ad-hoc
-auto-commit is the "draft me something" catch-all that fires only when
-nothing more specific is in the queue.
-
-## BatchQueueOrchestrator
-
-Cross-store queue logic (commit points + wait points + the
-`reorderBatchQueue` that rewrites all three sort_index spaces) lives
-in `src/electron/thread-queue-orchestrator.ts`. The runtime instantiates
-it as `this.batchQueue` and delegates IPC-exposed methods through.
-`executeCommit` (which runs `git commit` synchronously from the
-`oxplow__commit` MCP handler once the user has approved in chat) is
-also there.
 
 ## Orchestrator pattern
 
@@ -414,10 +332,10 @@ within-turn micro-planner and never mirrors oxplow items.
   pick one or a link-related cluster. Epics are excluded from this list.
 - `{ mode: "empty" }` — nothing ready; allow stop.
 
-The Stop-hook directive (step 4 in the pipeline) now says "call
-`read_work_options` and dispatch to a `general-purpose` subagent" rather
-than naming a specific item. This keeps the directive stable across
-epic/task/subtask distinctions and lets the tool do the grouping.
+`read_work_options` is the dispatch unit: the agent (or the user, via
+`/work-next`) calls it and dispatches the returned cluster to a
+`general-purpose` subagent. The grouping (epic-as-unit vs standalone
+items) lives in the tool, not the caller.
 
 `list_ready_work` remains available for inspection but is no longer the
 primary tool for queue-driven dispatch.
@@ -457,8 +375,6 @@ intermediate `ready` step.
   left alone. Callers pass the returned `prompt` directly to Agent(prompt=…).
   Pure composition lives in `composeDispatchBrief` (same file) so tests can
   exercise it without spinning up MCP.
-- `commit({ commit_point_id, message } | { auto: true, threadId, message })`,
-  `list_commit_points(threadId)`, `tasks_since_last_commit(threadId)`.
 - `get_subsystem_doc({ threadId, name })` — returns
   `{ name, path, content, exists }` for `.context/<name>.md` in the
   thread's stream worktree. Cheap alternative to `Read` when you only
@@ -481,14 +397,9 @@ intermediate `ready` step.
   `src/electron/followup-store.ts`; runtime publishes the bus event
   `followup.changed` so the UI re-fetches `getThreadWorkState`.
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
-  "fork_thread" above. Creates a new queued
-  thread on the same stream, seeds a note item, optionally moves ready/
-  blocked items across in one transaction.
-  The auto shape is used for ad-hoc commits when `thread.auto_commit=true`
-  and no commit_point row is queued — it just runs `git commit` on the
-  thread's worktree and publishes `auto-committed`. `tasks_since_last_commit`
-  is supplementary context for the auto-commit draft (not the primary
-  source — the diff is).
+  "fork_thread" above. Creates a new queued thread on the same stream,
+  seeds a note item, optionally moves ready / blocked items across in
+  one transaction.
 
 `buildLspMcpTools` (`src/mcp/lsp-mcp-tools.ts`) adds language-server
 queries (definition, references, hover) the agent can use without
@@ -868,28 +779,26 @@ Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 
 ### Stop-hook directives related to tasks
 
-The Stop-hook pipeline (see "Stop-hook pipeline" above) carries two
-task-shaped branches on the writer thread:
+The Stop-hook pipeline (see "Stop-hook pipeline" above) carries one
+task-shaped branch on the writer thread:
 
 - **Task audit (priority 4).** If any item is `in_progress`, the
   runtime emits `buildInProgressAuditStopReason` listing each
   in_progress item (id + title) and instructing the agent to
   reconcile: still active → leave alone; criteria met →
   `complete_task` (status `human_check`); stuck → `blocked`; paused
-  → `ready`; obsolete → `canceled`. Audit fires *before* the
-  ready-work branch — settle what's open before picking up new work.
-- **Ready work (priority 5).** When nothing is `in_progress` and
-  ready items exist, emit `buildNextWorkItemStopReason` pointing at
-  `mcp__oxplow__read_work_options`. The just-read suppression rule
-  prevents re-emitting the same ready set on consecutive Stops.
+  → `ready`; obsolete → `canceled`.
 
-If a turn spawns real follow-up work, the agent calls
-`mcp__oxplow__create_work_item` / `file_epic_with_children`.
+There is intentionally no ready-work branch — cross-turn queue
+progression is user-driven (a plain prompt, or `/work-next` shipped
+via the plugin). If a turn spawns real follow-up work, the agent
+calls `mcp__oxplow__create_work_item` /
+`file_epic_with_children`.
 
 ## Related
 
 - [data-model.md](./data-model.md) — the queue the agent operates on.
 - [ipc-and-stores.md](./ipc-and-stores.md) — how to add new MCP tools
   and the underlying storage.
-- [git-integration.md](./git-integration.md) — `gitCommitAll` and the
-  approved-commit-point execution loop.
+- [git-integration.md](./git-integration.md) — `gitCommitAll` for the
+  Files-panel commit dialog (user-driven).

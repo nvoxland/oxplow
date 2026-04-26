@@ -229,28 +229,17 @@ export async function dogfoodInnerAgent(
     tickMs?: number;
     quietTicks?: number;
     maxTicks?: number;
-    addCommitPoint?: boolean;
   },
 ): Promise<{ ticks: number; exitReason: "quiet" | "max" }> {
   const tickMs = opts.tickMs ?? 15_000;
   const quietTicks = opts.quietTicks ?? 3;
   const maxTicks = opts.maxTicks ?? 40;
-  const addCommitPoint = opts.addCommitPoint ?? true;
 
   // Activate Work page.
   await window.getByTestId("rail-page-all-work").click();
   const workPanel = window.getByTestId("page-all-work");
   await workPanel.waitFor({ state: "visible", timeout: 5_000 });
   probeLog(`[dogfood:${opts.slug}] Work page active`);
-
-  // Add commit point so propose_commit has a target. Without this,
-  // the agent will narrate "no active commit point existed" and
-  // leave the suggestion as a work-note only.
-  if (addCommitPoint) {
-    await window.getByTestId("plan-add-commit-point").click();
-    await window.waitForTimeout(400);
-    probeLog(`[dogfood:${opts.slug}] + Commit when done clicked`);
-  }
 
   // Create one work item for Plan-UI visibility (the allowed
   // single-item exception to "don't pre-queue").

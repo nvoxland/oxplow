@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
 import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
-import { ThreadQueueOrchestrator } from "./thread-queue-orchestrator.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { ThreadStore, type Thread, type ThreadState } from "../persistence/thread-store.js";
 import {
@@ -30,7 +29,6 @@ import {
   gitPull,
   gitPullAsync,
   gitCommitAll,
-  isWorktreeClean,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -63,7 +61,6 @@ import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
-import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
 import { UsageStore } from "../persistence/usage-store.js";
 import {
@@ -80,7 +77,6 @@ import {
 } from "../subprocess/code-quality.js";
 import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
-import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import { FollowupStore, type Followup } from "./followup-store.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
@@ -123,13 +119,10 @@ export class ElectronRuntime {
   readonly store: StreamStore;
   readonly threadStore: ThreadStore;
   private readonly workItemStore: WorkItemStore;
-  readonly commitPointStore: CommitPointStore;
   readonly wikiNoteStore: WikiNoteStore;
   readonly usageStore: UsageStore;
   readonly codeQualityStore: CodeQualityStore;
   private notesWatcher: NotesWatcher | null = null;
-  readonly waitPointStore: WaitPointStore;
-  readonly threadQueue: ThreadQueueOrchestrator;
   readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
   /** Transient in-memory follow-up store. Backs the agent-only
@@ -173,12 +166,6 @@ export class ElectronRuntime {
    *  loud banner superseding the frozen NON_WRITER block in the agent's
    *  initial system prompt. Keyed by Claude session id. */
   private readonly initialRoleBySessionId = new Map<string, "writer" | "read-only">();
-  /** Per-thread record of the most recent `read_work_options` call: the set
-   *  of ready-item ids the agent saw. Consumed by the next Stop-hook
-   *  decision (then cleared) so the ready-work directive doesn't echo the
-   *  list the agent already has. Populated through the
-   *  markReadWorkOptions callback wired into the MCP tool surface. */
-  private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
   /** Per-thread activity flag for the current turn. Seeded `false` on
    *  UserPromptSubmit, flipped to `true` on the first qualifying
    *  PostToolUse (write-intent / oxplow filing / dispatch — see
@@ -191,10 +178,10 @@ export class ElectronRuntime {
   private readonly turnActivityByThread = new Map<string, boolean>();
   /** Per-thread count of `Task` (subagent) tool calls that are
    *  PreToolUse-started but haven't yet seen a PostToolUse. Used by the
-   *  Stop-hook pipeline to suppress the in-progress audit and ready-work
-   *  directives while a subagent owns the in_progress item — re-firing
-   *  those nudges produces a visual loop where the parent acks each
-   *  Stop while still waiting on the subagent. See wi-593a50b62e22. */
+   *  Stop-hook pipeline to suppress the in-progress audit while a
+   *  subagent owns the in_progress item — re-firing the nudge produces
+   *  a visual loop where the parent acks each Stop while still waiting
+   *  on the subagent. See wi-593a50b62e22. */
   private readonly pendingSubagentsByThread = new Map<string, number>();
   /** Per-thread fingerprint of the in_progress set the runtime last
    *  emitted an audit directive for. The Stop pipeline compares the
@@ -218,17 +205,19 @@ export class ElectronRuntime {
    *  with no tool calls, this prevents the directive from re-emitting
    *  on the same prompt. */
   private readonly lastEmittedWikiCaptureByThread = new Set<string>();
-  /** Per-thread fingerprint of the last auto-commit nag we emitted. When
-   *  the next Stop produces the same fingerprint, the directive is
-   *  suppressed — the agent already saw it; repeating without diff
-   *  movement is noise. Cleared when a commit lands (auto-committed
-   *  thread event) or the user starts a fresh prompt. */
-  private readonly lastAutoCommitNagFingerprintByThread = new Map<string, string>();
-  /** Per-thread record of the last ready-work nag (item id + consecutive
-   *  count). After the cap is hit the pipeline stops emitting until the
-   *  ready-set changes. Cleared on UserPromptSubmit so each fresh prompt
-   *  re-arms the nag. */
-  private readonly recentReadyWorkNagByThread = new Map<string, { itemId: string; count: number }>();
+  /** Per-thread "agent is awaiting the user" flag. Set by the
+   *  `await_user` MCP tool; consumed by Stop hook (allows-stop +
+   *  suppresses every directive); cleared on UserPromptSubmit. The
+   *  question text is stored alongside for telemetry / future UI
+   *  surfacing — the Stop hook only reads the boolean. */
+  private readonly awaitingUserByThread = new Map<string, { question: string; setAt: number }>();
+  /** Per-thread "filed/transitioned a work item this turn" flag. Set
+   *  when the agent calls any work-item-mutating MCP tool
+   *  (create_work_item, update_work_item, complete_task,
+   *  file_epic_with_children, transition_work_items, dispatch_work_item).
+   *  Consumed by Stop hook's filing-enforcement branch. Cleared on
+   *  UserPromptSubmit alongside the other per-turn flags. */
+  private readonly filedThisTurnByThread = new Set<string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -258,7 +247,6 @@ export class ElectronRuntime {
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
     this.threadStore = new ThreadStore(projectDir, logger.child({ subsystem: "thread-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
-    this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
     this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
     this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
@@ -295,15 +283,6 @@ export class ElectronRuntime {
       logger.child({ subsystem: "notes-watch" }),
     );
     this.notesWatcher.start();
-    this.waitPointStore = new WaitPointStore(projectDir, logger.child({ subsystem: "wait-points" }));
-    this.threadQueue = new ThreadQueueOrchestrator(
-      this.store,
-      this.threadStore,
-      this.workItemStore,
-      this.commitPointStore,
-      this.waitPointStore,
-      logger.child({ subsystem: "thread-queue" }),
-    );
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
@@ -493,26 +472,6 @@ export class ElectronRuntime {
     this.store.subscribe((change) => {
       this.events.publish({ type: "stream.changed", kind: change.kind, streamId: change.streamId });
     });
-    this.waitPointStore.subscribe((change) => {
-      const thread = this.threadStore.findById(change.threadId);
-      this.events.publish({
-        type: "wait-point.changed",
-        streamId: thread?.stream_id ?? null,
-        threadId: change.threadId,
-        id: change.id,
-        kind: change.kind,
-      });
-    });
-    this.commitPointStore.subscribe((change) => {
-      const thread = this.threadStore.findById(change.threadId);
-      this.events.publish({
-        type: "commit-point.changed",
-        streamId: thread?.stream_id ?? null,
-        threadId: change.threadId,
-        id: change.id,
-        kind: change.kind,
-      });
-    });
     this.followupStore.subscribe((change) => {
       this.events.publish({
         type: "followup.changed",
@@ -607,12 +566,9 @@ export class ElectronRuntime {
           threadStore: this.threadStore,
           streamStore: this.store,
           workItemStore: this.workItemStore,
-          commitPointStore: this.commitPointStore,
-          executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
-          executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-          waitPointStore: this.waitPointStore,
           effortStore: this.effortStore,
-          markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+          markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
+          markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
           forkThread: (input) => this.forkThread(input),
           followupStore: this.followupStore,
         }),
@@ -718,12 +674,9 @@ export class ElectronRuntime {
             threadStore: this.threadStore,
             streamStore: this.store,
             workItemStore: this.workItemStore,
-            commitPointStore: this.commitPointStore,
-            executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
-            executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-            waitPointStore: this.waitPointStore,
             effortStore: this.effortStore,
-            markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+            markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
+            markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
             forkThread: (input) => this.forkThread(input),
           }),
           ...buildLspMcpTools({
@@ -1264,11 +1217,6 @@ export class ElectronRuntime {
     return this.threadStore.rename(streamId, threadId, title);
   }
 
-  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Thread[] {
-    this.resolveThread(streamId, threadId);
-    return this.threadStore.setAutoCommit(threadId, enabled);
-  }
-
   setStreamPrompt(streamId: string, prompt: string | null): Stream[] {
     return this.store.setStreamPrompt(streamId, prompt);
   }
@@ -1605,15 +1553,24 @@ export class ElectronRuntime {
   }
 
   /**
-   * Called by the `oxplow__read_work_options` MCP handler so the runtime
-   * can suppress the ready-work Stop directive on the very next Stop
-   * when the set the agent just saw is unchanged. The record is
-   * consumed (deleted) by the first Stop hook that reads it — a second
-   * Stop on the same thread without a fresh read_work_options call
-   * fires normally.
+   * Called by the `oxplow__await_user` MCP handler. Records that the
+   * agent is explicitly waiting on the user. The next Stop hook reads
+   * this and suppresses every directive so the agent doesn't march onto
+   * the next queue item past the open question. Cleared on
+   * UserPromptSubmit when the user's reply lands.
    */
-  markReadWorkOptions(threadId: string, readyIds: string[]): void {
-    this.lastReadWorkOptionsByThread.set(threadId, [...readyIds]);
+  markAwaitingUser(threadId: string, question: string): void {
+    this.awaitingUserByThread.set(threadId, { question, setAt: Date.now() });
+  }
+
+  /**
+   * Called by every work-item-mutating MCP handler (create / update /
+   * complete / file_epic / transition / dispatch). Marks the per-turn
+   * "agent filed something" flag the Stop-hook filing-enforcement branch
+   * reads. Cleared on UserPromptSubmit.
+   */
+  markFiledThisTurn(threadId: string): void {
+    this.filedThisTurnByThread.add(threadId);
   }
 
   /**
@@ -1770,11 +1727,11 @@ export class ElectronRuntime {
         // suppression flag so a fresh prompt is allowed to re-trigger.
         this.turnReadWriteByThread.set(envelope.threadId, { reads: 0, writes: 0 });
         this.lastEmittedWikiCaptureByThread.delete(envelope.threadId);
-        // Stop-hook nag debounces are scoped to the conversation gap
-        // between user prompts. A fresh prompt re-arms them so the agent
-        // sees the relevant directive again (commit pending, ready work,
-        // audit) on the new turn — but within one gap we suppress repeats.
-        this.recentReadyWorkNagByThread.delete(envelope.threadId);
+        // The user replied → clear the "agent is awaiting user" gate so
+        // the next Stop runs the directive pipeline normally. Also reset
+        // the per-turn filing flag so each turn enforces filing afresh.
+        this.awaitingUserByThread.delete(envelope.threadId);
+        this.filedThisTurnByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
@@ -1845,41 +1802,13 @@ export class ElectronRuntime {
   /**
    * Stop-hook pipeline entry point. Snapshots the relevant stores, hands
    * the snapshot to the pure `decideStopDirective`, applies any returned
-   * side effects (e.g. flipping a wait point to `triggered`), and
-   * returns the hook body for Claude. The decision logic itself lives
-   * in `src/electron/stop-hook-pipeline.ts` so each branch is unit-
-   * testable without spinning up a runtime.
+   * side effects (e.g. recording the audit signature), and returns the
+   * hook body for Claude. The decision logic itself lives in
+   * `src/electron/stop-hook-pipeline.ts` so each branch is unit-testable
+   * without spinning up a runtime.
    */
   private computeStopDirective(threadId: string): Record<string, unknown> | null {
     const thread = this.threadStore.findById(threadId);
-    // Auto-commit (both ad-hoc via thread.auto_commit and manually-placed
-    // mode=auto commit points) is now routed through the agent via a
-    // Stop-hook directive — see buildAutoCommitStopReason. The runtime no
-    // longer generates a message mechanically; the agent inspects the diff
-    // and calls `mcp__oxplow__commit`. That unifies the approve-mode and
-    // auto-mode flows: the only remaining distinction is "ask the user
-    // first, yes/no." See .context/agent-model.md for the flow.
-    // Consume the just-read record (once per call). If the agent called
-    // read_work_options during the turn we're closing and the set matches
-    // what's currently ready, the pipeline suppresses the ready-work
-    // directive — the agent already has the list.
-    const justReadReadySet = this.lastReadWorkOptionsByThread.get(threadId);
-    this.lastReadWorkOptionsByThread.delete(threadId);
-    // Cheap clean-tree probe: suppresses the auto-commit directive when an
-    // ad-hoc `git commit` (Bash / Files panel) already landed the work, so
-    // the Stop hook doesn't refire a no-op commit directive. See
-    // wi-ec4c8e6f44fd. Read from the thread's worktree; null / unknown
-    // paths fall back to "assume dirty" so we don't accidentally mute a
-    // legit commit directive.
-    let worktreeClean = false;
-    const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
-    if (stream) {
-      try { worktreeClean = isWorktreeClean(stream.worktree_path); } catch (err) {
-        this.logger.debug("isWorktreeClean probe failed", {
-          threadId, error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
     // Consume the activity flag for this turn (once per Stop). Absent =
     // unknown — pipeline treats undefined as "don't suppress" so older
     // tests / edge cases stay stable.
@@ -1893,37 +1822,29 @@ export class ElectronRuntime {
     this.turnReadWriteByThread.delete(threadId);
     const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
     const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
+    const turnHadWrites = !!counters && counters.writes > 0;
+    // Consume the per-turn filing flag (once per Stop) so each turn
+    // enforces filing afresh. Don't `delete` here — the flag is also
+    // cleared on UserPromptSubmit; deleting on Stop would silently let
+    // the next Stop in the same prompt-gap pass without a filing check.
+    const turnHadFiling = this.filedThisTurnByThread.has(threadId);
+    const awaitingUser = this.awaitingUserByThread.has(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
-      commitPoints: this.commitPointStore.listForThread(threadId),
-      waitPoints: this.waitPointStore.listForThread(threadId),
       workItems: this.workItemStore.listItems(threadId),
-      readyWorkItems: this.workItemStore.listReady(threadId),
-      autoCommit: thread?.auto_commit ?? false,
-      justReadReadySet,
-      worktreeClean,
       turnHadActivity,
       turnWasExploration,
       justEmittedWikiCapture,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
-      lastAutoCommitNagFingerprint: this.lastAutoCommitNagFingerprintByThread.get(threadId),
-      recentReadyWorkNag: this.recentReadyWorkNagByThread.get(threadId),
       lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
+      turnHadWrites,
+      turnHadFiling,
+      awaitingUser,
     };
-    // The item's own thread_id is what matters for the directive text (not
-    // `threadId` — they agree today but could diverge if listReady ever
-    // returns cross-thread candidates). stream_id comes off the thread row.
-    const streamId = thread?.stream_id ?? "";
     const outcome = decideStopDirective(snapshot, {
-      buildCommitPointReason: buildCommitPointStopReason,
-      buildAutoCommitReason: buildAutoCommitStopReason,
-      // item.thread_id is typed nullable (WorkItem covers backlog items too),
-      // but decideStopDirective only emits this reason for in-thread rows, so
-      // a fall-back to `threadId` keeps the directive stable.
-      buildNextWorkItemReason: (item) =>
-        buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId),
       buildInProgressAuditReason: buildInProgressAuditStopReason,
       buildWikiCaptureReason: buildWikiCaptureStopReason,
+      buildFilingEnforcementReason: buildFilingEnforcementStopReason,
     });
     // If the wiki-capture directive fired, latch the suppression flag so
     // we don't re-emit on the same prompt (cleared on UserPromptSubmit).
@@ -1935,21 +1856,8 @@ export class ElectronRuntime {
       this.lastEmittedWikiCaptureByThread.add(threadId);
     }
     for (const effect of outcome.sideEffects) {
-      if (effect.kind === "trigger-wait-point") {
-        try { this.waitPointStore.trigger(effect.id); } catch (err) {
-          this.logger.warn("trigger-wait-point side effect failed", {
-            id: effect.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      } else if (effect.kind === "record-audit-signature") {
+      if (effect.kind === "record-audit-signature") {
         this.lastAuditSignatureByThread.set(threadId, effect.signature);
-      } else if (effect.kind === "record-auto-commit-nag") {
-        this.lastAutoCommitNagFingerprintByThread.set(threadId, effect.fingerprint);
-      } else if (effect.kind === "record-ready-work-nag") {
-        const prev = this.recentReadyWorkNagByThread.get(threadId);
-        const count = prev && prev.itemId === effect.itemId ? prev.count + 1 : 1;
-        this.recentReadyWorkNagByThread.set(threadId, { itemId: effect.itemId, count });
       }
     }
     return outcome.directive ? { ...outcome.directive } : null;
@@ -2359,95 +2267,19 @@ export class ElectronRuntime {
     return this.workItemStore.getSummariesByIds(ids);
   }
 
-  // -------- commit points (IPC-exposed delegations) --------
-
-  listCommitPoints(threadId: string): CommitPoint[] {
-    return this.threadQueue.listCommitPoints(threadId);
-  }
-
-  createCommitPoint(streamId: string, threadId: string): CommitPoint {
-    this.resolveThread(streamId, threadId);
-    return this.threadQueue.createCommitPoint(threadId);
-  }
-
-  deleteCommitPoint(id: string): void {
-    this.threadQueue.deleteCommitPoint(id);
-  }
-
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): CommitPoint[] {
-    return this.threadQueue.updateCommitPoint(id, changes);
-  }
-
-  /** IPC-exposed: run the git commit for a commit point immediately. */
-  commitCommitPoint(id: string, message: string): CommitPoint {
-    return this.threadQueue.executeCommit(id, message);
-  }
-
   /**
-   * Execute an agent-drafted auto-commit for a thread (no commit_point
-   * row). Called from the `mcp__oxplow__commit` tool when the agent
-   * passes `{ auto: true, message }`. Runs `git commit` synchronously,
-   * publishes the `auto-committed` thread lifecycle event, and throws
-   * on failure so the agent sees the stderr and can retry. Falls back
-   * to `buildAutoCommitMessage` when `message` is empty/missing.
+   * Reorder the thread's work-item queue. Sort_indexes are rewritten to
+   * match the desired top-to-bottom order. Marker rows (commit/wait
+   * points) used to share this sort_index space; they no longer exist
+   * so the entry kind is implicit.
    */
-  executeAutoCommitForThread(threadId: string, message: string | undefined): { sha: string; message: string } {
-    const thread = this.threadStore.findById(threadId);
-    if (!thread) throw new Error(`unknown thread: ${threadId}`);
-    if (thread.status !== "active") throw new Error(`thread ${threadId} is not the writer; only active threads can commit`);
-    const stream = this.store.get(thread.stream_id);
-    if (!stream) throw new Error(`thread ${threadId} has no stream`);
-    const finalMessage = (message && message.trim().length > 0)
-      ? message
-      : (() => {
-          const workItems = this.workItemStore.listItems(threadId);
-          const latestDone = this.commitPointStore.getLatestDoneForThread(threadId);
-          return buildAutoCommitMessage(workItems, latestDone?.completed_at ?? null);
-        })();
-    const result = gitCommitAll(stream.worktree_path, finalMessage, { includeUntracked: true });
-    if (!result.ok || !result.sha) {
-      throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
-    }
-    this.logger.info("auto-commit: committed", { threadId, sha: result.sha, message: finalMessage });
-    // Commit landed → drop the per-thread auto-commit nag fingerprint so
-    // the next pending commit point is allowed to nag once before being
-    // re-debounced.
-    this.lastAutoCommitNagFingerprintByThread.delete(threadId);
-    this.events.publish({
-      type: "thread.changed",
-      streamId: thread.stream_id,
-      threadId: thread.id,
-      kind: "auto-committed",
-    });
-    return { sha: result.sha, message: finalMessage };
-  }
-
   reorderThreadQueue(
     streamId: string,
     threadId: string,
-    entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+    entries: Array<{ id: string }>,
   ): void {
     this.resolveThread(streamId, threadId);
-    this.threadQueue.reorderThreadQueue(threadId, entries);
-  }
-
-  // -------- wait points (IPC-exposed delegations) --------
-
-  listWaitPoints(threadId: string): WaitPoint[] {
-    return this.threadQueue.listWaitPoints(threadId);
-  }
-
-  createWaitPoint(streamId: string, threadId: string, note?: string | null): WaitPoint {
-    this.resolveThread(streamId, threadId);
-    return this.threadQueue.createWaitPoint(threadId, note ?? null);
-  }
-
-  setWaitPointNote(id: string, note: string | null): WaitPoint {
-    return this.threadQueue.setWaitPointNote(id, note);
-  }
-
-  deleteWaitPoint(id: string): void {
-    this.threadQueue.deleteWaitPoint(id);
+    this.workItemStore.setItemSortIndexes(threadId, entries.map((entry, index) => ({ id: entry.id, sortIndex: index })));
   }
 }
 
@@ -2518,13 +2350,6 @@ export function terminalInputIsInterrupt(message: string): boolean {
   return decoded === "\x1b" || decoded === "\x03";
 }
 
-export function buildNextWorkItemStopReason(
-  item: { id: string; title: string; kind: string; thread_id: string },
-  _streamId: string,
-): string {
-  return `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__oxplow__read_work_options\` and dispatch to a \`general-purpose\` subagent per the oxplow-runtime skill.`;
-}
-
 /**
  * Audit nudge for the Stop-hook in-progress branch. Lists every
  * `in_progress` work item on the thread and asks the agent to reconcile
@@ -2550,75 +2375,6 @@ export function buildInProgressAuditStopReason(items: WorkItem[]): string {
 }
 
 /**
- * Fallback auto-commit message builder used only when the agent-drafted
- * path fails (no message provided to `mcp__oxplow__commit`). The primary
- * path is agent-drafted via the Stop-hook directive — this keeps the
- * runtime able to land *something* rather than stall.
- *
- * `previousCommitCompletedAt` bounds the set of work items to those
- * whose `updated_at` is strictly after that moment — i.e., items that
- * settled since the previous commit landed. Passing `null` disables the
- * filter (first-commit case). Without this bound the message
- * monotonically re-counted every settled item in the thread, so each
- * auto-commit produced "complete N work items" with N climbing forever
- * and a body of whichever titles sorted first, regardless of what
- * actually changed.
- */
-export function buildAutoCommitMessage(
-  workItems: WorkItem[],
-  previousCommitCompletedAt: string | null = null,
-): string {
-  const settled = workItems.filter((item) => {
-    if (
-      item.status !== "human_check" &&
-      item.status !== "done" &&
-      item.status !== "canceled"
-    ) {
-      return false;
-    }
-    if (!previousCommitCompletedAt) return true;
-    return item.updated_at > previousCommitCompletedAt;
-  });
-  if (settled.length === 0) {
-    return "chore: auto-commit at queue commit point";
-  }
-  if (settled.length === 1) {
-    return `chore: ${settled[0]!.title}`;
-  }
-  const items = settled
-    .slice(0, 5)
-    .map((item) => `- ${item.title}`)
-    .join("\n");
-  const suffix = settled.length > 5 ? `\n…and ${settled.length - 5} more` : "";
-  return `chore: complete ${settled.length} work items\n\n${items}${suffix}`;
-}
-
-/**
- * Directive text for auto-commit — identical to the approve-mode variant
- * minus the "ask the user to approve" gate. The agent inspects the diff,
- * drafts a message, and commits in one turn. Used both when
- * `thread.auto_commit=true` triggers an ad-hoc commit (no DB row) and
- * when a manually-placed commit_point row has `mode="auto"`.
- *
- * Passing `commit_point_id: null` selects the no-row shape; the agent
- * calls `mcp__oxplow__commit` with `{ auto: true, message }`. With a
- * commit point id, the agent passes it so the row flips to done.
- */
-export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
-  const commitArgs = cp
-    ? `{ commit_point_id: "${cp.id}", message: "<final message>" }`
-    : `{ auto: true, message: "<final message>" }`;
-  const lines = [
-    `Auto-commit is due in this thread${cp ? ` (commit_point_id=${cp.id}, mode=auto)` : ""}. Inspect the unstaged/staged changes with read-only git commands (\`git status\`, \`git diff\`, \`git diff --staged\`), draft a concise commit message from what you see, then call \`mcp__oxplow__commit\` with ${commitArgs}.`,
-    ``,
-    `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__oxplow__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
-    ``,
-    `Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
-  ];
-  return lines.join("\n");
-}
-
-/**
  * Stop-hook directive text for the wiki-capture branch. Fires on
  * read-heavy / no-write turns (`turnHadActivity === false`,
  * `turnWasExploration === true`). The agent is expected to follow the
@@ -2629,6 +2385,26 @@ export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
  * directive fires and clears on the next user prompt, so a "skipped"
  * reply doesn't loop.
  */
+/**
+ * Filing-enforcement Stop reason. Fires when the turn made writes on
+ * project files but no work-item-mutating tool was called AND no
+ * in_progress item exists to claim the work. The agent must either
+ * file/transition an item describing what was just edited, or revert
+ * the edits, before stopping.
+ */
+export function buildFilingEnforcementStopReason(): string {
+  return [
+    `BLOCKED: this turn edited project files but no work item was filed or transitioned, and no in_progress item exists to claim the work. Every write requires a tracked work item — there is no trivial-edit carve-out.`,
+    ``,
+    `Pick one of these before stopping:`,
+    `  • If the edits are a fix/redo of a recently-closed human_check item, reopen it: \`mcp__oxplow__update_work_item\` → status=in_progress, then \`mcp__oxplow__complete_task\` back to human_check when settled.`,
+    `  • If the edits are a genuinely new concern, file a new task: \`mcp__oxplow__create_work_item\` with status=in_progress, then \`mcp__oxplow__complete_task\` to close it.`,
+    `  • If the edits should not have happened, revert them (e.g. via the Files panel or \`git checkout -- <path>\`), then stop normally.`,
+    ``,
+    `Do not file a placeholder "untracked work" item just to dismiss this — describe the real edits that landed. The Work panel needs to honestly reflect what shipped this turn.`,
+  ].join("\n");
+}
+
 export function buildWikiCaptureStopReason(): string {
   return [
     `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
@@ -2641,19 +2417,6 @@ export function buildWikiCaptureStopReason(): string {
     ``,
     `If the exploration was genuinely too trivial to capture (a single-file lookup with no synthesis), reply with the single line \`oxplow-note: skipped\` and stop — that's the escape hatch.`,
   ].join("\n");
-}
-
-export function buildCommitPointStopReason(cp: CommitPoint): string {
-  const lines = [
-    `A commit point is due in this thread's work queue (commit_point_id=${cp.id}).`,
-    ``,
-    `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style.`,
-    ``,
-    `Output the drafted message in your chat reply and ask the user to approve or suggest changes. Do NOT run \`git add\` or \`git commit\` yourself.`,
-    ``,
-    `When the user approves, call \`mcp__oxplow__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the git commit. If the user suggests changes, redraft the message in your next reply and ask again; only call \`mcp__oxplow__commit\` once the user has explicitly approved.`,
-  ];
-  return lines.join("\n");
 }
 
 class RuntimeSocket extends EventEmitter {
@@ -2693,7 +2456,8 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `When you realize you're about to change project files and aren't already on a work item, file one with status \`in_progress\` and track your work against it. Pick the shape by structure, not by whether you planned it: \`mcp__oxplow__create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`mcp__oxplow__file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently (distinct phases, handoffs, or subsystems). Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task — plenty of plans describe single tasks. No "auto" placeholder items — commit to a real, durable row. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish; pass \`touchedFiles\` with paths you edited so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
+    `WORK-ITEM FILING IS A HARD PRECONDITION FOR EVERY WRITE. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
+    `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

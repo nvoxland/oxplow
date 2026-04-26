@@ -36,7 +36,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `src/ui/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
 | `src/ui/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
-| `src/ui/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt + auto-commit toggle that flips `thread.auto_commit` via `setAutoCommit`). Replaces the in-rail ThreadRail settings modal. PlanPane's "Switch to auto/manual commits" kebab item still works in parallel. Routed via `threadSettingsRef(threadId)`. |
+| `src/ui/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
 | `src/ui/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
 
 ## Page kinds

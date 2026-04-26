@@ -20,6 +20,7 @@ import {
 import { formatContextMention } from "../agent-context-ref.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
+import { getActiveXtermTheme, subscribeXtermTheme } from "../xterm-theme.js";
 
 /**
  * Read the system clipboard as text. Prefers Electron's main-process
@@ -194,7 +195,7 @@ export function TerminalPane({
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
-      theme: { background: "#0e0e0e", foreground: "#e6e6e6" },
+      theme: getActiveXtermTheme(),
       scrollback: 5000,
       cursorBlink: true,
       scrollSensitivity: 2,
@@ -205,6 +206,11 @@ export function TerminalPane({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Re-tint the terminal whenever the user flips the app theme. xterm
+    // applies `options.theme = next` on the live terminal — no re-mount.
+    const unsubTheme = subscribeXtermTheme((next) => {
+      try { term.options.theme = next; } catch { /* terminal may have disposed */ }
+    });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {
         return true;
@@ -453,6 +459,7 @@ export function TerminalPane({
       disposed = true;
       cleanupRef.current?.();
       ro?.disconnect();
+      unsubTheme();
       dataDisp.dispose();
       binaryDisp.dispose();
       const sessionId = sessionIdRef.current;

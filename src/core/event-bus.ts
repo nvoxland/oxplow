@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed" | "auto-committed" | "prompt-changed";
+export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "prompt-changed";
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 export type PaneKind = "working" | "talking";
 
@@ -59,14 +59,6 @@ export interface WorkspaceContextChangedEvent {
   gitEnabled: boolean;
 }
 
-export interface CommitPointChangedEvent {
-  type: "commit-point.changed";
-  streamId: string | null;
-  threadId: string;
-  id: string | null;
-  kind: "created" | "updated" | "deleted" | "reordered";
-}
-
 export interface GitRefsChangedEvent {
   type: "git-refs.changed";
   streamId: string;
@@ -81,14 +73,6 @@ export interface StreamChangedEvent {
 
 export interface ConfigChangedEvent {
   type: "config.changed";
-}
-
-export interface WaitPointChangedEvent {
-  type: "wait-point.changed";
-  streamId: string | null;
-  threadId: string;
-  id: string | null;
-  kind: "created" | "updated" | "deleted";
 }
 
 export interface WikiNoteChangedEvent {
@@ -145,8 +129,6 @@ export type OxplowEvent =
   | AgentStatusChangedEvent
   | FileSnapshotCreatedEvent
   | WorkspaceContextChangedEvent
-  | CommitPointChangedEvent
-  | WaitPointChangedEvent
   | GitRefsChangedEvent
   | StreamChangedEvent
   | ConfigChangedEvent

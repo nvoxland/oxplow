@@ -178,8 +178,8 @@ Things I keep forgetting. Read this before adding any UI.
   - `command-palette-input`
   - `plan-pane` (the keydown-listening wrapper — focus this before
     dispatching keyboard probes, otherwise the listener misses them)
-  - `plan-add-points-bar`, `plan-add-commit-point`,
-    `plan-add-wait-point`
+  - `plan-add-points-bar` (now a single ⋯ menu — only "New task" lives
+    in it; commit/wait point markers were removed)
   - `files-commit`, `files-commit-message`, `files-commit-submit`
   - `thread-rail-new`, `thread-chip-<threadId>` (chip testid is on
     the outer wrapper that owns the drop handlers, so drag probes

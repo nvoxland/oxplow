@@ -1,9 +1,9 @@
 import type { Logger } from "../core/logger.js";
 
 /**
- * Shared subscribe/emit machinery for the persistence stores. Pulls the
- * six near-identical pub/sub blocks (thread, commit-point, file-change,
- * turn, wait-point, work-item) into one place so:
+ * Shared subscribe/emit machinery for the persistence stores. Pulls
+ * the near-identical pub/sub blocks (thread, file-change, turn,
+ * work-item) into one place so:
  *
  *   - bug fixes (snapshot iteration, throwing-listener handling) land in
  *     one spot rather than six;

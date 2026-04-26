@@ -14,7 +14,6 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     sort_index: 0,
     pane_target: "oxplow:0",
     resume_session_id: "",
-    auto_commit: false,
     custom_prompt: null,
     created_at: "2026-04-19T00:00:00Z",
     updated_at: "2026-04-19T00:00:00Z",

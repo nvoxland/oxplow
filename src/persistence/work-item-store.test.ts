@@ -252,11 +252,11 @@ describe("WorkItemStore.readWorkOptions", () => {
     expect(ids).toContain(subtask.id);
   });
 
-  test("beforeSortIndex cuts off items at or beyond a commit/wait boundary", () => {
+  test("beforeSortIndex cuts off items at or beyond a sort_index boundary", () => {
     const { workItems, threadId } = seedThread();
     const t1 = workItems.createItem({ threadId, kind: "task", title: "Before", createdBy: "user", actorId: "ui" });
     const t2 = workItems.createItem({ threadId, kind: "task", title: "After", createdBy: "user", actorId: "ui" });
-    // t1 has sort_index 0, t2 has sort_index 1; commit point sits at index 1
+    // t1 has sort_index 0, t2 has sort_index 1; cutoff sits at index 1
     const cutoff = t2.sort_index;
     const result = workItems.readWorkOptions(threadId, cutoff);
     expect(result.mode).toBe("standalone");

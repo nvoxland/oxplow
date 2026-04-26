@@ -169,6 +169,7 @@ function ActiveItemSection({
   onOpenPage(ref: TabRef): void;
 }) {
   if (!item) {
+    const working = agentStatus === "working";
     return (
       <>
         <SectionHeading>Active item</SectionHeading>
@@ -178,9 +179,13 @@ function ActiveItemSection({
             padding: "4px 14px 12px",
             fontSize: 12,
             color: "var(--text-muted)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
-          No item in progress.
+          <AgentStatusDot status={agentStatus} />
+          <span>{working ? "Agent working" : "No item in progress."}</span>
         </div>
       </>
     );

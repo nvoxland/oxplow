@@ -5,7 +5,6 @@ import { AgentStatusDot } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
-import { ThemeToggle } from "./ThemeToggle.js";
 import { Slideover } from "./Slideover.js";
 
 interface Props {
@@ -17,7 +16,6 @@ interface Props {
   onSwitch(id: string): void;
   onRenameStream?(streamId: string, newTitle: string): Promise<void> | void;
   onRequestCreateThread?(): void;
-  onOpenSettings?(): void;
   /** Open the per-stream settings page. The kebab "Settings" item
    *  routes here. */
   onOpenStreamSettings?(streamId: string): void;
@@ -33,7 +31,7 @@ interface Props {
 
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   // Inline rename state — set to a stream id to swap the tab title for an
@@ -263,20 +261,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           >
             + New stream
           </button>
-          <ThemeToggle variant="compact" />
-          {onOpenSettings ? (
-            <button type="button"
-              onClick={onOpenSettings}
-              title="Settings"
-              aria-label="Settings"
-              style={iconButtonStyle}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-          ) : null}
         </span>
       </div>
       <Slideover
@@ -334,19 +318,6 @@ const buttonStyle: CSSProperties = {
   borderRadius: 4,
   cursor: "pointer",
   fontFamily: "inherit",
-};
-
-const iconButtonStyle: CSSProperties = {
-  background: "var(--bg)",
-  color: "var(--fg)",
-  border: "1px solid var(--border)",
-  borderRadius: 4,
-  padding: "4px 6px",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
 };
 
 const tabStyle: CSSProperties = {

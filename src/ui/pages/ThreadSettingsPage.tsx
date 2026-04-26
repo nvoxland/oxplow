@@ -1,22 +1,8 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
-import { setAutoCommit, setThreadPrompt, type Thread } from "../api.js";
+import { setThreadPrompt, type Thread } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import { normalizePromptForSave } from "./StreamSettingsPage.js";
-
-/**
- * Pure-function helper exported for unit tests: invokes the supplied
- * saver with the new `enabled` value. Lets the smoke test confirm the
- * toggle fires `setAutoCommit` without standing up React.
- */
-export async function handleAutoCommitToggle(
-  streamId: string,
-  threadId: string,
-  enabled: boolean,
-  saver: (streamId: string, threadId: string, enabled: boolean) => Promise<Thread[]>,
-): Promise<Thread[]> {
-  return saver(streamId, threadId, enabled);
-}
 
 export interface ThreadSettingsPageProps {
   streamId: string;
@@ -26,25 +12,21 @@ export interface ThreadSettingsPageProps {
 }
 
 /**
- * Per-thread settings page (replaces the modal that lived inside
- * `ThreadRail`'s "Thread settings" overlay). Today this is just the
- * custom prompt textarea. Additional per-thread fields can land in this
- * page rather than re-introducing a modal.
+ * Per-thread settings page. Today this is just the custom prompt
+ * textarea. Additional per-thread fields can land in this page rather
+ * than re-introducing a modal.
  */
 export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: ThreadSettingsPageProps) {
   const [prompt, setPrompt] = useState("");
-  const [autoCommit, setAutoCommitState] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [togglingAutoCommit, setTogglingAutoCommit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setPrompt(thread?.custom_prompt ?? "");
-    setAutoCommitState(thread?.auto_commit ?? false);
     setError(null);
     setSavedMessage(null);
-  }, [thread?.id, thread?.custom_prompt, thread?.auto_commit]);
+  }, [thread?.id, thread?.custom_prompt]);
 
   async function handleSave() {
     if (!thread) return;
@@ -59,26 +41,6 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
       setError(String(e instanceof Error ? e.message : e));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleAutoCommitChange(nextEnabled: boolean) {
-    if (!thread) return;
-    setTogglingAutoCommit(true);
-    setError(null);
-    setSavedMessage(null);
-    // Optimistic update so the checkbox is responsive even if the
-    // round-trip is slow; we revert on failure.
-    const previous = autoCommit;
-    setAutoCommitState(nextEnabled);
-    try {
-      const next = await handleAutoCommitToggle(streamId, thread.id, nextEnabled, setAutoCommit);
-      onSaved?.(next);
-    } catch (e) {
-      setAutoCommitState(previous);
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setTogglingAutoCommit(false);
     }
   }
 
@@ -102,24 +64,6 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           </div>
         ) : (
           <>
-            <Section title="Auto-commit">
-              <Hint>
-                When enabled, the agent commits any settled work at every Stop without
-                waiting for a commit point. Mirrors the PlanPane "Switch to auto/manual
-                commits" toggle.
-              </Hint>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  data-testid="thread-settings-auto-commit"
-                  checked={autoCommit}
-                  disabled={togglingAutoCommit}
-                  onChange={(e) => void handleAutoCommitChange(e.target.checked)}
-                />
-                <span>Auto-commit settled work on Stop</span>
-              </label>
-            </Section>
-
             <Section title="Custom prompt">
               <Hint>
                 Appended to the agent's system prompt for this thread (on top of any

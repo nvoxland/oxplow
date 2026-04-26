@@ -5,28 +5,19 @@ import type {
   BacklogState,
   Thread,
   ThreadWorkState,
-  CommitPoint,
-  WaitPoint,
   WorkItem,
   WorkItemPriority,
   WorkItemStatus,
 } from "../../api.js";
 import {
-  createCommitPoint,
-  createWaitPoint,
-  listCommitPoints,
-  listWaitPoints,
   removeFollowup,
   reorderThreadQueue,
-  setAutoCommit,
-  subscribeOxplowEvents,
-  updateCommitPoint,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
-import { reportUiError, runWithError } from "../../ui-error.js";
+import { runWithError } from "../../ui-error.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { SelectionActionBar } from "./SelectionActionBar.js";
@@ -37,7 +28,6 @@ import {
   buildGroups,
   classifyWorkItem,
   filterAutoAuthored,
-  miniButtonStyle,
   statusLabel,
   useCollapsedSections,
   type WorkItemSectionKind,
@@ -127,8 +117,6 @@ export function PlanPane({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mode, setMode] = useState<"thread" | "backlog">("thread");
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
-  const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
-  const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
@@ -138,30 +126,10 @@ export function PlanPane({
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
-  // Commit point edit modal: opened by double-clicking a commit point row.
-  const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
   const streamId = thread?.stream_id ?? null;
-
-  useEffect(() => {
-    if (!threadId) { setCommitPoints([]); setWaitPoints([]); return; }
-    let cancelled = false;
-    const refreshCommits = () => void listCommitPoints(threadId)
-      .then((points) => { if (!cancelled) setCommitPoints(points); })
-      .catch((err) => reportUiError("Load commit points", err));
-    const refreshWaits = () => void listWaitPoints(threadId)
-      .then((points) => { if (!cancelled) setWaitPoints(points); })
-      .catch((err) => reportUiError("Load wait points", err));
-    refreshCommits();
-    refreshWaits();
-    const off = subscribeOxplowEvents((event) => {
-      if (event.type === "commit-point.changed" && event.threadId === threadId) refreshCommits();
-      if (event.type === "wait-point.changed" && event.threadId === threadId) refreshWaits();
-    });
-    return () => { cancelled = true; off(); };
-  }, [threadId]);
 
   const groups = useMemo(() => {
     const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
@@ -171,8 +139,7 @@ export function PlanPane({
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
   // sync with the section split in WorkGroupList (In progress → To do →
-  // Blocked → Human check → Done). Commit/wait-point rows are deliberately excluded:
-  // they're not "selectable work" in the keyboard sense.
+  // Blocked → Human check → Done).
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
     for (const group of groups) {
@@ -508,12 +475,6 @@ export function PlanPane({
           groups.map((group) => {
             const isRootThread = mode === "thread";
             const isActive = isRootThread && thread?.id === activeThreadId;
-            const autoCommitOn = thread?.auto_commit ?? false;
-            // To Do section header actions: collapsed into a single
-            // ⋯ menu button so the header stays narrow and can absorb
-            // future commands without crowding. All actions (new task,
-            // commit-mode toggle, add commit point, add wait point)
-            // live as menu items inside the popup.
             const toDoMenuItems: MenuItem[] = [
               {
                 id: "plan-new-task",
@@ -522,45 +483,6 @@ export function PlanPane({
                 enabled: true,
                 run: () => openCreateModal(),
               },
-              ...(isRootThread && thread ? [
-                {
-                  id: "plan-commit-mode",
-                  label: autoCommitOn ? "Switch to manual commits" : "Switch to auto commits",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Set commit mode", setAutoCommit(streamId, threadId, !autoCommitOn));
-                  },
-                },
-                // Commit point only lives in manual mode (auto commits
-                // at every Stop, so queued commit markers would be
-                // redundant). Always visible in manual mode even when
-                // the To Do queue is empty — the command renders in the
-                // menu greyed so the user sees it exists and why it's
-                // disabled. canAddPoints gating dropped per user
-                // feedback; backend tolerates an empty queue.
-                ...(!autoCommitOn ? [{
-                  id: "plan-add-commit-point",
-                  label: "Add commit point",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Add commit point", createCommitPoint(streamId, threadId));
-                  },
-                }] : []),
-                // Wait point applies to both modes and doesn't depend
-                // on having waiting items — user can queue a wait
-                // marker proactively.
-                {
-                  id: "plan-add-wait-point",
-                  label: "Add wait point",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Add wait point", createWaitPoint(streamId, threadId, null));
-                  },
-                },
-              ] : []),
             ];
             const toDoActions = (
               <span data-testid="plan-add-points-bar">
@@ -575,12 +497,8 @@ export function PlanPane({
                 key={group.epic?.id ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
-                expandedId={expandedId}
-                onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                 onUpdateWorkItem={activeUpdate}
                 onReorderWorkItems={activeReorder}
-                commitPoints={isRootThread ? commitPoints : []}
-                waitPoints={isRootThread ? waitPoints : []}
                 onReorderMixed={isRootThread && streamId && threadId
                   ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
                   : undefined}
@@ -595,7 +513,6 @@ export function PlanPane({
                 markedIds={markedIds}
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
-                onDoubleClickCommitPoint={(cp) => setEditingCommitPoint(cp)}
                 epicChildrenMap={group.epicChildren}
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
@@ -726,16 +643,6 @@ export function PlanPane({
             paneRef.current?.focus();
           }}
           onClose={() => { setKbPicker(null); paneRef.current?.focus(); }}
-        />
-      ) : null}
-      {editingCommitPoint ? (
-        <CommitPointModal
-          cp={editingCommitPoint}
-          onSave={async (changes) => {
-            await updateCommitPoint(editingCommitPoint.id, changes);
-            setEditingCommitPoint(null);
-          }}
-          onClose={() => setEditingCommitPoint(null)}
         />
       ) : null}
     </div>
@@ -933,18 +840,6 @@ function buildGroupMenu(
   ];
 }
 
-const primaryButtonStyle: CSSProperties = {
-  borderRadius: 6, border: "1px solid var(--border)", background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit", padding: "6px 10px",
-};
-
-const labelStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-  fontSize: 12,
-  color: "var(--muted)",
-};
-
 const bottomBarStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -969,128 +864,3 @@ const bottomChipStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/**
- * Modal for editing a commit point — opened by double-clicking a commit
- * divider row. Only lets the user change the mode (auto vs approve); the
- * drafted commit message now lives in chat between the agent and the user,
- * not in the commit point row.
- */
-function CommitPointModal({
-  cp,
-  onSave,
-  onClose,
-}: {
-  cp: CommitPoint;
-  onSave(changes: { mode?: "auto" | "approve" }): Promise<void>;
-  onClose(): void;
-}) {
-  const [mode, setMode] = useState<"auto" | "approve">(cp.mode);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const changes: { mode?: "auto" | "approve" } = {};
-      if (mode !== cp.mode) changes.mode = mode;
-      await onSave(changes);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000,
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 16,
-          width: "min(480px, 90vw)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>Edit commit point</div>
-          <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
-        </div>
-
-        <label style={labelStyle}>
-          Mode
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => setMode("approve")}
-              style={{
-                ...miniButtonStyle,
-                padding: "5px 12px",
-                background: mode === "approve" ? "var(--accent)" : "var(--bg-2)",
-                color: mode === "approve" ? "#fff" : "inherit",
-                border: `1px solid ${mode === "approve" ? "var(--accent)" : "var(--border)"}`,
-              }}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("auto")}
-              style={{
-                ...miniButtonStyle,
-                padding: "5px 12px",
-                background: mode === "auto" ? "var(--accent)" : "var(--bg-2)",
-                color: mode === "auto" ? "#fff" : "inherit",
-                border: `1px solid ${mode === "auto" ? "var(--accent)" : "var(--border)"}`,
-              }}
-            >
-              Auto
-            </button>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            {mode === "approve"
-              ? "Agent drafts a message, shows it in chat, and waits for your approval."
-              : "Agent commits immediately without waiting for approval."}
-          </div>
-        </label>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={miniButtonStyle} disabled={saving}>Cancel</button>
-          <button
-            type="button"
-            data-testid="commit-point-save"
-            onClick={() => void handleSave()}
-            disabled={saving}
-            style={{ ...primaryButtonStyle }}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

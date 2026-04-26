@@ -732,8 +732,7 @@ export class WorkItemStore {
     }
   }
 
-  /** Explicit sort_index writes — used by the mixed thread-queue reorder so
-   *  work items and commit points share a single index space. */
+  /** Explicit sort_index writes — used by the thread-queue reorder. */
   setItemSortIndexes(threadId: string, entries: Array<{ id: string; sortIndex: number }>): void {
     if (entries.length === 0) return;
     const now = new Date().toISOString();

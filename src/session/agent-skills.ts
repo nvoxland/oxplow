@@ -90,7 +90,7 @@ of plan-mode outputs describe a single task.
 
 ## Shaping the row
 
-- \`title\`: imperative, ≤60 chars (\`Fix wait-point overflow\`).
+- \`title\`: imperative, ≤60 chars (\`Fix login redirect loop\`).
 - \`description\`: what and why; keep it terse.
 - \`acceptanceCriteria\`: one observable criterion per line.
 - \`kind\`: \`epic\` only with children (use \`file_epic_with_children\`);
@@ -146,7 +146,7 @@ Never self-mark \`done\` — the user owns that transition.
 ## Talking about items in chat
 
 When you mention a work item to the user, refer to it by its quoted
-title (e.g. \`"Fix wait-point overflow"\`), **never** by its \`wi-…\`
+title (e.g. \`"Fix login redirect loop"\`), **never** by its \`wi-…\`
 id. The id is an internal handle for tool calls; the user doesn't see
 it in their UI and won't know what you're pointing at. This applies
 everywhere: confirming a fix, asking whether to proceed, summarizing
@@ -195,3 +195,30 @@ Record that as a work note via \`add_work_note\`.
 export const buildTaskFilingSkill = buildRuntimeSkill;
 export const buildTaskLifecycleSkill = buildRuntimeSkill;
 export const buildTaskDispatchSkill = buildRuntimeSkill;
+
+/**
+ * Plugin-emitted slash command — available in any project running
+ * oxplow, not just the oxplow repo's `.claude/commands/`. Replaces the
+ * old Stop-hook ready-work directive: instead of the harness force-
+ * marching the agent onto the next ready item, the user types
+ * `/work-next` (or composes it via `/loop /work-next`) when they want
+ * the queue to advance.
+ */
+export const WORK_NEXT_COMMAND_NAME = "work-next";
+export const WORK_NEXT_COMMAND_FILE = "work-next.md";
+
+export function buildWorkNextCommand(): string {
+  return `---
+description: Pick up the next ready oxplow work item and dispatch it.
+---
+
+Call \`mcp__oxplow__read_work_options\` for this thread and dispatch
+the resulting unit to a \`general-purpose\` subagent per the
+\`oxplow-runtime\` skill. The skill carries the protocol (mark
+\`in_progress\` before work, \`human_check\` after, never two items
+\`in_progress\` at once); follow it.
+
+If the tool returns \`{ mode: "empty" }\` there's nothing ready —
+report that and stop.
+`;
+}

@@ -31,17 +31,29 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD or a subagent dispatch.
 
-**Trivial-edit carve-out.** Single-file ≤30-line bug fixes,
-typo/rename/CSS-property tweaks, and one-line comment changes skip the
-work-item filing rule and the `.context/` read rule. Just make the
-change. The work-item ceremony exists to keep the Work panel honest
-about real concerns; tiny mechanical edits don't generate concerns.
+**No trivial-edit carve-out for filing.** Every write to project files
+requires a tracked work item — typos, single-line CSS tweaks, and
+one-file fixes included. The Stop hook enforces this: a turn that
+edited files without a filing/transition tool call AND with no
+in_progress item gets blocked. The carve-out previously documented
+here was abused into "skip filing for any small thing", which left the
+Work panel lying about what shipped. The `.context/` read rule still
+gets a soft pass for tiny mechanical edits — just don't skip the work
+item.
+
+**Asking the user a question.** When your reply ends with a real
+clarifying question, A/B/C choice, or any ask where the user owns the
+next move, call `mcp__oxplow__await_user({ threadId, question })` and
+end your turn. The Stop hook honours this and suppresses every
+directive (no dispatch nudge, no audit, no filing-enforcement) until
+the user replies. Don't call it for rhetorical asides — only genuine
+open questions.
 
 ## Subsystem docs — when to read which
 
 | If you're touching… | Read first |
 |---|---|
-| Tables, stores, work queue, commit/wait points, sort_index, migrations | `.context/data-model.md` |
+| Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |

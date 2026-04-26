@@ -259,8 +259,8 @@ describe("SnapshotStore", () => {
     const db = getStateDatabase(projectDir);
     if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
       db.run(
-        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
-         VALUES ('b-ts', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, created_at, updated_at)
+         VALUES ('b-ts', ?, 'T', 'active', 0, '', ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
@@ -294,8 +294,8 @@ describe("SnapshotStore", () => {
     const db = getStateDatabase(projectDir);
     if (db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`).length === 0) {
       db.run(
-        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
-         VALUES ('b-win', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, created_at, updated_at)
+         VALUES ('b-win', ?, 'T', 'active', 0, '', ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
@@ -344,8 +344,8 @@ describe("SnapshotStore", () => {
     const threadRows = db.all<{ id: string }>(`SELECT id FROM threads LIMIT 1`);
     if (threadRows.length === 0) {
       db.run(
-        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
-         VALUES ('b-tie', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, created_at, updated_at)
+         VALUES ('b-tie', ?, 'T', 'active', 0, '', ?, ?)`,
         streamId, new Date().toISOString(), new Date().toISOString(),
       );
     }
@@ -394,8 +394,8 @@ describe("SnapshotStore", () => {
     if (threadRows.length === 0) {
       // The seed doesn't create a thread — insert a minimal one for the FK.
       db.run(
-        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, auto_commit, created_at, updated_at)
-         VALUES ('b-test', ?, 'T', 'active', 0, '', 0, ?, ?)`,
+        `INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target, created_at, updated_at)
+         VALUES ('b-test', ?, 'T', 'active', 0, '', ?, ?)`,
         streamId,
         new Date().toISOString(),
         new Date().toISOString(),

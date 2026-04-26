@@ -6,8 +6,10 @@ import {
   SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_FILE,
   SUBAGENT_PROTOCOL_SKILL_NAME,
+  WORK_NEXT_COMMAND_FILE,
   buildRuntimeSkill,
   buildSubagentProtocolSkill,
+  buildWorkNextCommand,
 } from "./agent-skills.js";
 import {
   WIKI_CAPTURE_SKILL_NAME,
@@ -48,6 +50,8 @@ export interface ElectronPlugin {
   subagentProtocolSkillPath: string;
   /** Absolute path to the wiki-capture SKILL.md. */
   wikiCaptureSkillPath: string;
+  /** Absolute path to the /work-next slash command file. */
+  workNextCommandPath: string;
 }
 
 // SessionStart is registered but Claude Code silently drops HTTP hooks for
@@ -153,6 +157,15 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
   const wikiCaptureSkillPath = join(wikiCaptureDir, WIKI_CAPTURE_SKILL_FILE);
   writeFileSync(wikiCaptureSkillPath, buildWikiCaptureSkill(), "utf8");
 
+  // User-invoked slash commands. Shipped via the plugin so every project
+  // running oxplow gets `/work-next` — replaces the old Stop-hook ready-
+  // work directive. The repo-local `.claude/commands/` directory stays
+  // scoped to oxplow-on-oxplow dogfooding.
+  const commandsDir = join(pluginDir, "commands");
+  mkdirSync(commandsDir, { recursive: true });
+  const workNextCommandPath = join(commandsDir, WORK_NEXT_COMMAND_FILE);
+  writeFileSync(workNextCommandPath, buildWorkNextCommand(), "utf8");
+
   return {
     pluginDir,
     hooksPath,
@@ -164,6 +177,7 @@ export function createElectronPlugin(opts: ElectronPluginOptions): ElectronPlugi
     taskDispatchSkillPath,
     subagentProtocolSkillPath,
     wikiCaptureSkillPath,
+    workNextCommandPath,
   };
 }
 

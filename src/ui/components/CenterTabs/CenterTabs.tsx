@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { Kebab } from "../Kebab.js";
@@ -29,25 +29,35 @@ interface CenterTabsProps {
 
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: CenterTabsProps) {
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
+  const [hoverId, setHoverId] = useState<string | null>(null);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
         {tabs.map((tab) => {
           const isActive = tab.id === active?.id;
+          const isHover = !isActive && hoverId === tab.id;
           return (
             <div
               key={tab.id}
               data-testid={`center-tab-${tab.id}`}
               onClick={() => onActivate(tab.id)}
+              onMouseEnter={() => setHoverId(tab.id)}
+              onMouseLeave={() => setHoverId((prev) => (prev === tab.id ? null : prev))}
               style={{
                 padding: "10px 14px",
-                background: isActive ? "var(--surface-tab-active)" : "transparent",
-                color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                borderRight: "1px solid var(--border-subtle)",
-                borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
+                background: isActive
+                  ? "var(--surface-tab-active)"
+                  : isHover
+                    ? "var(--surface-card)"
+                    : "transparent",
+                color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                borderRight: "1px solid var(--border-strong)",
+                borderTop: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
+                borderLeft: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
+                borderBottom: isActive ? "3px solid var(--accent)" : "3px solid transparent",
                 cursor: "pointer",
                 fontSize: 13,
-                fontWeight: isActive ? 500 : 400,
+                fontWeight: isActive ? 600 : 400,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
