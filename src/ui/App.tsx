@@ -90,6 +90,7 @@ import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { CodeQualityPanel } from "./components/CodeQuality/CodeQualityPanel.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
+import { StartPage } from "./pages/StartPage.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -171,6 +172,11 @@ export function App() {
   // global localStorage key (the "default" thread inherits whatever was last
   // active before the per-thread refactor).
   const [threadCenterActive, setThreadCenterActive] = useState<Record<string, string>>({});
+  // Per-thread open "page" tabs that aren't files/notes/diffs (Start, future
+  // index/dashboard pages). Stored as TabRef so the rendering side can
+  // dispatch by kind. Independent of the legacy noteTabs/diffTabs lists,
+  // which still drive the tabs they own.
+  const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [noteTabs, setNoteTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1428,6 +1434,59 @@ export function App() {
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
+  const recentFileEntries = useMemo(() => {
+    const order = currentSession.openOrder;
+    return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
+  }, [currentSession.openOrder]);
+
+  const handleOpenPage = useCallback((ref: TabRef) => {
+    switch (ref.kind) {
+      case "agent":
+        setCenterActive("agent");
+        return;
+      case "file": {
+        const payload = ref.payload as { path?: string } | null;
+        if (payload?.path) void handleOpenFile(payload.path);
+        return;
+      }
+      case "work-item": {
+        const payload = ref.payload as { itemId?: string } | null;
+        if (payload?.itemId) handleRequestEditWorkItem(payload.itemId);
+        return;
+      }
+      case "start": {
+        if (selectedThreadId) {
+          setThreadPageTabs((prev) => {
+            const existing = prev[selectedThreadId] ?? [];
+            if (existing.some((t) => t.id === ref.id)) return prev;
+            return { ...prev, [selectedThreadId]: [...existing, ref] };
+          });
+          setCenterActive(ref.id);
+        }
+        return;
+      }
+      default:
+        if (ref.kind === "all-work") setLeftDockActivate({ id: "plan", token: Date.now() });
+        else if (ref.kind === "files") setLeftDockActivate({ id: "project", token: Date.now() });
+        else if (ref.kind === "notes-index") setLeftDockActivate({ id: "notes", token: Date.now() });
+        else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
+        else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
+        else if (ref.kind === "code-quality") setBottomActivate({ id: "code-quality", token: Date.now() });
+        else if (ref.kind === "settings") setSettingsOpen(true);
+        return;
+    }
+  }, [handleOpenFile, handleRequestEditWorkItem, selectedThreadId, setCenterActive]);
+
+  const closePageTab = useCallback((id: string) => {
+    if (!selectedThreadId) return;
+    setThreadPageTabs((prev) => {
+      const existing = prev[selectedThreadId] ?? [];
+      if (!existing.some((t) => t.id === id)) return prev;
+      return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
+    });
+    setCenterActive((current) => (current === id ? "agent" : current));
+  }, [selectedThreadId, setCenterActive]);
+
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [
       {
@@ -1529,6 +1588,19 @@ export function App() {
         ) : null,
       });
     }
+    const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    for (const ref of pageTabsForThread) {
+      if (ref.kind === "start") {
+        tabs.push({
+          id: ref.id,
+          label: "Start",
+          closable: true,
+          render: () => (
+            <StartPage onOpenPage={handleOpenPage} />
+          ),
+        });
+      }
+    }
     return tabs;
   }, [
     selectedThread,
@@ -1544,42 +1616,10 @@ export function App() {
     noteTabs,
     closeNoteTab,
     handleOpenNote,
+    selectedThreadId,
+    threadPageTabs,
+    handleOpenPage,
   ]);
-
-  const recentFileEntries = useMemo(() => {
-    const order = currentSession.openOrder;
-    return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
-  }, [currentSession.openOrder]);
-
-  const handleOpenPage = useCallback((ref: TabRef) => {
-    switch (ref.kind) {
-      case "agent":
-        setCenterActive("agent");
-        return;
-      case "file": {
-        const payload = ref.payload as { path?: string } | null;
-        if (payload?.path) void handleOpenFile(payload.path);
-        return;
-      }
-      case "work-item": {
-        const payload = ref.payload as { itemId?: string } | null;
-        if (payload?.itemId) handleRequestEditWorkItem(payload.itemId);
-        return;
-      }
-      default:
-        // Page kinds without renderers yet (start, all-work, dashboards, etc.)
-        // are dispatched to the existing tool-window dock for now where it
-        // makes sense, otherwise no-op.
-        if (ref.kind === "all-work") setLeftDockActivate({ id: "plan", token: Date.now() });
-        else if (ref.kind === "files") setLeftDockActivate({ id: "project", token: Date.now() });
-        else if (ref.kind === "notes-index") setLeftDockActivate({ id: "notes", token: Date.now() });
-        else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
-        else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
-        else if (ref.kind === "code-quality") setBottomActivate({ id: "code-quality", token: Date.now() });
-        else if (ref.kind === "settings") setSettingsOpen(true);
-        return;
-    }
-  }, [handleOpenFile, handleRequestEditWorkItem]);
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
     {
@@ -1753,6 +1793,7 @@ export function App() {
                 if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
                 else if (id.startsWith("diff:")) closeDiffTab(id);
                 else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
+                else closePageTab(id);
               }}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
