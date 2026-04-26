@@ -154,6 +154,12 @@ Things I keep forgetting. Read this before adding any UI.
 - **Use a custom MIME type** for internal drags so foreign drags (files, text)
   don't accidentally trigger app drops. See `WORK_ITEM_DRAG_MIME` in
   `src/ui/components/BatchRail.tsx`.
+- **Tabs in the three tabbed sections (left dock rail, center pane, bottom
+  dock rail) are drag-reorderable.** DockShell rail tabs persist their order
+  in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
+  CenterTabs reorders within `reorderGroup` only — `file:`, `note:`, and
+  `diff:` tabs each shuffle within their own group; the `agent` tab is
+  pinned (no `reorderGroup`). Cross-group drops are no-ops.
 
 ## Empty and error states
 

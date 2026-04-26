@@ -6,7 +6,12 @@ interface PersistedState {
   open: boolean;
   size: number;
   activeId: string | null;
+  /** User-imposed rail order. IDs not present in this list fall back to the
+   *  source order from the parent `toolWindows` prop, appended after listed ids. */
+  order?: string[];
 }
+
+const TOOL_WINDOW_DRAG_MIME = "application/x-oxplow-tool-window";
 
 export interface DockShellProps {
   side: DockSide;
@@ -47,6 +52,26 @@ export function DockShell({
     readPersisted(storageKey) ?? { open: defaultOpen, size: initialSize, activeId: initialActiveId },
   );
   const [dragging, setDragging] = useState(false);
+  const [tabDraggingId, setTabDraggingId] = useState<string | null>(null);
+  const [tabOverId, setTabOverId] = useState<string | null>(null);
+
+  const orderedToolWindows = useMemo(() => {
+    const userOrder = state.order ?? [];
+    const known = new Map(toolWindows.map((tw) => [tw.id, tw] as const));
+    const seen = new Set<string>();
+    const front: ToolWindow[] = [];
+    for (const id of userOrder) {
+      const tw = known.get(id);
+      if (tw && !seen.has(id)) {
+        front.push(tw);
+        seen.add(id);
+      }
+    }
+    for (const tw of toolWindows) {
+      if (!seen.has(tw.id)) front.push(tw);
+    }
+    return front;
+  }, [toolWindows, state.order]);
 
   useEffect(() => {
     writePersisted(storageKey, state);
@@ -55,10 +80,10 @@ export function DockShell({
   // If the persisted active tool window was removed in a later build, fall back
   // to the first available one so we don't render an empty panel.
   useEffect(() => {
-    if (toolWindows.length === 0) return;
-    if (state.activeId && toolWindows.some((tw) => tw.id === state.activeId)) return;
-    setState((prev) => ({ ...prev, activeId: toolWindows[0]!.id }));
-  }, [toolWindows, state.activeId]);
+    if (orderedToolWindows.length === 0) return;
+    if (state.activeId && orderedToolWindows.some((tw) => tw.id === state.activeId)) return;
+    setState((prev) => ({ ...prev, activeId: orderedToolWindows[0]!.id }));
+  }, [orderedToolWindows, state.activeId]);
 
   useEffect(() => {
     if (!activateRequest) return;
@@ -67,8 +92,8 @@ export function DockShell({
   }, [activateRequest, toolWindows]);
 
   const activeTool = useMemo(
-    () => toolWindows.find((tw) => tw.id === state.activeId) ?? toolWindows[0] ?? null,
-    [toolWindows, state.activeId],
+    () => orderedToolWindows.find((tw) => tw.id === state.activeId) ?? orderedToolWindows[0] ?? null,
+    [orderedToolWindows, state.activeId],
   );
 
   useEffect(() => {
@@ -153,19 +178,27 @@ export function DockShell({
           flexShrink: 0,
         };
 
+  const canReorder = orderedToolWindows.length > 1;
+  const commitOrder = (orderedIds: string[]) => {
+    setState((prev) => ({ ...prev, order: orderedIds }));
+  };
+
   const rail = (showRail || hasRailExtra) ? (
     <div style={{ ...railStyle, ...(side === "bottom" ? { alignItems: "center" } : {}) }}>
-      {showRail ? toolWindows.map((tw) => {
+      {showRail ? orderedToolWindows.map((tw) => {
         const active = state.open && tw.id === (activeTool?.id ?? "");
+        const isDropTarget = canReorder && tabDraggingId !== null && tabDraggingId !== tw.id && tabOverId === tw.id;
         const baseStyle: React.CSSProperties = {
           background: active ? "var(--bg)" : "transparent",
           color: active ? "var(--fg)" : "var(--muted)",
-          border: "1px solid",
-          borderColor: active ? "var(--border)" : "transparent",
+          border: "1px dashed",
+          borderColor: isDropTarget ? "var(--accent)" : (active ? "var(--border)" : "transparent"),
+          borderStyle: isDropTarget ? "dashed" : "solid",
           borderRadius: 4,
-          cursor: "pointer",
+          cursor: canReorder ? "grab" : "pointer",
           fontFamily: "inherit",
           fontSize: 11,
+          opacity: tabDraggingId === tw.id ? 0.5 : 1,
         };
         const orientedStyle: React.CSSProperties =
           side === "bottom"
@@ -180,10 +213,46 @@ export function DockShell({
         return (
           <button type="button"
             key={tw.id}
+            draggable={canReorder}
             onClick={() => setActiveId(tw.id)}
             title={tw.label}
             data-testid={`dock-tab-${tw.id}`}
             data-active={active ? "true" : "false"}
+            onDragStart={canReorder ? (event) => {
+              event.dataTransfer.setData(TOOL_WINDOW_DRAG_MIME, tw.id);
+              event.dataTransfer.effectAllowed = "move";
+              setTabDraggingId(tw.id);
+            } : undefined}
+            onDragEnd={canReorder ? () => {
+              setTabDraggingId(null);
+              setTabOverId(null);
+            } : undefined}
+            onDragOver={canReorder ? (event) => {
+              if (!tabDraggingId) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (tabOverId !== tw.id) setTabOverId(tw.id);
+            } : undefined}
+            onDragLeave={canReorder ? () => {
+              if (tabOverId === tw.id) setTabOverId(null);
+            } : undefined}
+            onDrop={canReorder ? (event) => {
+              if (!tabDraggingId) return;
+              event.preventDefault();
+              const sourceId = tabDraggingId;
+              const targetId = tw.id;
+              setTabDraggingId(null);
+              setTabOverId(null);
+              if (sourceId === targetId) return;
+              const ids = orderedToolWindows.map((t) => t.id);
+              const fromIdx = ids.indexOf(sourceId);
+              const toIdx = ids.indexOf(targetId);
+              if (fromIdx < 0 || toIdx < 0) return;
+              const next = ids.slice();
+              const [moved] = next.splice(fromIdx, 1);
+              next.splice(toIdx, 0, moved);
+              commitOrder(next);
+            } : undefined}
             style={orientedStyle}
           >
             {tw.label}
@@ -214,7 +283,7 @@ export function DockShell({
         flexDirection: "column",
       }}
     >
-      {toolWindows.map((tw) => {
+      {orderedToolWindows.map((tw) => {
         const isActive = activeTool ? tw.id === activeTool.id : false;
         return (
           <div
@@ -293,6 +362,7 @@ function readPersisted(storageKey: string): PersistedState | null {
       open: parsed.open,
       size: parsed.size,
       activeId: typeof parsed.activeId === "string" ? parsed.activeId : null,
+      order: Array.isArray(parsed.order) && parsed.order.every((id) => typeof id === "string") ? parsed.order : undefined,
     };
   } catch {
     return null;
