@@ -91,6 +91,7 @@ import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { StartPage } from "./pages/StartPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
+import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { indexRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
@@ -1455,7 +1456,8 @@ export function App() {
         return;
       }
       case "start":
-      case "settings": {
+      case "settings":
+      case "code-quality": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -1473,7 +1475,6 @@ export function App() {
         else if (ref.kind === "notes-index") setLeftDockActivate({ id: "notes", token: Date.now() });
         else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
         else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
-        else if (ref.kind === "code-quality") setBottomActivate({ id: "code-quality", token: Date.now() });
         return;
     }
   }, [handleOpenFile, handleRequestEditWorkItem, selectedThreadId, setCenterActive]);
@@ -1604,6 +1605,13 @@ export function App() {
           label: "Settings",
           closable: true,
           render: () => <SettingsPage onClose={() => closePageTab(ref.id)} />,
+        });
+      } else if (ref.kind === "code-quality") {
+        tabs.push({
+          id: ref.id,
+          label: "Code quality",
+          closable: true,
+          render: () => <CodeQualityPage stream={stream} onOpenFile={handleOpenFile} />,
         });
       }
     }
