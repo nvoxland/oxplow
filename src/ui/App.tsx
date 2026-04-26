@@ -70,7 +70,6 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { SettingsModal } from "./components/SettingsModal.js";
 import { ConfirmDialog } from "./components/ConfirmDialog.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
@@ -91,6 +90,8 @@ import { CodeQualityPanel } from "./components/CodeQuality/CodeQualityPanel.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { StartPage } from "./pages/StartPage.js";
+import { SettingsPage } from "./pages/SettingsPage.js";
+import { indexRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -196,7 +197,6 @@ export function App() {
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
@@ -1454,7 +1454,9 @@ export function App() {
         if (payload?.itemId) handleRequestEditWorkItem(payload.itemId);
         return;
       }
-      case "start": {
+      case "start":
+      case "settings": {
+        // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
             const existing = prev[selectedThreadId] ?? [];
@@ -1472,7 +1474,6 @@ export function App() {
         else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
         else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
         else if (ref.kind === "code-quality") setBottomActivate({ id: "code-quality", token: Date.now() });
-        else if (ref.kind === "settings") setSettingsOpen(true);
         return;
     }
   }, [handleOpenFile, handleRequestEditWorkItem, selectedThreadId, setCenterActive]);
@@ -1595,9 +1596,14 @@ export function App() {
           id: ref.id,
           label: "Start",
           closable: true,
-          render: () => (
-            <StartPage onOpenPage={handleOpenPage} />
-          ),
+          render: () => <StartPage onOpenPage={handleOpenPage} />,
+        });
+      } else if (ref.kind === "settings") {
+        tabs.push({
+          id: ref.id,
+          label: "Settings",
+          closable: true,
+          render: () => <SettingsPage onClose={() => closePageTab(ref.id)} />,
         });
       }
     }
@@ -1619,6 +1625,7 @@ export function App() {
     selectedThreadId,
     threadPageTabs,
     handleOpenPage,
+    closePageTab,
   ]);
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
@@ -1740,7 +1747,7 @@ export function App() {
           onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => handleOpenPage(indexRef("settings"))}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
           onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}
@@ -1820,7 +1827,6 @@ export function App() {
           void handleOpenFile(path);
         }}
       />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {stream && externalFilePrompt ? (
         <ExternalFileChangedDialog
           path={externalFilePrompt.path}
