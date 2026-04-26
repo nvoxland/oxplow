@@ -219,6 +219,48 @@ if the deferred ask warrants a row the user reviews/accepts, file a
 task; if it's just a within-conversation bookmark, add a follow-up
 and remove it in the same turn you handle it. Never carry both.
 
+## Background tasks (long-running op progress)
+
+`BackgroundTaskStore` (`src/electron/background-task-store.ts`) is
+another in-memory store, modeled on `FollowupStore`. It surfaces "what
+is the runtime doing right now" rows in the bottom-bar
+`BackgroundTaskIndicator` (`src/ui/components/`). No SQLite, no
+migration, lost on restart. Done/failed rows linger for a 4s grace
+window so the UI can flash a checkmark before evicting.
+
+Producers call `start({ kind, label, detail?, progress? })` to register
+a row, optionally `update(id, patch)` for progress ticks, then
+`complete(id)` or `fail(id, message)`. `progress` is `0..1` for
+determinate work or `null` for indeterminate (animated stripes in the
+UI). Active producers:
+
+- **Git pull/push** — `runtime.gitPull` / `runtime.gitPush` use
+  `gitPullAsync` / `gitPushAsync` from `src/git/git.ts` so the main
+  process doesn't block during the network call. Indeterminate.
+- **Code-quality scans** — `runtime.runCodeQualityScan` opens a row in
+  parallel with the existing `code-quality.scanned` event flow. The
+  scan-status strip in CodeQualityPanel keeps its panel-local spinner;
+  the bottom-bar row is the global indicator. Indeterminate.
+- **LSP cold start** — `LspSessionManager` (`src/lsp/lsp.ts`) takes
+  optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
+  wires them to `start`/`complete`. Indeterminate.
+- **Notes wiki resync** — `NotesWatcher.start` (`src/git/notes-watch.ts`)
+  takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
+  runtime registers a row only when `total >= 5` (smaller dirs aren't
+  worth a flash). Determinate.
+
+IPC: one method `listBackgroundTasks()` returns the snapshot. Renderer
+subscribes via `subscribeBackgroundTaskEvents(onChange)` (filters
+`background-task.changed` events) and refetches. The renderer never
+writes — only the runtime starts/updates tasks. Cancellation is not
+supported (v1).
+
+Adding a new producer: don't widen the union — extend
+`BackgroundTaskKind` and pick the most relevant existing kind, or add
+one in `background-task-store.ts` plus a label entry in
+`BackgroundTaskIndicator.tsx` (`KIND_LABEL`). Wire `start`/`complete`
+or `fail` in the new spot; events publish automatically.
+
 ## Work panel in_progress bucket is task-only
 
 The Work panel's in_progress bucket is driven purely by `work_item`

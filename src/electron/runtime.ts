@@ -26,7 +26,9 @@ import {
   addPath,
   appendToGitignore,
   gitPush,
+  gitPushAsync,
   gitPull,
+  gitPullAsync,
   gitCommitAll,
   isWorktreeClean,
   listFileCommits,
@@ -81,6 +83,7 @@ import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
 import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import { FollowupStore, type Followup } from "./followup-store.js";
+import { BackgroundTaskStore } from "./background-task-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -134,6 +137,11 @@ export class ElectronRuntime {
    *  in the To Do section of the Work panel. No DB row, lost on
    *  runtime restart — see followup-store.ts. */
   readonly followupStore: FollowupStore;
+  /** Transient in-memory progress rows for long-running ops (git
+   *  pull/push/fetch, code-quality scans, LSP startup, notes resync).
+   *  Surfaced in the bottom bar; lost on restart. See
+   *  background-task-store.ts. */
+  readonly backgroundTaskStore: BackgroundTaskStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
   readonly lspManager: LspSessionManager;
@@ -249,10 +257,36 @@ export class ElectronRuntime {
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
     this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
     this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
+    this.backgroundTaskStore = new BackgroundTaskStore(logger.child({ subsystem: "background-task-store" }));
+    let notesScanTaskId: string | null = null;
     this.notesWatcher = new NotesWatcher(
       projectDir,
       this.wikiNoteStore,
-      {},
+      {
+        onScanStart: (total) => {
+          // Skip the row entirely for tiny note dirs — no UI value, just churn.
+          if (total < 5) return;
+          notesScanTaskId = this.backgroundTaskStore.start({
+            kind: "notes-resync",
+            label: "Syncing wiki notes…",
+            detail: `0 / ${total}`,
+            progress: 0,
+          });
+        },
+        onScanProgress: ({ done, total, slug }) => {
+          if (!notesScanTaskId) return;
+          this.backgroundTaskStore.update(notesScanTaskId, {
+            progress: total > 0 ? done / total : null,
+            detail: `${done} / ${total} — ${slug}`,
+          });
+        },
+        onScanEnd: (error) => {
+          if (!notesScanTaskId) return;
+          if (error) this.backgroundTaskStore.fail(notesScanTaskId, error.message);
+          else this.backgroundTaskStore.complete(notesScanTaskId);
+          notesScanTaskId = null;
+        },
+      },
       logger.child({ subsystem: "notes-watch" }),
     );
     this.notesWatcher.start();
@@ -278,7 +312,17 @@ export class ElectronRuntime {
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
-    this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
+    this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }), {
+      onInitializeStart: (languageId) => this.backgroundTaskStore.start({
+        kind: "lsp",
+        label: `Starting ${languageId} language server…`,
+      }),
+      onInitializeEnd: (taskHandle, error) => {
+        if (!taskHandle) return;
+        if (error) this.backgroundTaskStore.fail(taskHandle, error.message);
+        else this.backgroundTaskStore.complete(taskHandle);
+      },
+    });
     this.editorFocusStore = new EditorFocusStore();
     this.agentPtyStore = new AgentPtyStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
@@ -468,6 +512,13 @@ export class ElectronRuntime {
       this.events.publish({
         type: "followup.changed",
         threadId: change.threadId,
+        kind: change.kind,
+        id: change.id,
+      });
+    });
+    this.backgroundTaskStore.subscribe((change) => {
+      this.events.publish({
+        type: "background-task.changed",
         kind: change.kind,
         id: change.id,
       });
@@ -931,14 +982,44 @@ export class ElectronRuntime {
     return appendToGitignore(stream.worktree_path, path);
   }
 
-  gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): GitOpResult {
+  async gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitPush(stream.worktree_path, options);
+    const branch = options?.branch ?? stream.branch ?? "HEAD";
+    const remote = options?.remote ?? "origin";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pushing ${branch} to ${remote}…`,
+    });
+    try {
+      const result = await gitPushAsync(stream.worktree_path, options);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
-  gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): GitOpResult {
+  async gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitPull(stream.worktree_path, options);
+    const branch = options?.branch ?? stream.branch ?? "HEAD";
+    const remote = options?.remote ?? "origin";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pulling ${branch} from ${remote}…`,
+    });
+    try {
+      const result = await gitPullAsync(stream.worktree_path, options);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
@@ -2177,6 +2258,10 @@ export class ElectronRuntime {
       scope: input.scope,
       baseRef: input.scope === "diff" ? input.baseRef ?? null : null,
     });
+    const taskId = this.backgroundTaskStore.start({
+      kind: "code-quality",
+      label: `${input.tool} scan (${input.scope})`,
+    });
 
     try {
       let files: string[] | undefined;
@@ -2184,6 +2269,7 @@ export class ElectronRuntime {
         const baseRef = input.baseRef?.trim() || detectBaseBranch(stream.worktree_path);
         if (!baseRef) {
           this.codeQualityStore.failScan(scanId, "No base ref available for diff scope");
+          this.backgroundTaskStore.fail(taskId, "No base ref available for diff scope");
           return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
         }
         const changes = listBranchChanges(stream.worktree_path, baseRef);
@@ -2192,6 +2278,7 @@ export class ElectronRuntime {
           .map((f) => f.path);
         if (files.length === 0) {
           this.codeQualityStore.completeScan(scanId, []);
+          this.backgroundTaskStore.complete(taskId);
           return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
         }
       }
@@ -2200,11 +2287,13 @@ export class ElectronRuntime {
         ? await runLizard(stream.worktree_path, { files })
         : await runJscpd(stream.worktree_path, { files });
       this.codeQualityStore.completeScan(scanId, findings);
+      this.backgroundTaskStore.complete(taskId);
     } catch (error) {
       const message = error instanceof CodeQualityToolMissingError
         ? `${input.tool} is not installed (install via pip/npm and ensure it's on PATH)`
         : error instanceof Error ? error.message : String(error);
       this.codeQualityStore.failScan(scanId, message);
+      this.backgroundTaskStore.fail(taskId, message);
     }
 
     const row = this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId);

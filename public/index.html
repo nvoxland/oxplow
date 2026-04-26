@@ -49,6 +49,11 @@
         0%, 100% { opacity: 1; }
         50% { opacity: 0.35; }
       }
+      /* Indeterminate progress: a slim accent bar slides across the track. */
+      @keyframes oxplow-progress-indeterminate {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(300%); }
+      }
       /* Thin, unobtrusive scrollbars. The Electron default leaves a
          pill-shaped thumb artifact even when content fits, which was
          showing up next to the New Stream / + Thread buttons. */

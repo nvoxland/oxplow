@@ -104,6 +104,12 @@ export interface FollowupChangedEvent {
   id: string | null;
 }
 
+export interface BackgroundTaskChangedEvent {
+  type: "background-task.changed";
+  kind: "started" | "updated" | "ended";
+  id: string;
+}
+
 export interface UsageRecordedEvent {
   type: "usage.recorded";
   kind: string;
@@ -147,7 +153,8 @@ export type OxplowEvent =
   | WikiNoteChangedEvent
   | UsageRecordedEvent
   | CodeQualityScannedEvent
-  | FollowupChangedEvent;
+  | FollowupChangedEvent
+  | BackgroundTaskChangedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

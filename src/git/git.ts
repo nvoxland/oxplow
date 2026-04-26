@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { GitFileStatus } from "./workspace-files.js";
@@ -565,6 +568,24 @@ function runGit(projectDir: string, args: string[]): GitOpResult {
   }
 }
 
+async function runGitAsync(projectDir: string, args: string[]): Promise<GitOpResult> {
+  try {
+    const { stdout, stderr } = await execFileP("git", ["-C", projectDir, ...args], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return { ok: true, stdout: stdout ?? "", stderr: stderr ?? "", exitCode: 0 };
+  } catch (error) {
+    const err = error as { code?: number; stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? err.message ?? "unknown git error",
+      exitCode: typeof err.code === "number" ? err.code : null,
+    };
+  }
+}
+
 export function restorePath(projectDir: string, path: string): GitOpResult {
   // `checkout HEAD -- <path>` restores both staged and working-tree copies,
   // matching IntelliJ's "Rollback" behaviour for a single file.
@@ -706,12 +727,20 @@ export function appendToGitignore(projectDir: string, path: string): GitOpResult
 }
 
 export function gitPush(projectDir: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): GitOpResult {
+  return runGit(projectDir, buildPushArgs(options));
+}
+
+export function gitPushAsync(projectDir: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult> {
+  return runGitAsync(projectDir, buildPushArgs(options));
+}
+
+function buildPushArgs(options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): string[] {
   const args = ["push"];
   if (options?.force) args.push("--force-with-lease");
   if (options?.setUpstream) args.push("--set-upstream");
   if (options?.remote) args.push(options.remote);
   if (options?.branch) args.push(options.branch);
-  return runGit(projectDir, args);
+  return args;
 }
 
 /**
@@ -775,11 +804,29 @@ export function gitCommitAll(projectDir: string, message: string, options?: { in
 }
 
 export function gitPull(projectDir: string, options?: { rebase?: boolean; remote?: string; branch?: string }): GitOpResult {
+  return runGit(projectDir, buildPullArgs(options));
+}
+
+export function gitPullAsync(projectDir: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult> {
+  return runGitAsync(projectDir, buildPullArgs(options));
+}
+
+function buildPullArgs(options?: { rebase?: boolean; remote?: string; branch?: string }): string[] {
   const args = ["pull"];
   if (options?.rebase) args.push("--rebase");
   if (options?.remote) args.push(options.remote);
   if (options?.branch) args.push(options.branch);
-  return runGit(projectDir, args);
+  return args;
+}
+
+/** Async git fetch — used by the periodic refs watcher and any other
+ *  caller that wants progress feedback in the bottom bar. */
+export function gitFetchAsync(projectDir: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult> {
+  const args = ["fetch"];
+  if (options?.all) args.push("--all");
+  if (options?.prune) args.push("--prune");
+  if (options?.remote) args.push(options.remote);
+  return runGitAsync(projectDir, args);
 }
 
 /**

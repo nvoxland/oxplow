@@ -326,6 +326,10 @@ export interface DesktopApi {
    *  on the runtime — adds happen via MCP tool calls; the UI only ever
    *  removes (the × button on each reminder line). */
   removeFollowup(threadId: string, id: string): Promise<void>;
+  /** Snapshot of currently-running and recently-finished background
+   *  tasks (git ops, code-quality scans, LSP startup, notes resync).
+   *  Subscribe to `background-task.changed` events and refetch. */
+  listBackgroundTasks(): Promise<import("./background-task-store.js").BackgroundTask[]>;
   listWaitPoints(threadId: string): Promise<WaitPoint[]>;
   createWaitPoint(streamId: string, threadId: string, note?: string | null): Promise<WaitPoint>;
   setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;

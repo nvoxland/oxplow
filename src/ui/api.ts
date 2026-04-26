@@ -783,6 +783,20 @@ export async function removeFollowup(threadId: string, id: string): Promise<void
   return desktopApi().removeFollowup(threadId, id);
 }
 
+export type BackgroundTask = import("../electron/background-task-store.js").BackgroundTask;
+
+export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
+  return desktopApi().listBackgroundTasks();
+}
+
+export function subscribeBackgroundTaskEvents(
+  onChange: () => void,
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type === "background-task.changed") onChange();
+  });
+}
+
 export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {
   return desktopApi().listAllRefs(streamId);
 }

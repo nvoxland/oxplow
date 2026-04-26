@@ -116,9 +116,17 @@ All git invocations go through `src/git/git.ts`. Notable:
   user approves the drafted message in chat.
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
-  `gitPush`, `gitPull`, `listFileCommits`, `listAllRefs`,
+  `listFileCommits`, `listAllRefs`,
   `readFileAtRef`, `listGitStatuses` — straight `execFileSync` wrappers
   exposed via IPC for UI consumption.
+- `gitPush` / `gitPull` ship sync wrappers plus async siblings
+  `gitPushAsync` / `gitPullAsync` (and a `gitFetchAsync` helper) backed
+  by `child_process.execFile` + `promisify`. The runtime IPC handlers
+  use the async variants so the main process stays responsive during
+  the network call, and they register a row with the
+  `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
+  shows progress. The sync wrappers stay around for code paths that
+  haven't been promoted yet (e.g. `gitCommitAll`'s internal calls).
 
 `isGitRepo` requires the project root *itself* to be the git toplevel —
 nested git repos and parent-dir lookups are explicitly refused (see
