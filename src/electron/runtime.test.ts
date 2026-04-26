@@ -677,6 +677,22 @@ describe("isWriteIntentTool", () => {
     expect(isWriteIntentTool("Bash", { command: "bun test src/foo.test.ts" })).toBe(false);
     expect(isWriteIntentTool("Bash", { command: "bunx tsc --noEmit" })).toBe(false);
   });
+  test("git commit / git push are NOT write-intent — the work being committed was already tracked", () => {
+    // Filing-enforcement Stop branch fires on write-intent. Counting a
+    // `git commit` as write-intent forces the agent to file a placeholder
+    // "Commit XYZ" item just to attribute the Bash invocation, which is
+    // bookkeeping noise for already-tracked work.
+    expect(isWriteIntentTool("Bash", { command: "git commit -m 'ship it'" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "git push origin main" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "git push" })).toBe(false);
+  });
+  test("other git mutating commands stay write-intent", () => {
+    // git rm / git checkout / git reset / git rebase still rewrite the
+    // working tree or refs in ways the Work panel SHOULD track.
+    expect(isWriteIntentTool("Bash", { command: "git rm src/foo.ts" })).toBe(true);
+    expect(isWriteIntentTool("Bash", { command: "git checkout -- src/foo.ts" })).toBe(true);
+    expect(isWriteIntentTool("Bash", { command: "git reset --hard origin/main" })).toBe(true);
+  });
   test("Bash with other/unknown command is write-intent (err toward auto-file)", () => {
     expect(isWriteIntentTool("Bash", { command: "npm install foo" })).toBe(true);
     expect(isWriteIntentTool("Bash", { command: "rm -rf dist" })).toBe(true);
@@ -697,6 +713,13 @@ describe("isReadIntentTool", () => {
     expect(isReadIntentTool("Bash", { command: "ls -la" })).toBe(true);
     expect(isReadIntentTool("Bash", { command: "git diff" })).toBe(true);
     expect(isReadIntentTool("Bash", { command: "bun test foo" })).toBe(true);
+  });
+  test("git commit / git push count as reads (activity but not write-intent)", () => {
+    // The "not write-intent" rule pulls them into the read column so a
+    // commit-only turn still counts as activity (no Q&A short-circuit)
+    // but doesn't trip filing-enforcement.
+    expect(isReadIntentTool("Bash", { command: "git commit -m 'foo'" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "git push origin main" })).toBe(true);
   });
   test("write-intent Bash doesn't count as a read", () => {
     expect(isReadIntentTool("Bash", { command: "rm -rf dist" })).toBe(false);

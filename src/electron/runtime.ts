@@ -3037,6 +3037,16 @@ const READONLY_BASH_LEADING: ReadonlySet<string> = new Set([
 ]);
 const READONLY_BASH_TWO_WORD: ReadonlySet<string> = new Set([
   "git log", "git diff", "git status", "git show", "git blame",
+  // `git commit` / `git push` modify .git but not project files, and the
+  // work being committed is already tracked by the work items that
+  // landed earlier — counting them as write-intent makes the filing-
+  // enforcement Stop branch fire on every "commit my changes" turn,
+  // forcing the agent to file a placeholder "Commit XYZ" item just to
+  // attribute the Bash invocation. They still count as activity (a
+  // turn with a commit isn't a Q&A turn) because `isReadIntentTool`'s
+  // "Bash that isn't write-intent counts as a read" rule pulls them
+  // into the read column.
+  "git commit", "git push",
   "bun test", "bunx tsc",
 ]);
 
