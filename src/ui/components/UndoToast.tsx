@@ -19,16 +19,20 @@ export function UndoToastStack() {
     () => store.getSnapshot(),
   );
   if (toasts.length === 0) return null;
+  // The most-recent toast also gets the stable `undo-toast` testid (and
+  // `undo-toast-undo` for its action button) so e2e probes can target
+  // "the toast that just appeared" without knowing the random toast id.
+  const latestId = toasts[toasts.length - 1]!.id;
   return (
     <div style={stackStyle} data-testid="undo-toast-stack">
       {toasts.map((toast) => (
-        <ToastRow key={toast.id} toast={toast} />
+        <ToastRow key={toast.id} toast={toast} isLatest={toast.id === latestId} />
       ))}
     </div>
   );
 }
 
-function ToastRow({ toast }: { toast: Toast }) {
+function ToastRow({ toast, isLatest }: { toast: Toast; isLatest: boolean }) {
   const store = getToastStore();
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -37,13 +41,17 @@ function ToastRow({ toast }: { toast: Toast }) {
     return () => clearTimeout(timer);
   }, [store, toast.id]);
   return (
-    <div style={toastStyle} data-testid={`undo-toast-${toast.id}`}>
+    <div
+      style={toastStyle}
+      data-testid={isLatest ? "undo-toast" : `undo-toast-${toast.id}`}
+      data-toast-id={toast.id}
+    >
       <span style={messageStyle}>{toast.message}</span>
       {toast.onUndo ? (
         <button
           type="button"
           onClick={() => store.undo(toast.id)}
-          data-testid={`undo-toast-action-${toast.id}`}
+          data-testid={isLatest ? "undo-toast-undo" : `undo-toast-action-${toast.id}`}
           style={actionStyle}
         >
           {toast.actionLabel}
@@ -53,7 +61,7 @@ function ToastRow({ toast }: { toast: Toast }) {
         type="button"
         onClick={() => store.dismiss(toast.id)}
         aria-label="Dismiss"
-        data-testid={`undo-toast-dismiss-${toast.id}`}
+        data-testid={isLatest ? "undo-toast-dismiss" : `undo-toast-dismiss-${toast.id}`}
         style={dismissStyle}
       >
         ×

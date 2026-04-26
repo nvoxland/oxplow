@@ -197,7 +197,19 @@ Things I keep forgetting. Read this before adding any UI.
     don't have to hover)
   - `undo-toast-stack`, `undo-toast-<id>`,
     `undo-toast-action-<id>`, `undo-toast-dismiss-<id>` on the
-    Undo toast bottom-stack
+    Undo toast bottom-stack. The most-recent toast also gets the
+    stable aliases `undo-toast`, `undo-toast-undo`, and
+    `undo-toast-dismiss` (no id suffix) so probes can target "the
+    toast that just appeared" without chasing the random toast id.
+  - `rail-page-<entry-id>` on every Pages-section button in
+    the left rail HUD (e.g. `rail-page-git-history`,
+    `rail-page-local-history`, `rail-page-code-quality`,
+    `rail-page-hook-events`). Click these to open the Page-wrapped
+    renderer as a center tab; assert via `page-<kind>` on the body
+    (e.g. `page-git-history`, `page-local-history`, etc.). The
+    `dock-tab-history` / `dock-tab-snapshots` / `dock-tab-code-quality`
+    / `dock-tab-hook-events` testids no longer exist — the bottom
+    drawer was removed in the IA cleanup.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
     `center-tab-close-<id>` on the × close button

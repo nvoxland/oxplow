@@ -1,9 +1,14 @@
 /**
- * Probe: delete a work item via right-click → context menu → Delete.
+ * Probe: delete a work item via the row kebab → menu → Delete.
+ *
+ * Right-click + ConfirmDialog were retired by the IA cleanup; per-row
+ * actions now live behind the always-visible kebab `⋯` button and
+ * destructive actions fire immediately + an Undo toast.
  *
  * Verifies:
- *   (a) right-click on a row opens the context menu
- *   (b) clicking Delete + accepting the confirm dialog removes the row
+ *   (a) clicking the row kebab opens the context menu
+ *   (b) clicking Delete fires immediately and removes the row (Undo
+ *       toast appears but we ignore it so the dismiss path is exercised)
  *   (c) removal persists across a reload
  */
 import { resolve, dirname } from "node:path";
@@ -44,42 +49,30 @@ async function main() {
 
     await window.screenshot({ path: resolve(outDir, "delete-ctx-01-before.png") });
 
-    // Dispatch a native `contextmenu` event on the row; React's onContextMenu
-    // handler is what opens the menu. Playwright's .click({button:"right"})
-    // also works, but the row has overlapping `<select>` elements for
-    // status/priority that can eat right-clicks — go through the row div
-    // directly.
-    const opened = await window.evaluate((t) => {
+    // Find the work-item id for the row we just created so we can target
+    // its always-visible kebab.
+    const itemId = await window.evaluate((t) => {
       const row = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="work-item-row-"]'))
         .find((el) => el.getAttribute("title")?.startsWith(t));
-      if (!row) return { ok: false, reason: "row not found" };
-      const rect = row.getBoundingClientRect();
-      const ev = new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + 20,
-        clientY: rect.top + 10,
-        button: 2,
-      });
-      row.dispatchEvent(ev);
-      return { ok: true };
+      if (!row) return null;
+      // testid format: work-item-row-<id>
+      return row.dataset.testid?.replace(/^work-item-row-/, "") ?? null;
     }, title);
-    if (!opened.ok) {
-      console.log("[probe] FAIL: could not dispatch contextmenu:", opened.reason);
+    if (!itemId) {
+      console.log("[probe] FAIL: row not found");
       process.exit(3);
     }
-    await window.waitForTimeout(150);
+
+    await window.getByTestId(`work-item-row-kebab-${itemId}`).click();
+    await window.waitForTimeout(200);
     await window.screenshot({ path: resolve(outDir, "delete-ctx-02-menu.png") });
 
     const deleteBtn = window.getByTestId("menu-item-workitem.delete");
     await deleteBtn.waitFor({ timeout: 2_000 });
     await deleteBtn.click();
-
-    // Confirm in the themed destructive dialog.
-    const confirmBtn = window.getByTestId("confirm-dialog-confirm");
-    await confirmBtn.waitFor({ timeout: 2_000 });
-    await confirmBtn.click();
-
+    // Delete now fires immediately and shows an Undo toast — no confirm
+    // dialog. We ignore the toast so the dismiss/auto-expire path covers
+    // the "stayed deleted" check.
     await window.waitForTimeout(600);
     await window.screenshot({ path: resolve(outDir, "delete-ctx-03-after.png") });
 
