@@ -82,10 +82,13 @@ The full IA redesign ships in phases (see plan
 - ✅ Phase 0 — Theme foundation (`.context/theming.md`).
 - ✅ Phase 1 — Tab store + page chrome + page refs (this doc).
 - ✅ Phase 2 — Rail HUD shell (this doc).
-- 🚧 Phase 3 — Page migration: existing panels become Page-wrapped
-  renderers driven by the tab store. The rail's `onOpenPage` currently
-  falls through to the legacy left/bottom dock activation for any kind
-  that doesn't yet have a page renderer.
+- ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
+  a Page-wrapped renderer in `src/ui/pages/`:
+  Start, Settings, Code quality, Local history, Git history, Files,
+  Notes, All work, Subsystem docs. Legacy left/bottom dock entries
+  (Plan, Project, Notes, Hook events, Git history, Local history,
+  Code quality) are still mounted alongside the pages so the app
+  stays usable mid-migration; phase 5/7 cleans them up.
 - 🚧 Phase 4 — New pages + backlinks indexer.
 - 🚧 Phase 5 — Web-style interactions sweep (kill modals + right-click
   menus): inline confirm + Undo toast, kebab popovers, slideovers,
@@ -93,10 +96,11 @@ The full IA redesign ships in phases (see plan
 - 🚧 Phase 6 — Selection action bar + drag-to-add-context polish.
 - 🚧 Phase 7 — Density + visual polish.
 
-Until phase 3 finishes, the existing left rail toolwindows (Work, Files,
-Notes, plus the new HUD tab) and bottom drawer (Hook events, Git
-history, Local history, Code quality) remain in place. The HUD tab is
-added alongside; it isn't yet the default.
+Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
+tabs. The existing left rail toolwindows (Work, Files, Notes, plus the
+HUD tab) and bottom drawer (Hook events, Git history, Local history,
+Code quality) remain in place during phases 4–6 so existing
+keyboard/menu paths keep working; phase 5/7 trims them.
 
 ## Per-thread active tab (today)
 

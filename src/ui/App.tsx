@@ -92,6 +92,12 @@ import type { TabRef } from "./tabs/tabState.js";
 import { StartPage } from "./pages/StartPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
+import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
+import { GitHistoryPage } from "./pages/GitHistoryPage.js";
+import { FilesPage } from "./pages/FilesPage.js";
+import { NotesIndexPage } from "./pages/NotesIndexPage.js";
+import { AllWorkPage } from "./pages/AllWorkPage.js";
+import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { indexRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
@@ -1457,7 +1463,13 @@ export function App() {
       }
       case "start":
       case "settings":
-      case "code-quality": {
+      case "code-quality":
+      case "local-history":
+      case "git-history":
+      case "files":
+      case "notes-index":
+      case "all-work":
+      case "subsystem-docs": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -1470,11 +1482,6 @@ export function App() {
         return;
       }
       default:
-        if (ref.kind === "all-work") setLeftDockActivate({ id: "plan", token: Date.now() });
-        else if (ref.kind === "files") setLeftDockActivate({ id: "project", token: Date.now() });
-        else if (ref.kind === "notes-index") setLeftDockActivate({ id: "notes", token: Date.now() });
-        else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
-        else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
         return;
     }
   }, [handleOpenFile, handleRequestEditWorkItem, selectedThreadId, setCenterActive]);
@@ -1613,6 +1620,100 @@ export function App() {
           closable: true,
           render: () => <CodeQualityPage stream={stream} onOpenFile={handleOpenFile} />,
         });
+      } else if (ref.kind === "local-history") {
+        tabs.push({
+          id: ref.id,
+          label: "Local history",
+          closable: true,
+          render: () => (
+            <LocalHistoryPage
+              stream={stream}
+              onOpenDiff={handleOpenDiff}
+              revealSnapshotId={snapshotsReveal}
+              onRequestEditWorkItem={handleRequestEditWorkItem}
+            />
+          ),
+        });
+      } else if (ref.kind === "git-history") {
+        tabs.push({
+          id: ref.id,
+          label: "Git history",
+          closable: true,
+          render: () => (
+            <GitHistoryPage stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />
+          ),
+        });
+      } else if (ref.kind === "files") {
+        tabs.push({
+          id: ref.id,
+          label: "Files",
+          closable: true,
+          render: () => (
+            <FilesPage
+              stream={stream}
+              gitEnabled={workspaceContext.gitEnabled}
+              selectedFilePath={selectedFilePath}
+              generatedDirs={generatedDirs}
+              onOpenFile={handleOpenFile}
+              onOpenDiff={handleOpenDiff}
+              onCreateFile={handleCreateFile}
+              onCreateDirectory={handleCreateDirectory}
+              onRenamePath={handleRenamePath}
+              onDeletePath={handleDeletePath}
+              onToggleGeneratedDir={handleToggleGeneratedDir}
+              commitRequest={commitFilesRequest}
+            />
+          ),
+        });
+      } else if (ref.kind === "notes-index") {
+        tabs.push({
+          id: ref.id,
+          label: "Notes",
+          closable: true,
+          render: () => (
+            <NotesIndexPage
+              stream={stream}
+              selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
+              onOpenNote={handleOpenNote}
+            />
+          ),
+        });
+      } else if (ref.kind === "all-work") {
+        tabs.push({
+          id: ref.id,
+          label: "All work",
+          closable: true,
+          render: () => (
+            <AllWorkPage
+              thread={selectedThread}
+              activeThreadId={currentThreadState.activeThreadId}
+              threadWork={selectedThreadWork}
+              agentStatus={agentThreadStatus}
+              backlog={backlogState}
+              onCreateWorkItem={handleCreateWorkItem}
+              onUpdateWorkItem={handleUpdateWorkItem}
+              onDeleteWorkItem={handleDeleteWorkItem}
+              onReorderWorkItems={handleReorderWorkItems}
+              onCreateBacklogItem={handleCreateBacklogItem}
+              onUpdateBacklogItem={handleUpdateBacklogItem}
+              onDeleteBacklogItem={handleDeleteBacklogItem}
+              onReorderBacklog={handleReorderBacklog}
+              onMoveItemToBacklog={handleMoveItemToBacklog}
+              openNewRequest={planNewRequest}
+              editRequest={planEditRequest}
+              onOpenFile={handleOpenFile}
+              onShowInHistory={handleShowSnapshotInHistory}
+              registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
+            />
+          ),
+        });
+      } else if (ref.kind === "subsystem-docs") {
+        tabs.push({
+          id: ref.id,
+          label: "Subsystem docs",
+          closable: true,
+          render: () => <SubsystemDocsPage stream={stream} onOpenPage={handleOpenPage} />,
+        });
       }
     }
     return tabs;
@@ -1634,6 +1735,18 @@ export function App() {
     threadPageTabs,
     handleOpenPage,
     closePageTab,
+    snapshotsReveal,
+    historyReveal,
+    workspaceContext.gitEnabled,
+    selectedFilePath,
+    generatedDirs,
+    commitFilesRequest,
+    centerActive,
+    currentThreadState.activeThreadId,
+    selectedThreadWork,
+    backlogState,
+    planNewRequest,
+    planEditRequest,
   ]);
 
   const leftToolWindows: ToolWindow[] = useMemo(() => [
