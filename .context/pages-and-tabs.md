@@ -27,7 +27,9 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
 | `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, body, collapsible Backlinks region. Reads only semantic CSS variables (skin via theme). |
 | `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, recent files, pages directory. Passive — never auto-opens tabs. |
-| `src/ui/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`. |
+| `src/ui/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
+| `src/ui/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits, worktrees row with per-row "Merge into current", recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
+| `src/ui/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
 | `src/ui/tabs/backlinksIndex.ts` | Pure cross-kind backlinks indexer. `computeBacklinks(target, ctx)` returns `BacklinkEntry[]` linking notes ↔ files ↔ work items ↔ findings. Inputs are plain data slices (notes, work items with `touched_files`, findings) — no IPC, no side effects, fully unit-tested. |
 | `src/ui/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
 | `src/ui/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
@@ -46,7 +48,8 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 ```
 "agent" | "file" | "diff" | "note" | "work-item" | "finding"
 | "all-work" | "notes-index" | "files" | "code-quality"
-| "local-history" | "git-history" | "hook-events" | "subsystem-docs"
+| "local-history" | "git-history" | "git-dashboard"
+| "uncommitted-changes" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
 | "new-stream" | "new-work-item"
 | "stream-settings" | "thread-settings"
@@ -66,6 +69,8 @@ versions of what today are left-rail or bottom-drawer panels.
 | work-item | `wi:<id>` | `wi:wi-142` |
 | finding | `finding:<id>` | `finding:f-7` |
 | `*-index` | the kind name | `code-quality`, `start`, `settings` |
+| git-dashboard | `git-dashboard` | `git-dashboard` |
+| uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
 | new-stream | `new-stream` | `new-stream` |
 | new-work-item | `new-work-item` | `new-work-item` |
@@ -86,9 +91,11 @@ have content:
 4. **Recent files** — top 6 file paths recently opened/touched in this
    thread (today derived from `currentSession.openOrder`; eventually
    should include agent-touched files).
-5. **Pages** — directory entries: Start, All work, Notes, Files, Code
-   quality, Local history, Git history, Subsystem docs, Settings, plus
-   Dashboards (Planning, Review, Quality).
+5. **Pages** — directory entries (computed in `computePagesDirectory`,
+   exposed for unit testing): Start, All work, Notes, Files, Code
+   quality, Local history, Git dashboard, Uncommitted, Git history,
+   Hook events, Subsystem docs, Settings, plus Dashboards (Planning,
+   Review, Quality).
 
 ## Migration status
 

@@ -2,7 +2,8 @@ import type { CSSProperties } from "react";
 import { useMemo } from "react";
 import type { AgentStatus, BacklogState, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { dashboardRef, indexRef, fileRef, workItemRef } from "../../tabs/pageRefs.js";
+import { fileRef, workItemRef } from "../../tabs/pageRefs.js";
+import { computePagesDirectory } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -309,13 +310,6 @@ function RecentFilesSection({
   );
 }
 
-interface PageEntry {
-  id: string;
-  label: string;
-  ref: TabRef;
-  badge?: number;
-}
-
 function PagesDirectory({
   onOpenPage,
   backlogReadyCount,
@@ -323,21 +317,7 @@ function PagesDirectory({
   onOpenPage(ref: TabRef): void;
   backlogReadyCount: number;
 }) {
-  const entries: PageEntry[] = [
-    { id: "start", label: "⌂  Start", ref: indexRef("start") },
-    { id: "all-work", label: "📋  All work", ref: indexRef("all-work"), badge: backlogReadyCount > 0 ? backlogReadyCount : undefined },
-    { id: "notes-index", label: "📒  Notes", ref: indexRef("notes-index") },
-    { id: "files", label: "📁  Files", ref: indexRef("files") },
-    { id: "code-quality", label: "⚠  Code quality", ref: indexRef("code-quality") },
-    { id: "local-history", label: "⏱  Local history", ref: indexRef("local-history") },
-    { id: "git-history", label: "🌿  Git history", ref: indexRef("git-history") },
-    { id: "hook-events", label: "🪝  Hook events", ref: indexRef("hook-events") },
-    { id: "subsystem-docs", label: "📑  Subsystem docs", ref: indexRef("subsystem-docs") },
-    { id: "settings", label: "⚙  Settings", ref: indexRef("settings") },
-    { id: "dashboard-planning", label: "📊  Planning", ref: dashboardRef("planning") },
-    { id: "dashboard-review", label: "📊  Review", ref: dashboardRef("review") },
-    { id: "dashboard-quality", label: "📊  Quality", ref: dashboardRef("quality") },
-  ];
+  const entries = computePagesDirectory({ backlogReadyCount });
   return (
     <>
       <SectionHeading>Pages</SectionHeading>

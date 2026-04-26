@@ -124,6 +124,46 @@ All git invocations go through `src/git/git.ts`. Notable:
   `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
   shows progress. The sync wrappers stay around for code paths that
   haven't been promoted yet (e.g. `gitCommitAll`'s internal calls).
+- `getAheadBehind(projectDir, base, head?)` — wraps
+  `git rev-list --left-right --count base...head` and returns
+  `{ ahead, behind }` relative to `base`. `head` defaults to `HEAD`.
+  Powers the Git Dashboard branch header and worktree rows.
+- `getCommitsAheadOf(projectDir, base, head, limit=50)` — wraps
+  `git log base..head` with the same parser used by `getGitLog`, for
+  pairwise commit-diff displays.
+- `listRecentRemoteBranches(projectDir, limit=20)` — wraps
+  `git for-each-ref --sort=-committerdate refs/remotes` and returns
+  `RemoteBranchEntry[]` (filters out `<remote>/HEAD`). Drives the
+  dashboard's recent-remote-branches card.
+- `gitPushCurrentTo` / `gitPushCurrentToAsync(projectDir, remote, branch)`
+  — runs `git push <remote> HEAD:refs/heads/<branch>`. Refspec push;
+  never touches any local working dir. The runtime IPC handler uses
+  the async variant + `BackgroundTaskStore`.
+- `gitPullRemoteIntoCurrent(projectDir, remote, branch)` — fetches
+  `<remote>/<branch>` then merges it into the current branch of
+  `projectDir`. Fetch failure short-circuits the merge.
+
+### Cross-worktree push: deliberately unsupported
+
+There is no helper that pushes the active stream's commits *into*
+another worktree's branch. Every available path mutates the other
+worktree:
+
+- `git push <other-worktree-path> <branch>` is refused by default for
+  the currently-checked-out branch (`receive.denyCurrentBranch`).
+- `git merge` / `git pull` inside the other worktree obviously
+  mutates its working dir.
+- `git update-ref` from our side advances the ref but leaves the
+  other worktree's HEAD/index/working tree divergent — it then
+  silently appears "dirty".
+
+The supported direction is the inverse: from the other stream, the
+Git Dashboard's worktrees card lists *our* branch with a
+"Merge into current" action so a human in that stream pulls our
+commits in safely. Tests pin this invariant: the gitMerge sibling-
+worktree test in `src/git/git.test.ts` asserts byte-equal HEAD,
+status, and file content on the sibling after merging *its* branch
+into the primary.
 
 `isGitRepo` requires the project root *itself* to be the git toplevel —
 nested git repos and parent-dir lookups are explicitly refused (see

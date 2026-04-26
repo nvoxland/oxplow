@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadWorkState, WorkItem } from "../../api.js";
-import { computeActiveItem, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
+import { computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
+import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
 function makeItem(partial: Partial<WorkItem> & { id: string; status: WorkItem["status"] }): WorkItem {
   const base: WorkItem = {
@@ -120,6 +121,28 @@ describe("computeUpNext", () => {
     const b = makeItem({ id: "wi-b", status: "in_progress", sort_index: 2 });
     const state = baseState([a, b]);
     expect(computeUpNext(state).map((i) => i.id)).toEqual(["wi-a"]);
+  });
+});
+
+describe("computePagesDirectory", () => {
+  test("includes Git dashboard and Uncommitted entries with the canonical refs", () => {
+    const entries = computePagesDirectory({ backlogReadyCount: 0 });
+    const dash = entries.find((e) => e.id === "git-dashboard");
+    const uncommitted = entries.find((e) => e.id === "uncommitted-changes");
+    expect(dash?.ref).toEqual(gitDashboardRef());
+    expect(uncommitted?.ref).toEqual(uncommittedChangesRef());
+  });
+
+  test("Git dashboard appears above Uncommitted, which appears above Git history", () => {
+    const entries = computePagesDirectory({ backlogReadyCount: 0 });
+    const ids = entries.map((e) => e.id);
+    expect(ids.indexOf("git-dashboard")).toBeLessThan(ids.indexOf("uncommitted-changes"));
+    expect(ids.indexOf("uncommitted-changes")).toBeLessThan(ids.indexOf("git-history"));
+  });
+
+  test("All-work badge surfaces only when backlogReadyCount is > 0", () => {
+    expect(computePagesDirectory({ backlogReadyCount: 0 }).find((e) => e.id === "all-work")?.badge).toBeUndefined();
+    expect(computePagesDirectory({ backlogReadyCount: 3 }).find((e) => e.id === "all-work")?.badge).toBe(3);
   });
 });
 

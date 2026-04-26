@@ -624,6 +624,150 @@ export function gitRebase(projectDir: string, onto: string): GitOpResult {
   return runGit(projectDir, ["rebase", onto]);
 }
 
+/**
+ * Counts of commits diverged between two refs. Wraps
+ * `git rev-list --left-right --count base...head` whose output is
+ * `<base-only>\t<head-only>` — interpreted here as `behind`/`ahead`
+ * relative to `base`. `head` defaults to `HEAD`. Returns zeros on any
+ * git error so the caller can render a header without branching.
+ */
+export function getAheadBehind(projectDir: string, base: string, head?: string): { ahead: number; behind: number } {
+  if (!isGitRepo(projectDir)) return { ahead: 0, behind: 0 };
+  const target = head ?? "HEAD";
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", projectDir, "rev-list", "--left-right", "--count", `${base}...${target}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const [behindRaw, aheadRaw] = out.split(/\s+/);
+    const behind = Number.parseInt(behindRaw ?? "0", 10);
+    const ahead = Number.parseInt(aheadRaw ?? "0", 10);
+    return {
+      ahead: Number.isFinite(ahead) ? ahead : 0,
+      behind: Number.isFinite(behind) ? behind : 0,
+    };
+  } catch {
+    return { ahead: 0, behind: 0 };
+  }
+}
+
+/**
+ * Commits in `head` not in `base`, newest first — `git log base..head`.
+ * Returns the same `GitLogCommit` shape as `getGitLog` so callers can
+ * reuse rendering. Empty array on any failure.
+ */
+export function getCommitsAheadOf(projectDir: string, base: string, head: string, limit = 50): GitLogCommit[] {
+  if (!isGitRepo(projectDir)) return [];
+  const cap = Math.max(1, Math.min(limit, 1000));
+  const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join(UNIT) + RECORD;
+  let raw: string;
+  try {
+    raw = git(projectDir, ["log", `--max-count=${cap}`, `--pretty=format:${format}`, `${base}..${head}`]);
+  } catch {
+    return [];
+  }
+  const commits: GitLogCommit[] = [];
+  for (const record of raw.split(RECORD)) {
+    const line = record.replace(/^\n/, "");
+    if (!line) continue;
+    const [sha, parentsRaw, authorName, authorEmail, authorDate, subject, refsRaw] = line.split(UNIT);
+    if (!sha) continue;
+    const parents = (parentsRaw ?? "").split(/\s+/).filter(Boolean).map((p) => ({ sha: p }));
+    const refs = (refsRaw ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+    commits.push({
+      sha,
+      parents,
+      commit: {
+        author: { name: authorName ?? "", email: authorEmail ?? "", date: authorDate ?? "" },
+        message: subject ?? "",
+      },
+      refs,
+    });
+  }
+  return commits;
+}
+
+export interface RemoteBranchEntry {
+  shortName: string;
+  remote: string;
+  branch: string;
+  lastCommitSha: string;
+  lastCommitSubject: string;
+  lastCommitDate: string;
+  lastCommitAuthor: string;
+}
+
+/**
+ * Remote-tracking branches sorted by committer date (newest first).
+ * Excludes `<remote>/HEAD` symbolic refs. Used by the Git Dashboard's
+ * "recent remote branches" card.
+ */
+export function listRecentRemoteBranches(projectDir: string, limit = 20): RemoteBranchEntry[] {
+  if (!isGitRepo(projectDir)) return [];
+  const cap = Math.max(1, Math.min(limit, 200));
+  const format = ["%(refname:short)", "%(objectname)", "%(committerdate:iso-strict)", "%(authorname)", "%(subject)"].join(UNIT);
+  let raw: string;
+  try {
+    raw = git(projectDir, [
+      "for-each-ref",
+      "--sort=-committerdate",
+      `--count=${cap + 5}`, // pad so we can drop HEAD aliases without short-changing the cap
+      `--format=${format}`,
+      "refs/remotes",
+    ]);
+  } catch {
+    return [];
+  }
+  const out: RemoteBranchEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    const [shortName, sha, date, author, subject] = line.split(UNIT);
+    if (!shortName || !sha) continue;
+    if (shortName.endsWith("/HEAD")) continue;
+    const slash = shortName.indexOf("/");
+    if (slash <= 0) continue;
+    const remote = shortName.slice(0, slash);
+    const branch = shortName.slice(slash + 1);
+    out.push({
+      shortName,
+      remote,
+      branch,
+      lastCommitSha: sha,
+      lastCommitSubject: subject ?? "",
+      lastCommitDate: date ?? "",
+      lastCommitAuthor: author ?? "",
+    });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/**
+ * Push the current HEAD into `<remote>/<branch>` via the refspec
+ * `HEAD:<branch>` — does not touch any local working dir. Sync variant
+ * suitable for tests + small repos; UI should prefer
+ * `gitPushCurrentToAsync` so the BackgroundTaskStore can show progress.
+ */
+export function gitPushCurrentTo(projectDir: string, remote: string, branch: string): GitOpResult {
+  return runGit(projectDir, ["push", remote, `HEAD:refs/heads/${branch}`]);
+}
+
+export function gitPushCurrentToAsync(projectDir: string, remote: string, branch: string): Promise<GitOpResult> {
+  return runGitAsync(projectDir, ["push", remote, `HEAD:refs/heads/${branch}`]);
+}
+
+/**
+ * Fetch `<remote>/<branch>` and merge it into the current branch of
+ * `projectDir`. Both steps run sequentially in the same working dir;
+ * fetch failure short-circuits before the merge runs.
+ */
+export async function gitPullRemoteIntoCurrent(projectDir: string, remote: string, branch: string): Promise<GitOpResult> {
+  const fetched = await runGitAsync(projectDir, ["fetch", remote, branch]);
+  if (!fetched.ok) return fetched;
+  return runGit(projectDir, ["merge", `${remote}/${branch}`]);
+}
+
 export interface GitWorktreeEntry {
   path: string;
   branch: string | null;

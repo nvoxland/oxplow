@@ -199,6 +199,7 @@ export interface DesktopApi {
     | { title: string; summary?: string; source: "worktree"; worktreePath: string },
   ): Promise<Stream>;
   listAdoptableWorktrees(): Promise<import("../git/git.js").GitWorktreeEntry[]>;
+  listSiblingWorktrees(streamId: string): Promise<import("../git/git.js").GitWorktreeEntry[]>;
   checkoutStreamBranch(streamId: string, branch: string): Promise<Stream>;
   getThreadState(streamId: string): Promise<ThreadState>;
   createThread(streamId: string, title: string): Promise<ThreadState>;
@@ -284,6 +285,11 @@ export interface DesktopApi {
   gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
   gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  getAheadBehind(streamId: string, base: string, head?: string): Promise<{ ahead: number; behind: number }>;
+  getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): Promise<GitLogCommit[]>;
+  listRecentRemoteBranches(streamId: string, limit?: number): Promise<import("../git/git.js").RemoteBranchEntry[]>;
+  gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
+  gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;

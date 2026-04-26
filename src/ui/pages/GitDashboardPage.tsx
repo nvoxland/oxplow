@@ -1,0 +1,631 @@
+import { useCallback, useEffect, useState } from "react";
+import type { GitLogCommit, GitOpResult, GitWorktreeEntry, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
+import {
+  getAheadBehind,
+  getCommitsAheadOf,
+  getGitLog,
+  gitMergeInto,
+  gitPullRemoteIntoCurrent,
+  gitPush,
+  gitPushCurrentTo,
+  listRecentRemoteBranches,
+  listSiblingWorktrees,
+  listWorkspaceFiles,
+  subscribeGitRefsEvents,
+  subscribeWorkspaceEvents,
+} from "../api.js";
+import { Page } from "../tabs/Page.js";
+import type { TabRef } from "../tabs/tabState.js";
+import { indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+
+export interface GitDashboardPageProps {
+  stream: Stream | null;
+  onOpenPage(ref: TabRef): void;
+}
+
+interface DashboardData {
+  branchHeader: {
+    branch: string | null;
+    headSha: string | null;
+    headSubject: string | null;
+    headDate: string | null;
+    upstream: string | null;
+    aheadUpstream: number;
+    behindUpstream: number;
+  };
+  uncommitted: WorkspaceStatusSummary | null;
+  recentCommits: GitLogCommit[];
+  worktrees: WorktreeRow[];
+  remoteBranches: RemoteBranchEntry[];
+}
+
+interface WorktreeRow {
+  worktree: GitWorktreeEntry;
+  ahead: number;
+  behind: number;
+}
+
+const RECENT_LIMIT = 10;
+const WORKTREE_BASE = "main";
+
+export function GitDashboardPage({ stream, onOpenPage }: GitDashboardPageProps) {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const streamId = stream?.id ?? null;
+
+  const refresh = useCallback(async () => {
+    if (!streamId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      setError(null);
+      const [filesResult, log, worktrees, remoteBranches] = await Promise.all([
+        listWorkspaceFiles(streamId),
+        getGitLog(streamId, { limit: RECENT_LIMIT }),
+        listSiblingWorktrees(streamId),
+        listRecentRemoteBranches(streamId, 20),
+      ]);
+      const branch = stream?.branch ?? log.currentBranch ?? null;
+      const headCommit = log.commits[0] ?? null;
+      // Find an upstream ref via the remote branches list (best-effort).
+      const upstreamRef = branch
+        ? remoteBranches.find((r) => r.branch === branch)?.shortName ?? null
+        : null;
+      let aheadUpstream = 0;
+      let behindUpstream = 0;
+      if (upstreamRef) {
+        const counts = await getAheadBehind(streamId, upstreamRef);
+        aheadUpstream = counts.ahead;
+        behindUpstream = counts.behind;
+      }
+      // Worktree ahead/behind vs main — when worktrees are exposed, fan out.
+      const worktreeRows: WorktreeRow[] = await Promise.all(
+        worktrees.map(async (wt) => {
+          if (!wt.branch) return { worktree: wt, ahead: 0, behind: 0 };
+          const counts = await getAheadBehind(streamId, WORKTREE_BASE, wt.branch);
+          return { worktree: wt, ahead: counts.ahead, behind: counts.behind };
+        }),
+      );
+      setData({
+        branchHeader: {
+          branch,
+          headSha: headCommit?.sha ?? null,
+          headSubject: headCommit?.commit.message ?? null,
+          headDate: headCommit?.commit.author.date ?? null,
+          upstream: upstreamRef,
+          aheadUpstream,
+          behindUpstream,
+        },
+        uncommitted: filesResult.summary,
+        recentCommits: log.commits,
+        worktrees: worktreeRows,
+        remoteBranches,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [streamId, stream?.branch]);
+
+  useEffect(() => {
+    setLoading(true);
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!streamId) return;
+    const unsubGit = subscribeGitRefsEvents(streamId, () => void refresh());
+    const unsubWorkspace = subscribeWorkspaceEvents(streamId, () => void refresh());
+    return () => {
+      unsubGit();
+      unsubWorkspace();
+    };
+  }, [streamId, refresh]);
+
+  const runConfirmed = useCallback(
+    async (label: string, command: string, action: () => Promise<GitOpResult>) => {
+      const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
+      if (!ok) return;
+      setPendingAction(label);
+      try {
+        const result = await action();
+        if (!result.ok) {
+          window.alert(`${label} failed:\n${result.stderr || "git error"}`);
+        } else {
+          await refresh();
+        }
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [refresh],
+  );
+
+  if (!streamId) {
+    return (
+      <Page testId="page-git-dashboard" title="Git dashboard" kind="git">
+        <div style={muted}>No stream selected.</div>
+      </Page>
+    );
+  }
+
+  return (
+    <Page testId="page-git-dashboard" title="Git dashboard" kind="git">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
+        {error ? <div style={errorBanner}>{error}</div> : null}
+        {loading && !data ? <div style={muted}>Loading…</div> : null}
+
+        {data ? (
+          <>
+            <BranchHeaderCard
+              data={data.branchHeader}
+              onPushUpstream={() =>
+                runConfirmed(
+                  "Push to upstream",
+                  `git push${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
+                  () => gitPush(streamId),
+                )
+              }
+              pending={pendingAction === "Push to upstream"}
+            />
+
+            <UncommittedMiniCard
+              summary={data.uncommitted}
+              onView={() => onOpenPage(uncommittedChangesRef())}
+            />
+
+            <RecentCommitsCard
+              commits={data.recentCommits}
+              onViewFullHistory={() => onOpenPage(indexRef("git-history"))}
+            />
+
+            <WorktreesCard
+              streamId={streamId}
+              rows={data.worktrees}
+              onMerge={(branch) =>
+                runConfirmed(
+                  `Merge ${branch} into current`,
+                  `git merge ${branch}`,
+                  () => gitMergeInto(streamId, branch),
+                )
+              }
+              pendingAction={pendingAction}
+            />
+
+            <RemoteBranchesCard
+              rows={data.remoteBranches}
+              onPull={(remote, branch) =>
+                runConfirmed(
+                  `Pull ${remote}/${branch} into current`,
+                  `git fetch ${remote} ${branch} && git merge ${remote}/${branch}`,
+                  () => gitPullRemoteIntoCurrent(streamId, remote, branch),
+                )
+              }
+              onPush={(remote, branch) =>
+                runConfirmed(
+                  `Push current → ${remote}/${branch}`,
+                  `git push ${remote} HEAD:refs/heads/${branch}`,
+                  () => gitPushCurrentTo(streamId, remote, branch),
+                )
+              }
+              pendingAction={pendingAction}
+            />
+          </>
+        ) : null}
+      </div>
+    </Page>
+  );
+}
+
+function BranchHeaderCard({
+  data,
+  onPushUpstream,
+  pending,
+}: {
+  data: DashboardData["branchHeader"];
+  onPushUpstream(): void;
+  pending: boolean;
+}) {
+  return (
+    <Card testId="git-dashboard-branch-header" title="Branch">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>{data.branch ?? "(detached)"}</div>
+        {data.upstream ? (
+          <div style={subtle}>
+            tracks <code>{data.upstream}</code> · ahead {data.aheadUpstream}, behind{" "}
+            {data.behindUpstream}
+          </div>
+        ) : (
+          <div style={subtle}>no upstream tracking branch</div>
+        )}
+        {data.headSha ? (
+          <div style={subtle}>
+            HEAD <code>{data.headSha.slice(0, 7)}</code> {data.headSubject}
+            {data.headDate ? ` · ${formatDate(data.headDate)}` : ""}
+          </div>
+        ) : null}
+        <div style={{ marginTop: 6 }}>
+          <button
+            type="button"
+            data-testid="git-dashboard-push-upstream"
+            onClick={onPushUpstream}
+            disabled={pending}
+            style={primaryButton}
+          >
+            {pending ? "Pushing…" : "Push to upstream"}
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function UncommittedMiniCard({
+  summary,
+  onView,
+}: {
+  summary: WorkspaceStatusSummary | null;
+  onView(): void;
+}) {
+  const total = summary?.total ?? 0;
+  return (
+    <Card testId="git-dashboard-uncommitted-mini" title="Uncommitted">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>{total === 0 ? "No uncommitted files" : `${total} uncommitted file${total === 1 ? "" : "s"}`}</div>
+        <button
+          type="button"
+          data-testid="git-dashboard-view-uncommitted"
+          onClick={onView}
+          style={linkButton}
+        >
+          View uncommitted →
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function RecentCommitsCard({
+  commits,
+  onViewFullHistory,
+}: {
+  commits: GitLogCommit[];
+  onViewFullHistory(): void;
+}) {
+  return (
+    <Card
+      testId="git-dashboard-recent-commits"
+      title="Recent commits"
+      action={
+        <button
+          type="button"
+          data-testid="git-dashboard-view-full-history"
+          onClick={onViewFullHistory}
+          style={linkButton}
+        >
+          View full history →
+        </button>
+      }
+    >
+      {commits.length === 0 ? (
+        <div style={muted}>No commits yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {commits.map((c) => (
+            <div key={c.sha} style={{ display: "flex", gap: 8, fontSize: 13 }}>
+              <code style={{ width: 64, color: "var(--text-muted)" }}>{c.sha.slice(0, 7)}</code>
+              <div style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.commit.message}
+              </div>
+              <div style={subtle}>{c.commit.author.name}</div>
+              <div style={subtle}>{formatDate(c.commit.author.date)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function WorktreesCard({
+  streamId,
+  rows,
+  onMerge,
+  pendingAction,
+}: {
+  streamId: string;
+  rows: WorktreeRow[];
+  onMerge(branch: string): void;
+  pendingAction: string | null;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  return (
+    <Card testId="git-dashboard-worktrees" title="Worktrees">
+      {rows.length === 0 ? (
+        <div style={muted}>No sibling worktrees.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {rows.map((row) => {
+            const branch = row.worktree.branch ?? "(detached)";
+            const mergeLabel = `Merge ${branch} into current`;
+            const isOpen = expanded === row.worktree.path;
+            return (
+              <div
+                key={row.worktree.path}
+                data-testid="git-dashboard-worktree-row"
+                style={{ borderBottom: "1px solid var(--border-subtle)" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: "6px 0",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(isOpen ? null : row.worktree.path)}
+                    style={{
+                      ...linkButton,
+                      width: 14,
+                      color: "var(--text-muted)",
+                    }}
+                    aria-label={isOpen ? "Hide pairwise diff" : "Show pairwise diff"}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{branch}</div>
+                    <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {row.worktree.path}
+                    </div>
+                  </div>
+                  <div style={subtle}>
+                    ↑{row.ahead} ↓{row.behind}
+                  </div>
+                  {row.worktree.branch ? (
+                    <button
+                      type="button"
+                      onClick={() => onMerge(row.worktree.branch!)}
+                      disabled={pendingAction === mergeLabel}
+                      style={smallButton}
+                    >
+                      {pendingAction === mergeLabel ? "Merging…" : "Merge into current"}
+                    </button>
+                  ) : null}
+                </div>
+                {isOpen && row.worktree.branch ? (
+                  <PairwiseDiffPane
+                    streamId={streamId}
+                    rows={rows}
+                    selfBranch={row.worktree.branch}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PairwiseDiffPane({
+  streamId,
+  rows,
+  selfBranch,
+}: {
+  streamId: string;
+  rows: WorktreeRow[];
+  selfBranch: string;
+}) {
+  const otherBranches = rows
+    .map((r) => r.worktree.branch)
+    .filter((b): b is string => !!b && b !== selfBranch);
+  const [target, setTarget] = useState<string>(otherBranches[0] ?? "");
+  const [commits, setCommits] = useState<GitLogCommit[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!target) {
+      setCommits([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    void getCommitsAheadOf(streamId, target, selfBranch, 20)
+      .then((result) => {
+        if (!cancelled) setCommits(result);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [streamId, selfBranch, target]);
+
+  if (otherBranches.length === 0) {
+    return <div style={{ ...subtle, padding: "4px 0 8px 26px" }}>No other worktrees to compare with.</div>;
+  }
+  return (
+    <div
+      data-testid="git-dashboard-worktree-pairwise"
+      style={{ padding: "4px 0 8px 26px", display: "flex", flexDirection: "column", gap: 6 }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span style={subtle}>Commits in <code>{selfBranch}</code> not in</span>
+        <select
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          style={{ fontSize: 12 }}
+        >
+          {otherBranches.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+      </div>
+      {loading ? (
+        <div style={subtle}>Loading…</div>
+      ) : commits.length === 0 ? (
+        <div style={subtle}>No commits ahead.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {commits.map((c) => (
+            <div key={c.sha} style={{ display: "flex", gap: 8, fontSize: 12 }}>
+              <code style={{ color: "var(--text-muted)" }}>{c.sha.slice(0, 7)}</code>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.commit.message}
+              </span>
+              <span style={subtle}>{c.commit.author.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RemoteBranchesCard({
+  rows,
+  onPull,
+  onPush,
+  pendingAction,
+}: {
+  rows: RemoteBranchEntry[];
+  onPull(remote: string, branch: string): void;
+  onPush(remote: string, branch: string): void;
+  pendingAction: string | null;
+}) {
+  return (
+    <Card testId="git-dashboard-remote-branches" title="Recent remote branches">
+      {rows.length === 0 ? (
+        <div style={muted}>No remote branches.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {rows.map((row) => {
+            const pullLabel = `Pull ${row.shortName} into current`;
+            const pushLabel = `Push current → ${row.shortName}`;
+            return (
+              <div
+                key={row.shortName}
+                data-testid="git-dashboard-remote-row"
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500 }}>{row.shortName}</div>
+                  <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {row.lastCommitSubject} · {row.lastCommitAuthor} · {formatDate(row.lastCommitDate)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onPull(row.remote, row.branch)}
+                  disabled={pendingAction === pullLabel}
+                  style={smallButton}
+                >
+                  {pendingAction === pullLabel ? "Pulling…" : "Pull into current"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPush(row.remote, row.branch)}
+                  disabled={pendingAction === pushLabel}
+                  style={smallButton}
+                >
+                  {pendingAction === pushLabel ? "Pushing…" : "Push current →"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Card({
+  title,
+  children,
+  testId,
+  action,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testId?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <section
+      data-testid={testId}
+      style={{
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: 12,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
+const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const errorBanner: React.CSSProperties = {
+  padding: 8,
+  background: "var(--surface-warning, #fef3c7)",
+  color: "var(--text-warning, #92400e)",
+  borderRadius: 4,
+};
+const primaryButton: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "var(--surface-action, #2563eb)",
+  color: "var(--text-inverse, white)",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
+};
+const smallButton: React.CSSProperties = {
+  padding: "2px 8px",
+  background: "var(--surface-tab-inactive)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 4,
+  fontSize: 12,
+  cursor: "pointer",
+};
+const linkButton: React.CSSProperties = {
+  padding: 0,
+  background: "transparent",
+  border: "none",
+  color: "var(--text-link, #2563eb)",
+  fontSize: 12,
+  cursor: "pointer",
+};
+

@@ -220,6 +220,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   handle("oxplow:createStream", (_event, input) => currentRuntime.createStream(input));
   handle("oxplow:listAdoptableWorktrees", () => currentRuntime.listAdoptableWorktrees());
+  handle("oxplow:listSiblingWorktrees", (_event, streamId: string) => currentRuntime.listSiblingWorktrees(streamId));
   handle("oxplow:checkoutStreamBranch", (_event, streamId: string, branch: string) =>
     currentRuntime.checkoutStreamBranch(streamId, branch),
   );
@@ -256,6 +257,11 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
   handle("oxplow:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
   handle("oxplow:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
+  handle("oxplow:getAheadBehind", (_event, streamId: string, base: string, head?: string) => currentRuntime.getAheadBehind(streamId, base, head));
+  handle("oxplow:getCommitsAheadOf", (_event, streamId: string, base: string, head: string, limit?: number) => currentRuntime.getCommitsAheadOf(streamId, base, head, limit));
+  handle("oxplow:listRecentRemoteBranches", (_event, streamId: string, limit?: number) => currentRuntime.listRecentRemoteBranches(streamId, limit));
+  handle("oxplow:gitPushCurrentTo", (_event, streamId: string, remote: string, branch: string) => currentRuntime.gitPushCurrentTo(streamId, remote, branch));
+  handle("oxplow:gitPullRemoteIntoCurrent", (_event, streamId: string, remote: string, branch: string) => currentRuntime.gitPullRemoteIntoCurrent(streamId, remote, branch));
   handle("oxplow:gitCommitAll", (_event, streamId: string, message: string, options) => currentRuntime.gitCommitAll(streamId, message, options));
   handle("oxplow:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
   handle("oxplow:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));

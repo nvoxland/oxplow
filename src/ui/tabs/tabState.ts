@@ -22,6 +22,8 @@ export type PageKind =
   | "code-quality"
   | "local-history"
   | "git-history"
+  | "git-dashboard"
+  | "uncommitted-changes"
   | "hook-events"
   | "subsystem-docs"
   | "settings"

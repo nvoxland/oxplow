@@ -38,7 +38,13 @@ import {
   gitMerge,
   gitRebase,
   listExistingWorktrees,
+  getAheadBehind,
+  getCommitsAheadOf,
+  listRecentRemoteBranches,
+  gitPushCurrentToAsync,
+  gitPullRemoteIntoCurrent,
   type GitWorktreeEntry,
+  type RemoteBranchEntry,
   type BranchChanges,
   type GroupedGitRefs,
   type ChangeScopes,
@@ -883,6 +889,20 @@ export class ElectronRuntime {
    * streams. Powers the new-stream "adopt existing worktree" flow. The main
    * worktree (the project itself) is excluded since it's the primary stream.
    */
+  /**
+   * All git worktrees of this repo except the one backing `streamId`.
+   * Used by the Git Dashboard's worktrees card so the user can see their
+   * sibling streams' branches and merge from any of them. Unlike
+   * `listAdoptableWorktrees`, this returns *every* sibling — including
+   * worktrees already tracked as oxplow streams — because the dashboard
+   * is a navigation/comparison surface, not the adoption flow.
+   */
+  listSiblingWorktrees(streamId: string): GitWorktreeEntry[] {
+    const stream = this.resolveStream(streamId);
+    const selfPath = stream.worktree_path;
+    return listExistingWorktrees(this.projectDir).filter((wt) => wt.path !== selfPath);
+  }
+
   listAdoptableWorktrees(): GitWorktreeEntry[] {
     const known = new Set(
       this.store.list().map((s) => s.worktree_path).filter((p): p is string => !!p),
@@ -983,6 +1003,57 @@ export class ElectronRuntime {
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
     const stream = this.resolveStream(streamId);
     return gitCommitAll(stream.worktree_path, message, options);
+  }
+
+  getAheadBehind(streamId: string, base: string, head?: string): { ahead: number; behind: number } {
+    const stream = this.resolveStream(streamId);
+    return getAheadBehind(stream.worktree_path, base, head);
+  }
+
+  getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): GitLogCommit[] {
+    const stream = this.resolveStream(streamId);
+    return getCommitsAheadOf(stream.worktree_path, base, head, limit);
+  }
+
+  listRecentRemoteBranches(streamId: string, limit?: number): RemoteBranchEntry[] {
+    const stream = this.resolveStream(streamId);
+    return listRecentRemoteBranches(stream.worktree_path, limit);
+  }
+
+  async gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+    const stream = this.resolveStream(streamId);
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pushing HEAD to ${remote}/${branch}…`,
+    });
+    try {
+      const result = await gitPushCurrentToAsync(stream.worktree_path, remote, branch);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
+  }
+
+  async gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+    const stream = this.resolveStream(streamId);
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pulling ${remote}/${branch} into current…`,
+    });
+    try {
+      const result = await gitPullRemoteIntoCurrent(stream.worktree_path, remote, branch);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {

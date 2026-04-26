@@ -1,7 +1,7 @@
 import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
 export type { OxplowEvent } from "../electron/ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry } from "../git/git.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "../git/git.js";
 
 export interface Stream {
   id: string;
@@ -326,6 +326,10 @@ export async function listAdoptableWorktrees(): Promise<import("../git/git.js").
   return desktopApi().listAdoptableWorktrees();
 }
 
+export async function listSiblingWorktrees(streamId: string): Promise<import("../git/git.js").GitWorktreeEntry[]> {
+  return desktopApi().listSiblingWorktrees(streamId);
+}
+
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
   return desktopApi().checkoutStreamBranch(streamId, branch);
 }
@@ -548,6 +552,46 @@ export async function gitCommitAll(
   options?: { includeUntracked?: boolean },
 ): Promise<import("../git/git.js").GitOpResult & { sha?: string }> {
   return desktopApi().gitCommitAll(streamId, message, options);
+}
+
+export async function getAheadBehind(
+  streamId: string,
+  base: string,
+  head?: string,
+): Promise<{ ahead: number; behind: number }> {
+  return desktopApi().getAheadBehind(streamId, base, head);
+}
+
+export async function getCommitsAheadOf(
+  streamId: string,
+  base: string,
+  head: string,
+  limit?: number,
+): Promise<import("../git/git.js").GitLogCommit[]> {
+  return desktopApi().getCommitsAheadOf(streamId, base, head, limit);
+}
+
+export async function listRecentRemoteBranches(
+  streamId: string,
+  limit?: number,
+): Promise<import("../git/git.js").RemoteBranchEntry[]> {
+  return desktopApi().listRecentRemoteBranches(streamId, limit);
+}
+
+export async function gitPushCurrentTo(
+  streamId: string,
+  remote: string,
+  branch: string,
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPushCurrentTo(streamId, remote, branch);
+}
+
+export async function gitPullRemoteIntoCurrent(
+  streamId: string,
+  remote: string,
+  branch: string,
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPullRemoteIntoCurrent(streamId, remote, branch);
 }
 
 export async function listFileCommits(

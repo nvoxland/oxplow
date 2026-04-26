@@ -68,6 +68,36 @@ union. To add an event:
    block.
 4. Consume in the UI via `subscribeOxplowEvents((e) => { if (e.type === ...) ... })`.
 
+## Git dashboard / cross-worktree IPC
+
+The Git Dashboard page added five renderer-callable methods to
+`DesktopApi`. Each delegates to a helper in `src/git/git.ts` after
+resolving the stream's `worktree_path` (the same pattern as
+`getGitLog`):
+
+- `getAheadBehind(streamId, base, head?)` — `{ ahead, behind }` for
+  the branch header / worktree rows.
+- `getCommitsAheadOf(streamId, base, head, limit?)` —
+  `GitLogCommit[]` for pairwise commit-diff displays.
+- `listRecentRemoteBranches(streamId, limit?)` —
+  `RemoteBranchEntry[]` sorted by committer date.
+- `gitPushCurrentTo(streamId, remote, branch)` — refspec push of
+  HEAD into `<remote>/<branch>`. Wraps the async git helper and opens
+  a `BackgroundTaskStore` row.
+- `gitPullRemoteIntoCurrent(streamId, remote, branch)` — fetch +
+  merge, also background-task wrapped.
+- `listSiblingWorktrees(streamId)` — every git worktree of this repo
+  except the one backing `streamId`. Used by the dashboard's
+  worktrees card. Distinct from `listAdoptableWorktrees`, which
+  returns only worktrees NOT yet tracked as oxplow streams (used by
+  the new-stream adoption flow).
+
+The cross-worktree merge action reuses the existing `gitMergeInto`
+IPC method; no new method is needed because merging only ever runs in
+the *current* stream's working dir. See
+[git-integration.md](./git-integration.md) for the rationale on why
+no symmetric "push commits into another worktree" IPC exists.
+
 For commonly-filtered events there are scoped helpers in `src/ui/api.ts`:
 
 - `subscribeWorkspaceEvents(streamId, fn)` — filters

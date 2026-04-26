@@ -47,6 +47,16 @@ export function hookEventsRef(): TabRef {
   return indexRef("hook-events");
 }
 
+/** Git Dashboard — committed-history rollup page. */
+export function gitDashboardRef(): TabRef {
+  return { id: "git-dashboard", kind: "git-dashboard", payload: null };
+}
+
+/** Uncommitted Changes — stats + tree view of working-tree changes. */
+export function uncommittedChangesRef(): TabRef {
+  return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
+}
+
 export type DashboardKind = "planning" | "review" | "quality";
 
 export function dashboardRef(variant: DashboardKind): TabRef {

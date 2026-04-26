@@ -84,6 +84,8 @@ import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
+import { GitDashboardPage } from "./pages/GitDashboardPage.js";
+import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { NotesIndexPage } from "./pages/NotesIndexPage.js";
@@ -1473,6 +1475,8 @@ export function App() {
       case "code-quality":
       case "local-history":
       case "git-history":
+      case "git-dashboard":
+      case "uncommitted-changes":
       case "hook-events":
       case "files":
       case "notes-index":
@@ -1666,6 +1670,28 @@ export function App() {
           closable: true,
           render: () => (
             <GitHistoryPage stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />
+          ),
+        });
+      } else if (ref.kind === "git-dashboard") {
+        tabs.push({
+          id: ref.id,
+          label: "Git dashboard",
+          closable: true,
+          render: () => (
+            <GitDashboardPage stream={stream} onOpenPage={handleOpenPage} />
+          ),
+        });
+      } else if (ref.kind === "uncommitted-changes") {
+        tabs.push({
+          id: ref.id,
+          label: "Uncommitted",
+          closable: true,
+          render: () => (
+            <UncommittedChangesPage
+              stream={stream}
+              onOpenPage={handleOpenPage}
+              onOpenFile={handleOpenFile}
+            />
           ),
         });
       } else if (ref.kind === "hook-events") {
