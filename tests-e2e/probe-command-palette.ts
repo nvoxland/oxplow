@@ -72,12 +72,12 @@ async function main() {
     // --- Part 2: palette opens while Monaco is focused ---
     // Try to find and click a file in the file tree, wait for editor, then
     // focus Monaco, then fire Cmd+K.
-    // Open the Files dock tab first — default view is Plan, so file-tree
-    // nodes may be in the DOM but not visible.
-    const filesDockTab = window.getByTestId("dock-tab-project");
-    if (await filesDockTab.count() > 0) {
-      await filesDockTab.click();
-      await window.waitForTimeout(300);
+    // Open the Files page first so the file tree is mounted as a center
+    // tab; otherwise file-tree nodes may not be in the DOM.
+    const filesRailEntry = window.getByTestId("rail-page-files");
+    if (await filesRailEntry.count() > 0) {
+      await filesRailEntry.click();
+      await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     }
 
     const firstFile = window.locator('[data-testid^="file-tree-entry-"][data-kind="file"]:visible').first();

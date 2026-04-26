@@ -54,9 +54,10 @@ async function main() {
       probeLog("[verify] NO rail-page-local-history entry — finding for the log");
     }
 
-    // Files panel + filter modes
-    await window.locator("[data-testid='dock-tab-project']").click();
-    await window.waitForTimeout(800);
+    // Files page + filter modes
+    await window.locator("[data-testid='rail-page-files']").click();
+    await window.locator("[data-testid='page-files']").waitFor({ state: "visible", timeout: 5_000 });
+    await window.waitForTimeout(400);
     const filters = await window.evaluate(() => {
       return Array.from(document.querySelectorAll("button, [role='tab']"))
         .map((el) => (el as HTMLElement).innerText?.trim())

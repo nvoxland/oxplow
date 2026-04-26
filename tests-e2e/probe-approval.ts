@@ -20,13 +20,9 @@ async function main() {
     await window.waitForTimeout(3_000);
     await window.screenshot({ path: resolve(outDir, "ap-00-launch.png") });
 
-    // Make sure Work panel is active.
-    const workPanel = window.getByTestId("dock-panel-plan");
-    for (let i = 0; i < 3; i++) {
-      if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-      await window.getByTestId("dock-tab-plan").click();
-      await window.waitForTimeout(300);
-    }
+    // Open the All work page from the rail HUD.
+    await window.getByTestId("rail-page-all-work").click();
+    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
     await window.screenshot({ path: resolve(outDir, "ap-01-work-panel.png") });
 
     // Dump everything that mentions commit / approve / propose / message.
@@ -57,7 +53,7 @@ async function main() {
 
     // Also dump the full Work panel DOM outline for inspection.
     const outline = await window.evaluate(() => {
-      const panel = document.querySelector('[data-testid="dock-panel-plan"]');
+      const panel = document.querySelector('[data-testid="page-all-work"]');
       function walk(el: Element, depth: number, limit: { n: number }): string {
         if (limit.n <= 0 || depth > 8) return "";
         limit.n -= 1;

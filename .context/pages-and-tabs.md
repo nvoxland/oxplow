@@ -101,10 +101,9 @@ The full IA redesign ships in phases (see plan
 - ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
   a Page-wrapped renderer in `src/ui/pages/`:
   Start, Settings, Code quality, Local history, Git history, Files,
-  Notes, All work, Subsystem docs. Legacy left-dock entries
-  (Plan, Project, Notes) remain alongside the pages so the app stays
-  usable; the bottom dock has since been removed (see "Bottom dock
-  removed" note below).
+  Notes, All work, Subsystem docs. Both docks have since been removed
+  — the rail HUD is THE left chrome and pages are THE center surface
+  (see "Left dock removed" / "Bottom dock removed" notes below).
 - ✅ Phase 4 — New pages + backlinks indexer:
   `WorkItemPage`, `NotePage`, `FindingPage`, three `DashboardPage`
   variants (Planning / Review / Quality), and the
@@ -165,9 +164,24 @@ The full IA redesign ships in phases (see plan
   Monaco-theme sections.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
-tabs. The left rail toolwindows (Work, Files, Notes, plus the HUD tab)
-remain in place so existing keyboard/menu paths keep working alongside
-the page tabs.
+tabs.
+
+**Left dock removed.** The left-side `DockShell` that previously
+carried four toolwindows (HUD / Work / Files / Notes) is gone.
+`<RailHud>` is now mounted directly as a 260px-wide left aside in
+`App.tsx` — the component owns its own width / `borderRight` /
+`var(--surface-rail)` background, so no host wrapper is needed. The
+rail HUD is THE persistent left chrome; the legacy `Plan` / `Project` /
+`Notes` left-rail tabs were duplicates of the existing
+`AllWorkPage` / `FilesPage` / `NotesIndexPage` content and have been
+deleted along with the `leftDockActivate` plumbing. Menu commands
+that used to flip the dock (`commitFiles`, edit-work-item) now route
+through `handleOpenPage(indexRef("files"))` /
+`handleOpenPage(indexRef("all-work"))`. E2e probes that previously
+relied on `dock-tab-plan` / `dock-tab-project` / `dock-panel-*`
+testids now click `rail-page-all-work` / `rail-page-files` and assert
+on `page-all-work` / `page-files`. The harness startup gate
+(`waitForOxplowReady`) polls for `rail-hud`.
 
 **Bottom dock removed.** The bottom-drawer `DockShell` that previously
 hosted Hook events / Git history / Local history / Code quality is

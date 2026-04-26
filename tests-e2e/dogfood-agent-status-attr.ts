@@ -34,12 +34,8 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[as] oxplow launched");
 
-    const workPanel = window.getByTestId("dock-panel-plan");
-    for (let i = 0; i < 3; i++) {
-      if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-      await window.getByTestId("dock-tab-plan").click();
-      await window.waitForTimeout(300);
-    }
+    await window.getByTestId("rail-page-all-work").click();
+    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
 
     await window.getByTestId("plan-add-commit-point").click();
     await window.waitForTimeout(400);

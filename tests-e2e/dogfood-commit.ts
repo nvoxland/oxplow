@@ -19,8 +19,9 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[commit] oxplow launched");
 
-    // Open Files dock tab.
-    await window.getByTestId("dock-tab-project").click();
+    // Open Files page.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     await window.waitForTimeout(400);
 
     // Click the Commit (N) button.

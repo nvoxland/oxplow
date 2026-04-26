@@ -42,14 +42,10 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[dogfood] oxplow launched");
 
-    // Step 1: activate Work panel
-    const workPanel = window.getByTestId("dock-panel-plan");
-    for (let i = 0; i < 3; i++) {
-      if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-      await window.getByTestId("dock-tab-plan").click();
-      await window.waitForTimeout(300);
-    }
-    probeLog("[dogfood] Work panel active");
+    // Step 1: open the All work page from the rail HUD
+    await window.getByTestId("rail-page-all-work").click();
+    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
+    probeLog("[dogfood] All work page active");
 
     // Step 2: create ONE work item (allowed single-item exception)
     await window.getByTestId("plan-new-task").click();

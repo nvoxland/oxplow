@@ -16,10 +16,9 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    // Open the file tree and a file. (left-side dock-tab-project still
-    // hosts the Files toolwindow.)
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(300);
+    // Open the Files page so the file tree is mounted.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     // Find a visible file-tree entry (not hidden under a collapsed dir).
     const path = await window.evaluate(() => {
       const node = Array.from(

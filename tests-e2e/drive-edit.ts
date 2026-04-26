@@ -25,22 +25,11 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    // Step 1: activate Files tab via testid. Click until the panel becomes
-    // active — the rail toggles open/closed on repeat clicks, so one click
-    // may close the dock if Files was already the active tab and dock was
-    // open, etc. Cap at 3 clicks.
-    log("step 1: click Files tab");
-    const projectPanel = window.getByTestId("dock-panel-project");
-    for (let i = 0; i < 3; i++) {
-      const active = await projectPanel.getAttribute("data-active");
-      const visible = await projectPanel.isVisible();
-      if (active === "true" && visible) break;
-      await window.getByTestId("dock-tab-project").click();
-      await window.waitForTimeout(400);
-    }
-    if (!(await projectPanel.isVisible())) {
-      throw new Error("could not activate Files panel");
-    }
+    // Step 1: open the Files page via the rail HUD entry.
+    log("step 1: open Files page");
+    await window.getByTestId("rail-page-files").click();
+    const projectPanel = window.getByTestId("page-files");
+    await projectPanel.waitFor({ state: "visible", timeout: 5_000 });
 
     // Step 2: expand tests-e2e/ folder
     log("step 2: expand tests-e2e/");

@@ -74,14 +74,9 @@ import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
-import { DockShell } from "./components/Dock/DockShell.js";
-import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import { ThreadRail } from "./components/ThreadRail.js";
-import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
-import { PlanPane } from "./components/Plan/PlanPane.js";
-import { NotesPane } from "./components/Notes/NotesPane.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
@@ -1206,7 +1201,6 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [planNewRequest, setPlanNewRequest] = useState(0);
   // Agent-terminal transport — lifted from TerminalPane so the Agent
   // tab's right-click menu can toggle between direct stdin and tmux.
@@ -1278,7 +1272,7 @@ export function App() {
     },
     commitFiles() {
       if (!stream || !workspaceContext.gitEnabled) return;
-      setLeftDockActivate((prev) => ({ id: "project", token: (prev?.token ?? 0) + 1 }));
+      handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
     },
   }), [stream, selectedFilePath, workspaceContext.gitEnabled]);
@@ -1418,7 +1412,7 @@ export function App() {
 
   const handleRequestEditWorkItem = (itemId: string) => {
     const token = Date.now();
-    setLeftDockActivate({ id: "plan", token });
+    handleOpenPage(indexRef("all-work"));
     setPlanEditRequest({ itemId, token });
     void recordUsage({
       kind: "work-item",
@@ -1967,89 +1961,6 @@ export function App() {
     planEditRequest,
   ]);
 
-  const leftToolWindows: ToolWindow[] = useMemo(() => [
-    {
-      id: "hud",
-      label: "HUD",
-      render: () => (
-        <RailHud
-          threadId={selectedThread?.id ?? null}
-          threadWork={selectedThreadWork}
-          backlog={backlogState}
-          agentStatus={agentThreadStatus}
-          recentFiles={recentFileEntries}
-          onOpenPage={handleOpenPage}
-          onOpenSearch={() => setQuickOpenVisible(true)}
-        />
-      ),
-    },
-    {
-      id: "plan",
-      label: "Work",
-      render: () => (
-        <PlanPane
-          thread={selectedThread}
-          activeThreadId={currentThreadState.activeThreadId}
-          threadWork={selectedThreadWork}
-          agentStatus={agentThreadStatus}
-          backlog={backlogState}
-          onCreateWorkItem={handleCreateWorkItem}
-          onUpdateWorkItem={handleUpdateWorkItem}
-          onDeleteWorkItem={handleDeleteWorkItem}
-          onReorderWorkItems={handleReorderWorkItems}
-          onCreateBacklogItem={handleCreateBacklogItem}
-          onUpdateBacklogItem={handleUpdateBacklogItem}
-          onDeleteBacklogItem={handleDeleteBacklogItem}
-          onReorderBacklog={handleReorderBacklog}
-          onMoveItemToBacklog={handleMoveItemToBacklog}
-          openNewRequest={planNewRequest}
-          editRequest={planEditRequest}
-          onOpenFile={handleOpenFile}
-          onShowInHistory={handleShowSnapshotInHistory}
-          registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
-          onOpenNewWorkItemPage={(payload) => handleOpenPage(newWorkItemRef(payload))}
-        />
-      ),
-    },
-    {
-      id: "project",
-      label: "Files",
-      render: () => (
-        <ProjectPanel
-          stream={stream}
-          gitEnabled={workspaceContext.gitEnabled}
-          selectedFilePath={selectedFilePath}
-          generatedDirs={generatedDirs}
-          onOpenFile={handleOpenFile}
-          onOpenDiff={handleOpenDiff}
-          onCreateFile={handleCreateFile}
-          onCreateDirectory={handleCreateDirectory}
-          onRenamePath={handleRenamePath}
-          onDeletePath={handleDeletePath}
-          onToggleGeneratedDir={handleToggleGeneratedDir}
-          commitRequest={commitFilesRequest}
-        />
-      ),
-    },
-    {
-      id: "notes",
-      label: "Notes",
-      render: () => (
-        <NotesPane
-          stream={stream}
-          selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
-          onOpenNote={handleOpenNote}
-        />
-      ),
-    },
-  ], [
-    stream,
-    selectedFilePath,
-    workspaceContext.gitEnabled,
-    selectedThread,
-    selectedThreadWork,
-  ]);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
@@ -2095,15 +2006,14 @@ export function App() {
         ) : null}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
-        <DockShell
-          side="left"
-          toolWindows={leftToolWindows}
-          storageKey="left"
-          defaultSize={300}
-          minSize={220}
-          maxSize={640}
-          railMode="always"
-          activateRequest={leftDockActivate}
+        <RailHud
+          threadId={selectedThread?.id ?? null}
+          threadWork={selectedThreadWork}
+          backlog={backlogState}
+          agentStatus={agentThreadStatus}
+          recentFiles={recentFileEntries}
+          onOpenPage={handleOpenPage}
+          onOpenSearch={() => setQuickOpenVisible(true)}
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
           {stream ? (

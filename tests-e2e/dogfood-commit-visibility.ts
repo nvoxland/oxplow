@@ -33,14 +33,10 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[cv] oxplow launched");
 
-    // Activate Work panel
-    const workPanel = window.getByTestId("dock-panel-plan");
-    for (let i = 0; i < 3; i++) {
-      if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-      await window.getByTestId("dock-tab-plan").click();
-      await window.waitForTimeout(300);
-    }
-    probeLog("[cv] Work panel active");
+    // Open the All work page from the rail HUD
+    await window.getByTestId("rail-page-all-work").click();
+    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
+    probeLog("[cv] All work page active");
 
     // Step 1: click + Commit when done FIRST (per updated prompt)
     const addCommitBtn = window.getByTestId("plan-add-commit-point");

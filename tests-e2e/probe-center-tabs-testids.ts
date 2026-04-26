@@ -19,9 +19,9 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    // Open the Files dock (id is "project", label is "Files").
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(300);
+    // Open the Files page from the rail HUD.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
 
     // Click the first visible file in the tree.
     const firstFile = window.locator('[data-testid^="file-tree-entry-"][data-kind="file"]:visible').first();
