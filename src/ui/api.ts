@@ -152,6 +152,12 @@ export interface EffortDetail {
   counts: { created: number; updated: number; deleted: number };
 }
 
+export interface ThreadFollowup {
+  id: string;
+  note: string;
+  createdAt: string;
+}
+
 export interface ThreadWorkState {
   threadId: string;
   waiting: WorkItem[];
@@ -159,6 +165,9 @@ export interface ThreadWorkState {
   done: WorkItem[];
   epics: WorkItem[];
   items: WorkItem[];
+  /** Transient agent follow-up reminders (in-memory on the runtime,
+   *  lost on restart). Surfaced at the top of the To Do section. */
+  followups: ThreadFollowup[];
 }
 
 export interface BacklogState {
@@ -768,6 +777,10 @@ export async function setWaitPointNote(
 
 export async function deleteWaitPoint(id: string): Promise<void> {
   return desktopApi().deleteWaitPoint(id);
+}
+
+export async function removeFollowup(threadId: string, id: string): Promise<void> {
+  return desktopApi().removeFollowup(threadId, id);
 }
 
 export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {

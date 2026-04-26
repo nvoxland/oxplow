@@ -1,7 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import mermaid from "mermaid";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   deleteWikiNote,
   listWikiNotes,
@@ -11,10 +8,7 @@ import {
   type Stream,
   type WikiNoteSummary,
 } from "../../api.js";
-import { ContextMenu } from "../ContextMenu.js";
-import type { MenuItem, MenuPosition } from "../../menu.js";
-
-mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
+import { MarkdownView } from "./MarkdownView.js";
 
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
@@ -263,9 +257,11 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
           />
         ) : (
           <MarkdownView
+            className="wiki-note-markdown"
             body={draftInitialized ? draft : body}
-            onNavigate={navigate}
+            onNavigateInternal={navigate}
             onOpenInNewTab={onOpenNoteInNewTab}
+            renderMermaid
           />
         )}
       </div>
@@ -373,133 +369,3 @@ function FreshnessBadge({ note }: { note: WikiNoteSummary }) {
   );
 }
 
-interface LinkMenuState {
-  position: MenuPosition;
-  href: string;
-  kind: "internal" | "external";
-  internalSlug?: string;
-}
-
-function MarkdownView({
-  body,
-  onNavigate,
-  onOpenInNewTab,
-}: {
-  body: string;
-  onNavigate: (slug: string) => void;
-  onOpenInNewTab: (slug: string) => void;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null);
-
-  const parseHref = useCallback((rawHref: string): { kind: "external" | "internal" | "anchor" | "empty"; slug?: string } => {
-    if (!rawHref) return { kind: "empty" };
-    if (rawHref.startsWith("#")) return { kind: "anchor" };
-    if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) return { kind: "external" };
-    let target = rawHref.replace(/^\.?\//, "");
-    target = target.split("#")[0]?.split("?")[0] ?? "";
-    if (target.endsWith(".md")) target = target.slice(0, -3);
-    return target ? { kind: "internal", slug: target } : { kind: "empty" };
-  }, []);
-
-  const handleLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
-    const href = event.currentTarget.getAttribute("href") ?? "";
-    const parsed = parseHref(href);
-    if (parsed.kind === "anchor") return; // allow default
-    event.preventDefault();
-    if (parsed.kind === "empty") return;
-    if (parsed.kind === "external") {
-      // Middle-click / cmd-click already opens externally via _blank; plain
-      // click routes to the OS browser too (we're inside Electron).
-      window.open(href, "_blank", "noopener,noreferrer");
-      return;
-    }
-    // Internal link: cmd/ctrl-click (or middle-click) opens in a new tab;
-    // plain click navigates within this tab.
-    const newTab = event.metaKey || event.ctrlKey || event.button === 1;
-    if (newTab) onOpenInNewTab(parsed.slug!);
-    else onNavigate(parsed.slug!);
-  }, [parseHref, onNavigate, onOpenInNewTab]);
-
-  const handleLinkContextMenu = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
-    const href = event.currentTarget.getAttribute("href") ?? "";
-    const parsed = parseHref(href);
-    if (parsed.kind === "anchor" || parsed.kind === "empty") return;
-    event.preventDefault();
-    setLinkMenu({
-      position: { x: event.clientX, y: event.clientY },
-      href,
-      kind: parsed.kind === "external" ? "external" : "internal",
-      internalSlug: parsed.slug,
-    });
-  }, [parseHref]);
-
-  useEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    const blocks = root.querySelectorAll<HTMLElement>("code.language-mermaid");
-    blocks.forEach(async (code, idx) => {
-      const source = code.textContent ?? "";
-      const id = `mermaid-${Date.now()}-${idx}`;
-      try {
-        const { svg } = await mermaid.render(id, source);
-        const host = document.createElement("div");
-        host.className = "mermaid-rendered";
-        host.innerHTML = svg;
-        const pre = code.parentElement;
-        if (pre && pre.tagName === "PRE") pre.replaceWith(host);
-      } catch (error) {
-        const pre = code.parentElement;
-        if (pre && pre.tagName === "PRE") {
-          const err = document.createElement("div");
-          err.style.color = "var(--color-status-error, #c95a5a)";
-          err.style.fontSize = "12px";
-          err.textContent = `Mermaid parse error: ${String(error)}`;
-          pre.after(err);
-        }
-      }
-    });
-  }, [body]);
-
-  const menuItems: MenuItem[] = useMemo(() => {
-    if (!linkMenu) return [];
-    if (linkMenu.kind === "internal" && linkMenu.internalSlug) {
-      const target = linkMenu.internalSlug;
-      return [
-        { id: "open", label: "Open", enabled: true, run: () => onNavigate(target) },
-        { id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) },
-      ];
-    }
-    return [
-      { id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(linkMenu.href, "_blank", "noopener,noreferrer"); } },
-      { id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(linkMenu.href).catch(() => {}); } },
-    ];
-  }, [linkMenu, onNavigate, onOpenInNewTab]);
-
-  return (
-    <div ref={ref} className="wiki-note-markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node, ...props }) => (
-            <a
-              {...props}
-              onClick={handleLinkClick}
-              onAuxClick={handleLinkClick}
-              onContextMenu={handleLinkContextMenu}
-            />
-          ),
-        }}
-      >
-        {body}
-      </ReactMarkdown>
-      {linkMenu && (
-        <ContextMenu
-          items={menuItems}
-          position={linkMenu.position}
-          onClose={() => setLinkMenu(null)}
-        />
-      )}
-    </div>
-  );
-}

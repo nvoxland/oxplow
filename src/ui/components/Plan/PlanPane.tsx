@@ -21,6 +21,7 @@ import {
   listCommitPoints,
   listWaitPoints,
   listWorkItemEfforts,
+  removeFollowup,
   reorderThreadQueue,
   setAutoCommit,
   subscribeOxplowEvents,
@@ -33,6 +34,7 @@ import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
+import { ActivityTimeline } from "./WorkItemDetail.js";
 import {
   buildBacklogGroups,
   buildGroups,
@@ -668,6 +670,10 @@ export function PlanPane({
                 agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
+                followups={isRootThread && !group.epic ? threadWork?.followups ?? [] : []}
+                onDismissFollowup={isRootThread && threadId
+                  ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))
+                  : undefined}
               />
             );
           })
@@ -1061,22 +1067,14 @@ function NewWorkItemModal({
             </div>
             {item ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-                <div style={modalFieldLabelStyle}>Notes {notes.length > 0 ? `(${notes.length})` : ""}</div>
-                {notes.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}>
-                    {notes.map((note) => (
-                      <div key={note.id} style={{ fontSize: 12, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
-                          <span style={{ fontWeight: 600, color: "var(--accent)" }}>{note.author}</span>
-                          <span style={{ color: "var(--muted)", fontSize: 11 }}>{formatNoteDate(note.created_at)}</span>
-                        </div>
-                        <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{note.body}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>No notes yet.</div>
-                )}
+                <div style={modalFieldLabelStyle}>Activity {notes.length + efforts.length > 0 ? `(${notes.length + efforts.length})` : ""}</div>
+                <ActivityTimeline
+                  notes={notes}
+                  efforts={efforts}
+                  formatTimestamp={formatNoteDate}
+                  onOpenFile={onOpenFile}
+                  onShowInHistory={onShowInHistory}
+                />
               </div>
             ) : null}
             {item ? (

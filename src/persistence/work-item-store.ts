@@ -155,6 +155,12 @@ export interface WorkItemChange {
   touchedFiles?: string[];
 }
 
+export interface ThreadFollowup {
+  id: string;
+  note: string;
+  createdAt: string;
+}
+
 export interface ThreadWorkState {
   threadId: string;
   waiting: WorkItem[];
@@ -162,6 +168,10 @@ export interface ThreadWorkState {
   done: WorkItem[];
   epics: WorkItem[];
   items: WorkItem[];
+  /** Transient agent follow-up reminders (in-memory, lost on restart).
+   *  Always present; empty array when none. Surfaced at the top of the
+   *  To Do section in the Work panel. */
+  followups: ThreadFollowup[];
 }
 
 interface CreateWorkItemInput {
@@ -265,6 +275,10 @@ export class WorkItemStore {
       done: items.filter((item) => item.status === "done" || item.status === "canceled" || item.status === "archived"),
       epics: items.filter((item) => item.kind === "epic"),
       items,
+      // Followups are layered in by the work-item API wrapper from a
+      // transient in-memory store. The persistence layer doesn't own
+      // them, so default to empty here and let the wrapper overwrite.
+      followups: [],
     };
   }
 

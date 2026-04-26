@@ -305,6 +305,9 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:createWaitPoint", (_event, streamId: string, threadId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, threadId, note));
   handle("oxplow:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));
   handle("oxplow:deleteWaitPoint", (_event, id: string) => currentRuntime.deleteWaitPoint(id));
+  handle("oxplow:removeFollowup", (_event, threadId: string, id: string) => {
+    currentRuntime.followupStore.remove(threadId, id);
+  });
   handle("oxplow:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
   handle("oxplow:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   handle("oxplow:ping", () => currentRuntime.ping());

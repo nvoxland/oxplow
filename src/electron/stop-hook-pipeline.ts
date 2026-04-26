@@ -54,6 +54,17 @@ export interface ThreadSnapshot {
    *  identical, the ready-work directive is suppressed — the agent already
    *  has the list. Optional; absent means "no just-read suppression." */
   justReadReadySet?: string[];
+  /** Signature of the in_progress item set the runtime last emitted an audit
+   *  directive for on this thread, in the same format the pipeline computes
+   *  (sorted `id|updated_at|note_count` triples joined by newlines). When
+   *  the next Stop sees an identical current signature, the audit directive
+   *  is suppressed — no item changed, no agent activity, repeating the
+   *  nudge produces a tight ack-loop that costs the user a wall of
+   *  identical lines plus a lot of model tokens. Any change (set growing
+   *  or shrinking, an item's `updated_at`, or `note_count` ticking up
+   *  because a note landed) re-arms the audit. Optional; absent means
+   *  "no prior audit recorded — fire normally." */
+  lastInProgressAuditSignature?: string;
   /** True when the orchestrator has dispatched a `Task` subagent that
    *  hasn't yet returned. While set, the in-progress audit and ready-work
    *  directives are suppressed — re-emitting them mid-flight produces a
@@ -121,7 +132,9 @@ export type StopHookSideEffect =
   | { kind: "trigger-wait-point"; id: string }
   | { kind: "record-auto-commit-nag"; fingerprint: string }
   | { kind: "record-ready-work-nag"; itemId: string }
-  | { kind: "record-audit-nag"; fingerprint: string };
+  | { kind: "record-audit-nag"; fingerprint: string }
+  | { kind: "trigger-wait-point"; id: string }
+  | { kind: "record-audit-signature"; signature: string };
 
 export interface StopHookOutcome {
   directive: StopDirective | null;
@@ -259,6 +272,16 @@ export function decideStopDirective(
   // bookkeeping step that prevents stale in_progress rows piling up.
   const inProgress = snapshot.workItems.filter((item) => item.status === "in_progress");
   if (inProgress.length > 0 && builders.buildInProgressAuditReason) {
+    const signature = computeAuditSignature(inProgress);
+    if (snapshot.lastInProgressAuditSignature === signature) {
+      // Nothing changed since the last audit fire on this thread — no agent
+      // activity ticked any item's updated_at or note_count, and the set
+      // membership is identical. Re-emitting the same nudge is the
+      // ack-loop the user hit; suppress and leave the recorded signature
+      // alone so a real change re-arms it.
+      return { directive: null, sideEffects };
+    }
+    sideEffects.push({ kind: "record-audit-signature", signature });
     const auditFp = inProgress.map((i) => i.id).sort().join("|");
     // Suppress when we already audited this exact set AND the agent
     // didn't touch any in_progress item this turn — re-asking produces
@@ -337,6 +360,19 @@ function shouldSuppressReadyWorkForJustRead(
   if (readySet.size !== readSet.size) return false;
   for (const id of readSet) if (!readySet.has(id)) return false;
   return true;
+}
+
+/** Per-thread fingerprint of the in_progress set used to detect "nothing
+ *  changed since the last audit fire" and skip a duplicate nudge. Sort by
+ *  id for stable ordering regardless of `listItems` ordering tweaks; combine
+ *  `updated_at` (covers status/title/AC edits via update_work_item /
+ *  complete_task) and `note_count` (covers add_work_note, which doesn't
+ *  bump updated_at). */
+export function computeAuditSignature(items: WorkItem[]): string {
+  return items
+    .map((item) => `${item.id}|${item.updated_at}|${item.note_count}`)
+    .sort()
+    .join("\n");
 }
 
 function isTerminalStatus(item: WorkItem): boolean {

@@ -112,6 +112,7 @@ const api: DesktopApi = {
   commitCommitPoint: (id, message) => ipcRenderer.invoke("oxplow:commitCommitPoint", id, message),
   reorderThreadQueue: (streamId, threadId, entries) => ipcRenderer.invoke("oxplow:reorderThreadQueue", streamId, threadId, entries),
   listWaitPoints: (threadId) => ipcRenderer.invoke("oxplow:listWaitPoints", threadId),
+  removeFollowup: (threadId, id) => ipcRenderer.invoke("oxplow:removeFollowup", threadId, id),
   createWaitPoint: (streamId, threadId, note) => ipcRenderer.invoke("oxplow:createWaitPoint", streamId, threadId, note),
   setWaitPointNote: (id, note) => ipcRenderer.invoke("oxplow:setWaitPointNote", id, note),
   deleteWaitPoint: (id) => ipcRenderer.invoke("oxplow:deleteWaitPoint", id),
