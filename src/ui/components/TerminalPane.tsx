@@ -18,6 +18,8 @@ import {
   readContextRef,
 } from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
+import { Kebab } from "./Kebab.js";
+import type { MenuItem } from "../menu.js";
 
 /**
  * Read the system clipboard as text. Prefers Electron's main-process
@@ -62,6 +64,54 @@ export function TerminalPane({
     modeRef.current = next;
     setMode(next);
   }
+
+  const pasteFromClipboard = () => {
+    const term = termRef.current;
+    if (!term) return;
+    void readClipboard().then((text) => {
+      if (text) {
+        term.paste(text);
+        term.focus();
+      }
+    }).catch((error) => {
+      logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
+    });
+  };
+
+  const copySelection = () => {
+    const term = termRef.current;
+    if (!term) return;
+    const selection = term.getSelection();
+    if (!selection) return;
+    try {
+      void navigator.clipboard.writeText(selection).catch((error) => {
+        logUi("warn", "terminal copy: clipboard write failed", { error: String(error) });
+      });
+    } catch {
+      // ignored — older browsers without async clipboard API
+    }
+  };
+
+  const headerMenu: MenuItem[] = [
+    {
+      id: "terminal.copy",
+      label: "Copy selection",
+      enabled: true,
+      run: copySelection,
+    },
+    {
+      id: "terminal.paste",
+      label: "Paste",
+      enabled: true,
+      run: pasteFromClipboard,
+    },
+    {
+      id: "terminal.clear",
+      label: "Clear",
+      enabled: true,
+      run: () => { termRef.current?.clear(); termRef.current?.focus(); },
+    },
+  ];
 
   useEffect(() => {
     if (!visible) return;
@@ -312,19 +362,10 @@ export function TerminalPane({
       };
       host.addEventListener("paste", handlePaste);
 
-      // Electron disables the browser's default context menu in renderers,
-      // so a plain right-click shows nothing. Match the tmux / iTerm2
-      // convention — right-click = paste — instead of wiring up a full menu
-      // for a single item.
-      const handleContextMenu = (event: MouseEvent) => {
-        event.preventDefault();
-        void readClipboard().then((text) => {
-          if (text) term.paste(text);
-        }).catch((error) => {
-          logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
-        });
-      };
-      host.addEventListener("contextmenu", handleContextMenu);
+      // Right-click no longer pastes — the IA redesign moved every per-row
+      // / per-pane action to a visible kebab `⋯` (see `.context/usability.md`).
+      // The header-bar kebab below carries the Paste action; Cmd/Ctrl+V still
+      // pastes via the keydown handler in the surrounding mousedown listener.
 
       // Direct-mode agents replay their scrollback synchronously from inside
       // the openTerminalSession handler, so terminal-event messages may reach
@@ -401,7 +442,6 @@ export function TerminalPane({
       cleanupRef.current = () => {
         host.removeEventListener("mousedown", handleMouseDown);
         host.removeEventListener("paste", handlePaste);
-        host.removeEventListener("contextmenu", handleContextMenu);
         unsubscribe();
         prevCleanup?.();
       };
@@ -427,12 +467,30 @@ export function TerminalPane({
 
   return (
     <div
-      style={{ position: "relative", width: "100%", height: "100%" }}
+      style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          padding: "2px 6px",
+          borderBottom: "1px solid var(--border-subtle)",
+          background: "var(--surface-rail)",
+          flex: "0 0 auto",
+        }}
+      >
+        <Kebab
+          items={headerMenu}
+          size={16}
+          testId="terminal-pane-kebab"
+          label="Terminal actions"
+        />
+      </div>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: "100%" }} />
       {dragHovering ? (
         <div
           style={{

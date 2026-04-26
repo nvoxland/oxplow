@@ -233,6 +233,14 @@
       .oxplow-gutter-added { box-shadow: inset 3px 0 0 0 #16a34a; }
       .oxplow-gutter-modified { box-shadow: inset 3px 0 0 0 var(--accent); }
       .oxplow-gutter-deleted { box-shadow: inset 3px -2px 0 -1px #dc2626; }
+      /* Blame margin: kebab hidden until row is hovered. */
+      .oxplow-blame-row-kebab { opacity: 0; transition: opacity 80ms ease; }
+      .oxplow-blame-row:hover .oxplow-blame-row-kebab,
+      .oxplow-blame-row-kebab:focus { opacity: 1; }
+      /* Markdown view: link kebab hidden until link or its kebab is hovered. */
+      .oxplow-md-link-kebab { opacity: 0; transition: opacity 80ms ease; }
+      .oxplow-md-link:hover .oxplow-md-link-kebab,
+      .oxplow-md-link-kebab:focus-within { opacity: 1; }
     </style>
   </head>
   <body>

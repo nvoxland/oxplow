@@ -210,9 +210,20 @@ export function ThreadRail({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
-        <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate(true)} title="Create thread">
-          + New thread
-        </button>
+        {showCreate ? (
+          <InlineCreateThreadRow
+            nextIndex={threads.length + 1}
+            onCancel={() => setShowCreate(false)}
+            onSubmit={async (title) => {
+              await onCreateThread(title);
+              setShowCreate(false);
+            }}
+          />
+        ) : (
+          <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate(true)} title="Create thread">
+            + New thread
+          </button>
+        )}
         {completed.length > 0 ? (
           <div style={{ position: "relative" }}>
             <button type="button" style={smallBtn} onClick={() => setShowOverflow((v) => !v)}>
@@ -232,16 +243,6 @@ export function ThreadRail({
           </div>
         ) : null}
       </div>
-      {showCreate ? (
-        <CreateThreadModal
-          nextIndex={threads.length + 1}
-          onCancel={() => setShowCreate(false)}
-          onSubmit={async (title) => {
-            await onCreateThread(title);
-            setShowCreate(false);
-          }}
-        />
-      ) : null}
       {settingsThread ? (
         <div style={backdropStyle}>
           <div style={settingsModalStyle}>
@@ -654,7 +655,14 @@ function OverflowDropdown({
   );
 }
 
-function CreateThreadModal({
+/**
+ * Inline-new-row that retires `CreateThreadModal`. Mounts at the end of
+ * the thread chip strip when the user clicks "+ New thread"; Enter
+ * submits, Escape cancels. Existing `data-testid="thread-rail-create-input"`
+ * and `thread-rail-create-submit` testids stay so e2e probes (and the
+ * Cmd+K palette workflow) keep working.
+ */
+function InlineCreateThreadRow({
   nextIndex,
   onSubmit,
   onCancel,
@@ -671,17 +679,6 @@ function CreateThreadModal({
   useEffect(() => {
     inputRef.current?.select();
   }, []);
-
-  useEffect(() => {
-    function handler(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onCancel]);
 
   async function submit() {
     const trimmed = title.trim();
@@ -704,47 +701,47 @@ function CreateThreadModal({
   const canSubmit = !submitting && trimmed.length > 0;
 
   return (
-    <div role="dialog" aria-modal="true" data-testid="thread-rail-create-modal" style={backdropStyle}>
-      <form
-        style={createModalStyle}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!canSubmit) return;
-          void submit();
+    <form
+      style={{ display: "flex", alignItems: "center", gap: 6 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        void submit();
+      }}
+    >
+      <input
+        ref={inputRef}
+        value={title}
+        autoFocus
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
         }}
+        style={{ ...settingsInputStyle, width: 200, padding: "3px 6px" }}
+        placeholder="Thread title"
+        data-testid="thread-rail-create-input"
+        aria-label="New thread title"
+      />
+      <button
+        type="submit"
+        data-testid="thread-rail-create-submit"
+        style={smallBtn}
+        disabled={!canSubmit}
       >
-        <div style={settingsModalHeaderStyle}>
-          <span>New thread</span>
-          <button type="button" onClick={onCancel} style={closeBtnStyle} aria-label="Close">×</button>
-        </div>
-        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-          <label style={settingsLabelStyle}>
-            <span>Title</span>
-            <input
-              ref={inputRef}
-              value={title}
-              autoFocus
-              onChange={(e) => setTitle(e.target.value)}
-              style={settingsInputStyle}
-              placeholder="Thread title"
-              data-testid="thread-rail-create-input"
-            />
-          </label>
-          {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button type="button" onClick={onCancel} style={settingsBtnStyle}>Cancel</button>
-            <button
-              type="submit"
-              data-testid="thread-rail-create-submit"
-              style={settingsBtnStyle}
-              disabled={!canSubmit}
-            >
-              {submitting ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
+        {submitting ? "Creating…" : "Create"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        style={smallBtn}
+      >
+        Cancel
+      </button>
+      {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}
+    </form>
   );
 }
 
@@ -826,17 +823,6 @@ const overflowItemStyle: CSSProperties = {
   fontFamily: "inherit",
   fontSize: 12,
   textAlign: "left",
-};
-
-const createModalStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 8,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
-  minWidth: 420,
-  maxWidth: 560,
-  display: "flex",
-  flexDirection: "column",
 };
 
 const backdropStyle: CSSProperties = {

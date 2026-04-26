@@ -33,6 +33,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { InlineConfirm } from "../InlineConfirm.js";
+import { Slideover } from "../Slideover.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
@@ -1139,7 +1140,6 @@ function CommitDialog({
   // Default OFF so probe scripts / lock files don't ride along — three
   // dogfood passes shipped commits that bundled local-only files.
   const [includeUntracked, setIncludeUntracked] = useState(false);
-  useEscape(onClose);
 
   const trimmed = message.trim();
   const canSubmit = trimmed.length > 0 && !running;
@@ -1153,10 +1153,29 @@ function CommitDialog({
   };
 
   return (
-    <ModalShell onClose={onClose} title={`Commit ${pathCount} change${pathCount === 1 ? "" : "s"}`}>
+    <Slideover
+      open
+      onClose={onClose}
+      title={`Commit ${pathCount} change${pathCount === 1 ? "" : "s"}`}
+      testId="files-commit-slideover"
+      footer={(
+        <>
+          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
+          <button
+            type="button"
+            data-testid="files-commit-submit"
+            disabled={!canSubmit}
+            onClick={() => void run()}
+            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff", opacity: canSubmit ? 1 : 0.5 }}
+          >
+            {running ? "Committing…" : "Commit"}
+          </button>
+        </>
+      )}
+    >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 12, minWidth: 380 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
       >
         <label htmlFor="files-commit-message" style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
           Commit message
@@ -1169,7 +1188,7 @@ function CommitDialog({
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Summary line&#10;&#10;Optional body"
           style={{
-            minHeight: 96,
+            minHeight: 140,
             resize: "vertical",
             background: "var(--bg)",
             color: "var(--fg)",
@@ -1200,19 +1219,10 @@ function CommitDialog({
           Runs <code>{includeUntracked ? "git add -A" : "git add -u"} &amp;&amp; git commit -m …</code> in the stream's worktree.
           Cmd/Ctrl+Enter to commit.
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
-          <button
-            type="submit"
-            data-testid="files-commit-submit"
-            disabled={!canSubmit}
-            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff", opacity: canSubmit ? 1 : 0.5 }}
-          >
-            {running ? "Committing…" : "Commit"}
-          </button>
-        </div>
+        {/* Hidden submit so Cmd/Ctrl+Enter form-submit path works. */}
+        <button type="submit" style={{ display: "none" }} aria-hidden="true" tabIndex={-1} disabled={!canSubmit}>submit</button>
       </form>
-    </ModalShell>
+    </Slideover>
   );
 }
 

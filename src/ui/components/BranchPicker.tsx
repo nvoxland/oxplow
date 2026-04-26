@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { InlineConfirm } from "./InlineConfirm.js";
+import { Slideover } from "./Slideover.js";
 
 export interface PickedRef {
   kind: "branch" | "tag";
@@ -389,7 +390,6 @@ export function BranchPicker({
                         <RowButton
                           key={`recent:${name}`}
                           onClick={(e) => manageHere ? openBranchMenu(e, branch!) : pickRecent(name)}
-                          onContextMenu={manageHere ? (e) => openBranchMenu(e, branch!) : undefined}
                           disabled={busy}
                           current={name === currentBranch}
                           icon="⟲"
@@ -411,7 +411,6 @@ export function BranchPicker({
                         <RowButton
                           key={b.ref}
                           onClick={(e) => manageHere ? openBranchMenu(e, b) : void pickBranch(b)}
-                          onContextMenu={manageHere ? (e) => openBranchMenu(e, b) : undefined}
                           disabled={busy}
                           current={b.name === currentBranch}
                           icon="⎇"
@@ -515,26 +514,40 @@ export function BranchPicker({
           />
         );
       })() : null}
-      {renaming ? (
-        <div style={inlineDialogBackdropStyle} onMouseDown={(e) => { if (e.target === e.currentTarget) setRenaming(null); }}>
+      <Slideover
+        open={!!renaming}
+        onClose={() => setRenaming(null)}
+        title={renaming ? `Rename branch "${renaming.from}"` : "Rename branch"}
+        testId="branch-rename-slideover"
+        footer={(
+          <>
+            <button type="button" onClick={() => setRenaming(null)} style={dialogButtonStyle}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => void handleRename()}
+              style={dialogButtonStyle}
+              disabled={busy || !renaming}
+            >
+              Rename
+            </button>
+          </>
+        )}
+      >
+        {renaming ? (
           <form
-            style={inlineDialogStyle}
             onSubmit={(e) => { e.preventDefault(); void handleRename(); }}
+            style={{ display: "flex", flexDirection: "column", gap: 8 }}
           >
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>Rename branch "{renaming.from}"</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>New name</div>
             <input
               autoFocus
               value={renaming.value}
               onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
               style={inputStyle}
             />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" onClick={() => setRenaming(null)} style={dialogButtonStyle}>Cancel</button>
-              <button type="submit" style={dialogButtonStyle} disabled={busy}>Rename</button>
-            </div>
           </form>
-        </div>
-      ) : null}
+        ) : null}
+      </Slideover>
     </span>
   );
 }
@@ -563,7 +576,6 @@ function RemoteGroup({ remote, branches, busy, onPick, onContextMenu, forceOpen 
           <RowButton
             key={b.ref}
             onClick={(e) => onContextMenu ? onContextMenu(e, b) : void onPick(b)}
-            onContextMenu={onContextMenu ? (e) => onContextMenu(e, b) : undefined}
             disabled={busy}
             current={false}
             icon="⎇"
@@ -577,9 +589,8 @@ function RemoteGroup({ remote, branches, busy, onPick, onContextMenu, forceOpen 
   );
 }
 
-function RowButton({ onClick, onContextMenu, disabled, current, icon, name, meta, indent = 18, showChevron = false }: {
+function RowButton({ onClick, disabled, current, icon, name, meta, indent = 18, showChevron = false }: {
   onClick(event: ReactMouseEvent): void;
-  onContextMenu?(event: ReactMouseEvent): void;
   disabled: boolean;
   current: boolean;
   icon: string;
@@ -592,7 +603,6 @@ function RowButton({ onClick, onContextMenu, disabled, current, icon, name, meta
     <button
       type="button"
       onClick={(e) => onClick(e)}
-      onContextMenu={onContextMenu}
       disabled={disabled}
       style={{
         ...itemStyle,
@@ -696,28 +706,6 @@ const emptyStyle: CSSProperties = {
   padding: "8px 10px",
   color: "var(--muted)",
   fontSize: 12,
-};
-
-const inlineDialogBackdropStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1300,
-};
-
-const inlineDialogStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 6,
-  padding: 14,
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
-  minWidth: 320,
-  boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
 };
 
 const dialogButtonStyle: CSSProperties = {

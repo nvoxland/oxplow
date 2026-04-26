@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
+import type { CSSProperties } from "react";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
@@ -574,9 +574,8 @@ export function EditorPane({
             onGitClick={(sha) => {
               onRevealCommitRef.current?.(sha);
             }}
-            onGitContextMenu={(event, sha, authorMail) => {
-              event.preventDefault();
-              setBlameMenu({ x: event.clientX, y: event.clientY, sha, authorMail });
+            onOpenGitMenu={(rect, sha, authorMail) => {
+              setBlameMenu({ x: rect.right, y: rect.bottom + 4, sha, authorMail });
             }}
           />
         ) : null}
@@ -725,14 +724,20 @@ function BlameOverlay({
   lineHeight,
   onLocalClick,
   onGitClick,
-  onGitContextMenu,
+  onOpenGitMenu,
 }: {
   entries: LocalBlameEntry[];
   scrollTop: number;
   lineHeight: number;
   onLocalClick(itemId: string): void;
   onGitClick(sha: string): void;
-  onGitContextMenu(event: ReactMouseEvent, sha: string, authorMail: string): void;
+  /**
+   * Open the git-blame menu for `sha`. `rect` is the bounding rect of the
+   * trigger button so the popover can be anchored under it (matches the
+   * Kebab/ContextMenu positioning convention used elsewhere). Replaces
+   * the previous mouse-event-based right-click menu.
+   */
+  onOpenGitMenu(rect: DOMRect, sha: string, authorMail: string): void;
 }) {
   const nowSec = Date.now() / 1000;
   return (
@@ -779,19 +784,47 @@ function BlameOverlay({
             const date = formatBlameDate(entry.git.authorTime);
             const author = truncateAuthor(entry.git.author);
             const sha = entry.git.sha;
+            const authorMail = entry.git.authorMail;
             return (
               <div
                 key={entry.line}
-                title={`${sha.slice(0, 8)} ${entry.git.author} <${entry.git.authorMail}>\n${entry.git.summary}`}
+                title={`${sha.slice(0, 8)} ${entry.git.author} <${authorMail}>\n${entry.git.summary}`}
                 onClick={() => onGitClick(sha)}
-                onContextMenu={(event) => onGitContextMenu(event, sha, entry.git!.authorMail)}
+                className="oxplow-blame-row"
                 style={{
                   ...rowStyle(lineHeight, bg),
                   borderLeft: "2px solid var(--blame-git-border, #4a9eff)",
                   cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  position: "relative",
                 }}
               >
-                {`${date}  ${author}`}
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {`${date}  ${author}`}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Blame actions"
+                  className="oxplow-blame-row-kebab"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                    onOpenGitMenu(rect, sha, authorMail);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    lineHeight: 1,
+                    padding: "0 2px",
+                  }}
+                >
+                  ⋯
+                </button>
               </div>
             );
           }

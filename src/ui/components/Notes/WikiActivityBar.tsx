@@ -14,7 +14,8 @@ import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { formatContextMention, type ContextRef } from "../../agent-context-ref.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
-import { ContextMenu } from "../ContextMenu.js";
+import { Kebab } from "../Kebab.js";
+import type { MenuItem } from "../../menu.js";
 
 const FRESHNESS_COLOR: Record<WikiNoteSummary["freshness"], string> = {
   "fresh": "var(--freshness-fresh)",
@@ -65,7 +66,6 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [items, setItems] = useState<ItemEntry[]>([]);
   const [openSection, setOpenSection] = useState<"notes" | "files" | "items" | null>(null);
-  const [pendingMenu, setPendingMenu] = useState<{ ref: ContextRef; x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const refreshNotes = useCallback(async () => {
@@ -192,11 +192,16 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
     else onOpenWorkItem(entry.itemId);
   };
 
-  const handleContextMenu = (e: React.MouseEvent, entry: Entry) => {
-    e.preventDefault();
-    setOpenSection(null);
-    setPendingMenu({ ref: entryToContextRef(entry), x: e.clientX, y: e.clientY });
-  };
+  const buildEntryMenu = (entry: Entry): MenuItem[] => [
+    {
+      id: "activity.add-to-agent",
+      label: "Add to agent context",
+      enabled: true,
+      run: () => {
+        insertIntoAgent(formatContextMention(entryToContextRef(entry)));
+      },
+    },
+  ];
 
   return (
     <div
@@ -224,7 +229,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "notes"}
           onToggle={() => setOpenSection((v) => v === "notes" ? null : "notes")}
           onOpen={handleOpen}
-          onContextMenu={handleContextMenu}
+          buildMenu={buildEntryMenu}
           testidPrefix="wiki-activity"
         />
       )}
@@ -239,7 +244,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "files"}
           onToggle={() => setOpenSection((v) => v === "files" ? null : "files")}
           onOpen={handleOpen}
-          onContextMenu={handleContextMenu}
+          buildMenu={buildEntryMenu}
           testidPrefix="file-activity"
         />
       )}
@@ -254,25 +259,8 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
           open={openSection === "items"}
           onToggle={() => setOpenSection((v) => v === "items" ? null : "items")}
           onOpen={handleOpen}
-          onContextMenu={handleContextMenu}
+          buildMenu={buildEntryMenu}
           testidPrefix="item-activity"
-        />
-      )}
-      {pendingMenu && (
-        <ContextMenu
-          items={[
-            {
-              id: "activity.add-to-agent",
-              label: "Add to agent context",
-              enabled: true,
-              run: () => {
-                insertIntoAgent(formatContextMention(pendingMenu.ref));
-                setPendingMenu(null);
-              },
-            },
-          ]}
-          position={{ x: pendingMenu.x, y: pendingMenu.y }}
-          onClose={() => setPendingMenu(null)}
         />
       )}
     </div>
@@ -286,7 +274,7 @@ function Section({
   open,
   onToggle,
   onOpen,
-  onContextMenu,
+  buildMenu,
   testidPrefix,
 }: {
   label: string;
@@ -295,7 +283,7 @@ function Section({
   open: boolean;
   onToggle: () => void;
   onOpen: (entry: Entry) => void;
-  onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
+  buildMenu: (entry: Entry) => MenuItem[];
   testidPrefix: string;
 }) {
   return (
@@ -306,7 +294,8 @@ function Section({
           key={entryKey(entry)}
           entry={entry}
           onOpen={() => onOpen(entry)}
-          onContextMenu={(e) => onContextMenu(e, entry)}
+          menuItems={buildMenu(entry)}
+          testidPrefix={testidPrefix}
         />
       ))}
       {overflow.length > 0 && (
@@ -349,12 +338,9 @@ function Section({
           }}
         >
           {overflow.map((entry) => (
-            <button
+            <div
               key={entryKey(entry)}
-              type="button"
               role="menuitem"
-              onClick={() => onOpen(entry)}
-              onContextMenu={(e) => onContextMenu(e, entry)}
               draggable
               onDragStart={(e) => setContextRefDrag(e, entryToContextRef(entry))}
               style={{
@@ -362,23 +348,42 @@ function Section({
                 alignItems: "center",
                 gap: 6,
                 width: "100%",
-                background: "transparent",
-                color: "var(--text-primary)",
-                border: "none",
                 padding: "5px 8px",
-                cursor: "pointer",
                 fontSize: 12,
-                textAlign: "left",
               }}
             >
-              <EntryIcon entry={entry} />
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {entryLabel(entry)}
-              </span>
-              <span style={{ opacity: 0.55, fontSize: 11, flex: "0 0 auto" }}>
-                {formatRelative(entry.ts)}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onOpen(entry)}
+                style={{
+                  display: "flex",
+                  flex: 1,
+                  alignItems: "center",
+                  gap: 6,
+                  minWidth: 0,
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: 0,
+                  textAlign: "left",
+                }}
+              >
+                <EntryIcon entry={entry} />
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {entryLabel(entry)}
+                </span>
+                <span style={{ opacity: 0.55, fontSize: 11, flex: "0 0 auto" }}>
+                  {formatRelative(entry.ts)}
+                </span>
+              </button>
+              <Kebab
+                items={buildMenu(entry)}
+                size={14}
+                testId={`${testidPrefix}-kebab-${entryKey(entry)}`}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -389,42 +394,63 @@ function Section({
 function Pill({
   entry,
   onOpen,
-  onContextMenu,
+  menuItems,
+  testidPrefix,
 }: {
   entry: Entry;
   onOpen: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  menuItems: MenuItem[];
+  testidPrefix: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      onContextMenu={onContextMenu}
+    <span
       draggable
       onDragStart={(e) => setContextRefDrag(e, entryToContextRef(entry))}
       title={`${entryFullLabel(entry)} — ${formatRelative(entry.ts)}\nDrag onto agent to add to context`}
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 5,
+        gap: 4,
         background: "var(--surface-card)",
         color: "var(--text-primary)",
         border: "1px solid var(--border-subtle)",
         borderRadius: 10,
-        padding: "1px 8px",
+        padding: "1px 4px 1px 8px",
         cursor: "grab",
         fontSize: 11,
         flex: "0 1 auto",
         minWidth: 0,
-        maxWidth: 220,
+        maxWidth: 240,
       }}
     >
-      <EntryIcon entry={entry} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-        {entryLabel(entry)}
-      </span>
-      <span style={{ opacity: 0.55, flex: "0 0 auto" }}>· {formatRelative(entry.ts)}</span>
-    </button>
+      <button
+        type="button"
+        onClick={onOpen}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          background: "transparent",
+          color: "inherit",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          fontSize: 11,
+          minWidth: 0,
+        }}
+      >
+        <EntryIcon entry={entry} />
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+          {entryLabel(entry)}
+        </span>
+        <span style={{ opacity: 0.55, flex: "0 0 auto" }}>· {formatRelative(entry.ts)}</span>
+      </button>
+      <Kebab
+        items={menuItems}
+        size={14}
+        testId={`${testidPrefix}-kebab-${entryKey(entry)}`}
+      />
+    </span>
   );
 }
 

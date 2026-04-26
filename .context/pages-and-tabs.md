@@ -120,19 +120,26 @@ The full IA redesign ships in phases (see plan
   + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
   and `PromptDialog.tsx` are deleted. 5c (Kebab popovers) shipped on
   the high-traffic surfaces (StreamRail, ThreadRail, CenterTabs,
-  WorkGroupList rows, Notes pane rows, FileTree rows); BranchPicker
-  manage menu, EditorPane git-blame margin, NotesPane/MarkdownView
-  link menus, WikiActivityBar entry menus, and TerminalPane right-
-  click are tracked as a continuation task. 5d landed `Slideover`
-  primitive (`src/ui/components/Slideover.tsx`); BranchPicker /
-  commit-dialog / snapshot-detail / commit-detail migrations to
-  Slideover are still pending. 5e landed the per-stream and
+  WorkGroupList rows, Notes pane rows, FileTree rows) plus the
+  remaining holdouts: BranchPicker manage rows (chevron-led row click,
+  no `onContextMenu`), EditorPane git-blame margin (hover-revealed
+  per-row kebab), MarkdownView links (inline hover-revealed kebab
+  next to each link), WikiActivityBar entry pills + overflow rows
+  (per-row kebab), TerminalPane (xterm `contextmenu` listener
+  removed; header-bar kebab with Copy/Paste/Clear). 5d landed
+  `Slideover` primitive (`src/ui/components/Slideover.tsx`) plus the
+  BranchPicker rename Slideover and ProjectPanel commit-dialog
+  Slideover; snapshot-detail and commit-detail Slideover wraps for
+  cross-page opens are still pending. 5e landed the per-stream and
   per-thread settings as `StreamSettingsPage` and `ThreadSettingsPage`
   (the in-rail settings overlay falls back to the legacy modal when
   the rail isn't given an `onOpenStreamSettings` /
-  `onOpenThreadSettings` handler — App.tsx wires both). New-stream /
-  New-work-item page-form replacements and the inline-new-row that
-  retires `CreateThreadModal` are still pending.
+  `onOpenThreadSettings` handler — App.tsx wires both), plus the
+  inline-new-row that retired `CreateThreadModal` (ThreadRail's
+  `+ New thread` now expands an inline input/Cancel/Create row
+  in-place using the same `thread-rail-create-input` /
+  `thread-rail-create-submit` testids). New-stream /
+  New-work-item page-form replacements are still pending.
 - ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
   `SelectionActionBar` (`src/ui/components/Plan/SelectionActionBar.tsx`)
   appears at the top of `PlanPane`'s work-group region whenever ≥1
