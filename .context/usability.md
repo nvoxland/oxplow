@@ -2,28 +2,18 @@
 
 Things I keep forgetting. Read this before adding any UI.
 
-> **IA redesign — phases 0–7 shipped; phase 5 continuations mostly
-> shipped, snapshot/commit-detail Slideover + new-X pages pending.**
-> Modal `ConfirmDialog` and `PromptDialog` chrome was retired in favor
-> of inline patterns; the right-click → `ContextMenu` reflex was
-> replaced by visible kebab `⋯` buttons on each row; per-stream and
-> per-thread settings ship as Page tabs (`StreamSettingsPage`,
-> `ThreadSettingsPage`). The rules below describe the redesigned
-> target. The previous phase-5c right-click holdouts have been
-> migrated: BranchPicker manage rows now open via the row's primary
-> click + visible chevron (no `onContextMenu`); the EditorPane git-
-> blame margin gained a hover-revealed kebab per row; MarkdownView
-> links carry an inline hover-revealed kebab next to each link; the
-> WikiActivityBar pills + overflow rows each carry their own kebab;
-> the TerminalPane lost its xterm `contextmenu` listener and gained a
-> header-bar kebab (Copy selection / Paste / Clear). Phase 5d landed
-> the BranchPicker rename Slideover and ProjectPanel commit
-> Slideover; snapshot-detail and commit-detail Slideover wraps for
-> cross-page opens are still pending. Phase 5e landed the inline-new-
-> row that retires `CreateThreadModal`; New-stream and New-work-item
-> page-form replacements are still pending. Phase 7 (density + visual
-> polish) is shipped — see `.context/theming.md` Density section and
-> `.context/pages-and-tabs.md` for the migration log. Plan:
+> **IA redesign — phases 0–7 fully shipped.** Modal `ConfirmDialog`
+> and `PromptDialog` chrome was retired in favor of inline patterns;
+> the right-click → `ContextMenu` reflex was replaced by visible
+> kebab `⋯` buttons on each row; per-stream and per-thread settings
+> ship as Page tabs (`StreamSettingsPage`, `ThreadSettingsPage`); new-
+> stream and new-work-item flows ship as Page tabs (`NewStreamPage`,
+> `NewWorkItemPage`); snapshot- and commit-detail Slideover wrappers
+> (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
+> cross-page open path. The rules below describe the redesigned
+> target. Phase 7 (density + visual polish) details live in
+> `.context/theming.md`'s Density section; the per-phase migration log
+> lives in `.context/pages-and-tabs.md`. Plan:
 > `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
 ## Forms
@@ -45,12 +35,15 @@ Things I keep forgetting. Read this before adding any UI.
   `ProjectPanel.tsx`. Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
-  or (post-5d) a slideover, not a centered modal.** The few surviving
-  modals (BranchPicker form chrome, ProjectPanel commit dialog,
-  NewWorkItemModal, CreateThreadModal, StreamRail "New stream" modal,
-  Stream/Thread settings modals) are scheduled to migrate; do not add
-  new ones. The pattern to copy is `src/ui/pages/SettingsPage.tsx`
-  — full Page tab, no backdrop.
+  or a slideover, not a centered modal.** The "+ New" flows ship as
+  Page tabs (`NewStreamPage`, `NewWorkItemPage`, the `Stream/Thread`
+  settings pages); cross-page detail openings (snapshot, commit,
+  branch rename, file commit) ship as Slideovers. The remaining
+  legacy hand-rolled modal chrome inside `PlanPane.tsx`'s
+  `NewWorkItemModal` only backs the edit-double-click flow — do not
+  add new modal call sites; route new flows through pages or
+  slideovers. The page pattern to copy is
+  `src/ui/pages/SettingsPage.tsx` — full Page tab, no backdrop.
 - **Never call `window.prompt()`.** Electron disables it — it returns
   `null` synchronously without showing anything, so any code path
   gated on its return value silently no-ops. Use `InlineEdit` (for

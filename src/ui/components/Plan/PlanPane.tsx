@@ -103,6 +103,10 @@ interface Props {
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
+  /** Route the "new task" / "+ Task on epic" buttons to a NewWorkItemPage
+   *  tab instead of the inline modal. When omitted, the legacy modal
+   *  path stays in place (used by tests and standalone usages). */
+  onOpenNewWorkItemPage?(payload: { parentId?: string | null }): void;
 }
 
 interface ContextMenuState {
@@ -133,6 +137,7 @@ export function PlanPane({
   onOpenFile,
   onShowInHistory,
   registerOpenCreate,
+  onOpenNewWorkItemPage,
 }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -367,6 +372,12 @@ export function PlanPane({
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   const openCreateModal = (parentId: string | null = null) => {
+    // When wired, route the create flow to a full-tab page (phase 5e).
+    // Falls back to the legacy inline modal in tests / standalone use.
+    if (onOpenNewWorkItemPage) {
+      onOpenNewWorkItemPage({ parentId });
+      return;
+    }
     setTitle(""); setDescription(""); setAcceptance("");
     setPriority("medium");
     setStatus("ready");

@@ -104,7 +104,9 @@ import { NotePage } from "./pages/NotePage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
-import { indexRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { NewStreamPage } from "./pages/NewStreamPage.js";
+import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
+import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1224,6 +1226,10 @@ export function App() {
   // useEffect chain can stall for 10+ seconds before committing. Direct
   // ref call inside flushSync sidesteps the scheduler entirely.
   const planOpenCreateRef = useRef<(() => void) | null>(null);
+  // Forward ref so commandHandlers (declared above handleOpenPage) can
+  // route through the same page-tab opener used by every other caller.
+  // The ref is populated in a useEffect after handleOpenPage is defined.
+  const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commandState = useMemo(
     () => ({
@@ -1256,21 +1262,13 @@ export function App() {
       if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
     },
     newWorkItem() {
-      // Open the Plan dock (mounts PlanPane if it's not already) and
-      // open the create modal. If PlanPane is mounted, call its
-      // registered opener directly so setModalMode commits inside the
-      // parent's flushSync — the fallback via setPlanNewRequest handles
-      // the edge case where PlanPane hasn't mounted yet (its
-      // openNewRequest useEffect will fire once it does).
-      setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
-      if (planOpenCreateRef.current) {
-        planOpenCreateRef.current();
-      } else {
-        setPlanNewRequest((prev) => prev + 1);
-      }
+      // handleOpenPage is declared further down; forward through the ref
+      // so the menu/keyboard handler routes to a NewWorkItemPage tab
+      // (replaces the legacy openCreateModal-via-PlanPane path).
+      handleOpenPageRef.current?.(newWorkItemRef());
     },
     newStream() {
-      setStreamCreateRequest((n) => n + 1);
+      handleOpenPageRef.current?.(newStreamRef());
     },
     newThread() {
       if (!stream) return;
@@ -1501,7 +1499,9 @@ export function App() {
       case "all-work":
       case "subsystem-docs":
       case "stream-settings":
-      case "thread-settings": {
+      case "thread-settings":
+      case "new-stream":
+      case "new-work-item": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -1527,6 +1527,13 @@ export function App() {
     });
     setCenterActive((current) => (current === id ? "agent" : current));
   }, [selectedThreadId, setCenterActive]);
+
+  // Keep the forward ref in sync with the latest handleOpenPage. Used by
+  // commandHandlers (declared above handleOpenPage) so menu/keyboard
+  // dispatches route through the same page-tab opener.
+  useEffect(() => {
+    handleOpenPageRef.current = handleOpenPage;
+  }, [handleOpenPage]);
 
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [
@@ -1744,6 +1751,7 @@ export function App() {
               onOpenFile={handleOpenFile}
               onShowInHistory={handleShowSnapshotInHistory}
               registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
+              onOpenNewWorkItemPage={(payload) => handleOpenPage(newWorkItemRef(payload))}
             />
           ),
         });
@@ -1827,6 +1835,56 @@ export function App() {
                     threads: nextThreads,
                   },
                 }));
+              }}
+            />
+          ),
+        });
+      } else if (ref.kind === "new-stream") {
+        tabs.push({
+          id: ref.id,
+          label: "New stream",
+          closable: true,
+          render: () => (
+            <NewStreamPage
+              gitEnabled={workspaceContext.gitEnabled}
+              defaultTitle={`Stream ${streams.length + 1}`}
+              onClose={() => closePageTab(ref.id)}
+              onCreated={(created) => {
+                handleStreamCreated(created);
+                closePageTab(ref.id);
+              }}
+            />
+          ),
+        });
+      } else if (ref.kind === "new-work-item") {
+        const payload = (ref.payload as {
+          parentId?: string | null;
+          initialCategory?: string | null;
+          initialPriority?: string | null;
+        } | null) ?? {};
+        tabs.push({
+          id: ref.id,
+          label: "New work item",
+          closable: true,
+          render: () => (
+            <NewWorkItemPage
+              defaults={{
+                parentId: payload.parentId ?? null,
+                initialCategory: payload.initialCategory ?? null,
+                initialPriority: payload.initialPriority ?? null,
+              }}
+              epics={selectedThreadWork?.epics ?? []}
+              onClose={() => closePageTab(ref.id)}
+              onSubmit={async (input) => {
+                await handleCreateWorkItem({
+                  kind: input.kind,
+                  title: input.title,
+                  description: input.description,
+                  acceptanceCriteria: input.acceptanceCriteria ?? null,
+                  parentId: input.parentId ?? null,
+                  status: input.status ?? "ready",
+                  priority: input.priority ?? "medium",
+                });
               }}
             />
           ),
@@ -1922,6 +1980,7 @@ export function App() {
           onOpenFile={handleOpenFile}
           onShowInHistory={handleShowSnapshotInHistory}
           registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
+          onOpenNewWorkItemPage={(payload) => handleOpenPage(newWorkItemRef(payload))}
         />
       ),
     },
@@ -2003,6 +2062,7 @@ export function App() {
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => handleOpenPage(indexRef("settings"))}
           onOpenStreamSettings={(targetStreamId) => handleOpenPage(streamSettingsRef(targetStreamId))}
+          onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
           onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}

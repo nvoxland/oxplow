@@ -23,15 +23,18 @@ interface Props {
   /** Open the per-stream settings page. When provided, the kebab
    *  "Settings" item routes here instead of the legacy modal. */
   onOpenStreamSettings?(streamId: string): void;
+  /** Open the New-stream page (replaces the in-rail modal when wired). */
+  onOpenNewStreamPage?(): void;
   onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
-  /** Bumping this number opens the inline "new stream" form. */
+  /** Bumping this number opens the inline "new stream" form when no
+   *  `onOpenNewStreamPage` is wired (legacy path). */
   createRequest?: number;
 }
 
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -108,6 +111,10 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
 
   useEffect(() => {
     if (createRequest === undefined || createRequest === 0) return;
+    if (onOpenNewStreamPage) {
+      onOpenNewStreamPage();
+      return;
+    }
     void openCreate();
   }, [createRequest]);
 
@@ -328,7 +335,10 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     },
                     onSwitchBranch: () => { void openSwitchBranch(candidate); },
                     onSettings: () => openStreamSettings(candidate),
-                    onAddStream: () => void openCreate(),
+                    onAddStream: () => {
+                      if (onOpenNewStreamPage) { onOpenNewStreamPage(); return; }
+                      void openCreate();
+                    },
                     onAddThread: () => onRequestCreateThread?.(),
                     canRename: !!onRenameStream,
                     canAddThread: !!onRequestCreateThread,
@@ -342,7 +352,13 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
         </div>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 0 6px 8px" }}>
           <button type="button"
-            onClick={openCreate}
+            onClick={() => {
+              if (onOpenNewStreamPage) {
+                onOpenNewStreamPage();
+                return;
+              }
+              void openCreate();
+            }}
             title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
             style={{ ...buttonStyle, opacity: gitEnabled ? 1 : 0.6, cursor: gitEnabled ? "pointer" : "not-allowed" }}
             disabled={!gitEnabled}

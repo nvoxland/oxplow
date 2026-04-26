@@ -115,7 +115,7 @@ The full IA redesign ships in phases (see plan
   legacy `note:` tab path now renders through `NotePage` so wiki
   notes get a Backlinks panel; modal-based work-item edits still work
   alongside `WorkItemPage` for callers that want the modal flow.
-- 🟡 Phase 5 — Web-style interactions sweep (kill modals + right-click
+- ✅ Phase 5 — Web-style interactions sweep (kill modals + right-click
   menus). 5a (`InlineConfirm` + `UndoToast` queue) and 5b (`InlineEdit`
   + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
   and `PromptDialog.tsx` are deleted. 5c (Kebab popovers) shipped on
@@ -126,20 +126,19 @@ The full IA redesign ships in phases (see plan
   per-row kebab), MarkdownView links (inline hover-revealed kebab
   next to each link), WikiActivityBar entry pills + overflow rows
   (per-row kebab), TerminalPane (xterm `contextmenu` listener
-  removed; header-bar kebab with Copy/Paste/Clear). 5d landed
+  removed; header-bar kebab with Copy/Paste/Clear). 5d landed the
   `Slideover` primitive (`src/ui/components/Slideover.tsx`) plus the
-  BranchPicker rename Slideover and ProjectPanel commit-dialog
-  Slideover; snapshot-detail and commit-detail Slideover wraps for
-  cross-page opens are still pending. 5e landed the per-stream and
-  per-thread settings as `StreamSettingsPage` and `ThreadSettingsPage`
-  (the in-rail settings overlay falls back to the legacy modal when
-  the rail isn't given an `onOpenStreamSettings` /
-  `onOpenThreadSettings` handler — App.tsx wires both), plus the
-  inline-new-row that retired `CreateThreadModal` (ThreadRail's
-  `+ New thread` now expands an inline input/Cancel/Create row
-  in-place using the same `thread-rail-create-input` /
-  `thread-rail-create-submit` testids). New-stream /
-  New-work-item page-form replacements are still pending.
+  BranchPicker rename Slideover, ProjectPanel commit-dialog
+  Slideover, and the cross-page detail wrappers
+  `SnapshotDetailSlideover` (`src/ui/components/Snapshots/SnapshotDetailSlideover.tsx`)
+  and `CommitDetailSlideover` (`src/ui/components/History/CommitDetailSlideover.tsx`).
+  5e landed the per-stream and per-thread settings as
+  `StreamSettingsPage` and `ThreadSettingsPage`, the inline-new-row
+  that retired `CreateThreadModal`, and the new-stream / new-work-
+  item page-form replacements (`NewStreamPage`, `NewWorkItemPage` —
+  routed via `newStreamRef()` / `newWorkItemRef({...})`). The
+  `PlanPane` `NewWorkItemModal` only backs the edit-double-click
+  flow now; new flows route through pages.
 - ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
   `SelectionActionBar` (`src/ui/components/Plan/SelectionActionBar.tsx`)
   appears at the top of `PlanPane`'s work-group region whenever ≥1
@@ -168,8 +167,8 @@ The full IA redesign ships in phases (see plan
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
 tabs. The existing left rail toolwindows (Work, Files, Notes, plus the
 HUD tab) and bottom drawer (Hook events, Git history, Local history,
-Code quality) remain in place during phases 4–6 so existing
-keyboard/menu paths keep working; phase 5/7 trims them.
+Code quality) remain in place so existing keyboard/menu paths keep
+working alongside the page tabs.
 
 ## Per-thread active tab (today)
 
