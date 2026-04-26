@@ -88,6 +88,8 @@ import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
 import { CodeQualityPanel } from "./components/CodeQuality/CodeQualityPanel.js";
+import { RailHud } from "./components/RailHud/RailHud.js";
+import type { TabRef } from "./tabs/tabState.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1508,7 +1510,57 @@ export function App() {
     handleOpenNote,
   ]);
 
+  const recentFileEntries = useMemo(() => {
+    const order = currentSession.openOrder;
+    return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
+  }, [currentSession.openOrder]);
+
+  const handleOpenPage = useCallback((ref: TabRef) => {
+    switch (ref.kind) {
+      case "agent":
+        setCenterActive("agent");
+        return;
+      case "file": {
+        const payload = ref.payload as { path?: string } | null;
+        if (payload?.path) void handleOpenFile(payload.path);
+        return;
+      }
+      case "work-item": {
+        const payload = ref.payload as { itemId?: string } | null;
+        if (payload?.itemId) handleRequestEditWorkItem(payload.itemId);
+        return;
+      }
+      default:
+        // Page kinds without renderers yet (start, all-work, dashboards, etc.)
+        // are dispatched to the existing tool-window dock for now where it
+        // makes sense, otherwise no-op.
+        if (ref.kind === "all-work") setLeftDockActivate({ id: "plan", token: Date.now() });
+        else if (ref.kind === "files") setLeftDockActivate({ id: "project", token: Date.now() });
+        else if (ref.kind === "notes-index") setLeftDockActivate({ id: "notes", token: Date.now() });
+        else if (ref.kind === "git-history") setBottomActivate({ id: "history", token: Date.now() });
+        else if (ref.kind === "local-history") setBottomActivate({ id: "snapshots", token: Date.now() });
+        else if (ref.kind === "code-quality") setBottomActivate({ id: "code-quality", token: Date.now() });
+        else if (ref.kind === "settings") setSettingsOpen(true);
+        return;
+    }
+  }, [handleOpenFile, handleRequestEditWorkItem]);
+
   const leftToolWindows: ToolWindow[] = useMemo(() => [
+    {
+      id: "hud",
+      label: "HUD",
+      render: () => (
+        <RailHud
+          threadId={selectedThread?.id ?? null}
+          threadWork={selectedThreadWork}
+          backlog={backlogState}
+          agentStatus={agentThreadStatus}
+          recentFiles={recentFileEntries}
+          onOpenPage={handleOpenPage}
+          onOpenSearch={() => setQuickOpenVisible(true)}
+        />
+      ),
+    },
     {
       id: "plan",
       label: "Work",

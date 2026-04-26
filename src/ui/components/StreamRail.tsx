@@ -6,6 +6,7 @@ import { AgentStatusDot } from "./AgentStatusDot.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
+import { ThemeToggle } from "./ThemeToggle.js";
 
 interface Props {
   stream: Stream | null;
@@ -317,6 +318,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           >
             + New stream
           </button>
+          <ThemeToggle variant="compact" />
           {onOpenSettings ? (
             <button type="button"
               onClick={onOpenSettings}

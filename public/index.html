@@ -5,43 +5,182 @@
     <title>oxplow</title>
     <link rel="stylesheet" href="./dist/main.css" />
     <style>
-      :root {
-        --bg: #0e0e0e;           /* editor / main content — neutral, darkest */
-        --bg-1: #1a1815;         /* center-tab strip, side panels — faint warm */
-        --bg-2: #342921;         /* thread rail — warm amber/sienna, complementary to the cool stream rail */
-        --bg-3: #2a313f;         /* stream rail — cool blue-tinted top chrome */
-        --bg-tab-inactive: #3a3a3d; /* non-selected thread tabs — neutral light gray */
-        --bg-detail: #242424;    /* expanded-detail surfaces — neutral elevation above --bg, no warm tint */
+      /* ============================================================
+         Theme tokens. All renderer components read CSS variables;
+         themes change values, not names. See .context/theming.md.
+         ============================================================ */
+
+      /* Light theme — default for new installs. */
+      :root,
+      :root[data-theme="light"] {
+        /* Surface tiers — light, airy, low contrast between adjacent panes. */
+        --surface-app: #f5f7fa;
+        --surface-card: #ffffff;
+        --surface-rail: #f1f3f7;
+        --surface-tab-active: #ffffff;
+        --surface-tab-inactive: #e7eaf0;
+        --surface-elevated: #ffffff;
+        --surface-overlay: rgba(15, 17, 21, 0.45);
+
+        /* Borders / dividers. */
+        --border-subtle: #e5e8ee;
+        --border-strong: #c4cad4;
+
+        /* Text. */
+        --text-primary: #1a1d23;
+        --text-secondary: #5a6371;
+        --text-muted: #8a92a0;
+
+        /* Accent (primary action). */
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --accent-soft-bg: #eef4ff;
+        --accent-on-accent: #ffffff;
+
+        /* Semantic status. */
+        --status-running: #2563eb;
+        --status-waiting: #d97706;
+        --status-ready: #64748b;
+        --status-human-check: #7c3aed;
+        --status-done: #059669;
+        --status-canceled: #94a3b8;
+
+        /* Severity (code quality). */
+        --severity-low: #64748b;
+        --severity-medium: #d97706;
+        --severity-high: #ea580c;
+        --severity-critical: #e11d48;
+
+        /* Freshness (notes). */
+        --freshness-fresh: #059669;
+        --freshness-stale: #d97706;
+        --freshness-very-stale: #e11d48;
+
+        /* Diff. */
+        --diff-add-bg: #e8f6ee;
+        --diff-add-fg: #064e2b;
+        --diff-remove-bg: #fde8ec;
+        --diff-remove-fg: #7f1d1d;
+
+        /* Legacy aliases — existing components read these. Re-mapped to
+           the semantic tokens above so the old code keeps working until
+           it's migrated piecemeal in later phases. */
+        --bg: var(--surface-app);
+        --bg-1: var(--surface-tab-inactive);
+        --bg-2: #f7eedf;             /* warm thread rail tint, light variant */
+        --bg-3: #e6ecf5;             /* cool stream rail tint, light variant */
+        --bg-tab-inactive: var(--surface-tab-inactive);
+        --bg-detail: var(--surface-card);
+        --fg: var(--text-primary);
+        --muted: var(--text-secondary);
+        --border: var(--border-subtle);
+        /* --border-strong shared; defined above */
+        /* --accent shared; defined above */
+        --priority-urgent: #e11d48;
+        --priority-high: #ea580c;
+        --priority-medium: var(--text-secondary);
+        --priority-low: var(--text-muted);
+
+        /* Blame overlay (light variant). Saturation = age, hue = source. */
+        --blame-local-fresh: rgba(234, 88, 12, 0.18);
+        --blame-local-recent: rgba(234, 88, 12, 0.12);
+        --blame-local-stale: rgba(234, 88, 12, 0.08);
+        --blame-local-old: rgba(160, 110, 70, 0.06);
+        --blame-local-border: #ea580c;
+        --blame-git-fresh: rgba(37, 99, 235, 0.16);
+        --blame-git-recent: rgba(37, 99, 235, 0.11);
+        --blame-git-stale: rgba(37, 99, 235, 0.07);
+        --blame-git-old: rgba(110, 130, 170, 0.05);
+        --blame-git-border: #2563eb;
+        --blame-uncommitted: rgba(120, 125, 135, 0.10);
+
+        color-scheme: light;
+      }
+
+      /* Dark theme — preserves the original dark aesthetic with semantic
+         tokens layered on. Existing dark-built components keep working
+         when this attribute is set. */
+      :root[data-theme="dark"] {
+        --surface-app: #14161a;
+        --surface-card: #1c1f24;
+        --surface-rail: #181b20;
+        --surface-tab-active: #1f2228;
+        --surface-tab-inactive: #181b20;
+        --surface-elevated: #232730;
+        --surface-overlay: rgba(0, 0, 0, 0.55);
+
+        --border-subtle: #2a2e36;
+        --border-strong: #3a3f49;
+
+        --text-primary: #e6e8ec;
+        --text-secondary: #9aa1ad;
+        --text-muted: #6c727c;
+
+        --accent: #5b8cf5;
+        --accent-hover: #7aa2f7;
+        --accent-soft-bg: #1f2a44;
+        --accent-on-accent: #ffffff;
+
+        --status-running: #5b8cf5;
+        --status-waiting: #f59e0b;
+        --status-ready: #94a3b8;
+        --status-human-check: #a78bfa;
+        --status-done: #34d399;
+        --status-canceled: #6b7280;
+
+        --severity-low: #94a3b8;
+        --severity-medium: #f59e0b;
+        --severity-high: #fb923c;
+        --severity-critical: #fb7185;
+
+        --freshness-fresh: #34d399;
+        --freshness-stale: #f59e0b;
+        --freshness-very-stale: #fb7185;
+
+        --diff-add-bg: #1f3326;
+        --diff-add-fg: #a7f3d0;
+        --diff-remove-bg: #3a1f25;
+        --diff-remove-fg: #fda4af;
+
+        /* Legacy aliases — original dark hex values for components not yet
+           migrated to semantic tokens. */
+        --bg: #0e0e0e;
+        --bg-1: #1a1815;
+        --bg-2: #342921;
+        --bg-3: #2a313f;
+        --bg-tab-inactive: #3a3a3d;
+        --bg-detail: #242424;
         --fg: #e6e6e6;
-        --muted: #8d8a85;        /* warm muted to go with the warm chrome */
+        --muted: #8d8a85;
         --border: #2f2b26;
         --border-strong: #3c3832;
-        --accent: #4a9eff;
-        --priority-urgent: #e06c75;   /* same red family used in delete affordances */
-        --priority-high: #e5a06a;     /* warm orange — escalates visually over --muted */
-        --priority-medium: #8d8a85;   /* alias of --muted; no highlight */
-        --priority-low: #6b6864;      /* sits below --muted so Low items recede */
-        /* Blame overlay — two hue tracks so local (work-item) and git
-           attribution read as distinct sources. Saturation encodes age,
-           hue encodes source. See .context/theming.md. */
-        --blame-local-fresh: rgba(229, 160, 106, 0.55);   /* accent amber, <7d */
-        --blame-local-recent: rgba(229, 160, 106, 0.40);  /* <30d */
-        --blame-local-stale: rgba(229, 160, 106, 0.28);   /* <180d */
-        --blame-local-old: rgba(170, 140, 110, 0.18);     /* older */
+        /* --accent: redefined as semantic above */
+        --priority-urgent: #e06c75;
+        --priority-high: #e5a06a;
+        --priority-medium: #8d8a85;
+        --priority-low: #6b6864;
+
+        --blame-local-fresh: rgba(229, 160, 106, 0.55);
+        --blame-local-recent: rgba(229, 160, 106, 0.40);
+        --blame-local-stale: rgba(229, 160, 106, 0.28);
+        --blame-local-old: rgba(170, 140, 110, 0.18);
         --blame-local-border: #e5a06a;
-        --blame-git-fresh: rgba(96, 165, 250, 0.55);      /* accent blue, <7d */
+        --blame-git-fresh: rgba(96, 165, 250, 0.55);
         --blame-git-recent: rgba(96, 165, 250, 0.40);
         --blame-git-stale: rgba(96, 165, 250, 0.28);
         --blame-git-old: rgba(120, 140, 170, 0.14);
         --blame-git-border: #4a9eff;
         --blame-uncommitted: rgba(70, 70, 70, 0.35);
+
+        color-scheme: dark;
       }
+
       html, body, #root {
         margin: 0;
         height: 100%;
         background: var(--bg);
         color: var(--fg);
-        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
         font-size: 13px;
       }
       * { box-sizing: border-box; }
@@ -54,28 +193,37 @@
         0% { transform: translateX(-100%); }
         100% { transform: translateX(300%); }
       }
-      /* Thin, unobtrusive scrollbars. The Electron default leaves a
-         pill-shaped thumb artifact even when content fits, which was
-         showing up next to the New Stream / + Thread buttons. */
+      /* Thin, unobtrusive scrollbars. */
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb {
+        background: rgba(120, 125, 135, 0.22);
+        border-radius: 10px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      :root[data-theme="dark"] ::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.08);
         border-radius: 10px;
         border: 2px solid transparent;
         background-clip: padding-box;
       }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: padding-box; border: 2px solid transparent; }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(120, 125, 135, 0.40);
+        background-clip: padding-box;
+        border: 2px solid transparent;
+      }
+      :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.18);
+        background-clip: padding-box;
+        border: 2px solid transparent;
+      }
       ::-webkit-scrollbar-corner { background: transparent; }
-      /* Hide scrollbars entirely on the narrow horizontal rails — they only
-         show when many streams/threads are open and we don't want the thumb
-         floating next to the trailing "+ New" button. */
       .oxplow-rail-scroll { scrollbar-width: none; }
       .oxplow-rail-scroll::-webkit-scrollbar { display: none; }
-      /* Gutter markers for uncommitted changes in the editor (computed
-         against HEAD). A 3px bar on the line-decorations strip. */
+      /* Gutter markers for uncommitted changes in the editor. */
       .oxplow-gutter-added { box-shadow: inset 3px 0 0 0 #16a34a; }
-      .oxplow-gutter-modified { box-shadow: inset 3px 0 0 0 #4a9eff; }
+      .oxplow-gutter-modified { box-shadow: inset 3px 0 0 0 var(--accent); }
       .oxplow-gutter-deleted { box-shadow: inset 3px -2px 0 -1px #dc2626; }
     </style>
   </head>
