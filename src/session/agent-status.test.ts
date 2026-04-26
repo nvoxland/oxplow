@@ -101,4 +101,42 @@ describe("deriveThreadAgentStatus", () => {
       event({ kind: "stop", t: 4 }),
     ])).toBe("working");
   });
+
+  test("user interrupt mid-tool-call clears working state to done", () => {
+    // Escape during a Read tool call: PostToolUse never lands and Stop
+    // may not fire either. The runtime synthesizes a meta `Interrupt`
+    // event from the terminal layer so the icon falls back to idle.
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Read" }),
+      event({ kind: "meta", t: 2, hookEventName: "Interrupt", raw: {} }),
+    ])).toBe("done");
+  });
+
+  test("user interrupt mid-Task clears pendingTasks so a later stop is done", () => {
+    // Without the Interrupt reset, the Task PreToolUse keeps
+    // pendingTasks=1 and any subsequent stop stays "working".
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
+      event({ kind: "meta", t: 2, hookEventName: "Interrupt", raw: {} }),
+    ])).toBe("done");
+  });
+
+  test("user interrupt while idle is a no-op", () => {
+    // Pressing Escape with no turn in flight should not flip an idle
+    // session into a different state.
+    expect(deriveThreadAgentStatus([
+      event({ kind: "meta", t: 0, hookEventName: "Interrupt", raw: {} }),
+    ])).toBe("idle");
+  });
+
+  test("user prompt after interrupt re-enters working", () => {
+    expect(deriveThreadAgentStatus([
+      event({ kind: "user-prompt", t: 0, prompt: "hi" }),
+      event({ kind: "tool-use-start", t: 1, toolName: "Read" }),
+      event({ kind: "meta", t: 2, hookEventName: "Interrupt", raw: {} }),
+      event({ kind: "user-prompt", t: 3, prompt: "again" }),
+    ])).toBe("working");
+  });
 });

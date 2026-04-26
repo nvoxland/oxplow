@@ -43,6 +43,16 @@ export function deriveThreadAgentStatus(events: readonly StoredEvent[]): AgentSt
         if (ev.toolName === "Task" && pendingTasks > 0) pendingTasks -= 1;
         break;
       case "meta":
+        // The terminal layer synthesizes a `meta` event with
+        // `hookEventName === "Interrupt"` when the user presses Escape
+        // mid-turn. Claude Code doesn't reliably fire Stop on
+        // user-initiated interrupts, so without this carve-out the tab
+        // icon stays "working" until the next prompt. Reset
+        // pendingTasks too — any in-flight Task is also dead.
+        if (ev.hookEventName === "Interrupt" && status === "working") {
+          status = "done";
+          pendingTasks = 0;
+        }
         break;
     }
   }
