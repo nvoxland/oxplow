@@ -150,9 +150,13 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
     if (newSlugDraft !== null) newSlugInputRef.current?.focus();
   }, [newSlugDraft]);
 
-  function openContextMenu(e: React.MouseEvent, note: { slug: string; title: string }) {
-    e.preventDefault();
-    setContextMenu({ slug: note.slug, title: note.title, x: e.clientX, y: e.clientY });
+  function openMenuForNote(rect: DOMRect | null, note: { slug: string; title: string }) {
+    setContextMenu({
+      slug: note.slug,
+      title: note.title,
+      x: rect ? rect.right : 0,
+      y: rect ? rect.bottom + 4 : 0,
+    });
   }
 
   const contextMenuItems = contextMenu
@@ -295,9 +299,9 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             notesBySlug={notesBySlug}
             selectedSlug={selectedSlug}
             onOpenNote={onOpenNote}
-            onContextMenu={(e, hit) => {
+            onOpenMenu={(rect, hit) => {
               const summary = notesBySlug.get(hit.slug);
-              openContextMenu(e, summary ?? { slug: hit.slug, title: hit.title } as WikiNoteSummary);
+              openMenuForNote(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiNoteSummary);
             }}
           />
         ) : notes.length === 0 ? (
@@ -319,7 +323,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     selected={v.note.slug === selectedSlug}
                     rightLabel={formatRelative(v.last_at)}
                     onSelect={() => onOpenNote(v.note.slug)}
-                    onContextMenu={(e) => openContextMenu(e, v.note)}
+                    onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
                   />
                 ))}
               />
@@ -337,7 +341,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     selected={n.slug === selectedSlug}
                     rightLabel={formatRelative(n.updated_at)}
                     onSelect={() => onOpenNote(n.slug)}
-                    onContextMenu={(e) => openContextMenu(e, n)}
+                    onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
                   />
                 ))}
               />
@@ -411,14 +415,14 @@ function SearchResults({
   notesBySlug,
   selectedSlug,
   onOpenNote,
-  onContextMenu,
+  onOpenMenu,
 }: {
   hits: WikiNoteSearchHit[] | null;
   searching: boolean;
   notesBySlug: Map<string, WikiNoteSummary>;
   selectedSlug: string | null;
   onOpenNote: (slug: string) => void;
-  onContextMenu: (e: React.MouseEvent, hit: WikiNoteSearchHit) => void;
+  onOpenMenu: (rect: DOMRect, hit: WikiNoteSearchHit) => void;
 }) {
   if (hits === null && searching) {
     return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>Searching…</div>;
@@ -438,7 +442,7 @@ function SearchResults({
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
           onSelect={() => onOpenNote(hit.slug)}
-          onContextMenu={(e) => onContextMenu(e, hit)}
+          onOpenMenu={(rect) => onOpenMenu(rect, hit)}
         />
       ))}
     </>
@@ -450,20 +454,19 @@ function SearchRow({
   summary,
   selected,
   onSelect,
-  onContextMenu,
+  onOpenMenu,
 }: {
   hit: WikiNoteSearchHit;
   summary: WikiNoteSummary | null;
   selected: boolean;
   onSelect: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onOpenMenu: (rect: DOMRect) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
   return (
     <div
       onClick={onSelect}
       onDoubleClick={onSelect}
-      onContextMenu={onContextMenu}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
       style={{
@@ -490,6 +493,25 @@ function SearchRow({
         style={{ fontSize: 11, opacity: 0.7, paddingLeft: 14, lineHeight: 1.3 }}
         dangerouslySetInnerHTML={{ __html: highlightSnippet(hit.snippet) }}
       />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          aria-label="More actions"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect());
+          }}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--muted)",
+            cursor: "pointer",
+            padding: "0 4px",
+            fontSize: 14,
+            lineHeight: 1,
+          }}
+        >⋯</button>
+      </div>
     </div>
   );
 }
@@ -499,19 +521,18 @@ function NoteRow({
   selected,
   rightLabel,
   onSelect,
-  onContextMenu,
+  onOpenMenu,
 }: {
   note: WikiNoteSummary;
   selected: boolean;
   rightLabel?: string;
   onSelect: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onOpenMenu: (rect: DOMRect, note: WikiNoteSummary) => void;
 }) {
   return (
     <div
       onClick={onSelect}
       onDoubleClick={onSelect}
-      onContextMenu={onContextMenu}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: note.slug })}
       style={{
@@ -541,6 +562,24 @@ function NoteRow({
       {rightLabel && (
         <span style={{ fontSize: 11, opacity: 0.5, flex: "0 0 auto" }}>{rightLabel}</span>
       )}
+      <button
+        type="button"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), note);
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 14,
+          lineHeight: 1,
+          flex: "0 0 auto",
+        }}
+      >⋯</button>
     </div>
   );
 }

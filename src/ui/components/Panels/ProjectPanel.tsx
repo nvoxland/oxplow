@@ -32,8 +32,7 @@ import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
-import { ConfirmDialog } from "../ConfirmDialog.js";
-import { PromptDialog } from "../PromptDialog.js";
+import { InlineConfirm } from "../InlineConfirm.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
@@ -74,12 +73,16 @@ export function ProjectPanel({
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
-  // Destructive-action confirmations that used to be window.confirm().
-  const [pendingConfirm, setPendingConfirm] = useState<
-    { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
-  >(null);
+  // Inline-prompt state for new-file/new-folder/rename. Replaces the
+  // PromptDialog modal — renders as a small input strip at the top of
+  // the panel until submitted/canceled.
   const [pendingPrompt, setPendingPrompt] = useState<
     { message: string; initialValue: string; confirmLabel: string; run: (value: string) => void | Promise<void> } | null
+  >(null);
+  // Inline-confirm state for destructive ops (delete-file, rollback).
+  // Renders a banner with an InlineConfirm pair at the top of the panel.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
   >(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
   const entriesByDirRef = useRef<Record<string, WorkspaceEntry[]>>({});
@@ -710,6 +713,31 @@ export function ProjectPanel({
           scopes={scopes}
         />
       </div>
+      {pendingPrompt ? (
+        <InlinePromptStrip
+          message={pendingPrompt.message}
+          initialValue={pendingPrompt.initialValue}
+          confirmLabel={pendingPrompt.confirmLabel}
+          onSubmit={(value) => {
+            const { run } = pendingPrompt;
+            setPendingPrompt(null);
+            void run(value);
+          }}
+          onCancel={() => setPendingPrompt(null)}
+        />
+      ) : null}
+      {pendingConfirm ? (
+        <InlineConfirmStrip
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          onConfirm={() => {
+            const { run } = pendingConfirm;
+            setPendingConfirm(null);
+            void run();
+          }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      ) : null}
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
         {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
         {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
@@ -818,32 +846,6 @@ export function ProjectPanel({
           title={opResult.title}
           result={opResult.result}
           onClose={() => setOpResult(null)}
-        />
-      ) : null}
-      {pendingConfirm ? (
-        <ConfirmDialog
-          message={pendingConfirm.message}
-          confirmLabel={pendingConfirm.confirmLabel}
-          destructive
-          onConfirm={() => {
-            const { run } = pendingConfirm;
-            setPendingConfirm(null);
-            void run();
-          }}
-          onCancel={() => setPendingConfirm(null)}
-        />
-      ) : null}
-      {pendingPrompt ? (
-        <PromptDialog
-          message={pendingPrompt.message}
-          initialValue={pendingPrompt.initialValue}
-          confirmLabel={pendingPrompt.confirmLabel}
-          onSubmit={(value) => {
-            const { run } = pendingPrompt;
-            setPendingPrompt(null);
-            void run(value);
-          }}
-          onCancel={() => setPendingPrompt(null)}
         />
       ) : null}
     </div>
@@ -1500,4 +1502,138 @@ const filterStatusBarStyle: CSSProperties = {
   alignItems: "center",
   gap: 8,
   flexShrink: 0,
+};
+
+/**
+ * Inline prompt strip — replaces the modal PromptDialog for new-file /
+ * new-folder / rename flows. Renders just under the Files header.
+ * Submit on Enter; Escape (or Cancel) reverts.
+ */
+function InlinePromptStrip({
+  message,
+  initialValue,
+  confirmLabel,
+  onSubmit,
+  onCancel,
+}: {
+  message: string;
+  initialValue: string;
+  confirmLabel: string;
+  onSubmit(value: string): void;
+  onCancel(): void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.select(); }, []);
+  const trimmed = value.trim();
+  return (
+    <form
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--bg-2)",
+      }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (trimmed.length === 0) return;
+        onSubmit(trimmed);
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: 11 }}>{message}</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          autoFocus
+          style={{
+            flex: 1,
+            background: "var(--bg)",
+            color: "var(--fg)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            padding: "4px 6px",
+            fontFamily: "inherit",
+            fontSize: 12,
+          }}
+        />
+        <button type="button" onClick={onCancel} style={{ ...miniInlineButton }}>
+          Cancel
+        </button>
+        <button type="submit" disabled={trimmed.length === 0} style={{ ...miniInlinePrimary, opacity: trimmed.length === 0 ? 0.5 : 1 }}>
+          {confirmLabel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Inline-confirm strip for non-row-anchored destructives (delete-file
+ * triggered from a context-menu, git-rollback). Replaces the
+ * ConfirmDialog modal. The confirm button auto-focuses; Escape cancels.
+ */
+function InlineConfirmStrip({
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  message: string;
+  confirmLabel: string;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--bg-2)",
+        fontSize: 12,
+      }}
+    >
+      <span style={{ flex: 1, color: "var(--fg)" }}>{message}</span>
+      <InlineConfirm
+        triggerLabel={confirmLabel}
+        confirmLabel={confirmLabel}
+        onConfirm={onConfirm}
+      />
+      <button type="button" onClick={onCancel} style={miniInlineButton}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+const miniInlineButton: CSSProperties = {
+  background: "var(--bg)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "4px 8px",
+  fontSize: 11,
+  cursor: "pointer",
+};
+
+const miniInlinePrimary: CSSProperties = {
+  background: "var(--accent)",
+  color: "#fff",
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  padding: "4px 10px",
+  fontSize: 11,
+  cursor: "pointer",
 };

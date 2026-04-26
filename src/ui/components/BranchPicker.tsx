@@ -1,8 +1,8 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
-import { ConfirmDialog } from "./ConfirmDialog.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { InlineConfirm } from "./InlineConfirm.js";
 
 export interface PickedRef {
   kind: "branch" | "tag";
@@ -345,6 +345,33 @@ export function BranchPicker({
               style={inputStyle}
             />
           </div>
+          {deleting ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 10px",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--bg-2)",
+                fontSize: 12,
+              }}
+            >
+              <span style={{ flex: 1, color: "var(--fg)" }}>{deleting.message}</span>
+              <InlineConfirm
+                triggerLabel={deleting.force ? "Force delete" : "Delete"}
+                confirmLabel={deleting.force ? "Force delete" : "Delete"}
+                onConfirm={() => { void handleDelete(); }}
+              />
+              <button
+                type="button"
+                onClick={() => setDeleting(null)}
+                style={dialogButtonStyle}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           <div style={listStyle}>
             {loading ? (
               <div style={emptyStyle}>Loading…</div>
@@ -507,15 +534,6 @@ export function BranchPicker({
             </div>
           </form>
         </div>
-      ) : null}
-      {deleting ? (
-        <ConfirmDialog
-          message={deleting.message}
-          confirmLabel={deleting.force ? "Force delete" : "Delete"}
-          destructive
-          onConfirm={() => { void handleDelete(); }}
-          onCancel={() => setDeleting(null)}
-        />
       ) : null}
     </span>
   );

@@ -76,7 +76,7 @@ export function WorkGroupList({
   commitPoints,
   waitPoints,
   onReorderMixed,
-  onContextMenu,
+  onOpenMenu,
   sectionActions,
   selectedId,
   markedIds,
@@ -102,7 +102,7 @@ export function WorkGroupList({
   commitPoints?: CommitPoint[];
   waitPoints?: WaitPoint[];
   onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
@@ -522,7 +522,7 @@ export function WorkGroupList({
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
-            onContextMenu={onContextMenu}
+            onOpenMenu={onOpenMenu}
             {...sharedDragHandlers}
           />
           {isExpanded ? (
@@ -532,7 +532,7 @@ export function WorkGroupList({
               onReorderWorkItems={onReorderWorkItems}
               onReparentWorkItem={onReparentWorkItem}
               onUpdateWorkItem={onUpdateWorkItem}
-              onContextMenu={onContextMenu}
+              onOpenMenu={onOpenMenu}
               scopeThreadId={scopeThreadId}
               onRequestEdit={onRequestEdit}
               selectedId={selectedId}
@@ -558,7 +558,7 @@ export function WorkGroupList({
         onRequestEdit={onRequestEdit}
         onSelect={onSelect}
         onUpdateWorkItem={onUpdateWorkItem}
-        onContextMenu={onContextMenu}
+        onOpenMenu={onOpenMenu}
         {...sharedDragHandlers}
       />
     );
@@ -855,7 +855,7 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"]
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
   isSelected, isMarked, isOver, isDragging,
-  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
+  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onOpenMenu,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
@@ -871,7 +871,7 @@ function EpicInlineRow({
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -900,7 +900,6 @@ function EpicInlineRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
-      onContextMenu={(event) => onContextMenu(event, item)}
       style={{
         display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
         cursor: isDragging ? "grabbing" : "pointer",
@@ -935,13 +934,32 @@ function EpicInlineRow({
         ) : null}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
+      <button
+        type="button"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
+        }}
+        data-testid={`work-item-row-kebab-${item.id}`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 14,
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >⋯</button>
     </div>
   );
 }
 
 function EpicChildrenPane({
   epicId, children, onReorderWorkItems, onReparentWorkItem,
-  onUpdateWorkItem, onContextMenu, scopeThreadId, onRequestEdit,
+  onUpdateWorkItem, onOpenMenu, scopeThreadId, onRequestEdit,
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
   epicId: string;
@@ -949,7 +967,7 @@ function EpicChildrenPane({
   onReorderWorkItems(ids: string[]): Promise<void>;
   onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   scopeThreadId: string | null;
   onRequestEdit?(item: WorkItem): void;
   selectedId?: string | null;
@@ -1010,7 +1028,7 @@ function EpicChildrenPane({
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
-            onContextMenu={onContextMenu}
+            onOpenMenu={onOpenMenu}
             onDragStart={(event) => {
               // Same drag-cancel workaround as the parent pane's rows —
               // populate dataTransfer first, defer state mutation that
@@ -1093,7 +1111,7 @@ function InlineItemRow({
   onSelect,
   onRequestEdit,
   onUpdateWorkItem,
-  onContextMenu,
+  onOpenMenu,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -1111,7 +1129,7 @@ function InlineItemRow({
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -1149,7 +1167,6 @@ function InlineItemRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
-      onContextMenu={(event) => onContextMenu(event, item)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -1205,6 +1222,25 @@ function InlineItemRow({
         priority={item.priority}
         onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
       />
+      <button
+        type="button"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
+        }}
+        data-testid={`work-item-row-kebab-${item.id}`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 14,
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >⋯</button>
     </div>
   );
 }

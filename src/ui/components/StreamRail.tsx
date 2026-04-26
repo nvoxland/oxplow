@@ -4,7 +4,8 @@ import { checkoutStreamBranch, createStream, listAdoptableWorktrees, listBranche
 import { logUi } from "../logger.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
-import { ContextMenu } from "./ContextMenu.js";
+import { Kebab } from "./Kebab.js";
+import type { MenuItem } from "../menu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 import { ThemeToggle } from "./ThemeToggle.js";
 
@@ -31,7 +32,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stream: Stream } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -215,13 +215,17 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
             const canDrag = !!onReorderStreams && !isPrimary;
             const showBranchInTitle = isPrimary || candidate.title !== candidate.branch;
             return (
-              <button type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 key={candidate.id}
                 draggable={canDrag}
                 onClick={() => onSwitch(candidate.id)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setContextMenu({ x: event.clientX, y: event.clientY, stream: candidate });
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSwitch(candidate.id);
+                  }
                 }}
                 onDragStart={canDrag ? (event) => {
                   event.dataTransfer.setData(STREAM_DRAG_MIME, JSON.stringify({ streamId: candidate.id }));
@@ -305,7 +309,27 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
               >
                 <AgentStatusDot status={status} />
                 <span>{candidate.title}</span>
-              </button>
+                <Kebab
+                  items={buildStreamMenu(candidate, {
+                    gitEnabled,
+                    onRename: () => {
+                      if (!onRenameStream) return;
+                      setRenaming({ id: candidate.id, title: candidate.title });
+                      setRenameValue(candidate.title);
+                      setRenameError(null);
+                      setTimeout(() => renameInputRef.current?.select(), 0);
+                    },
+                    onSwitchBranch: () => { void openSwitchBranch(candidate); },
+                    onSettings: () => openStreamSettings(candidate),
+                    onAddStream: () => void openCreate(),
+                    onAddThread: () => onRequestCreateThread?.(),
+                    canRename: !!onRenameStream,
+                    canAddThread: !!onRequestCreateThread,
+                  })}
+                  testId={`stream-tab-kebab-${candidate.id}`}
+                  size={14}
+                />
+              </div>
             );
           })}
         </div>
@@ -432,50 +456,6 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
             </div>
           </form>
         </div>
-      ) : null}
-      {contextMenu ? (
-        <ContextMenu
-          items={[
-            {
-              id: "stream.rename",
-              label: "Rename…",
-              enabled: !!onRenameStream,
-              run: () => {
-                setRenaming({ id: contextMenu.stream.id, title: contextMenu.stream.title });
-                setRenameValue(contextMenu.stream.title);
-                setRenameError(null);
-                setTimeout(() => renameInputRef.current?.select(), 0);
-              },
-            },
-            {
-              id: "stream.switch-branch",
-              label: "Switch branch…",
-              enabled: gitEnabled,
-              run: () => { void openSwitchBranch(contextMenu.stream); },
-            },
-            {
-              id: "stream.settings",
-              label: "Settings",
-              enabled: true,
-              run: () => openStreamSettings(contextMenu.stream),
-            },
-            {
-              id: "stream.add-stream",
-              label: "Add stream",
-              enabled: gitEnabled,
-              run: () => void openCreate(),
-            },
-            {
-              id: "stream.add-thread",
-              label: "Add thread",
-              enabled: !!onRequestCreateThread,
-              run: () => onRequestCreateThread?.(),
-            },
-          ]}
-          position={{ x: contextMenu.x, y: contextMenu.y }}
-          onClose={() => setContextMenu(null)}
-          minWidth={180}
-        />
       ) : null}
       {switchBranchStream ? (
         <div style={backdropStyle}>
@@ -711,6 +691,25 @@ const pickerButtonStyle: CSSProperties = {
   justifyContent: "flex-start",
   height: "auto",
 };
+
+function buildStreamMenu(_stream: Stream, opts: {
+  gitEnabled: boolean;
+  onRename(): void;
+  onSwitchBranch(): void;
+  onSettings(): void;
+  onAddStream(): void;
+  onAddThread(): void;
+  canRename: boolean;
+  canAddThread: boolean;
+}): MenuItem[] {
+  return [
+    { id: "stream.rename", label: "Rename…", enabled: opts.canRename, run: opts.onRename },
+    { id: "stream.switch-branch", label: "Switch branch…", enabled: opts.gitEnabled, run: opts.onSwitchBranch },
+    { id: "stream.settings", label: "Settings", enabled: true, run: opts.onSettings },
+    { id: "stream.add-stream", label: "Add stream", enabled: opts.gitEnabled, run: opts.onAddStream },
+    { id: "stream.add-thread", label: "Add thread", enabled: opts.canAddThread, run: opts.onAddThread },
+  ];
+}
 
 function resolvePickedRef(target: PickedRef): { ref: string; label: string } {
   if (target.kind === "tag") {

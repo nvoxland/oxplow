@@ -29,7 +29,7 @@ import {
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { ConfirmDialog } from "../ConfirmDialog.js";
+import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
@@ -149,7 +149,6 @@ export function PlanPane({
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
   const [mode, setMode] = useState<"thread" | "backlog">("thread");
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
@@ -163,7 +162,6 @@ export function PlanPane({
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
-  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<string[] | null>(null);
   // Commit point edit modal: opened by double-clicking a commit point row.
   const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
   // Notes for the currently-open edit modal.
@@ -650,12 +648,11 @@ export function PlanPane({
                 onReorderMixed={isRootThread && streamId && threadId
                   ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
                   : undefined}
-                onContextMenu={(event, item) => {
-                  event.preventDefault();
+                onOpenMenu={(rect, item) => {
                   const groupIds = markedIds.has(item.id) && markedIds.size > 1
                     ? [...markedIds]
                     : null;
-                  setContextMenu({ x: event.clientX, y: event.clientY, item, groupIds });
+                  setContextMenu({ x: rect.right, y: rect.bottom + 4, item, groupIds });
                 }}
                 sectionActions={sectionActions}
                 selectedId={selectedId}
@@ -717,13 +714,19 @@ export function PlanPane({
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
                   const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
-                  if (liveIds.length > 0) setPendingDeleteGroup(liveIds);
+                  if (liveIds.length === 0) return;
+                  for (const id of liveIds) void activeDelete(id);
+                  showToast({
+                    message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                  });
                 },
               })
             : buildWorkItemMenu(contextMenu.item, {
                 onDelete: (item) => {
                   setContextMenu(null);
-                  setPendingDelete(item);
+                  if (expandedId === item.id) setExpandedId(null);
+                  void activeDelete(item.id);
+                  showToast({ message: `Deleted "${item.title}".` });
                 },
                 onRename: (item) => {
                   setContextMenu(null);
@@ -744,33 +747,6 @@ export function PlanPane({
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
           minWidth={160}
-        />
-      ) : null}
-      {pendingDelete ? (
-        <ConfirmDialog
-          message={`Delete "${pendingDelete.title}"?`}
-          confirmLabel="Delete"
-          destructive
-          onConfirm={() => {
-            const item = pendingDelete;
-            setPendingDelete(null);
-            if (expandedId === item.id) setExpandedId(null);
-            void activeDelete(item.id);
-          }}
-          onCancel={() => setPendingDelete(null)}
-        />
-      ) : null}
-      {pendingDeleteGroup ? (
-        <ConfirmDialog
-          message={`Delete ${pendingDeleteGroup.length} work items?`}
-          confirmLabel="Delete all"
-          destructive
-          onConfirm={() => {
-            const ids = pendingDeleteGroup;
-            setPendingDeleteGroup(null);
-            for (const id of ids) void activeDelete(id);
-          }}
-          onCancel={() => setPendingDeleteGroup(null)}
         />
       ) : null}
       {kbPicker && selectedItem ? (

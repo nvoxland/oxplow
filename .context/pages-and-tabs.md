@@ -106,9 +106,18 @@ The full IA redesign ships in phases (see plan
   legacy `note:` tab path now renders through `NotePage` so wiki
   notes get a Backlinks panel; modal-based work-item edits still work
   alongside `WorkItemPage` for callers that want the modal flow.
-- 🚧 Phase 5 — Web-style interactions sweep (kill modals + right-click
-  menus): inline confirm + Undo toast, kebab popovers, slideovers,
-  page-form replacements.
+- 🟡 Phase 5 — Web-style interactions sweep (kill modals + right-click
+  menus). 5a (`InlineConfirm` + `UndoToast` queue) and 5b (`InlineEdit`
+  + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
+  and `PromptDialog.tsx` are deleted. 5c (Kebab popovers) shipped on
+  the high-traffic surfaces (StreamRail, ThreadRail, CenterTabs,
+  WorkGroupList rows, Notes pane rows, FileTree rows); BranchPicker
+  manage menu, EditorPane git-blame margin, NotesPane/MarkdownView
+  link menus, WikiActivityBar entry menus, and TerminalPane right-
+  click are tracked as a continuation task. 5d (slideovers for branch
+  picker / commit dialog / snapshot detail / commit detail) and 5e
+  (page-form replacements for New stream / New work item /
+  Stream-Thread settings) are still pending.
 - 🚧 Phase 6 — Selection action bar + drag-to-add-context polish.
 - 🚧 Phase 7 — Density + visual polish.
 

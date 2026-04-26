@@ -7,7 +7,7 @@ import type {
 } from "../api.js";
 import { setThreadPrompt } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
-import { ContextMenu } from "./ContextMenu.js";
+import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 import { logUi } from "../logger.js";
 
@@ -95,7 +95,6 @@ export function ThreadRail({
   const hasQueued = threads.some((b) => b.status === "queued");
   const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; thread: Thread } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,46 +102,46 @@ export function ThreadRail({
     setShowCreate(true);
   }, [createRequest]);
 
-  const contextMenuItems: MenuItem[] = contextMenu
-    ? [
-        {
-          id: "thread.promote",
-          label: "Promote to writer",
-          enabled: contextMenu.thread.id !== activeThreadId,
-          run: () => onPromoteThread(contextMenu.thread.id),
-        },
-        {
-          id: "thread.complete",
-          label: "Mark complete",
-          enabled: hasQueued,
-          run: () => onCompleteThread(contextMenu.thread.id),
-        },
-        {
-          id: "thread.rename",
-          label: "Rename…",
-          enabled: !!onRenameThread,
-          run: () => setRenamingId(contextMenu.thread.id),
-        },
-        {
-          id: "thread.settings",
-          label: "Settings",
-          enabled: true,
-          run: () => openThreadSettings(contextMenu.thread),
-        },
-        {
-          id: "thread.add-thread",
-          label: "Add thread",
-          enabled: !!onRequestCreateThread,
-          run: () => (onRequestCreateThread ? onRequestCreateThread() : setShowCreate(true)),
-        },
-        {
-          id: "thread.add-stream",
-          label: "Add stream",
-          enabled: !!onRequestCreateStream,
-          run: () => onRequestCreateStream?.(),
-        },
-      ]
-    : [];
+  function buildThreadMenu(thread: Thread): MenuItem[] {
+    return [
+      {
+        id: "thread.promote",
+        label: "Promote to writer",
+        enabled: thread.id !== activeThreadId,
+        run: () => onPromoteThread(thread.id),
+      },
+      {
+        id: "thread.complete",
+        label: "Mark complete",
+        enabled: hasQueued,
+        run: () => onCompleteThread(thread.id),
+      },
+      {
+        id: "thread.rename",
+        label: "Rename…",
+        enabled: !!onRenameThread,
+        run: () => setRenamingId(thread.id),
+      },
+      {
+        id: "thread.settings",
+        label: "Settings",
+        enabled: true,
+        run: () => openThreadSettings(thread),
+      },
+      {
+        id: "thread.add-thread",
+        label: "Add thread",
+        enabled: !!onRequestCreateThread,
+        run: () => (onRequestCreateThread ? onRequestCreateThread() : setShowCreate(true)),
+      },
+      {
+        id: "thread.add-stream",
+        label: "Add stream",
+        enabled: !!onRequestCreateStream,
+        run: () => onRequestCreateStream?.(),
+      },
+    ];
+  }
 
   return (
     <div style={railStyle}>
@@ -171,10 +170,7 @@ export function ThreadRail({
               if (!trimmed || trimmed === thread.title) return;
               await onRenameThread?.(thread.id, trimmed);
             }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setContextMenu({ x: event.clientX, y: event.clientY, thread });
-            }}
+            menuItems={buildThreadMenu(thread)}
             onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToThread) ? (payload) => {
               if (payload.fromThreadId === null) {
                 if (onMoveBacklogItemToThread) void onMoveBacklogItemToThread(payload.itemId, thread.id);
@@ -234,14 +230,6 @@ export function ThreadRail({
           }}
         />
       ) : null}
-      {contextMenu ? (
-        <ContextMenu
-          items={contextMenuItems}
-          position={{ x: contextMenu.x, y: contextMenu.y }}
-          onClose={() => setContextMenu(null)}
-          minWidth={180}
-        />
-      ) : null}
       {settingsThread ? (
         <div style={backdropStyle}>
           <div style={settingsModalStyle}>
@@ -287,7 +275,7 @@ function ThreadChip({
   onSelect,
   onPromote,
   onComplete,
-  onContextMenu,
+  menuItems,
   onDropWorkItem,
   isRenaming,
   onSubmitRename,
@@ -307,7 +295,7 @@ function ThreadChip({
   onSelect(): void;
   onPromote(): void;
   onComplete(): void;
-  onContextMenu?(event: React.MouseEvent): void;
+  menuItems?: MenuItem[];
   onDropWorkItem?(payload: { itemId: string; fromThreadId: string | null }): void;
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
@@ -438,7 +426,6 @@ function ThreadChip({
         onDragEnd={onDragEnd ? () => { setIsDragging(false); onDragEnd(); } : undefined}
         onClick={isRenaming ? undefined : onSelect}
         onKeyDown={isRenaming ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
-        onContextMenu={onContextMenu}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -516,6 +503,11 @@ function ThreadChip({
         {total > 0 ? (
           <span style={{ fontSize: 10, opacity: 0.75 }}>
             {done}/{total}
+          </span>
+        ) : null}
+        {menuItems && menuItems.length > 0 ? (
+          <span onClick={(e) => e.stopPropagation()}>
+            <Kebab items={menuItems} testId={`thread-chip-kebab-${thread.id}`} size={14} />
           </span>
         ) : null}
       </div>

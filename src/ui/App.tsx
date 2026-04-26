@@ -70,7 +70,8 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { ConfirmDialog } from "./components/ConfirmDialog.js";
+import { showToast } from "./components/toastStore.js";
+import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { BottomPanel } from "./components/BottomPanel.js";
@@ -200,7 +201,6 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [pendingDirtyClose, setPendingDirtyClose] = useState<{ path: string; basename: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
   const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
@@ -453,11 +453,33 @@ export function App() {
   function handleCloseOpenFile(path: string) {
     if (!stream) return;
     // Guard against silently dropping unsaved edits when a user closes a
-    // dirty tab via the × or Cmd+W. Mirrors IntelliJ / VS Code behavior.
+    // dirty tab via the × or Cmd+W. Phase-5 redesign: fire-and-undo
+    // instead of a blocking confirm — close immediately, surface a
+    // toast that offers Undo for ~7s. The toast captures the draft so
+    // undo restores the unsaved buffer; if the user lets the toast
+    // expire, the draft is gone (same end-state as the old "Discard").
     const currentFile = fileSessions[stream.id]?.files[path];
+    const targetStream = stream;
     if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
       const basename = path.split("/").pop() ?? path;
-      setPendingDirtyClose({ path, basename });
+      const stashed = {
+        savedContent: currentFile.savedContent,
+        draftContent: currentFile.draftContent,
+      };
+      closeOpenFileNow(path);
+      showToast({
+        message: `Closed "${basename}" with unsaved changes.`,
+        actionLabel: "Undo",
+        onUndo: () => {
+          setFileSessions((prev) => {
+            const session = prev[targetStream.id] ?? createEmptyFileSession();
+            const restored = setLoadedFileContent(session, path, stashed.savedContent);
+            const withDraft = updateFileDraft(restored, path, stashed.draftContent);
+            return { ...prev, [targetStream.id]: withDraft };
+          });
+          setCenterActive(`file:${path}`);
+        },
+      });
       return;
     }
     closeOpenFileNow(path);
@@ -2042,19 +2064,7 @@ export function App() {
       {paletteOpen ? (
         <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
       ) : null}
-      {pendingDirtyClose ? (
-        <ConfirmDialog
-          message={`"${pendingDirtyClose.basename}" has unsaved changes. Close and discard them?`}
-          confirmLabel="Discard"
-          destructive
-          onConfirm={() => {
-            const { path } = pendingDirtyClose;
-            setPendingDirtyClose(null);
-            closeOpenFileNow(path);
-          }}
-          onCancel={() => setPendingDirtyClose(null)}
-        />
-      ) : null}
+      <UndoToastStack />
     </div>
   );
 }

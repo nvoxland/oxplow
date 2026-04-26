@@ -1,6 +1,46 @@
+import { useRef } from "react";
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
+
+/**
+ * `requestMenu` opens a menu anchored at the kebab's bottom-right
+ * corner. The parent (ProjectPanel) renders the actual menu using
+ * its existing ContextMenuTarget-keyed `contextMenuItems` builder.
+ *
+ * Phase 5 of the IA redesign retired the right-click trigger here in
+ * favor of a visible kebab `⋯` button on every row — discovery beats
+ * convention, and screen-reader users (or anyone without a real
+ * mouse) can now reach every file action from the same affordance.
+ */
+function KebabButton({ onClick, label = "More actions" }: { onClick(rect: DOMRect): void; label?: string }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        const rect = ref.current?.getBoundingClientRect();
+        if (rect) onClick(rect);
+      }}
+      style={{
+        background: "transparent",
+        border: "none",
+        color: "var(--muted)",
+        cursor: "pointer",
+        padding: "0 4px",
+        fontSize: 14,
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      ⋯
+    </button>
+  );
+}
 
 export function ChangedFilesSection({
   files,
@@ -66,7 +106,7 @@ export function TreeEntries({
         const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
         return (
           <div key={entry.path}>
-            <button type="button"
+            <div
               data-testid={`file-tree-entry-${entry.path}`}
               data-kind={entry.kind}
               data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
@@ -83,15 +123,14 @@ export function TreeEntries({
                   onOpenFile(entry.path);
                 }
               }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                onContextMenu({
-                  path: entry.path,
-                  kind: entry.kind,
-                  name: entry.name,
-                  x: event.clientX,
-                  y: event.clientY,
-                });
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (entry.kind === "directory") void onToggleDirectory(entry.path);
+                  else if (entry.gitStatus !== "deleted") onOpenFile(entry.path);
+                }
               }}
               style={{
                 display: "flex",
@@ -164,7 +203,16 @@ export function TreeEntries({
                 </span>
               ) : null}
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
-            </button>
+              <KebabButton
+                onClick={(rect) => onContextMenu({
+                  path: entry.path,
+                  kind: entry.kind,
+                  name: entry.name,
+                  x: rect.right,
+                  y: rect.bottom + 4,
+                })}
+              />
+            </div>
             {entry.kind === "directory" && expanded ? (
               <div style={{ paddingLeft: 18 }}>
                 {loadingDirs[entry.path] && children.length === 0 ? (
@@ -206,20 +254,18 @@ function FileRow({
   onContextMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
-    <button type="button"
+    <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "file", path })}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onContextMenu({
-          path,
-          kind: "file",
-          name: basename(path),
-          x: event.clientX,
-          y: event.clientY,
-        });
-      }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -240,6 +286,15 @@ function FileRow({
       <span>📄</span>
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
-    </button>
+      <KebabButton
+        onClick={(rect) => onContextMenu({
+          path,
+          kind: "file",
+          name: basename(path),
+          x: rect.right,
+          y: rect.bottom + 4,
+        })}
+      />
+    </div>
   );
 }
