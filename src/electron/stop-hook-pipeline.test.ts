@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
+import { decideStopDirective, findStaleEpicChildrenPairs, type ThreadSnapshot } from "./stop-hook-pipeline.js";
 import type { Thread } from "../persistence/thread-store.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
 
@@ -8,6 +8,9 @@ const builders = {
     `audit: ${items.map((i) => i.id).join(",")}`,
   buildWikiCaptureReason: () => "wiki-capture",
   buildFilingEnforcementReason: () => "file an item",
+  buildFiledButDidntShipReason: () => "filed but didn't ship",
+  buildStaleEpicChildrenReason: (pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>) =>
+    `stale-epics: ${pairs.map((p) => `${p.epic.id}=>${p.staleChildren.map((c) => c.id).join(",")}`).join("|")}`,
 };
 
 function thread(overrides: Partial<Thread> = {}): Thread {
@@ -358,6 +361,158 @@ describe("decideStopDirective", () => {
           turnHadActivity: true,
           turnHadWrites: true,
           turnHadFiling: false,
+          awaitingUser: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
+
+  describe("stale-epic-children advisory branch", () => {
+    test("epic in human_check with a ready child: emit advisory", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toEqual({
+        decision: "block",
+        reason: "stale-epics: wi-epic=>wi-child",
+      });
+    });
+
+    test("epic in blocked with an in_progress child: emit advisory", () => {
+      const epic = workItem("wi-epic", 0, "blocked", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "in_progress", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive?.decision).toBe("block");
+      expect(out.directive?.reason).toContain("wi-child");
+    });
+
+    test("epic in human_check with all-terminal children: no advisory", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "human_check", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("ready epic with ready children: not closed, no advisory", () => {
+      const epic = workItem("wi-epic", 0, "ready", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("awaitingUser overrides stale-epic-children", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true, awaitingUser: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
+
+  describe("findStaleEpicChildrenPairs", () => {
+    test("returns empty array when no epics are closed", () => {
+      const epic = workItem("wi-epic", 0, "ready", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      expect(findStaleEpicChildrenPairs([epic, child])).toEqual([]);
+    });
+
+    test("returns each closed epic with its non-terminal children", () => {
+      const e1 = workItem("e1", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const c1a = workItem("c1a", 1, "ready", { parent_id: "e1" });
+      const c1b = workItem("c1b", 2, "human_check", { parent_id: "e1" });
+      const e2 = workItem("e2", 3, "blocked", { kind: "epic" as WorkItemKind });
+      const c2a = workItem("c2a", 4, "in_progress", { parent_id: "e2" });
+      const pairs = findStaleEpicChildrenPairs([e1, c1a, c1b, e2, c2a]);
+      expect(pairs).toHaveLength(2);
+      expect(pairs[0]!.epic.id).toBe("e1");
+      expect(pairs[0]!.staleChildren.map((c) => c.id)).toEqual(["c1a"]);
+      expect(pairs[1]!.epic.id).toBe("e2");
+      expect(pairs[1]!.staleChildren.map((c) => c.id)).toEqual(["c2a"]);
+    });
+  });
+
+  describe("filed-but-didn't-ship advisory branch", () => {
+    test("filed a ready item, no writes, no in_progress: emit advisory", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "filed but didn't ship" });
+    });
+
+    test("filed a ready item AND made writes: pass through (writes are the legitimate path)", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("filed a ready item but has an in_progress item: audit takes precedence", () => {
+      const ip = workItem("wi-ip", 1, "in_progress");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ip],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "audit: wi-ip" });
+    });
+
+    test("filing call but no ready row landed (e.g. transition only): no advisory", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: false,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("awaitingUser overrides filed-but-didn't-ship", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
           awaitingUser: true,
         }),
         builders,

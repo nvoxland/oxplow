@@ -236,8 +236,8 @@ export async function dogfoodInnerAgent(
   const maxTicks = opts.maxTicks ?? 40;
 
   // Activate Work page.
-  await window.getByTestId("rail-page-all-work").click();
-  const workPanel = window.getByTestId("page-all-work");
+  await window.getByTestId("rail-page-plan-work").click();
+  const workPanel = window.getByTestId("page-plan-work");
   await workPanel.waitFor({ state: "visible", timeout: 5_000 });
   probeLog(`[dogfood:${opts.slug}] Work page active`);
 

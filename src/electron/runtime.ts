@@ -224,6 +224,15 @@ export class ElectronRuntime {
    *  Consumed by Stop hook's filing-enforcement branch. Cleared on
    *  UserPromptSubmit alongside the other per-turn flags. */
   private readonly filedThisTurnByThread = new Set<string>();
+  /** Per-thread "filed at least one new ready item this turn (no
+   *  in_progress claim attached)" flag. Stricter subset of
+   *  `filedThisTurnByThread`: set only by `create_work_item` /
+   *  `file_epic_with_children` when the new row landed at `ready`
+   *  (the default). Drives the Stop-hook "filed but didn't ship"
+   *  advisory branch — catches turns where the agent logged work as
+   *  backlog when the user's instruction was to do it. Cleared
+   *  alongside the other per-turn flags on UserPromptSubmit. */
+  private readonly filedReadyThisTurnByThread = new Set<string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -575,6 +584,7 @@ export class ElectronRuntime {
           effortStore: this.effortStore,
           markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
           markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
+          markFiledReadyThisTurn: (threadId) => this.markFiledReadyThisTurn(threadId),
           forkThread: (input) => this.forkThread(input),
           followupStore: this.followupStore,
         }),
@@ -683,6 +693,7 @@ export class ElectronRuntime {
             effortStore: this.effortStore,
             markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
             markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
+            markFiledReadyThisTurn: (threadId) => this.markFiledReadyThisTurn(threadId),
             forkThread: (input) => this.forkThread(input),
           }),
           ...buildLspMcpTools({
@@ -1645,6 +1656,16 @@ export class ElectronRuntime {
   }
 
   /**
+   * Stricter sibling of `markFiledThisTurn`: called only by
+   * `create_work_item` / `file_epic_with_children` when the new row
+   * landed at `ready` (no in_progress claim). Drives the Stop-hook
+   * "filed but didn't ship" advisory branch.
+   */
+  markFiledReadyThisTurn(threadId: string): void {
+    this.filedReadyThisTurnByThread.add(threadId);
+  }
+
+  /**
    * fork_thread MCP tool implementation. Creates a new thread on the
    * same stream as `sourceThreadId`, seeds it with a `note`-kind work
    * item carrying `summary` (no schema change — avoids a new table),
@@ -1803,6 +1824,7 @@ export class ElectronRuntime {
         // the per-turn filing flag so each turn enforces filing afresh.
         this.awaitingUserByThread.delete(envelope.threadId);
         this.filedThisTurnByThread.delete(envelope.threadId);
+        this.filedReadyThisTurnByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
@@ -1899,6 +1921,7 @@ export class ElectronRuntime {
     // cleared on UserPromptSubmit; deleting on Stop would silently let
     // the next Stop in the same prompt-gap pass without a filing check.
     const turnHadFiling = this.filedThisTurnByThread.has(threadId);
+    const turnFiledReadyItem = this.filedReadyThisTurnByThread.has(threadId);
     const awaitingUser = this.awaitingUserByThread.has(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
@@ -1910,12 +1933,15 @@ export class ElectronRuntime {
       lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
       turnHadWrites,
       turnHadFiling,
+      turnFiledReadyItem,
       awaitingUser,
     };
     const outcome = decideStopDirective(snapshot, {
       buildInProgressAuditReason: buildInProgressAuditStopReason,
       buildWikiCaptureReason: buildWikiCaptureStopReason,
       buildFilingEnforcementReason: buildFilingEnforcementStopReason,
+      buildFiledButDidntShipReason: buildFiledButDidntShipStopReason,
+      buildStaleEpicChildrenReason: buildStaleEpicChildrenStopReason,
     });
     // If the wiki-capture directive fired, latch the suppression flag so
     // we don't re-emit on the same prompt (cleared on UserPromptSubmit).
@@ -2476,6 +2502,42 @@ export function buildFilingEnforcementStopReason(): string {
   ].join("\n");
 }
 
+export function buildStaleEpicChildrenStopReason(
+  pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
+): string {
+  const lines: string[] = [
+    `BLOCKED: ${pairs.length === 1 ? "an epic" : `${pairs.length} epics`} on this thread ${pairs.length === 1 ? "is" : "are"} closed (human_check/blocked) but still ${pairs.length === 1 ? "has" : "have"} non-terminal children. The Plan-pane epic rollup will pull the epic back into To Do, hiding the closed state from the rail counts.`,
+    ``,
+  ];
+  for (const { epic, staleChildren } of pairs) {
+    lines.push(`Epic "${epic.title}" (${epic.id}) — status=${epic.status} but has ${staleChildren.length} non-terminal child${staleChildren.length === 1 ? "" : "ren"}:`);
+    for (const child of staleChildren) {
+      lines.push(`  • ${child.id} (${child.status}) "${child.title}"`);
+    }
+    lines.push(``);
+  }
+  lines.push(
+    `Fix one of:`,
+    `  • If the children's work shipped with the epic, close them via \`mcp__oxplow__transition_work_items\` (target=human_check or blocked).`,
+    `  • If the children still need work, reopen the epic via \`mcp__oxplow__update_work_item\` (status=ready or in_progress).`,
+  );
+  return lines.join("\n");
+}
+
+export function buildFiledButDidntShipStopReason(): string {
+  return [
+    `ADVISORY: this turn filed at least one new \`ready\` work item but didn't edit any project files, and you have nothing in_progress.`,
+    ``,
+    `\`status: "ready"\` is for **backlog** — "I noticed this for later". When the user gives a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), the deliverable is the change itself, not the row that tracks it.`,
+    ``,
+    `If the user told you to do the work this turn:`,
+    `  • Reopen the relevant ready row(s): \`mcp__oxplow__update_work_item\` → status=in_progress.`,
+    `  • Make the edits. Close back to \`human_check\` with \`complete_task\`.`,
+    ``,
+    `If the user only asked you to log/file/remember the items (legitimate backlog capture), reply briefly confirming what you filed and stop — the directive is advisory, not a wall.`,
+  ].join("\n");
+}
+
 export function buildWikiCaptureStopReason(): string {
   return [
     `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
@@ -2527,7 +2589,8 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `WORK-ITEM FILING IS A HARD PRECONDITION FOR EVERY WRITE. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
+    `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
+    `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
     `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
   ];
   if (thread.status !== "active") {

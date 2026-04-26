@@ -270,6 +270,36 @@ export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
   });
 }
 
+/**
+ * Filter group items by status. Used by the page split: Done Work
+ * passes `excludeStatuses: ["archived"]`, Archived passes
+ * `onlyStatuses: ["archived"]`. Epics pass through untouched — an
+ * empty epic still anchors its slot, like in `filterAutoAuthored`.
+ *
+ * Pure — exported for tests.
+ */
+export function applyStatusFilter(
+  groups: WorkItemGroup[],
+  opts: { only?: WorkItemStatus[]; exclude?: WorkItemStatus[] },
+): WorkItemGroup[] {
+  const onlySet = opts.only ? new Set(opts.only) : null;
+  const excludeSet = opts.exclude ? new Set(opts.exclude) : null;
+  const keep = (item: WorkItem) => {
+    if (item.kind === "epic") return true;
+    if (onlySet && !onlySet.has(item.status)) return false;
+    if (excludeSet && excludeSet.has(item.status)) return false;
+    return true;
+  };
+  return groups.map((group) => {
+    const items = group.items.filter(keep);
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epicId, children] of group.epicChildren.entries()) {
+      epicChildren.set(epicId, children.filter(keep));
+    }
+    return { epic: group.epic, items, epicChildren };
+  });
+}
+
 export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[] {
   if (!threadWork) return [];
   const all = [...threadWork.waiting, ...threadWork.inProgress, ...threadWork.done];

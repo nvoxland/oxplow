@@ -1,9 +1,13 @@
 import type { ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import {
+  archivedRef,
+  backlogRef,
   dashboardRef,
+  doneWorkRef,
   gitDashboardRef,
   indexRef,
+  planWorkRef,
   uncommittedChangesRef,
 } from "../../tabs/pageRefs.js";
 
@@ -17,17 +21,20 @@ export interface PageDirectoryEntry {
 /**
  * Static directory of top-level pages shown in the rail's "Pages" section.
  * Pure helper so it can be unit-tested without mounting the React component.
- * `backlogReadyCount` controls the badge on "All work".
+ * `backlogReadyCount` controls the badge on "Backlog".
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
     { id: "start", label: "⌂  Start", ref: indexRef("start") },
+    { id: "plan-work", label: "📋  Plan work", ref: planWorkRef() },
+    { id: "done-work", label: "✓  Done work", ref: doneWorkRef() },
     {
-      id: "all-work",
-      label: "📋  All work",
-      ref: indexRef("all-work"),
+      id: "backlog",
+      label: "📦  Backlog",
+      ref: backlogRef(),
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
+    { id: "archived", label: "▣  Archived", ref: archivedRef() },
     { id: "notes-index", label: "📒  Notes", ref: indexRef("notes-index") },
     { id: "files", label: "📁  Files", ref: indexRef("files") },
     { id: "code-quality", label: "⚠  Code quality", ref: indexRef("code-quality") },

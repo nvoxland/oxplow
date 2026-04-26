@@ -89,7 +89,10 @@ import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { NotesIndexPage } from "./pages/NotesIndexPage.js";
-import { AllWorkPage } from "./pages/AllWorkPage.js";
+import { PlanWorkPage } from "./pages/PlanWorkPage.js";
+import { DoneWorkPage } from "./pages/DoneWorkPage.js";
+import { BacklogPage } from "./pages/BacklogPage.js";
+import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
@@ -1403,7 +1406,7 @@ export function App() {
 
   const handleRequestEditWorkItem = (itemId: string) => {
     const token = Date.now();
-    handleOpenPage(indexRef("all-work"));
+    handleOpenPage(indexRef("plan-work"));
     setPlanEditRequest({ itemId, token });
     void recordUsage({
       kind: "work-item",
@@ -1480,7 +1483,10 @@ export function App() {
       case "hook-events":
       case "files":
       case "notes-index":
-      case "all-work":
+      case "plan-work":
+      case "done-work":
+      case "backlog":
+      case "archived":
       case "subsystem-docs":
       case "stream-settings":
       case "thread-settings":
@@ -1736,30 +1742,54 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "all-work") {
+      } else if (
+        ref.kind === "plan-work"
+        || ref.kind === "done-work"
+        || ref.kind === "backlog"
+        || ref.kind === "archived"
+      ) {
+        const sharedProps = {
+          thread: selectedThread,
+          activeThreadId: currentThreadState.activeThreadId,
+          threadWork: selectedThreadWork,
+          agentStatus: agentThreadStatus,
+          backlog: backlogState,
+          onUpdateWorkItem: handleUpdateWorkItem,
+          onDeleteWorkItem: handleDeleteWorkItem,
+          onReorderWorkItems: handleReorderWorkItems,
+          onUpdateBacklogItem: handleUpdateBacklogItem,
+          onDeleteBacklogItem: handleDeleteBacklogItem,
+          onReorderBacklog: handleReorderBacklog,
+          onMoveItemToBacklog: handleMoveItemToBacklog,
+          editRequest: planEditRequest,
+          registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
+          onOpenNewWorkItemPage: (payload: { parentId?: string | null; editingItemId?: string | null }) =>
+            handleOpenPage(newWorkItemRef(payload)),
+        };
+        const labelByKind: Record<string, string> = {
+          "plan-work": "Plan work",
+          "done-work": "Done work",
+          "backlog": "Backlog",
+          "archived": "Archived",
+        };
         tabs.push({
           id: ref.id,
-          label: "All work",
+          label: labelByKind[ref.kind] ?? ref.kind,
           closable: true,
-          render: () => (
-            <AllWorkPage
-              thread={selectedThread}
-              activeThreadId={currentThreadState.activeThreadId}
-              threadWork={selectedThreadWork}
-              agentStatus={agentThreadStatus}
-              backlog={backlogState}
-              onUpdateWorkItem={handleUpdateWorkItem}
-              onDeleteWorkItem={handleDeleteWorkItem}
-              onReorderWorkItems={handleReorderWorkItems}
-              onUpdateBacklogItem={handleUpdateBacklogItem}
-              onDeleteBacklogItem={handleDeleteBacklogItem}
-              onReorderBacklog={handleReorderBacklog}
-              onMoveItemToBacklog={handleMoveItemToBacklog}
-              editRequest={planEditRequest}
-              registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
-              onOpenNewWorkItemPage={(payload) => handleOpenPage(newWorkItemRef(payload))}
-            />
-          ),
+          render: () => {
+            switch (ref.kind) {
+              case "plan-work":
+                return <PlanWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+              case "done-work":
+                return <DoneWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+              case "backlog":
+                return <BacklogPage {...sharedProps} />;
+              case "archived":
+                return <ArchivedPage {...sharedProps} />;
+              default:
+                return null;
+            }
+          },
         });
       } else if (ref.kind === "subsystem-docs") {
         tabs.push({

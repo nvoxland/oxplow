@@ -47,7 +47,8 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 
 ```
 "agent" | "file" | "diff" | "note" | "work-item" | "finding"
-| "all-work" | "notes-index" | "files" | "code-quality"
+| "plan-work" | "done-work" | "backlog" | "archived"
+| "notes-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "git-dashboard"
 | "uncommitted-changes" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
@@ -92,10 +93,11 @@ have content:
    thread (today derived from `currentSession.openOrder`; eventually
    should include agent-touched files).
 5. **Pages** — directory entries (computed in `computePagesDirectory`,
-   exposed for unit testing): Start, All work, Notes, Files, Code
-   quality, Local history, Git dashboard, Uncommitted, Git history,
-   Hook events, Subsystem docs, Settings, plus Dashboards (Planning,
-   Review, Quality).
+   exposed for unit testing): Start, Plan work, Done work, Backlog,
+   Archived, Notes, Files, Code quality, Local history, Git dashboard,
+   Uncommitted, Git history, Hook events, Subsystem docs, Settings,
+   plus Dashboards (Planning, Review, Quality). The backlog ready
+   count surfaces as a badge on the **Backlog** entry.
 
 ## Migration status
 
@@ -180,15 +182,52 @@ carried four toolwindows (HUD / Work / Files / Notes) is gone.
 `var(--surface-rail)` background, so no host wrapper is needed. The
 rail HUD is THE persistent left chrome; the legacy `Plan` / `Project` /
 `Notes` left-rail tabs were duplicates of the existing
-`AllWorkPage` / `FilesPage` / `NotesIndexPage` content and have been
-deleted along with the `leftDockActivate` plumbing. Menu commands
-that used to flip the dock (`commitFiles`, edit-work-item) now route
-through `handleOpenPage(indexRef("files"))` /
-`handleOpenPage(indexRef("all-work"))`. E2e probes that previously
+the work pages (`PlanWorkPage` / `DoneWorkPage` / `BacklogPage` /
+`ArchivedPage`) / `FilesPage` / `NotesIndexPage` content and have
+been deleted along with the `leftDockActivate` plumbing. Menu
+commands that used to flip the dock (`commitFiles`, edit-work-item)
+now route through `handleOpenPage(indexRef("files"))` /
+`handleOpenPage(indexRef("plan-work"))`. E2e probes that previously
 relied on `dock-tab-plan` / `dock-tab-project` / `dock-panel-*`
-testids now click `rail-page-all-work` / `rail-page-files` and assert
-on `page-all-work` / `page-files`. The harness startup gate
+testids now click `rail-page-plan-work` / `rail-page-files` and
+assert on `page-plan-work` / `page-files`. The harness startup gate
 (`waitForOxplowReady`) polls for `rail-hud`.
+
+**Work pages split (post-Phase-3).** The single `AllWorkPage` was
+replaced by four focused pages so each has one job:
+
+- **Plan work** (`page-plan-work`) — planning surface for the active
+  thread: To Do + Blocked in full, plus last-5 previews of Human
+  Check / Done. Drops the In Progress section because the rail HUD
+  already surfaces "Active item" + "Up next". Header link
+  "View all done →" routes to Done Work; kebab carries the legacy
+  `plan-toggle-hide-auto` filter and a "View backlog →" entry.
+- **Done work** (`page-done-work`) — full descending list of done +
+  canceled items for the current thread. Excludes archived; header
+  link "View archived →" routes to the Archived page.
+- **Backlog** (`page-backlog`) — full-pane stream-global backlog
+  (was previously the bottom-bar chip toggle inside AllWorkPage).
+  The `backlogReadyCount` badge in the rail directory now hangs
+  off this entry.
+- **Archived** (`page-archived`) — full descending list of archived
+  items only.
+
+All four wrap `PlanPane` and pass new filter props
+(`visibleSections`, `sectionItemLimit`, `onlyStatuses`,
+`excludeStatuses`, `sectionLabelOverrides`, `extraSectionLinks`,
+`forceMode`, `hideBacklogChip`, `hideArchiveToggle`). The
+inline "Show archived (N)" toggle on the Done section header is
+suppressed across all four — archive flow is owned by the
+dedicated Archived page link.
+
+The four pages reuse the shared `<Card>` + `cardLinkButton` from
+`src/ui/components/Card.tsx` for cross-page "View X →" affordances;
+GitDashboardPage uses the same shell so the dashboard vocabulary is
+consistent across IA.
+
+Named ref helpers — `planWorkRef()`, `doneWorkRef()`,
+`backlogRef()`, `archivedRef()` — mirror the GitDashboard pattern
+(`gitDashboardRef`, `uncommittedChangesRef`).
 
 **Bottom dock removed.** The bottom-drawer `DockShell` that previously
 hosted Hook events / Git history / Local history / Code quality is

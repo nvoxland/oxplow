@@ -43,8 +43,8 @@ async function main() {
     probeLog("[dogfood] oxplow launched");
 
     // Step 1: open the All work page from the rail HUD
-    await window.getByTestId("rail-page-all-work").click();
-    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
+    await window.getByTestId("rail-page-plan-work").click();
+    await window.getByTestId("page-plan-work").waitFor({ state: "visible", timeout: 5_000 });
     probeLog("[dogfood] All work page active");
 
     // Step 2: create ONE work item (allowed single-item exception)

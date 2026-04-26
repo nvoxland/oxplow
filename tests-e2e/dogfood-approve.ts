@@ -20,8 +20,8 @@ async function main() {
     probeLog("[approve] oxplow launched");
 
     // Open the All work page from the rail HUD.
-    await window.getByTestId("rail-page-all-work").click();
-    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
+    await window.getByTestId("rail-page-plan-work").click();
+    await window.getByTestId("page-plan-work").waitFor({ state: "visible", timeout: 5_000 });
     probeLog("[approve] All work page active");
 
     await window.screenshot({ path: resolve(outDir, "approve-01-work-panel.png") });

@@ -71,6 +71,10 @@ export function WorkGroupList({
   onToggleSectionCollapsed,
   followups,
   onDismissFollowup,
+  visibleSections,
+  sectionItemLimit,
+  sectionLabelOverrides,
+  hideArchiveToggle,
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
@@ -106,6 +110,23 @@ export function WorkGroupList({
    *  epics inherit nothing. */
   followups?: ThreadFollowup[];
   onDismissFollowup?: (id: string) => void;
+  /** When provided, only sections in this list render. Used by the
+   *  page split (Plan Work / Done Work / Archived) to restrict the
+   *  panel to a subset of the five buckets. Default = all. */
+  visibleSections?: WorkItemSectionKind[];
+  /** Cap rows per section after the in-section sort. Used by Plan
+   *  Work to render previews of Human Check / Done. Sections with no
+   *  entry render fully. */
+  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  /** Override the default section header label per kind. Used by the
+   *  Archived page so the (singular) Done section reads "Archived". */
+  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  /** Suppress the built-in "Show archived (N) / Archive all" controls
+   *  on the Done section header. Plan Work, Done Work, and Archived
+   *  all set this — those pages own their own archive flow (a
+   *  cross-page link to the Archived page) so the inline toggle is
+   *  redundant. */
+  hideArchiveToggle?: boolean;
 }) {
   // When the thread is not the active writer, in_progress items are not agent-owned
   // and can be freely reordered — only lock them when this thread is active.
@@ -135,7 +156,10 @@ export function WorkGroupList({
     }
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
-    for (const { kind, label } of SECTION_ORDER) {
+    const allowedKinds = visibleSections ? new Set(visibleSections) : null;
+    for (const { kind, label: defaultLabel } of SECTION_ORDER) {
+      if (allowedKinds && !allowedKinds.has(kind)) continue;
+      const label = sectionLabelOverrides?.[kind] ?? defaultLabel;
       // Human Check and Done render descending by sort_index — newest-finished
       // items surface at the top so the user can triage (or reopen) them
       // without scrolling. For Done specifically, the "drop into Done lands at
@@ -151,15 +175,19 @@ export function WorkGroupList({
       // can drop into an empty "Done" / "Human check" to create the first
       // item there. When nothing is dragging, empty sections are suppressed
       // by the renderer below.
-      if (buckets[kind].length === 0) {
+      const limit = sectionItemLimit?.[kind];
+      const limited = typeof limit === "number" ? buckets[kind].slice(0, limit) : buckets[kind];
+      if (limited.length === 0) {
         orderedSections.push({ kind, label, rows: [] });
       } else {
-        orderedSections.push({ kind, label, rows: buckets[kind] });
-        flat.push(...buckets[kind]);
+        orderedSections.push({ kind, label, rows: limited });
+        // The DnD index (`allRows`) only needs the visible rows — items
+        // hidden by the preview cap aren't drag targets on this surface.
+        flat.push(...limited);
       }
     }
     return { sections: orderedSections, allRows: flat };
-  }, [group.items, epicChildrenMap]);
+  }, [group.items, epicChildrenMap, visibleSections, sectionItemLimit, sectionLabelOverrides]);
 
   // Index every work item visible in this group (root + every epic's
   // children) so the drag-start handler can encode the resolved
@@ -392,6 +420,15 @@ export function WorkGroupList({
     if (row.item.kind === "epic") {
       const isExpanded = expandedEpicIds.has(row.item.id);
       const children = epicChildrenMap.get(row.item.id) ?? [];
+      // Surface stale-epic-children: when the epic is closed but
+      // children are still ready/in_progress the rollup pulls the
+      // epic back into To Do, hiding the closed state. The banner
+      // gives the user a one-click cascade fix.
+      const epicStatus = row.item.status;
+      const staleChildren =
+        epicStatus === "human_check" || epicStatus === "blocked"
+          ? children.filter((c) => c.status === "ready" || c.status === "in_progress")
+          : [];
       return (
         <div key={key}>
           <EpicInlineRow
@@ -418,6 +455,17 @@ export function WorkGroupList({
             onOpenMenu={onOpenMenu}
             {...sharedDragHandlers}
           />
+          {staleChildren.length > 0 ? (
+            <StaleEpicChildrenBanner
+              epic={row.item}
+              staleChildren={staleChildren}
+              onCascade={(targetStatus) => {
+                for (const child of staleChildren) {
+                  void onUpdateWorkItem(child.id, { status: targetStatus });
+                }
+              }}
+            />
+          ) : null}
           {isExpanded ? (
             <EpicChildrenPane
               epicId={row.item.id}
@@ -529,13 +577,13 @@ export function WorkGroupList({
                   {itemCount}
                 </span>
               </span>
-              {customActions || isDone ? (
+              {customActions || (isDone && !hideArchiveToggle) ? (
                 <span
                   onClick={(event) => event.stopPropagation()}
                   style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0 }}
                 >
                   {customActions}
-                  {isDone ? (
+                  {isDone && !hideArchiveToggle ? (
                     <DoneHeaderActions
                       archivableCount={archivableCount}
                       archivedCount={archivedRows.length}
@@ -1218,5 +1266,60 @@ function InlinePriorityPicker({
         ))}
       </select>
     </span>
+  );
+}
+
+function StaleEpicChildrenBanner({
+  epic,
+  staleChildren,
+  onCascade,
+}: {
+  epic: WorkItem;
+  staleChildren: WorkItem[];
+  onCascade: (targetStatus: WorkItemStatus) => void;
+}) {
+  // The classifyEpic rollup will pull this epic back into To Do because
+  // its children are still ready/in_progress, so the rail counts will
+  // misrepresent the closed state. Surface a one-click cascade fix that
+  // mirrors the server-side cascade guard the MCP tools enforce.
+  const targetStatus = epic.status === "blocked" ? "blocked" : "human_check";
+  const n = staleChildren.length;
+  const noun = n === 1 ? "child" : "children";
+  const label = `Close ${n} ${noun} as ${statusLabel(targetStatus)}`;
+  return (
+    <div
+      data-testid={`stale-epic-children-banner-${epic.id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        margin: "0 0 4px 24px",
+        background: "var(--surface-warning, rgba(255,200,0,0.08))",
+        border: "1px solid var(--border-warning, rgba(255,200,0,0.4))",
+        borderRadius: 4,
+        fontSize: 12,
+      }}
+    >
+      <span style={{ flex: 1, color: "var(--text-warning, var(--fg))" }}>
+        Epic closed but {n} {noun} still {n === 1 ? "is" : "are"} pending — rollup will pull it back into To Do.
+      </span>
+      <button
+        type="button"
+        onClick={() => onCascade(targetStatus)}
+        data-testid={`stale-epic-children-cascade-${epic.id}`}
+        style={{
+          padding: "2px 8px",
+          fontSize: 11,
+          background: "var(--surface-action, #2563eb)",
+          color: "var(--text-inverse, white)",
+          border: "none",
+          borderRadius: 4,
+          cursor: "pointer",
+        }}
+      >
+        {label}
+      </button>
+    </div>
   );
 }

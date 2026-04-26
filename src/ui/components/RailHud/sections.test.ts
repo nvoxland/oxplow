@@ -140,9 +140,18 @@ describe("computePagesDirectory", () => {
     expect(ids.indexOf("uncommitted-changes")).toBeLessThan(ids.indexOf("git-history"));
   });
 
-  test("All-work badge surfaces only when backlogReadyCount is > 0", () => {
-    expect(computePagesDirectory({ backlogReadyCount: 0 }).find((e) => e.id === "all-work")?.badge).toBeUndefined();
-    expect(computePagesDirectory({ backlogReadyCount: 3 }).find((e) => e.id === "all-work")?.badge).toBe(3);
+  test("Backlog badge surfaces only when backlogReadyCount is > 0", () => {
+    expect(computePagesDirectory({ backlogReadyCount: 0 }).find((e) => e.id === "backlog")?.badge).toBeUndefined();
+    expect(computePagesDirectory({ backlogReadyCount: 3 }).find((e) => e.id === "backlog")?.badge).toBe(3);
+  });
+
+  test("includes the four work pages in plan→done→backlog→archived order", () => {
+    const entries = computePagesDirectory({ backlogReadyCount: 0 });
+    const ids = entries.map((e) => e.id);
+    expect(ids.indexOf("plan-work")).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf("plan-work")).toBeLessThan(ids.indexOf("done-work"));
+    expect(ids.indexOf("done-work")).toBeLessThan(ids.indexOf("backlog"));
+    expect(ids.indexOf("backlog")).toBeLessThan(ids.indexOf("archived"));
   });
 });
 

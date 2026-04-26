@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { BacklogState, WorkItem, WorkItemStatus } from "../../api.js";
 import {
+  applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
   classifyEpic,
@@ -358,4 +359,47 @@ test("filterAutoAuthored keeps epic rows even if agent-authored, and filters the
   const filtered = filterAutoAuthored(groups);
   expect(filtered[0]!.items.map((i) => i.id)).toEqual(["e1"]);
   expect(filtered[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["u-child"]);
+});
+
+test("applyStatusFilter exclude drops matching items", () => {
+  const groups = [{
+    epic: null,
+    items: [
+      item("a", "ready", 0),
+      item("b", "archived", 1),
+      item("c", "done", 2),
+    ] as WorkItem[],
+    epicChildren: new Map<string, WorkItem[]>(),
+  }];
+  const filtered = applyStatusFilter(groups, { exclude: ["archived"] });
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["a", "c"]);
+});
+
+test("applyStatusFilter only keeps matching items", () => {
+  const groups = [{
+    epic: null,
+    items: [
+      item("a", "ready", 0),
+      item("b", "archived", 1),
+      item("c", "done", 2),
+    ] as WorkItem[],
+    epicChildren: new Map<string, WorkItem[]>(),
+  }];
+  const filtered = applyStatusFilter(groups, { only: ["archived"] });
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["b"]);
+});
+
+test("applyStatusFilter keeps epic rows even when status would exclude them, and filters their children", () => {
+  const epic = { ...item("e1", "ready", 0), kind: "epic" as const };
+  const groups = [{
+    epic: null,
+    items: [epic] as WorkItem[],
+    epicChildren: new Map<string, WorkItem[]>([[
+      "e1",
+      [item("c1", "ready", 1), item("c2", "archived", 2)] as WorkItem[],
+    ]]),
+  }];
+  const filtered = applyStatusFilter(groups, { only: ["ready"] });
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["e1"]);
+  expect(filtered[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["c1"]);
 });

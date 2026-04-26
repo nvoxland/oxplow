@@ -17,7 +17,10 @@ const GROUPS: StartGroup[] = [
   {
     heading: "Work",
     entries: [
-      { icon: "📋", label: "All work", ref: indexRef("all-work") },
+      { icon: "📋", label: "Plan work", ref: indexRef("plan-work") },
+      { icon: "✓", label: "Done work", ref: indexRef("done-work") },
+      { icon: "📦", label: "Backlog", ref: indexRef("backlog") },
+      { icon: "▣", label: "Archived", ref: indexRef("archived") },
     ],
   },
   {

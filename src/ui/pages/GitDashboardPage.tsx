@@ -17,6 +17,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { Card, cardLinkButton } from "../components/Card.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
@@ -555,36 +556,6 @@ function RemoteBranchesCard({
   );
 }
 
-function Card({
-  title,
-  children,
-  testId,
-  action,
-}: {
-  title: string;
-  children: React.ReactNode;
-  testId?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <section
-      data-testid={testId}
-      style={{
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "";
   try {
@@ -620,12 +591,5 @@ const smallButton: React.CSSProperties = {
   fontSize: 12,
   cursor: "pointer",
 };
-const linkButton: React.CSSProperties = {
-  padding: 0,
-  background: "transparent",
-  border: "none",
-  color: "var(--text-link, #2563eb)",
-  fontSize: 12,
-  cursor: "pointer",
-};
+const linkButton: React.CSSProperties = cardLinkButton;
 

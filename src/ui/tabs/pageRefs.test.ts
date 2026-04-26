@@ -48,9 +48,9 @@ describe("pageRefs", () => {
   });
 
   test("indexRef returns the same id and kind", () => {
-    const ref = indexRef("all-work");
-    expect(ref.id).toBe("all-work");
-    expect(ref.kind).toBe("all-work");
+    const ref = indexRef("plan-work");
+    expect(ref.id).toBe("plan-work");
+    expect(ref.kind).toBe("plan-work");
   });
 
   test("dashboardRef encodes the variant", () => {

@@ -24,6 +24,7 @@ import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import {
+  applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
   classifyWorkItem,
@@ -84,6 +85,36 @@ interface Props {
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
    *  don't silently lose their container row. */
   hideAuto?: boolean;
+  /** Restrict the visible sections (To Do / Blocked / etc). Used by the
+   *  page split: Plan Work shows toDo+blocked+humanCheck+done previews,
+   *  Done Work / Archived show only "done", etc. Default = all five. */
+  visibleSections?: WorkItemSectionKind[];
+  /** Cap the number of items rendered per section after sort. Used by
+   *  Plan Work to render "last 5" previews of Human Check + Done. */
+  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  /** Override the default section header label per kind. The Archived
+   *  page uses this so the Done section reads "Archived". */
+  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  /** Filter raw items by status before grouping. Done Work passes
+   *  `excludeStatuses: ["archived"]`; Archived passes
+   *  `onlyStatuses: ["archived"]`. */
+  onlyStatuses?: WorkItemStatus[];
+  excludeStatuses?: WorkItemStatus[];
+  /** Per-section header link nodes (right-aligned, after `sectionActions`).
+   *  Used by Plan Work for "View all done →" links pointing at the
+   *  dedicated Done Work / Archived pages. */
+  extraSectionLinks?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
+  /** Pin the pane mode and disable the bottom-bar toggle. The Backlog
+   *  page passes `"backlog"` so the pane renders the stream-global
+   *  backlog full-pane. */
+  forceMode?: "thread" | "backlog";
+  /** Suppress the bottom Backlog chip entirely. The page split drops it
+   *  in favour of rail-nav + a "View backlog" link on Plan Work. */
+  hideBacklogChip?: boolean;
+  /** Suppress the built-in Done-section "Show archived (N) / Archive
+   *  all" controls. The page split owns archive flow via a dedicated
+   *  Archived page. */
+  hideArchiveToggle?: boolean;
 }
 
 interface ContextMenuState {
@@ -112,10 +143,20 @@ export function PlanPane({
   registerOpenCreate,
   onOpenNewWorkItemPage,
   hideAuto = false,
+  visibleSections,
+  sectionItemLimit,
+  sectionLabelOverrides,
+  onlyStatuses,
+  excludeStatuses,
+  extraSectionLinks,
+  forceMode,
+  hideBacklogChip = false,
+  hideArchiveToggle = false,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [mode, setMode] = useState<"thread" | "backlog">("thread");
+  const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
+  const mode = forceMode ?? internalMode;
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -132,9 +173,12 @@ export function PlanPane({
   const streamId = thread?.stream_id ?? null;
 
   const groups = useMemo(() => {
-    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    let raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    if (onlyStatuses || excludeStatuses) {
+      raw = applyStatusFilter(raw, { only: onlyStatuses, exclude: excludeStatuses });
+    }
     return hideAuto ? filterAutoAuthored(raw) : raw;
-  }, [mode, threadWork, backlog, hideAuto]);
+  }, [mode, threadWork, backlog, hideAuto, onlyStatuses, excludeStatuses]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
@@ -492,6 +536,15 @@ export function PlanPane({
             const sectionActions: Partial<Record<WorkItemSectionKind, React.ReactNode>> = {
               toDo: toDoActions,
             };
+            if (extraSectionLinks) {
+              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[WorkItemSectionKind, React.ReactNode]>) {
+                if (!node) continue;
+                const existing = sectionActions[k];
+                sectionActions[k] = existing ? (
+                  <>{existing}{node}</>
+                ) : node;
+              }
+            }
             return (
               <WorkGroupList
                 key={group.epic?.id ?? "__root__"}
@@ -524,14 +577,19 @@ export function PlanPane({
                 onDismissFollowup={isRootThread && threadId
                   ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))
                   : undefined}
+                visibleSections={visibleSections}
+                sectionItemLimit={sectionItemLimit}
+                sectionLabelOverrides={sectionLabelOverrides}
+                hideArchiveToggle={hideArchiveToggle}
               />
             );
           })
         )}
       </div>
+      {hideBacklogChip || forceMode ? null : (
       <div style={bottomBarStyle}>
         <button type="button"
-          onClick={() => setMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
+          onClick={() => setInternalMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
           onDragOver={handleBacklogChipDragOver}
           onDragLeave={() => setBacklogChipDragOver(false)}
           onDrop={handleBacklogChipDrop}
@@ -547,6 +605,7 @@ export function PlanPane({
           Backlog{backlog ? ` · ${backlog.items.length}` : ""}
         </button>
       </div>
+      )}
       {contextMenu ? (
         <ContextMenu
           items={contextMenu.groupIds

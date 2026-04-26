@@ -32,6 +32,10 @@ export interface McpToolDeps {
    *  file_epic_with_children, transition_work_items, dispatch_work_item).
    *  Used by the filing-enforcement Stop branch. Optional for tests. */
   markFiledThisTurn?: (threadId: string) => void;
+  /** Stricter sibling: only called by `create_work_item` /
+   *  `file_epic_with_children` when the new row landed at `ready`.
+   *  Drives the Stop-hook "filed but didn't ship" advisory branch. */
+  markFiledReadyThisTurn?: (threadId: string) => void;
   /** Fork a thread on the same stream: seed with a note item from
    *  `summary`, optionally move `moveItemIds` across. Returns the new
    *  thread id. Optional for tests that don't wire the runtime. */
@@ -258,8 +262,76 @@ function withRedoHint<T extends Record<string, unknown>>(
   };
 }
 
+/**
+ * Closing an epic to human_check / blocked when non-terminal children
+ * (ready / in_progress) remain produces a misleading rollup: the
+ * Plan-pane `classifyEpic` rollup prefers child statuses over the
+ * literal epic status, so the epic flips back into To Do or Blocked
+ * even though the agent meant to ship it. This guard rejects the
+ * call early with a structured error naming the stale children. The
+ * agent must either pass `cascade: true` (so this helper plus
+ * `cascadeChildrenStatus` flip the children in the same call) or
+ * close the children explicitly first.
+ *
+ * Returns `null` when the call is allowed, or a structured `{ error }`
+ * payload when it's rejected. Non-epic items always return `null` —
+ * the guard only kicks in for `kind === "epic"`.
+ */
+export function checkEpicCascadeGuard(
+  workItemStore: WorkItemStore,
+  threadId: string,
+  itemId: string,
+  cascade: boolean | undefined,
+): { error: string } | null {
+  if (cascade === true) return null;
+  const item = workItemStore.getItem(threadId, itemId);
+  if (!item || item.kind !== "epic") return null;
+  const stale = workItemStore
+    .listItems(threadId)
+    .filter((child) => child.parent_id === itemId && (child.status === "ready" || child.status === "in_progress"));
+  if (stale.length === 0) return null;
+  const childList = stale
+    .map((child) => `  • ${child.id} (${child.status}) "${child.title}"`)
+    .join("\n");
+  return {
+    error:
+      `Epic "${item.title}" (${itemId}) has ${stale.length} non-terminal child${stale.length === 1 ? "" : "ren"} ` +
+      `that must close along with it (otherwise the section rollup pulls the epic back into To Do):\n` +
+      `${childList}\n\n` +
+      `Either pass \`cascade: true\` to flip every non-terminal child to the same target status in one call, ` +
+      `or close the children explicitly first via \`mcp__oxplow__transition_work_items\`.`,
+  };
+}
+
+/**
+ * Companion to `checkEpicCascadeGuard`: when `cascade: true` is
+ * passed, flip every non-terminal child of the epic (ready /
+ * in_progress) to the target status. Each child transitions through
+ * `updateItem` so the same side effects fire (efforts, audit log,
+ * events) as a manual transition would.
+ */
+export function cascadeChildrenStatus(
+  workItemStore: WorkItemStore,
+  threadId: string,
+  epicId: string,
+  status: "human_check" | "blocked",
+): void {
+  const stale = workItemStore
+    .listItems(threadId)
+    .filter((child) => child.parent_id === epicId && (child.status === "ready" || child.status === "in_progress"));
+  for (const child of stale) {
+    workItemStore.updateItem({
+      threadId,
+      itemId: child.id,
+      status,
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+  }
+}
+
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, effortStore, markAwaitingUser, markFiledThisTurn, forkThread, followupStore } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, effortStore, markAwaitingUser, markFiledThisTurn, markFiledReadyThisTurn, forkThread, followupStore } = deps;
 
   // Prefer the thread row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
@@ -500,6 +572,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       }) => {
         resolveThreadAndStream(args);
         if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // The Stop-hook "filed but didn't ship" advisory branch needs
+        // to know whether this filing was a new ready row (backlog
+        // capture) or already claimed (in_progress). Only signal the
+        // advisory flag for the ready / unspecified case.
+        if (markFiledReadyThisTurn && (args.status === undefined || args.status === "ready")) {
+          markFiledReadyThisTurn(args.threadId);
+        }
         // Default to "task" — by far the most common kind. Forcing the agent
         // to declare it on every call produced a guaranteed first-call
         // failure ("missing required field: kind") for trivial fixes.
@@ -672,6 +751,10 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       }) => {
         resolveThreadAndStream(args);
         if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // file_epic_with_children always lands rows at the default
+        // (ready) status — the schema doesn't accept a status arg —
+        // so this always signals the advisory flag.
+        if (markFiledReadyThisTurn) markFiledReadyThisTurn(args.threadId);
         const result = workItemStore.fileEpicWithChildren({
           threadId: args.threadId,
           epic: {
@@ -799,6 +882,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             description: "Optional list of repo-relative paths the agent edited during this effort. Attaches to the closing effort for Local History attribution. Skip if >100 files — the fallback (assume-all) is fine for large change sets.",
             items: { type: "string" },
           },
+          cascade: { type: "boolean", description: "When closing an epic: also flip every non-terminal child (ready/in_progress) to the same target status in one call. Required when the epic has any non-terminal children — otherwise the call is rejected so the children don't silently linger and the epic rollup doesn't pull the epic back into To Do." },
         },
         required: ["threadId", "itemId", "note"],
       },
@@ -809,9 +893,22 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         note: string;
         status?: "human_check" | "blocked";
         touchedFiles?: string[];
+        cascade?: boolean;
       }) => {
         resolveThreadAndStream(args);
         if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // Epic-cascade guard: closing an epic without `cascade: true`
+        // when non-terminal children remain produces a misleading
+        // rollup (the epic flips back into To Do because
+        // classifyEpic prefers child statuses over the literal epic
+        // status). Reject early with a structured error naming the
+        // stale children. The agent must either pass cascade=true
+        // or close the children explicitly first.
+        const epicGuardError = checkEpicCascadeGuard(workItemStore, args.threadId, args.itemId, args.cascade);
+        if (epicGuardError) return epicGuardError;
+        if (args.cascade) {
+          cascadeChildrenStatus(workItemStore, args.threadId, args.itemId, args.status ?? "human_check");
+        }
         const item = workItemStore.completeTask({
           threadId: args.threadId,
           itemId: args.itemId,
@@ -859,6 +956,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             description: "Optional list of files the agent touched during this effort. Pass when transitioning to `human_check` to support parallel-task attribution. Skip if >50 files — the fallback (assume-all) is fine for large change sets.",
             items: { type: "string" },
           },
+          cascade: { type: "boolean", description: "When transitioning an epic to `human_check`/`blocked`: also flip every non-terminal child (ready/in_progress) to the same target status. Required when the epic has any non-terminal children — otherwise the call is rejected." },
         },
         required: ["threadId", "itemId"],
       },
@@ -873,9 +971,21 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
         touchedFiles?: string[];
+        cascade?: boolean;
       }) => {
         resolveThreadAndStream(args);
         if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // Epic-cascade guard mirrors the one on complete_task: only
+        // applies when the status transition is to human_check or
+        // blocked (an "epic close"). Other transitions (e.g. epic →
+        // ready, epic → in_progress) pass through unchanged.
+        if (args.status === "human_check" || args.status === "blocked") {
+          const epicGuardError = checkEpicCascadeGuard(workItemStore, args.threadId, args.itemId, args.cascade);
+          if (epicGuardError) return epicGuardError;
+          if (args.cascade) {
+            cascadeChildrenStatus(workItemStore, args.threadId, args.itemId, args.status);
+          }
+        }
         const item = workItemStore.updateItem({
           threadId: args.threadId,
           itemId: args.itemId,

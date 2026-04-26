@@ -957,4 +957,159 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     } as never)).toThrow(/terminal|already.*done|canceled|archived/i);
   });
 
+  describe("epic-cascade guard on close", () => {
+    test("complete_task on an epic with non-terminal children rejects when cascade is omitted", async () => {
+      const { tools, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }, { title: "child B" }],
+      } as never)) as { ok: boolean; epicId: string; childIds: string[] };
+
+      const completeTask = tool(tools, "oxplow__complete_task");
+      const result = (await completeTask.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        note: "done",
+      } as never)) as { error?: string; status?: string };
+      expect(result.error).toBeDefined();
+      expect(result.error!).toContain("non-terminal");
+      expect(result.error!).toContain("cascade: true");
+      // Epic must NOT have been transitioned.
+      expect(result.status).toBeUndefined();
+    });
+
+    test("complete_task on an epic cascades children when cascade=true", async () => {
+      const { tools, workItemStore, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }, { title: "child B" }],
+      } as never)) as { epicId: string; childIds: string[] };
+
+      const completeTask = tool(tools, "oxplow__complete_task");
+      const result = (await completeTask.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        note: "epic done",
+        cascade: true,
+      } as never)) as { ok: boolean; status: string };
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("human_check");
+      // Both children flipped to human_check.
+      for (const childId of created.childIds) {
+        expect(workItemStore.getItem(threadB.id, childId)!.status).toBe("human_check");
+      }
+    });
+
+    test("complete_task on a non-epic ignores cascade entirely (no rejection)", async () => {
+      const { tools, threadB } = seed();
+      const create = tool(tools, "oxplow__create_work_item");
+      const a = (await create.handler({
+        threadId: threadB.id, kind: "task", title: "plain task", status: "in_progress",
+      } as never)) as { id: string };
+
+      const completeTask = tool(tools, "oxplow__complete_task");
+      const result = (await completeTask.handler({
+        threadId: threadB.id,
+        itemId: a.id,
+        note: "done",
+      } as never)) as { ok: boolean; status: string };
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("human_check");
+    });
+
+    test("update_work_item to human_check on an epic also enforces the guard", async () => {
+      const { tools, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }],
+      } as never)) as { epicId: string };
+
+      const update = tool(tools, "oxplow__update_work_item");
+      const result = (await update.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        status: "human_check",
+      } as never)) as { error?: string; status?: string };
+      expect(result.error).toBeDefined();
+      expect(result.error!).toContain("non-terminal");
+    });
+
+    test("update_work_item to human_check with cascade flips all children", async () => {
+      const { tools, workItemStore, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }],
+      } as never)) as { epicId: string; childIds: string[] };
+
+      const update = tool(tools, "oxplow__update_work_item");
+      const result = (await update.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        status: "blocked",
+        cascade: true,
+      } as never)) as { ok: boolean; status: string };
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("blocked");
+      for (const childId of created.childIds) {
+        expect(workItemStore.getItem(threadB.id, childId)!.status).toBe("blocked");
+      }
+    });
+
+    test("update_work_item to ready/in_progress on an epic does NOT enforce the guard (only closes do)", async () => {
+      const { tools, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }],
+      } as never)) as { epicId: string };
+
+      const update = tool(tools, "oxplow__update_work_item");
+      // Re-opening an epic shouldn't trip the guard — it only fires
+      // on closes (human_check / blocked).
+      const result = (await update.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        status: "ready",
+      } as never)) as { ok: boolean; status: string };
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("ready");
+    });
+
+    test("epic with all children already in terminal status passes through without cascade", async () => {
+      const { tools, threadB } = seed();
+      const fileEpic = tool(tools, "oxplow__file_epic_with_children");
+      const created = (await fileEpic.handler({
+        threadId: threadB.id,
+        epic: { title: "Big work" },
+        children: [{ title: "child A" }, { title: "child B" }],
+      } as never)) as { epicId: string; childIds: string[] };
+
+      // Pre-close every child explicitly.
+      const transition = tool(tools, "oxplow__transition_work_items");
+      await transition.handler({
+        transitions: created.childIds.map((id) => ({
+          threadId: threadB.id, itemId: id, status: "human_check",
+        })),
+      } as never);
+
+      const completeTask = tool(tools, "oxplow__complete_task");
+      const result = (await completeTask.handler({
+        threadId: threadB.id,
+        itemId: created.epicId,
+        note: "done",
+      } as never)) as { ok: boolean; status: string };
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("human_check");
+    });
+  });
+
 });

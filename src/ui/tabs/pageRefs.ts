@@ -38,13 +38,32 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "all-work" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings" | "start"): TabRef {
+export function indexRef(kind: "plan-work" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings" | "start"): TabRef {
   return { id: kind, kind, payload: null };
 }
 
 /** Convenience helper for the new HookEventsPage. */
 export function hookEventsRef(): TabRef {
   return indexRef("hook-events");
+}
+
+/**
+ * Named ref helpers for the four work pages that replaced the legacy
+ * single AllWorkPage. Mirrors the GitDashboard pattern
+ * (`gitDashboardRef`, `uncommittedChangesRef`) so call sites read as
+ * intent rather than as stringly-typed `indexRef("…")`.
+ */
+export function planWorkRef(): TabRef {
+  return indexRef("plan-work");
+}
+export function doneWorkRef(): TabRef {
+  return indexRef("done-work");
+}
+export function backlogRef(): TabRef {
+  return indexRef("backlog");
+}
+export function archivedRef(): TabRef {
+  return indexRef("archived");
 }
 
 /** Git Dashboard — committed-history rollup page. */

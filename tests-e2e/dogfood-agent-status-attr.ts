@@ -34,8 +34,8 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[as] oxplow launched");
 
-    await window.getByTestId("rail-page-all-work").click();
-    await window.getByTestId("page-all-work").waitFor({ state: "visible", timeout: 5_000 });
+    await window.getByTestId("rail-page-plan-work").click();
+    await window.getByTestId("page-plan-work").waitFor({ state: "visible", timeout: 5_000 });
 
     await window.getByTestId("plan-add-commit-point").click();
     await window.waitForTimeout(400);

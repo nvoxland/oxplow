@@ -93,6 +93,12 @@ export interface ThreadSnapshot {
    *  `file_epic_with_children`, `transition_work_items`,
    *  `dispatch_work_item`. Used by the filing-enforcement branch. */
   turnHadFiling?: boolean;
+  /** Stricter subset of `turnHadFiling`: true when at least one new
+   *  row was filed at `ready` status this turn (the default). Drives
+   *  the "filed but didn't ship" advisory branch — catches turns
+   *  where the agent logged work as backlog when the user's
+   *  instruction was to do it now. */
+  turnFiledReadyItem?: boolean;
 }
 
 export interface StopDirective {
@@ -123,6 +129,22 @@ export function decideStopDirective(
      *  work item AND no in_progress item exists to claim the work.
      *  Optional so older callers fall through. */
     buildFilingEnforcementReason?: () => string;
+    /** Emitted when the turn filed at least one new `ready` row,
+     *  edited zero project files, and has no `in_progress` item.
+     *  Catches the "user said 'do X', agent filed it as backlog and
+     *  stopped" misread. Optional so older callers fall through. */
+    buildFiledButDidntShipReason?: () => string;
+    /** Emitted when at least one epic is in `human_check`/`blocked`
+     *  but has children still in `ready` or `in_progress`. The
+     *  `classifyEpic` rollup pulls such epics back into To Do, so
+     *  the rail counts lie until the children are closed too.
+     *  Server-side cascade guards on `complete_task`/`update_work_item`
+     *  prevent this on the happy path; the Stop-hook lint is a
+     *  belt-and-suspenders backstop for legacy state and non-MCP
+     *  mutations. Receives the offending epic+children pairs. */
+    buildStaleEpicChildrenReason?: (
+      pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
+    ) => string;
   },
 ): StopHookOutcome {
   const sideEffects: StopHookSideEffect[] = [];
@@ -193,6 +215,39 @@ export function decideStopDirective(
     };
   }
 
+  // Filed-but-didn't-ship advisory branch: the turn filed at least one
+  // new `ready` row but made zero project edits AND has nothing
+  // in_progress. This is the "user said do X, agent logged it as
+  // backlog and stopped" misread. The advisory text includes an
+  // explicit escape hatch for the legitimate "user said log this"
+  // case so the directive isn't a wall.
+  if (
+    snapshot.turnFiledReadyItem &&
+    !snapshot.turnHadWrites &&
+    inProgressAll.length === 0 &&
+    builders.buildFiledButDidntShipReason
+  ) {
+    return {
+      directive: { decision: "block", reason: builders.buildFiledButDidntShipReason() },
+      sideEffects,
+    };
+  }
+
+  // Stale-epic-children advisory: any epic in human_check / blocked
+  // whose children include ready / in_progress rows. The classifyEpic
+  // rollup will pull such epics back into To Do, hiding the
+  // closed-epic state from the rail counts. Fires when the bad state
+  // exists at Stop time regardless of what the turn did — this is
+  // catching legacy state, not turn activity. Server-side cascade
+  // guards on the MCP tools prevent fresh cases.
+  const staleEpicPairs = findStaleEpicChildrenPairs(snapshot.workItems);
+  if (staleEpicPairs.length > 0 && builders.buildStaleEpicChildrenReason) {
+    return {
+      directive: { decision: "block", reason: builders.buildStaleEpicChildrenReason(staleEpicPairs) },
+      sideEffects,
+    };
+  }
+
   // In-progress audit branch: when any work items are sitting in_progress,
   // the agent's job at Stop time is to reconcile them — confirm still
   // active, flip to human_check / blocked / ready / canceled as
@@ -220,6 +275,28 @@ export function decideStopDirective(
   // agent (or run `/work-next`) when they want the next ready item
   // picked up. Commits are user-driven via CLI / Bash.
   return { directive: null, sideEffects };
+}
+
+/**
+ * Find every epic that's been closed (human_check / blocked) but
+ * still has at least one child sitting in `ready` or `in_progress`.
+ * Used by the stale-epic-children Stop-hook advisory — pure helper
+ * so callers can also surface the same data in UI banners
+ * (PlanWorkPage / WorkGroupList) and tests can assert on the shape.
+ */
+export function findStaleEpicChildrenPairs(
+  items: WorkItem[],
+): Array<{ epic: WorkItem; staleChildren: WorkItem[] }> {
+  const pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }> = [];
+  for (const epic of items) {
+    if (epic.kind !== "epic") continue;
+    if (epic.status !== "human_check" && epic.status !== "blocked") continue;
+    const staleChildren = items.filter(
+      (child) => child.parent_id === epic.id && (child.status === "ready" || child.status === "in_progress"),
+    );
+    if (staleChildren.length > 0) pairs.push({ epic, staleChildren });
+  }
+  return pairs;
 }
 
 /** Per-thread fingerprint of the in_progress set used to detect "nothing
