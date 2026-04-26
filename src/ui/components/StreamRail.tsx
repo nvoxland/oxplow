@@ -20,6 +20,9 @@ interface Props {
   onRenameStream?(streamId: string, newTitle: string): Promise<void> | void;
   onRequestCreateThread?(): void;
   onOpenSettings?(): void;
+  /** Open the per-stream settings page. When provided, the kebab
+   *  "Settings" item routes here instead of the legacy modal. */
+  onOpenStreamSettings?(streamId: string): void;
   onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
   /** Bumping this number opens the inline "new stream" form. */
@@ -28,7 +31,7 @@ interface Props {
 
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onStreamCreated, onRenameStream, onRequestCreateThread, onOpenSettings, onOpenStreamSettings, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -61,6 +64,10 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   function openStreamSettings(candidate: Stream) {
+    if (onOpenStreamSettings) {
+      onOpenStreamSettings(candidate.id);
+      return;
+    }
     setSettingsStream(candidate);
     setSettingsPrompt(candidate.custom_prompt ?? "");
     setSettingsSaving(false);

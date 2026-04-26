@@ -35,6 +35,9 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get a Backlinks panel. |
 | `src/ui/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `src/ui/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
+| `src/ui/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
+| `src/ui/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
+| `src/ui/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
 
 ## Page kinds
 
@@ -45,6 +48,8 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | "all-work" | "notes-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
+| "new-stream" | "new-work-item"
+| "stream-settings" | "thread-settings"
 ```
 
 `agent` is implicit per thread. The `*-index` kinds are full-page
@@ -62,6 +67,10 @@ versions of what today are left-rail or bottom-drawer panels.
 | finding | `finding:<id>` | `finding:f-7` |
 | `*-index` | the kind name | `code-quality`, `start`, `settings` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
+| new-stream | `new-stream` | `new-stream` |
+| new-work-item | `new-work-item` | `new-work-item` |
+| stream-settings | `stream-settings:<streamId>` | `stream-settings:s-7` |
+| thread-settings | `thread-settings:<threadId>` | `thread-settings:t-3` |
 
 ## Rail HUD contract
 
@@ -114,10 +123,16 @@ The full IA redesign ships in phases (see plan
   WorkGroupList rows, Notes pane rows, FileTree rows); BranchPicker
   manage menu, EditorPane git-blame margin, NotesPane/MarkdownView
   link menus, WikiActivityBar entry menus, and TerminalPane right-
-  click are tracked as a continuation task. 5d (slideovers for branch
-  picker / commit dialog / snapshot detail / commit detail) and 5e
-  (page-form replacements for New stream / New work item /
-  Stream-Thread settings) are still pending.
+  click are tracked as a continuation task. 5d landed `Slideover`
+  primitive (`src/ui/components/Slideover.tsx`); BranchPicker /
+  commit-dialog / snapshot-detail / commit-detail migrations to
+  Slideover are still pending. 5e landed the per-stream and
+  per-thread settings as `StreamSettingsPage` and `ThreadSettingsPage`
+  (the in-rail settings overlay falls back to the legacy modal when
+  the rail isn't given an `onOpenStreamSettings` /
+  `onOpenThreadSettings` handler — App.tsx wires both). New-stream /
+  New-work-item page-form replacements and the inline-new-row that
+  retires `CreateThreadModal` are still pending.
 - 🚧 Phase 6 — Selection action bar + drag-to-add-context polish.
 - 🚧 Phase 7 — Density + visual polish.
 

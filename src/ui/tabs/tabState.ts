@@ -25,7 +25,11 @@ export type PageKind =
   | "subsystem-docs"
   | "settings"
   | "start"
-  | "dashboard";
+  | "dashboard"
+  | "new-stream"
+  | "new-work-item"
+  | "stream-settings"
+  | "thread-settings";
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

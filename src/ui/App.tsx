@@ -102,7 +102,9 @@ import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
 import { NotePage } from "./pages/NotePage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
-import { indexRef } from "./tabs/pageRefs.js";
+import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
+import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
+import { indexRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1497,7 +1499,9 @@ export function App() {
       case "files":
       case "notes-index":
       case "all-work":
-      case "subsystem-docs": {
+      case "subsystem-docs":
+      case "stream-settings":
+      case "thread-settings": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -1787,6 +1791,46 @@ export function App() {
             />
           ),
         });
+      } else if (ref.kind === "stream-settings") {
+        const targetStreamId = (ref.payload as { streamId?: string } | null)?.streamId ?? "";
+        const targetStream = streams.find((s) => s.id === targetStreamId) ?? null;
+        tabs.push({
+          id: ref.id,
+          label: targetStream ? `Settings · ${targetStream.title}` : "Stream settings",
+          closable: true,
+          render: () => (
+            <StreamSettingsPage
+              stream={targetStream}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(next) => setStreams(next)}
+            />
+          ),
+        });
+      } else if (ref.kind === "thread-settings") {
+        const targetThreadId = (ref.payload as { threadId?: string } | null)?.threadId ?? "";
+        const targetThread = currentThreadState.threads.find((t) => t.id === targetThreadId) ?? null;
+        tabs.push({
+          id: ref.id,
+          label: targetThread ? `Settings · ${targetThread.title}` : "Thread settings",
+          closable: true,
+          render: () => (
+            <ThreadSettingsPage
+              streamId={stream?.id ?? ""}
+              thread={targetThread}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(nextThreads) => {
+                if (!stream) return;
+                setThreadStates((prev) => ({
+                  ...prev,
+                  [stream.id]: {
+                    ...(prev[stream.id] ?? { selectedThreadId: null, activeThreadId: null, threads: [] }),
+                    threads: nextThreads,
+                  },
+                }));
+              }}
+            />
+          ),
+        });
       } else if (ref.kind === "dashboard") {
         const variant = (ref.payload as { variant?: "planning" | "review" | "quality" } | null)?.variant ?? "planning";
         tabs.push({
@@ -1958,6 +2002,7 @@ export function App() {
           onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
           onOpenSettings={() => handleOpenPage(indexRef("settings"))}
+          onOpenStreamSettings={(targetStreamId) => handleOpenPage(streamSettingsRef(targetStreamId))}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
           onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}
@@ -1979,6 +2024,7 @@ export function App() {
             onRenameThread={handleRenameThreadById}
             onReorderThreads={handleReorderThreads}
             onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
+            onOpenThreadSettings={(targetThreadId) => handleOpenPage(threadSettingsRef(targetThreadId))}
             createRequest={threadCreateRequest}
           />
         ) : null}

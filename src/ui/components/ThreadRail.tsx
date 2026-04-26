@@ -28,6 +28,9 @@ interface Props {
   onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
   onRequestCreateThread?(): void;
+  /** Open the per-thread settings page. When provided, the kebab
+   *  "Settings" item routes here instead of the legacy modal. */
+  onOpenThreadSettings?(threadId: string): void;
   /** Bumping this number opens the "new thread" modal. */
   createRequest?: number;
 }
@@ -52,15 +55,24 @@ export function ThreadRail({
   onReorderThreads,
   onRequestCreateStream,
   onRequestCreateThread,
+  onOpenThreadSettings,
   createRequest,
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overThreadId, setOverThreadId] = useState<string | null>(null);
+  // Legacy in-rail settings modal — used only as a fallback when the
+  // host did not wire `onOpenThreadSettings`. Once every caller passes
+  // the page-routing handler this state and the surrounding overlay
+  // can be removed.
   const [settingsThread, setSettingsThread] = useState<Thread | null>(null);
   const [settingsPrompt, setSettingsPrompt] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   function openThreadSettings(thread: Thread) {
+    if (onOpenThreadSettings) {
+      onOpenThreadSettings(thread.id);
+      return;
+    }
     setSettingsThread(thread);
     setSettingsPrompt(thread.custom_prompt ?? "");
     setSettingsSaving(false);
