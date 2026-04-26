@@ -48,6 +48,7 @@ about real concerns; tiny mechanical edits don't generate concerns.
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |
 | Code quality scans (lizard / jscpd subprocess + findings store + Code quality panel) | `.context/code-quality.md` |
+| Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |
 
 When you finish a change that alters how a subsystem works, **update
 the matching `.context/` doc in the same commit**. Concrete triggers:

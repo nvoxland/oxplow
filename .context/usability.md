@@ -2,6 +2,16 @@
 
 Things I keep forgetting. Read this before adding any UI.
 
+> **IA redesign in flight.** A separate plan moves the app away from
+> modal dialogs and right-click menus toward page tabs, slideovers,
+> inline edit, kebab popovers, and Undo toasts. See
+> `.context/pages-and-tabs.md` and the plan
+> `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
+> The rules below describe today's UI; once phase 5 of the redesign
+> ships, the modal-first form rule and the right-click-preferred rule
+> will be inverted. New UI work should match whichever rule set the
+> file you're editing already uses — don't half-migrate.
+
 ## Forms
 
 - **Discrete create / edit actions use a modal, never an inline sub-panel.**

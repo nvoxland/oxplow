@@ -164,7 +164,13 @@ export function App() {
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
-  const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
+  // Per-thread active center tab. The map is the source of truth; `centerActive`
+  // and `setCenterActive` below are derived helpers so existing handler code
+  // keeps working unchanged. Each thread remembers its last active tab so
+  // switching threads restores it. The initial seed comes from the legacy
+  // global localStorage key (the "default" thread inherits whatever was last
+  // active before the per-thread refactor).
+  const [threadCenterActive, setThreadCenterActive] = useState<Record<string, string>>({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [noteTabs, setNoteTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -268,7 +274,16 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-      setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
+      // Seed the new thread's center-active only if we don't already have a
+      // remembered value for it. Per-thread persistence means returning to a
+      // thread restores its prior tab; only initial entry uses the file-session
+      // selected path as a heuristic.
+      if (nextThread) {
+        const seeded = nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent";
+        setThreadCenterActive((prev) => (
+          prev[nextThread.id] !== undefined ? prev : { ...prev, [nextThread.id]: seeded }
+        ));
+      }
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -306,6 +321,10 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
       const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
       if (thread) {
+        const seeded = "agent";
+        setThreadCenterActive((prev) => (
+          prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
+        ));
         void getThreadWorkState(next.id, thread.id).then((work) => {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
@@ -318,8 +337,6 @@ export function App() {
       return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
     });
     setStream(next);
-    const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-    setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
@@ -736,6 +753,25 @@ export function App() {
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
+  const selectedThreadId = selectedThread?.id ?? null;
+  // Derived from the per-thread map. When no thread is selected, fall back to
+  // a sentinel that keeps existing UI selectors happy (they all default to
+  // "agent" eventually).
+  const centerActive = selectedThreadId
+    ? threadCenterActive[selectedThreadId] ?? readPersistedCenterActive() ?? "agent"
+    : "agent";
+  const setCenterActive = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      if (!selectedThreadId) return;
+      setThreadCenterActive((prev) => {
+        const current = prev[selectedThreadId] ?? readPersistedCenterActive() ?? "agent";
+        const value = typeof next === "function" ? next(current) : next;
+        if (value === current) return prev;
+        return { ...prev, [selectedThreadId]: value };
+      });
+    },
+    [selectedThreadId],
+  );
   // Reset terminal transport to direct whenever the active pane target
   // changes — matches the old TerminalPane's internal useEffect.
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
