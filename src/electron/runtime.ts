@@ -131,6 +131,11 @@ export class ElectronRuntime {
 
   private electronPlugin: ElectronPlugin | null = null;
   private readonly terminalSessions = new Map<string, RuntimeSocket>();
+  /** Tracks which thread each terminal-pane websocket is attached to so
+   *  Escape / Ctrl-C keystrokes can be synthesized into an Interrupt
+   *  meta hook event for the right thread. Populated in
+   *  `openTerminalSession`, removed on close. */
+  private readonly terminalSessionThread = new Map<string, { streamId: string; threadId: string }>();
   private readonly lspClients = new Map<string, RuntimeSocket>();
   private readonly agentStatusByThread = new Map<string, AgentStatus>();
   private readonly recentUiWrites = new Map<string, number>();
@@ -1244,7 +1249,9 @@ export class ElectronRuntime {
     const socket = new RuntimeSocket((message) => onSend(sessionId, message));
     socket.on("close", () => {
       this.terminalSessions.delete(sessionId);
+      this.terminalSessionThread.delete(sessionId);
     });
+    this.terminalSessionThread.set(sessionId, { streamId: stream.id, threadId: thread.id });
     if (mode === "tmux") {
       attachPane(socket, thread.pane_target, cols, rows, paneLogger.child({ subsystem: "pty-bridge", mode }));
     } else {
@@ -1266,6 +1273,22 @@ export class ElectronRuntime {
   sendTerminalMessage(sessionId: string, message: string): void {
     const socket = this.terminalSessions.get(sessionId);
     if (!socket) throw new Error(`unknown terminal session: ${sessionId}`);
+    // Detect user-driven interrupts (Escape / Ctrl-C). Claude Code
+    // doesn't fire a Stop hook on Esc cancellation, so without a
+    // synthetic signal the tab icon stays "thinking" until the next
+    // prompt. Synthesize a meta `Interrupt` hook event keyed to this
+    // session's thread; the agent-status reducer treats it as a forced
+    // reset of "working" → "done".
+    if (terminalInputIsInterrupt(message)) {
+      const ctx = this.terminalSessionThread.get(sessionId);
+      if (ctx && this.agentStatusByThread.get(ctx.threadId) === "working") {
+        ingestHookPayload(this.hookEvents, "Interrupt", {}, {
+          streamId: ctx.streamId,
+          threadId: ctx.threadId,
+        });
+        this.recomputeAgentStatus(ctx.streamId, ctx.threadId);
+      }
+    }
     socket.emit("message", message);
   }
 
@@ -1273,6 +1296,7 @@ export class ElectronRuntime {
     const socket = this.terminalSessions.get(sessionId);
     if (!socket) return;
     this.terminalSessions.delete(sessionId);
+    this.terminalSessionThread.delete(sessionId);
     socket.close();
   }
 
@@ -2132,6 +2156,35 @@ export function describeHookHealth(
     }
   }
   return out;
+}
+
+/**
+ * Inspect a terminal-pane websocket message string and decide whether
+ * it represents a user-issued interrupt (Escape, Ctrl-C). Used by
+ * `sendTerminalMessage` to synthesize a meta `Interrupt` hook event so
+ * the agent-status reducer can clear "working" — Claude Code doesn't
+ * reliably fire Stop on user-driven cancellations.
+ *
+ * Conservative: only returns true for messages whose decoded input
+ * bytes consist *exclusively* of interrupt control bytes. This avoids
+ * matching pasted text that happens to contain a stray ESC, or normal
+ * keystrokes during a turn.
+ */
+export function terminalInputIsInterrupt(message: string): boolean {
+  let parsed: unknown;
+  try { parsed = JSON.parse(message); } catch { return false; }
+  if (!parsed || typeof parsed !== "object") return false;
+  const obj = parsed as { type?: unknown; bytes?: unknown };
+  if (obj.type !== "input" && obj.type !== "input-binary") return false;
+  if (typeof obj.bytes !== "string" || obj.bytes.length === 0) return false;
+  let decoded: string;
+  try { decoded = Buffer.from(obj.bytes, "base64").toString("binary"); }
+  catch { return false; }
+  if (decoded.length === 0) return false;
+  // Accept either a bare ESC (\x1b) or Ctrl-C (\x03), each as the sole
+  // payload byte. Multi-byte sequences starting with ESC (e.g. arrow
+  // keys: \x1b[A) are NOT interrupts and must not match.
+  return decoded === "\x1b" || decoded === "\x03";
 }
 
 export function buildNextWorkItemStopReason(

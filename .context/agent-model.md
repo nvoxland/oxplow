@@ -601,6 +601,21 @@ the parent paused for a subagent, even though the subagent was still
 doing real work. The status flips to `done` once the final `Task`
 PostToolUse returns and a subsequent `stop` lands. See wi-593a50b62e22.
 
+**User-interrupt synthetic event.** Claude Code does not reliably fire
+the `Stop` hook when the user cancels a turn with Escape (or `Ctrl-C`):
+the in-flight tool's `PostToolUse` is dropped and no `Stop` lands, so
+the reducer would otherwise stay `working` until the next prompt. The
+runtime's `sendTerminalMessage` watches the websocket input stream and,
+when it sees a bare `\x1b` or `\x03` byte (interrupt heuristic in
+`terminalInputIsInterrupt`, runtime.ts), ingests a synthetic
+`Interrupt` meta hook event for the thread that owns the terminal
+session. The reducer's `meta` branch treats `hookEventName ===
+"Interrupt"` as a forced reset: status drops back to `done` and
+`pendingTasks` is cleared. The synthesis only fires when the thread is
+currently `working` so a user idly tapping Escape at a prompt is a
+no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
+filtered out — only the bare interrupt byte counts. See wi-53c5f6e407fc.
+
 ## Snapshot tracking
 
 The runtime keeps a content-addressed history of worktree files so the

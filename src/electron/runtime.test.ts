@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, isWriteIntentTool, shouldAcceptHookFilePath } from "./runtime.js";
+import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -831,3 +831,31 @@ describe("isWriteIntentTool", () => {
   });
 });
 
+
+describe("terminalInputIsInterrupt", () => {
+  const b64 = (s: string) => Buffer.from(s, "binary").toString("base64");
+  test("bare ESC byte is an interrupt", () => {
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "input", bytes: b64("\x1b") }))).toBe(true);
+  });
+  test("Ctrl-C byte is an interrupt", () => {
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "input", bytes: b64("\x03") }))).toBe(true);
+  });
+  test("arrow key (ESC sequence) is NOT an interrupt", () => {
+    // \x1b[A — up arrow. Multi-byte ESC sequences must not match.
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "input", bytes: b64("\x1b[A") }))).toBe(false);
+  });
+  test("printable text is NOT an interrupt", () => {
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "input", bytes: b64("hello") }))).toBe(false);
+  });
+  test("non-input messages are NOT an interrupt", () => {
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "resize", cols: 80, rows: 24 }))).toBe(false);
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "history-exit" }))).toBe(false);
+  });
+  test("malformed JSON is NOT an interrupt", () => {
+    expect(terminalInputIsInterrupt("not json")).toBe(false);
+    expect(terminalInputIsInterrupt("")).toBe(false);
+  });
+  test("input-binary with bare ESC is also recognized", () => {
+    expect(terminalInputIsInterrupt(JSON.stringify({ type: "input-binary", bytes: b64("\x1b") }))).toBe(true);
+  });
+});
