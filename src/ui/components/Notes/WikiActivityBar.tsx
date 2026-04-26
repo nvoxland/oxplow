@@ -17,9 +17,9 @@ import { insertIntoAgent } from "../../agent-input-bus.js";
 import { ContextMenu } from "../ContextMenu.js";
 
 const FRESHNESS_COLOR: Record<WikiNoteSummary["freshness"], string> = {
-  "fresh": "var(--color-status-success, #5a9a5a)",
-  "stale": "var(--color-status-warn, #c99a4a)",
-  "very-stale": "var(--color-status-error, #c95a5a)",
+  "fresh": "var(--freshness-fresh)",
+  "stale": "var(--freshness-stale)",
+  "very-stale": "var(--freshness-very-stale)",
 };
 
 const INLINE_LIMIT = 4;
@@ -38,13 +38,13 @@ interface ItemEntry { kind: "item"; itemId: string; title: string; status: WorkI
 type Entry = NoteEntry | FileEntry | ItemEntry;
 
 const STATUS_COLOR: Partial<Record<WorkItemStatus, string>> = {
-  ready: "var(--color-text-muted, #888)",
-  in_progress: "var(--color-status-info, #5a8ac9)",
-  human_check: "var(--color-status-warn, #c99a4a)",
-  blocked: "var(--color-status-error, #c95a5a)",
-  done: "var(--color-status-success, #5a9a5a)",
-  canceled: "var(--color-text-muted, #666)",
-  archived: "var(--color-text-muted, #555)",
+  ready: "var(--status-ready)",
+  in_progress: "var(--status-running)",
+  human_check: "var(--status-human-check)",
+  blocked: "var(--status-canceled)",
+  done: "var(--status-done)",
+  canceled: "var(--status-canceled)",
+  archived: "var(--text-muted)",
 };
 
 /**
@@ -207,8 +207,8 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
         alignItems: "center",
         gap: 10,
         padding: "4px 8px",
-        borderBottom: "1px solid var(--color-border, #333)",
-        background: "var(--color-bg-subtle, #1c1c1c)",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-rail)",
         fontSize: 12,
         flex: "0 0 auto",
         overflow: "hidden",
@@ -229,7 +229,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
         />
       )}
       {notes.length > 0 && files.length > 0 && (
-        <span style={{ width: 1, height: 14, background: "var(--color-border, #333)", flex: "0 0 auto" }} />
+        <span style={{ width: 1, height: 14, background: "var(--border-subtle)", flex: "0 0 auto" }} />
       )}
       {files.length > 0 && (
         <Section
@@ -244,7 +244,7 @@ export function WikiActivityBar({ streamId, onOpenNote, onOpenFile, onOpenWorkIt
         />
       )}
       {items.length > 0 && (notes.length > 0 || files.length > 0) && (
-        <span style={{ width: 1, height: 14, background: "var(--color-border, #333)", flex: "0 0 auto" }} />
+        <span style={{ width: 1, height: 14, background: "var(--border-subtle)", flex: "0 0 auto" }} />
       )}
       {items.length > 0 && (
         <Section
@@ -316,9 +316,9 @@ function Section({
           aria-expanded={open}
           data-testid={`${testidPrefix}-more`}
           style={{
-            background: "var(--color-bg-input, #222)",
-            color: "var(--color-text, #ddd)",
-            border: "1px solid var(--color-border, #333)",
+            background: "var(--surface-card)",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
             borderRadius: 10,
             padding: "1px 8px",
             cursor: "pointer",
@@ -342,8 +342,8 @@ function Section({
             maxWidth: 420,
             maxHeight: 360,
             overflowY: "auto",
-            background: "var(--color-bg-elevated, #1f1f1f)",
-            border: "1px solid var(--color-border, #333)",
+            background: "var(--surface-elevated)",
+            border: "1px solid var(--border-subtle)",
             boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
             padding: 4,
           }}
@@ -363,7 +363,7 @@ function Section({
                 gap: 6,
                 width: "100%",
                 background: "transparent",
-                color: "var(--color-text, #ddd)",
+                color: "var(--text-primary)",
                 border: "none",
                 padding: "5px 8px",
                 cursor: "pointer",
@@ -407,9 +407,9 @@ function Pill({
         display: "inline-flex",
         alignItems: "center",
         gap: 5,
-        background: "var(--color-bg-input, #222)",
-        color: "var(--color-text, #ddd)",
-        border: "1px solid var(--color-border, #333)",
+        background: "var(--surface-card)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-subtle)",
         borderRadius: 10,
         padding: "1px 8px",
         cursor: "grab",
@@ -447,7 +447,7 @@ function EntryIcon({ entry }: { entry: Entry }) {
     return (
       <span style={{
         width: 7, height: 7, borderRadius: 2,
-        background: STATUS_COLOR[entry.status] ?? "var(--color-text-muted, #888)",
+        background: STATUS_COLOR[entry.status] ?? "var(--text-muted)",
         flex: "0 0 auto",
       }} />
     );

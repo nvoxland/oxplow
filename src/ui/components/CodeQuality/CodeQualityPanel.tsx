@@ -302,12 +302,12 @@ function FileGroup({
           display: "block",
           width: "100%",
           textAlign: "left",
-          padding: "6px 12px",
+          padding: "10px 14px",
           background: "transparent",
           border: "none",
           cursor: "pointer",
           fontFamily: "var(--font-mono)",
-          fontSize: 12,
+          fontSize: 13,
         }}
         title="Open file (drag to add to agent context)"
       >

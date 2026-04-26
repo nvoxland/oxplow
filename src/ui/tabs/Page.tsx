@@ -54,20 +54,20 @@ export function Page({ title, kind, chips, actions, children, backlinks, testId 
       <header
         data-testid="page-header"
         style={{
-          padding: "10px 16px",
+          padding: "14px 20px",
           borderBottom: "1px solid var(--border-subtle)",
           display: "flex",
           alignItems: "center",
           gap: 12,
           flexShrink: 0,
-          minHeight: 44,
+          minHeight: 56,
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flex: 1, minWidth: 0 }}>
           <span
             data-testid="page-title"
             style={{
-              fontSize: 15,
+              fontSize: 17,
               fontWeight: 600,
               color: "var(--text-primary)",
               overflow: "hidden",

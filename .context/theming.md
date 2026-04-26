@@ -106,6 +106,40 @@ Those aliases are defined per theme and map to the semantic tokens.
 aliases. Aliases will be removed during the visual-polish phase as
 each component is migrated.
 
+## Density
+
+Phase 7 (the visual-polish pass) tuned the app's density to
+Metabase-grade rather than dense-IDE. The relevant numbers:
+
+- **Body font** is 14px (was 13px). Captions/metadata stay at 13px;
+  IDs/timestamps that need column alignment use the `.oxplow-tabular`
+  class (12px tabular-nums).
+- **List rows** (work items, file tree, notes, code-quality findings,
+  snapshots, commits) use `padding: 8–10px 12px` and target ~36–40px
+  height — up from the prior ~24–28px.
+- **Section headers** use `padding: 10px 12px` and 11px uppercase
+  labels, against `--surface-app` so they read as a divider band
+  rather than a card surface.
+- **Tab strips** (`CenterTabs`) use `min-height: 36px` with
+  `padding: 10px 14px` per tab.
+- **Page chrome** (`Page.tsx`) header is ~56px tall (`min-height: 56px`,
+  `padding: 14px 20px`); page titles are 17px / `font-weight: 600`.
+- **Selection / marked rows** use a 3px left stripe (was 2px) plus
+  `--accent-soft-bg` rather than a generic semi-transparent yellow.
+
+When adding a new list surface, match these numbers — the
+"Metabase-clean" feel relies on them being consistent across panels.
+
+## Monaco theme follows the app
+
+`src/ui/monaco-theme.ts` exports `getActiveMonacoTheme()` and
+`subscribeMonacoTheme(fn)` so the embedded code editors track the
+app theme. `EditorPane.tsx` and `DiffPane.tsx` both call
+`monaco.editor.setTheme` from a subscriber on mount; flipping the
+ThemeToggle re-tints both editors live. Monaco theme ids: `vs` for
+light, `vs-dark` for dark. The helper has no monaco import so it's
+unit-testable from `monaco-theme.test.ts`.
+
 ## Color use rules
 
 - **Backgrounds and chrome stay neutral.** No saturated color on rails,

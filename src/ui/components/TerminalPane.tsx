@@ -438,13 +438,13 @@ export function TerminalPane({
           style={{
             position: "absolute",
             inset: 0,
-            border: "2px dashed var(--color-status-info, #5a8ac9)",
-            background: "rgba(90, 138, 201, 0.10)",
+            border: "2px dashed var(--accent)",
+            background: "var(--accent-soft-bg)",
             pointerEvents: "none",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "var(--color-text, #ddd)",
+            color: "var(--text-primary)",
             fontSize: 13,
             zIndex: 5,
           }}

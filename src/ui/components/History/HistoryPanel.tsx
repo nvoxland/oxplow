@@ -23,7 +23,7 @@ const BRANCH_COLORS = [
   "#f87171",
 ];
 
-const ROW_HEIGHT = 24;
+const ROW_HEIGHT = 36;
 const LANE_WIDTH = 14;
 const NODE_RADIUS = 4;
 const GRAPH_PAD = 8;
@@ -359,9 +359,9 @@ function CommitRow({
         alignItems: "center",
         height: ROW_HEIGHT,
         cursor: "pointer",
-        background: selected ? "rgba(74, 158, 255, 0.18)" : "transparent",
+        background: selected ? "var(--accent-soft-bg)" : "transparent",
         opacity: matched ? 1 : 0.35,
-        fontSize: 12,
+        fontSize: 13,
         lineHeight: 1,
         whiteSpace: "nowrap",
         overflow: "hidden",

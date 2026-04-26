@@ -8,6 +8,7 @@ import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { getActiveMonacoTheme, subscribeMonacoTheme } from "../monaco-theme.js";
 
 interface Props {
   stream: Stream;
@@ -98,12 +99,19 @@ export function EditorPane({
       const editor = monaco.editor.create(hostRef.current, {
         value: "",
         language: "typescript",
-        theme: "vs-dark",
+        theme: getActiveMonacoTheme(),
         automaticLayout: true,
         minimap: { enabled: false },
         contextmenu: false,
       });
       editorRef.current = editor;
+      // Re-apply Monaco's theme whenever the user flips the app theme.
+      // Monaco's theme is global (set via `monaco.editor.setTheme`) so
+      // any open editor — including DiffPane — picks up the change.
+      const unsubTheme = subscribeMonacoTheme((next) => {
+        try { monaco.editor.setTheme(next); } catch { /* monaco may have unloaded */ }
+      });
+      focusDisposersRef.current.push({ dispose: unsubTheme });
       // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
       // editor has focus. The native Electron menu also binds this — menu
       // accelerators fire at the OS level BEFORE the keydown reaches the

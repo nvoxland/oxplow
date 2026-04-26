@@ -146,7 +146,17 @@ The full IA redesign ships in phases (see plan
   recent-files / active item / up-next, CodeQualityPanel file group
   rows, plus a "Add to agent context" item on every work-item kebab
   (single-row and group menus).
-- 🚧 Phase 7 — Density + visual polish.
+- ✅ Phase 7 — Density + visual polish. Body font bumped to 14px;
+  list rows (Plan / Files / Notes / Code quality / Snapshots /
+  History) raised from ~24–28px to ~36–40px; section headers use
+  `--surface-app` + 10px padding; CenterTabs strip is 36px min-height;
+  Page chrome header is 56px with a 17px / 600-weight title; legacy
+  unknown `--color-*` fallback hexes (NotesPane, NoteTab,
+  WikiActivityBar, MarkdownView, TerminalPane drag overlay) migrated
+  to the semantic tokens; selection/marked rows use a 3px stripe +
+  `--accent-soft-bg`. Monaco editors now follow the app theme via
+  `src/ui/monaco-theme.ts`. See `.context/theming.md` Density and
+  Monaco-theme sections.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
 tabs. The existing left rail toolwindows (Work, Files, Notes, plus the

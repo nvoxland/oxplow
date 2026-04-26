@@ -181,8 +181,16 @@
         background: var(--bg);
         color: var(--fg);
         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
-        font-size: 13px;
+        /* 14px base body for the Metabase-grade density tune-up (phase 7).
+         * Captions/metadata still drop to 13px; tabular IDs stay at 12px;
+         * code/diff regions use the mono stack via Monaco. See
+         * .context/theming.md "Density" note. */
+        font-size: 14px;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
       }
+      /* Tabular numerals — applied to IDs/counters/timestamps that need
+       * column-aligned digits. Opt-in via class so prose stays proportional. */
+      .oxplow-tabular { font-variant-numeric: tabular-nums; font-size: 12px; }
       * { box-sizing: border-box; }
       @keyframes oxplow-pulse {
         0%, 100% { opacity: 1; }

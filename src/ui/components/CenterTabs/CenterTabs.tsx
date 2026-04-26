@@ -31,7 +31,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-1)" }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
         {tabs.map((tab) => {
           const isActive = tab.id === active?.id;
           return (
@@ -40,13 +40,14 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header }: Cent
               data-testid={`center-tab-${tab.id}`}
               onClick={() => onActivate(tab.id)}
               style={{
-                padding: "8px 12px",
-                background: isActive ? "var(--bg)" : "transparent",
-                color: isActive ? "var(--fg)" : "var(--muted)",
-                borderRight: "1px solid var(--border)",
+                padding: "10px 14px",
+                background: isActive ? "var(--surface-tab-active)" : "transparent",
+                color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                borderRight: "1px solid var(--border-subtle)",
                 borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: 13,
+                fontWeight: isActive ? 500 : 400,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,

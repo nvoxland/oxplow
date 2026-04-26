@@ -925,12 +925,12 @@ function EpicInlineRow({
         onRequestEdit?.(item);
       }}
       style={{
-        display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
+        display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
         borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
-        borderLeft: isMarked ? "2px solid var(--priority-urgent)" : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-        background: isMarked ? "rgba(234,179,8,0.14)" : isSelected ? "rgba(74,158,255,0.12)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
-        fontSize: 12, userSelect: "none", opacity: dimmed ? 0.6 : 1,
+        borderLeft: isMarked ? "3px solid var(--status-waiting)" : isSelected ? "3px solid var(--accent)" : "3px solid transparent",
+        background: isMarked ? "rgba(217,119,6,0.10)" : isSelected ? "var(--accent-soft-bg)" : isDragging ? "var(--surface-tab-inactive)" : "transparent",
+        fontSize: 13, userSelect: "none", opacity: dimmed ? 0.6 : 1,
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
@@ -1203,21 +1203,21 @@ function InlineItemRow({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
+        gap: 8,
+        padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
         borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
         borderLeft: isMarked
-          ? "2px solid var(--priority-urgent)"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+          ? "3px solid var(--status-waiting)"
+          : isSelected ? "3px solid var(--accent)" : "3px solid transparent",
         background: isMarked
-          ? "rgba(234,179,8,0.14)"
+          ? "rgba(217,119,6,0.10)"
           : isSelected
-            ? "rgba(74,158,255,0.12)"
+            ? "var(--accent-soft-bg)"
             : isDragging
-              ? "rgba(255,255,255,0.04)"
+              ? "var(--surface-tab-inactive)"
               : "transparent",
-        fontSize: 12,
+        fontSize: 13,
         userSelect: "none",
         opacity: dimmed ? 0.6 : 1,
       }}

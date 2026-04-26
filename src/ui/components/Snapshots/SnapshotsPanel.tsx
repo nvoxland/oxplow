@@ -505,8 +505,8 @@ function SnapshotRow({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        height: 24,
+        gap: 8,
+        height: 36,
         cursor: "pointer",
         // Flashing (reveal) > selected > compareBase > default.
         // Flashing uses a bright accent bg + left stripe so the user's
@@ -526,8 +526,8 @@ function SnapshotRow({
             ? "inset 2px 0 0 var(--accent)"
             : undefined,
         transition: "background 0.2s ease-out",
-        padding: "0 8px",
-        fontSize: 12,
+        padding: "0 12px",
+        fontSize: 13,
         whiteSpace: "nowrap",
         overflow: "hidden",
       }}

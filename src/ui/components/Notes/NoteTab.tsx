@@ -19,9 +19,9 @@ const FRESHNESS_LABEL: Record<FreshnessStatus, string> = {
 };
 
 const FRESHNESS_COLOR: Record<FreshnessStatus, string> = {
-  "fresh": "var(--color-status-success, #5a9a5a)",
-  "stale": "var(--color-status-warn, #c99a4a)",
-  "very-stale": "var(--color-status-error, #c95a5a)",
+  "fresh": "var(--freshness-fresh)",
+  "stale": "var(--freshness-stale)",
+  "very-stale": "var(--freshness-very-stale)",
 };
 
 interface Props {
@@ -174,7 +174,7 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
         alignItems: "center",
         gap: 6,
         padding: "6px 10px",
-        borderBottom: "1px solid var(--color-border, #333)",
+        borderBottom: "1px solid var(--border-subtle)",
       }}>
         <button
           type="button"
@@ -229,15 +229,15 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
       </header>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
         {notFound ? (
-          <div style={{ color: "var(--color-text-muted, #888)", fontSize: 13 }}>
-            <div style={{ fontSize: 15, marginBottom: 8, color: "var(--color-text, #ddd)" }}>Page not found</div>
+          <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
+            <div style={{ fontSize: 15, marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
             <div>No note exists with slug <code>{currentSlug}</code>.</div>
             <div style={{ marginTop: 8 }}>
               Click <strong>Create page</strong> above to start a new note at <code>.oxplow/notes/{currentSlug}.md</code>.
             </div>
           </div>
         ) : loadError ? (
-          <div style={{ color: "var(--color-status-error, #c95a5a)" }}>Failed to load note: {loadError}</div>
+          <div style={{ color: "var(--severity-critical)" }}>Failed to load note: {loadError}</div>
         ) : editing ? (
           <textarea
             value={draft}
@@ -248,9 +248,9 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
               minHeight: 300,
               fontFamily: "var(--font-mono, monospace)",
               fontSize: 13,
-              background: "var(--color-bg-input, #222)",
-              color: "var(--color-text, #ddd)",
-              border: "1px solid var(--color-border, #333)",
+              background: "var(--surface-card)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border-subtle)",
               padding: 8,
               resize: "none",
             }}
@@ -287,10 +287,10 @@ function BacklinksFooter({
   return (
     <footer
       style={{
-        borderTop: "1px solid var(--color-border, #333)",
+        borderTop: "1px solid var(--border-subtle)",
         padding: "6px 10px",
         fontSize: 12,
-        color: "var(--color-text-muted, #888)",
+        color: "var(--text-muted)",
         display: "flex",
         flexWrap: "wrap",
         gap: 6,
@@ -304,10 +304,10 @@ function BacklinksFooter({
         const status = deleted.has(path) ? "deleted" : changed.has(path) ? "changed" : "fresh";
         const color =
           status === "deleted"
-            ? "var(--color-status-error, #c95a5a)"
+            ? "var(--severity-critical)"
             : status === "changed"
-              ? "var(--color-status-warn, #c99a4a)"
-              : "var(--color-text, #ddd)";
+              ? "var(--status-waiting)"
+              : "var(--text-primary)";
         return (
           <button
             key={path}
@@ -329,7 +329,7 @@ function BacklinksFooter({
               fontSize: 11,
               padding: "1px 6px",
               borderRadius: 3,
-              border: "1px solid var(--color-border, #333)",
+              border: "1px solid var(--border-subtle)",
               background: "transparent",
               color,
               cursor: status === "deleted" ? "not-allowed" : "pointer",

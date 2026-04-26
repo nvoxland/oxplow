@@ -21,9 +21,9 @@ import { deleteWikiNote } from "../../api.js";
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
 const FRESHNESS_COLOR: Record<FreshnessStatus, string> = {
-  "fresh": "var(--color-status-success, #5a9a5a)",
-  "stale": "var(--color-status-warn, #c99a4a)",
-  "very-stale": "var(--color-status-error, #c95a5a)",
+  "fresh": "var(--freshness-fresh)",
+  "stale": "var(--freshness-stale)",
+  "very-stale": "var(--freshness-very-stale)",
 };
 
 const SECTION_INITIAL_LIMIT = 8;
@@ -211,7 +211,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
 
   if (!streamId) {
     return (
-      <div style={{ padding: 12, color: "var(--color-text-muted, #888)" }}>
+      <div style={{ padding: 12, color: "var(--text-muted)" }}>
         Select a stream to view its notes.
       </div>
     );
@@ -227,14 +227,14 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
         alignItems: "center",
         justifyContent: "space-between",
         padding: "6px 8px",
-        borderBottom: "1px solid var(--color-border, #333)",
+        borderBottom: "1px solid var(--border-subtle)",
         gap: 6,
       }}>
         <span style={{ fontSize: 12, opacity: 0.7 }}>Notes ({notes.length})</span>
         <button type="button" onClick={beginNew} title="New note" disabled={newSlugDraft !== null}>+ New</button>
       </div>
 
-      <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--color-border, #333)" }}>
+      <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
         <input
           type="search"
           value={query}
@@ -247,9 +247,9 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             boxSizing: "border-box",
             fontSize: 12,
             padding: "4px 6px",
-            background: "var(--color-bg-input, #222)",
-            color: "var(--color-text, #ddd)",
-            border: "1px solid var(--color-border, #333)",
+            background: "var(--surface-card)",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
           }}
         />
       </div>
@@ -257,7 +257,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
       {newSlugDraft !== null && (
         <div style={{
           padding: "6px 8px",
-          borderBottom: "1px solid var(--color-border, #333)",
+          borderBottom: "1px solid var(--border-subtle)",
           display: "flex",
           flexDirection: "column",
           gap: 4,
@@ -275,9 +275,9 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             style={{
               fontFamily: "var(--font-mono, monospace)",
               fontSize: 12,
-              background: "var(--color-bg-input, #222)",
-              color: "var(--color-text, #ddd)",
-              border: "1px solid var(--color-border, #333)",
+              background: "var(--surface-card)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border-subtle)",
               padding: "4px 6px",
             }}
           />
@@ -286,7 +286,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             <button type="button" onClick={cancelNew}>Cancel</button>
           </div>
           {newSlugError && (
-            <div style={{ fontSize: 11, color: "var(--color-status-error, #c95a5a)" }}>{newSlugError}</div>
+            <div style={{ fontSize: 11, color: "var(--severity-critical)" }}>{newSlugError}</div>
           )}
         </div>
       )}
@@ -470,10 +470,10 @@ function SearchRow({
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
       style={{
-        padding: "6px 10px",
+        padding: "10px 12px",
         cursor: "pointer",
-        background: selected ? "var(--color-bg-selected, #2a2a2a)" : "transparent",
-        borderBottom: "1px solid var(--color-border-subtle, #262626)",
+        background: selected ? "var(--accent-soft-bg)" : "transparent",
+        borderBottom: "1px solid var(--border-subtle)",
         fontSize: 13,
         display: "flex",
         flexDirection: "column",
@@ -536,10 +536,10 @@ function NoteRow({
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: note.slug })}
       style={{
-        padding: "6px 10px",
+        padding: "10px 12px",
         cursor: "pointer",
-        background: selected ? "var(--color-bg-selected, #2a2a2a)" : "transparent",
-        borderBottom: "1px solid var(--color-border-subtle, #262626)",
+        background: selected ? "var(--accent-soft-bg)" : "transparent",
+        borderBottom: "1px solid var(--border-subtle)",
         fontSize: 13,
         display: "flex",
         alignItems: "center",
@@ -607,6 +607,6 @@ function highlightSnippet(snippet: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
   return escaped
-    .replace(/&lt;mark&gt;/g, '<mark style="background: var(--color-status-warn, #c99a4a); color: inherit;">')
+    .replace(/&lt;mark&gt;/g, '<mark style="background: var(--status-waiting); color: inherit;">')
     .replace(/&lt;\/mark&gt;/g, "</mark>");
 }

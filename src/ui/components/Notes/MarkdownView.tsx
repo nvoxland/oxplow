@@ -142,7 +142,7 @@ export function MarkdownView({
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") {
           const err = document.createElement("div");
-          err.style.color = "var(--color-status-error, #c95a5a)";
+          err.style.color = "var(--severity-critical)";
           err.style.fontSize = "12px";
           err.textContent = `Mermaid parse error: ${String(error)}`;
           pre.after(err);

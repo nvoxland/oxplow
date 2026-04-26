@@ -2,21 +2,24 @@
 
 Things I keep forgetting. Read this before adding any UI.
 
-> **IA redesign — phase 5a/5b/5c shipped.** Modal `ConfirmDialog` and
-> `PromptDialog` chrome was retired in favor of inline patterns; the
-> right-click → `ContextMenu` reflex is being replaced by visible
-> kebab `⋯` buttons on each row. The rules below describe the
-> redesigned target. A small set of right-click handlers is still
-> alive on legacy surfaces (BranchPicker manage menu, EditorPane git
-> blame margin, Wiki activity bar, MarkdownView links, NotesPane
-> new-row bar, TerminalPane) — those are tracked as a phase-5c
-> continuation task and should not grow new copies. Phase 5d
-> (slideovers for branch picker / commit dialog / snapshot detail)
-> and phase 5e (page-form replacements for New stream / New work item
-> / Stream-Thread settings) are still pending; the surviving form
-> modals stay modal until those phases ship. See
-> `.context/pages-and-tabs.md` and the plan
-> `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
+> **IA redesign — phases 0–7 shipped (phase 5 continuations remain).**
+> Modal `ConfirmDialog` and `PromptDialog` chrome was retired in favor
+> of inline patterns; the right-click → `ContextMenu` reflex was
+> replaced by visible kebab `⋯` buttons on each row; per-stream and
+> per-thread settings ship as Page tabs (`StreamSettingsPage`,
+> `ThreadSettingsPage`). The rules below describe the redesigned
+> target. A small set of right-click handlers is still alive on
+> legacy surfaces (BranchPicker manage menu, EditorPane git-blame
+> margin, MarkdownView links, NotesPane new-row bar, TerminalPane)
+> — those are tracked as a phase-5c continuation task and should not
+> grow new copies. Phase 5d (Slideover migrations for branch picker /
+> commit dialog / snapshot detail / commit detail) and phase 5e
+> (page-form replacements for New stream / New work item, plus the
+> inline-new-row that retires `CreateThreadModal`) are still pending;
+> those surviving form modals stay modal until they ship. Phase 7
+> (density + visual polish) is shipped — see `.context/theming.md`
+> Density section and `.context/pages-and-tabs.md` for the migration
+> log. Plan: `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
 ## Forms
 
