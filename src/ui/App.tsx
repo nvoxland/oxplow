@@ -82,7 +82,6 @@ import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { PlanPane } from "./components/Plan/PlanPane.js";
 import { NotesPane } from "./components/Notes/NotesPane.js";
-import { NoteTab } from "./components/Notes/NoteTab.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { HistoryPanel } from "./components/History/HistoryPanel.js";
 import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
@@ -98,6 +97,10 @@ import { FilesPage } from "./pages/FilesPage.js";
 import { NotesIndexPage } from "./pages/NotesIndexPage.js";
 import { AllWorkPage } from "./pages/AllWorkPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
+import { WorkItemPage } from "./pages/WorkItemPage.js";
+import { FindingPage } from "./pages/FindingPage.js";
+import { NotePage } from "./pages/NotePage.js";
+import { DashboardPage } from "./pages/DashboardPage.js";
 import { indexRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
@@ -1456,11 +1459,14 @@ export function App() {
         if (payload?.path) void handleOpenFile(payload.path);
         return;
       }
-      case "work-item": {
-        const payload = ref.payload as { itemId?: string } | null;
-        if (payload?.itemId) handleRequestEditWorkItem(payload.itemId);
+      case "note": {
+        const payload = ref.payload as { slug?: string } | null;
+        if (payload?.slug) handleOpenNote(payload.slug);
         return;
       }
+      case "work-item":
+      case "finding":
+      case "dashboard":
       case "start":
       case "settings":
       case "code-quality":
@@ -1484,7 +1490,7 @@ export function App() {
       default:
         return;
     }
-  }, [handleOpenFile, handleRequestEditWorkItem, selectedThreadId, setCenterActive]);
+  }, [handleOpenFile, handleOpenNote, selectedThreadId, setCenterActive]);
 
   const closePageTab = useCallback((id: string) => {
     if (!selectedThreadId) return;
@@ -1573,7 +1579,15 @@ export function App() {
         label: slug,
         closable: true,
         render: () => stream ? (
-          <NoteTab stream={stream} slug={slug} onClosed={() => closeNoteTab(slug)} onOpenNoteInNewTab={handleOpenNote} onOpenFile={handleOpenFile} />
+          <NotePage
+            stream={stream}
+            slug={slug}
+            threadWork={selectedThreadWork}
+            onClosed={() => closeNoteTab(slug)}
+            onOpenNote={handleOpenNote}
+            onOpenFile={(p) => { void handleOpenFile(p); }}
+            onOpenPage={handleOpenPage}
+          />
         ) : null,
       });
     }
@@ -1713,6 +1727,59 @@ export function App() {
           label: "Subsystem docs",
           closable: true,
           render: () => <SubsystemDocsPage stream={stream} onOpenPage={handleOpenPage} />,
+        });
+      } else if (ref.kind === "work-item") {
+        const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
+        const items = selectedThreadWork?.items ?? [];
+        const matching = items.find((i) => i.id === itemId);
+        tabs.push({
+          id: ref.id,
+          label: matching ? matching.title.slice(0, 40) : itemId,
+          closable: true,
+          render: () => (
+            <WorkItemPage
+              stream={stream}
+              thread={selectedThread}
+              itemId={itemId}
+              items={items}
+              threadWork={selectedThreadWork}
+              onOpenPage={handleOpenPage}
+              onOpenFile={handleOpenFile}
+              onShowInHistory={handleShowSnapshotInHistory}
+            />
+          ),
+        });
+      } else if (ref.kind === "finding") {
+        const findingId = (ref.payload as { findingId?: string } | null)?.findingId ?? "";
+        tabs.push({
+          id: ref.id,
+          label: `Finding ${findingId}`,
+          closable: true,
+          render: () => (
+            <FindingPage
+              stream={stream}
+              findingId={findingId}
+              threadWork={selectedThreadWork}
+              onOpenPage={handleOpenPage}
+              onOpenFileAtLine={(p) => { void handleOpenFile(p); }}
+            />
+          ),
+        });
+      } else if (ref.kind === "dashboard") {
+        const variant = (ref.payload as { variant?: "planning" | "review" | "quality" } | null)?.variant ?? "planning";
+        tabs.push({
+          id: ref.id,
+          label: `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,
+          closable: true,
+          render: () => (
+            <DashboardPage
+              variant={variant}
+              stream={stream}
+              threadWork={selectedThreadWork}
+              backlog={backlogState}
+              onOpenPage={handleOpenPage}
+            />
+          ),
         });
       }
     }

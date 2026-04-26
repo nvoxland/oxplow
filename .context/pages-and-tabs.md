@@ -28,6 +28,13 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, body, collapsible Backlinks region. Reads only semantic CSS variables (skin via theme). |
 | `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, recent files, pages directory. Passive — never auto-opens tabs. |
 | `src/ui/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`. |
+| `src/ui/tabs/backlinksIndex.ts` | Pure cross-kind backlinks indexer. `computeBacklinks(target, ctx)` returns `BacklinkEntry[]` linking notes ↔ files ↔ work items ↔ findings. Inputs are plain data slices (notes, work items with `touched_files`, findings) — no IPC, no side effects, fully unit-tested. |
+| `src/ui/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
+| `src/ui/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
+| `src/ui/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
+| `src/ui/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get a Backlinks panel. |
+| `src/ui/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
+| `src/ui/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
 
 ## Page kinds
 
@@ -89,7 +96,16 @@ The full IA redesign ships in phases (see plan
   (Plan, Project, Notes, Hook events, Git history, Local history,
   Code quality) are still mounted alongside the pages so the app
   stays usable mid-migration; phase 5/7 cleans them up.
-- 🚧 Phase 4 — New pages + backlinks indexer.
+- ✅ Phase 4 — New pages + backlinks indexer:
+  `WorkItemPage`, `NotePage`, `FindingPage`, three `DashboardPage`
+  variants (Planning / Review / Quality), and the
+  `computeBacklinks(target, ctx)` indexer. `FilePage` and `DiffPage`
+  were intentionally skipped: file and diff tabs already render via
+  `centerTabs` with their own chrome (Monaco editor, diff editor) and
+  wrapping them in Page chrome would double-up the header. The
+  legacy `note:` tab path now renders through `NotePage` so wiki
+  notes get a Backlinks panel; modal-based work-item edits still work
+  alongside `WorkItemPage` for callers that want the modal flow.
 - 🚧 Phase 5 — Web-style interactions sweep (kill modals + right-click
   menus): inline confirm + Undo toast, kebab popovers, slideovers,
   page-form replacements.
