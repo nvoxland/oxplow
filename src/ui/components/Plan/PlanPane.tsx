@@ -32,6 +32,9 @@ import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
 import { reportUiError, runWithError } from "../../ui-error.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { formatContextMention } from "../../agent-context-ref.js";
+import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import { ActivityTimeline } from "./WorkItemDetail.js";
@@ -562,6 +565,70 @@ export function PlanPane({
         />
       ) : null}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {(() => {
+          const allItems = groups.flatMap((g) => [
+            ...g.items,
+            ...[...g.epicChildren.values()].flat(),
+          ]);
+          const markedItems = [...markedIds]
+            .map((id) => allItems.find((item) => item.id === id))
+            .filter((item): item is WorkItem => item !== undefined);
+          if (markedItems.length === 0) return null;
+          return (
+            <SelectionActionBar
+              items={markedItems}
+              onClear={() => setMarkedIds(new Set())}
+              onChangeStatus={() => {
+                const liveIds = markedItems
+                  .filter((item) => item.status !== "in_progress")
+                  .map((item) => item.id);
+                if (liveIds.length === 0) return;
+                const anchor = markedItems.find((item) => item.status !== "in_progress") ?? markedItems[0]!;
+                setSelectedId(anchor.id);
+                setKbPicker({
+                  kind: "status",
+                  itemId: anchor.id,
+                  extraIds: liveIds.filter((id) => id !== anchor.id),
+                });
+              }}
+              onChangePriority={() => {
+                const ids = markedItems.map((item) => item.id);
+                const anchor = markedItems[0]!;
+                setSelectedId(anchor.id);
+                setKbPicker({
+                  kind: "priority",
+                  itemId: anchor.id,
+                  extraIds: ids.filter((id) => id !== anchor.id),
+                });
+              }}
+              onAddAllToAgent={() => {
+                // Reuse the same mention formatter the kebab "Add to agent
+                // context" path uses; concatenate so the user sees a
+                // space-separated chain of bracketed work-item refs.
+                const text = markedItems
+                  .map((item) => formatContextMention({
+                    kind: "work-item",
+                    itemId: item.id,
+                    title: item.title,
+                    status: item.status,
+                  }))
+                  .join("");
+                insertIntoAgent(text);
+              }}
+              onDelete={() => {
+                const liveIds = markedItems
+                  .filter((item) => item.status !== "in_progress")
+                  .map((item) => item.id);
+                if (liveIds.length === 0) return;
+                for (const id of liveIds) void activeDelete(id);
+                showToast({
+                  message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                });
+                setMarkedIds(new Set());
+              }}
+            />
+          );
+        })()}
         {groups.length === 0 ? (
           <>
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
@@ -720,6 +787,21 @@ export function PlanPane({
                     message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
                   });
                 },
+                onAddToAgent: (ids) => {
+                  setContextMenu(null);
+                  const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
+                  const text = ids
+                    .map((id) => allWi.find((i) => i.id === id))
+                    .filter((item): item is WorkItem => item !== undefined)
+                    .map((item) => formatContextMention({
+                      kind: "work-item",
+                      itemId: item.id,
+                      title: item.title,
+                      status: item.status,
+                    }))
+                    .join("");
+                  if (text.length > 0) insertIntoAgent(text);
+                },
               })
             : buildWorkItemMenu(contextMenu.item, {
                 onDelete: (item) => {
@@ -742,6 +824,15 @@ export function PlanPane({
                   setContextMenu(null);
                   setSelectedId(item.id);
                   setKbPicker({ kind: "priority", itemId: item.id });
+                },
+                onAddToAgent: (item) => {
+                  setContextMenu(null);
+                  insertIntoAgent(formatContextMention({
+                    kind: "work-item",
+                    itemId: item.id,
+                    title: item.title,
+                    status: item.status,
+                  }));
                 },
               })}
           position={{ x: contextMenu.x, y: contextMenu.y }}
@@ -1360,6 +1451,7 @@ function buildWorkItemMenu(
     onRename: (item: WorkItem) => void;
     onChangeStatus: (item: WorkItem) => void;
     onChangePriority: (item: WorkItem) => void;
+    onAddToAgent: (item: WorkItem) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -1383,6 +1475,12 @@ function buildWorkItemMenu(
       run: () => actions.onChangePriority(item),
     },
     {
+      id: "workitem.add-to-agent",
+      label: "Add to agent context",
+      enabled: true,
+      run: () => actions.onAddToAgent(item),
+    },
+    {
       id: "workitem.delete",
       label: "Delete",
       enabled: !locked,
@@ -1398,6 +1496,7 @@ function buildGroupMenu(
     onChangeStatus: (item: WorkItem, ids: string[]) => void;
     onChangePriority: (item: WorkItem, ids: string[]) => void;
     onDelete: (item: WorkItem, ids: string[]) => void;
+    onAddToAgent: (ids: string[]) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -1414,6 +1513,12 @@ function buildGroupMenu(
       label: `Change priority… (${n} items)`,
       enabled: true,
       run: () => actions.onChangePriority(item, groupIds),
+    },
+    {
+      id: "workitem.add-to-agent",
+      label: `Add to agent context (${n} items)`,
+      enabled: true,
+      run: () => actions.onAddToAgent(groupIds),
     },
     {
       id: "workitem.delete",

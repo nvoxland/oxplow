@@ -136,6 +136,14 @@ Things I keep forgetting. Read this before adding any UI.
   the backlog chip, or StreamRail move all of them at once. Drop
   targets that handle single-item payloads still work — they fall
   back to `itemId` when `itemIds` is absent.
+- **Plan pane: a selection-aware action bar appears at the top of the
+  work-group region whenever ≥1 row is marked.** Component:
+  `src/ui/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
+  marked-set right-click menu — Change status / Change priority /
+  Add to agent context / Delete — plus a Clear button. The bar reads
+  the existing marked-set state in `PlanPane`; there is no separate
+  store. Pure helpers (`shouldShowSelectionActionBar`,
+  `summarizeSelection`) are exported for tests.
 - **Plan pane: Shift+↑/↓ reorders the selected work item within its
   own status section.** Crossing a section boundary is a deliberate
   no-op — to change status, the user drags (which changes status as
@@ -244,12 +252,24 @@ context" kebab/menu action; both share one path through
 `src/ui/agent-context-ref.ts` (`formatContextMention`).
 
 - **Sources** (anything the user might want to reference): drag rows
-  or pills from the Files tree, NotesPane, and the recent-activity
-  bar above the agent. Set the payload with `setContextRefDrag(e,
-  ref)` from `src/ui/agent-context-dnd.ts`. Reuse the same helper and
-  the same MIME (`application/x-oxplow-context-ref`) for any new
-  referenceable surface — separate from `WORK_ITEM_DRAG_MIME`, which
-  carries the reorder payload.
+  or pills from the Files tree, NotesPane, the WikiActivityBar, the
+  Backlinks panel on every Page, the rail HUD recent-files / active
+  item / up-next sections, and Code-quality file groups. Set the
+  payload with `setContextRefDrag(e, ref)` from
+  `src/ui/agent-context-dnd.ts`. Reuse the same helper and the same
+  MIME (`application/x-oxplow-context-ref`) for any new referenceable
+  surface — separate from `WORK_ITEM_DRAG_MIME`, which carries the
+  reorder payload.
+- **Multi-row work-item drag** is a separate path. Plan-pane
+  `WorkGroupList` drag-start enriches the `WORK_ITEM_DRAG_MIME`
+  payload with `items: [{id,title,status}, …]` so cross-pane drop
+  targets can decode resolved refs without their own work-item
+  lookup. The TerminalPane drop handler accepts both
+  `CONTEXT_REF_MIME` (single ref) and `WORK_ITEM_DRAG_MIME`
+  (multi-id), iterates the latter, and pastes a space-separated
+  chain of mentions in one drop. Helpers:
+  `decodeWorkItemDragRefs` / `dragHasWorkItemRefs` in
+  `src/ui/agent-context-dnd.ts`.
 - **Sink**: `TerminalPane` is the only drop target. It writes through
   `term.paste(text)` so the same xterm input pipeline handles both
   direct and tmux transports — do not branch by transport.

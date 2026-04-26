@@ -10,7 +10,13 @@ import {
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
-import { dragHasContextRef, readContextRef } from "../agent-context-dnd.js";
+import {
+  WORK_ITEM_DRAG_MIME_VALUE,
+  decodeWorkItemDragRefs,
+  dragHasContextRef,
+  dragHasWorkItemRefs,
+  readContextRef,
+} from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
 
 /**
@@ -84,7 +90,11 @@ export function TerminalPane({
   }, [visible]);
 
   function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
-    if (!dragHasContextRef(e)) return;
+    // Accept either the standalone "context ref" MIME (file/note/work-item
+    // single-row drag) or a multi-id work-item DnD payload (Plan pane
+    // marked-set drag). Both end up inserted as @-mentions / bracketed
+    // refs through the same `term.paste` pipeline.
+    if (!dragHasContextRef(e) && !dragHasWorkItemRefs(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     if (!dragHovering) setDragHovering(true);
@@ -99,12 +109,30 @@ export function TerminalPane({
 
   function handleDrop(e: ReactDragEvent<HTMLDivElement>) {
     setDragHovering(false);
+    const term = termRef.current;
+    if (!term) return;
+
+    // Multi-id work-item payload first — when present, iterate every id
+    // and paste a space-separated chain of context mentions. This is the
+    // path for "drag a marked Plan-pane row into the agent" (one or many).
+    if (dragHasWorkItemRefs(e)) {
+      const raw = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME_VALUE);
+      const refs = decodeWorkItemDragRefs(raw);
+      if (refs.length > 0) {
+        e.preventDefault();
+        const text = refs.map(formatContextMention).join("");
+        term.paste(text);
+        term.focus();
+        return;
+      }
+      // Fall through if the items slice was missing — older drag sources
+      // may not embed it; still try the standalone CONTEXT_REF_MIME path.
+    }
+
     const ref = readContextRef(e);
     if (!ref || (ref.kind === "file" && ref.path === "")) return;
     e.preventDefault();
     const text = formatContextMention(ref);
-    const term = termRef.current;
-    if (!term) return;
     term.paste(text);
     term.focus();
   }

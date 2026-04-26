@@ -133,7 +133,19 @@ The full IA redesign ships in phases (see plan
   `onOpenThreadSettings` handler — App.tsx wires both). New-stream /
   New-work-item page-form replacements and the inline-new-row that
   retires `CreateThreadModal` are still pending.
-- 🚧 Phase 6 — Selection action bar + drag-to-add-context polish.
+- ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
+  `SelectionActionBar` (`src/ui/components/Plan/SelectionActionBar.tsx`)
+  appears at the top of `PlanPane`'s work-group region whenever ≥1
+  rows are marked. It owns no state; PlanPane reads its existing
+  marked-set and routes Change status / Change priority / Add to
+  agent context / Delete through the same paths used by single-row
+  kebabs. The agent terminal now accepts multi-row work-item drags
+  (decodes the `WORK_ITEM_DRAG_MIME` payload's `items` slice
+  directly — see `.context/usability.md` "Add to agent context").
+  Drag-to-add sources expanded: BacklinksList entries, RailHud
+  recent-files / active item / up-next, CodeQualityPanel file group
+  rows, plus a "Add to agent context" item on every work-item kebab
+  (single-row and group menus).
 - 🚧 Phase 7 — Density + visual polish.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area

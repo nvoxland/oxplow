@@ -200,6 +200,20 @@ export function WorkGroupList({
     return { sections: orderedSections, allRows: flat };
   }, [group.items, commitPoints, waitPoints]);
 
+  // Index every work item visible in this group (root + every epic's
+  // children) so the drag-start handler can encode the resolved
+  // {id, title, status} slice into the WORK_ITEM_DRAG_MIME payload.
+  // The agent terminal reads this slice to add each marked row as a
+  // context ref without needing its own work-item lookup.
+  const allWorkItemsById = useMemo(() => {
+    const map = new Map<string, WorkItem>();
+    for (const item of group.items) map.set(item.id, item);
+    for (const children of epicChildrenMap.values()) {
+      for (const child of children) map.set(child.id, child);
+    }
+    return map;
+  }, [group.items, epicChildrenMap]);
+
   const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
 
   // Look up the dragged work item (if any) so cross-section drops can route
@@ -464,11 +478,21 @@ export function WorkGroupList({
         const ids = isMarked && markedIds && markedIds.size > 1
           ? [...markedIds]
           : [row.item.id];
+        // Embed the resolved {id,title,status} slice for each carried id
+        // so cross-pane drop targets (e.g. the agent terminal) can build
+        // ContextRefs without their own lookup. The dragged row is
+        // always present even if not in the page-local index — it's the
+        // row the user actually grabbed.
+        const items = ids
+          .map((id) => allWorkItemsById.get(id) ?? (id === row.item.id ? row.item : null))
+          .filter((item): item is WorkItem => item !== null)
+          .map((item) => ({ id: item.id, title: item.title, status: item.status }));
         event.dataTransfer.setData(
           WORK_ITEM_DRAG_MIME,
           JSON.stringify({
             itemId: row.item.id,
             itemIds: ids,
+            items,
             fromThreadId: scopeThreadId,
           }),
         );
@@ -1036,9 +1060,18 @@ function EpicChildrenPane({
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", child.id);
               const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
+              // Only resolve the items we can see locally — this pane
+              // only carries the epic's children. The parent group's
+              // drag-start handler has the full visible set; for
+              // multi-drag from a child row, callers receive whatever
+              // titles we can find here. Unresolved ids drop through.
+              const items = ids
+                .map((id) => children.find((c) => c.id === id) ?? (id === child.id ? child : null))
+                .filter((item): item is WorkItem => item !== null)
+                .map((item) => ({ id: item.id, title: item.title, status: item.status }));
               event.dataTransfer.setData(
                 WORK_ITEM_DRAG_MIME,
-                JSON.stringify({ itemId: child.id, itemIds: ids, fromThreadId: scopeThreadId, parentEpicId: epicId }),
+                JSON.stringify({ itemId: child.id, itemIds: ids, items, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
               queueMicrotask(() => setDraggingKey(key));
             }}

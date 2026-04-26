@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { AgentStatus, BacklogState, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { dashboardRef, indexRef, fileRef, workItemRef } from "../../tabs/pageRefs.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 
@@ -191,6 +192,13 @@ function ActiveItemSection({
         type="button"
         data-testid="rail-active-item"
         onClick={() => onOpenPage(workItemRef(item.id))}
+        draggable
+        onDragStart={(ev) => setContextRefDrag(ev, {
+          kind: "work-item",
+          itemId: item.id,
+          title: item.title,
+          status: item.status,
+        })}
         style={{
           ...rowStyle,
           flexDirection: "column",
@@ -240,6 +248,13 @@ function UpNextSection({
             type="button"
             data-testid={`rail-up-next-item-${item.id}`}
             onClick={() => onOpenPage(workItemRef(item.id))}
+            draggable
+            onDragStart={(ev) => setContextRefDrag(ev, {
+              kind: "work-item",
+              itemId: item.id,
+              title: item.title,
+              status: item.status,
+            })}
             style={rowHoverStyle()}
           >
             <span style={{ color: "var(--text-muted)", fontSize: 11 }}>☐</span>
@@ -273,6 +288,8 @@ function RecentFilesSection({
               data-testid={`rail-recent-file-${e.path}`}
               title={e.path}
               onClick={() => onOpenPage(fileRef(e.path))}
+              draggable
+              onDragStart={(ev) => setContextRefDrag(ev, { kind: "file", path: e.path })}
               style={rowHoverStyle()}
             >
               <span style={{ color: "var(--text-muted)", fontSize: 11 }}>📄</span>

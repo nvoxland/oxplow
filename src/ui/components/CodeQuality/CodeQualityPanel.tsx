@@ -10,6 +10,7 @@ import {
   type CodeQualityTool,
   type Stream,
 } from "../../api.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
 
 interface Props {
   stream: Stream | null;
@@ -295,6 +296,8 @@ function FileGroup({
       <button
         type="button"
         onClick={onOpen}
+        draggable
+        onDragStart={(e) => setContextRefDrag(e, { kind: "file", path })}
         style={{
           display: "block",
           width: "100%",
@@ -306,7 +309,7 @@ function FileGroup({
           fontFamily: "var(--font-mono)",
           fontSize: 12,
         }}
-        title="Open file"
+        title="Open file (drag to add to agent context)"
       >
         {path} <span style={{ color: "var(--muted-foreground)" }}>({rows.length})</span>
       </button>
