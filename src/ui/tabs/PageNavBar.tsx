@@ -7,17 +7,14 @@ export interface PageNavBarProps {
   canForward: boolean;
   onBack(): void;
   onForward(): void;
-  /** Optional bookmark affordance — when omitted, no star renders. */
+  /** Optional bookmark affordance — when omitted, no star renders.
+   *  The button always opens a popover that lets the user toggle this
+   *  page's bookmark in each scope (thread / stream / global). */
   bookmark?: {
-    isBookmarked: boolean;
-    /** Click on the star: toggles in `defaultScope`. */
-    onToggle(): void;
-    /** Optional scope chooser (chevron). When supplied, the chevron
-     *  opens a popover; clicking a scope toggles that scope. */
-    scopes?: BookmarkScope[];
-    defaultScope?: BookmarkScope;
-    onToggleScope?(scope: BookmarkScope): void;
-    onSetDefaultScope?(scope: BookmarkScope): void;
+    /** Scopes this page is currently bookmarked at. The star is filled
+     *  when this is non-empty. */
+    scopes: BookmarkScope[];
+    onToggleScope(scope: BookmarkScope): void;
   };
   /** Optional backlinks dropdown content — when omitted, no dropdown renders. */
   backlinks?: {
@@ -87,44 +84,24 @@ export function PageNavBar({
           <button
             type="button"
             data-testid="page-nav-bookmark"
-            title={bookmark.isBookmarked ? "Remove bookmark" : `Bookmark (${bookmark.defaultScope ?? "thread"})`}
-            onClick={bookmark.onToggle}
+            title="Bookmark"
+            onClick={() => setScopeOpen((v) => !v)}
+            aria-expanded={scopeOpen}
             style={{
               ...navButtonStyle(true),
-              color: bookmark.isBookmarked ? "var(--accent-fg)" : "var(--text-secondary)",
-              borderTopRightRadius: bookmark.scopes ? 0 : 4,
-              borderBottomRightRadius: bookmark.scopes ? 0 : 4,
+              color: bookmark.scopes.length > 0 ? "var(--accent-fg)" : "var(--text-secondary)",
             }}
           >
-            {bookmark.isBookmarked ? "★" : "☆"}
+            {bookmark.scopes.length > 0 ? "★" : "☆"}
           </button>
-          {bookmark.scopes ? (
-            <button
-              type="button"
-              data-testid="page-nav-bookmark-scope"
-              title="Choose bookmark scope"
-              onClick={() => setScopeOpen((v) => !v)}
-              aria-expanded={scopeOpen}
-              style={{
-                ...navButtonStyle(true),
-                marginLeft: -1,
-                borderTopLeftRadius: 0,
-                borderBottomLeftRadius: 0,
-                padding: "4px 6px",
-                fontSize: 10,
-              }}
-            >
-              ▾
-            </button>
-          ) : null}
-          {scopeOpen && bookmark.scopes ? (
+          {scopeOpen ? (
             <div
               data-testid="page-nav-bookmark-popover"
               style={{
                 position: "absolute",
                 top: "calc(100% + 4px)",
                 left: 0,
-                minWidth: 200,
+                minWidth: 180,
                 background: "var(--surface-card)",
                 border: "1px solid var(--border-subtle)",
                 borderRadius: 6,
@@ -134,50 +111,31 @@ export function PageNavBar({
                 fontSize: 12,
               }}
             >
-              <div style={{ color: "var(--text-secondary)", padding: "2px 6px 4px", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                Bookmark scope
-              </div>
               {(["thread", "stream", "global"] as BookmarkScope[]).map((scope) => {
-                const active = bookmark.scopes!.includes(scope);
-                const isDefault = bookmark.defaultScope === scope;
+                const active = bookmark.scopes.includes(scope);
                 return (
-                  <div key={scope} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <button
-                      type="button"
-                      data-testid={`page-nav-bookmark-scope-${scope}`}
-                      onClick={() => bookmark.onToggleScope?.(scope)}
-                      style={{
-                        flex: 1,
-                        textAlign: "left",
-                        padding: "4px 6px",
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--text-primary)",
-                        cursor: "pointer",
-                        borderRadius: 4,
-                      }}
-                    >
-                      <span style={{ display: "inline-block", width: 14 }}>
-                        {active ? "★" : " "}
-                      </span>
-                      {scope === "thread" ? "This thread" : scope === "stream" ? "This stream" : "Global"}
-                    </button>
-                    <button
-                      type="button"
-                      title={isDefault ? "Default scope" : "Set as default scope"}
-                      onClick={() => bookmark.onSetDefaultScope?.(scope)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: isDefault ? "var(--accent-fg)" : "var(--text-secondary)",
-                        cursor: "pointer",
-                        padding: "2px 6px",
-                        fontSize: 10,
-                      }}
-                    >
-                      {isDefault ? "● default" : "○ default"}
-                    </button>
-                  </div>
+                  <button
+                    key={scope}
+                    type="button"
+                    data-testid={`page-nav-bookmark-scope-${scope}`}
+                    onClick={() => bookmark.onToggleScope(scope)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "4px 6px",
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                      borderRadius: 4,
+                    }}
+                  >
+                    <span style={{ display: "inline-block", width: 14 }}>
+                      {active ? "★" : " "}
+                    </span>
+                    {scope === "thread" ? "This thread" : scope === "stream" ? "This stream" : "Global"}
+                  </button>
                 );
               })}
             </div>

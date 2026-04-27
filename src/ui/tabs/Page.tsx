@@ -10,12 +10,8 @@ export interface PageNavBarConfig {
   onBack(): void;
   onForward(): void;
   bookmark?: {
-    isBookmarked: boolean;
-    onToggle(): void;
-    scopes?: BookmarkScope[];
-    defaultScope?: BookmarkScope;
-    onToggleScope?(scope: BookmarkScope): void;
-    onSetDefaultScope?(scope: BookmarkScope): void;
+    scopes: BookmarkScope[];
+    onToggleScope(scope: BookmarkScope): void;
   };
   /** Backlinks dropdown content. Mutually exclusive with the
    *  legacy footer panel — when this is supplied, the footer is
@@ -100,12 +96,8 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
     onForward: ctxNav.goForward,
     bookmark: ctxNav.bookmark
       ? {
-          isBookmarked: ctxNav.bookmark.scopes.length > 0,
-          onToggle: () => ctxNav.bookmark!.toggle(),
           scopes: ctxNav.bookmark.scopes,
-          defaultScope: ctxNav.bookmark.lastScope,
           onToggleScope: (scope) => ctxNav.bookmark!.toggle(scope),
-          onSetDefaultScope: (scope) => ctxNav.bookmark!.setLastScope(scope),
         }
       : undefined,
   } : undefined);

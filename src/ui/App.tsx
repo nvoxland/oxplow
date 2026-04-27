@@ -1762,8 +1762,10 @@ export function App() {
       });
     }
     for (const slug of noteTabs) {
+      const noteTabId = `note:${slug}`;
+      const noteNavOpen = (newRef: TabRef) => handleNavigateInTab(noteTabId, newRef);
       tabs.push({
-        id: `note:${slug}`,
+        id: noteTabId,
         label: slug,
         closable: true,
         reorderGroup: "note",
@@ -1775,7 +1777,7 @@ export function App() {
             onClosed={() => closeNoteTab(slug)}
             onOpenNote={handleOpenNote}
             onOpenFile={(p) => { void handleOpenFile(p); }}
-            onOpenPage={handleOpenPage}
+            onOpenPage={noteNavOpen}
           />
         ) : null,
       });
@@ -1804,12 +1806,21 @@ export function App() {
     const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
     const pageTabStartIdx = tabs.length;
     for (const ref of pageTabsForThread) {
+      // Default for any in-page navigation: replace the current page in this
+      // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
+      // BacklinksList still escape to a new tab via PageNavigationContext.
+      const navOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+      const navRevealCommit = (sha: string) => {
+        const token = Date.now();
+        setHistoryReveal({ sha, token });
+        navOpen(indexRef("git-history"));
+      };
       if (ref.kind === "start") {
         tabs.push({
           id: ref.id,
           label: "Start",
           closable: true,
-          render: () => <StartPage onOpenPage={handleOpenPage} />,
+          render: () => <StartPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "settings") {
         tabs.push({
@@ -1856,8 +1867,8 @@ export function App() {
           render: () => (
             <GitDashboardPage
               stream={stream}
-              onOpenPage={handleOpenPage}
-              onRevealCommit={handleRevealCommit}
+              onOpenPage={navOpen}
+              onRevealCommit={navRevealCommit}
             />
           ),
         });
@@ -1869,7 +1880,7 @@ export function App() {
           render: () => (
             <UncommittedChangesPage
               stream={stream}
-              onOpenPage={handleOpenPage}
+              onOpenPage={navOpen}
               onOpenFile={handleOpenFile}
             />
           ),
@@ -1886,7 +1897,7 @@ export function App() {
               sha={sha}
               threadWork={selectedThreadWork}
               onOpenDiff={handleOpenDiff}
-              onOpenPage={handleOpenPage}
+              onOpenPage={navOpen}
             />
           ),
         });
@@ -1954,7 +1965,7 @@ export function App() {
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
           onOpenNewWorkItemPage: (payload: { parentId?: string | null; editingItemId?: string | null }) =>
-            handleOpenPage(newWorkItemRef(payload)),
+            navOpen(newWorkItemRef(payload)),
         };
         const labelByKind: Record<string, string> = {
           "plan-work": "Plan work",
@@ -1969,9 +1980,9 @@ export function App() {
           render: () => {
             switch (ref.kind) {
               case "plan-work":
-                return <PlanWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+                return <PlanWorkPage {...sharedProps} onOpenPage={navOpen} />;
               case "done-work":
-                return <DoneWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+                return <DoneWorkPage {...sharedProps} onOpenPage={navOpen} />;
               case "backlog":
                 return <BacklogPage {...sharedProps} />;
               case "archived":
@@ -1986,7 +1997,7 @@ export function App() {
           id: ref.id,
           label: "Subsystem docs",
           closable: true,
-          render: () => <SubsystemDocsPage stream={stream} onOpenPage={handleOpenPage} />,
+          render: () => <SubsystemDocsPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
@@ -2003,7 +2014,7 @@ export function App() {
               itemId={itemId}
               items={items}
               threadWork={selectedThreadWork}
-              onOpenPage={handleOpenPage}
+              onOpenPage={navOpen}
               onOpenFile={handleOpenFile}
               onShowInHistory={handleShowSnapshotInHistory}
               onOpenDiff={handleOpenDiff}
@@ -2022,7 +2033,7 @@ export function App() {
               stream={stream}
               findingId={findingId}
               threadWork={selectedThreadWork}
-              onOpenPage={handleOpenPage}
+              onOpenPage={navOpen}
               onOpenFileAtLine={(p) => { void handleOpenFile(p); }}
             />
           ),
@@ -2150,7 +2161,7 @@ export function App() {
               stream={stream}
               threadWork={selectedThreadWork}
               backlog={backlogState}
-              onOpenPage={handleOpenPage}
+              onOpenPage={navOpen}
             />
           ),
         });
@@ -2168,7 +2179,6 @@ export function App() {
       const ref = pageRefsForThread.find((r) => r.id === tabId);
       const innerRender = tab.render;
       const scopes = ref ? bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id) : [];
-      const lastScope = bookmarksStore.lastScope();
       const navValue = {
         navigate: (newRef: TabRef, opts?: { newTab?: boolean }) => {
           if (opts?.newTab) handleOpenPage(newRef);
@@ -2180,17 +2190,14 @@ export function App() {
         canGoForward: entry.forward.length > 0,
         bookmark: ref ? {
           scopes,
-          lastScope,
-          toggle: (scope?: BookmarkScope) => {
-            const target = scope ?? lastScope;
+          toggle: (scope: BookmarkScope) => {
             const currentScopes = bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id);
-            if (currentScopes.includes(target)) {
-              bookmarksStore.remove(target, selectedThreadId, stream?.id ?? null, ref.id);
+            if (currentScopes.includes(scope)) {
+              bookmarksStore.remove(scope, selectedThreadId, stream?.id ?? null, ref.id);
             } else {
-              bookmarksStore.add(target, selectedThreadId, stream?.id ?? null, ref, tab.label);
+              bookmarksStore.add(scope, selectedThreadId, stream?.id ?? null, ref, tab.label);
             }
           },
-          setLastScope: (scope: BookmarkScope) => bookmarksStore.setLastScope(scope),
         } : undefined,
       };
       tab.render = () => (

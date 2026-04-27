@@ -16,7 +16,8 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha } from "../components/History/CommitGraphTable.js";
 
@@ -52,6 +53,11 @@ const RECENT_LIMIT = 5;
 const WORKTREE_BASE = "main";
 
 export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDashboardPageProps) {
+  const nav = useOptionalPageNavigation();
+  const handleSelectCommit = (sha: string) => {
+    if (nav) nav.navigate(gitCommitRef(sha));
+    else onRevealCommit(sha);
+  };
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,7 +190,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
             <RecentCommitsCard
               log={data.recentLog}
-              onRevealCommit={onRevealCommit}
+              onSelectCommit={handleSelectCommit}
+              onViewFullHistory={() => onRevealCommit(data.recentLog.commits[0]?.sha ?? "")}
             />
 
             <WorktreesCard
@@ -295,10 +302,12 @@ function UncommittedMiniCard({
 
 function RecentCommitsCard({
   log,
-  onRevealCommit,
+  onSelectCommit,
+  onViewFullHistory,
 }: {
   log: GitLogResult;
-  onRevealCommit(sha: string): void;
+  onSelectCommit(sha: string): void;
+  onViewFullHistory(): void;
 }) {
   const refIndex = useMemo(() => indexRefsBySha(log), [log]);
   return (
@@ -309,7 +318,7 @@ function RecentCommitsCard({
         <button
           type="button"
           data-testid="git-dashboard-view-full-history"
-          onClick={() => onRevealCommit(log.commits[0]?.sha ?? "")}
+          onClick={onViewFullHistory}
           style={linkButton}
         >
           View full history →
@@ -324,7 +333,7 @@ function RecentCommitsCard({
           branchHeadsBySha={refIndex.branchHeadsBySha}
           tagsBySha={refIndex.tagsBySha}
           currentBranch={log.currentBranch}
-          onSelect={onRevealCommit}
+          onSelect={onSelectCommit}
         />
       )}
     </Card>

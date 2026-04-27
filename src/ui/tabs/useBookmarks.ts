@@ -27,10 +27,15 @@ export function resetBookmarksStore(): void {
 /** Subscribe to the bookmarks store and re-render on any change. */
 export function useBookmarksStore(): BookmarksApi {
   const store = getBookmarksStore();
+  // useSyncExternalStore re-renders only when the snapshot CHANGES (===).
+  // The store doesn't expose a versioned snapshot, so bump a module-level
+  // counter on every notify and read it back here.
   useSyncExternalStore(
-    (fn) => store.subscribe(fn),
-    () => 0, // any stable snapshot — we only care about the trigger
-    () => 0,
+    (fn) => store.subscribe(() => { storeVersion++; fn(); }),
+    () => storeVersion,
+    () => storeVersion,
   );
   return store;
 }
+
+let storeVersion = 0;

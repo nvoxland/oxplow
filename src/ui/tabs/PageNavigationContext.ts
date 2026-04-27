@@ -10,12 +10,8 @@ export interface NavigateOptions {
 export interface BookmarkBinding {
   /** All scopes this page is currently bookmarked at. */
   scopes: BookmarkScope[];
-  /** Toggle bookmark in the given scope (or the user's last-used
-   *  scope if omitted). */
-  toggle(scope?: BookmarkScope): void;
-  /** Persisted "last-used" scope, drives the default-click behavior. */
-  lastScope: BookmarkScope;
-  setLastScope(scope: BookmarkScope): void;
+  /** Toggle bookmark in the given scope. */
+  toggle(scope: BookmarkScope): void;
 }
 
 export interface PageNavigation {

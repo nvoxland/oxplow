@@ -409,7 +409,22 @@ function buildNativeSubmenu(group: MenuGroupSnapshot): MenuItemConstructorOption
     { type: "separator" },
     { role: "cut" },
     { role: "copy" },
-    { role: "paste" },
+    // Custom Paste (no `role: "paste"`) so Cmd+V is NOT registered as a
+    // global menu accelerator. The role default would intercept Cmd+V
+    // before it reaches the focused element's keydown listener, which
+    // breaks the TerminalPane's xterm.js Cmd+V handler (it pastes via the
+    // main-process clipboard IPC to dodge the renderer's
+    // navigator.clipboard focus quirks). Plain text inputs still get
+    // Cmd+V via Chromium's built-in editing commands, which fire
+    // independently of the Edit menu.
+    {
+      label: "Paste",
+      click: (_item, focusedWindow) => {
+        if (focusedWindow && "webContents" in focusedWindow) {
+          (focusedWindow as { webContents: { paste: () => void } }).webContents.paste();
+        }
+      },
+    },
     { role: "selectAll" },
     { type: "separator" },
     ...items,
