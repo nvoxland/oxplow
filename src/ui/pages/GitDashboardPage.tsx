@@ -8,13 +8,16 @@ import {
   gitPullRemoteIntoCurrent,
   gitPush,
   gitPushCurrentTo,
+  listAgentStatuses,
   listRecentRemoteBranches,
   listSiblingWorktrees,
   listStreams,
   listWorkspaceFiles,
+  subscribeAgentStatus,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
 } from "../api.js";
+import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
@@ -64,6 +67,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  // Per-(stream, thread) agent status. The Streams card aggregates over
+  // each stream's threads to render the "working" indicator.
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, Record<string, string>>>({});
   const streamId = stream?.id ?? null;
 
   const refresh = useCallback(async () => {
@@ -145,6 +151,37 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     };
   }, [streamId, refresh]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentStatuses().then((entries) => {
+      if (cancelled) return;
+      const byStream: Record<string, Record<string, string>> = {};
+      for (const e of entries) {
+        (byStream[e.streamId] ??= {})[e.threadId] = e.status;
+      }
+      setAgentStatuses(byStream);
+    });
+    const unsub = subscribeAgentStatus("all", (entry) => {
+      setAgentStatuses((prev: Record<string, Record<string, string>>) => ({
+        ...prev,
+        [entry.streamId]: { ...(prev[entry.streamId] ?? {}), [entry.threadId]: entry.status },
+      }));
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  const streamWorkingFlags = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const sid of Object.keys(agentStatuses)) {
+      const threads = agentStatuses[sid] ?? {};
+      out[sid] = Object.values(threads).some((s) => s === "working");
+    }
+    return out;
+  }, [agentStatuses]);
+
   const runConfirmed = useCallback(
     async (label: string, command: string, action: () => Promise<GitOpResult>) => {
       const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
@@ -206,6 +243,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
             <StreamsCard
               streamId={streamId}
               rows={data.streams}
+              workingByStreamId={streamWorkingFlags}
               onMerge={(branch) =>
                 runConfirmed(
                   `Merge ${branch} into current`,
@@ -354,11 +392,13 @@ function StreamsCard({
   rows,
   onMerge,
   pendingAction,
+  workingByStreamId,
 }: {
   streamId: string;
   rows: StreamWorktreeRow[];
   onMerge(branch: string): void;
   pendingAction: string | null;
+  workingByStreamId: Record<string, boolean>;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
@@ -398,7 +438,12 @@ function StreamsCard({
                     {isOpen ? "▾" : "▸"}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500 }}>{row.stream.title}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
+                      {workingByStreamId[row.stream.id] ? (
+                        <AgentStatusDot status="working" />
+                      ) : null}
+                      <span>{row.stream.title}</span>
+                    </div>
                     <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {branch}
                     </div>
