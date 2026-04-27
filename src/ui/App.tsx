@@ -110,7 +110,7 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
-import { closedThreadsRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, fileRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1601,11 +1601,16 @@ export function App() {
       return;
     }
     if (existing[idx]!.id === ref.id) return;
-    // Don't allow in-tab navigation to file/note/agent kinds — those
-    // live in their own tab tracks. Promote to a regular open instead.
-    if (ref.kind === "agent" || ref.kind === "file" || ref.kind === "note" || ref.kind === "diff") {
+    // agent/note/diff still live in their own tab tracks — promote to
+    // a regular open. File refs DO support in-tab nav: the page tab
+    // becomes a file viewer (back returns to the prior page).
+    if (ref.kind === "agent" || ref.kind === "note" || ref.kind === "diff") {
       handleOpenPage(ref);
       return;
+    }
+    if (ref.kind === "file") {
+      const payload = ref.payload as { path?: string } | null;
+      if (payload?.path) void handleOpenFile(payload.path);
     }
     const oldRef = existing[idx]!;
     setThreadPageTabs((prev) => {
@@ -1760,7 +1765,21 @@ export function App() {
           ),
       },
     ];
+    // Files that already appear as a page-tab (because the user
+    // clicked through from a file-list page) are rendered inside that
+    // page-tab slot — skip them here so the chrome doesn't show two
+    // tabs with the same `file:${path}` id.
+    const pageTabFilePaths = new Set<string>();
+    if (selectedThreadId) {
+      for (const ref of threadPageTabs[selectedThreadId] ?? []) {
+        if (ref.kind === "file") {
+          const p = (ref.payload as { path?: string } | null)?.path;
+          if (p) pageTabFilePaths.add(p);
+        }
+      }
+    }
     for (const path of currentSession.openOrder) {
+      if (pageTabFilePaths.has(path)) continue;
       const basename = path.split("/").pop() ?? path;
       const file = currentSession.files[path];
       const dirty = !!file && file.draftContent !== file.savedContent;
@@ -1842,12 +1861,48 @@ export function App() {
       // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
       // BacklinksList still escape to a new tab via PageNavigationContext.
       const navOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+      // For file-list pages: plain click → in-tab nav (back returns to
+      // the list); modifier-click → new file tab.
+      const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
+        if (opts?.newTab) handleOpenPage(fileRef(path));
+        else handleNavigateInTab(ref.id, fileRef(path));
+      };
       const navRevealCommit = (sha: string) => {
         const token = Date.now();
         setHistoryReveal({ sha, token });
         navOpen(indexRef("git-history"));
       };
-      if (ref.kind === "settings") {
+      if (ref.kind === "file") {
+        const path = (ref.payload as { path?: string } | null)?.path;
+        if (!path) continue;
+        const basename = path.split("/").pop() ?? path;
+        const file = currentSession.files[path];
+        const dirty = !!file && file.draftContent !== file.savedContent;
+        tabs.push({
+          id: ref.id,
+          label: `${dirty ? "● " : ""}${basename}`,
+          closable: true,
+          reorderGroup: "file",
+          render: () => stream ? (
+            <EditorPane
+              stream={stream}
+              filePath={path}
+              value={file?.draftContent ?? ""}
+              isDirty={dirty}
+              onChange={handleEditorChange}
+              onSave={() => { void handleEditorSave(); }}
+              findRequest={editorFindRequest}
+              navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
+              onNavigateToLocation={handleNavigateToLocation}
+              openFileOrder={currentSession.openOrder}
+              openFiles={currentSession.files}
+              onRevealCommit={handleRevealCommit}
+              onRevealWorkItem={handleRequestEditWorkItem}
+              onCompareWithClipboard={handleCompareWithClipboard}
+            />
+          ) : null,
+        });
+      } else if (ref.kind === "settings") {
         tabs.push({
           id: ref.id,
           label: "Settings",
@@ -1859,7 +1914,7 @@ export function App() {
           id: ref.id,
           label: "Code quality",
           closable: true,
-          render: () => <CodeQualityPage stream={stream} onOpenFile={handleOpenFile} />,
+          render: () => <CodeQualityPage stream={stream} onOpenFile={navOpenFile} />,
         });
       } else if (ref.kind === "local-history") {
         tabs.push({
@@ -1906,7 +1961,7 @@ export function App() {
             <UncommittedChangesPage
               stream={stream}
               onOpenPage={navOpen}
-              onOpenFile={handleOpenFile}
+              onOpenFile={navOpenFile}
             />
           ),
         });
@@ -1944,7 +1999,7 @@ export function App() {
               gitEnabled={workspaceContext.gitEnabled}
               selectedFilePath={selectedFilePath}
               generatedDirs={generatedDirs}
-              onOpenFile={handleOpenFile}
+              onOpenFile={navOpenFile}
               onOpenDiff={handleOpenDiff}
               onCreateFile={handleCreateFile}
               onCreateDirectory={handleCreateDirectory}

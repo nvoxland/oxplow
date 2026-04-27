@@ -4,7 +4,7 @@ import { CodeQualityPanel } from "../components/CodeQuality/CodeQualityPanel.js"
 
 export interface CodeQualityPageProps {
   stream: Stream | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
 }
 
 /**

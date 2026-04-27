@@ -8,7 +8,7 @@ export interface FilesPageProps {
   gitEnabled: boolean;
   selectedFilePath: string | null;
   generatedDirs: string[];
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(request: DiffRequest): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;

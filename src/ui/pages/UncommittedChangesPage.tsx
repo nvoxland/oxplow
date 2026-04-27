@@ -13,7 +13,7 @@ import { indexRef } from "../tabs/pageRefs.js";
 export interface UncommittedChangesPageProps {
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
 }
 
 interface DirNode {
@@ -185,7 +185,7 @@ function DirTreeView({
   node: DirNode;
   expanded: Set<string>;
   toggle(path: string): void;
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   depth: number;
 }) {
   const isExpanded = expanded.has(node.path);
@@ -232,7 +232,17 @@ function DirTreeView({
             <div
               key={file.path}
               data-testid="uncommitted-tree-file"
-              onClick={() => onOpenFile(file.path)}
+              onClick={(e) => onOpenFile(file.path, { newTab: e.metaKey || e.ctrlKey })}
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  onOpenFile(file.path, { newTab: true });
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onOpenFile(file.path, { newTab: true });
+              }}
               style={{
                 display: "flex",
                 gap: 8,
