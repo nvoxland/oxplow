@@ -757,7 +757,7 @@ export class ElectronRuntime {
   }
 
   getThreadAgentStatus(threadId: string): AgentStatus {
-    return this.agentStatusByThread.get(threadId) ?? "idle";
+    return this.agentStatusByThread.get(threadId) ?? "waiting";
   }
 
   listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {
@@ -1471,7 +1471,7 @@ export class ElectronRuntime {
     // synthetic signal the tab icon stays "thinking" until the next
     // prompt. Synthesize a meta `Interrupt` hook event keyed to this
     // session's thread; the agent-status reducer treats it as a forced
-    // reset of "working" → "done".
+    // reset of "working" → "waiting".
     if (terminalInputIsInterrupt(message)) {
       const ctx = this.terminalSessionThread.get(sessionId);
       if (ctx && this.agentStatusByThread.get(ctx.threadId) === "working") {

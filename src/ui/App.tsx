@@ -819,8 +819,8 @@ export function App() {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
       const activeThreadId = threadStates[s.id]?.activeThreadId;
-      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "idle";
-      else out[s.id] = "idle";
+      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "waiting";
+      else out[s.id] = "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -1496,7 +1496,7 @@ export function App() {
     });
   }, [stream]);
 
-  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
+  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
   const bookmarksStore = useBookmarksStore();
 

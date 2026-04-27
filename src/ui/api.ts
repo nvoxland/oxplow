@@ -979,7 +979,7 @@ export interface WorkItemChangeEvent {
   itemId: string | null;
 }
 
-export type AgentStatus = "idle" | "working" | "waiting" | "done";
+export type AgentStatus = "working" | "waiting";
 
 export interface AgentStatusEntry {
   streamId: string;

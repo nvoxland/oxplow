@@ -97,8 +97,8 @@ export function WorkGroupList({
   isActive?: boolean;
   /** Live agent state for this thread, used to drive the In Progress
    *  empty-state placeholder ("Thinking..." with a braille spinner when
-   *  the agent is mid-turn, "Waiting" when idle). Falls back to "idle"
-   *  when undefined. */
+   *  the agent is `working`, "Waiting" when `waiting`). Falls back to
+   *  `waiting` when undefined. */
   agentStatus?: AgentStatus;
   /** Collapse-state accessors from PlanPane's useCollapsedSections. */
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;

@@ -133,7 +133,7 @@ export function ThreadRail({
             thread={thread}
             isActive={thread.id === activeThreadId}
             isSelected={thread.id === selectedThreadId}
-            agentStatus={agentStatuses[thread.id] ?? "idle"}
+            agentStatus={agentStatuses[thread.id] ?? "waiting"}
             workState={threadWorkStates[thread.id]}
             hasQueued={hasQueued}
             isRenaming={renamingId === thread.id}
