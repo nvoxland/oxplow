@@ -43,7 +43,7 @@ interface Props {
   gitEnabled: boolean;
   selectedFilePath: string | null;
   generatedDirs: string[];
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(request: DiffRequest): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;
@@ -428,11 +428,11 @@ export function ProjectPanel({
 
   // The file tree's click/double-click opens something contextual to the
   // current filter — file in "all", matching diff in scope-filtered views.
-  function openForCurrentFilter(path: string) {
+  function openForCurrentFilter(path: string, opts?: { newTab?: boolean }) {
     if (filterMode === "uncommitted") { openUncommittedDiff(path); return; }
     if (filterMode === "branch" && scopes?.branchBase) { openBranchDiff(path); return; }
     if (filterMode === "unpushed" && scopes?.upstream) { openOriginDiff(path); return; }
-    onOpenFile(path);
+    onOpenFile(path, opts);
   }
 
   async function handleContextAction(

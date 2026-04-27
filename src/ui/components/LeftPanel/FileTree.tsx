@@ -50,7 +50,7 @@ export function ChangedFilesSection({
 }: {
   files: WorkspaceIndexedFile[];
   selectedFilePath: string | null;
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
@@ -64,7 +64,13 @@ export function ChangedFilesSection({
           path={file.path}
           gitStatus={file.gitStatus}
           active={selectedFilePath === file.path}
-          onClick={() => onOpenFile(file.path)}
+          onClick={(e: React.MouseEvent | React.KeyboardEvent) => {
+            const newTab =
+              ("metaKey" in e && (e.metaKey || e.ctrlKey)) ||
+              ("button" in e && e.button === 1) ||
+              ("type" in e && e.type === "contextmenu");
+            onOpenFile(file.path, { newTab });
+          }}
           onOpenMenu={onOpenMenu}
         />
       ))}
@@ -91,7 +97,7 @@ export function TreeEntries({
   selectedFilePath: string | null;
   generatedSet: Set<string>;
   onToggleDirectory(path: string): void;
-  onOpenFile(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
@@ -114,13 +120,19 @@ export function TreeEntries({
               onDragStart={entry.kind === "file"
                 ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
                 : undefined}
-              onClick={() => {
+              onClick={(e) => {
                 if (entry.kind === "directory") {
                   void onToggleDirectory(entry.path);
                 } else if (entry.gitStatus === "deleted") {
                   // Deleted files no longer exist on disk; opening would 404.
                 } else {
-                  onOpenFile(entry.path);
+                  onOpenFile(entry.path, { newTab: e.metaKey || e.ctrlKey });
+                }
+              }}
+              onAuxClick={(e) => {
+                if (entry.kind === "file" && entry.gitStatus !== "deleted" && e.button === 1) {
+                  e.preventDefault();
+                  onOpenFile(entry.path, { newTab: true });
                 }
               }}
               role="button"
@@ -250,18 +262,28 @@ function FileRow({
   path: string;
   gitStatus: GitFileStatus | null;
   active: boolean;
-  onClick(): void;
+  onClick(e: React.MouseEvent | React.KeyboardEvent): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div
       onClick={onClick}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          onClick(e);
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onClick(e);
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onClick();
+          onClick(e);
         }
       }}
       draggable

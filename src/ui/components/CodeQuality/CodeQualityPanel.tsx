@@ -14,7 +14,7 @@ import { setContextRefDrag } from "../../agent-context-dnd.js";
 
 interface Props {
   stream: Stream | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
 }
 
 const TOOLS: CodeQualityTool[] = ["lizard", "jscpd"];
@@ -186,7 +186,7 @@ export function CodeQualityPanel({ stream, onOpenFile }: Props) {
               key={path}
               path={path}
               rows={rows}
-              onOpen={() => onOpenFile?.(path)}
+              onOpen={(opts) => onOpenFile?.(path, opts)}
             />
           ))
         )}
@@ -289,13 +289,23 @@ function FileGroup({
 }: {
   path: string;
   rows: CodeQualityFindingRow[];
-  onOpen: () => void;
+  onOpen: (opts?: { newTab?: boolean }) => void;
 }) {
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
       <button
         type="button"
-        onClick={onOpen}
+        onClick={(e) => onOpen({ newTab: e.metaKey || e.ctrlKey })}
+        onAuxClick={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            onOpen({ newTab: true });
+          }
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onOpen({ newTab: true });
+        }}
         draggable
         onDragStart={(e) => setContextRefDrag(e, { kind: "file", path })}
         style={{
