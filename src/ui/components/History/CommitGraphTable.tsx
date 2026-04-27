@@ -19,6 +19,14 @@ const LANE_WIDTH = 14;
 const NODE_RADIUS = 4;
 const GRAPH_PAD = 8;
 
+export interface CommitStats {
+  filesAdded: number;
+  filesModified: number;
+  filesDeleted: number;
+  additions: number;
+  deletions: number;
+}
+
 export interface CommitGraphTableProps {
   commits: GitLogCommit[];
   branchHeadsBySha: Map<string, string[]>;
@@ -27,6 +35,8 @@ export interface CommitGraphTableProps {
   selectedSha?: string | null;
   /** When set, rows whose sha is NOT in this set render at 35% opacity. Pass `null` to disable highlighting (every row treated as matched). */
   matches?: Set<string> | null;
+  /** Optional per-commit stats. When present, an extra `A# M# D# +# −#` cell renders before the author column. */
+  statsBySha?: Map<string, CommitStats>;
   onSelect?(sha: string, opts?: { newTab?: boolean }): void;
   /** Optional row-element ref map for scroll-into-view. */
   rowRefs?: MutableRefObject<Map<string, HTMLDivElement>>;
@@ -46,6 +56,7 @@ export function CommitGraphTable({
   currentBranch,
   selectedSha,
   matches,
+  statsBySha,
   onSelect,
   rowRefs,
 }: CommitGraphTableProps) {
@@ -81,6 +92,7 @@ export function CommitGraphTable({
               branchHeads={branchHeadsBySha.get(sha) ?? []}
               tags={tagsBySha.get(sha) ?? []}
               currentBranch={currentBranch}
+              stats={statsBySha?.get(sha) ?? null}
               onClick={(e) => onSelect?.(sha, { newTab: e.metaKey || e.ctrlKey || e.button === 1 })}
             />
           </div>
@@ -122,6 +134,7 @@ function CommitRow({
   branchHeads,
   tags,
   currentBranch,
+  stats,
   onClick,
 }: {
   row: GraphRow;
@@ -131,6 +144,7 @@ function CommitRow({
   branchHeads: string[];
   tags: string[];
   currentBranch: string | null;
+  stats: CommitStats | null;
   onClick(e: { metaKey: boolean; ctrlKey: boolean; button: number }): void;
 }) {
   const mid = ROW_HEIGHT / 2;
@@ -229,6 +243,19 @@ function CommitRow({
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
           {row.commit.commit.message}
         </span>
+        {stats ? (
+          <span
+            data-testid="commit-graph-row-stats"
+            style={{ flexShrink: 0, fontSize: 11, color: "var(--muted)", display: "inline-flex", gap: 6 }}
+            title={`${stats.filesAdded} added, ${stats.filesModified} modified, ${stats.filesDeleted} deleted · +${stats.additions} −${stats.deletions} lines`}
+          >
+            <span>A{stats.filesAdded}</span>
+            <span>M{stats.filesModified}</span>
+            <span>D{stats.filesDeleted}</span>
+            <span style={{ color: "var(--text-success, #16a34a)" }}>+{stats.additions}</span>
+            <span style={{ color: "var(--text-danger, #dc2626)" }}>−{stats.deletions}</span>
+          </span>
+        ) : null}
         <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
           {row.commit.commit.author.name}
         </span>
