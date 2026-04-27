@@ -874,6 +874,10 @@ export class ElectronRuntime {
     return listBranches(this.projectDir);
   }
 
+  getDefaultBranch(): string | null {
+    return detectBaseBranch(this.projectDir);
+  }
+
   listGitRefs(): GroupedGitRefs {
     return listGitRefsGrouped(this.projectDir);
   }
