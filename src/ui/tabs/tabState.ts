@@ -31,7 +31,6 @@ export type PageKind =
   | "hook-events"
   | "subsystem-docs"
   | "settings"
-  | "start"
   | "dashboard"
   | "new-stream"
   | "new-work-item"

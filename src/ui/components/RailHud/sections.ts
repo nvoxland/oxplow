@@ -25,7 +25,6 @@ export interface PageDirectoryEntry {
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
-    { id: "start", label: "⌂  Start", ref: indexRef("start") },
     { id: "plan-work", label: "📋  Plan work", ref: planWorkRef() },
     { id: "done-work", label: "✓  Done work", ref: doneWorkRef() },
     {

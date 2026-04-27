@@ -83,7 +83,6 @@ import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { StartPage } from "./pages/StartPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
@@ -1523,7 +1522,6 @@ export function App() {
       case "work-item":
       case "finding":
       case "dashboard":
-      case "start":
       case "settings":
       case "code-quality":
       case "local-history":
@@ -1822,14 +1820,7 @@ export function App() {
         setHistoryReveal({ sha, token });
         navOpen(indexRef("git-history"));
       };
-      if (ref.kind === "start") {
-        tabs.push({
-          id: ref.id,
-          label: "Start",
-          closable: true,
-          render: () => <StartPage onOpenPage={navOpen} />,
-        });
-      } else if (ref.kind === "settings") {
+      if (ref.kind === "settings") {
         tabs.push({
           id: ref.id,
           label: "Settings",
