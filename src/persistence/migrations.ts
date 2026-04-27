@@ -1137,6 +1137,18 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 45,
+    name: "finished_seen watermark",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE finished_seen (
+          scope TEXT PRIMARY KEY,
+          t TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

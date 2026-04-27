@@ -763,21 +763,60 @@ export class ElectronRuntime {
       | { kind: "note"; slug: string; title: string; t: string }
     >
   {
-    const items = this.effortStore.listRecentClosed(threadId, limit).map((row) => ({
+    const db = getStateDatabase(this.projectDir);
+    const threadScope = threadId ? `thread:${threadId}` : "thread:all";
+    const itemSince = db.get<{ t: string }>(
+      `SELECT t FROM finished_seen WHERE scope = ?`,
+      threadScope,
+    )?.t ?? null;
+    const noteSince = db.get<{ t: string }>(
+      `SELECT t FROM finished_seen WHERE scope = ?`,
+      "notes",
+    )?.t ?? null;
+    const items = this.effortStore.listRecentClosed(threadId, limit, itemSince).map((row) => ({
       kind: "work-item" as const,
       itemId: row.itemId,
       title: row.title,
       t: row.endedAt,
     }));
-    const notes = this.wikiNoteStore.list().slice(0, limit).map((note) => ({
-      kind: "note" as const,
-      slug: note.slug,
-      title: note.title,
-      t: note.updated_at,
-    }));
+    const notes = this.wikiNoteStore
+      .list()
+      .filter((n) => !noteSince || n.updated_at > noteSince)
+      .slice(0, limit)
+      .map((note) => ({
+        kind: "note" as const,
+        slug: note.slug,
+        title: note.title,
+        t: note.updated_at,
+      }));
     return [...items, ...notes]
       .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0))
       .slice(0, limit);
+  }
+
+  /**
+   * Mark all currently-finished entries as seen. Records a watermark
+   * (current ISO timestamp) under per-thread + global scopes; subsequent
+   * listRecentlyFinished filters out anything ≤ watermark.
+   */
+  clearRecentlyFinished(threadId: string | null): void {
+    const db = getStateDatabase(this.projectDir);
+    const now = new Date().toISOString();
+    const threadScope = threadId ? `thread:${threadId}` : "thread:all";
+    db.run(
+      `INSERT INTO finished_seen (scope, t) VALUES (?, ?)
+       ON CONFLICT(scope) DO UPDATE SET t = excluded.t`,
+      threadScope,
+      now,
+    );
+    db.run(
+      `INSERT INTO finished_seen (scope, t) VALUES (?, ?)
+       ON CONFLICT(scope) DO UPDATE SET t = excluded.t`,
+      "notes",
+      now,
+    );
+    this.events.publish({ type: "work-item.changed", id: null, kind: "list" } as any);
+    this.events.publish({ type: "wiki-note.changed", kind: "upserted", slug: "" } as any);
   }
 
   listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {

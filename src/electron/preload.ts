@@ -120,6 +120,7 @@ const api: DesktopApi = {
   listHookEvents: (streamId) => ipcRenderer.invoke("oxplow:listHookEvents", streamId),
   listAgentStatuses: (streamId) => ipcRenderer.invoke("oxplow:listAgentStatuses", streamId),
   listRecentlyFinished: (threadId, limit) => ipcRenderer.invoke("oxplow:listRecentlyFinished", threadId, limit),
+  clearRecentlyFinished: (threadId) => ipcRenderer.invoke("oxplow:clearRecentlyFinished", threadId),
   ping: () => ipcRenderer.invoke("oxplow:ping"),
   logUi: (payload) => ipcRenderer.invoke("oxplow:logUi", payload),
   updateEditorFocus: (payload) => ipcRenderer.invoke("oxplow:updateEditorFocus", payload),

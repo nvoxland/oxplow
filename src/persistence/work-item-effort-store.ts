@@ -334,10 +334,12 @@ export class WorkItemEffortStore {
   listRecentClosed(
     threadId: string | null,
     limit: number,
+    sinceT?: string | null,
   ): Array<{ itemId: string; title: string; endedAt: string }> {
     // Collapse multiple efforts per work item to a single row anchored at
     // the latest close. Reopen → reclose cycles otherwise surface as
     // duplicate Finished entries for the same item.
+    const since = sinceT ?? "";
     const rows = threadId
       ? this.stateDb.all<{
           work_item_id: string;
@@ -351,9 +353,11 @@ export class WorkItemEffortStore {
              AND wi.deleted_at IS NULL
              AND e.ended_at IS NOT NULL
            GROUP BY e.work_item_id
+           HAVING ended_at > ?
            ORDER BY ended_at DESC
            LIMIT ?`,
           threadId,
+          since,
           limit,
         )
       : this.stateDb.all<{
@@ -367,8 +371,10 @@ export class WorkItemEffortStore {
            WHERE wi.deleted_at IS NULL
              AND e.ended_at IS NOT NULL
            GROUP BY e.work_item_id
+           HAVING ended_at > ?
            ORDER BY ended_at DESC
            LIMIT ?`,
+          since,
           limit,
         );
     return rows.map((row) => ({

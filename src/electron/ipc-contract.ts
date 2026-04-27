@@ -338,6 +338,7 @@ export interface DesktopApi {
       | { kind: "note"; slug: string; title: string; t: string }
     >
   >;
+  clearRecentlyFinished(threadId: string | null): Promise<void>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   updateEditorFocus(payload: EditorFocusPayload): Promise<void>;

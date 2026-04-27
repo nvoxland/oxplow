@@ -1019,6 +1019,10 @@ export async function listRecentlyFinished(threadId: string | null, limit: numbe
   return desktopApi().listRecentlyFinished(threadId, limit);
 }
 
+export async function clearRecentlyFinished(threadId: string | null): Promise<void> {
+  return desktopApi().clearRecentlyFinished(threadId);
+}
+
 export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,
