@@ -56,6 +56,7 @@ interface StreamWorktreeRow {
   stream: Stream;
   ahead: number;
   behind: number;
+  uncommitted: WorkspaceStatusSummary | null;
 }
 
 const RECENT_LIMIT = 5;
@@ -119,12 +120,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         : null;
       const streamRows: StreamWorktreeRow[] = await Promise.all(
         streamWorktrees.map(async ({ wt, stream: matchedStream }) => {
-          if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
+          const uncommitted = await listWorkspaceFiles(matchedStream.id)
+            .then((r) => r.summary)
+            .catch(() => null);
+          if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0, uncommitted };
           const isMainRow = wt.isMain || wt.branch === mainBranch;
           const base = isMainRow ? mainUpstream : mainBranch;
-          if (!base) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
+          if (!base) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0, uncommitted };
           const counts = await getAheadBehind(streamId, base, wt.branch);
-          return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind };
+          return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind, uncommitted };
         }),
       );
       setData({
@@ -577,6 +581,7 @@ function StreamsCard({
                       {branch}
                     </span>
                   </div>
+                  <UncommittedSummaryInline summary={row.uncommitted} />
                   <div style={subtle}>
                     ↑{row.ahead} ↓{row.behind}
                   </div>
@@ -604,6 +609,25 @@ function StreamsCard({
         </div>
       )}
     </Card>
+  );
+}
+
+function UncommittedSummaryInline({ summary }: { summary: WorkspaceStatusSummary | null }) {
+  if (!summary || summary.total === 0) {
+    return <span style={{ ...subtle, fontStyle: "italic" }}>clean</span>;
+  }
+  const addedLike = summary.added + summary.untracked;
+  const modifiedLike = summary.modified + summary.renamed;
+  return (
+    <span
+      data-testid="git-dashboard-stream-uncommitted"
+      style={{ ...subtle, display: "inline-flex", gap: 6 }}
+      title={`${summary.total} uncommitted: ${summary.modified} modified, ${summary.added} added, ${summary.deleted} deleted, ${summary.renamed} renamed, ${summary.untracked} untracked`}
+    >
+      <span>A{addedLike}</span>
+      <span>M{modifiedLike}</span>
+      <span>D{summary.deleted}</span>
+    </span>
   );
 }
 
