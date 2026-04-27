@@ -200,6 +200,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:setSnapshotMaxFileBytes", (_event, bytes: number) => currentRuntime.setSnapshotMaxFileBytes(bytes));
   handle("oxplow:setGeneratedDirs", (_event, dirs: string[]) => currentRuntime.setGeneratedDirs(dirs));
   handle("oxplow:listBranches", () => currentRuntime.listBranches());
+  handle("oxplow:getDefaultBranch", () => currentRuntime.getDefaultBranch());
   // Renderer-side navigator.clipboard.readText() rejects with
   // "Document is not focused" when the webContents just regained focus
   // (Cmd-Tab from another app + immediate Cmd+V) and returns empty for

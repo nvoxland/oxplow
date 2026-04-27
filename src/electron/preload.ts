@@ -23,6 +23,7 @@ const api: DesktopApi = {
   setSnapshotMaxFileBytes: (bytes) => ipcRenderer.invoke("oxplow:setSnapshotMaxFileBytes", bytes),
   setGeneratedDirs: (dirs) => ipcRenderer.invoke("oxplow:setGeneratedDirs", dirs),
   listBranches: () => ipcRenderer.invoke("oxplow:listBranches"),
+  getDefaultBranch: () => ipcRenderer.invoke("oxplow:getDefaultBranch"),
   clipboardReadText: () => ipcRenderer.invoke("oxplow:clipboardReadText"),
   listGitRefs: () => ipcRenderer.invoke("oxplow:listGitRefs"),
   renameGitBranch: (from, to) => ipcRenderer.invoke("oxplow:renameGitBranch", from, to),

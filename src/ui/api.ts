@@ -290,6 +290,10 @@ export async function listBranches(): Promise<BranchRef[]> {
   return desktopApi().listBranches();
 }
 
+export async function getDefaultBranch(): Promise<string | null> {
+  return desktopApi().getDefaultBranch();
+}
+
 export async function listGitRefs(): Promise<import("../git/git.js").GroupedGitRefs> {
   return desktopApi().listGitRefs();
 }

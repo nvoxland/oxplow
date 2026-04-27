@@ -186,6 +186,7 @@ export interface DesktopApi {
   setSnapshotMaxFileBytes(bytes: number): Promise<import("../config/config.js").OxplowConfig>;
   setGeneratedDirs(dirs: string[]): Promise<import("../config/config.js").OxplowConfig>;
   listBranches(): Promise<BranchRef[]>;
+  getDefaultBranch(): Promise<string | null>;
   clipboardReadText(): Promise<string>;
   listGitRefs(): Promise<GroupedGitRefs>;
   renameGitBranch(from: string, to: string): Promise<GitOpResult>;

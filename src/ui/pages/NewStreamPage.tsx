@@ -2,8 +2,10 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   createStream,
+  getDefaultBranch,
   listAdoptableWorktrees,
   listBranches,
+  type BranchRef,
   type GitWorktreeEntry,
   type Stream,
 } from "../api.js";
@@ -41,6 +43,29 @@ export function validateNewStreamInput(state: NewStreamFormState):
     return { ok: false, message: "Select a worktree" };
   }
   return { ok: true };
+}
+
+/**
+ * Pick the branch entry that represents the repo's default branch
+ * (e.g. main / master). `defaultBranch` is the short name returned by
+ * `detectBaseBranch` and may be either local ("main") or remote-qualified
+ * ("origin/main"). We prefer a matching local branch, then fall back to the
+ * remote-tracking branch.
+ */
+export function pickDefaultBranchEntry(
+  branches: BranchRef[],
+  defaultBranch: string | null,
+): BranchRef | null {
+  if (!defaultBranch) return null;
+  const stripped = defaultBranch.replace(/^[^/]+\//, "");
+  const localMatch = branches.find((b) => b.kind === "local" && b.name === stripped);
+  if (localMatch) return localMatch;
+  const remoteMatch = branches.find((b) => b.kind === "remote" && b.name === defaultBranch);
+  if (remoteMatch) return remoteMatch;
+  const remoteByShort = branches.find(
+    (b) => b.kind === "remote" && b.name.replace(/^[^/]+\//, "") === stripped,
+  );
+  return remoteByShort ?? null;
 }
 
 function resolvePickedRef(target: PickedRef): { ref: string; label: string } {
@@ -88,16 +113,19 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
     if (!gitEnabled) return;
     let cancelled = false;
     setLoadingBranches(true);
-    void Promise.all([listBranches(), listAdoptableWorktrees()])
-      .then(([nextBranches, nextWorktrees]) => {
+    void Promise.all([listBranches(), listAdoptableWorktrees(), getDefaultBranch()])
+      .then(([nextBranches, nextWorktrees, defaultBranch]) => {
         if (cancelled) return;
         setWorktrees(nextWorktrees);
         const first = nextBranches[0];
         if (first) {
           setSelectedRef((prev) => prev || first.ref);
           setSelectedRefLabel((prev) => prev || first.name);
-          setStartPointRef((prev) => prev || first.ref);
-          setStartPointLabel((prev) => prev || first.name);
+        }
+        const defaultEntry = pickDefaultBranchEntry(nextBranches, defaultBranch) ?? first;
+        if (defaultEntry) {
+          setStartPointRef((prev) => prev || defaultEntry.ref);
+          setStartPointLabel((prev) => prev || defaultEntry.name);
         }
         const firstWt = nextWorktrees[0];
         if (firstWt) setWorktreePath((prev) => prev || firstWt.path);
