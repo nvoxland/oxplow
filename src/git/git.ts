@@ -627,6 +627,16 @@ export function gitRebase(projectDir: string, onto: string): GitOpResult {
   return runGit(projectDir, ["rebase", onto]);
 }
 
+/** Async variant of `gitMerge` for the background-task indicator. */
+export function gitMergeAsync(projectDir: string, other: string): Promise<GitOpResult> {
+  return runGitAsync(projectDir, ["merge", other]);
+}
+
+/** Async variant of `gitRebase` for the background-task indicator. */
+export function gitRebaseAsync(projectDir: string, onto: string): Promise<GitOpResult> {
+  return runGitAsync(projectDir, ["rebase", onto]);
+}
+
 /**
  * Counts of commits diverged between two refs. Wraps
  * `git rev-list --left-right --count base...head` whose output is

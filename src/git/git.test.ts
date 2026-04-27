@@ -11,7 +11,9 @@ import {
   getCommitsAheadOf,
   gitBlame,
   gitMerge,
+  gitMergeAsync,
   gitPushCurrentTo,
+  gitRebaseAsync,
   isGitRepo,
   isGitWorktree,
   listBranchChanges,
@@ -332,6 +334,47 @@ test("gitMerge into current branch does not touch a sibling worktree's working d
   // Status diff: only the new committed `advance.txt` should differ from the pre-commit baseline; wip.txt remains untracked.
   expect(siblingStatusAfter).toContain("?? wip.txt");
   expect(siblingStatusBefore).toContain("?? wip.txt");
+});
+
+test("gitMergeAsync resolves with ok=true on a fast-forward merge", async () => {
+  const repoDir = mkRepo();
+  const siblingDir = mkdtempSync(join(tmpdir(), "oxplow-mergeasync-"));
+  tempDirs.push(siblingDir);
+  rmSync(siblingDir, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "feature", siblingDir], { stdio: "ignore" });
+  commitFileIn(siblingDir, "advance.txt", "advanced\n", "advance feature");
+
+  const result = await gitMergeAsync(repoDir, "feature");
+  expect(result.ok).toBe(true);
+});
+
+test("gitMergeAsync resolves with ok=false on a conflicting merge", async () => {
+  const repoDir = mkRepo();
+  // Seed a base commit so both branches diverge from a shared ancestor.
+  commitFile(repoDir, "shared.txt", "base\n", "base");
+  // Create a sibling branch that touches the same file.
+  const siblingDir = mkdtempSync(join(tmpdir(), "oxplow-mergeconflict-"));
+  tempDirs.push(siblingDir);
+  rmSync(siblingDir, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "conflict", siblingDir], { stdio: "ignore" });
+  commitFileIn(siblingDir, "shared.txt", "from-conflict\n", "conflict edit");
+  // Diverge main with its own change to the same file.
+  commitFile(repoDir, "shared.txt", "from-main\n", "main edit");
+
+  const result = await gitMergeAsync(repoDir, "conflict");
+  expect(result.ok).toBe(false);
+  expect(result.stderr.length + (result.stdout?.length ?? 0)).toBeGreaterThan(0);
+
+  // Abort the merge so afterEach cleanup doesn't trip on a half-merged state.
+  execFileSync("git", ["-C", repoDir, "merge", "--abort"], { stdio: "ignore" });
+});
+
+test("gitRebaseAsync resolves with ok=true when rebasing a no-op", async () => {
+  const repoDir = mkRepo();
+  // main has one commit from mkRepo. Branch off, rebase back onto main — no-op.
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  const result = await gitRebaseAsync(repoDir, "main");
+  expect(result.ok).toBe(true);
 });
 
 test("getGitLog with all:false returns only commits reachable from HEAD's current branch", async () => {
