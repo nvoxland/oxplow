@@ -268,6 +268,7 @@ function UpNextSection({
             key={item.id}
             type="button"
             data-testid={`rail-up-next-item-${item.id}`}
+            title={item.title}
             onClick={() => onOpenPage(workItemRef(item.id))}
             draggable
             onDragStart={(ev) => setContextRefDrag(ev, {
@@ -448,6 +449,7 @@ function PagesDirectory({
             key={entry.id}
             type="button"
             data-testid={`rail-page-${entry.id}`}
+            title={entry.label}
             onClick={() => onOpenPage(entry.ref)}
             style={rowHoverStyle()}
           >

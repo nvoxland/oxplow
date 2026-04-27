@@ -56,7 +56,7 @@ describe("ThreadStore", () => {
     expect(state1.threads.map((b) => b.sort_index)).toEqual([0, 1, 2]);
   });
 
-  test("creates, reorders, promotes, and completes threads", () => {
+  test("creates, reorders, and promotes threads", () => {
     const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
     const stream = makeStream();
     const store = new ThreadStore(dir);
@@ -73,22 +73,69 @@ describe("ThreadStore", () => {
     state = store.reorder(stream.id, followUp!.id, 1);
     expect(state.threads[1]?.id).toBe(followUp?.id);
 
-    // Promote changes status but preserves sort order (no auto-reorder-to-front).
     const orderBeforePromote = state.threads.map((b) => b.id);
     state = store.promote(stream.id, queued!.id);
     expect(state.activeThreadId).toBe(queued?.id);
     expect(state.threads.map((b) => b.id)).toEqual(orderBeforePromote);
     expect(state.threads.find((thread) => thread.id === queued!.id)?.status).toBe("active");
+  });
 
-    state = store.complete(stream.id, queued!.id);
-    expect(state.threads.find((thread) => thread.id === queued!.id)?.status).toBe("completed");
-    expect(state.threads.find((thread) => thread.id === state.activeThreadId)?.title).toBe("Default");
+  test("close hides a queued thread; reopen brings it back", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
+    const stream = makeStream();
+    const store = new ThreadStore(dir);
+    store.ensureStream(stream);
+    const created = store.create(stream, { title: "Side quest" });
+    const target = created.threads.find((t) => t.title === "Side quest")!;
+
+    const afterClose = store.close(stream.id, target.id);
+    expect(afterClose.threads.some((t) => t.id === target.id)).toBe(false);
+    const closed = store.listClosed(stream.id);
+    expect(closed.length).toBe(1);
+    expect(closed[0]?.id).toBe(target.id);
+    expect(closed[0]?.closed_at).toBeTruthy();
+
+    const afterReopen = store.reopen(stream.id, target.id);
+    expect(afterReopen.threads.some((t) => t.id === target.id)).toBe(true);
+    expect(store.listClosed(stream.id).length).toBe(0);
+  });
+
+  test("close refuses the writer thread", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
+    const stream = makeStream();
+    const store = new ThreadStore(dir);
+    const initial = store.ensureStream(stream);
+    const writer = initial.threads.find((t) => t.status === "active")!;
+    expect(() => store.close(stream.id, writer.id)).toThrow(/writer thread/);
+  });
+
+  test("close refuses a thread with open work items", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oxplow-threads-"));
+    const stream = makeStream();
+    const store = new ThreadStore(dir);
+    store.ensureStream(stream);
+    const created = store.create(stream, { title: "Side" });
+    const target = created.threads.find((t) => t.title === "Side")!;
+
+    // Insert a ready work item directly via the shared db.
+    const { getStateDatabase } = require("./state-db.js");
+    const db = getStateDatabase(dir);
+    db.run(
+      `INSERT INTO work_items (id, thread_id, kind, title, status, priority, sort_index, created_by, author, created_at, updated_at)
+       VALUES ('wi-x', ?, 'task', 'Open task', 'ready', 'medium', 0, 'user', 'user', ?, ?)`,
+      target.id,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+
+    expect(() => store.close(stream.id, target.id)).toThrow(/open work items/);
   });
 });
 
 function makeStream(): Stream {
   return {
     id: "s-1",
+    kind: "worktree",
     title: "Demo",
     summary: "",
     branch: "main",

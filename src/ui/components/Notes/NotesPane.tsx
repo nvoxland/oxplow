@@ -469,6 +469,7 @@ function SearchRow({
       onDoubleClick={onSelect}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
+      title={hit.title}
       style={{
         padding: "10px 12px",
         cursor: "pointer",
@@ -545,7 +546,7 @@ function NoteRow({
         alignItems: "center",
         gap: 6,
       }}
-      title={`${note.slug} — ${note.total_refs} referenced file${note.total_refs === 1 ? "" : "s"}\nDrag onto agent to add to context`}
+      title={`${note.title}\n${note.slug} — ${note.total_refs} referenced file${note.total_refs === 1 ? "" : "s"}\nDrag onto agent to add to context`}
     >
       <span
         style={{

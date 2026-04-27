@@ -18,7 +18,8 @@ interface Props {
   onSelectThread(threadId: string): void | Promise<void>;
   onCreateThread(title: string): Promise<void>;
   onPromoteThread(threadId: string): void | Promise<void>;
-  onCompleteThread(threadId: string): void | Promise<void>;
+  onCloseThread(threadId: string): void | Promise<void>;
+  onOpenClosedThreads?(): void;
   onMoveWorkItem?(itemId: string, fromThreadId: string, toThreadId: string): Promise<void>;
   onMoveBacklogItemToThread?(itemId: string, toThreadId: string): Promise<void>;
   onRenameThread?(threadId: string, newTitle: string): Promise<void> | void;
@@ -44,7 +45,8 @@ export function ThreadRail({
   onSelectThread,
   onCreateThread,
   onPromoteThread,
-  onCompleteThread,
+  onCloseThread,
+  onOpenClosedThreads,
   onMoveWorkItem,
   onMoveBacklogItemToThread,
   onRenameThread,
@@ -57,21 +59,13 @@ export function ThreadRail({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overThreadId, setOverThreadId] = useState<string | null>(null);
 
-  const { ordered, completed } = useMemo(() => {
-    // All non-completed threads share a single sort_index sequence and are
-    // user-orderable via drag. The writer thread gets a visible badge (see
-    // ThreadChip) but its position is whatever the user chose.
-    const ordered = threads
-      .filter((b) => b.status !== "completed")
-      .sort((a, b) => a.sort_index - b.sort_index);
-    const completed = threads
-      .filter((b) => b.status === "completed")
-      .sort((a, b) => b.sort_index - a.sort_index);
-    return { ordered, completed };
+  const ordered = useMemo(() => {
+    // Closed threads are filtered out of the rail by the store; what
+    // arrives here is the active + queued set, ordered by sort_index.
+    return threads.slice().sort((a, b) => a.sort_index - b.sort_index);
   }, [threads]);
 
   const hasQueued = threads.some((b) => b.status === "queued");
-  const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
@@ -81,18 +75,30 @@ export function ThreadRail({
   }, [createRequest]);
 
   function buildThreadMenu(thread: Thread): MenuItem[] {
+    const isWriter = thread.id === activeThreadId;
+    const work = threadWorkStates[thread.id];
+    const openItemCount = work
+      ? work.items.filter(
+          (i) => i.status === "ready" || i.status === "blocked" || i.status === "in_progress",
+        ).length
+      : 0;
+    const closeReason = isWriter
+      ? "Promote another thread to writer first"
+      : openItemCount > 0
+      ? `Finish or move ${openItemCount} open work item${openItemCount === 1 ? "" : "s"} first`
+      : null;
     return [
       {
         id: "thread.promote",
         label: "Promote to writer",
-        enabled: thread.id !== activeThreadId,
+        enabled: !isWriter,
         run: () => onPromoteThread(thread.id),
       },
       {
-        id: "thread.complete",
-        label: "Mark complete",
-        enabled: hasQueued,
-        run: () => onCompleteThread(thread.id),
+        id: "thread.close",
+        label: closeReason ? `Close thread (${closeReason})` : "Close thread",
+        enabled: closeReason === null,
+        run: () => onCloseThread(thread.id),
       },
       {
         id: "thread.rename",
@@ -124,7 +130,7 @@ export function ThreadRail({
   return (
     <div style={railStyle}>
       <div className="oxplow-rail-scroll" style={{ display: "flex", alignItems: "flex-end", gap: 2, flex: 1, minWidth: 0, overflowX: "auto" }}>
-        {ordered.length === 0 && completed.length === 0 ? (
+        {ordered.length === 0 ? (
           <span style={{ color: "var(--muted)", fontSize: 11, padding: "8px 12px", alignSelf: "center" }}>No threads yet.</span>
         ) : null}
         {ordered.map((thread) => (
@@ -140,7 +146,7 @@ export function ThreadRail({
             isDragTarget={overThreadId === thread.id && draggingId !== null && draggingId !== thread.id}
             onSelect={() => void onSelectThread(thread.id)}
             onPromote={() => void onPromoteThread(thread.id)}
-            onComplete={() => void onCompleteThread(thread.id)}
+            onClose={() => void onCloseThread(thread.id)}
             onCancelRename={() => setRenamingId(null)}
             onSubmitRename={async (newTitle) => {
               const trimmed = newTitle.trim();
@@ -190,23 +196,16 @@ export function ThreadRail({
             + New thread
           </button>
         )}
-        {completed.length > 0 ? (
-          <div style={{ position: "relative" }}>
-            <button type="button" style={smallBtn} onClick={() => setShowOverflow((v) => !v)}>
-              … {completed.length} done ▾
-            </button>
-            {showOverflow ? (
-              <OverflowDropdown
-                threads={completed}
-                selectedThreadId={selectedThreadId}
-                onSelect={(id) => {
-                  setShowOverflow(false);
-                  void onSelectThread(id);
-                }}
-                onClose={() => setShowOverflow(false)}
-              />
-            ) : null}
-          </div>
+        {onOpenClosedThreads ? (
+          <button
+            type="button"
+            data-testid="thread-rail-closed-threads"
+            style={smallBtn}
+            onClick={() => onOpenClosedThreads()}
+            title="View threads you have closed"
+          >
+            Closed threads
+          </button>
         ) : null}
       </div>
     </div>
@@ -222,7 +221,7 @@ function ThreadChip({
   hasQueued,
   onSelect,
   onPromote,
-  onComplete,
+  onClose,
   menuItems,
   onDropWorkItem,
   isRenaming,
@@ -242,7 +241,7 @@ function ThreadChip({
   hasQueued: boolean;
   onSelect(): void;
   onPromote(): void;
-  onComplete(): void;
+  onClose(): void;
   menuItems?: MenuItem[];
   onDropWorkItem?(payload: { itemId: string; fromThreadId: string | null }): void;
   isRenaming?: boolean;
@@ -465,7 +464,7 @@ function ThreadChip({
           workState={workState}
           hasQueued={hasQueued}
           onPromote={onPromote}
-          onComplete={onComplete}
+          onClose={onClose}
         />
       ) : null}
     </div>
@@ -477,9 +476,8 @@ function HoverCard({
   isActive,
   agentStatus,
   workState,
-  hasQueued,
   onPromote,
-  onComplete,
+  onClose,
 }: {
   thread: Thread;
   isActive: boolean;
@@ -487,17 +485,20 @@ function HoverCard({
   workState: ThreadWorkState | undefined;
   hasQueued: boolean;
   onPromote(): void;
-  onComplete(): void;
+  onClose(): void;
 }) {
   const total = workState?.items.length ?? 0;
   const waiting = workState?.waiting.length ?? 0;
   const inProgress = workState?.inProgress ?? [];
   const done = workState?.done.length ?? 0;
-  // "writer" means this thread is the one allowed to commit changes; every
-  // other live thread stays read-only. "completed" threads are archived.
-  const statusLabel = isActive ? "writer" : thread.status === "completed" ? "completed" : "read-only";
-  const statusColor =
-    statusLabel === "writer" ? "#86efac" : statusLabel === "read-only" ? "#7dd3fc" : "#c4b5fd";
+  const openCount = workState
+    ? workState.items.filter(
+        (i) => i.status === "ready" || i.status === "blocked" || i.status === "in_progress",
+      ).length
+    : 0;
+  const canClose = !isActive && openCount === 0;
+  const statusLabel = isActive ? "writer" : "read-only";
+  const statusColor = isActive ? "#86efac" : "#7dd3fc";
 
   return (
     <div style={hoverCardStyle}>
@@ -533,57 +534,28 @@ function HoverCard({
         <span>{waiting} waiting</span>
       </div>
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-        {isActive ? (
-          <button type="button" data-testid={`thread-chip-complete-${thread.id}`} style={smallBtn} onClick={onComplete} disabled={!hasQueued} title="Mark this thread done and hand the writer role to the next queued thread">
-            Complete thread
-          </button>
-        ) : thread.status !== "completed" ? (
-          <button type="button" data-testid={`thread-chip-promote-${thread.id}`} style={smallBtn} onClick={onPromote} title="Make this thread the writer — only one thread can write at a time">
-            Make writer
-          </button>
-        ) : null}
+        {isActive ? null : (
+          <>
+            <button type="button" data-testid={`thread-chip-promote-${thread.id}`} style={smallBtn} onClick={onPromote} title="Make this thread the writer — only one thread can write at a time">
+              Make writer
+            </button>
+            <button
+              type="button"
+              data-testid={`thread-chip-close-${thread.id}`}
+              style={smallBtn}
+              onClick={onClose}
+              disabled={!canClose}
+              title={canClose
+                ? "Close this thread; you can reopen it later from the Closed threads page"
+                : openCount > 0
+                ? `Close blocked: ${openCount} open work item${openCount === 1 ? "" : "s"}`
+                : "Cannot close the writer thread"}
+            >
+              Close thread
+            </button>
+          </>
+        )}
       </div>
-    </div>
-  );
-}
-
-function OverflowDropdown({
-  threads,
-  selectedThreadId,
-  onSelect,
-  onClose,
-}: {
-  threads: Thread[];
-  selectedThreadId: string | null;
-  onSelect(id: string): void;
-  onClose(): void;
-}) {
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      const target = e.target as HTMLElement | null;
-      if (target && target.closest("[data-thread-overflow]")) return;
-      onClose();
-    }
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
-  }, [onClose]);
-  return (
-    <div data-thread-overflow style={overflowStyle}>
-      {threads.map((thread) => (
-        <button type="button"
-          key={thread.id}
-          onClick={() => onSelect(thread.id)}
-          style={{
-            ...overflowItemStyle,
-            background: thread.id === selectedThreadId ? "rgba(74, 158, 255, 0.18)" : "transparent",
-          }}
-        >
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {thread.title}
-          </span>
-          <span style={{ color: "var(--muted)", fontSize: 10 }}>completed</span>
-        </button>
-      ))}
     </div>
   );
 }
@@ -738,37 +710,6 @@ const metaLabel: CSSProperties = {
   fontSize: 10,
   textTransform: "uppercase",
   letterSpacing: 0.6,
-};
-
-const overflowStyle: CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 4px)",
-  right: 0,
-  zIndex: 20,
-  minWidth: 220,
-  maxHeight: 300,
-  overflowY: "auto",
-  background: "var(--bg-2)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
-  display: "flex",
-  flexDirection: "column",
-  padding: 4,
-};
-
-const overflowItemStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 8,
-  padding: "6px 8px",
-  border: "none",
-  borderRadius: 4,
-  color: "inherit",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 12,
-  textAlign: "left",
 };
 
 const settingsInputStyle: CSSProperties = {

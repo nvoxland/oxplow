@@ -64,15 +64,30 @@ Streams never look outside the project root for data; see
 
 ### `threads` — `BatchStore` (`src/persistence/thread-store.ts`)
 
-Units of work *within* a stream. Statuses: `active` (writer — may mutate the
-worktree), `queued` (read-only, agents can run but writes are denied — see
-[agent-model.md](./agent-model.md)'s write-guard section), `completed`
-(archived). Exactly one thread per stream is `active`; the others are
-`queued` or `completed`. A newly-seeded stream ships with one thread titled
-`Default` (pre-v12 DBs called it `Current Thread`; migration v12 renames
-the sort_index=0 row). The rolling `summary` field + `record_batch_summary`
-MCP tool were removed in v13 — use the work-item log as the source of
-truth instead.
+Units of work *within* a stream. Statuses: `active` (writer — may mutate
+the worktree) and `queued` (read-only, agents can run but writes are
+denied — see [agent-model.md](./agent-model.md)'s write-guard section).
+Exactly one thread per stream is `active`; the rest are `queued`. A
+newly-seeded stream ships with one thread titled `Default` (pre-v12 DBs
+called it `Current Thread`; migration v12 renames the sort_index=0 row).
+The rolling `summary` field + `record_batch_summary` MCP tool were
+removed in v13 — use the work-item log as the source of truth instead.
+
+`closed_at` (migration v44, nullable TEXT) — closing a thread is
+orthogonal to its status. A closed thread keeps its `queued` status but
+sits hidden from the rail; it surfaces only on the **Closed Threads**
+page (`src/ui/pages/ClosedThreadsPage.tsx`), which lists each closed
+thread with its work items (read-only) and a Reopen action. Closing is
+allowed only for non-writer threads with no work items in `ready` /
+`blocked` / `in_progress` (`ThreadStore.close()`); promote another
+thread or finish/move open items first. `ThreadStore.reopen()` clears
+`closed_at` and the thread returns to the rail as a queued read-only
+tab. `ThreadStore.list()` already filters closed threads out, so every
+existing surface (rail, work panel, dispatch) treats them as gone
+without code changes; `listClosed(streamId)` is the dedicated reader
+for the Closed Threads page. Migration v44 also retires the legacy
+`completed` status — any pre-existing `completed` rows are remapped to
+`queued` with `closed_at = updated_at`.
 
 `custom_prompt` (migration v18, nullable TEXT) — per-thread standing
 instructions appended to the agent's system prompt after the stream-level

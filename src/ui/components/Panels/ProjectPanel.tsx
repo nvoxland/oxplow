@@ -676,7 +676,7 @@ export function ProjectPanel({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 6 }}>
-        <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stream.branch}</div>
+        <div title={stream.branch} style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stream.branch}</div>
         <button type="button"
           onClick={() => void expandAll()}
           aria-label="Expand all"
@@ -947,13 +947,14 @@ function FindUsagesModal({
           ) : (
             [...grouped.entries()].map(([path, hits]) => (
               <div key={path} style={{ borderTop: "1px solid var(--border)" }}>
-                <div style={{ padding: "4px 14px", background: "var(--bg-2)", fontSize: 11, color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
+                <div title={path} style={{ padding: "4px 14px", background: "var(--bg-2)", fontSize: 11, color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</span>
                   <span>{hits.length}</span>
                 </div>
                 {hits.map((hit) => (
                   <button type="button"
                     key={`${hit.path}:${hit.line}`}
+                    title={`${hit.path}:${hit.line}\n${hit.snippet}`}
                     onClick={() => onOpen(hit.path)}
                     style={{
                       display: "flex",

@@ -138,7 +138,6 @@ export function threadStatusColor(status: Thread["status"]) {
   switch (status) {
     case "active": return "#86efac";
     case "queued": return "#7dd3fc";
-    case "completed": return "#c4b5fd";
   }
 }
 

@@ -232,7 +232,9 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:reorderStreams", (_event, orderedStreamIds: string[]) => currentRuntime.reorderStreams(orderedStreamIds));
   handle("oxplow:selectThread", (_event, streamId: string, threadId: string) => currentRuntime.selectThread(streamId, threadId));
   handle("oxplow:promoteThread", (_event, streamId: string, threadId: string) => currentRuntime.promoteThread(streamId, threadId));
-  handle("oxplow:completeThread", (_event, streamId: string, threadId: string) => currentRuntime.completeThread(streamId, threadId));
+  handle("oxplow:closeThread", (_event, streamId: string, threadId: string) => currentRuntime.closeThread(streamId, threadId));
+  handle("oxplow:reopenThread", (_event, streamId: string, threadId: string) => currentRuntime.reopenThread(streamId, threadId));
+  handle("oxplow:listClosedThreads", (_event, streamId: string) => currentRuntime.listClosedThreads(streamId));
   handle("oxplow:renameThread", (_event, streamId: string, threadId: string, title: string) => currentRuntime.renameThread(streamId, threadId, title));
   handle("oxplow:setStreamPrompt", (_event, streamId: string, prompt: string | null) => currentRuntime.setStreamPrompt(streamId, prompt));
   handle("oxplow:setThreadPrompt", (_event, streamId: string, threadId: string, prompt: string | null) => currentRuntime.setThreadPrompt(streamId, threadId, prompt));

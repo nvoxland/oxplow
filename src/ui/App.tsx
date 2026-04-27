@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   createWorkItem,
-  completeThread,
+  closeThread,
   createThread,
   deleteWorkItem,
   getThreadWorkState,
@@ -99,6 +99,7 @@ import { PlanWorkPage } from "./pages/PlanWorkPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
+import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
@@ -109,7 +110,7 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
-import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -610,12 +611,11 @@ export function App() {
     }
   }
 
-  async function handleCompleteThread(threadId: string) {
+  async function handleCloseThread(threadId: string) {
     if (!stream) return;
     try {
-      const next = await completeThread(stream.id, threadId);
+      const next = await closeThread(stream.id, threadId);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      setCenterActive("agent");
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -1566,7 +1566,8 @@ export function App() {
       case "stream-settings":
       case "thread-settings":
       case "new-stream":
-      case "new-work-item": {
+      case "new-work-item":
+      case "closed-threads": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -2023,6 +2024,13 @@ export function App() {
           closable: true,
           render: () => <SubsystemDocsPage stream={stream} onOpenPage={navOpen} />,
         });
+      } else if (ref.kind === "closed-threads") {
+        tabs.push({
+          id: ref.id,
+          label: "Closed threads",
+          closable: true,
+          render: () => <ClosedThreadsPage stream={stream} />,
+        });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         const items = selectedThreadWork?.items ?? [];
@@ -2296,7 +2304,8 @@ export function App() {
             onSelectThread={handleSelectThread}
             onCreateThread={handleCreateThread}
             onPromoteThread={handlePromoteThread}
-            onCompleteThread={handleCompleteThread}
+            onCloseThread={handleCloseThread}
+            onOpenClosedThreads={() => handleOpenPage(closedThreadsRef())}
             onMoveWorkItem={handleMoveWorkItemToThread}
             onMoveBacklogItemToThread={handleMoveBacklogItemToThread}
             onRenameThread={handleRenameThreadById}

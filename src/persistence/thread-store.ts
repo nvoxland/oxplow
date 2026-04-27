@@ -7,7 +7,7 @@ import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 import type { Stream } from "./stream-store.js";
 
-export type ThreadStatus = "active" | "queued" | "completed";
+export type ThreadStatus = "active" | "queued";
 
 export interface Thread {
   id: string;
@@ -20,6 +20,7 @@ export interface Thread {
   pane_target: string;
   resume_session_id: string;
   custom_prompt: string | null;
+  closed_at: string | null;
 }
 
 export interface ThreadState {
@@ -28,7 +29,7 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-export type ThreadChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "prompt-changed";
+export type ThreadChangeKind = "created" | "selected" | "reordered" | "promoted" | "closed" | "reopened" | "resume-updated" | "renamed" | "prompt-changed";
 
 export interface ThreadChange {
   streamId: string;
@@ -86,6 +87,7 @@ export class ThreadStore {
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
       custom_prompt: null,
+      closed_at: null,
     };
     this.insertThread(thread);
     this.setSelected(stream.id, thread.id);
@@ -143,6 +145,7 @@ export class ThreadStore {
       pane_target: `${paneSessionName(stream)}:thread-${createWindowName()}`,
       resume_session_id: "",
       custom_prompt: null,
+      closed_at: null,
     };
     this.insertThread(thread);
     this.setSelected(stream.id, thread.id);
@@ -182,7 +185,7 @@ export class ThreadStore {
     const threads = this.fetchThreads(streamId);
     const target = threads.find((thread) => thread.id === threadId);
     if (!target) throw new Error(`unknown thread: ${threadId}`);
-    if (target.status === "completed") throw new Error("cannot activate a completed thread");
+    if (target.closed_at) throw new Error("cannot activate a closed thread");
     const now = new Date().toISOString();
     this.stateDb.transaction(() => {
       for (const thread of threads) {
@@ -195,21 +198,53 @@ export class ThreadStore {
     return this.list(streamId);
   }
 
-  complete(streamId: string, threadId: string): ThreadState {
-    const threads = this.fetchThreads(streamId);
-    const target = threads.find((thread) => thread.id === threadId);
+  /** Close a thread. Allowed only on non-writer threads with no work
+   *  items in `ready` / `blocked` / `in_progress`. The thread keeps its
+   *  status (`queued`) but `closed_at` is set, which hides it from the
+   *  rail's main list. Reopen via `reopen()`. */
+  close(streamId: string, threadId: string): ThreadState {
+    const target = this.getThread(streamId, threadId);
     if (!target) throw new Error(`unknown thread: ${threadId}`);
-    if (target.status !== "active") throw new Error("only the active thread can be completed");
-    const nextQueued = threads.find((thread) => thread.status === "queued" && thread.id !== threadId);
-    if (!nextQueued) throw new Error("create another queued thread before completing the active thread");
+    if (target.closed_at) throw new Error("thread is already closed");
+    if (target.status === "active") {
+      throw new Error("cannot close the writer thread — promote another thread first");
+    }
+    const blocking = this.stateDb.get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM work_items
+       WHERE thread_id = ?
+         AND deleted_at IS NULL
+         AND status IN ('ready','blocked','in_progress')`,
+      threadId,
+    );
+    if ((blocking?.c ?? 0) > 0) {
+      throw new Error("thread has open work items — finish or move them before closing");
+    }
     const now = new Date().toISOString();
-    this.stateDb.transaction(() => {
-      this.stateDb.run("UPDATE threads SET status = 'completed', updated_at = ? WHERE id = ?", now, threadId);
-      this.stateDb.run("UPDATE threads SET status = 'active', updated_at = ? WHERE id = ?", now, nextQueued.id);
-      this.setSelected(streamId, nextQueued.id);
-    });
-    this.emitChange({ streamId, threadId: nextQueued.id, kind: "promoted" });
+    this.stateDb.run("UPDATE threads SET closed_at = ?, updated_at = ? WHERE id = ?", now, now, threadId);
+    this.emitChange({ streamId, threadId, kind: "closed" });
     return this.list(streamId);
+  }
+
+  /** Reopen a closed thread. Clears `closed_at`; the thread reappears in
+   *  the rail as a queued (read-only) thread. */
+  reopen(streamId: string, threadId: string): ThreadState {
+    const target = this.getThread(streamId, threadId);
+    if (!target) throw new Error(`unknown thread: ${threadId}`);
+    if (!target.closed_at) throw new Error("thread is not closed");
+    const now = new Date().toISOString();
+    this.stateDb.run("UPDATE threads SET closed_at = NULL, updated_at = ? WHERE id = ?", now, threadId);
+    this.emitChange({ streamId, threadId, kind: "reopened" });
+    return this.list(streamId);
+  }
+
+  /** List closed threads for the Closed Threads page, newest-closed first. */
+  listClosed(streamId: string): Thread[] {
+    return this.stateDb
+      .all<Record<string, unknown>>(
+        "SELECT * FROM threads WHERE stream_id = ? AND closed_at IS NOT NULL ORDER BY closed_at DESC, id",
+        streamId,
+      )
+      .map(rowToThread);
   }
 
   reorderThreads(streamId: string, orderedThreadIds: string[]): void {
@@ -274,7 +309,7 @@ export class ThreadStore {
   private fetchThreads(streamId: string): Thread[] {
     return this.stateDb
       .all<Record<string, unknown>>(
-        "SELECT * FROM threads WHERE stream_id = ? ORDER BY sort_index, created_at, id",
+        "SELECT * FROM threads WHERE stream_id = ? AND closed_at IS NULL ORDER BY sort_index, created_at, id",
         streamId,
       )
       .map(rowToThread);
@@ -385,6 +420,7 @@ function rowToThread(row: Record<string, unknown>): Thread {
     pane_target: String(row.pane_target ?? ""),
     resume_session_id: String(row.resume_session_id ?? ""),
     custom_prompt: row.custom_prompt != null ? String(row.custom_prompt) : null,
+    closed_at: row.closed_at != null ? String(row.closed_at) : null,
   };
 }
 

@@ -354,6 +354,7 @@ function Section({
               <button
                 type="button"
                 onClick={() => onOpen(entry)}
+                title={entryFullLabel(entry)}
                 style={{
                   display: "flex",
                   flex: 1,

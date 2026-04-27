@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "prompt-changed";
+export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "closed" | "reopened" | "resume-updated" | "summary-updated" | "renamed" | "prompt-changed";
 export type AgentStatus = "working" | "waiting";
 export type PaneKind = "working" | "talking";
 

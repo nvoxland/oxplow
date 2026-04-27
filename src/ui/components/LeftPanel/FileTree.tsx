@@ -110,6 +110,7 @@ export function TreeEntries({
               data-testid={`file-tree-entry-${entry.path}`}
               data-kind={entry.kind}
               data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
+              title={entry.path}
               draggable={entry.kind === "file"}
               onDragStart={entry.kind === "file"
                 ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
@@ -256,6 +257,7 @@ function FileRow({
   return (
     <div
       onClick={onClick}
+      title={path}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {

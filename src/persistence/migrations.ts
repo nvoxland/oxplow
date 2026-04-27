@@ -1121,6 +1121,22 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`UPDATE work_items SET status = 'done', completed_at = COALESCE(completed_at, updated_at) WHERE status = 'human_check';`);
     },
   },
+  {
+    version: 44,
+    name: "thread closed_at + drop completed status",
+    up: (db) => {
+      // Threads gain a `closed_at` timestamp (nullable). Closing a thread
+      // is now decoupled from active/queued status — closed threads stay
+      // queued, just hidden from the rail. The legacy "completed" status
+      // is gone; any existing completed rows get migrated to `queued` with
+      // closed_at populated from updated_at so they show up in the new
+      // Closed Threads page rather than vanishing.
+      db.exec(`
+        ALTER TABLE threads ADD COLUMN closed_at TEXT;
+        UPDATE threads SET closed_at = updated_at, status = 'queued' WHERE status = 'completed';
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

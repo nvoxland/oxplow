@@ -209,7 +209,9 @@ export interface DesktopApi {
   reorderStreams(orderedStreamIds: string[]): Promise<void>;
   selectThread(streamId: string, threadId: string): Promise<ThreadState>;
   promoteThread(streamId: string, threadId: string): Promise<ThreadState>;
-  completeThread(streamId: string, threadId: string): Promise<ThreadState>;
+  closeThread(streamId: string, threadId: string): Promise<ThreadState>;
+  reopenThread(streamId: string, threadId: string): Promise<ThreadState>;
+  listClosedThreads(streamId: string): Promise<Thread[]>;
   renameThread(streamId: string, threadId: string, title: string): Promise<Thread>;
   setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]>;
   setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]>;

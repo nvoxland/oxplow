@@ -138,3 +138,7 @@ export function streamSettingsRef(streamId: string): TabRef {
 export function threadSettingsRef(threadId: string): TabRef {
   return { id: `thread-settings:${threadId}`, kind: "thread-settings", payload: { threadId } };
 }
+
+export function closedThreadsRef(): TabRef {
+  return { id: "closed-threads", kind: "closed-threads", payload: null };
+}

@@ -23,13 +23,14 @@ export interface Thread {
   id: string;
   stream_id: string;
   title: string;
-  status: "active" | "queued" | "completed";
+  status: "active" | "queued";
   sort_index: number;
   created_at: string;
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
   custom_prompt: string | null;
+  closed_at: string | null;
 }
 
 export interface ThreadState {
@@ -366,8 +367,16 @@ export async function promoteThread(streamId: string, threadId: string): Promise
   return desktopApi().promoteThread(streamId, threadId);
 }
 
-export async function completeThread(streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().completeThread(streamId, threadId);
+export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().closeThread(streamId, threadId);
+}
+
+export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().reopenThread(streamId, threadId);
+}
+
+export async function listClosedThreads(streamId: string): Promise<Thread[]> {
+  return desktopApi().listClosedThreads(streamId);
 }
 
 export async function renameThread(streamId: string, threadId: string, title: string): Promise<Thread> {

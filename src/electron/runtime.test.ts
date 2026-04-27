@@ -304,7 +304,7 @@ test("decideStopDirective (via stop-hook-pipeline): empty thread allows stop", a
     {
       thread: {
         id: "b1", stream_id: "s1", title: "B", status: "active" as ThreadStatus, sort_index: 0,
-        pane_target: "p", resume_session_id: "", custom_prompt: null,
+        pane_target: "p", resume_session_id: "", custom_prompt: null, closed_at: null,
         created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
       },
       workItems: [],
@@ -748,7 +748,7 @@ describe("buildWikiCaptureHint", () => {
       const text = buildWikiCaptureHint(prompt);
       expect(text, `expected hint for: ${prompt}`).not.toBeNull();
       expect(text!).toContain("<wiki-capture-hint>");
-      expect(text!).toContain("oxplow-wiki-capture");
+      expect(text!).toContain("synthesis / exploration");
       expect(text!).toContain(".oxplow/notes/");
       expect(text!).toContain("resync_note");
     }

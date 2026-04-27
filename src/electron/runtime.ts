@@ -1360,9 +1360,19 @@ export class ElectronRuntime {
     return this.threadStore.promote(streamId, threadId);
   }
 
-  completeThread(streamId: string, threadId: string): ThreadState {
+  closeThread(streamId: string, threadId: string): ThreadState {
     this.resolveStream(streamId);
-    return this.threadStore.complete(streamId, threadId);
+    return this.threadStore.close(streamId, threadId);
+  }
+
+  reopenThread(streamId: string, threadId: string): ThreadState {
+    this.resolveStream(streamId);
+    return this.threadStore.reopen(streamId, threadId);
+  }
+
+  listClosedThreads(streamId: string): Thread[] {
+    this.resolveStream(streamId);
+    return this.threadStore.listClosed(streamId);
   }
 
   renameThread(streamId: string, threadId: string, title: string): Thread {
@@ -1950,7 +1960,12 @@ export class ElectronRuntime {
           sessionContext = candidate;
         }
       }
-      const additionalContext = [sessionContext, focusContext, redoReminder, wikiCaptureHint].filter(Boolean).join("\n\n");
+      // Wiki-capture goes FIRST so the imperative frame lands before the
+      // agent reads the rest of the reminder pile. When it trails the
+      // session-context / focus / redo blocks the agent treats it as a
+      // post-answer afterthought and skips the note write; leading with
+      // it sets the turn's frame as "synthesis = write a note".
+      const additionalContext = [wikiCaptureHint, sessionContext, focusContext, redoReminder].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -2604,7 +2619,7 @@ export function buildWikiCaptureHint(prompt: string): string | null {
   if (!explorationPattern.test(normalized)) return null;
   return [
     `<wiki-capture-hint>`,
-    `This prompt looks like exploration / synthesis. After you answer in chat, capture the synthesized understanding into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first (\`mcp__oxplow__search_notes\` / \`search_note_bodies\` / \`find_notes_for_file\`), append-or-create, then call \`mcp__oxplow__resync_note\`. The write guard allows this even on read-only threads.`,
+    `This is a synthesis / exploration turn. Before responding, search existing notes (\`mcp__oxplow__search_notes\` / \`search_note_bodies\` / \`find_notes_for_file\`), then Write \`.oxplow/notes/<slug>.md\` (append-or-create) and call \`mcp__oxplow__resync_note\`. The chat reply should summarize the note, not substitute for it. The write guard allows this on read-only threads.`,
     `</wiki-capture-hint>`,
   ].join("\n");
 }
