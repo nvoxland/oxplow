@@ -80,46 +80,6 @@ describe("WorkItemStore acceptance_criteria", () => {
     expect(workItems.getItem(threadId, item.id)?.acceptance_criteria).toBeNull();
   });
 
-  test("dragging a Done item back to Human Check: updateItem+reorderItems sequence leaves item in HC", () => {
-    // Reproduces the user-facing drag-out-of-Done regression. Mirrors what
-    // WorkGroupList.handleDropOnKey does: fires updateItem (status change)
-    // then reorderItems (full persistence order) in that order. Final store
-    // state must have the dragged item classified into humanCheck by
-    // ThreadWorkState.getState.
-    const { workItems, threadId } = seedThread();
-    const r0 = workItems.createItem({ threadId, kind: "task", title: "r0", createdBy: "user", actorId: "ui" });
-    const r1 = workItems.createItem({ threadId, kind: "task", title: "r1", createdBy: "user", actorId: "ui" });
-    const hc2 = workItems.createItem({ threadId, kind: "task", title: "hc2", createdBy: "user", actorId: "ui" });
-    const hc3 = workItems.createItem({ threadId, kind: "task", title: "hc3", createdBy: "user", actorId: "ui" });
-    const d4 = workItems.createItem({ threadId, kind: "task", title: "d4", createdBy: "user", actorId: "ui" });
-    const d5 = workItems.createItem({ threadId, kind: "task", title: "d5", createdBy: "user", actorId: "ui" });
-    // Put items into their target statuses. Note: updateItem's "bump sort_index
-    // to MAX+1 on transition to done" will reassign sort_index values. That's
-    // fine for this test — we care about the final drag result, not the setup.
-    workItems.updateItem({ threadId, itemId: hc2.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ threadId, itemId: hc3.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ threadId, itemId: d4.id, status: "done", actorKind: "user", actorId: "ui" });
-    workItems.updateItem({ threadId, itemId: d5.id, status: "done", actorKind: "user", actorId: "ui" });
-
-    // Drop fires: (1) status → human_check, then (2) reorder with the
-    // finalized id order from the UI. The id list we pass is what the UI
-    // would produce after splice + finalizeReorderIds for a drag of d4 onto
-    // the top of the Human Check section.
-    workItems.updateItem({ threadId, itemId: d4.id, status: "human_check", actorKind: "user", actorId: "ui" });
-    workItems.reorderItems(threadId, [r0.id, r1.id, hc2.id, hc3.id, d4.id, d5.id], "user", "ui");
-
-    const state = workItems.getState(threadId);
-    const hcIds = state.inProgress.filter((i) => i.status === "human_check").map((i) => i.id);
-    const doneIds = state.done.map((i) => i.id);
-    expect(hcIds).toContain(d4.id);
-    expect(doneIds).not.toContain(d4.id);
-    // The dropped item should render at the top of HC (highest sort_index in
-    // the HC run) when the section renders descending.
-    const hcItems = state.inProgress.filter((i) => i.status === "human_check");
-    hcItems.sort((a, b) => b.sort_index - a.sort_index);
-    expect(hcItems[0]?.id).toBe(d4.id);
-  });
-
   test("getItemDetail returns incoming + outgoing links + recent events", () => {
     const { workItems, threadId } = seedThread();
     const parent = workItems.createItem({ threadId, kind: "epic", title: "Parent", createdBy: "agent", actorId: "mcp" });
@@ -464,16 +424,6 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
     expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
   });
 
-  test("updateItem still rejects done -> in_progress (terminal state)", () => {
-    const { workItems, threadId } = seedThread();
-    const item = workItems.createItem({
-      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "done",
-    });
-    expect(() => workItems.updateItem({
-      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
-    })).toThrow(/done.*in_progress|move to.*ready.*first/i);
-  });
-
   test("updateItem accepts blocked -> ready (explicit unblock)", () => {
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
@@ -496,17 +446,6 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
     expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
   });
 
-  test("updateItem accepts human_check -> in_progress (reopen)", () => {
-    const { workItems, threadId } = seedThread();
-    const item = workItems.createItem({
-      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "human_check",
-    });
-    workItems.updateItem({
-      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
-    });
-    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
-  });
-
   test("updateItem accepts in_progress -> in_progress (no-op)", () => {
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
@@ -518,14 +457,15 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
     expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
   });
 
-  test("updateItem rejects done -> in_progress", () => {
+  test("updateItem accepts done -> in_progress (reopen)", () => {
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
       threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "done",
     });
-    expect(() => workItems.updateItem({
+    workItems.updateItem({
       threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
-    })).toThrow(/done.*in_progress|ready.*first/i);
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
   });
 
   test("updateItem rejects canceled -> in_progress", () => {
@@ -548,7 +488,7 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
     })).toThrow(/archived.*in_progress|ready.*first/i);
   });
 
-  test("completeTask forwards touchedFiles on the emitted change (human_check)", () => {
+  test("completeTask forwards touchedFiles on the emitted change (done)", () => {
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
       threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "in_progress",
@@ -563,7 +503,7 @@ describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
       actorKind: "agent", actorId: "mcp",
     });
     off();
-    const transition = seen.find((s) => s.nextStatus === "human_check");
+    const transition = seen.find((s) => s.nextStatus === "done");
     expect(transition).toBeDefined();
     expect(transition!.touchedFiles).toEqual(["src/a.ts", "src/b.ts"]);
   });

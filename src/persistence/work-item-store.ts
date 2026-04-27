@@ -4,7 +4,7 @@ import { getStateDatabase } from "./state-db.js";
 import { StoreEmitter } from "./store-emitter.js";
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
+export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 export type WorkItemLinkType =
   | "blocks"
@@ -29,7 +29,7 @@ const WORK_ITEM_KINDS: ReadonlySet<WorkItemKind> = new Set([
   "epic", "task", "subtask", "bug", "note",
 ]);
 const WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
-  "ready", "in_progress", "human_check", "blocked", "done", "canceled", "archived",
+  "ready", "in_progress", "blocked", "done", "canceled", "archived",
 ]);
 const WORK_ITEM_PRIORITIES: ReadonlySet<WorkItemPriority> = new Set([
   "low", "medium", "high", "urgent",
@@ -149,7 +149,7 @@ export interface WorkItemChange {
   /**
    * Optional list of repo-relative paths the agent declares it touched
    * during this effort. Only forwarded when the status transitions to
-   * `human_check`; consumed by the effort-close path to populate
+   * `done`; consumed by the effort-close path to populate
    * `work_item_effort_file`. Server dedups and caps at 100 paths.
    */
   touchedFiles?: string[];
@@ -212,9 +212,8 @@ export interface CompleteTaskInput {
   threadId: string;
   itemId: string;
   note: string;
-  /** Defaults to `human_check`. Only `human_check` and `blocked` are valid
-   *  finishers — callers must not self-mark `done`. */
-  status?: "human_check" | "blocked";
+  /** Defaults to `done`. Only `done` and `blocked` are valid finishers. */
+  status?: "done" | "blocked";
   /** Optional list of repo-relative paths the agent touched during this
    *  effort. Forwarded to the underlying status transition so the runtime
    *  can insert `work_item_effort_file` rows at effort-close. This is the
@@ -242,7 +241,7 @@ interface UpdateWorkItemInput {
   actorId: string;
   /**
    * Optional list of repo-relative paths the agent touched during this
-   * effort. Relevant only when transitioning to `human_check`; ignored
+   * effort. Relevant only when transitioning to `done`; ignored
    * otherwise. Passed through to the `WorkItemChange` event so the
    * runtime can insert `work_item_effort_file` rows at effort-close.
    */
@@ -271,7 +270,7 @@ export class WorkItemStore {
     return {
       threadId,
       waiting: items.filter((item) => item.status === "ready" || item.status === "blocked"),
-      inProgress: items.filter((item) => item.status === "in_progress" || item.status === "human_check"),
+      inProgress: items.filter((item) => item.status === "in_progress"),
       done: items.filter((item) => item.status === "done" || item.status === "canceled" || item.status === "archived"),
       epics: items.filter((item) => item.kind === "epic"),
       items,
@@ -453,13 +452,13 @@ export class WorkItemStore {
     const now = new Date().toISOString();
     const nextParentId = input.parentId !== undefined ? input.parentId : existing.parent_id;
     const nextStatus = input.status ? requireWorkItemStatus(input.status) : existing.status;
-    // Transition guard: block jumping to in_progress from terminal states
-    // (done/canceled/archived). For `blocked → in_progress`, accept the
-    // request — agents pushing back into work after a block IS the
-    // deliberate unblock gesture; forcing a separate hop through `ready`
-    // was friction without value. See wi-6285706789c5.
+    // Transition guard: block jumping to in_progress from canceled/archived
+    // (those are explicit "abandoned" states the user must re-ready first).
+    // `done → in_progress` is allowed: it's the redo/reopen path when the
+    // user pushes back on shipped work. `blocked → in_progress` is also
+    // allowed (deliberate unblock gesture; see wi-6285706789c5).
     if (nextStatus === "in_progress" && existing.status !== nextStatus) {
-      if (existing.status === "done" || existing.status === "canceled" || existing.status === "archived") {
+      if (existing.status === "canceled" || existing.status === "archived") {
         throw new Error(
           `cannot transition \`${existing.status}\` → \`in_progress\` directly; move to \`ready\` first`,
         );
@@ -548,7 +547,7 @@ export class WorkItemStore {
       itemId: input.itemId,
       previousStatus: statusChanged ? existing.status : undefined,
       nextStatus: statusChanged ? nextStatus : undefined,
-      touchedFiles: statusChanged && (nextStatus === "human_check" || nextStatus === "blocked") ? input.touchedFiles : undefined,
+      touchedFiles: statusChanged && (nextStatus === "done" || nextStatus === "blocked") ? input.touchedFiles : undefined,
     });
     return updated;
   }
@@ -674,14 +673,13 @@ export class WorkItemStore {
    *  `note` text is NOT appended to the work-item history anymore — it
    *  belongs on the effort row that just closed (written by the
    *  caller after this returns; see `mcp-tools.ts`'s
-   *  `oxplow__complete_task` handler). `status` defaults to
-   *  `human_check`. Rejects `done` (callers must not self-mark) and
-   *  rejects if the current status is already terminal. */
+   *  `oxplow__complete_task` handler). `status` defaults to `done`.
+   *  Rejects if the current status is already terminal. */
   completeTask(input: CompleteTaskInput): WorkItem {
-    const status = input.status ?? "human_check";
-    if (status !== "human_check" && status !== "blocked") {
+    const status = input.status ?? "done";
+    if (status !== "done" && status !== "blocked") {
       throw new Error(
-        `complete_task: status must be 'human_check' or 'blocked' (callers must not self-mark 'done')`,
+        `complete_task: status must be 'done' or 'blocked'`,
       );
     }
     const existing = this.getItem(input.threadId, input.itemId);

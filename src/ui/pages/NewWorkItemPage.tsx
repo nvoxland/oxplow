@@ -268,7 +268,6 @@ export function NewWorkItemPage({
                   <option value="in_progress">in_progress</option>
                 ) : null}
                 <option value="blocked">blocked</option>
-                <option value="human_check">human_check</option>
                 <option value="done">done</option>
                 <option value="archived">archived</option>
                 <option value="canceled">canceled</option>

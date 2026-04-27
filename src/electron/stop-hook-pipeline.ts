@@ -118,7 +118,7 @@ export function decideStopDirective(
      *  Catches the "user said 'do X', agent filed it as backlog and
      *  stopped" misread. Optional so older callers fall through. */
     buildFiledButDidntShipReason?: () => string;
-    /** Emitted when at least one epic is in `human_check`/`blocked`
+    /** Emitted when at least one epic is in `done`/`blocked`
      *  but has children still in `ready` or `in_progress`. The
      *  `classifyEpic` rollup pulls such epics back into To Do, so
      *  the rail counts lie until the children are closed too.
@@ -192,7 +192,7 @@ export function decideStopDirective(
     };
   }
 
-  // Stale-epic-children advisory: any epic in human_check / blocked
+  // Stale-epic-children advisory: any epic in done / blocked
   // whose children include ready / in_progress rows. The classifyEpic
   // rollup will pull such epics back into To Do, hiding the
   // closed-epic state from the rail counts. Fires when the bad state
@@ -209,7 +209,7 @@ export function decideStopDirective(
 
   // In-progress audit branch: when any work items are sitting in_progress,
   // the agent's job at Stop time is to reconcile them — confirm still
-  // active, flip to human_check / blocked / ready / canceled as
+  // active, flip to done / blocked / ready / canceled as
   // appropriate. Tasks persist across turn boundaries; the audit is the
   // bookkeeping step that prevents stale in_progress rows piling up.
   const inProgress = inProgressAll;
@@ -237,7 +237,7 @@ export function decideStopDirective(
 }
 
 /**
- * Find every epic that's been closed (human_check / blocked) but
+ * Find every epic that's been closed (done / blocked) but
  * still has at least one child sitting in `ready` or `in_progress`.
  * Used by the stale-epic-children Stop-hook advisory — pure helper
  * so callers can also surface the same data in UI banners
@@ -249,7 +249,7 @@ export function findStaleEpicChildrenPairs(
   const pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }> = [];
   for (const epic of items) {
     if (epic.kind !== "epic") continue;
-    if (epic.status !== "human_check" && epic.status !== "blocked") continue;
+    if (epic.status !== "done" && epic.status !== "blocked") continue;
     const staleChildren = items.filter(
       (child) => child.parent_id === epic.id && (child.status === "ready" || child.status === "in_progress"),
     );

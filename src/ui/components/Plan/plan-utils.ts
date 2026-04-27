@@ -52,7 +52,7 @@ export interface WorkItemGroup {
   epicChildren: Map<string, WorkItem[]>;
 }
 
-export type WorkItemSectionKind = "inProgress" | "toDo" | "humanCheck" | "blocked" | "done";
+export type WorkItemSectionKind = "inProgress" | "toDo" | "blocked" | "done";
 
 export interface WorkItemSection {
   kind: WorkItemSectionKind;
@@ -66,7 +66,6 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "toDo", label: "To Do" },
   { kind: "blocked", label: "Blocked" },
-  { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
 ];
 
@@ -75,7 +74,6 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
     case "in_progress": return "inProgress";
     case "ready": return "toDo";
     case "blocked": return "blocked";
-    case "human_check": return "humanCheck";
     // `archived` rolls into the Done section — the done-section header
     // owns a "Show archived" toggle that controls whether those rows are
     // visible. Keeping archived in its own section cluttered the panel.
@@ -93,10 +91,9 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
  * Priority order:
  *   1. any child blocked → blocked
  *   2. all children terminal (done/canceled/archived) → done
- *   3. all children human_check → humanCheck
- *   4. any child in_progress, or any done child mixed with non-done
+ *   3. any child in_progress, or any done child mixed with non-done
  *      non-blocked siblings → inProgress
- *   5. all children ready → toDo
+ *   4. all children ready → toDo
  *
  * Edge cases: an epic with no children falls back to its own literal
  * status; an empty epic that's `ready` goes to To Do, etc.
@@ -107,7 +104,6 @@ export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSect
   let anyInProgress = false;
   let anyDone = false;
   let allTerminal = true;
-  let allHumanCheck = true;
   let allReady = true;
   for (const child of children) {
     const s = child.status;
@@ -115,16 +111,12 @@ export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSect
     if (s === "in_progress") anyInProgress = true;
     if (s === "done" || s === "canceled" || s === "archived") anyDone = true;
     if (s !== "done" && s !== "canceled" && s !== "archived") allTerminal = false;
-    if (s !== "human_check") allHumanCheck = false;
     if (s !== "ready") allReady = false;
   }
   if (anyBlocked) return "blocked";
   if (allTerminal) return "done";
-  if (allHumanCheck) return "humanCheck";
   if (anyInProgress || anyDone) return "inProgress";
   if (allReady) return "toDo";
-  // Fallback: mixed ready/human_check with no started or done items —
-  // treat as in-progress so review-pending work doesn't hide in To Do.
   return "inProgress";
 }
 
@@ -135,7 +127,6 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
   switch (section) {
     case "inProgress": return null;
     case "toDo": return "ready";
-    case "humanCheck": return "human_check";
     case "blocked": return "blocked";
     case "done": return "done";
   }
@@ -159,14 +150,14 @@ export function classifyRow(
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
-    inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
+    inProgress: [], toDo: [], blocked: [], done: [],
   };
   for (const item of items) buckets[classifyWorkItem(item.status)].push(item);
   const sections: WorkItemSection[] = [];
   for (const { kind, label } of SECTION_ORDER) {
     if (buckets[kind].length === 0) continue;
     buckets[kind].sort((a, b) =>
-      (kind === "humanCheck" || kind === "done") ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
+      kind === "done" ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
     );
     sections.push({ kind, label, items: buckets[kind] });
   }
@@ -174,21 +165,20 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
 }
 
 /**
- * The Human Check and Done sections render descending (newest / highest
- * sort_index on top) so recent items stay visible without scrolling. Every
- * other section renders ascending. Persistence is a single ascending
- * sort_index space per thread, so when we flatten the visual order into an id
- * list for the store we need to flip descending runs back to ascending —
- * otherwise the store's "rewrite sort_index = position" rule would invert
- * them on the next render and drag-reorders inside the section would
- * visually jump in the opposite direction.
+ * The Done section renders descending (newest / highest sort_index on top)
+ * so recent items stay visible without scrolling. Every other section
+ * renders ascending. Persistence is a single ascending sort_index space per
+ * thread, so when we flatten the visual order into an id list for the store
+ * we need to flip descending runs back to ascending — otherwise the
+ * store's "rewrite sort_index = position" rule would invert them on the
+ * next render and drag-reorders inside the section would visually jump in
+ * the opposite direction.
  *
  * This helper takes a flat list of rows in **visual** order and returns the
  * list of ids in **persistence** order. Rows outside descending runs are
  * kept in place; descending runs are reversed in situ.
  */
 const DESCENDING_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
-  "human_check",
   "done",
   "canceled",
   "archived",
@@ -201,7 +191,6 @@ export function finalizeReorderIds(
   let runStart = -1;
   const flipRun = (end: number) => {
     if (runStart < 0) return;
-    // Reverse ids between runStart (inclusive) and end (exclusive).
     let lo = runStart;
     let hi = end - 1;
     while (lo < hi) {
@@ -215,16 +204,9 @@ export function finalizeReorderIds(
   for (let i = 0; i < rows.length; i++) {
     const status = rows[i]!.status;
     const inDescRun = DESCENDING_STATUSES.has(status);
-    // Group human_check separately from done so a boundary between them flips.
-    // The done section (done/canceled/archived) is one run; human_check is its own.
-    const runKind = status === "human_check" ? "hc" : (inDescRun ? "done" : null);
-    const prevKind = runStart >= 0 ? (rows[runStart]!.status === "human_check" ? "hc" : "done") : null;
-    if (runKind && runKind === prevKind) {
-      // continue current run
-    } else if (runKind) {
-      flipRun(i);
+    if (inDescRun && runStart < 0) {
       runStart = i;
-    } else {
+    } else if (!inDescRun) {
       flipRun(i);
     }
   }
@@ -337,14 +319,13 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
   return [{ epic: null, items: epicsAndRoots, epicChildren: epicChildrenMap }];
 }
 
-// User-facing label for a status. The raw id ("human_check", "in_progress")
-// still flows through the wire and the `value` on <select> options, but every
-// label the user sees goes through this helper so tweaks land in one place.
+// User-facing label for a status. The raw id ("in_progress") still flows
+// through the wire and the `value` on <select> options, but every label
+// the user sees goes through this helper so tweaks land in one place.
 export function statusLabel(status: WorkItemStatus): string {
   switch (status) {
     case "ready": return "To Do";
     case "in_progress": return "In Progress";
-    case "human_check": return "Human Check";
     case "blocked": return "Blocked";
     case "done": return "Done";
     case "canceled": return "Canceled";
@@ -356,7 +337,6 @@ export function statusIcon(status: WorkItemStatus): string {
   switch (status) {
     case "ready": return "○";
     case "in_progress": return "◐";
-    case "human_check": return "?";
     case "blocked": return "⊘";
     case "done": return "✓";
     case "canceled": return "✕";

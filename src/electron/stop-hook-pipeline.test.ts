@@ -286,8 +286,8 @@ describe("decideStopDirective", () => {
   });
 
   describe("stale-epic-children advisory branch", () => {
-    test("epic in human_check with a ready child: emit advisory", () => {
-      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+    test("epic in done with a ready child: emit advisory", () => {
+      const epic = workItem("wi-epic", 0, "done", { kind: "epic" as WorkItemKind });
       const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
       const out = decideStopDirective(
         snapshot({ workItems: [epic, child], turnHadActivity: true }),
@@ -310,9 +310,9 @@ describe("decideStopDirective", () => {
       expect(out.directive?.reason).toContain("wi-child");
     });
 
-    test("epic in human_check with all-terminal children: no advisory", () => {
-      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
-      const child = workItem("wi-child", 1, "human_check", { parent_id: "wi-epic" });
+    test("epic in done with all-terminal children: no advisory", () => {
+      const epic = workItem("wi-epic", 0, "done", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "done", { parent_id: "wi-epic" });
       const out = decideStopDirective(
         snapshot({ workItems: [epic, child], turnHadActivity: true }),
         builders,
@@ -331,7 +331,7 @@ describe("decideStopDirective", () => {
     });
 
     test("awaitingUser overrides stale-epic-children", () => {
-      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const epic = workItem("wi-epic", 0, "done", { kind: "epic" as WorkItemKind });
       const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
       const out = decideStopDirective(
         snapshot({ workItems: [epic, child], turnHadActivity: true, awaitingUser: true }),
@@ -349,9 +349,9 @@ describe("decideStopDirective", () => {
     });
 
     test("returns each closed epic with its non-terminal children", () => {
-      const e1 = workItem("e1", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const e1 = workItem("e1", 0, "done", { kind: "epic" as WorkItemKind });
       const c1a = workItem("c1a", 1, "ready", { parent_id: "e1" });
-      const c1b = workItem("c1b", 2, "human_check", { parent_id: "e1" });
+      const c1b = workItem("c1b", 2, "done", { parent_id: "e1" });
       const e2 = workItem("e2", 3, "blocked", { kind: "epic" as WorkItemKind });
       const c2a = workItem("c2a", 4, "in_progress", { parent_id: "e2" });
       const pairs = findStaleEpicChildrenPairs([e1, c1a, c1b, e2, c2a]);

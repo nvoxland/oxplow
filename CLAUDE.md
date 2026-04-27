@@ -103,7 +103,7 @@ explicit summary.
 change**, even if it spans a few files. Use `file_epic_with_children`
 only when the work has ≥3 sub-steps a reviewer would naturally
 inspect independently — distinct phases, handoffs, or separable
-subsystems. The test: could a child close to `human_check` on its own
+subsystems. The test: could a child close to `done` on its own
 and have the user inspect just that piece? If no, it's one task.
 
 **One user-visible concern per ROW.** Independent concerns must be
@@ -116,9 +116,9 @@ rows.
 mid-turn, file a new work item rather than silently expanding the
 current item's scope. The exception: if the new ask is genuinely a
 correction to the same concern (a fix/redo on something you just
-shipped to `human_check`), reopen that item — call `update_work_item`
+shipped to `done`), reopen that item — call `update_work_item`
 to flip it back to `in_progress`, redo the work, then `complete_task`
-back to `human_check`. Filing a "Fix what I just did" task
+back to `done`. Filing a "Fix what I just did" task
 fragments the history.
 
 **File backlog ideas as you have them.** When you notice a follow-up

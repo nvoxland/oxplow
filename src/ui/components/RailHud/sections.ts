@@ -54,10 +54,8 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
  * Pick the lowest-sort_index `in_progress` non-epic item from a thread's
  * work state. The "Active item" rail section anchors on this.
  *
- * The store's `inProgress` bucket packs both `in_progress` and `human_check`
- * (kanban-view convenience). The rail's "Active item" means *what the agent
- * is doing right now*, so human_check items — already shipped, awaiting
- * review — are excluded here.
+ * The store's `inProgress` bucket holds `in_progress` items. The rail's
+ * "Active item" means *what the agent is doing right now*.
  */
 export function computeActiveItem(state: ThreadWorkState | null): WorkItem | null {
   if (!state) return null;

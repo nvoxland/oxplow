@@ -38,7 +38,7 @@ description: Standing protocol for subagents executing a oxplow work item. Loads
 
 # Subagent protocol
 
-- Mark the item \`in_progress\` on entry; \`human_check\` on exit.
+- Mark the item \`in_progress\` on entry; \`done\` on exit.
 - Return ONE line: \`oxplow-result: {"ok":true,"itemId":"wi-…","…":…}\`.
 - Keep notes terse: what you did, not how.
 - On blocker, set \`blocked\` and leave a note — do not retry silently.
@@ -81,8 +81,8 @@ of plan-mode outputs describe a single task.
 - **\`file_epic_with_children\`** — ≥3 sub-steps a reviewer would
   naturally check off independently: distinct phases, clear handoffs,
   or separable subsystems (e.g. schema → runtime → IPC → UI → docs).
-  Each child closes to \`human_check\` on its own as it ships.
-- Decision test: could a single child close to \`human_check\` and
+  Each child closes to \`done\` on its own as it ships.
+- Decision test: could a single child close to \`done\` and
   have the user meaningfully inspect just that piece? If yes, epic.
   If no, it's a task and the bullets are just an execution outline.
 - Don't retroactively wrap a task in an epic mid-execution if it turns
@@ -106,7 +106,7 @@ tasks, not one "misc" child. Same rule as top-level items.
 # Work-item transitions
 
 Mark an explicit item \`in_progress\` when you start executing it and
-\`human_check\` (via \`update_work_item\` or \`complete_task\`) when
+\`done\` (via \`update_work_item\` or \`complete_task\`) when
 you finish. Use \`blocked\` for items parked on user input.
 
 **Close the row in the same turn the work actually ships.** An
@@ -125,10 +125,10 @@ assume-all fallback handles big change sets).
 For retroactive splits or "file and close in one call" rows (where
 the edits already shipped and you just want a durable row with
 attribution), pass \`touchedFiles\` directly into \`create_work_item\`
-along with \`status: "human_check"\` (or \`"blocked"\`) — the server
+along with \`status: "done"\` (or \`"blocked"\`) — the server
 synthesizes the \`in_progress → target\` transition so attribution
 lands exactly as it would for a normal close. Without
-\`touchedFiles\`, items filed directly into \`human_check\` never open
+\`touchedFiles\`, items filed directly into \`done\` never open
 an effort, so attribution is impossible; the Local History panel
 falls back to "assume all" for that item.
 
@@ -141,8 +141,6 @@ In either case, leave a note (\`add_work_note\`) explaining what's
 pending so the stop-hook nudge suppresses itself — it only fires for
 items the agent didn't touch during the turn.
 
-Never self-mark \`done\` — the user owns that transition.
-
 ## Talking about items in chat
 
 When you mention a work item to the user, refer to it by its quoted
@@ -154,18 +152,18 @@ what shipped, naming the item you just reopened, etc.
 
 ## Redos on a just-shipped item
 
-When the user pushes back on work you just closed to \`human_check\`
+When the user pushes back on work you just closed to \`done\`
 (asks you to fix, redo, revert, or take a different approach to the
 same concern), **reopen the existing item** — don't file a new one.
 
 Flow:
 
 1. \`update_work_item\` the item back to \`in_progress\` (this opens a
-   fresh effort; the \`human_check → in_progress\` transition is the
-   documented reopen path).
+   fresh effort; the \`done → in_progress\` transition is the documented
+   reopen path).
 2. Do the new round of edits.
-3. \`complete_task\` back to \`human_check\` with \`touchedFiles\` for
-   the new effort.
+3. \`complete_task\` back to \`done\` with \`touchedFiles\` for the new
+   effort.
 
 The item row gets a second effort recording the redo, attributed
 correctly. Filing a new "Fix the thing I just did" task fragments the
@@ -215,7 +213,7 @@ description: Pick up the next ready oxplow work item and dispatch it.
 Call \`mcp__oxplow__read_work_options\` for this thread and dispatch
 the resulting unit to a \`general-purpose\` subagent per the
 \`oxplow-runtime\` skill. The skill carries the protocol (mark
-\`in_progress\` before work, \`human_check\` after, never two items
+\`in_progress\` before work, \`done\` after, never two items
 \`in_progress\` at once); follow it.
 
 If the tool returns \`{ mode: "empty" }\` there's nothing ready —

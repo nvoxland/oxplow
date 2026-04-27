@@ -1109,6 +1109,18 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 43,
+    name: "drop_human_check_status",
+    up: (db) => {
+      // The human_check status was a "agent says done, user verifies"
+      // intermediate. It produced enough churn (extra section, descending
+      // sort logic, redo-hint surface, recent-human-check reminders) for
+      // little real value — agents now self-mark `done` directly. Migrate
+      // every existing row so older DBs keep working.
+      db.exec(`UPDATE work_items SET status = 'done', completed_at = COALESCE(completed_at, updated_at) WHERE status = 'human_check';`);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

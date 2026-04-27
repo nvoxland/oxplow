@@ -23,12 +23,12 @@ import type { MenuItem } from "../../menu.js";
 /**
  * Renders one work-item group (an epic + its children, or the root group
  * with no epic). Items are split by status into four sections —
- * In progress → To do → Blocked → Human check → Done — with dividers between non-empty
+ * In progress → To do → Blocked → Done — with dividers between non-empty
  * sections.
  *
  * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
  * section boundaries also changes its status to that section's default
- * (toDo → ready, humanCheck → human_check, done → done) so the user can
+ * (toDo → ready, done → done) so the user can
  * triage straight from the Work panel. InProgress rejects drop-in: the
  * agent owns that status and in-progress items are drag-locked. Empty
  * sections stay hidden until a drag is active, at which point they appear
@@ -46,7 +46,6 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "toDo", label: "To Do" },
   { kind: "blocked", label: "Blocked" },
-  { kind: "humanCheck", label: "Human check" },
   { kind: "done", label: "Done" },
 ];
 
@@ -115,8 +114,8 @@ export function WorkGroupList({
    *  panel to a subset of the five buckets. Default = all. */
   visibleSections?: WorkItemSectionKind[];
   /** Cap rows per section after the in-section sort. Used by Plan
-   *  Work to render previews of Human Check / Done. Sections with no
-   *  entry render fully. */
+   *  Work to render previews of Done. Sections with no entry render
+   *  fully. */
   sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
   /** Override the default section header label per kind. Used by the
    *  Archived page so the (singular) Done section reads "Archived". */
@@ -145,7 +144,7 @@ export function WorkGroupList({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
     const buckets: Record<WorkItemSectionKind, QueueRow[]> = {
-      inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
+      inProgress: [], toDo: [], blocked: [], done: [],
     };
     for (const row of work) {
       // Epics roll up their children's statuses into an effective section
@@ -160,21 +159,21 @@ export function WorkGroupList({
     for (const { kind, label: defaultLabel } of SECTION_ORDER) {
       if (allowedKinds && !allowedKinds.has(kind)) continue;
       const label = sectionLabelOverrides?.[kind] ?? defaultLabel;
-      // Human Check and Done render descending by sort_index — newest-finished
-      // items surface at the top so the user can triage (or reopen) them
-      // without scrolling. For Done specifically, the "drop into Done lands at
-      // the top" contract depends on this + the MAX+1 sort_index bump in
-      // `work-item-store.updateItem`. `finalizeReorderIds` unwinds descending
-      // runs when we persist a reorder so the underlying sort_index space
-      // stays ascending.
-      const descending = kind === "humanCheck" || kind === "done";
+      // Done renders descending by sort_index — newest-finished items
+      // surface at the top so the user can triage (or reopen) them
+      // without scrolling. The "drop into Done lands at the top" contract
+      // depends on this + the MAX+1 sort_index bump in
+      // `work-item-store.updateItem`. `finalizeReorderIds` unwinds
+      // descending runs when we persist a reorder so the underlying
+      // sort_index space stays ascending.
+      const descending = kind === "done";
       buckets[kind].sort((a, b) =>
         descending ? b.sortIndex - a.sortIndex : a.sortIndex - b.sortIndex,
       );
       // Keep empty sections in the list while a drag is active so the user
-      // can drop into an empty "Done" / "Human check" to create the first
-      // item there. When nothing is dragging, empty sections are suppressed
-      // by the renderer below.
+      // can drop into an empty "Done" to create the first item there.
+      // When nothing is dragging, empty sections are suppressed by the
+      // renderer below.
       const limit = sectionItemLimit?.[kind];
       const limited = typeof limit === "number" ? buckets[kind].slice(0, limit) : buckets[kind];
       if (limited.length === 0) {
@@ -227,7 +226,7 @@ export function WorkGroupList({
     // new status into finalizeReorderIds below — otherwise the dragged row
     // would still look like its old section to the run detector, which
     // miscomputes the descending-run flips (regression when dragging out of
-    // Done back to Human Check / To Do).
+    // Done back to To Do).
     const statusOverrides = new Map<string, WorkItemStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
@@ -302,7 +301,7 @@ export function WorkGroupList({
       }
     }
     resetDrag();
-    // `next` is in visual order (Human Check + Done descending). Convert to
+    // `next` is in visual order (Done descending). Convert to
     // persistence order before writing — finalizeReorderIds flips descending
     // runs so sort_index ends up ascending in the store, which keeps the
     // next render's visual order stable. Use the effective (post-drop)
@@ -350,11 +349,11 @@ export function WorkGroupList({
 
   const renderRow = (row: QueueRow) => {
     const key = keyFor(row);
-    // Human Check / Done drops always land at the top of the section, so a
-    // between-rows indicator on those targets would lie about where the
+    // Done drops always land at the top of the section, so a
+    // between-rows indicator on that target would lie about where the
     // dragged item will end up. Suppress it there.
     const targetSection = classifyRow(row.item, epicChildrenMap);
-    const suppressDropLine = targetSection === "humanCheck" || targetSection === "done";
+    const suppressDropLine = targetSection === "done";
     const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
     const isMarked = markedIds?.has(row.item.id) ?? false;
@@ -426,7 +425,7 @@ export function WorkGroupList({
       // gives the user a one-click cascade fix.
       const epicStatus = row.item.status;
       const staleChildren =
-        epicStatus === "human_check" || epicStatus === "blocked"
+        epicStatus === "done" || epicStatus === "blocked"
           ? children.filter((c) => c.status === "ready" || c.status === "in_progress")
           : [];
       return (
@@ -512,7 +511,7 @@ export function WorkGroupList({
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        const alwaysShow = section.kind === "toDo" || section.kind === "humanCheck" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
+        const alwaysShow = section.kind === "toDo" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
         if (empty && !alwaysShow && !draggedWorkItem) {
           return null;
         }
@@ -787,7 +786,7 @@ export function SectionHeaderMenu({ items, testId }: { items: MenuItem[]; testId
 }
 
 const STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "in_progress", "human_check", "done", "archived", "canceled",
+  "blocked", "ready", "in_progress", "done", "archived", "canceled",
 ];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -1282,7 +1281,7 @@ function StaleEpicChildrenBanner({
   // its children are still ready/in_progress, so the rail counts will
   // misrepresent the closed state. Surface a one-click cascade fix that
   // mirrors the server-side cascade guard the MCP tools enforce.
-  const targetStatus = epic.status === "blocked" ? "blocked" : "human_check";
+  const targetStatus: WorkItemStatus = epic.status === "blocked" ? "blocked" : "done";
   const n = staleChildren.length;
   const noun = n === 1 ? "child" : "children";
   const label = `Close ${n} ${noun} as ${statusLabel(targetStatus)}`;

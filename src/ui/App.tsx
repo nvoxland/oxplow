@@ -648,7 +648,7 @@ export function App() {
     description?: string;
     acceptanceCriteria?: string | null;
     parentId?: string | null;
-    status?: "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
+    status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
     priority?: "low" | "medium" | "high" | "urgent";
   }) {
     if (!stream || !selectedThread) return;
@@ -669,7 +669,7 @@ export function App() {
       description?: string;
       acceptanceCriteria?: string | null;
       parentId?: string | null;
-      status?: "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
+      status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
       priority?: "low" | "medium" | "high" | "urgent";
     },
   ) {

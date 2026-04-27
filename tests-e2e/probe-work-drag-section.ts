@@ -1,9 +1,9 @@
 /**
- * Probe: drag a work item between status sections (To do → Human check).
+ * Probe: drag a work item between status sections (To do → Blocked).
  *
  * Creates a fresh work item, then synthesizes an HTML5 drag from its row
- * onto the "Human check" section header. Verifies:
- *   (a) the status visibly changes (row moves under "Human check")
+ * onto the "Blocked" section header. Verifies:
+ *   (a) the status visibly changes (row moves under "Blocked")
  *   (b) the change persists across a reload
  *
  * HTML5 DnD via Playwright's `.dragTo()` is unreliable — React's synthetic
@@ -75,7 +75,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 50));
 
       const header = document.querySelector<HTMLElement>(
-        '[data-testid="plan-section-header-humanCheck"]',
+        '[data-testid="plan-section-header-blocked"]',
       );
       if (!header) return { ok: false, reason: "human-check header not visible after dragstart" };
 
@@ -95,7 +95,7 @@ async function main() {
     await window.waitForTimeout(600);
     await window.screenshot({ path: resolve(outDir, "drag-section-02-after-drop.png") });
 
-    // Verify the row is now under "Human check" by checking its status icon.
+    // Verify the row is now under "Blocked" by checking its status icon.
     const after = await window.evaluate(() => {
       const rows = Array.from(
         document.querySelectorAll<HTMLElement>('[data-testid^="work-item-row-"]'),
@@ -130,7 +130,7 @@ async function main() {
       console.log("[probe] FAIL: expected HUMAN CHECK, got", currentSection);
       process.exit(3);
     }
-    console.log("[probe] OK: row moved to Human check section");
+    console.log("[probe] OK: row moved to Blocked section");
   } finally {
     await close();
   }

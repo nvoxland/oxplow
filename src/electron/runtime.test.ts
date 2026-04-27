@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildThreadMcpConfig, buildRecentHumanCheckReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -34,9 +34,9 @@ function workItem(id: string, status: WorkItemStatus, title = id): WorkItem {
   };
 }
 
-function makeHumanCheckItem(overrides: Partial<WorkItem>): WorkItem {
+function makeDoneItem(overrides: Partial<WorkItem>): WorkItem {
   return {
-    ...workItem("wi-x", "human_check" as WorkItemStatus, "Some task"),
+    ...workItem("wi-x", "done" as WorkItemStatus, "Some task"),
     author: "agent",
     ...overrides,
   };
@@ -244,15 +244,15 @@ test("shouldAcceptHookFilePath: rejects paths that resolve outside the worktree"
   }
 });
 
-test("buildRecentHumanCheckReminder: points at a recent agent-authored human_check item with the reopen instructions", () => {
+test("buildRecentDoneReminder: points at a recent agent-authored done item with the reopen instructions", () => {
   const now = Date.parse("2024-05-01T12:00:00Z");
-  const recent = makeHumanCheckItem({
+  const recent = makeDoneItem({
     id: "wi-abc",
     title: "Wire up the paste handler",
     updated_at: "2024-05-01T11:55:00Z", // 5 min ago
   });
-  const out = buildRecentHumanCheckReminder([recent], now);
-  expect(out).toContain("<recent-human-check-reminder>");
+  const out = buildRecentDoneReminder([recent], now);
+  expect(out).toContain("<recent-done-reminder>");
   expect(out).toContain("wi-abc");
   expect(out).toContain("Wire up the paste handler");
   expect(out).toContain("update_work_item");
@@ -260,40 +260,40 @@ test("buildRecentHumanCheckReminder: points at a recent agent-authored human_che
   expect(out).toContain("Do NOT file a new");
 });
 
-test("buildRecentHumanCheckReminder: ignores user-authored human_check items", () => {
+test("buildRecentDoneReminder: ignores user-authored done items", () => {
   const now = Date.parse("2024-05-01T12:00:00Z");
-  const userItem = makeHumanCheckItem({
+  const userItem = makeDoneItem({
     id: "wi-user",
     author: "user",
     updated_at: "2024-05-01T11:55:00Z",
   });
-  expect(buildRecentHumanCheckReminder([userItem], now)).toBe("");
+  expect(buildRecentDoneReminder([userItem], now)).toBe("");
 });
 
-test("buildRecentHumanCheckReminder: ignores items older than the window", () => {
+test("buildRecentDoneReminder: ignores items older than the window", () => {
   const now = Date.parse("2024-05-01T12:00:00Z");
-  const stale = makeHumanCheckItem({
+  const stale = makeDoneItem({
     id: "wi-old",
     updated_at: "2024-05-01T10:00:00Z", // 2h ago, outside 15-min window
   });
-  expect(buildRecentHumanCheckReminder([stale], now)).toBe("");
+  expect(buildRecentDoneReminder([stale], now)).toBe("");
 });
 
-test("buildRecentHumanCheckReminder: ignores items not in human_check", () => {
+test("buildRecentDoneReminder: ignores items not in done", () => {
   const now = Date.parse("2024-05-01T12:00:00Z");
-  const inProgress = makeHumanCheckItem({
+  const inProgress = makeDoneItem({
     id: "wi-ip",
     status: "in_progress" as WorkItemStatus,
     updated_at: "2024-05-01T11:58:00Z",
   });
-  expect(buildRecentHumanCheckReminder([inProgress], now)).toBe("");
+  expect(buildRecentDoneReminder([inProgress], now)).toBe("");
 });
 
-test("buildRecentHumanCheckReminder: picks the most recent when multiple eligible items exist", () => {
+test("buildRecentDoneReminder: picks the most recent when multiple eligible items exist", () => {
   const now = Date.parse("2024-05-01T12:00:00Z");
-  const older = makeHumanCheckItem({ id: "wi-older", updated_at: "2024-05-01T11:50:00Z" });
-  const newer = makeHumanCheckItem({ id: "wi-newer", updated_at: "2024-05-01T11:58:00Z" });
-  const out = buildRecentHumanCheckReminder([older, newer], now);
+  const older = makeDoneItem({ id: "wi-older", updated_at: "2024-05-01T11:50:00Z" });
+  const newer = makeDoneItem({ id: "wi-newer", updated_at: "2024-05-01T11:58:00Z" });
+  const out = buildRecentDoneReminder([older, newer], now);
   expect(out).toContain("wi-newer");
   expect(out).not.toContain("wi-older");
 });
@@ -376,7 +376,7 @@ describe("history-tracking runtime wiring", () => {
     rmSync(h.dir, { recursive: true, force: true });
   });
 
-  test("in_progress → human_check closes the effort with an end_snapshot_id", () => {
+  test("in_progress → done closes the effort with an end_snapshot_id", () => {
     const h = seedHistoryHarness();
     const item = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "T",
@@ -390,7 +390,7 @@ describe("history-tracking runtime wiring", () => {
     writeFileSync(join(h.dir, "a.txt"), "v2");
     applyStatusTransition(
       { effortStore: h.effortStore, flushSnapshot: h.flushSnapshot },
-      { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "human_check" },
+      { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "done" },
     );
     expect(h.effortStore.getOpenEffort(item.id)).toBeNull();
     const all = h.effortStore.listEffortsForWorkItem(item.id);
@@ -410,9 +410,9 @@ describe("history-tracking runtime wiring", () => {
     writeFileSync(join(h.dir, "a.txt"), "v1");
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
     writeFileSync(join(h.dir, "a.txt"), "v2");
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "in_progress", next: "done" });
     writeFileSync(join(h.dir, "a.txt"), "v3");
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "human_check", next: "ready" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "done", next: "ready" });
     applyStatusTransition(deps, { threadId: h.threadId, workItemId: item.id, previous: "ready", next: "in_progress" });
     expect(h.effortStore.listEffortsForWorkItem(item.id)).toHaveLength(2);
     expect(h.effortStore.getOpenEffort(item.id)).not.toBeNull();
@@ -448,8 +448,8 @@ describe("history-tracking runtime wiring", () => {
   });
 });
 
-describe("touchedFiles payload on human_check transition", () => {
-  test("update_work_item with touchedFiles populates work_item_effort_file on transition to human_check", () => {
+describe("touchedFiles payload on done transition", () => {
+  test("update_work_item with touchedFiles populates work_item_effort_file on transition to done", () => {
     const h = seedHistoryHarness();
     const a = h.workItems.createItem({
       threadId: h.threadId, kind: "task", title: "A", createdBy: "user", actorId: "test",
@@ -461,7 +461,7 @@ describe("touchedFiles payload on human_check transition", () => {
     writeFileSync(join(h.dir, "b.txt"), "v1");
     applyStatusTransition(deps, {
       threadId: h.threadId, workItemId: a.id,
-      previous: "in_progress", next: "human_check",
+      previous: "in_progress", next: "done",
       touchedFiles: ["a.txt", "b.txt", "a.txt"],
     });
     expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual(["a.txt", "b.txt"]);
@@ -514,7 +514,7 @@ describe("touchedFiles payload on human_check transition", () => {
     for (let i = 0; i < 101; i++) many.push(`f${i}.txt`);
     applyStatusTransition(deps, {
       threadId: h.threadId, workItemId: a.id,
-      previous: "in_progress", next: "human_check",
+      previous: "in_progress", next: "done",
       touchedFiles: many,
     });
     expect(h.effortStore.listEffortFiles(openEffort.id)).toEqual([]);
@@ -533,7 +533,7 @@ describe("computeEffortFiles", () => {
     writeFileSync(join(h.dir, "a.txt"), "v1");
     writeFileSync(join(h.dir, "b.txt"), "v1");
     // No recordEffortFile calls — log is empty for this effort.
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "done" });
     const open = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const summary = computeEffortFiles(h.effortStore, h.snapshotStore, open.id);
     expect(summary).not.toBeNull();
@@ -563,8 +563,8 @@ describe("computeEffortFiles", () => {
     writeFileSync(join(h.dir, "b.txt"), "by-b");
     h.effortStore.recordEffortFile(effB.id, "b.txt");
     // Both efforts close at the same flush point (end-snapshot is shared).
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "done" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "done" });
 
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
@@ -598,8 +598,8 @@ describe("computeEffortFiles", () => {
     writeFileSync(join(h.dir, "shared.txt"), "final");
     h.effortStore.recordEffortFile(effA.id, "shared.txt");
     h.effortStore.recordEffortFile(effB.id, "shared.txt");
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "done" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "done" });
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
     if (closedA.end_snapshot_id === closedB.end_snapshot_id) {
@@ -625,8 +625,8 @@ describe("computeEffortFiles", () => {
     writeFileSync(join(h.dir, "a.txt"), "by-a");
     writeFileSync(join(h.dir, "b.txt"), "by-b");
     // Neither transition declares touchedFiles — effort_file log stays empty.
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "human_check" });
-    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "human_check" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: a.id, previous: "in_progress", next: "done" });
+    applyStatusTransition(deps, { threadId: h.threadId, workItemId: b.id, previous: "in_progress", next: "done" });
     const closedA = h.effortStore.listEffortsForWorkItem(a.id)[0]!;
     const closedB = h.effortStore.listEffortsForWorkItem(b.id)[0]!;
     if (closedA.end_snapshot_id === closedB.end_snapshot_id) {

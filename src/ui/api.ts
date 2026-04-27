@@ -39,7 +39,7 @@ export interface ThreadState {
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "ready" | "in_progress" | "human_check" | "blocked" | "done" | "canceled" | "archived";
+export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface WorkItem {

@@ -34,7 +34,7 @@ import {
   type WorkItemSectionKind,
 } from "./plan-utils.js";
 
-const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, blocked: 2, humanCheck: 3, done: 4 };
+const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, blocked: 2, done: 3 };
 function statusOrderRank(status: WorkItemStatus): number {
   return STATUS_RANK[classifyWorkItem(status)] ?? 0;
 }
@@ -86,11 +86,11 @@ interface Props {
    *  don't silently lose their container row. */
   hideAuto?: boolean;
   /** Restrict the visible sections (To Do / Blocked / etc). Used by the
-   *  page split: Plan Work shows toDo+blocked+humanCheck+done previews,
-   *  Done Work / Archived show only "done", etc. Default = all five. */
+   *  page split: Plan Work shows toDo+blocked+done previews,
+   *  Done Work / Archived show only "done", etc. Default = all four. */
   visibleSections?: WorkItemSectionKind[];
   /** Cap the number of items rendered per section after sort. Used by
-   *  Plan Work to render "last 5" previews of Human Check + Done. */
+   *  Plan Work to render "last 5" previews of Done. */
   sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
   /** Override the default section header label per kind. The Archived
    *  page uses this so the Done section reads "Archived". */
@@ -183,7 +183,7 @@ export function PlanPane({
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
   // sync with the section split in WorkGroupList (In progress → To do →
-  // Blocked → Human check → Done).
+  // Blocked → Done).
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
     for (const group of groups) {
@@ -709,7 +709,7 @@ export function PlanPane({
 }
 
 const KB_STATUS_OPTIONS: WorkItemStatus[] = [
-  "blocked", "ready", "human_check", "done", "archived", "canceled",
+  "blocked", "ready", "done", "archived", "canceled",
 ];
 const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
 

@@ -1574,8 +1574,8 @@ export class ElectronRuntime {
     });
   }
 
-  private buildRecentHumanCheckReminder(threadId: string): string {
-    return buildRecentHumanCheckReminder(this.workItemStore.listItems(threadId), Date.now());
+  private buildRecentDoneReminder(threadId: string): string {
+    return buildRecentDoneReminder(this.workItemStore.listItems(threadId), Date.now());
   }
 
   private resolveActiveThreadForPrompt(streamId: string): Thread | null {
@@ -1835,15 +1835,14 @@ export class ElectronRuntime {
         this.filedReadyThisTurnByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
-      // If an agent-authored human_check item was closed on this thread
-      // very recently, there's a strong chance this new prompt is either
-      // a redo on it or a follow-up concern. Inject a reminder pointing
+      // If an agent-authored done item was closed on this thread very
+      // recently, there's a strong chance this new prompt is either a
+      // redo on it or a follow-up concern. Inject a reminder pointing
       // at the item so the agent knows to reopen (update_work_item →
       // in_progress) rather than silently expand scope or file a
-      // duplicate "Fix …" task. See CLAUDE.md "Fixes/redos on a just-
-      // shipped item" and the redoHint on create_work_item.
+      // duplicate "Fix …" task.
       const redoReminder = envelope.threadId
-        ? this.buildRecentHumanCheckReminder(envelope.threadId)
+        ? this.buildRecentDoneReminder(envelope.threadId)
         : "";
       // Wiki-capture hint: when the prompt looks like exploration /
       // synthesis, nudge the agent up-front to plan on writing a wiki
@@ -2464,7 +2463,7 @@ export function buildInProgressAuditStopReason(items: WorkItem[]): string {
     ``,
     `Audit each before stopping. For each item:`,
     `- If it's still actively being worked on, leave it \`in_progress\`.`,
-    `- If its acceptance criteria are met, call \`mcp__oxplow__complete_task\` (status \`human_check\`) — never self-mark \`done\`.`,
+    `- If its acceptance criteria are met, call \`mcp__oxplow__complete_task\` (status \`done\`).`,
     `- If you're stuck and need a user decision, \`mcp__oxplow__update_work_item\` with \`status: "blocked"\`.`,
     `- If it's paused but resumable later, \`status: "ready"\`.`,
     `- If it's no longer relevant, \`status: "canceled"\`.`,
@@ -2477,7 +2476,7 @@ export function buildStaleEpicChildrenStopReason(
   pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
 ): string {
   const lines: string[] = [
-    `BLOCKED: ${pairs.length === 1 ? "an epic" : `${pairs.length} epics`} on this thread ${pairs.length === 1 ? "is" : "are"} closed (human_check/blocked) but still ${pairs.length === 1 ? "has" : "have"} non-terminal children. The Plan-pane epic rollup will pull the epic back into To Do, hiding the closed state from the rail counts.`,
+    `BLOCKED: ${pairs.length === 1 ? "an epic" : `${pairs.length} epics`} on this thread ${pairs.length === 1 ? "is" : "are"} closed (done/blocked) but still ${pairs.length === 1 ? "has" : "have"} non-terminal children. The Plan-pane epic rollup will pull the epic back into To Do, hiding the closed state from the rail counts.`,
     ``,
   ];
   for (const { epic, staleChildren } of pairs) {
@@ -2489,7 +2488,7 @@ export function buildStaleEpicChildrenStopReason(
   }
   lines.push(
     `Fix one of:`,
-    `  • If the children's work shipped with the epic, close them via \`mcp__oxplow__transition_work_items\` (target=human_check or blocked).`,
+    `  • If the children's work shipped with the epic, close them via \`mcp__oxplow__transition_work_items\` (target=done or blocked).`,
     `  • If the children still need work, reopen the epic via \`mcp__oxplow__update_work_item\` (status=ready or in_progress).`,
   );
   return lines.join("\n");
@@ -2503,7 +2502,7 @@ export function buildFiledButDidntShipStopReason(): string {
     ``,
     `If the user told you to do the work this turn:`,
     `  • Reopen the relevant ready row(s): \`mcp__oxplow__update_work_item\` → status=in_progress.`,
-    `  • Make the edits. Close back to \`human_check\` with \`complete_task\`.`,
+    `  • Make the edits. Close back to \`done\` with \`complete_task\`.`,
     ``,
     `If the user only asked you to log/file/remember the items (legitimate backlog capture), reply briefly confirming what you filed and stop — the directive is advisory, not a wall.`,
   ].join("\n");
@@ -2571,7 +2570,7 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
+    `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`done\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`done\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
     `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
     `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
     `WIKI CAPTURE: when a turn is exploration / synthesis (architecture, overview, "how does X work", trace, walk-through, summary), write the answer into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first, append-or-create, then \`mcp__oxplow__resync_note\`. Allowed on read-only threads too (the write guard exempts the notes dir).`,
@@ -2640,17 +2639,17 @@ export function buildSessionContextBlock(input: {
 }
 
 /**
- * When the most-recently-closed agent-authored item on this thread is in
- * `human_check` and closed within the reminder window (default 15 min),
- * produce a prominent reminder pointing at it. Injected into
- * UserPromptSubmit additionalContext so that when the user's new prompt
- * is likely a correction to that item, the agent sees the reopen path
+ * When the most-recently-closed agent-authored item on this thread is
+ * `done` and closed within the reminder window (default 15 min), produce
+ * a prominent reminder pointing at it. Injected into UserPromptSubmit
+ * additionalContext so that when the user's new prompt is likely a
+ * correction to that item, the agent sees the reopen path
  * (update_work_item → in_progress) before anything else — instead of
  * filing a duplicate "Fix …" task, silently expanding another item's
- * scope, or forgetting to re-record the effort. Returns empty when
- * no eligible item exists.
+ * scope, or forgetting to re-record the effort. Returns empty when no
+ * eligible item exists.
  */
-export function buildRecentHumanCheckReminder(
+export function buildRecentDoneReminder(
   items: WorkItem[],
   now: number,
   windowMs = 15 * 60 * 1000,
@@ -2658,7 +2657,7 @@ export function buildRecentHumanCheckReminder(
   const cutoff = now - windowMs;
   let candidate: { id: string; title: string; ts: number } | null = null;
   for (const item of items) {
-    if (item.status !== "human_check") continue;
+    if (item.status !== "done") continue;
     if (item.author !== "agent") continue;
     const ts = Date.parse(item.updated_at);
     if (!Number.isFinite(ts) || ts < cutoff) continue;
@@ -2668,16 +2667,16 @@ export function buildRecentHumanCheckReminder(
   }
   if (!candidate) return "";
   return [
-    "<recent-human-check-reminder>",
-    `You just closed "${candidate.title}" to human_check on this thread.`,
+    "<recent-done-reminder>",
+    `You just closed "${candidate.title}" to done on this thread.`,
     "If the user's new prompt is a fix/redo/pushback on THAT item (even indirectly — \"still doesn't work\", \"that's wrong\", \"try again\", \"no\", etc.):",
     `  1. Call update_work_item itemId="${candidate.id}" status=in_progress to reopen it.`,
     "  2. Do the new effort in the same item.",
-    "  3. Call complete_task back to human_check when done (with touchedFiles).",
+    "  3. Call complete_task back to done when done (with touchedFiles).",
     "Do NOT file a new \"Fix …\" task for the redo — that fragments history and the Work panel lies about how many concerns were actually raised.",
     "If the new prompt is a GENUINELY separate concern, file a new item as usual and ignore this reminder.",
     "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id. The id is internal to tool calls; the user doesn't see or know it.",
-    "</recent-human-check-reminder>",
+    "</recent-done-reminder>",
   ].join("\n");
 }
 
@@ -2858,7 +2857,7 @@ export function applyStatusTransition(
     // "open effort" marker. We need the id to attach the touched-files
     // payload to the row just closed.
     const openEffort = deps.effortStore.getOpenEffort(workItemId);
-    // Any move out of in_progress (human_check / blocked / ready /
+    // Any move out of in_progress (done / blocked / ready /
     // canceled / archived) triggers a possible task-end snapshot — the
     // work just paused, so capture the worktree state. The 5-minute gap
     // rule suppresses the flush when the stream's most recent snapshot
@@ -2871,7 +2870,7 @@ export function applyStatusTransition(
       ? null
       : deps.flushSnapshot("task-end", { effortId: openEffort?.id ?? null });
     deps.effortStore.closeEffort({ workItemId, endSnapshotId });
-    if (openEffort && (next === "human_check" || next === "blocked") && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
+    if (openEffort && (next === "done" || next === "blocked") && Array.isArray(touchedFiles) && touchedFiles.length > 0) {
       // Dedup, then enforce the cap. Oversized payloads drop ALL rows
       // so computeEffortFiles falls back to raw pair-diff ("assume all").
       const deduped = Array.from(new Set(touchedFiles.filter((p) => typeof p === "string" && p.length > 0)));
@@ -2882,8 +2881,8 @@ export function applyStatusTransition(
       }
     }
   } else if (previous && next && previous !== next) {
-    // Any other status transition (e.g. ready ↔ blocked, human_check →
-    // done, etc.) where neither side is `in_progress`. No effort opens
+    // Any other status transition (e.g. ready ↔ blocked, done → ready,
+    // etc.) where neither side is `in_progress`. No effort opens
     // or closes, but capture the worktree state with a `task-event`
     // snapshot so the user sees these moments in Local History. Same
     // 5-minute gap rule as task-end so back-to-back changes don't pile
@@ -2900,7 +2899,7 @@ export function applyStatusTransition(
  * snapshot AND this effort has ≥1 row in `work_item_effort_file`, the
  * result is filtered to those paths so parallel subagents each see only
  * their own writes. If this effort has zero rows (agent skipped
- * `touchedFiles` on the human_check transition, or list exceeded the
+ * `touchedFiles` on the done transition, or list exceeded the
  * server cap), we fall back to the raw pair-diff — the "assume all"
  * behaviour. The 1-effort case also returns the raw pair-diff. Returns
  * null when the effort is unknown or still open (no end snapshot).

@@ -227,7 +227,6 @@ function PlanningSections({
 }
 
 function ReviewSections({
-  threadWork,
   stream,
   onOpenPage,
 }: {
@@ -235,27 +234,11 @@ function ReviewSections({
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const humanCheck = useMemo(() => {
-    const items = threadWork?.items ?? [];
-    return items.filter((i) => i.status === "human_check");
-  }, [threadWork]);
   const snaps = useRecentSnapshots(stream);
   const findings = useFindings(stream);
 
   return (
     <>
-      <Section title="Awaiting human check">
-        {humanCheck.length === 0 ? <EmptyHint>Nothing waiting on review.</EmptyHint> : null}
-        {humanCheck.map((item) => (
-          <RowButton
-            key={item.id}
-            testId={`dashboard-review-hc-${item.id}`}
-            label={item.title}
-            subtitle={item.priority}
-            onClick={() => onOpenPage(workItemRef(item.id))}
-          />
-        ))}
-      </Section>
       <Section title="Recent snapshots">
         {snaps.length === 0 ? <EmptyHint>No snapshots yet.</EmptyHint> : null}
         {snaps.map((snap) => (

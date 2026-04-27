@@ -88,7 +88,7 @@ test("createElectronPlugin writes the merged oxplow-runtime skill Claude Code ca
   // The merged body retains every original topic's load-bearing text so
   // none of the three legacy surfaces regresses.
   expect(body).toMatch(/epic|acceptance criteria/i);
-  expect(body).toMatch(/human_check/i);
+  expect(body).toMatch(/in_progress/i);
   expect(body).toMatch(/read_work_options|dispatch_work_item|general-purpose/i);
 });
 

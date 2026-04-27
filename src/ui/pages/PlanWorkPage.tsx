@@ -24,7 +24,7 @@ const PREVIEW_LIMIT = 5;
 
 /**
  * Planning surface for the active thread. Shows To Do + Blocked in
- * full, plus the last 5 Human Check / Done items as previews. The
+ * full, plus the last 5 Done items as previews. The
  * In Progress section is intentionally absent — the rail HUD's
  * "Active item" + "Up next" already surface what the agent is doing
  * right now, so duplicating it here is noise.
@@ -71,9 +71,9 @@ export function PlanWorkPage({ onOpenPage, ...rest }: PlanWorkPageProps) {
         <PlanPane
           {...rest}
           hideAuto={hideAuto}
-          visibleSections={["toDo", "blocked", "humanCheck", "done"]}
-          sectionItemLimit={{ humanCheck: PREVIEW_LIMIT, done: PREVIEW_LIMIT }}
-          extraSectionLinks={{ humanCheck: viewAllDone, done: viewAllDone }}
+          visibleSections={["toDo", "blocked", "done"]}
+          sectionItemLimit={{ done: PREVIEW_LIMIT }}
+          extraSectionLinks={{ done: viewAllDone }}
           hideBacklogChip
           hideArchiveToggle
         />

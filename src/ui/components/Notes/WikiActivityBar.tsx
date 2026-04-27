@@ -41,7 +41,6 @@ type Entry = NoteEntry | FileEntry | ItemEntry;
 const STATUS_COLOR: Partial<Record<WorkItemStatus, string>> = {
   ready: "var(--status-ready)",
   in_progress: "var(--status-running)",
-  human_check: "var(--status-human-check)",
   blocked: "var(--status-canceled)",
   done: "var(--status-done)",
   canceled: "var(--status-canceled)",

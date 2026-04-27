@@ -67,36 +67,6 @@ describe("computeActiveItem", () => {
     expect(computeActiveItem(null)).toBeNull();
   });
 
-  test("excludes human_check items (closed; awaiting review, not active)", () => {
-    const closed = makeItem({ id: "wi-closed", status: "human_check", sort_index: 1 });
-    const active = makeItem({ id: "wi-active", status: "in_progress", sort_index: 5 });
-    // The store packs both in_progress and human_check into `inProgress` for
-    // the kanban view; the rail HUD must narrow to in_progress only.
-    const state: ThreadWorkState = {
-      threadId: "t-1",
-      waiting: [],
-      inProgress: [closed, active],
-      done: [],
-      epics: [],
-      items: [closed, active],
-      followups: [],
-    };
-    expect(computeActiveItem(state)?.id).toBe("wi-active");
-  });
-
-  test("returns null when only human_check items remain", () => {
-    const closed = makeItem({ id: "wi-closed", status: "human_check", sort_index: 1 });
-    const state: ThreadWorkState = {
-      threadId: "t-1",
-      waiting: [],
-      inProgress: [closed],
-      done: [],
-      epics: [],
-      items: [closed],
-      followups: [],
-    };
-    expect(computeActiveItem(state)).toBeNull();
-  });
 });
 
 describe("computeUpNext", () => {

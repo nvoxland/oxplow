@@ -222,7 +222,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(result.reminder).toContain("parentId=this id");
   });
 
-  test("create_work_item file-and-close shortcut (status=human_check + touchedFiles) opens and closes an effort with attribution", async () => {
+  test("create_work_item file-and-close shortcut (status=done + touchedFiles) opens and closes an effort with attribution", async () => {
     const { tools, workItemStore, threadB, dir } = seed();
     // Mimic runtime wiring: subscribe to work-item changes and route
     // status transitions through applyStatusTransition so the effort
@@ -253,15 +253,15 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       threadId: threadB.id,
       kind: "task",
       title: "Retroactive split",
-      status: "human_check",
+      status: "done",
       touchedFiles: ["src/a.ts", "src/b.ts"],
     } as never) as { ok: boolean; id: string };
     off();
 
     expect(result.ok).toBe(true);
     // Final row status is the requested target.
-    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("human_check");
-    // Exactly one effort exists (opened by ready→in_progress, closed by in_progress→human_check).
+    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("done");
+    // Exactly one effort exists (opened by ready→in_progress, closed by in_progress→done).
     const efforts = effortStore.listEffortsForWorkItem(result.id);
     expect(efforts).toHaveLength(1);
     expect(efforts[0]!.ended_at).not.toBeNull();
@@ -294,13 +294,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       threadId: threadB.id,
       kind: "note",
       title: "Pure note — no edits",
-      status: "human_check",
+      status: "done",
     } as never) as { id: string };
     off();
 
     // No touchedFiles → no synthesized effort (agent is signalling "nothing to attribute").
     expect(effortStore.listEffortsForWorkItem(result.id)).toHaveLength(0);
-    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("human_check");
+    expect(workItemStore.getItem(threadB.id, result.id)!.status).toBe("done");
   });
 
   test("create_work_item with status=in_progress routes through ready → in_progress so an effort is opened", async () => {
@@ -352,10 +352,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     }
   });
 
-  test("create_work_item emits redoHint when a human_check item was closed on the same thread within the window", async () => {
+  test("create_work_item emits redoHint when a done item was closed on the same thread within the window", async () => {
     const { tools, workItemStore, threadB } = seed();
     const t = tool(tools, "oxplow__create_work_item");
-    // First: file a task and close it to human_check (simulating an
+    // First: file a task and close it to done (simulating an
     // effort the agent just shipped).
     const first = await t.handler({
       threadId: threadB.id,
@@ -372,7 +372,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     workItemStore.updateItem({
       threadId: threadB.id,
       itemId: first.id,
-      status: "human_check",
+      status: "done",
       actorKind: "agent",
       actorId: "mcp",
     });
@@ -388,7 +388,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(second.redoHint).toContain("in_progress");
   });
 
-  test("create_work_item omits redoHint when no recent human_check item exists", async () => {
+  test("create_work_item omits redoHint when no recent done item exists", async () => {
     const { tools, threadB } = seed();
     const t = tool(tools, "oxplow__create_work_item");
     const result = await t.handler({
@@ -454,12 +454,12 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       transitions: [
         { threadId: threadB.id, itemId: a.id, status: "in_progress" },
         { threadId: threadB.id, itemId: b.id, status: "in_progress" },
-        { threadId: threadB.id, itemId: c.id, status: "human_check" },
+        { threadId: threadB.id, itemId: c.id, status: "done" },
       ],
     } as never)) as { ok: boolean; results: Array<{ id: string; status: string }> };
     expect(result.ok).toBe(true);
     expect(result.results).toHaveLength(3);
-    expect(result.results.map((r) => r.status)).toEqual(["in_progress", "in_progress", "human_check"]);
+    expect(result.results.map((r) => r.status)).toEqual(["in_progress", "in_progress", "done"]);
 
     // One `updated` event per transitioned item, same as three individual
     // update_work_item calls would have emitted.
@@ -471,7 +471,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     // Store state reflects the final status of each item.
     expect(workItemStore.getItem(threadB.id, a.id)!.status).toBe("in_progress");
     expect(workItemStore.getItem(threadB.id, b.id)!.status).toBe("in_progress");
-    expect(workItemStore.getItem(threadB.id, c.id)!.status).toBe("human_check");
+    expect(workItemStore.getItem(threadB.id, c.id)!.status).toBe("done");
   });
 
   test("transition_work_items rejects an unknown threadId before firing any side effects", async () => {
@@ -587,8 +587,8 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     off();
 
     expect(result.ok).toBe(true);
-    expect(result.status).toBe("human_check");
-    expect(workItemStore.getItem(threadB.id, a.id)!.status).toBe("human_check");
+    expect(result.status).toBe("done");
+    expect(workItemStore.getItem(threadB.id, a.id)!.status).toBe("done");
     // Note is NOT appended to work-item history anymore.
     const events = workItemStore.listEvents(threadB.id, a.id);
     const notes = events.filter((e) => e.event_type === "note");
@@ -615,14 +615,14 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
     expect(workItemStore.getItem(threadB.id, a.id)!.status).toBe("blocked");
   });
 
-  test("complete_task rejects status=done (callers must not self-mark done)", async () => {
+  test("complete_task rejects unknown status values", async () => {
     const { tools, threadB } = seed();
     const create = tool(tools, "oxplow__create_work_item");
     const a = (await create.handler({ threadId: threadB.id, kind: "task", title: "X" } as never)) as { id: string };
     const t = tool(tools, "oxplow__complete_task");
     await expect(async () => t.handler({
-      threadId: threadB.id, itemId: a.id, note: "done", status: "done",
-    } as never)).toThrow(/done.*self|self.*done|human_check|blocked/i);
+      threadId: threadB.id, itemId: a.id, note: "done", status: "ready",
+    } as never)).toThrow(/done.*blocked|blocked.*done/i);
   });
 
   test("dispatch_work_item returns a brief containing preamble, title, description, and acceptance criteria", async () => {
@@ -997,10 +997,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
         cascade: true,
       } as never)) as { ok: boolean; status: string };
       expect(result.ok).toBe(true);
-      expect(result.status).toBe("human_check");
-      // Both children flipped to human_check.
+      expect(result.status).toBe("done");
+      // Both children flipped to done.
       for (const childId of created.childIds) {
-        expect(workItemStore.getItem(threadB.id, childId)!.status).toBe("human_check");
+        expect(workItemStore.getItem(threadB.id, childId)!.status).toBe("done");
       }
     });
 
@@ -1018,10 +1018,10 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
         note: "done",
       } as never)) as { ok: boolean; status: string };
       expect(result.ok).toBe(true);
-      expect(result.status).toBe("human_check");
+      expect(result.status).toBe("done");
     });
 
-    test("update_work_item to human_check on an epic also enforces the guard", async () => {
+    test("update_work_item to done on an epic also enforces the guard", async () => {
       const { tools, threadB } = seed();
       const fileEpic = tool(tools, "oxplow__file_epic_with_children");
       const created = (await fileEpic.handler({
@@ -1034,13 +1034,13 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       const result = (await update.handler({
         threadId: threadB.id,
         itemId: created.epicId,
-        status: "human_check",
+        status: "done",
       } as never)) as { error?: string; status?: string };
       expect(result.error).toBeDefined();
       expect(result.error!).toContain("non-terminal");
     });
 
-    test("update_work_item to human_check with cascade flips all children", async () => {
+    test("update_work_item to done with cascade flips all children", async () => {
       const { tools, workItemStore, threadB } = seed();
       const fileEpic = tool(tools, "oxplow__file_epic_with_children");
       const created = (await fileEpic.handler({
@@ -1074,7 +1074,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
 
       const update = tool(tools, "oxplow__update_work_item");
       // Re-opening an epic shouldn't trip the guard — it only fires
-      // on closes (human_check / blocked).
+      // on closes (done / blocked).
       const result = (await update.handler({
         threadId: threadB.id,
         itemId: created.epicId,
@@ -1097,7 +1097,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
       const transition = tool(tools, "oxplow__transition_work_items");
       await transition.handler({
         transitions: created.childIds.map((id) => ({
-          threadId: threadB.id, itemId: id, status: "human_check",
+          threadId: threadB.id, itemId: id, status: "done",
         })),
       } as never);
 
@@ -1108,7 +1108,7 @@ describe("MCP work-item tools: streamId is inferred from threadId", () => {
         note: "done",
       } as never)) as { ok: boolean; status: string };
       expect(result.ok).toBe(true);
-      expect(result.status).toBe("human_check");
+      expect(result.status).toBe("done");
     });
   });
 

@@ -71,10 +71,10 @@ oxplow agent:
   queueable commit/wait point markers. The Stop-hook does not emit
   any commit-related directives.
 - **Work-item lifecycle.** Create → Stop-hook picks next ready item →
-  agent marks `in_progress` → agent works → agent marks `human_check`
-  when waiting for user review. Agents **never self-mark `done`** —
-  `done` is user-only. Polling "is everything done?" must treat
-  `human_check` as terminal-from-the-pipeline's-perspective.
+  agent marks `in_progress` → agent works → agent marks `done`
+  when acceptance criteria are met. The user can reopen by flipping
+  back to `in_progress`. Polling "is everything done?" treats `done`
+  as terminal.
 
 ## Common pitfalls
 
@@ -85,9 +85,6 @@ oxplow agent:
   switch to the writer thread instead.
 - **Queueing work without a prompt does nothing if the agent is
   idle.** See the first-turn caveat above.
-- **`human_check` is terminal for the pipeline, not for the user.**
-  The pipeline treats `human_check` as agent-settled so follow-on
-  steps don't block on human review.
 - **Runtime never commits.** The harness has no `git commit` path —
   no auto-commit at Stop, no commit-point markers, no `mcp__oxplow__commit`
   tool. Drive commits yourself via CLI / Bash / Files-panel commit.
@@ -228,7 +225,7 @@ The pipeline runs in priority order:
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
    to reconcile each: still active → leave alone; acceptance criteria met
-   → `complete_task` (status `human_check`, never self-mark `done`);
+   → `complete_task` (status `done`);
    stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
    persist across turn boundaries; without this audit step stale
    `in_progress` rows pile up because nothing forces a settle.
@@ -279,8 +276,8 @@ summary, moveItemIds? })` — one transaction that:
    `work_items`).
 3. Optionally moves each `moveItemIds` entry over via
    `WorkItemStore.moveItemToThread`. Items must currently be `ready` or
-   `blocked` on the source thread; `in_progress` / `human_check` /
-   terminal items are rejected with an error listing the offenders so
+   `blocked` on the source thread; `in_progress` / terminal items are
+   rejected with an error listing the offenders so
    the caller can settle them first.
 4. For each moved item, copies its last 3 notes (by `created_at DESC`,
    re-inserted in chronological order) as fresh rows on the same item
@@ -305,7 +302,7 @@ that, the orchestrator has two modes:
    ~20 lines across ≤ 2 files — test fixtures, import cleanup, label
    renames), the orchestrator does the Read/Edit/Bash directly under
    the work item. Mark `in_progress`, edit, run tests, mark
-   `human_check`. Snapshots still fire with correct attribution; we
+   `done`. Snapshots still fire with correct attribution; we
    just skip the subagent round-trip.
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
    risky changes, the orchestrator calls `oxplow__read_work_options`,
@@ -314,7 +311,7 @@ that, the orchestrator has two modes:
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
-The dispatch protocol (mark `in_progress` before work, `human_check`
+The dispatch protocol (mark `in_progress` before work, `done`
 after, never two items `in_progress` at once, blocked + note on
 stuck) is identical for both modes and lives in the merged
 `oxplow-runtime` skill (orchestrator side — filing + lifecycle +
@@ -643,7 +640,7 @@ snapshot id. Mechanics:
 - Snapshots are anchored to **efforts**, not turns. A status
   transition into `in_progress` flushes a `task-start` snapshot and
   records its id on `work_item_effort.start_snapshot_id`. Any move
-  *out* of `in_progress` (human_check / blocked / ready / canceled /
+  *out* of `in_progress` (done / blocked / ready / canceled /
   archived) flushes a `task-end` snapshot recorded on
   `work_item_effort.end_snapshot_id`, subject to the 5-minute gap
   rule: when the stream's most recent snapshot is younger than
@@ -662,8 +659,8 @@ snapshot id. Mechanics:
   pure `applyStatusTransition` helper it delegates to) runs. A
   transition *into* `in_progress` flushes `source: "task-start"` and
   opens a new `work_item_effort` row pointing at it; a transition
-  *out of* `in_progress` (to `human_check`, `done`, `canceled`,
-  `blocked`, etc.) flushes `source: "task-end"` and closes the effort.
+  *out of* `in_progress` (to `done`, `canceled`, `blocked`, etc.)
+  flushes `source: "task-end"` and closes the effort.
   Re-entering `in_progress` creates a second effort — efforts are a
   per-cycle record, not a single lifetime span. A DB-level UNIQUE
   partial index on `work_item_effort(work_item_id) WHERE ended_at IS
@@ -705,45 +702,45 @@ paths) drop all rows, so the "assume all" fallback engages in
 unreliable whenever ≥2 efforts were in_progress (the common case the
 log is meant to cover).
 
-Attach only fires on the `in_progress → human_check` and
+Attach only fires on the `in_progress → done` and
 `in_progress → blocked` transitions, and only when an effort is
 currently open for the item. A `touchedFiles` payload on a plain
 metadata update or on an already-closed item is accepted by the
 schema but silently ignored — there's no effort row to attach it to.
 
 **File-and-close shortcut.** `create_work_item` also accepts
-`touchedFiles`. When the caller asks for `status: "human_check"` or
+`touchedFiles`. When the caller asks for `status: "done"` or
 `"blocked"` AND passes `touchedFiles`, the MCP handler files the row
 at `ready`, then runs `ready → in_progress → <target>` under the
 covers so the normal effort-open/close path fires and attribution
-lands just like a conventional close. Passing `status: "human_check"`
+lands just like a conventional close. Passing `status: "done"`
 *without* `touchedFiles` is still legal (pure note/record row, or
 agent explicitly declining attribution) — no effort is synthesized in
 that case.
 
-**Recent-human-check reminder (UserPromptSubmit).** When the agent just
-closed an item to `human_check` on the thread that's submitting a new
-prompt, the UserPromptSubmit hook injects a `<recent-human-check-
-reminder>` block into `additionalContext` pointing at the item and
-spelling out the reopen flow (`update_work_item → in_progress → redo
-→ complete_task`). This fires even when the agent never touches
+**Recent-done reminder (UserPromptSubmit).** When the agent just
+closed an item to `done` on the thread that's submitting a new
+prompt, the UserPromptSubmit hook injects a `<recent-done-reminder>`
+block into `additionalContext` pointing at the item and spelling out
+the reopen flow (`update_work_item → in_progress → redo →
+complete_task`). This fires even when the agent never touches
 `create_work_item` next turn — the most reliable failure mode was the
 agent investigating/reverting in-place on a correction without
-recording a new effort. See `buildRecentHumanCheckReminder` in
+recording a new effort. See `buildRecentDoneReminder` in
 `src/electron/runtime.ts` and the wiring in `handleHookEnvelope`'s
 `UserPromptSubmit` branch. Window is 15 minutes by default.
 
 **Redo-hint on `create_work_item`.** When the caller files a new row
-on a thread that has an agent-authored `human_check` item closed
-within the last 10 minutes, the response carries a `redoHint` field
-pointing at that item and telling the agent to consider reopening
+on a thread that has an agent-authored `done` item closed within the
+last 10 minutes, the response carries a `redoHint` field pointing at
+that item and telling the agent to consider reopening
 (`update_work_item → in_progress`) instead of filing the new task.
 This is a soft nudge — the create still succeeds, because a
 genuinely separate concern *should* get its own row. The heuristic
 just makes the reopen path impossible to miss when the most common
 trap (user rejects the last effort → agent reflexively files a
 "Fix …" task) is most likely to be tripped. See
-`findRecentHumanCheckItem` in `src/mcp/mcp-tools.ts`.
+`findRecentDoneItem` in `src/mcp/mcp-tools.ts`.
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a
@@ -790,7 +787,7 @@ Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
   independent, completable work.
 - **Persist across turns** — if a turn ends with work mid-flight
   (asked a question, Stop fired before finishing), the task stays
-  `in_progress`. Only `human_check` when the work is actually shipped.
+  `in_progress`. Only `done` when the work is actually shipped.
 
 ### Stop-hook directives related to tasks
 
@@ -801,7 +798,7 @@ task-shaped branch on the writer thread:
   runtime emits `buildInProgressAuditStopReason` listing each
   in_progress item (id + title) and instructing the agent to
   reconcile: still active → leave alone; criteria met →
-  `complete_task` (status `human_check`); stuck → `blocked`; paused
+  `complete_task` (status `done`); stuck → `blocked`; paused
   → `ready`; obsolete → `canceled`.
 
 There is intentionally no ready-work branch — cross-turn queue

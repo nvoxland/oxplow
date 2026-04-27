@@ -92,8 +92,8 @@ reads them).
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 
 The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
-Statuses: `ready`, `in_progress`, `human_check`, `blocked`, `done`,
-`canceled`, `archived`. `archived` is a terminal state that hides the item
+Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
+`archived`. `archived` is a terminal state that hides the item
 from the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
@@ -152,7 +152,7 @@ migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
 
 ### `work_item_effort` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
 
-An **effort** is one `in_progress → human_check` (or done/canceled) cycle
+An **effort** is one `in_progress → done` (or blocked/canceled) cycle
 of a work item. Columns: `work_item_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
 written by `complete_task` describing what shipped in this effort; one
@@ -161,20 +161,19 @@ Auto-managed by the runtime on `work-item.changed` status transitions:
 
 - `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
   and linked to `start_snapshot_id`.
-- `in_progress → {human_check, done, canceled}` closes the effort; a
+- `in_progress → {done, blocked, canceled}` closes the effort; a
   `task-end` snapshot is flushed and linked to `end_snapshot_id`,
   subject to a 5-minute minimum gap between snapshots — if the latest
   snapshot is fresher than that gap, the close path skips flushing a
   new row (the effort's `end_snapshot_id` is left null in that case).
 
-Re-opening a task (human_check → ready → in_progress) produces a second
-effort. At most one open effort per work item at a time.
+Re-opening a task (done → in_progress) produces a second effort. At most one open effort per work item at a time.
 
 `work_item_effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `first_seen_at`,
 primary key `(effort_id, path)`. Rows come from the `touchedFiles`
-payload on the `update_work_item` transition to `human_check`, not
+payload on the `update_work_item` transition to `done`, not
 from the PostToolUse hook (the previous heuristic couldn't attribute
 writes when ≥2 efforts were in_progress). See agent-model.md's
 "Per-effort write log" for the flow. Consumed by
@@ -442,51 +441,46 @@ per thread. `runtime.reorderThreadQueue(streamId, threadId, entries)`
 rewrites the values in one operation; entries are `{ id }` with
 `sort_index = position`.
 
-**Visual vs persistence order for Human Check and Done.** Sections in
-`WorkGroupList` render ascending by `sort_index` *except* Human Check
-and Done, which render descending (newest-finished items surface on
-top). The underlying `sort_index` space is still a single ascending
-line — the sections are only flipped at render time. When a
-drag-reorder persists a new order, `finalizeReorderIds` in
-`plan-utils.ts` reverses each descending run (`human_check`, plus the
-`done`/`canceled`/`archived` group) so the `reorderItems` /
+**Visual vs persistence order for Done.** Sections in `WorkGroupList`
+render ascending by `sort_index` *except* Done, which renders
+descending (newest-finished items surface on top). The underlying
+`sort_index` space is still a single ascending line — the section is
+only flipped at render time. When a drag-reorder persists a new order,
+`finalizeReorderIds` in `plan-utils.ts` reverses each descending run
+(`done`/`canceled`/`archived`) so the `reorderItems` /
 `reorderThreadQueue` "sort_index = position" rule produces the intended
 visual result. The drag handler passes the *effective* new status of a
-row whose status is changing as part of the drop (e.g. a Done row
-dropped onto a Human Check row) so the run detector sees the new
-section membership. Dropping any item *into* Done is a drop-to-top
-contract: the drag handler inserts the row at the head of the Done
-bucket in visual order, and `work-item-store.updateItem` bumps
-`sort_index` to `MAX+1` on every non-Done → Done transition, so the
-two paths agree on "newest-done on top." Any new section with a
+row whose status is changing as part of the drop so the run detector
+sees the new section membership. Dropping any item *into* Done is a
+drop-to-top contract: the drag handler inserts the row at the head of
+the Done bucket in visual order, and `work-item-store.updateItem`
+bumps `sort_index` to `MAX+1` on every non-Done → Done transition, so
+the two paths agree on "newest-done on top." Any new section with a
 non-ascending display must either do the same reversal dance or get
 its own flat list.
 
 ## Status diagrams (text)
 
 ```
-work item:    ready ─► in_progress ─► human_check ─► done ─► archived
-                   ╰─────────► blocked
+work item:    ready ─► in_progress ─► done ─► archived
+                   ╰─────────► blocked ◄─┘
                    ╰─────────► canceled ─► archived
 ```
 
 ### Transitions to `in_progress` (server-side guard)
 
 `WorkItemStore.updateItem` rejects any direct jump into `in_progress`
-that didn't come from `ready` or `human_check`. The only accepted
-sources are:
+from `canceled` or `archived` (those are explicit "abandoned" states
+the user must re-`ready` first). All other sources are accepted:
 
 - `ready → in_progress` (normal pickup)
-- `human_check → in_progress` (reopen — the user decided it needs more work)
+- `done → in_progress` (reopen — the redo path when the user pushes
+  back on shipped work)
+- `blocked → in_progress` (deliberate unblock gesture)
 - `in_progress → in_progress` (no-op)
 
-Everything else (`blocked`, `done`, `canceled`, `archived`) must
-transit through `ready` first with an explicit `update_work_item`
-call. Rationale: `blocked` is a distinct signal the user parked the
-item on; silently promoting it into `in_progress` ignores that
-decision. Terminal sources (`done`/`canceled`/`archived`) likewise
-require a conscious re-open step. `dispatch_work_item`'s autoStart
-path also only fires when the item is currently `ready`.
+`dispatch_work_item`'s autoStart path only fires when the item is
+currently `ready`.
 
 `listReady` / `readWorkOptions` / `list_ready_work` filter to
 `status='ready'` only — `blocked` items are never dispatchable until
