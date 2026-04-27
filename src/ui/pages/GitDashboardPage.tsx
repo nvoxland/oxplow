@@ -108,20 +108,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         const match = streamByWorktreePath.get(wt.path);
         return match ? [{ wt, stream: match }] : [];
       });
-      // Compare worktree branches against the main repo's actual branch
-      // rather than the hardcoded "main" string. For the main worktree
-      // itself, fall back to its upstream so the row isn't always 0/0.
-      const mainBranch = streamWorktrees.find(({ wt }) => wt.isMain)?.wt.branch ?? null;
-      const mainUpstream = mainBranch
-        ? remoteBranches.find((r) => r.branch === mainBranch)?.shortName ?? null
-        : null;
+      // Each sibling row compares against the currently-viewed stream's
+      // branch — the dashboard is always rendered for one stream, and
+      // "ahead/behind vs. self" is the only axis that's meaningful here.
       const streamRows: StreamWorktreeRow[] = await Promise.all(
         streamWorktrees.map(async ({ wt, stream: matchedStream }) => {
-          if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
-          const isMainRow = wt.isMain || wt.branch === mainBranch;
-          const base = isMainRow ? mainUpstream : mainBranch;
-          if (!base) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
-          const counts = await getAheadBehind(streamId, base, wt.branch);
+          if (!wt.branch || !branch || wt.branch === branch) {
+            return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
+          }
+          const counts = await getAheadBehind(streamId, branch, wt.branch);
           return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind };
         }),
       );
@@ -272,6 +267,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
             <StreamsCard
               streamId={streamId}
               rows={data.streams}
+              currentBranch={data.branchHeader.branch}
               workingByStreamId={streamWorkingFlags}
               onMerge={(branch) =>
                 runConfirmed(
@@ -467,12 +463,14 @@ function RecentCommitsCard({
 function StreamsCard({
   streamId,
   rows,
+  currentBranch,
   onMerge,
   pendingAction,
   workingByStreamId,
 }: {
   streamId: string;
   rows: StreamWorktreeRow[];
+  currentBranch: string | null;
   onMerge(branch: string): void;
   pendingAction: string | null;
   workingByStreamId: Record<string, boolean>;
@@ -542,8 +540,8 @@ function StreamsCard({
                 {isOpen && row.worktree.branch ? (
                   <PairwiseDiffPane
                     streamId={streamId}
-                    rows={rows}
-                    selfBranch={row.worktree.branch}
+                    siblingBranch={row.worktree.branch}
+                    currentBranch={currentBranch}
                   />
                 ) : null}
               </div>
@@ -557,15 +555,14 @@ function StreamsCard({
 
 function PairwiseDiffPane({
   streamId,
-  rows,
-  selfBranch,
+  siblingBranch,
+  currentBranch,
 }: {
   streamId: string;
-  rows: StreamWorktreeRow[];
-  selfBranch: string;
+  siblingBranch: string;
+  currentBranch: string | null;
 }) {
-  const mainBranch = rows.find((r) => r.worktree.isMain)?.worktree.branch ?? null;
-  const target = mainBranch && mainBranch !== selfBranch ? mainBranch : "";
+  const target = currentBranch && currentBranch !== siblingBranch ? currentBranch : "";
   const [commits, setCommits] = useState<GitLogCommit[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -576,7 +573,7 @@ function PairwiseDiffPane({
     }
     let cancelled = false;
     setLoading(true);
-    void getCommitsAheadOf(streamId, target, selfBranch, 20)
+    void getCommitsAheadOf(streamId, target, siblingBranch, 20)
       .then((result) => {
         if (!cancelled) setCommits(result);
       })
@@ -586,14 +583,14 @@ function PairwiseDiffPane({
     return () => {
       cancelled = true;
     };
-  }, [streamId, selfBranch, target]);
+  }, [streamId, siblingBranch, target]);
 
   if (!target) {
     return (
       <div style={{ ...subtle, padding: "4px 0 8px 26px" }}>
-        {mainBranch
-          ? `This is the main repo branch (${mainBranch}); nothing to compare against.`
-          : "Main repo branch not detected."}
+        {currentBranch
+          ? `Same branch as the current stream (${currentBranch}); nothing to compare.`
+          : "Current stream is detached; nothing to compare against."}
       </div>
     );
   }
@@ -604,7 +601,7 @@ function PairwiseDiffPane({
     >
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <span style={subtle}>
-          Commits in <code>{selfBranch}</code> not in <code>{target}</code>
+          Commits in <code>{siblingBranch}</code> not in <code>{target}</code>
         </span>
       </div>
       {loading ? (
