@@ -550,6 +550,13 @@ export async function gitPull(
   return desktopApi().gitPull(streamId, options);
 }
 
+export async function gitFetch(
+  streamId: string,
+  options?: { remote?: string; prune?: boolean; all?: boolean },
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitFetch(streamId, options);
+}
+
 export async function gitCommitAll(
   streamId: string,
   message: string,

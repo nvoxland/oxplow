@@ -258,6 +258,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
   handle("oxplow:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
   handle("oxplow:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
+  handle("oxplow:gitFetch", (_event, streamId: string, options) => currentRuntime.gitFetch(streamId, options));
   handle("oxplow:getAheadBehind", (_event, streamId: string, base: string, head?: string) => currentRuntime.getAheadBehind(streamId, base, head));
   handle("oxplow:getCommitsAheadOf", (_event, streamId: string, base: string, head: string, limit?: number) => currentRuntime.getCommitsAheadOf(streamId, base, head, limit));
   handle("oxplow:listRecentRemoteBranches", (_event, streamId: string, limit?: number) => currentRuntime.listRecentRemoteBranches(streamId, limit));

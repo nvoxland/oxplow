@@ -68,6 +68,7 @@ const api: DesktopApi = {
   gitAppendToGitignore: (streamId, path) => ipcRenderer.invoke("oxplow:gitAppendToGitignore", streamId, path),
   gitPush: (streamId, options) => ipcRenderer.invoke("oxplow:gitPush", streamId, options),
   gitPull: (streamId, options) => ipcRenderer.invoke("oxplow:gitPull", streamId, options),
+  gitFetch: (streamId, options) => ipcRenderer.invoke("oxplow:gitFetch", streamId, options),
   getAheadBehind: (streamId, base, head) => ipcRenderer.invoke("oxplow:getAheadBehind", streamId, base, head),
   getCommitsAheadOf: (streamId, base, head, limit) => ipcRenderer.invoke("oxplow:getCommitsAheadOf", streamId, base, head, limit),
   listRecentRemoteBranches: (streamId, limit) => ipcRenderer.invoke("oxplow:listRecentRemoteBranches", streamId, limit),

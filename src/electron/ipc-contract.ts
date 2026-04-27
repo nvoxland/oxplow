@@ -286,6 +286,7 @@ export interface DesktopApi {
   gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
   gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult>;
   getAheadBehind(streamId: string, base: string, head?: string): Promise<{ ahead: number; behind: number }>;
   getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): Promise<GitLogCommit[]>;
   listRecentRemoteBranches(streamId: string, limit?: number): Promise<import("../git/git.js").RemoteBranchEntry[]>;
