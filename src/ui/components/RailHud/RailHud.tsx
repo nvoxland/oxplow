@@ -441,14 +441,10 @@ function PagesDirectory({
 
 function humanStatus(status: AgentStatus): string {
   switch (status) {
-    case "idle":
-      return "idle";
     case "working":
       return "running";
     case "waiting":
       return "waiting on you";
-    case "done":
-      return "done";
     default:
       return status;
   }

@@ -2,17 +2,13 @@ import type { CSSProperties } from "react";
 import type { AgentStatus } from "../api.js";
 
 const COLORS: Record<AgentStatus, string> = {
-  idle: "var(--muted)",
   working: "#fcd34d",
   waiting: "#fca5a5",
-  done: "#86efac",
 };
 
 const LABELS: Record<AgentStatus, string> = {
-  idle: "Idle",
   working: "Working",
   waiting: "Waiting for input",
-  done: "Done",
 };
 
 export function AgentStatusDot({ status, size = 8 }: { status: AgentStatus; size?: number }) {

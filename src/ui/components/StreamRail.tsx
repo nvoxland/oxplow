@@ -99,7 +99,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
         <div className="oxplow-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
           {orderedStreams.map((candidate) => {
             const active = candidate.id === stream?.id;
-            const status = streamStatuses[candidate.id] ?? "idle";
+            const status = streamStatuses[candidate.id] ?? "waiting";
             const canDrop = !!onDropWorkItemOnStream && !!streamActiveThreadIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
             const isStreamDragTarget = isDragOver && draggingStreamId !== null && draggingStreamId !== candidate.id;

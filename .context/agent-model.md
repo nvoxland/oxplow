@@ -54,12 +54,16 @@ oxplow agent:
   `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes —
   xterm pipes them through the PTY to claude.
-- **When a turn is done.** `deriveBatchAgentStatus`
-  (`src/session/agent-status.ts`) reduces hook events to
-  `idle | working | waiting | done`; the UI surfaces it as the colored
-  dot on each thread tab. Poll for the transition *out* of `working` to
-  know a turn finished. Looking at terminal rows alone is fragile
-  (scrollback, progress indicators, partial lines).
+- **When a turn is done.** `deriveThreadAgentStatus`
+  (`src/session/agent-status.ts`) reduces hook events to two states:
+  `working` (agent is actively burning cycles) or `waiting` (agent
+  isn't doing anything; user owes the next move). Brand-new threads,
+  finished turns, exited processes, and permission prompts all
+  collapse to `waiting`. The UI surfaces this as the colored dot on
+  each thread tab — yellow pulsing for `working`, red for `waiting`.
+  Poll for the transition *out* of `working` to know a turn finished.
+  Looking at terminal rows alone is fragile (scrollback, progress
+  indicators, partial lines).
 - **Committing from a driven session.** Commits are user-driven only.
   Either run `git commit` yourself in the terminal, click commit in
   the Files panel, or tell the agent in chat "go run `git commit -m
@@ -587,18 +591,23 @@ provide finer-grained overrides without displacing earlier context.
 
 ## Agent status
 
-`deriveBatchAgentStatus` (`src/session/agent-status.ts`) reduces a stream
-of hook events into one of `idle | working | waiting | done`. The runtime
-recomputes on every hook arrival and emits `agent-status.changed`. The UI
-shows it as a colored dot on each thread tab.
+`deriveThreadAgentStatus` (`src/session/agent-status.ts`) reduces a stream
+of hook events into one of two states: `working` or `waiting`. The
+runtime recomputes on every hook arrival and emits
+`agent-status.changed`. The UI shows it as a colored dot on each thread
+tab — yellow pulsing for `working`, red for `waiting`. The two states
+encode the only signal a tab indicator actually needs: is the agent
+burning cycles, or does the user owe the next move? Brand-new threads,
+finished turns (`stop`), exited processes (`session-end`), permission
+prompts (`notification`), and user interrupts all collapse to `waiting`.
 
 **Subagent-in-flight carve-out.** The reducer counts unreturned `Task`
 tool calls (PreToolUse + / PostToolUse -). When a `stop` event arrives
 while the count is >0, status stays `working` instead of flipping to
-`done`. Without this the tab icon would flip to "agent done" the moment
-the parent paused for a subagent, even though the subagent was still
-doing real work. The status flips to `done` once the final `Task`
-PostToolUse returns and a subsequent `stop` lands. See wi-593a50b62e22.
+`waiting`. Without this the tab icon would flip the moment the parent
+paused for a subagent, even though the subagent was still doing real
+work. The status flips to `waiting` once the final `Task` PostToolUse
+returns and a subsequent `stop` lands. See wi-593a50b62e22.
 
 **User-interrupt synthetic event.** Claude Code does not reliably fire
 the `Stop` hook when the user cancels a turn with Escape (or `Ctrl-C`):

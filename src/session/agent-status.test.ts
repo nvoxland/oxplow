@@ -10,12 +10,12 @@ function event(normalized: NormalizedEvent): StoredEvent {
 }
 
 describe("deriveThreadAgentStatus", () => {
-  test("empty history is idle", () => {
-    expect(deriveThreadAgentStatus([])).toBe("idle");
+  test("empty history is waiting (no work given yet)", () => {
+    expect(deriveThreadAgentStatus([])).toBe("waiting");
   });
 
-  test("session-start alone is done (ready, nothing happening)", () => {
-    expect(deriveThreadAgentStatus([event({ kind: "session-start", t: 0 })])).toBe("done");
+  test("session-start alone is waiting (agent booted, no prompt yet)", () => {
+    expect(deriveThreadAgentStatus([event({ kind: "session-start", t: 0 })])).toBe("waiting");
   });
 
   test("user prompt flips to working", () => {
@@ -33,12 +33,12 @@ describe("deriveThreadAgentStatus", () => {
     ])).toBe("working");
   });
 
-  test("stop after work is done", () => {
+  test("stop after work returns to waiting", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-end", t: 1, toolName: "Read", status: "ok" }),
       event({ kind: "stop", t: 2 }),
-    ])).toBe("done");
+    ])).toBe("waiting");
   });
 
   test("notification during work is waiting", () => {
@@ -56,12 +56,12 @@ describe("deriveThreadAgentStatus", () => {
     ])).toBe("working");
   });
 
-  test("session-end is idle regardless of prior activity", () => {
+  test("session-end returns to waiting regardless of prior activity", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-start", t: 1, toolName: "Read" }),
       event({ kind: "session-end", t: 2, reason: "exit" }),
-    ])).toBe("idle");
+    ])).toBe("waiting");
   });
 
   test("meta events do not change status", () => {
@@ -72,10 +72,6 @@ describe("deriveThreadAgentStatus", () => {
   });
 
   test("stop while a Task subagent is still in flight stays working", () => {
-    // Parent dispatches a Task subagent (PreToolUse fires). Before the
-    // subagent's PostToolUse returns, a Stop hook arrives (subagent or
-    // parent pause). Tab-icon should reflect "still doing work" until
-    // the Task tool actually returns.
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
@@ -83,13 +79,13 @@ describe("deriveThreadAgentStatus", () => {
     ])).toBe("working");
   });
 
-  test("stop after Task subagent returns is done", () => {
+  test("stop after Task subagent returns is waiting", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
       event({ kind: "tool-use-end", t: 2, toolName: "Task", status: "ok" }),
       event({ kind: "stop", t: 3 }),
-    ])).toBe("done");
+    ])).toBe("waiting");
   });
 
   test("multiple Task subagents in flight: stop stays working until all return", () => {
@@ -102,33 +98,26 @@ describe("deriveThreadAgentStatus", () => {
     ])).toBe("working");
   });
 
-  test("user interrupt mid-tool-call clears working state to done", () => {
-    // Escape during a Read tool call: PostToolUse never lands and Stop
-    // may not fire either. The runtime synthesizes a meta `Interrupt`
-    // event from the terminal layer so the icon falls back to idle.
+  test("user interrupt mid-tool-call clears working state to waiting", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-start", t: 1, toolName: "Read" }),
       event({ kind: "meta", t: 2, hookEventName: "Interrupt", raw: {} }),
-    ])).toBe("done");
+    ])).toBe("waiting");
   });
 
-  test("user interrupt mid-Task clears pendingTasks so a later stop is done", () => {
-    // Without the Interrupt reset, the Task PreToolUse keeps
-    // pendingTasks=1 and any subsequent stop stays "working".
+  test("user interrupt mid-Task clears pendingTasks so a later stop is waiting", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "user-prompt", t: 0, prompt: "hi" }),
       event({ kind: "tool-use-start", t: 1, toolName: "Task" }),
       event({ kind: "meta", t: 2, hookEventName: "Interrupt", raw: {} }),
-    ])).toBe("done");
+    ])).toBe("waiting");
   });
 
-  test("user interrupt while idle is a no-op", () => {
-    // Pressing Escape with no turn in flight should not flip an idle
-    // session into a different state.
+  test("user interrupt while not working is a no-op", () => {
     expect(deriveThreadAgentStatus([
       event({ kind: "meta", t: 0, hookEventName: "Interrupt", raw: {} }),
-    ])).toBe("idle");
+    ])).toBe("waiting");
   });
 
   test("user prompt after interrupt re-enters working", () => {

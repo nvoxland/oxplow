@@ -819,8 +819,8 @@ export function App() {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
       const activeThreadId = threadStates[s.id]?.activeThreadId;
-      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "idle";
-      else out[s.id] = "idle";
+      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "waiting";
+      else out[s.id] = "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -865,27 +865,29 @@ export function App() {
 
   // After the first stream has had its file sessions rebuilt, verify the
   // initial (localStorage-seeded) centerActive is still resolvable. If it
-  // points to a file that didn't come back or a diff tab (which never
-  // persist), snap back to "agent". This runs once per mount — subsequent
-  // stream switches have their own centerActive logic in handleSwitch.
+  // points to a file that didn't come back, a diff tab (which never
+  // persist), or a page tab that wasn't restored, snap back to "agent".
+  // Runs once per mount — subsequent stream switches have their own
+  // centerActive logic in handleSwitch. The page-tab case matters
+  // because the user's first click after startup often opens a page tab
+  // (work-item, plan-work, git-history, …); the previous fall-through
+  // reset for unknown id shapes would clobber that click and snap focus
+  // back to the agent. Now we trust `effectiveCenterActive`'s fallback
+  // gate by checking membership in the same available set.
   useEffect(() => {
     if (centerActiveValidatedRef.current) return;
     if (!stream) return;
     if (!restoredStreamsRef.current.has(stream.id)) return;
     centerActiveValidatedRef.current = true;
-    const session = fileSessions[stream.id];
     if (centerActive === "agent") return;
+    const session = fileSessions[stream.id];
     if (centerActive.startsWith("file:")) {
       const path = centerActive.slice("file:".length);
-      if (!session || !session.files[path]) {
-        setCenterActive("agent");
-      }
+      if (!session || !session.files[path]) setCenterActive("agent");
       return;
     }
     if (centerActive.startsWith("diff:")) {
-      if (!diffTabs.some((tab) => tab.id === centerActive)) {
-        setCenterActive("agent");
-      }
+      if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive("agent");
       return;
     }
     if (centerActive.startsWith("note:")) {
@@ -893,9 +895,14 @@ export function App() {
       if (!noteTabs.includes(slug)) setCenterActive("agent");
       return;
     }
-    // Unknown id shape — fall back defensively.
-    setCenterActive("agent");
-  }, [stream, fileSessions, centerActive, diffTabs, noteTabs]);
+    // Page tabs (work-item, plan-work, git-history, …) — validate
+    // against the per-thread page-tab list. Reset to agent only when
+    // the page wasn't restored. The previous unknown-id fall-through
+    // unconditionally reset every page id, clobbering the user's
+    // first click after startup.
+    const pageTabs = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    if (!pageTabs.some((ref) => ref.id === centerActive)) setCenterActive("agent");
+  }, [stream, fileSessions, centerActive, diffTabs, noteTabs, selectedThreadId, threadPageTabs]);
 
   // Restore previously-open file tabs the first time each stream becomes
   // active. We add the paths to the session in openOrder, mark each as
@@ -1489,7 +1496,7 @@ export function App() {
     });
   }, [stream]);
 
-  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
+  const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
   const bookmarksStore = useBookmarksStore();
 
