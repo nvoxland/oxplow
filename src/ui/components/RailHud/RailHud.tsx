@@ -227,25 +227,17 @@ function ActiveItemSection({
           padding: "4px 14px 12px",
         }}
       >
-        <div
+        <span
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
             color: "var(--text-primary)",
             fontWeight: 500,
             fontSize: 13,
-            marginBottom: 4,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
         >
-          <AgentStatusDot status={agentStatus} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
-        </div>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          {humanStatus(agentStatus)} · {item.kind}
+          {item.title}
         </span>
       </button>
     </>
@@ -439,13 +431,3 @@ function PagesDirectory({
   );
 }
 
-function humanStatus(status: AgentStatus): string {
-  switch (status) {
-    case "working":
-      return "running";
-    case "waiting":
-      return "waiting on you";
-    default:
-      return status;
-  }
-}
