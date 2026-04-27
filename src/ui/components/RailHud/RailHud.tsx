@@ -188,7 +188,7 @@ function ActiveItemSection({
     const working = agentStatus === "working";
     return (
       <>
-        <SectionHeading>Active item</SectionHeading>
+        <SectionHeading>Current Work</SectionHeading>
         <div
           data-testid="rail-active-empty"
           style={{
@@ -208,7 +208,7 @@ function ActiveItemSection({
   }
   return (
     <>
-      <SectionHeading>Active item</SectionHeading>
+      <SectionHeading>Current Work</SectionHeading>
       <button
         type="button"
         data-testid="rail-active-item"
