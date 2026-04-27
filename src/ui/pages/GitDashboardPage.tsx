@@ -10,6 +10,7 @@ import {
   gitPushCurrentTo,
   listRecentRemoteBranches,
   listSiblingWorktrees,
+  listStreams,
   listWorkspaceFiles,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
@@ -39,12 +40,13 @@ interface DashboardData {
   };
   uncommitted: WorkspaceStatusSummary | null;
   recentLog: GitLogResult;
-  worktrees: WorktreeRow[];
+  streams: StreamWorktreeRow[];
   remoteBranches: RemoteBranchEntry[];
 }
 
-interface WorktreeRow {
+interface StreamWorktreeRow {
   worktree: GitWorktreeEntry;
+  stream: Stream;
   ahead: number;
   behind: number;
 }
@@ -72,11 +74,12 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const [filesResult, log, worktrees, remoteBranches] = await Promise.all([
+      const [filesResult, log, worktrees, remoteBranches, streams] = await Promise.all([
         listWorkspaceFiles(streamId),
         getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listSiblingWorktrees(streamId),
         listRecentRemoteBranches(streamId, 20),
+        listStreams(),
       ]);
       const branch = stream?.branch ?? log.currentBranch ?? null;
       const headCommit = log.commits[0] ?? null;
@@ -91,12 +94,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         aheadUpstream = counts.ahead;
         behindUpstream = counts.behind;
       }
-      // Worktree ahead/behind vs main — when worktrees are exposed, fan out.
-      const worktreeRows: WorktreeRow[] = await Promise.all(
-        worktrees.map(async (wt) => {
-          if (!wt.branch) return { worktree: wt, ahead: 0, behind: 0 };
+      // Only surface worktrees that back a known stream — the dashboard
+      // labels rows by the stream's title rather than the worktree path.
+      const streamByWorktreePath = new Map(streams.map((s) => [s.worktree_path, s]));
+      const streamWorktrees = worktrees.flatMap((wt) => {
+        const match = streamByWorktreePath.get(wt.path);
+        return match ? [{ wt, stream: match }] : [];
+      });
+      const streamRows: StreamWorktreeRow[] = await Promise.all(
+        streamWorktrees.map(async ({ wt, stream: matchedStream }) => {
+          if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
           const counts = await getAheadBehind(streamId, WORKTREE_BASE, wt.branch);
-          return { worktree: wt, ahead: counts.ahead, behind: counts.behind };
+          return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind };
         }),
       );
       setData({
@@ -111,7 +120,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         },
         uncommitted: filesResult.summary,
         recentLog: log,
-        worktrees: worktreeRows,
+        streams: streamRows,
         remoteBranches,
       });
     } catch (err) {
@@ -194,9 +203,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onViewFullHistory={() => onRevealCommit(data.recentLog.commits[0]?.sha ?? "")}
             />
 
-            <WorktreesCard
+            <StreamsCard
               streamId={streamId}
-              rows={data.worktrees}
+              rows={data.streams}
               onMerge={(branch) =>
                 runConfirmed(
                   `Merge ${branch} into current`,
@@ -340,22 +349,22 @@ function RecentCommitsCard({
   );
 }
 
-function WorktreesCard({
+function StreamsCard({
   streamId,
   rows,
   onMerge,
   pendingAction,
 }: {
   streamId: string;
-  rows: WorktreeRow[];
+  rows: StreamWorktreeRow[];
   onMerge(branch: string): void;
   pendingAction: string | null;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
-    <Card testId="git-dashboard-worktrees" title="Worktrees">
+    <Card testId="git-dashboard-streams" title="Streams">
       {rows.length === 0 ? (
-        <div style={muted}>No sibling worktrees.</div>
+        <div style={muted}>No sibling streams.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {rows.map((row) => {
@@ -365,7 +374,7 @@ function WorktreesCard({
             return (
               <div
                 key={row.worktree.path}
-                data-testid="git-dashboard-worktree-row"
+                data-testid="git-dashboard-stream-row"
                 style={{ borderBottom: "1px solid var(--border-subtle)" }}
               >
                 <div
@@ -389,9 +398,9 @@ function WorktreesCard({
                     {isOpen ? "▾" : "▸"}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500 }}>{branch}</div>
+                    <div style={{ fontWeight: 500 }}>{row.stream.title}</div>
                     <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {row.worktree.path}
+                      {branch}
                     </div>
                   </div>
                   <div style={subtle}>
@@ -430,7 +439,7 @@ function PairwiseDiffPane({
   selfBranch,
 }: {
   streamId: string;
-  rows: WorktreeRow[];
+  rows: StreamWorktreeRow[];
   selfBranch: string;
 }) {
   const otherBranches = rows
