@@ -27,7 +27,7 @@ export interface CommitGraphTableProps {
   selectedSha?: string | null;
   /** When set, rows whose sha is NOT in this set render at 35% opacity. Pass `null` to disable highlighting (every row treated as matched). */
   matches?: Set<string> | null;
-  onSelect?(sha: string): void;
+  onSelect?(sha: string, opts?: { newTab?: boolean }): void;
   /** Optional row-element ref map for scroll-into-view. */
   rowRefs?: MutableRefObject<Map<string, HTMLDivElement>>;
 }
@@ -81,7 +81,7 @@ export function CommitGraphTable({
               branchHeads={branchHeadsBySha.get(sha) ?? []}
               tags={tagsBySha.get(sha) ?? []}
               currentBranch={currentBranch}
-              onClick={() => onSelect?.(sha)}
+              onClick={(e) => onSelect?.(sha, { newTab: e.metaKey || e.ctrlKey || e.button === 1 })}
             />
           </div>
         );
@@ -131,7 +131,7 @@ function CommitRow({
   branchHeads: string[];
   tags: string[];
   currentBranch: string | null;
-  onClick(): void;
+  onClick(e: { metaKey: boolean; ctrlKey: boolean; button: number }): void;
 }) {
   const mid = ROW_HEIGHT / 2;
   const colX = (k: number) => GRAPH_PAD + k * LANE_WIDTH + LANE_WIDTH / 2;

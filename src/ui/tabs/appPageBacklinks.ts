@@ -14,7 +14,7 @@
  *   4. Extending `useBacklinks` to fetch + memoize the new slice.
  */
 
-import type { GitLogCommit } from "../api.js";
+import type { CommitDetail, GitLogCommit } from "../api.js";
 import type { BacklinkContext, BacklinkEntry } from "./backlinksIndex.js";
 import {
   fileRef,
@@ -35,6 +35,9 @@ export interface AppBacklinkContext extends BacklinkContext {
   uncommittedPaths?: string[];
   /** Current branch name. */
   currentBranch?: string;
+  /** Per-commit detail (touched files etc.) — only fetched when the
+   *  active page is `git-commit`. */
+  commitDetail?: CommitDetail;
 }
 
 export type AppPageBacklinksProvider = (
@@ -144,13 +147,18 @@ export function gitCommitBacklinks(payload: unknown, ctx: AppBacklinkContext): B
   const out: BacklinkEntry[] = [
     { ref: indexRef("git-history"), label: "Git history", subtitle: "page" },
   ];
-  // Files touched by this commit — derived from the recentLog if present.
-  const c = (ctx.recentLog ?? []).find((entry) => entry.sha === sha);
-  const paths: string[] = []; // recentLog doesn't carry per-commit file lists; the page-level
-  //                              detail fetch does, but providers can't await. v1 keeps the
-  //                              file/work-item/note links empty here unless ctx is enriched.
+  // Files touched by this commit (when commit detail has been fetched).
+  // Renames render as "old → new"; surface the post-rename path so the
+  // file ref points at something that exists on disk.
+  const detailFiles = ctx.commitDetail && ctx.commitDetail.sha === sha ? ctx.commitDetail.files : [];
+  const paths = detailFiles.map((f) => (f.path.includes(" → ") ? f.path.split(" → ")[1]! : f.path));
+  for (const p of paths) {
+    out.push({ ref: fileRef(p), label: p, subtitle: "file" });
+  }
   out.push(...workItemsTouching(paths, ctx));
   out.push(...notesMentioningSha(sha, ctx));
+  out.push(...notesMentioningPaths(paths, ctx));
+  const c = (ctx.recentLog ?? []).find((entry) => entry.sha === sha);
   if (c) {
     // Cross-link to the previous and next commit in the visible log.
     const idx = (ctx.recentLog ?? []).indexOf(c);

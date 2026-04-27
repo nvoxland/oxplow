@@ -1,29 +1,29 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CommitDetail, GitLogCommit, GitLogResult, Stream } from "../../api.js";
-import { getCommitDetail, getGitLog, subscribeGitRefsEvents } from "../../api.js";
+import type { GitLogCommit, GitLogResult, Stream } from "../../api.js";
+import { getGitLog, subscribeGitRefsEvents } from "../../api.js";
 import { logUi } from "../../logger.js";
 import { CommitGraphTable, indexRefsBySha } from "./CommitGraphTable.js";
-import type { DiffRequest } from "../Diff/diff-request.js";
 
 interface Props {
   stream: Stream | null;
-  onOpenDiff?(request: DiffRequest): void;
+  /**
+   * Called when a commit row is clicked. The host wires this to navigate
+   * to the per-commit page so commits are bookmark/back/forward citizens
+   * (no longer an inline detail pane on this panel).
+   */
+  onSelectCommit?(sha: string, opts?: { newTab?: boolean }): void;
+  /** Optional sha to scroll into view (e.g. when arriving from blame). */
   revealSha?: { sha: string; token: number } | null;
 }
 
-export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
+export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
   const [log, setLog] = useState<GitLogResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [author, setAuthor] = useState("");
   const [branch, setBranch] = useState("");
-  const [selectedSha, setSelectedSha] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CommitDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailWidth, setDetailWidth] = useState<number>(380);
-  const [dragging, setDragging] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const limit = 500;
 
@@ -65,53 +65,7 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
   }, [stream?.id]);
 
   useEffect(() => {
-    if (!stream || !selectedSha) {
-      setDetail(null);
-      return;
-    }
-    let cancelled = false;
-    setDetailLoading(true);
-    void getCommitDetail(stream.id, selectedSha)
-      .then((result) => {
-        if (cancelled) return;
-        setDetail(result);
-        setDetailLoading(false);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        logUi("warn", "commit detail failed", { error: String(err) });
-        setDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stream?.id, selectedSha]);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (event: PointerEvent) => {
-      const container = document.getElementById("history-panel-root");
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const next = rect.right - event.clientX;
-      setDetailWidth(Math.min(Math.max(next, 240), Math.max(rect.width - 300, 240)));
-    };
-    const onUp = () => setDragging(false);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    const prevCursor = document.body.style.cursor;
-    document.body.style.cursor = "col-resize";
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      document.body.style.cursor = prevCursor;
-    };
-  }, [dragging]);
-
-  useEffect(() => {
     if (!revealSha) return;
-    setSelectedSha(revealSha.sha);
-    // Defer to let rows render before scrolling.
     requestAnimationFrame(() => {
       const node = rowRefs.current.get(revealSha.sha);
       if (node) node.scrollIntoView({ block: "nearest" });
@@ -155,301 +109,47 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
 
   return (
     <div id="history-panel-root" style={containerStyle}>
-      <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
-        <div style={leftPaneStyle}>
-          <div style={toolbarStyle}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter commits (message, sha, author)"
-              style={{ ...inputStyle, flex: 1, minWidth: 160 }}
-            />
-            <select value={author} onChange={(e) => setAuthor(e.target.value)} style={inputStyle}>
-              <option value="">All authors</option>
-              {authors.map((name) => (<option key={name} value={name}>{name}</option>))}
-            </select>
-            <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inputStyle}>
-              <option value="">All branches</option>
-              {(log?.branchHeads ?? []).map((b) => (
-                <option key={b.name} value={b.name}>{b.name}</option>
-              ))}
-            </select>
-            <div style={{ color: "var(--muted)", fontSize: 11, marginLeft: "auto", whiteSpace: "nowrap" }}>
-              {loading ? "loading…" : log ? `${matchCount} / ${log.commits.length}` : ""}
-            </div>
-          </div>
-          <div style={listStyle}>
-            {error ? (
-              <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
-            ) : !stream ? (
-              <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
-            ) : !log ? null : (
-              <CommitGraphTable
-                commits={visibleCommits}
-                branchHeadsBySha={refIndex.branchHeadsBySha}
-                tagsBySha={refIndex.tagsBySha}
-                currentBranch={log.currentBranch}
-                selectedSha={selectedSha}
-                matches={matches}
-                onSelect={(sha) => setSelectedSha(sha)}
-                rowRefs={rowRefs}
-              />
-            )}
-          </div>
-        </div>
-        <div
-          onPointerDown={(e) => { e.preventDefault(); setDragging(true); }}
-          style={{ ...resizeHandleStyle, background: dragging ? "var(--accent)" : undefined }}
+      <div style={toolbarStyle}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter commits (message, sha, author)"
+          style={{ ...inputStyle, flex: 1, minWidth: 160 }}
         />
-        <div style={{ ...detailPaneStyle, width: detailWidth }}>
-          <DetailPane
-            detail={detail}
-            loading={detailLoading}
-            sha={selectedSha}
-            onOpenFileDiff={(sha, path, parent) => {
-              if (!onOpenDiff) return;
-              // Double-clicking a file in the commit's file list should show
-              // the change that commit introduced. Diff its parent against
-              // the commit — for root commits use the empty tree hash.
-              const left = parent ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-              onOpenDiff({
-                path,
-                leftRef: left,
-                rightKind: { ref: sha },
-                baseLabel: parent ? parent.slice(0, 7) : "(root)",
-              });
-            }}
+        <select value={author} onChange={(e) => setAuthor(e.target.value)} style={inputStyle}>
+          <option value="">All authors</option>
+          {authors.map((name) => (<option key={name} value={name}>{name}</option>))}
+        </select>
+        <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inputStyle}>
+          <option value="">All branches</option>
+          {(log?.branchHeads ?? []).map((b) => (
+            <option key={b.name} value={b.name}>{b.name}</option>
+          ))}
+        </select>
+        <div style={{ color: "var(--muted)", fontSize: 11, marginLeft: "auto", whiteSpace: "nowrap" }}>
+          {loading ? "loading…" : log ? `${matchCount} / ${log.commits.length}` : ""}
+        </div>
+      </div>
+      <div style={listStyle}>
+        {error ? (
+          <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
+        ) : !stream ? (
+          <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
+        ) : !log ? null : (
+          <CommitGraphTable
+            commits={visibleCommits}
+            branchHeadsBySha={refIndex.branchHeadsBySha}
+            tagsBySha={refIndex.tagsBySha}
+            currentBranch={log.currentBranch}
+            selectedSha={revealSha?.sha ?? null}
+            matches={matches}
+            onSelect={(sha, opts) => onSelectCommit?.(sha, opts)}
+            rowRefs={rowRefs}
           />
-        </div>
+        )}
       </div>
     </div>
   );
-}
-
-
-function DetailPane({
-  detail,
-  loading,
-  sha,
-  onOpenFileDiff,
-}: {
-  detail: CommitDetail | null;
-  loading: boolean;
-  sha: string | null;
-  onOpenFileDiff?(sha: string, path: string, parent: string | null): void;
-}) {
-  if (!sha) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Select a commit to see details.</div>;
-  }
-  if (loading && !detail) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;
-  }
-  if (!detail) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Commit not found.</div>;
-  }
-  const totalAdditions = detail.files.reduce((sum, f) => sum + f.additions, 0);
-  const totalDeletions = detail.files.reduce((sum, f) => sum + f.deletions, 0);
-  return (
-    <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10, fontSize: 12, overflow: "auto", height: "100%" }}>
-      <div>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{detail.subject}</div>
-        {detail.body ? (
-          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)", fontSize: 11 }}>{detail.body}</div>
-        ) : null}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", color: "var(--muted)", fontSize: 11 }}>
-        <span>SHA</span><span style={{ fontFamily: "var(--mono, monospace)", color: "inherit" }}>{detail.sha}</span>
-        <span>Author</span><span>{detail.author.name}{detail.author.email ? ` <${detail.author.email}>` : ""}</span>
-        <span>Date</span><span>{formatAbsolute(detail.author.date)}</span>
-        {detail.committer.email && detail.committer.email !== detail.author.email ? (
-          <>
-            <span>Committer</span><span>{detail.committer.name}{detail.committer.email ? ` <${detail.committer.email}>` : ""}</span>
-            <span>Committed</span><span>{formatAbsolute(detail.committer.date)}</span>
-          </>
-        ) : null}
-        {detail.parents.length > 0 ? (
-          <>
-            <span>Parents</span>
-            <span style={{ fontFamily: "var(--mono, monospace)" }}>
-              {detail.parents.map((p) => p.slice(0, 7)).join(", ")}
-            </span>
-          </>
-        ) : null}
-      </div>
-      <div>
-        <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>
-          {detail.files.length} file{detail.files.length === 1 ? "" : "s"} changed
-          <span style={{ marginLeft: 6, color: "#86efac" }}>+{totalAdditions}</span>
-          <span style={{ marginLeft: 4, color: "#f87171" }}>−{totalDeletions}</span>
-        </div>
-        <FileTreeView
-          files={detail.files}
-          onOpenFile={(path) => {
-            if (!onOpenFileDiff) return;
-            onOpenFileDiff(detail.sha, path, detail.parents[0] ?? null);
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-type DetailFile = CommitDetail["files"][number];
-
-interface TreeDir {
-  kind: "dir";
-  label: string;           // compacted path segment(s) shown for this node
-  fullPath: string;        // path from repo root to this node
-  children: TreeNode[];
-}
-
-interface TreeFile {
-  kind: "file";
-  label: string;
-  file: DetailFile;
-}
-
-type TreeNode = TreeDir | TreeFile;
-
-function buildFileTree(files: DetailFile[]): TreeNode[] {
-  const root: TreeDir = { kind: "dir", label: "", fullPath: "", children: [] };
-  for (const file of files) {
-    const displayPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
-    const parts = displayPath.split("/").filter(Boolean);
-    let cur: TreeDir = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const seg = parts[i]!;
-      let next = cur.children.find((c): c is TreeDir => c.kind === "dir" && c.label === seg);
-      if (!next) {
-        next = { kind: "dir", label: seg, fullPath: cur.fullPath ? `${cur.fullPath}/${seg}` : seg, children: [] };
-        cur.children.push(next);
-      }
-      cur = next;
-    }
-    cur.children.push({ kind: "file", label: parts[parts.length - 1] ?? file.path, file });
-  }
-  const sortAndCompact = (node: TreeDir) => {
-    node.children.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
-      return a.label.localeCompare(b.label);
-    });
-    for (const child of node.children) {
-      if (child.kind === "dir") sortAndCompact(child);
-    }
-    // Compact "foo" > "bar" chains into "foo/bar" when the parent has a single
-    // dir child (IntelliJ-style path compaction).
-    while (node.children.length === 1 && node.children[0]!.kind === "dir") {
-      const only = node.children[0] as TreeDir;
-      node.label = node.label ? `${node.label}/${only.label}` : only.label;
-      node.fullPath = only.fullPath;
-      node.children = only.children;
-    }
-  };
-  sortAndCompact(root);
-  return root.children;
-}
-
-function FileTreeView({
-  files,
-  onOpenFile,
-}: {
-  files: DetailFile[];
-  onOpenFile(path: string): void;
-}) {
-  const tree = useMemo(() => buildFileTree(files), [files]);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-      {tree.map((node, i) => (
-        <TreeRow key={treeKey(node, i)} node={node} depth={0} onOpenFile={onOpenFile} />
-      ))}
-    </div>
-  );
-}
-
-function treeKey(node: TreeNode, index: number): string {
-  return node.kind === "dir" ? `d:${node.fullPath}:${index}` : `f:${node.file.path}`;
-}
-
-function TreeRow({
-  node,
-  depth,
-  onOpenFile,
-}: {
-  node: TreeNode;
-  depth: number;
-  onOpenFile(path: string): void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  const indent = 10 + depth * 12;
-  if (node.kind === "dir") {
-    return (
-      <>
-        <div
-          onClick={() => setExpanded((v) => !v)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            fontSize: 11,
-            cursor: "pointer",
-            paddingLeft: indent,
-            color: "var(--muted)",
-          }}
-          title={node.fullPath}
-        >
-          <span style={{ width: 10, flexShrink: 0, fontSize: 9 }}>{expanded ? "▾" : "▸"}</span>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.label}</span>
-        </div>
-        {expanded
-          ? node.children.map((child, i) => (
-              <TreeRow key={treeKey(child, i)} node={child} depth={depth + 1} onOpenFile={onOpenFile} />
-            ))
-          : null}
-      </>
-    );
-  }
-  const file = node.file;
-  const realPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
-  return (
-    <div
-      onDoubleClick={() => onOpenFile(realPath)}
-      title={`${file.path}\nDouble-click to open diff`}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        fontSize: 11,
-        cursor: "pointer",
-        paddingLeft: indent + 14,
-      }}
-    >
-      <span style={{ ...statusBadgeStyle, color: statusColor(file.status) }}>{statusLabel(file.status)}</span>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{node.label}</span>
-      {file.additions > 0 ? <span style={{ color: "#86efac" }}>+{file.additions}</span> : null}
-      {file.deletions > 0 ? <span style={{ color: "#f87171" }}>−{file.deletions}</span> : null}
-    </div>
-  );
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "added": return "A";
-    case "deleted": return "D";
-    case "modified": return "M";
-    case "renamed": return "R";
-    case "untracked": return "?";
-    default: return "·";
-  }
-}
-
-function statusColor(status: string): string {
-  switch (status) {
-    case "added": return "#86efac";
-    case "deleted": return "#f87171";
-    case "modified": return "#e5a06a";
-    case "renamed": return "#c4b5fd";
-    default: return "var(--muted)";
-  }
 }
 
 function reachableFromBranch(log: GitLogResult | null, branch: string): Set<string> | null {
@@ -471,26 +171,11 @@ function reachableFromBranch(log: GitLogResult | null, branch: string): Set<stri
   return reachable;
 }
 
-function formatAbsolute(input: string): string {
-  if (!input) return "";
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return input;
-  return d.toLocaleString();
-}
-
 const containerStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   height: "100%",
   overflow: "hidden",
-};
-
-const leftPaneStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  flex: 1,
-  minWidth: 0,
-  minHeight: 0,
 };
 
 const toolbarStyle: CSSProperties = {
@@ -517,34 +202,4 @@ const listStyle: CSSProperties = {
   minHeight: 0,
   overflow: "auto",
   background: "var(--bg)",
-};
-
-const resizeHandleStyle: CSSProperties = {
-  width: 4,
-  flexShrink: 0,
-  cursor: "col-resize",
-  borderLeft: "1px solid var(--border)",
-};
-
-const detailPaneStyle: CSSProperties = {
-  flexShrink: 0,
-  minWidth: 240,
-  maxWidth: "100%",
-  borderLeft: "1px solid var(--border)",
-  background: "var(--bg)",
-  minHeight: 0,
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-};
-
-const statusBadgeStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 16,
-  fontFamily: "var(--mono, monospace)",
-  fontSize: 10,
-  fontWeight: 600,
-  flexShrink: 0,
 };

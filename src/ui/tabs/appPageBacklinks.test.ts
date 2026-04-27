@@ -97,6 +97,66 @@ describe("gitCommitBacklinks", () => {
     expect(ids).toContain("git-commit:c2");
     expect(ids).toContain("git-commit:c0");
   });
+
+  test("emits a file ref per touched file when commitDetail is supplied", () => {
+    const ctx = baseCtx({
+      commitDetail: {
+        sha: "c1",
+        parents: [],
+        author: { name: "x", email: "", date: "" },
+        committer: { name: "x", email: "", date: "" },
+        subject: "x",
+        body: "",
+        files: [
+          { path: "src/a.ts", status: "modified", additions: 1, deletions: 0 },
+          { path: "old.ts → new.ts", status: "renamed", additions: 0, deletions: 0 },
+        ],
+      },
+    });
+    const out = gitCommitBacklinks({ sha: "c1" }, ctx);
+    const ids = out.map((e) => e.ref.id);
+    expect(ids).toContain("file:src/a.ts");
+    expect(ids).toContain("file:new.ts");
+    expect(ids).not.toContain("file:old.ts → new.ts");
+  });
+
+  test("links work items whose touched_files overlap commitDetail.files", () => {
+    const ctx = baseCtx({
+      workItems: [
+        { id: "wi-1", title: "Refactor a.ts", description: "", acceptance_criteria: null, touched_files: ["src/a.ts"] },
+        { id: "wi-2", title: "Unrelated", description: "", acceptance_criteria: null, touched_files: ["src/b.ts"] },
+      ],
+      commitDetail: {
+        sha: "c1",
+        parents: [],
+        author: { name: "x", email: "", date: "" },
+        committer: { name: "x", email: "", date: "" },
+        subject: "x",
+        body: "",
+        files: [{ path: "src/a.ts", status: "modified", additions: 1, deletions: 0 }],
+      },
+    });
+    const out = gitCommitBacklinks({ sha: "c1" }, ctx);
+    const ids = out.map((e) => e.ref.id);
+    expect(ids).toContain("wi:wi-1");
+    expect(ids).not.toContain("wi:wi-2");
+  });
+
+  test("ignores commitDetail when its sha doesn't match the target", () => {
+    const ctx = baseCtx({
+      commitDetail: {
+        sha: "different",
+        parents: [],
+        author: { name: "x", email: "", date: "" },
+        committer: { name: "x", email: "", date: "" },
+        subject: "x",
+        body: "",
+        files: [{ path: "src/a.ts", status: "modified", additions: 1, deletions: 0 }],
+      },
+    });
+    const out = gitCommitBacklinks({ sha: "c1" }, ctx);
+    expect(out.map((e) => e.ref.id)).not.toContain("file:src/a.ts");
+  });
 });
 
 describe("gitHistoryBacklinks", () => {

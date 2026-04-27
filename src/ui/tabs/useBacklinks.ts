@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { GitLogCommit, Stream, ThreadWorkState } from "../api.js";
-import { getBranchChanges, getGitLog, listCodeQualityFindings, listWikiNotes, readWikiNoteBody, listWorkItemEfforts } from "../api.js";
+import type { CommitDetail, GitLogCommit, Stream, ThreadWorkState } from "../api.js";
+import { getBranchChanges, getCommitDetail, getGitLog, listCodeQualityFindings, listWikiNotes, readWikiNoteBody, listWorkItemEfforts } from "../api.js";
 import type { BacklinkContext, BacklinkEntry, BacklinkFindingEntry, BacklinkNoteEntry, BacklinkWorkItemEntry } from "./backlinksIndex.js";
 import { computeBacklinks } from "./backlinksIndex.js";
 import { APP_PAGE_BACKLINKS } from "./appPageBacklinks.js";
@@ -26,6 +26,7 @@ export function useBacklinks(
   const [recentLog, setRecentLog] = useState<GitLogCommit[] | undefined>(undefined);
   const [uncommittedPaths, setUncommittedPaths] = useState<string[] | undefined>(undefined);
   const [currentBranch, setCurrentBranch] = useState<string | undefined>(undefined);
+  const [commitDetail, setCommitDetail] = useState<CommitDetail | undefined>(undefined);
 
   useEffect(() => {
     if (!stream) {
@@ -112,9 +113,27 @@ export function useBacklinks(
     return () => { cancelled = true; };
   }, [isAppPage, target.kind, stream?.id]);
 
+  // Per-commit detail (touched files) for git-commit pages — bounded
+  // single fetch per (stream, sha) pair.
+  const commitSha = target.kind === "git-commit"
+    ? (target.payload as { sha?: string } | null)?.sha ?? ""
+    : "";
+  useEffect(() => {
+    if (!stream || !commitSha) {
+      setCommitDetail(undefined);
+      return;
+    }
+    let cancelled = false;
+    void getCommitDetail(stream.id, commitSha).then((res) => {
+      if (cancelled) return;
+      setCommitDetail(res ?? undefined);
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [stream?.id, commitSha]);
+
   const provider = APP_PAGE_BACKLINKS[target.kind];
   if (provider) {
-    return provider(target.payload, { ...ctx, recentLog, uncommittedPaths, currentBranch });
+    return provider(target.payload, { ...ctx, recentLog, uncommittedPaths, currentBranch, commitDetail });
   }
   return computeBacklinks(target, ctx);
 }

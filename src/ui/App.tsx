@@ -110,7 +110,7 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
-import { closedThreadsRef, fileRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -217,7 +217,6 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
@@ -1421,9 +1420,7 @@ export function App() {
   };
 
   const handleRevealCommit = (sha: string) => {
-    const token = Date.now();
-    setHistoryReveal({ sha, token });
-    handleOpenPage(indexRef("git-history"));
+    handleOpenPage(gitCommitRef(sha));
   };
 
   const handleRequestEditWorkItem = (itemId: string) => {
@@ -1860,7 +1857,10 @@ export function App() {
       // Default for any in-page navigation: replace the current page in this
       // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
       // BacklinksList still escape to a new tab via PageNavigationContext.
-      const navOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+      const navOpen = (newRef: TabRef, opts?: { newTab?: boolean }) => {
+        if (opts?.newTab) handleOpenPage(newRef);
+        else handleNavigateInTab(ref.id, newRef);
+      };
       // For file-list pages: plain click → in-tab nav (back returns to
       // the list); modifier-click → new file tab.
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
@@ -1868,9 +1868,7 @@ export function App() {
         else handleNavigateInTab(ref.id, fileRef(path));
       };
       const navRevealCommit = (sha: string) => {
-        const token = Date.now();
-        setHistoryReveal({ sha, token });
-        navOpen(indexRef("git-history"));
+        navOpen(gitCommitRef(sha));
       };
       if (ref.kind === "file") {
         const path = (ref.payload as { path?: string } | null)?.path;
@@ -1936,7 +1934,7 @@ export function App() {
           label: "Git history",
           closable: true,
           render: () => (
-            <GitHistoryPage stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />
+            <GitHistoryPage stream={stream} onOpenPage={navOpen} />
           ),
         });
       } else if (ref.kind === "git-dashboard") {
@@ -2318,7 +2316,6 @@ export function App() {
     closePageTab,
     bookmarksStore,
     snapshotsReveal,
-    historyReveal,
     workspaceContext.gitEnabled,
     selectedFilePath,
     generatedDirs,
