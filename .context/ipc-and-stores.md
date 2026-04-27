@@ -238,9 +238,11 @@ a row, optionally `update(id, patch)` for progress ticks, then
 determinate work or `null` for indeterminate (animated stripes in the
 UI). Active producers:
 
-- **Git pull/push** — `runtime.gitPull` / `runtime.gitPush` use
-  `gitPullAsync` / `gitPushAsync` from `src/git/git.ts` so the main
-  process doesn't block during the network call. Indeterminate.
+- **Git pull/push/merge/rebase** — `runtime.gitPull` /
+  `runtime.gitPush` / `runtime.gitMergeInto` / `runtime.gitRebaseOnto`
+  use `gitPullAsync` / `gitPushAsync` / `gitMergeAsync` /
+  `gitRebaseAsync` from `src/git/git.ts` so the main process doesn't
+  block during the network or merge work. Indeterminate.
 - **Code-quality scans** — `runtime.runCodeQualityScan` opens a row in
   parallel with the existing `code-quality.scanned` event flow. The
   scan-status strip in CodeQualityPanel keeps its panel-local spinner;

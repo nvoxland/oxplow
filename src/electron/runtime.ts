@@ -36,8 +36,8 @@ import {
   listGitRefsGrouped,
   renameBranch,
   deleteBranch,
-  gitMerge,
-  gitRebase,
+  gitMergeAsync,
+  gitRebaseAsync,
   listExistingWorktrees,
   getAheadBehind,
   getCommitsAheadOf,
@@ -880,14 +880,41 @@ export class ElectronRuntime {
     return deleteBranch(this.projectDir, branch, options?.force);
   }
 
-  gitMergeInto(streamId: string, other: string): GitOpResult {
+  async gitMergeInto(streamId: string, other: string): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitMerge(stream.worktree_path, other);
+    const target = stream.branch ?? "HEAD";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Merging ${other} → ${target}…`,
+    });
+    try {
+      const result = await gitMergeAsync(stream.worktree_path, other);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git merge failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
-  gitRebaseOnto(streamId: string, onto: string): GitOpResult {
+  async gitRebaseOnto(streamId: string, onto: string): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitRebase(stream.worktree_path, onto);
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Rebasing onto ${onto}…`,
+    });
+    try {
+      const result = await gitRebaseAsync(stream.worktree_path, onto);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git rebase failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
   /**

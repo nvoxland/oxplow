@@ -116,14 +116,16 @@ All git invocations go through `src/git/git.ts`. Notable:
   `listFileCommits`, `listAllRefs`,
   `readFileAtRef`, `listGitStatuses` — straight `execFileSync` wrappers
   exposed via IPC for UI consumption.
-- `gitPush` / `gitPull` ship sync wrappers plus async siblings
-  `gitPushAsync` / `gitPullAsync` (and a `gitFetchAsync` helper) backed
-  by `child_process.execFile` + `promisify`. The runtime IPC handlers
+- `gitPush` / `gitPull` / `gitMerge` / `gitRebase` ship sync wrappers
+  plus async siblings `gitPushAsync` / `gitPullAsync` / `gitMergeAsync` /
+  `gitRebaseAsync` (and a `gitFetchAsync` helper) backed by
+  `child_process.execFile` + `promisify`. The runtime IPC handlers
   use the async variants so the main process stays responsive during
-  the network call, and they register a row with the
+  the network or merge work, and they register a row with the
   `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
   shows progress. The sync wrappers stay around for code paths that
-  haven't been promoted yet (e.g. `gitCommitAll`'s internal calls).
+  haven't been promoted yet (e.g. `gitCommitAll`'s internal calls,
+  unit tests).
 - `getGitLog` accepts an `all` option (defaults `true`). Pass
   `{ all: false }` to drop `--all` so the log only walks commits
   reachable from `HEAD`'s branch — used by the Git Dashboard's
