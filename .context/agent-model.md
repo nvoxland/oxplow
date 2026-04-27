@@ -140,7 +140,10 @@ to `runtime.handleHookEnvelope`, which:
    below). The runtime no longer tracks per-turn rows; snapshots and
    per-effort attribution are anchored to `work_item_effort`.
 4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
-   blocks the tool (see Write guard below).
+   blocks the tool (read-only thread; see Write guard below) or if
+   `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
+   MultiEdit / NotebookEdit on a writer thread without an in_progress
+   item or a filing call this turn; see `filing-enforcement.ts`).
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
    from the stores — see `buildSessionContextBlock` in `runtime.ts`)
@@ -184,19 +187,22 @@ top branch returns "allow stop" and **suppresses every directive**
 (in-progress audit, filing-enforcement). The flag is cleared on the
 next UserPromptSubmit.
 
-**Filing-enforcement branch (writer thread).** When the turn made
-write-intent edits to project files (`turnHadWrites === true`) but
-**no** work-item-mutating tool was called this turn
-(`turnHadFiling === false`) AND no `in_progress` item exists to claim
-the work, the pipeline blocks with `buildFilingEnforcementStopReason`.
-The agent must either file/transition an item describing the edits or
-revert them before stopping. There is no trivial-edit carve-out — every
-write requires a tracked item. Filing-counted tools:
-`create_work_item`, `update_work_item`, `complete_task`,
-`file_epic_with_children`, `transition_work_items`, `dispatch_work_item`
-(each calls `markFiledThisTurn` from its MCP handler). The
-filing-enforcement branch sits *before* the in-progress audit branch so
-legitimate "filed and still open" turns flow into the audit normally.
+**Filing enforcement (writer thread, PreToolUse).** Enforcement runs
+in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
+`filing-enforcement.ts`), not the Stop hook. When the agent invokes
+Edit / Write / MultiEdit / NotebookEdit on a writer thread and the
+thread has no `in_progress` work item AND no filing call has fired
+yet this turn, the hook returns `permissionDecision: "deny"` and the
+edit is rejected before it lands. The agent files an item (or flips
+an existing ready row to in_progress) and re-issues the edit. Filing-
+counted tools: `create_work_item`, `update_work_item`,
+`complete_task`, `file_epic_with_children`, `transition_work_items`,
+`dispatch_work_item` (each calls `markFiledThisTurn` from its MCP
+handler). Bash is **excluded** — shell commands routinely mutate the
+worktree as a side effect (`git merge`, `git pull`, codegen,
+formatters) without representing authored change worth filing. The
+Stop-hook in-progress audit still fires for any lingering items, so
+real edits made via Bash under an open item are unaffected.
 
 **Wiki-capture exception.** A read-heavy / no-write turn
 (`turnHadActivity === false` AND `turnWasExploration === true`) emits
@@ -215,13 +221,7 @@ on the next `UserPromptSubmit`.
 
 The pipeline runs in priority order:
 
-1. **Filing-enforcement (writer thread only).** Block with
-   `buildFilingEnforcementStopReason` when the turn made write-intent
-   edits to project files but no work-item-mutating tool was called
-   AND no in_progress item exists to claim the work (see
-   "Filing-enforcement branch" below for the full set of filing-counted
-   tools).
-2. **Writer thread with `in_progress` work items.** Block with the audit
+1. **Writer thread with `in_progress` work items.** Block with the audit
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
    to reconcile each: still active → leave alone; acceptance criteria met
@@ -240,7 +240,7 @@ The pipeline runs in priority order:
    agent answers "still in progress" → Stop fires → identical audit
    nudge → same answer, costing the user a wall of repeated lines and
    model tokens. See wi-c468e8fc093d.
-3. **Otherwise.** Allow stop.
+2. **Otherwise.** Allow stop.
 
 **No commit / wait-point branches.** The runtime never drives `git
 commit` and there are no queueable commit / wait-point markers. Commits

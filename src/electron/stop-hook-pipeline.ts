@@ -15,11 +15,15 @@ import type { WorkItem } from "../persistence/work-item-store.js";
  *   2. Q&A turn (no qualifying tool activity): allow stop, except for the
  *      wiki-capture exception (read-heavy / no-write turns get the
  *      capture directive).
- *   3. Filing-enforcement: write-intent edits without a filing call AND
- *      no in_progress claim → block.
- *   4. In-progress audit: any item in `in_progress` → block with audit
+ *   3. In-progress audit: any item in `in_progress` → block with audit
  *      directive (with no-change suppression by signature).
- *   5. Allow stop.
+ *   4. Allow stop.
+ *
+ * Filing enforcement runs in the PreToolUse hook (see
+ * `filing-enforcement.ts`), not here — by the time Stop fires, any
+ * write has already shipped, so blocking at end-of-turn was both
+ * post-hoc theatre and false-positive on Bash-driven worktree change
+ * (`git merge`, codegen, formatters).
  *
  * The runtime never drives `git commit` and never queues commit/wait
  * markers. Commits are user-driven (CLI / Bash); cross-turn queue
@@ -125,10 +129,6 @@ export function decideStopDirective(
      *  enabled. Optional so callers that don't wire this up (older tests)
      *  fall through to the plain Q&A "allow stop" path. */
     buildWikiCaptureReason?: () => string;
-    /** Emitted when the turn made writes but never filed/transitioned a
-     *  work item AND no in_progress item exists to claim the work.
-     *  Optional so older callers fall through. */
-    buildFilingEnforcementReason?: () => string;
     /** Emitted when the turn filed at least one new `ready` row,
      *  edited zero project files, and has no `in_progress` item.
      *  Catches the "user said 'do X', agent filed it as backlog and
@@ -196,24 +196,15 @@ export function decideStopDirective(
     return { directive: null, sideEffects };
   }
 
-  // Filing-enforcement branch: the turn made write-intent edits to project
-  // files but never created/transitioned a work item AND no in_progress
-  // item exists to claim the work. Block with a hard directive — the
-  // agent must file (or transition) an item or revert before stopping.
-  // This sits BEFORE the in-progress audit so the audit branch can
-  // continue to handle the legitimate "filed and still open" path.
+  // Filing enforcement is no longer a Stop branch — it ran at the wrong
+  // moment (post-hoc, after the write had already shipped) and false-
+  // positived on Bash-driven worktree mutation that doesn't represent
+  // authored change (`git merge`, codegen, formatters). Enforcement
+  // moved to the PreToolUse hook (`buildFilingEnforcementPreToolDeny`),
+  // which intercepts Edit/Write/MultiEdit/NotebookEdit before the write
+  // lands when no in_progress item exists. The pipeline keeps the
+  // `inProgressAll` snapshot below for the in-progress audit branch.
   const inProgressAll = snapshot.workItems.filter((item) => item.status === "in_progress");
-  if (
-    snapshot.turnHadWrites &&
-    !snapshot.turnHadFiling &&
-    inProgressAll.length === 0 &&
-    builders.buildFilingEnforcementReason
-  ) {
-    return {
-      directive: { decision: "block", reason: builders.buildFilingEnforcementReason() },
-      sideEffects,
-    };
-  }
 
   // Filed-but-didn't-ship advisory branch: the turn filed at least one
   // new `ready` row but made zero project edits AND has nothing

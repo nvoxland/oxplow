@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
+import { buildFilingEnforcementPreToolDeny } from "./filing-enforcement.js";
 import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { ThreadStore, type Thread, type ThreadState } from "../persistence/thread-store.js";
@@ -1807,6 +1808,22 @@ export class ElectronRuntime {
         toolInput: (envelope.payload as { tool_input?: unknown })?.tool_input,
       });
       if (deny) return { body: deny };
+      // Filing-enforcement guard: block Edit/Write/MultiEdit/NotebookEdit
+      // when the writer thread has no in_progress item to claim the
+      // change AND no filing call has fired this turn yet. Catches the
+      // misread at the moment the agent can act on it (file → re-edit)
+      // instead of at end-of-turn after the write has already shipped.
+      const inProgressOpen = this.workItemStore
+        .listItems(envelope.threadId)
+        .some((item) => item.status === "in_progress");
+      const filedThisTurn = this.filedThisTurnByThread.has(envelope.threadId);
+      const filingDeny = buildFilingEnforcementPreToolDeny({
+        thread,
+        toolName,
+        hasInProgressItem: inProgressOpen,
+        filedThisTurn,
+      });
+      if (filingDeny) return { body: filingDeny };
     }
     if (envelope.event === "UserPromptSubmit") {
       // Seed the per-turn activity flag — flips to true on the first
@@ -1939,7 +1956,6 @@ export class ElectronRuntime {
     const outcome = decideStopDirective(snapshot, {
       buildInProgressAuditReason: buildInProgressAuditStopReason,
       buildWikiCaptureReason: buildWikiCaptureStopReason,
-      buildFilingEnforcementReason: buildFilingEnforcementStopReason,
       buildFiledButDidntShipReason: buildFiledButDidntShipStopReason,
       buildStaleEpicChildrenReason: buildStaleEpicChildrenStopReason,
     });
@@ -2482,26 +2498,6 @@ export function buildInProgressAuditStopReason(items: WorkItem[]): string {
  * directive fires and clears on the next user prompt, so a "skipped"
  * reply doesn't loop.
  */
-/**
- * Filing-enforcement Stop reason. Fires when the turn made writes on
- * project files but no work-item-mutating tool was called AND no
- * in_progress item exists to claim the work. The agent must either
- * file/transition an item describing what was just edited, or revert
- * the edits, before stopping.
- */
-export function buildFilingEnforcementStopReason(): string {
-  return [
-    `BLOCKED: this turn edited project files but no work item was filed or transitioned, and no in_progress item exists to claim the work. Every write requires a tracked work item — there is no trivial-edit carve-out.`,
-    ``,
-    `Pick one of these before stopping:`,
-    `  • If the edits are a fix/redo of a recently-closed human_check item, reopen it: \`mcp__oxplow__update_work_item\` → status=in_progress, then \`mcp__oxplow__complete_task\` back to human_check when settled.`,
-    `  • If the edits are a genuinely new concern, file a new task: \`mcp__oxplow__create_work_item\` with status=in_progress, then \`mcp__oxplow__complete_task\` to close it.`,
-    `  • If the edits should not have happened, revert them (e.g. via the Files panel or \`git checkout -- <path>\`), then stop normally.`,
-    ``,
-    `Do not file a placeholder "untracked work" item just to dismiss this — describe the real edits that landed. The Work panel needs to honestly reflect what shipped this turn.`,
-  ].join("\n");
-}
-
 export function buildStaleEpicChildrenStopReason(
   pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
 ): string {

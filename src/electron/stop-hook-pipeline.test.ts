@@ -7,7 +7,6 @@ const builders = {
   buildInProgressAuditReason: (items: WorkItem[]) =>
     `audit: ${items.map((i) => i.id).join(",")}`,
   buildWikiCaptureReason: () => "wiki-capture",
-  buildFilingEnforcementReason: () => "file an item",
   buildFiledButDidntShipReason: () => "filed but didn't ship",
   buildStaleEpicChildrenReason: (pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>) =>
     `stale-epics: ${pairs.map((p) => `${p.epic.id}=>${p.staleChildren.map((c) => c.id).join(",")}`).join("|")}`,
@@ -300,8 +299,13 @@ describe("decideStopDirective", () => {
     });
   });
 
-  describe("filing-enforcement branch", () => {
-    test("turn had writes but no filing and no open in_progress: block with filing directive", () => {
+  describe("filing-enforcement no longer fires at Stop", () => {
+    // Filing enforcement moved to the PreToolUse hook
+    // (`buildFilingEnforcementPreToolDeny`). The Stop pipeline must
+    // pass through writes-without-filing turns so we don't double-
+    // block (PreToolUse blocked the edit; Stop blocking again is
+    // post-hoc theatre).
+    test("writes without filing and no in_progress: pass through", () => {
       const out = decideStopDirective(
         snapshot({
           workItems: [],
@@ -311,23 +315,10 @@ describe("decideStopDirective", () => {
         }),
         builders,
       );
-      expect(out.directive).toEqual({ decision: "block", reason: "file an item" });
-    });
-
-    test("turn had writes AND filing call: pass through (no enforcement block)", () => {
-      const out = decideStopDirective(
-        snapshot({
-          workItems: [],
-          turnHadActivity: true,
-          turnHadWrites: true,
-          turnHadFiling: true,
-        }),
-        builders,
-      );
       expect(out.directive).toBeNull();
     });
 
-    test("turn had writes under a pre-existing in_progress item: audit handles it", () => {
+    test("writes under a pre-existing in_progress item: audit fires normally", () => {
       const ip = workItem("wi-ip", 1, "in_progress");
       const out = decideStopDirective(
         snapshot({
@@ -339,33 +330,6 @@ describe("decideStopDirective", () => {
         builders,
       );
       expect(out.directive).toEqual({ decision: "block", reason: "audit: wi-ip" });
-    });
-
-    test("read-only turn does not trigger filing enforcement", () => {
-      const out = decideStopDirective(
-        snapshot({
-          workItems: [],
-          turnHadActivity: true,
-          turnHadWrites: false,
-          turnHadFiling: false,
-        }),
-        builders,
-      );
-      expect(out.directive).toBeNull();
-    });
-
-    test("awaitingUser overrides filing enforcement", () => {
-      const out = decideStopDirective(
-        snapshot({
-          workItems: [],
-          turnHadActivity: true,
-          turnHadWrites: true,
-          turnHadFiling: false,
-          awaitingUser: true,
-        }),
-        builders,
-      );
-      expect(out.directive).toBeNull();
     });
   });
 

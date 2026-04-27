@@ -31,15 +31,17 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD or a subagent dispatch.
 
-**No trivial-edit carve-out for filing.** Every write to project files
-requires a tracked work item — typos, single-line CSS tweaks, and
-one-file fixes included. The Stop hook enforces this: a turn that
-edited files without a filing/transition tool call AND with no
-in_progress item gets blocked. The carve-out previously documented
-here was abused into "skip filing for any small thing", which left the
-Work panel lying about what shipped. The `.context/` read rule still
-gets a soft pass for tiny mechanical edits — just don't skip the work
-item.
+**No trivial-edit carve-out for filing.** Every Edit / Write /
+MultiEdit / NotebookEdit on project files requires a tracked work
+item — typos, single-line CSS tweaks, and one-file fixes included.
+Enforcement is a **PreToolUse hook**: when the writer thread has no
+`in_progress` item AND no filing call has fired this turn, the edit
+tool is denied at the moment it's invoked, not at end-of-turn. File
+the item (or flip a ready row to in_progress), then re-issue the edit.
+Bash is intentionally exempt — `git merge`, `git pull`, codegen, and
+formatters mutate the worktree as a side effect without representing
+authored change worth filing. The `.context/` read rule still gets a
+soft pass for tiny mechanical edits — just don't skip the work item.
 
 **Asking the user a question.** When your reply ends with a real
 clarifying question, A/B/C choice, or any ask where the user owns the
