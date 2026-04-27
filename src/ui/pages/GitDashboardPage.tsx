@@ -8,12 +8,16 @@ import {
   gitPullRemoteIntoCurrent,
   gitPush,
   gitPushCurrentTo,
+  listAgentStatuses,
   listRecentRemoteBranches,
   listSiblingWorktrees,
+  listStreams,
   listWorkspaceFiles,
+  subscribeAgentStatus,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
 } from "../api.js";
+import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
@@ -39,12 +43,13 @@ interface DashboardData {
   };
   uncommitted: WorkspaceStatusSummary | null;
   recentLog: GitLogResult;
-  worktrees: WorktreeRow[];
+  streams: StreamWorktreeRow[];
   remoteBranches: RemoteBranchEntry[];
 }
 
-interface WorktreeRow {
+interface StreamWorktreeRow {
   worktree: GitWorktreeEntry;
+  stream: Stream;
   ahead: number;
   behind: number;
 }
@@ -62,6 +67,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  // Per-(stream, thread) agent status. The Streams card aggregates over
+  // each stream's threads to render the "working" indicator.
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, Record<string, string>>>({});
   const streamId = stream?.id ?? null;
 
   const refresh = useCallback(async () => {
@@ -72,11 +80,12 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const [filesResult, log, worktrees, remoteBranches] = await Promise.all([
+      const [filesResult, log, worktrees, remoteBranches, streams] = await Promise.all([
         listWorkspaceFiles(streamId),
         getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listSiblingWorktrees(streamId),
         listRecentRemoteBranches(streamId, 20),
+        listStreams(),
       ]);
       const branch = stream?.branch ?? log.currentBranch ?? null;
       const headCommit = log.commits[0] ?? null;
@@ -91,12 +100,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         aheadUpstream = counts.ahead;
         behindUpstream = counts.behind;
       }
-      // Worktree ahead/behind vs main — when worktrees are exposed, fan out.
-      const worktreeRows: WorktreeRow[] = await Promise.all(
-        worktrees.map(async (wt) => {
-          if (!wt.branch) return { worktree: wt, ahead: 0, behind: 0 };
+      // Only surface worktrees that back a known stream — the dashboard
+      // labels rows by the stream's title rather than the worktree path.
+      const streamByWorktreePath = new Map(streams.map((s) => [s.worktree_path, s]));
+      const streamWorktrees = worktrees.flatMap((wt) => {
+        const match = streamByWorktreePath.get(wt.path);
+        return match ? [{ wt, stream: match }] : [];
+      });
+      const streamRows: StreamWorktreeRow[] = await Promise.all(
+        streamWorktrees.map(async ({ wt, stream: matchedStream }) => {
+          if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
           const counts = await getAheadBehind(streamId, WORKTREE_BASE, wt.branch);
-          return { worktree: wt, ahead: counts.ahead, behind: counts.behind };
+          return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind };
         }),
       );
       setData({
@@ -111,7 +126,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         },
         uncommitted: filesResult.summary,
         recentLog: log,
-        worktrees: worktreeRows,
+        streams: streamRows,
         remoteBranches,
       });
     } catch (err) {
@@ -135,6 +150,37 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       unsubWorkspace();
     };
   }, [streamId, refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentStatuses().then((entries) => {
+      if (cancelled) return;
+      const byStream: Record<string, Record<string, string>> = {};
+      for (const e of entries) {
+        (byStream[e.streamId] ??= {})[e.threadId] = e.status;
+      }
+      setAgentStatuses(byStream);
+    });
+    const unsub = subscribeAgentStatus("all", (entry) => {
+      setAgentStatuses((prev: Record<string, Record<string, string>>) => ({
+        ...prev,
+        [entry.streamId]: { ...(prev[entry.streamId] ?? {}), [entry.threadId]: entry.status },
+      }));
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  const streamWorkingFlags = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const sid of Object.keys(agentStatuses)) {
+      const threads = agentStatuses[sid] ?? {};
+      out[sid] = Object.values(threads).some((s) => s === "working");
+    }
+    return out;
+  }, [agentStatuses]);
 
   const runConfirmed = useCallback(
     async (label: string, command: string, action: () => Promise<GitOpResult>) => {
@@ -194,9 +240,10 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onViewFullHistory={() => onRevealCommit(data.recentLog.commits[0]?.sha ?? "")}
             />
 
-            <WorktreesCard
+            <StreamsCard
               streamId={streamId}
-              rows={data.worktrees}
+              rows={data.streams}
+              workingByStreamId={streamWorkingFlags}
               onMerge={(branch) =>
                 runConfirmed(
                   `Merge ${branch} into current`,
@@ -340,22 +387,24 @@ function RecentCommitsCard({
   );
 }
 
-function WorktreesCard({
+function StreamsCard({
   streamId,
   rows,
   onMerge,
   pendingAction,
+  workingByStreamId,
 }: {
   streamId: string;
-  rows: WorktreeRow[];
+  rows: StreamWorktreeRow[];
   onMerge(branch: string): void;
   pendingAction: string | null;
+  workingByStreamId: Record<string, boolean>;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
-    <Card testId="git-dashboard-worktrees" title="Worktrees">
+    <Card testId="git-dashboard-streams" title="Streams">
       {rows.length === 0 ? (
-        <div style={muted}>No sibling worktrees.</div>
+        <div style={muted}>No sibling streams.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {rows.map((row) => {
@@ -365,7 +414,7 @@ function WorktreesCard({
             return (
               <div
                 key={row.worktree.path}
-                data-testid="git-dashboard-worktree-row"
+                data-testid="git-dashboard-stream-row"
                 style={{ borderBottom: "1px solid var(--border-subtle)" }}
               >
                 <div
@@ -389,9 +438,14 @@ function WorktreesCard({
                     {isOpen ? "▾" : "▸"}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500 }}>{branch}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
+                      {workingByStreamId[row.stream.id] ? (
+                        <AgentStatusDot status="working" />
+                      ) : null}
+                      <span>{row.stream.title}</span>
+                    </div>
                     <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {row.worktree.path}
+                      {branch}
                     </div>
                   </div>
                   <div style={subtle}>
@@ -430,7 +484,7 @@ function PairwiseDiffPane({
   selfBranch,
 }: {
   streamId: string;
-  rows: WorktreeRow[];
+  rows: StreamWorktreeRow[];
   selfBranch: string;
 }) {
   const otherBranches = rows
