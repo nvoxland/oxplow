@@ -2,16 +2,26 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listWorkspaceFiles, subscribeWorkspaceEvents, type Stream, type WorkspaceIndexedFile } from "../api.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
+import type { TabRef } from "../tabs/tabState.js";
+import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
 interface Props {
   open: boolean;
   stream: Stream | null;
   selectedFilePath: string | null;
+  /** Top-level pages/apps surfaced as launcher entries when the input
+   *  is empty, and mixed into search results when the user types. */
+  pages: PageDirectoryEntry[];
   onClose(): void;
   onOpenFile(path: string): void;
+  onOpenPage(ref: TabRef): void;
 }
 
-export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOpenFile }: Props) {
+type Result =
+  | { kind: "page"; entry: PageDirectoryEntry }
+  | { kind: "file"; file: WorkspaceIndexedFile };
+
+export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClose, onOpenFile, onOpenPage }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,23 +70,37 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
     };
   }, [open, stream?.id]);
 
-  const filteredFiles = useMemo(() => {
+  // Empty input = launcher mode (pages only, fixed order). With a
+  // query, search both pages and files in parallel and show pages
+  // first — they're a finite curated list and a "plan" / "files"
+  // / "git" search shouldn't have to scroll past matching file paths.
+  const results = useMemo<Result[]>(() => {
     const q = query.trim().toLowerCase();
-    const next = q ? files.filter((file) => fuzzyMatches(file.path.toLowerCase(), q)) : files;
-    return next.slice(0, 80);
-  }, [files, query]);
+    if (!q) {
+      return pages.map((entry) => ({ kind: "page" as const, entry }));
+    }
+    const matchedPages: Result[] = pages
+      .filter((entry) => fuzzyMatches(entry.label.toLowerCase(), q) || fuzzyMatches(entry.id, q))
+      .map((entry) => ({ kind: "page" as const, entry }));
+    const matchedFiles: Result[] = files
+      .filter((file) => fuzzyMatches(file.path.toLowerCase(), q))
+      .slice(0, 80)
+      .map((file) => ({ kind: "file" as const, file }));
+    return [...matchedPages, ...matchedFiles];
+  }, [pages, files, query]);
 
   useEffect(() => {
-    if (selectedIndex < filteredFiles.length) return;
-    setSelectedIndex(filteredFiles.length === 0 ? 0 : filteredFiles.length - 1);
-  }, [filteredFiles, selectedIndex]);
+    if (selectedIndex < results.length) return;
+    setSelectedIndex(results.length === 0 ? 0 : results.length - 1);
+  }, [results, selectedIndex]);
 
   if (!open || !stream) {
     return null;
   }
 
-  function confirmSelection(path: string) {
-    onOpenFile(path);
+  function confirm(result: Result) {
+    if (result.kind === "page") onOpenPage(result.entry.ref);
+    else onOpenFile(result.file.path);
     onClose();
   }
 
@@ -98,7 +122,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
             }
             if (event.key === "ArrowDown") {
               event.preventDefault();
-              setSelectedIndex((current) => Math.min(current + 1, Math.max(filteredFiles.length - 1, 0)));
+              setSelectedIndex((current) => Math.min(current + 1, Math.max(results.length - 1, 0)));
               return;
             }
             if (event.key === "ArrowUp") {
@@ -108,39 +132,58 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, onClose, onOp
             }
             if (event.key === "Enter") {
               event.preventDefault();
-              const selected = filteredFiles[selectedIndex];
-              if (selected) {
-                confirmSelection(selected.path);
-              }
+              const selected = results[selectedIndex];
+              if (selected) confirm(selected);
             }
           }}
-          placeholder="Quick open file…"
+          placeholder="Search pages and files…"
           style={inputStyle}
         />
         <div style={metaStyle}>
           <span>{stream.title}</span>
-          <span>{loading ? "Indexing files…" : `${files.length} files`}</span>
+          <span>{loading ? "Indexing files…" : `${pages.length} pages · ${files.length} files`}</span>
         </div>
         {error ? <div style={errorStyle}>{error}</div> : null}
         <div style={resultsStyle}>
-          {filteredFiles.length === 0 && !loading ? (
-            <div style={emptyStyle}>No matching files.</div>
+          {results.length === 0 && !loading ? (
+            <div style={emptyStyle}>No matches.</div>
           ) : (
-            filteredFiles.map((file, index) => (
-              <button type="button"
-                key={file.path}
-                onClick={() => confirmSelection(file.path)}
-                style={{
-                  ...resultStyle,
-                  background: index === selectedIndex ? "rgba(74, 158, 255, 0.18)" : "transparent",
-                  color: file.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
-                }}
-              >
-                <span>📄</span>
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{file.path}</span>
-                <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(file.gitStatus)}</span>
-              </button>
-            ))
+            results.map((result, index) => {
+              const active = index === selectedIndex;
+              if (result.kind === "page") {
+                return (
+                  <button type="button"
+                    key={`page:${result.entry.id}`}
+                    onClick={() => confirm(result)}
+                    style={{
+                      ...resultStyle,
+                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 18, textAlign: "center" }}>{result.entry.label.split("  ")[0]}</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {result.entry.label.split("  ").slice(1).join("  ") || result.entry.label}
+                    </span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                  </button>
+                );
+              }
+              return (
+                <button type="button"
+                  key={`file:${result.file.path}`}
+                  onClick={() => confirm(result)}
+                  style={{
+                    ...resultStyle,
+                    background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    color: result.file.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
+                  }}
+                >
+                  <span style={{ width: 18, textAlign: "center" }}>📄</span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{result.file.path}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.gitStatus)}</span>
+                </button>
+              );
+            })
           )}
         </div>
       </div>

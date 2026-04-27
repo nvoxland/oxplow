@@ -31,9 +31,12 @@ import {
   renameThread,
   renameStream,
   subscribeOxplowEvents,
+  subscribeWikiNoteEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
+  listRecentlyFinished,
+  type FinishedEntry,
   getConfig,
   setGeneratedDirs,
   selectThread,
@@ -83,7 +86,6 @@ import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { StartPage } from "./pages/StartPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
@@ -111,6 +113,7 @@ import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettin
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
+import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -1505,6 +1508,28 @@ export function App() {
     return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
   }, [currentSession.openOrder]);
 
+  // Recently-finished work merged across closed work-item efforts
+  // (per-thread) and updated wiki notes (global). Refetched on
+  // work-item or wiki-note changes; sub-100ms IPC, so coarse
+  // invalidation is fine.
+  const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listRecentlyFinished(selectedThreadId, 5)
+        .then((entries) => { if (!cancelled) setRecentlyFinished(entries); })
+        .catch(() => { /* ignore — empty list keeps the section hidden */ });
+    };
+    refresh();
+    const offWork = subscribeWorkItemEvents("all", () => refresh());
+    const offNotes = subscribeWikiNoteEvents(() => refresh());
+    return () => {
+      cancelled = true;
+      offWork();
+      offNotes();
+    };
+  }, [selectedThreadId]);
+
   const handleOpenPage = useCallback((ref: TabRef) => {
     switch (ref.kind) {
       case "agent":
@@ -1523,7 +1548,6 @@ export function App() {
       case "work-item":
       case "finding":
       case "dashboard":
-      case "start":
       case "settings":
       case "code-quality":
       case "local-history":
@@ -1822,14 +1846,7 @@ export function App() {
         setHistoryReveal({ sha, token });
         navOpen(indexRef("git-history"));
       };
-      if (ref.kind === "start") {
-        tabs.push({
-          id: ref.id,
-          label: "Start",
-          closable: true,
-          render: () => <StartPage onOpenPage={navOpen} />,
-        });
-      } else if (ref.kind === "settings") {
+      if (ref.kind === "settings") {
         tabs.push({
           id: ref.id,
           label: "Settings",
@@ -2300,6 +2317,7 @@ export function App() {
           backlog={backlogState}
           agentStatus={agentThreadStatus}
           recentFiles={recentFileEntries}
+          recentlyFinished={recentlyFinished}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
             return {
@@ -2351,9 +2369,15 @@ export function App() {
         open={quickOpenVisible}
         stream={stream}
         selectedFilePath={selectedFilePath}
+        pages={computePagesDirectory({
+          backlogReadyCount: backlogState?.items.filter((i) => i.status === "ready").length ?? 0,
+        })}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);
+        }}
+        onOpenPage={(ref) => {
+          handleOpenPage(ref);
         }}
       />
       {stream && externalFilePrompt ? (

@@ -326,6 +326,52 @@ export class WorkItemEffortStore {
     }));
   }
 
+  /**
+   * Most recent closed efforts in a thread (or globally when threadId
+   * is null), capped at `limit`. Joins to `work_items` for the title.
+   * Drives the rail's "Finished" section.
+   */
+  listRecentClosed(
+    threadId: string | null,
+    limit: number,
+  ): Array<{ itemId: string; title: string; endedAt: string }> {
+    const rows = threadId
+      ? this.stateDb.all<{
+          work_item_id: string;
+          ended_at: string;
+          title: string | null;
+        }>(
+          `SELECT e.work_item_id, e.ended_at, wi.title
+           FROM work_item_effort e
+           JOIN work_items wi ON wi.id = e.work_item_id
+           WHERE wi.thread_id = ?
+             AND wi.deleted_at IS NULL
+             AND e.ended_at IS NOT NULL
+           ORDER BY e.ended_at DESC, e.rowid DESC
+           LIMIT ?`,
+          threadId,
+          limit,
+        )
+      : this.stateDb.all<{
+          work_item_id: string;
+          ended_at: string;
+          title: string | null;
+        }>(
+          `SELECT e.work_item_id, e.ended_at, wi.title
+           FROM work_item_effort e
+           JOIN work_items wi ON wi.id = e.work_item_id
+           WHERE wi.deleted_at IS NULL
+             AND e.ended_at IS NOT NULL
+           ORDER BY e.ended_at DESC, e.rowid DESC
+           LIMIT ?`,
+          limit,
+        );
+    return rows.map((row) => ({
+      itemId: row.work_item_id,
+      title: row.title ?? "(untitled)",
+      endedAt: row.ended_at,
+    }));
+  }
 }
 
 function rowToEffort(row: Record<string, unknown>): WorkItemEffort {

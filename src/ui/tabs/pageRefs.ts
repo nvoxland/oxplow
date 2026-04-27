@@ -38,7 +38,7 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "plan-work" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings" | "start"): TabRef {
+export function indexRef(kind: "plan-work" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
 }
 
@@ -91,8 +91,7 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 /**
  * Form pages introduced by phase 5e. These replace the legacy modal
  * dialogs (NewStreamModal / NewWorkItemModal / Stream-Thread settings)
- * with a focused full-tab workspace, matching `SettingsPage` /
- * `StartPage`.
+ * with a focused full-tab workspace, matching `SettingsPage`.
  */
 
 export interface NewWorkItemPayload {

@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import { useMemo } from "react";
-import type { AgentStatus, BacklogState, ThreadWorkState, WorkItem } from "../../api.js";
+import type { AgentStatus, BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, workItemRef } from "../../tabs/pageRefs.js";
-import { computePagesDirectory } from "./sections.js";
+import { fileRef, noteRef, workItemRef } from "../../tabs/pageRefs.js";
+import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -24,6 +24,9 @@ export interface RailHudProps {
   agentStatus: AgentStatus;
   recentFiles: RecentFileEntry[];
   bookmarks?: BookmarkRailEntry[];
+  /** Most recently finished work — closed work item efforts merged
+   *  with updated wiki notes, sorted by timestamp DESC. */
+  recentlyFinished?: FinishedEntry[];
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
   /** Optional: invoked when the user clicks the search affordance. */
@@ -48,6 +51,7 @@ export function RailHud({
   agentStatus,
   recentFiles,
   bookmarks,
+  recentlyFinished,
   onOpenPage,
   onOpenSearch,
 }: RailHudProps) {
@@ -91,6 +95,10 @@ export function RailHud({
 
       {recents.length > 0 ? (
         <RecentFilesSection entries={recents} onOpenPage={onOpenPage} />
+      ) : null}
+
+      {recentlyFinished && recentlyFinished.length > 0 ? (
+        <FinishedSection entries={recentlyFinished} onOpenPage={onOpenPage} />
       ) : null}
 
       <PagesDirectory onOpenPage={onOpenPage} backlogReadyCount={backlogReadyCount} />
@@ -388,6 +396,41 @@ function RecentFilesSection({
   );
 }
 
+function FinishedSection({
+  entries,
+  onOpenPage,
+}: {
+  entries: FinishedEntry[];
+  onOpenPage(ref: TabRef): void;
+}) {
+  return (
+    <>
+      <SectionHeading>Finished</SectionHeading>
+      <div data-testid="rail-finished" style={{ paddingBottom: 8 }}>
+        {entries.map((e) => {
+          const ref = e.kind === "work-item" ? workItemRef(e.itemId) : noteRef(e.slug);
+          const icon = e.kind === "work-item" ? "✓" : "📒";
+          return (
+            <button
+              key={`${e.kind}:${e.kind === "work-item" ? e.itemId : e.slug}`}
+              type="button"
+              data-testid={`rail-finished-${e.kind === "work-item" ? e.itemId : e.slug}`}
+              title={e.title}
+              onClick={() => onOpenPage(ref)}
+              style={rowHoverStyle()}
+            >
+              <span style={{ color: "var(--text-muted)", fontSize: 11, width: 14, textAlign: "center" }}>{icon}</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.title}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function PagesDirectory({
   onOpenPage,
   backlogReadyCount,
@@ -395,7 +438,7 @@ function PagesDirectory({
   onOpenPage(ref: TabRef): void;
   backlogReadyCount: number;
 }) {
-  const entries = computePagesDirectory({ backlogReadyCount });
+  const entries = computePagesDirectory({ backlogReadyCount }).filter((e) => RAIL_PAGE_IDS.has(e.id));
   return (
     <>
       <SectionHeading>Pages</SectionHeading>
