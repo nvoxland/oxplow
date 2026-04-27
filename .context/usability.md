@@ -240,6 +240,12 @@ Things I keep forgetting. Read this before adding any UI.
   `src/ui/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME`
   ("Add to agent context") in `src/ui/agent-context-dnd.ts`. Add a
   new MIME rather than overloading an existing one.
+- **Tabs in the three tabbed sections (left dock rail, center pane, bottom
+  dock rail) are drag-reorderable.** DockShell rail tabs persist their order
+  in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
+  CenterTabs reorders within `reorderGroup` only — `file:`, `note:`, and
+  `diff:` tabs each shuffle within their own group; the `agent` tab is
+  pinned (no `reorderGroup`). Cross-group drops are no-ops.
 
 ## Empty and error states
 

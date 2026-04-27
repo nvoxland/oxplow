@@ -20,7 +20,30 @@ import {
 import { formatContextMention } from "../agent-context-ref.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
-import { getActiveXtermTheme, subscribeXtermTheme } from "../xterm-theme.js";
+
+const XTERM_THEME = {
+  background: "#1c1f24",
+  foreground: "#e6e8ec",
+  cursor: "#5b8cf5",
+  cursorAccent: "#1c1f24",
+  selectionBackground: "#1f2a44",
+  black: "#3f4451",
+  red: "#e05561",
+  green: "#8cc265",
+  yellow: "#d18f52",
+  blue: "#4aa5f0",
+  magenta: "#c162de",
+  cyan: "#42b3c2",
+  white: "#e6e6e6",
+  brightBlack: "#4f5666",
+  brightRed: "#ff616e",
+  brightGreen: "#a5e075",
+  brightYellow: "#f0a45d",
+  brightBlue: "#4dc4ff",
+  brightMagenta: "#de73ff",
+  brightCyan: "#4cd1e0",
+  brightWhite: "#ffffff",
+} as const;
 
 /**
  * Read the system clipboard as text. Prefers Electron's main-process
@@ -195,7 +218,7 @@ export function TerminalPane({
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
-      theme: getActiveXtermTheme(),
+      theme: XTERM_THEME,
       scrollback: 5000,
       cursorBlink: true,
       scrollSensitivity: 2,
@@ -206,11 +229,6 @@ export function TerminalPane({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
-    // Re-tint the terminal whenever the user flips the app theme. xterm
-    // applies `options.theme = next` on the live terminal — no re-mount.
-    const unsubTheme = subscribeXtermTheme((next) => {
-      try { term.options.theme = next; } catch { /* terminal may have disposed */ }
-    });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {
         return true;
@@ -459,7 +477,6 @@ export function TerminalPane({
       disposed = true;
       cleanupRef.current?.();
       ro?.disconnect();
-      unsubTheme();
       dataDisp.dispose();
       binaryDisp.dispose();
       const sessionId = sessionIdRef.current;

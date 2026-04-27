@@ -8,7 +8,6 @@ import {
   setSnapshotRetentionDays,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
-import { ThemeToggle } from "../components/ThemeToggle.js";
 
 export interface SettingsPageProps {
   /** Closes the page (caller closes the tab). Optional — settings can be a
@@ -97,13 +96,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       }
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
-        <Section title="Appearance">
-          <Hint>Light theme is the default. Use the toggle for dark mode or to follow your OS.</Hint>
-          <div style={{ marginTop: 8 }}>
-            <ThemeToggle variant="segmented" />
-          </div>
-        </Section>
-
         <Section title="Agent prompt additions">
           <Hint>
             Text appended to every agent's system prompt. Applies to agent sessions started after Save —

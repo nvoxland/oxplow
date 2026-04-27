@@ -152,6 +152,13 @@ export function markFileSaved(state: FileSessionState, path: string, content: st
   };
 }
 
+export function reorderOpenFiles(state: FileSessionState, orderedPaths: string[]): FileSessionState {
+  const known = new Set(state.openOrder);
+  const sanitized = orderedPaths.filter((path) => known.has(path));
+  if (sanitized.length !== state.openOrder.length) return state;
+  return { ...state, openOrder: sanitized };
+}
+
 export function removeOpenFiles(state: FileSessionState, paths: string[]): FileSessionState {
   let next = state;
   for (const path of paths) {

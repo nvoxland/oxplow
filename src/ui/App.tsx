@@ -58,6 +58,7 @@ import {
   openFileInSession,
   removeOpenFiles,
   renameOpenFilePaths,
+  reorderOpenFiles,
   selectOpenFile,
   setLoadedFileContent,
   setOpenFileLoading,
@@ -1459,6 +1460,35 @@ export function App() {
     setCenterActive((current) => (current === `note:${slug}` ? "agent" : current));
   }, []);
 
+  const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
+    if (!stream) return;
+    const orderedFiles: string[] = [];
+    const orderedNotes: string[] = [];
+    const orderedDiffIds: string[] = [];
+    for (const id of orderedIds) {
+      if (id.startsWith("file:")) orderedFiles.push(id.slice("file:".length));
+      else if (id.startsWith("note:")) orderedNotes.push(id.slice("note:".length));
+      else if (id.startsWith("diff:")) orderedDiffIds.push(id);
+    }
+    setFileSessions((prev) => {
+      const base = prev[stream.id] ?? createEmptyFileSession();
+      return { ...prev, [stream.id]: reorderOpenFiles(base, orderedFiles) };
+    });
+    setNoteTabs((prev) => {
+      if (orderedNotes.length !== prev.length) return prev;
+      const known = new Set(prev);
+      if (!orderedNotes.every((s) => known.has(s))) return prev;
+      return orderedNotes;
+    });
+    setDiffTabs((prev) => {
+      if (orderedDiffIds.length !== prev.length) return prev;
+      const byId = new Map(prev.map((d) => [d.id, d] as const));
+      const next = orderedDiffIds.map((id) => byId.get(id)).filter((d): d is { id: string; spec: DiffSpec } => !!d);
+      if (next.length !== prev.length) return prev;
+      return next;
+    });
+  }, [stream]);
+
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
   const bookmarksStore = useBookmarksStore();
@@ -1706,6 +1736,7 @@ export function App() {
         id: `file:${path}`,
         label: `${dirty ? "● " : ""}${basename}`,
         closable: true,
+        reorderGroup: "file",
         render: () => stream ? (
           // One shared EditorPane across all file tabs — React keeps the same
           // component instance as long as the element type in the same slot
@@ -1735,6 +1766,7 @@ export function App() {
         id: `note:${slug}`,
         label: slug,
         closable: true,
+        reorderGroup: "note",
         render: () => stream ? (
           <NotePage
             stream={stream}
@@ -1755,6 +1787,7 @@ export function App() {
         id: diff.id,
         label: `${label} (${suffix})`,
         closable: true,
+        reorderGroup: "diff",
         render: () => stream ? (
           <DiffPane
             stream={stream}
@@ -2280,6 +2313,7 @@ export function App() {
                 else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
                 else closePageTab(id);
               }}
+              onReorder={handleReorderCenterTabs}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
         </div>

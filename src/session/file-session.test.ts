@@ -7,6 +7,7 @@ import {
   openFileInSession,
   removeOpenFiles,
   renameOpenFilePaths,
+  reorderOpenFiles,
   selectOpenFile,
   setLoadedFileContent,
   updateFileDraft,
@@ -89,6 +90,31 @@ test("renameOpenFilePaths renames matching open files and preserves selection", 
   expect(state.openOrder).toEqual(["app/a.ts", "app/nested/b.ts"]);
   expect(state.selectedPath).toBe("app/nested/b.ts");
   expect(Object.keys(state.files)).toEqual(["app/a.ts", "app/nested/b.ts"]);
+});
+
+test("reorderOpenFiles applies a new openOrder when the path set matches", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "a.ts", "a");
+  state = openFileInSession(state, "b.ts", "b");
+  state = openFileInSession(state, "c.ts", "c");
+  state = selectOpenFile(state, "b.ts");
+
+  state = reorderOpenFiles(state, ["c.ts", "a.ts", "b.ts"]);
+
+  expect(state.openOrder).toEqual(["c.ts", "a.ts", "b.ts"]);
+  // Selection and access order are independent of tab layout.
+  expect(state.selectedPath).toBe("b.ts");
+});
+
+test("reorderOpenFiles is a no-op when the path set does not match", () => {
+  let state = createEmptyFileSession();
+  state = openFileInSession(state, "a.ts", "a");
+  state = openFileInSession(state, "b.ts", "b");
+
+  // Drop a path → reject (length mismatch)
+  expect(reorderOpenFiles(state, ["a.ts"]).openOrder).toEqual(["a.ts", "b.ts"]);
+  // Foreign path → reject (unknown path)
+  expect(reorderOpenFiles(state, ["a.ts", "z.ts"]).openOrder).toEqual(["a.ts", "b.ts"]);
 });
 
 test("removeOpenFiles closes a batch of paths", () => {
