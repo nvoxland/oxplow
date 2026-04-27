@@ -169,9 +169,8 @@ The full IA redesign ships in phases (see plan
   unknown `--color-*` fallback hexes (NotesPane, NoteTab,
   WikiActivityBar, MarkdownView, TerminalPane drag overlay) migrated
   to the semantic tokens; selection/marked rows use a 3px stripe +
-  `--accent-soft-bg`. Monaco editors now follow the app theme via
-  `src/ui/monaco-theme.ts`. See `.context/theming.md` Density and
-  Monaco-theme sections.
+  `--accent-soft-bg`. Monaco editors are pinned to `vs-dark` (oxplow
+  is dark-only). See `.context/theming.md` Density section.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
 tabs.

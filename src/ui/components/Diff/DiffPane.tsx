@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { readFileAtRef, readWorkspaceFile, type Stream } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
-import { getActiveMonacoTheme, subscribeMonacoTheme } from "../../monaco-theme.js";
 
 export interface DiffSpec {
   path: string;
@@ -52,21 +51,14 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
         automaticLayout: true,
         readOnly: true,
         renderSideBySide: true,
-        theme: getActiveMonacoTheme(),
+        theme: "vs-dark",
         minimap: { enabled: false },
       });
       editorRef.current = editor;
       setEditorReady(true);
     })();
-    // Monaco's theme is global; EditorPane's subscriber re-applies it.
-    // We still subscribe here so a diff-only window (no editor open)
-    // tracks the toggle on its own.
-    const unsubTheme = subscribeMonacoTheme((next) => {
-      try { monacoRef.current?.editor.setTheme(next); } catch { /* monaco may have unloaded */ }
-    });
     return () => {
       cancelled = true;
-      unsubTheme();
       editorRef.current?.dispose();
       editorRef.current = null;
       if (modelsRef.current) {

@@ -6,101 +6,12 @@
     <link rel="stylesheet" href="./dist/main.css" />
     <style>
       /* ============================================================
-         Theme tokens. All renderer components read CSS variables;
-         themes change values, not names. See .context/theming.md.
+         Theme tokens. All renderer components read CSS variables.
+         Oxplow is dark-only — values live on :root.
+         See .context/theming.md.
          ============================================================ */
 
-      /* Light theme — default for new installs. */
-      :root,
-      :root[data-theme="light"] {
-        /* Surface tiers — light, airy, low contrast between adjacent panes. */
-        --surface-app: #f5f7fa;
-        --surface-card: #ffffff;
-        --surface-rail: #f1f3f7;
-        --surface-tab-active: #ffffff;
-        --surface-tab-inactive: #d4d9e3;
-        --surface-elevated: #ffffff;
-        --surface-overlay: rgba(15, 17, 21, 0.45);
-
-        /* Borders / dividers. */
-        --border-subtle: #e5e8ee;
-        --border-strong: #c4cad4;
-
-        /* Text. */
-        --text-primary: #1a1d23;
-        --text-secondary: #5a6371;
-        --text-muted: #8a92a0;
-
-        /* Accent (primary action). */
-        --accent: #2563eb;
-        --accent-hover: #1d4ed8;
-        --accent-soft-bg: #eef4ff;
-        --accent-on-accent: #ffffff;
-
-        /* Semantic status. */
-        --status-running: #2563eb;
-        --status-waiting: #d97706;
-        --status-ready: #64748b;
-        --status-human-check: #7c3aed;
-        --status-done: #059669;
-        --status-canceled: #94a3b8;
-
-        /* Severity (code quality). */
-        --severity-low: #64748b;
-        --severity-medium: #d97706;
-        --severity-high: #ea580c;
-        --severity-critical: #e11d48;
-
-        /* Freshness (notes). */
-        --freshness-fresh: #059669;
-        --freshness-stale: #d97706;
-        --freshness-very-stale: #e11d48;
-
-        /* Diff. */
-        --diff-add-bg: #e8f6ee;
-        --diff-add-fg: #064e2b;
-        --diff-remove-bg: #fde8ec;
-        --diff-remove-fg: #7f1d1d;
-
-        /* Legacy aliases — existing components read these. Re-mapped to
-           the semantic tokens above so the old code keeps working until
-           it's migrated piecemeal in later phases. */
-        --bg: var(--surface-app);
-        --bg-1: var(--surface-tab-inactive);
-        --bg-2: #f7eedf;             /* warm thread rail tint, light variant */
-        --bg-3: #e6ecf5;             /* cool stream rail tint, light variant */
-        --bg-tab-inactive: var(--surface-tab-inactive);
-        --bg-detail: var(--surface-card);
-        --fg: var(--text-primary);
-        --muted: var(--text-secondary);
-        --border: var(--border-subtle);
-        /* --border-strong shared; defined above */
-        /* --accent shared; defined above */
-        --priority-urgent: #e11d48;
-        --priority-high: #ea580c;
-        --priority-medium: var(--text-secondary);
-        --priority-low: var(--text-muted);
-
-        /* Blame overlay (light variant). Saturation = age, hue = source. */
-        --blame-local-fresh: rgba(234, 88, 12, 0.18);
-        --blame-local-recent: rgba(234, 88, 12, 0.12);
-        --blame-local-stale: rgba(234, 88, 12, 0.08);
-        --blame-local-old: rgba(160, 110, 70, 0.06);
-        --blame-local-border: #ea580c;
-        --blame-git-fresh: rgba(37, 99, 235, 0.16);
-        --blame-git-recent: rgba(37, 99, 235, 0.11);
-        --blame-git-stale: rgba(37, 99, 235, 0.07);
-        --blame-git-old: rgba(110, 130, 170, 0.05);
-        --blame-git-border: #2563eb;
-        --blame-uncommitted: rgba(120, 125, 135, 0.10);
-
-        color-scheme: light;
-      }
-
-      /* Dark theme — preserves the original dark aesthetic with semantic
-         tokens layered on. Existing dark-built components keep working
-         when this attribute is set. */
-      :root[data-theme="dark"] {
+      :root {
         --surface-app: #14161a;
         --surface-card: #1c1f24;
         --surface-rail: #181b20;
@@ -205,23 +116,12 @@
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb {
-        background: rgba(120, 125, 135, 0.22);
-        border-radius: 10px;
-        border: 2px solid transparent;
-        background-clip: padding-box;
-      }
-      :root[data-theme="dark"] ::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.08);
         border-radius: 10px;
         border: 2px solid transparent;
         background-clip: padding-box;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: rgba(120, 125, 135, 0.40);
-        background-clip: padding-box;
-        border: 2px solid transparent;
-      }
-      :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.18);
         background-clip: padding-box;
         border: 2px solid transparent;
