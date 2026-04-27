@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GitLogCommit, GitLogResult, GitOpResult, GitWorktreeEntry, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
 import {
   getAheadBehind,
+  getCommitDetail,
   getCommitsAheadOf,
   getGitLog,
   gitFetch,
   gitMergeInto,
+  gitRebaseOnto,
   gitPull,
   gitPullRemoteIntoCurrent,
   gitPush,
@@ -25,7 +27,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
-import { CommitGraphTable, indexRefsBySha } from "../components/History/CommitGraphTable.js";
+import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
@@ -264,6 +266,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
             />
 
             <RecentCommitsCard
+              streamId={streamId}
               log={data.recentLog}
               onSelectCommit={handleSelectCommit}
               onViewFullHistory={() => onRevealCommit(data.recentLog.commits[0]?.sha ?? "")}
@@ -280,10 +283,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   () => gitMergeInto(streamId, branch),
                 )
               }
+              onRebase={(branch) =>
+                runConfirmed(
+                  `Rebase current onto ${branch}`,
+                  `git rebase ${branch}`,
+                  () => gitRebaseOnto(streamId, branch),
+                )
+              }
               pendingAction={pendingAction}
             />
 
             <RemoteBranchesCard
+              streamId={streamId}
               rows={data.remoteBranches}
               onPull={(remote, branch) =>
                 runConfirmed(
@@ -338,37 +349,39 @@ function UpstreamCard({
         ) : (
           <div style={subtle}>No upstream</div>
         )}
-        {hasUpstream ? (
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button
-              type="button"
-              data-testid="git-dashboard-push"
-              onClick={onPush}
-              disabled={pushing || nothingToPush}
-              style={primaryButton}
-            >
-              {pushing ? "Pushing…" : "Push"}
-            </button>
-            <button
-              type="button"
-              data-testid="git-dashboard-pull"
-              onClick={onPullUpstream}
-              disabled={pulling || nothingToPull}
-              style={smallButton}
-            >
-              {pulling ? "Pulling…" : "Pull"}
-            </button>
-            <button
-              type="button"
-              data-testid="git-dashboard-fetch"
-              onClick={onFetch}
-              disabled={fetching}
-              style={smallButton}
-            >
-              {fetching ? "Fetching…" : "Fetch"}
-            </button>
-          </div>
-        ) : null}
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          {hasUpstream ? (
+            <>
+              <button
+                type="button"
+                data-testid="git-dashboard-push"
+                onClick={onPush}
+                disabled={pushing || nothingToPush}
+                style={primaryButton}
+              >
+                {pushing ? "Pushing…" : "Push"}
+              </button>
+              <button
+                type="button"
+                data-testid="git-dashboard-pull"
+                onClick={onPullUpstream}
+                disabled={pulling || nothingToPull}
+                style={smallButton}
+              >
+                {pulling ? "Pulling…" : "Pull"}
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            data-testid="git-dashboard-fetch"
+            onClick={onFetch}
+            disabled={fetching}
+            style={smallButton}
+          >
+            {fetching ? "Fetching…" : "Fetch"}
+          </button>
+        </div>
       </div>
     </Card>
   );
@@ -425,15 +438,51 @@ function MiniStat({ label, value }: { label: string; value: number }) {
 }
 
 function RecentCommitsCard({
+  streamId,
   log,
   onSelectCommit,
   onViewFullHistory,
 }: {
+  streamId: string;
   log: GitLogResult;
   onSelectCommit(sha: string): void;
   onViewFullHistory(): void;
 }) {
   const refIndex = useMemo(() => indexRefsBySha(log), [log]);
+  const [stats, setStats] = useState<Map<string, CommitStats>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const shas = log.commits.map((c) => c.sha);
+    void Promise.all(
+      shas.map(async (sha) => {
+        const detail = await getCommitDetail(streamId, sha);
+        if (!detail) return [sha, null] as const;
+        let filesAdded = 0;
+        let filesModified = 0;
+        let filesDeleted = 0;
+        let additions = 0;
+        let deletions = 0;
+        for (const f of detail.files) {
+          if (f.status === "added" || f.status === "untracked") filesAdded += 1;
+          else if (f.status === "deleted") filesDeleted += 1;
+          else filesModified += 1;
+          additions += f.additions ?? 0;
+          deletions += f.deletions ?? 0;
+        }
+        return [sha, { filesAdded, filesModified, filesDeleted, additions, deletions }] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      const next = new Map<string, CommitStats>();
+      for (const [sha, s] of entries) if (s) next.set(sha, s);
+      setStats(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [streamId, log]);
+
   return (
     <Card
       testId="git-dashboard-recent-commits"
@@ -457,6 +506,7 @@ function RecentCommitsCard({
           branchHeadsBySha={refIndex.branchHeadsBySha}
           tagsBySha={refIndex.tagsBySha}
           currentBranch={log.currentBranch}
+          statsBySha={stats}
           onSelect={onSelectCommit}
         />
       )}
@@ -468,12 +518,14 @@ function StreamsCard({
   streamId,
   rows,
   onMerge,
+  onRebase,
   pendingAction,
   workingByStreamId,
 }: {
   streamId: string;
   rows: StreamWorktreeRow[];
   onMerge(branch: string): void;
+  onRebase(branch: string): void;
   pendingAction: string | null;
   workingByStreamId: Record<string, boolean>;
 }) {
@@ -487,6 +539,7 @@ function StreamsCard({
           {rows.map((row) => {
             const branch = row.worktree.branch ?? "(detached)";
             const mergeLabel = `Merge ${branch} into current`;
+            const rebaseLabel = `Rebase current onto ${branch}`;
             const isOpen = expanded === row.worktree.path;
             return (
               <div
@@ -514,29 +567,28 @@ function StreamsCard({
                   >
                     {isOpen ? "▾" : "▸"}
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
-                      {workingByStreamId[row.stream.id] ? (
-                        <AgentStatusDot status="working" />
-                      ) : null}
-                      <span>{row.stream.title}</span>
-                    </div>
-                    <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 6, overflow: "hidden" }}>
+                    {workingByStreamId[row.stream.id] ? (
+                      <AgentStatusDot status="working" />
+                    ) : null}
+                    <span style={{ fontWeight: 500, flexShrink: 0 }}>{row.stream.title}</span>
+                    <span style={{ ...subtle, flexShrink: 0 }}>·</span>
+                    <span style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {branch}
-                    </div>
+                    </span>
                   </div>
                   <div style={subtle}>
                     ↑{row.ahead} ↓{row.behind}
                   </div>
                   {row.worktree.branch ? (
-                    <button
-                      type="button"
-                      onClick={() => onMerge(row.worktree.branch!)}
-                      disabled={pendingAction === mergeLabel}
-                      style={smallButton}
-                    >
-                      {pendingAction === mergeLabel ? "Merging…" : "Merge into current"}
-                    </button>
+                    <MergeRebaseSplitButton
+                      streamId={streamId}
+                      branch={row.worktree.branch}
+                      onMerge={onMerge}
+                      onRebase={onRebase}
+                      mergePending={pendingAction === mergeLabel}
+                      rebasePending={pendingAction === rebaseLabel}
+                    />
                   ) : null}
                 </div>
                 {isOpen && row.worktree.branch ? (
@@ -553,6 +605,153 @@ function StreamsCard({
       )}
     </Card>
   );
+}
+
+type MergeRebaseMode = "merge" | "rebase";
+
+const MERGE_MODE_PREFIX = "oxplow.gitDashboard.mergeMode";
+
+function mergeModeKey(streamId: string, branch: string): string {
+  return `${MERGE_MODE_PREFIX}.${streamId}.${branch}`;
+}
+
+function readMergeMode(streamId: string, branch: string): MergeRebaseMode {
+  try {
+    const v = window.localStorage.getItem(mergeModeKey(streamId, branch));
+    return v === "rebase" ? "rebase" : "merge";
+  } catch {
+    return "merge";
+  }
+}
+
+function writeMergeMode(streamId: string, branch: string, mode: MergeRebaseMode): void {
+  try {
+    window.localStorage.setItem(mergeModeKey(streamId, branch), mode);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function MergeRebaseSplitButton({
+  streamId,
+  branch,
+  onMerge,
+  onRebase,
+  mergePending,
+  rebasePending,
+}: {
+  streamId: string;
+  branch: string;
+  onMerge(branch: string): void;
+  onRebase(branch: string): void;
+  mergePending: boolean;
+  rebasePending: boolean;
+}) {
+  const [mode, setMode] = useState<MergeRebaseMode>(() => readMergeMode(streamId, branch));
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMode(readMergeMode(streamId, branch));
+  }, [streamId, branch]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = () => setMenuOpen(false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [menuOpen]);
+
+  const choose = (next: MergeRebaseMode) => {
+    setMode(next);
+    writeMergeMode(streamId, branch, next);
+    setMenuOpen(false);
+  };
+
+  const pending = mode === "merge" ? mergePending : rebasePending;
+  const idleLabel = mode === "merge" ? "Merge In" : "Rebase Onto";
+  const busyLabel = mode === "merge" ? "Merging…" : "Rebasing…";
+  const onPrimary = () => (mode === "merge" ? onMerge(branch) : onRebase(branch));
+
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        data-testid="git-dashboard-stream-merge-rebase"
+        data-mode={mode}
+        onClick={onPrimary}
+        disabled={pending}
+        style={{ ...smallButton, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
+      >
+        {pending ? busyLabel : idleLabel}
+      </button>
+      <button
+        type="button"
+        aria-label="Choose merge or rebase"
+        data-testid="git-dashboard-stream-merge-rebase-menu"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenuOpen((v) => !v);
+        }}
+        disabled={pending}
+        style={{
+          ...smallButton,
+          padding: "2px 6px",
+          borderTopLeftRadius: 0,
+          borderBottomLeftRadius: 0,
+        }}
+      >
+        ▾
+      </button>
+      {menuOpen ? (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: 2,
+            background: "var(--surface-card)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 4,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+            zIndex: 10,
+            minWidth: 140,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => choose("merge")}
+            style={menuItem(mode === "merge")}
+          >
+            Merge In
+          </button>
+          <button
+            type="button"
+            onClick={() => choose("rebase")}
+            style={menuItem(mode === "rebase")}
+          >
+            Rebase Onto
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function menuItem(active: boolean): React.CSSProperties {
+  return {
+    padding: "6px 10px",
+    background: active ? "var(--surface-tab-active, var(--surface-card))" : "transparent",
+    color: "var(--text-primary)",
+    border: "none",
+    borderBottom: "1px solid var(--border-subtle)",
+    textAlign: "left",
+    fontSize: 12,
+    cursor: "pointer",
+    fontWeight: active ? 600 : 400,
+  };
 }
 
 function PairwiseDiffPane({
@@ -629,16 +828,38 @@ function PairwiseDiffPane({
 }
 
 function RemoteBranchesCard({
+  streamId,
   rows,
   onPull,
   onPush,
   pendingAction,
 }: {
+  streamId: string;
   rows: RemoteBranchEntry[];
   onPull(remote: string, branch: string): void;
   onPush(remote: string, branch: string): void;
   pendingAction: string | null;
 }) {
+  const [counts, setCounts] = useState<Record<string, { ahead: number; behind: number }>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      rows.map(async (row) => {
+        const res = await getAheadBehind(streamId, row.shortName);
+        return [row.shortName, res] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      const out: Record<string, { ahead: number; behind: number }> = {};
+      for (const [k, v] of entries) out[k] = { ahead: v.ahead, behind: v.behind };
+      setCounts(out);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [streamId, rows]);
+
   return (
     <Card testId="git-dashboard-remote-branches" title="Recent remote branches">
       {rows.length === 0 ? (
@@ -648,6 +869,7 @@ function RemoteBranchesCard({
           {rows.map((row) => {
             const pullLabel = `Pull ${row.shortName} into current`;
             const pushLabel = `Push current → ${row.shortName}`;
+            const c = counts[row.shortName];
             return (
               <div
                 key={row.shortName}
@@ -666,13 +888,16 @@ function RemoteBranchesCard({
                     {row.lastCommitSubject} · {row.lastCommitAuthor} · {formatDate(row.lastCommitDate)}
                   </div>
                 </div>
+                <div style={subtle}>
+                  ↑{c?.ahead ?? 0} ↓{c?.behind ?? 0}
+                </div>
                 <button
                   type="button"
                   onClick={() => onPull(row.remote, row.branch)}
                   disabled={pendingAction === pullLabel}
                   style={smallButton}
                 >
-                  {pendingAction === pullLabel ? "Pulling…" : "Pull into current"}
+                  {pendingAction === pullLabel ? "Pulling…" : "Pull into"}
                 </button>
                 <button
                   type="button"
@@ -680,7 +905,7 @@ function RemoteBranchesCard({
                   disabled={pendingAction === pushLabel}
                   style={smallButton}
                 >
-                  {pendingAction === pushLabel ? "Pushing…" : "Push current →"}
+                  {pendingAction === pushLabel ? "Pushing…" : "Push to"}
                 </button>
               </div>
             );
