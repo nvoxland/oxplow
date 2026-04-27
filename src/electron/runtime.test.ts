@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildThreadMcpConfig, buildRecentHumanCheckReminder, buildSessionContextBlock, buildWikiCaptureStopReason, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentHumanCheckReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -731,24 +731,40 @@ describe("isReadIntentTool", () => {
   });
 });
 
-describe("buildWikiCaptureStopReason", () => {
-  test("names the wiki-capture skill and the resync_note pin", () => {
-    const text = buildWikiCaptureStopReason();
-    expect(text).toContain("oxplow-wiki-capture");
-    expect(text).toContain("resync_note");
-    expect(text).toContain(".oxplow/notes/");
+describe("buildWikiCaptureHint", () => {
+  test("returns a hint block for exploration prompts", () => {
+    for (const prompt of [
+      "how does the stop hook work?",
+      "explain the wiki note storage",
+      "describe the architecture",
+      "give me an overview of the code",
+      "walk me through the runtime",
+      "create a high level architecture of the code",
+      "summarize the codebase",
+      "what is the architecture of the snapshot store",
+      "trace how a UserPromptSubmit hook flows through the runtime",
+      "where is the write guard implemented",
+    ]) {
+      const text = buildWikiCaptureHint(prompt);
+      expect(text, `expected hint for: ${prompt}`).not.toBeNull();
+      expect(text!).toContain("<wiki-capture-hint>");
+      expect(text!).toContain("oxplow-wiki-capture");
+      expect(text!).toContain(".oxplow/notes/");
+      expect(text!).toContain("resync_note");
+    }
   });
-  test("documents the skipped escape hatch verbatim", () => {
-    const text = buildWikiCaptureStopReason();
-    expect(text).toContain("oxplow-note: skipped");
-  });
-  test("teaches the search-before-create flow", () => {
-    const text = buildWikiCaptureStopReason();
-    // All three search/find tools should be named so the agent knows
-    // which corner to check before deciding append-vs-new.
-    expect(text).toContain("search_notes");
-    expect(text).toContain("search_note_bodies");
-    expect(text).toContain("find_notes_for_file");
+  test("returns null for non-exploration prompts", () => {
+    for (const prompt of [
+      "fix the login redirect bug",
+      "add a delete button to the work panel",
+      "refactor the snapshot store",
+      "yes, proceed",
+      "rename foo to bar",
+      "",
+      "   ",
+    ]) {
+      expect(buildWikiCaptureHint(prompt), `expected null for: ${prompt}`).toBeNull();
+    }
   });
 });
 

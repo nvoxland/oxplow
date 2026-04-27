@@ -125,6 +125,43 @@ describe("buildWriteGuardResponse", () => {
     }
   });
 
+  test("allows Write to .oxplow/notes/<slug>.md from a non-writer thread (wiki carve-out)", () => {
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
+    try {
+      const projectDir = join(parent, "project");
+      const notePath = join(projectDir, ".oxplow", "notes", "architecture-overview.md");
+      const result = buildWriteGuardResponse(
+        makeThread({ status: "queued" }),
+        "Write",
+        { projectDir, toolInput: { file_path: notePath } },
+      );
+      expect(result).toBeNull();
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("wiki carve-out is notes-dir-specific — sibling .oxplow/ paths still blocked", () => {
+    const parent = mkdtempSync(join(tmpdir(), "oxplow-wg-"));
+    try {
+      const projectDir = join(parent, "project");
+      for (const inside of [
+        join(projectDir, ".oxplow", "state.sqlite"),
+        join(projectDir, ".oxplow", "snapshots", "ab", "cdef"),
+        join(projectDir, ".oxplow", "runtime", "claude-plugin", "hooks.json"),
+      ]) {
+        const result = buildWriteGuardResponse(
+          makeThread({ status: "queued" }),
+          "Write",
+          { projectDir, toolInput: { file_path: inside } },
+        );
+        expect(result?.hookSpecificOutput.permissionDecision).toBe("deny");
+      }
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   test("flipping thread.status from queued to active flips the decision", () => {
     // Simulates the runtime reading thread fresh on each PreToolUse call —
     // after a promotion, the next call sees the new status and allows.

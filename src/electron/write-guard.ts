@@ -82,15 +82,24 @@ export function buildWriteGuardResponse(
   if (!WORKTREE_MUTATING_TOOLS.has(toolName)) return null;
 
   // When we know the project root, allow writes to agent-private paths that
-  // don't touch the shared worktree (e.g. ~/.claude/plans/foo.md). A path
-  // inside the project's .oxplow/ is still blocked — that's shared state.
+  // don't touch the shared worktree (e.g. ~/.claude/plans/foo.md), and to
+  // the per-project wiki at `.oxplow/notes/<slug>.md` — wiki bodies are
+  // not committed to git and don't collide with the writer's in-progress
+  // code, so capture is safe from any thread. Other `.oxplow/` paths
+  // (state.sqlite, snapshots/, runtime/) stay blocked because they ARE
+  // shared state.
   const { projectDir, toolInput } = context;
   if (projectDir) {
     const abs = extractAbsTargetPath(toolInput, projectDir);
     if (abs) {
       const oxplowDir = resolve(projectDir, ".oxplow");
+      const notesDir = resolve(projectDir, ".oxplow/notes");
       const insideProject = isInsideWorktree(abs, projectDir);
       const insideOxplow = isInsideWorktree(abs, oxplowDir);
+      const insideNotes = isInsideWorktree(abs, notesDir);
+      if (insideNotes) {
+        return null;
+      }
       if (!insideProject && !insideOxplow) {
         return null;
       }
@@ -140,6 +149,9 @@ export const NON_WRITER_PROMPT_BLOCK = [
   `- set environment state or touch configs`,
   ``,
   `Read-only tools (Read, Grep, Glob) and mcp__oxplow__* (work items, backlog) remain fully available. Record proposed changes as a note on the current work item or as a new work item's description; the writer thread will pick them up.`,
+  ``,
+  `EXCEPTION — wiki notes ARE writable from this thread.`,
+  `The per-project wiki at \`.oxplow/notes/<slug>.md\` is not committed to git and does not collide with the writer's in-progress code. When a turn is exploration / synthesis (the user asked you to explain, trace, summarize, walk through, or describe the architecture of something), capture the finding via the \`oxplow-wiki-capture\` skill and Write to \`.oxplow/notes/<slug>.md\`. The hook will allow it; the notes watcher syncs metadata, and \`mcp__oxplow__resync_note\` pins freshness.`,
   ``,
   `Common read-only alternatives to commands that would otherwise mutate state:`,
   `- inspect a file on another branch: \`git show <branch>:<path>\` (no checkout needed)`,

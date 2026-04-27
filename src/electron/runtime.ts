@@ -197,21 +197,11 @@ export class ElectronRuntime {
    *  landed, set membership is identical). Cleared lazily by the next
    *  audit fire that records a fresh signature. See wi-c468e8fc093d. */
   private readonly lastAuditSignatureByThread = new Map<string, string>();
-  /** Per-thread read/write counters for the current turn. Bumped by
-   *  PostToolUse: reads on Read/Grep/Glob and read-only Bash, writes on
-   *  any write-intent tool (Edit/Write/MultiEdit/non-readonly Bash).
-   *  Read on Stop together with `turnHadActivity` to derive
-   *  `turnWasExploration` (reads >= 2 && writes === 0). Cleared on
-   *  UserPromptSubmit alongside `turnActivityByThread`. */
-  private readonly turnReadWriteByThread = new Map<string, { reads: number; writes: number }>();
-  /** Per-thread guard against firing the wiki-capture directive twice in
-   *  a row. Set when the directive is emitted; cleared on
-   *  UserPromptSubmit. The capture turn itself runs Write tools so
-   *  `turnHadActivity` flips true on its Stop and the directive wouldn't
-   *  re-fire anyway — but if the agent replies `oxplow-note: skipped`
-   *  with no tool calls, this prevents the directive from re-emitting
-   *  on the same prompt. */
-  private readonly lastEmittedWikiCaptureByThread = new Set<string>();
+  /** Per-thread write counter for the current turn. Bumped on PostToolUse
+   *  for any write-intent tool (Edit/Write/MultiEdit/non-readonly Bash).
+   *  Drives `turnHadWrites` for the filing-enforcement Stop branch.
+   *  Cleared on UserPromptSubmit alongside `turnActivityByThread`. */
+  private readonly turnWriteCountByThread = new Map<string, number>();
   /** Per-thread "agent is awaiting the user" flag. Set by the
    *  `await_user` MCP tool; consumed by Stop hook (allows-stop +
    *  suppresses every directive); cleared on UserPromptSubmit. The
@@ -1768,11 +1758,10 @@ export class ElectronRuntime {
           this.turnActivityByThread.set(envelope.threadId, true);
         }
         if (activityToolName && envelope.threadId) {
-          const counters = this.turnReadWriteByThread.get(envelope.threadId)
-            ?? { reads: 0, writes: 0 };
-          if (isReadIntentTool(activityToolName, payload.tool_input)) counters.reads += 1;
-          else if (isWriteIntentTool(activityToolName, payload.tool_input)) counters.writes += 1;
-          this.turnReadWriteByThread.set(envelope.threadId, counters);
+          if (isWriteIntentTool(activityToolName, payload.tool_input)) {
+            const cur = this.turnWriteCountByThread.get(envelope.threadId) ?? 0;
+            this.turnWriteCountByThread.set(envelope.threadId, cur + 1);
+          }
         }
         // Match a PreToolUse for `Task` (subagent dispatch) — decrement
         // the per-thread pending-subagent counter so the Stop-hook
@@ -1831,11 +1820,9 @@ export class ElectronRuntime {
       // directive pipeline for pure Q&A turns.
       if (envelope.threadId) {
         this.turnActivityByThread.set(envelope.threadId, false);
-        // Reset the per-turn read/write counters for the wiki-capture
-        // exploration heuristic, and clear the "just emitted capture"
-        // suppression flag so a fresh prompt is allowed to re-trigger.
-        this.turnReadWriteByThread.set(envelope.threadId, { reads: 0, writes: 0 });
-        this.lastEmittedWikiCaptureByThread.delete(envelope.threadId);
+        // Reset per-turn write counter so each turn's filing-enforcement
+        // check starts clean.
+        this.turnWriteCountByThread.set(envelope.threadId, 0);
         // The user replied → clear the "agent is awaiting user" gate so
         // the next Stop runs the directive pipeline normally. Also reset
         // the per-turn filing flag so each turn enforces filing afresh.
@@ -1854,6 +1841,16 @@ export class ElectronRuntime {
       const redoReminder = envelope.threadId
         ? this.buildRecentHumanCheckReminder(envelope.threadId)
         : "";
+      // Wiki-capture hint: when the prompt looks like exploration /
+      // synthesis, nudge the agent up-front to plan on writing a wiki
+      // note. Replaces the old Stop-hook wiki-capture directive, which
+      // fired post-hoc after the answer had already gone to chat with
+      // no durable home. Returns null for non-exploration prompts —
+      // those pay no token cost.
+      const promptText = typeof (envelope.payload as { prompt?: unknown })?.prompt === "string"
+        ? (envelope.payload as { prompt: string }).prompt
+        : "";
+      const wikiCaptureHint = buildWikiCaptureHint(promptText) ?? "";
       // Re-inject the session context each turn — the agent's system-prompt
       // SESSION CONTEXT line is frozen at launch, but the UI's active /
       // selected thread can flip mid-session. Reading the live state here
@@ -1874,7 +1871,7 @@ export class ElectronRuntime {
           sessionContext = candidate;
         }
       }
-      const additionalContext = [sessionContext, focusContext, redoReminder].filter(Boolean).join("\n\n");
+      const additionalContext = [sessionContext, focusContext, redoReminder, wikiCaptureHint].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -1924,15 +1921,12 @@ export class ElectronRuntime {
     // tests / edge cases stay stable.
     const turnHadActivity = this.turnActivityByThread.get(threadId);
     this.turnActivityByThread.delete(threadId);
-    // Derive the wiki-capture exploration flag from the per-turn read/write
-    // counters: a read-heavy turn (≥2 reads) with zero writes counts as
-    // exploration. Counters are cleared together with the activity flag so
-    // they don't leak into the next turn.
-    const counters = this.turnReadWriteByThread.get(threadId);
-    this.turnReadWriteByThread.delete(threadId);
-    const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
-    const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
-    const turnHadWrites = !!counters && counters.writes > 0;
+    // Per-turn write count drives `turnHadWrites` for the filing-
+    // enforcement Stop branch. Clear together with the activity flag so
+    // it doesn't leak into the next turn.
+    const writeCount = this.turnWriteCountByThread.get(threadId) ?? 0;
+    this.turnWriteCountByThread.delete(threadId);
+    const turnHadWrites = writeCount > 0;
     // Consume the per-turn filing flag (once per Stop) so each turn
     // enforces filing afresh. Don't `delete` here — the flag is also
     // cleared on UserPromptSubmit; deleting on Stop would silently let
@@ -1944,8 +1938,6 @@ export class ElectronRuntime {
       thread,
       workItems: this.workItemStore.listItems(threadId),
       turnHadActivity,
-      turnWasExploration,
-      justEmittedWikiCapture,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
       lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
       turnHadWrites,
@@ -1955,19 +1947,9 @@ export class ElectronRuntime {
     };
     const outcome = decideStopDirective(snapshot, {
       buildInProgressAuditReason: buildInProgressAuditStopReason,
-      buildWikiCaptureReason: buildWikiCaptureStopReason,
       buildFiledButDidntShipReason: buildFiledButDidntShipStopReason,
       buildStaleEpicChildrenReason: buildStaleEpicChildrenStopReason,
     });
-    // If the wiki-capture directive fired, latch the suppression flag so
-    // we don't re-emit on the same prompt (cleared on UserPromptSubmit).
-    if (
-      outcome.directive &&
-      snapshot.turnHadActivity === false &&
-      snapshot.turnWasExploration === true
-    ) {
-      this.lastEmittedWikiCaptureByThread.add(threadId);
-    }
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "record-audit-signature") {
         this.lastAuditSignatureByThread.set(threadId, effect.signature);
@@ -2487,17 +2469,6 @@ export function buildInProgressAuditStopReason(items: WorkItem[]): string {
   ].join("\n");
 }
 
-/**
- * Stop-hook directive text for the wiki-capture branch. Fires on
- * read-heavy / no-write turns (`turnHadActivity === false`,
- * `turnWasExploration === true`). The agent is expected to follow the
- * `oxplow-wiki-capture` skill: search existing notes, decide append vs
- * new, write the body to `.oxplow/notes/<slug>.md`, then call
- * `mcp__oxplow__resync_note`. The escape hatch (`oxplow-note: skipped`)
- * is honoured implicitly: the suppression flag latches when the
- * directive fires and clears on the next user prompt, so a "skipped"
- * reply doesn't loop.
- */
 export function buildStaleEpicChildrenStopReason(
   pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
 ): string {
@@ -2534,17 +2505,28 @@ export function buildFiledButDidntShipStopReason(): string {
   ].join("\n");
 }
 
-export function buildWikiCaptureStopReason(): string {
+/**
+ * UserPromptSubmit-time hint that nudges the agent to capture
+ * exploration / synthesis turns into the per-project wiki. Returns
+ * `null` when the prompt doesn't look like exploration — non-exploration
+ * prompts pay no token cost. Replaces the old Stop-hook wiki-capture
+ * directive (which fired post-hoc, after the answer had already been
+ * written to chat with no durable home). Path-allowed under the wiki
+ * carve-out in `write-guard.ts`, so the hint is valid on read-only
+ * threads too.
+ */
+export function buildWikiCaptureHint(prompt: string): string | null {
+  if (typeof prompt !== "string") return null;
+  const normalized = prompt.trim();
+  if (!normalized) return null;
+  // Match anywhere in the prompt — the user often opens with greetings or
+  // context before the actual ask.
+  const explorationPattern = /\b(how (?:does|do|is|are|was)|where (?:is|are|does)|explain|trace|describe(?: the)?(?: architecture)?|walk (?:me )?through|give (?:me )?an? (?:overview|summary|tour|architecture)|what (?:is|are) the architecture|architecture of|summari[sz]e (?:the )?(?:code|codebase|module|system)|high(?:[- ]level)? (?:architecture|overview|summary)|overview of (?:the )?(?:code|codebase|module|system))\b/i;
+  if (!explorationPattern.test(normalized)) return null;
   return [
-    `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
-    ``,
-    `Follow the \`oxplow-wiki-capture\` skill:`,
-    `1. Search existing notes by title (\`mcp__oxplow__search_notes\`), body content (\`mcp__oxplow__search_note_bodies\`), and file backlinks (\`mcp__oxplow__find_notes_for_file\` for each non-trivial file you read this turn).`,
-    `2. If a clearly-relevant note already covers the topic, append a new \`## <yyyy-mm-dd> — <focus>\` section. Only create a new note if no topic match.`,
-    `3. Write the body to \`.oxplow/notes/<slug>.md\` (kebab-case slug, ≤50 chars, topic-shaped).`,
-    `4. Call \`mcp__oxplow__resync_note\` to pin freshness.`,
-    ``,
-    `If the exploration was genuinely too trivial to capture (a single-file lookup with no synthesis), reply with the single line \`oxplow-note: skipped\` and stop — that's the escape hatch.`,
+    `<wiki-capture-hint>`,
+    `This prompt looks like exploration / synthesis. After you answer in chat, capture the synthesized understanding into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first (\`mcp__oxplow__search_notes\` / \`search_note_bodies\` / \`find_notes_for_file\`), append-or-create, then call \`mcp__oxplow__resync_note\`. The write guard allows this even on read-only threads.`,
+    `</wiki-capture-hint>`,
   ].join("\n");
 }
 
@@ -2588,6 +2570,7 @@ function buildThreadAgentPrompt(
     `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
     `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
     `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
+    `WIKI CAPTURE: when a turn is exploration / synthesis (architecture, overview, "how does X work", trace, walk-through, summary), write the answer into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first, append-or-create, then \`mcp__oxplow__resync_note\`. Allowed on read-only threads too (the write guard exempts the notes dir).`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);

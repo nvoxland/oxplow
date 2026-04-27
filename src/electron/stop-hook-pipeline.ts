@@ -12,9 +12,10 @@ import type { WorkItem } from "../persistence/work-item-store.js";
  * The pipeline runs in priority order:
  *   1. Awaiting-user gate: agent called `await_user`. Allow stop and
  *      suppress every directive.
- *   2. Q&A turn (no qualifying tool activity): allow stop, except for the
- *      wiki-capture exception (read-heavy / no-write turns get the
- *      capture directive).
+ *   2. Q&A turn (no qualifying tool activity): allow stop. Wiki-capture
+ *      no longer fires from the Stop hook — proactive capture is driven
+ *      by the UserPromptSubmit `<wiki-capture-hint>` and the skill's
+ *      keyword router instead.
  *   3. In-progress audit: any item in `in_progress` → block with audit
  *      directive (with no-change suppression by signature).
  *   4. Allow stop.
@@ -65,23 +66,10 @@ export interface ThreadSnapshot {
    *  so behaviour stays stable when the activity flag wasn't threaded
    *  through (older tests, missing UserPromptSubmit, etc.). */
   turnHadActivity?: boolean;
-  /** True when the turn read code (Read/Grep/Glob, read-only Bash) at
-   *  least twice and produced zero write-intent activity. Combined with
-   *  `turnHadActivity === false` this is the wiki-capture trigger: a
-   *  read-heavy Q&A turn the agent should durably capture before stopping.
-   *  Only checked when `turnHadActivity` is false; ignored otherwise so
-   *  edits still take precedence on real-work turns. */
-  turnWasExploration?: boolean;
-  /** True when the wiki-capture directive already fired earlier on this
-   *  thread and hasn't been cleared by a fresh user prompt. Suppresses a
-   *  second emission so the agent isn't asked to capture twice in a row
-   *  (the first emission either produced a note or got the agent's
-   *  `oxplow-note: skipped` reply; either way it's settled). */
-  justEmittedWikiCapture?: boolean;
   /** True when the agent explicitly signalled "I'm waiting on the user"
    *  via the `await_user` MCP tool during this turn. Top-priority Stop
    *  branch: when set, ALL directives are suppressed (audit, filing-
-   *  enforcement, wiki-capture). The agent asked a real question and
+   *  enforcement). The agent asked a real question and
    *  the user owns the next move — do not push onward. Cleared by the
    *  next UserPromptSubmit so the directive pipeline fires normally on
    *  the reply. */
@@ -125,10 +113,6 @@ export function decideStopDirective(
      *  before stopping. Optional so tests / non-runtime callers can opt
      *  out of the audit branch entirely. */
     buildInProgressAuditReason?: (items: WorkItem[]) => string;
-    /** Emitted for read-heavy / no-write turns when wiki-capture is
-     *  enabled. Optional so callers that don't wire this up (older tests)
-     *  fall through to the plain Q&A "allow stop" path. */
-    buildWikiCaptureReason?: () => string;
     /** Emitted when the turn filed at least one new `ready` row,
      *  edited zero project files, and has no `in_progress` item.
      *  Catches the "user said 'do X', agent filed it as backlog and
@@ -160,27 +144,11 @@ export function decideStopDirective(
 
   // Q&A turn: the agent answered or asked the user something with no
   // qualifying tool activity. Allow stop so the agent stays stopped until
-  // the user replies.
-  //
-  // EXCEPTION: read-heavy exploration turns (`turnWasExploration`) get
-  // the wiki-capture directive — the agent answered a "how does X work"
-  // question and should durably capture findings into `.oxplow/notes/`
-  // before the conversation moves on. The capture turn re-enters the
-  // pipeline with `turnHadActivity === true` (it ran Write), so the
-  // directive only fires once. `justEmittedWikiCapture` guards against
-  // a second emission within the same user prompt.
+  // the user replies. Wiki-capture used to be a backstop branch here;
+  // it now lives at UserPromptSubmit time as a `<wiki-capture-hint>`
+  // additionalContext block (see `buildWikiCaptureHint` in runtime.ts)
+  // so the nudge fires before the answer rather than after.
   if (snapshot.turnHadActivity === false) {
-    if (
-      snapshot.turnWasExploration === true &&
-      !snapshot.justEmittedWikiCapture &&
-      snapshot.thread?.status === "active" &&
-      builders.buildWikiCaptureReason
-    ) {
-      return {
-        directive: { decision: "block", reason: builders.buildWikiCaptureReason() },
-        sideEffects,
-      };
-    }
     return { directive: null, sideEffects };
   }
 

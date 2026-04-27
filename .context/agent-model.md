@@ -204,20 +204,19 @@ formatters) without representing authored change worth filing. The
 Stop-hook in-progress audit still fires for any lingering items, so
 real edits made via Bash under an open item are unaffected.
 
-**Wiki-capture exception.** A read-heavy / no-write turn
-(`turnHadActivity === false` AND `turnWasExploration === true`) emits
-the **wiki-capture directive** (`buildWikiCaptureStopReason`) instead
-of allowing stop. The runtime tracks per-turn read/write counters in
-`turnReadWriteByThread` (PostToolUse bumps based on `isReadIntentTool`
-/ `isWriteIntentTool`) and derives `turnWasExploration = reads >= 2 &&
-writes === 0`. The directive points the agent at the
-`oxplow-wiki-capture` skill: search existing notes by title / body /
-file backlinks, append-or-create, write `.oxplow/notes/<slug>.md`,
-call `mcp__oxplow__resync_note`. Escape hatch: agent replies
-`oxplow-note: skipped` for trivially-shallow exploration. The
-`lastEmittedWikiCaptureByThread` set latches when the directive fires
-so it doesn't re-emit on the same prompt; the latch + counters clear
-on the next `UserPromptSubmit`.
+**Wiki-capture is a UserPromptSubmit hint, not a Stop directive.**
+When the user's prompt looks like exploration / synthesis (regex match
+on "how does", "explain", "trace", "describe", "walk me through",
+"give me an overview", "high-level architecture", "summarize the
+codebase", etc.), the runtime injects a `<wiki-capture-hint>` block
+into `additionalContext` via `buildWikiCaptureHint(prompt)`. The hint
+points the agent at the `oxplow-wiki-capture` skill (search existing
+notes → append-or-create → `mcp__oxplow__resync_note`) and notes that
+the write-guard wiki carve-out applies, so capture works on read-only
+threads too. Non-exploration prompts pay no token cost — the builder
+returns `null`. The Stop hook no longer carries a wiki-capture
+branch; the old directive fired post-hoc, after the answer had
+already gone to chat with no durable home.
 
 The pipeline runs in priority order:
 
@@ -424,10 +423,10 @@ exploration question ("how does X work", "where is X", "explain X")
 or types `/note`. It carries the find-or-create flow (search by
 title → body → file backlinks before creating), slug/body
 conventions, and the "fold in `oxplow__get_thread_notes` from any
-query subagents this turn dispatched" guidance. The Stop-hook
-wiki-capture directive (see "Wiki-capture exception" in the Stop-hook
-pipeline section) auto-loads the skill on read-heavy / no-write
-turns; the `/note` slash command at `.claude/commands/note.md`
+query subagents this turn dispatched" guidance. The
+`<wiki-capture-hint>` block injected on exploration UserPromptSubmits
+(see "Wiki-capture is a UserPromptSubmit hint" above) auto-loads the
+skill; the `/note` slash command at `.claude/commands/note.md`
 triggers the same flow on demand.
 
 ## Write guard
@@ -445,10 +444,17 @@ in-progress changes.
   absolute path. Containment checks use `isInsideWorktree` from
   `src/electron/runtime-paths.ts`, shared with the runtime's hook-path
   filter.
+- **Wiki-notes carve-out.** Writes to `.oxplow/notes/<slug>.md` are
+  allowed even on non-writer threads — the per-project wiki is not
+  committed to git and doesn't collide with the writer's in-progress
+  code, so capture is safe from any thread. Other `.oxplow/` paths
+  (`state.sqlite`, `snapshots/`, `runtime/`) stay blocked.
 - **Prompt enforcement.** `NON_WRITER_PROMPT_BLOCK` (same file) is
   appended to the system prompt for non-writer threads, telling the agent
   to avoid Bash mutations too (the hook can't reliably classify shell
-  commands, so the prompt is the only line of defence there).
+  commands, so the prompt is the only line of defence there). The
+  block also documents the wiki-notes carve-out so the agent knows it
+  CAN capture exploration findings via Write.
 - MCP tools (`mcp__oxplow__*`) are always allowed: they write to the state
   DB, not the worktree.
 

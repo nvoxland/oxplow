@@ -11,7 +11,7 @@ export const WIKI_CAPTURE_SKILL_FILE = "SKILL.md";
 export function buildWikiCaptureSkill(): string {
   return `---
 name: ${WIKI_CAPTURE_SKILL_NAME}
-description: Capturing code exploration into wiki notes. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing code exploration into wiki notes. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki notes — code-exploration capture
@@ -45,6 +45,13 @@ Skip when:
 If the user types \`/note\` or says "save this" / "add to the wiki" /
 "add a note", capture even if the trigger heuristic above wouldn't
 otherwise fire.
+
+## On a read-only thread
+
+The write guard exempts \`.oxplow/notes/<slug>.md\` — capture exactly
+the same way as on the writer thread. Don't punt the user's
+exploration answer just because you can't edit code; the wiki is
+where exploration goes regardless of writer status.
 
 ## Find before you create
 
@@ -104,13 +111,5 @@ If this turn dispatched query subagents (\`oxplow__delegate_query\` →
 incorporate their findings into the wiki note rather than discarding
 them. Subagent notes are otherwise invisible — the wiki is where they
 become durable.
-
-## Stop-hook nudge
-
-When the Stop hook fires the wiki-capture directive, this skill is
-your reference. If after looking at the turn you decide nothing's
-worth durable capture (e.g. the question was trivial), reply with the
-single line \`oxplow-note: skipped\` and stop — that suppresses the
-nudge for one turn.
 `;
 }

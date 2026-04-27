@@ -105,9 +105,11 @@ test("createElectronPlugin writes the wiki-capture skill", () => {
   // Trigger phrases should be in the description so Claude's router
   // matches exploration questions and the wiki MCP tools.
   expect(body).toMatch(/search_note_bodies|find_notes_for_file/);
-  // Body should teach the find-or-create flow + the skipped escape hatch.
-  expect(body).toMatch(/oxplow-note: skipped/);
+  // Body should teach the find-or-create flow and call out the
+  // read-only-thread carve-out so the skill works regardless of writer
+  // status.
   expect(body).toMatch(/append/i);
+  expect(body).toMatch(/read-only thread/i);
 });
 
 test("createElectronPlugin writes the /work-next command so any project running oxplow can invoke it", () => {
