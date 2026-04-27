@@ -995,6 +995,14 @@ export async function listAgentStatuses(streamId?: string): Promise<AgentStatusE
   return desktopApi().listAgentStatuses(streamId);
 }
 
+export type FinishedEntry =
+  | { kind: "work-item"; itemId: string; title: string; t: string }
+  | { kind: "note"; slug: string; title: string; t: string };
+
+export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
+  return desktopApi().listRecentlyFinished(threadId, limit);
+}
+
 export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,

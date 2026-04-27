@@ -329,6 +329,12 @@ export interface DesktopApi {
   listBackgroundTasks(): Promise<import("./background-task-store.js").BackgroundTask[]>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; threadId: string; status: AgentStatus }>>;
+  listRecentlyFinished(threadId: string | null, limit: number): Promise<
+    Array<
+      | { kind: "work-item"; itemId: string; title: string; t: string }
+      | { kind: "note"; slug: string; title: string; t: string }
+    >
+  >;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   updateEditorFocus(payload: EditorFocusPayload): Promise<void>;

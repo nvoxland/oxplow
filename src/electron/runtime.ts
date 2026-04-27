@@ -750,6 +750,35 @@ export class ElectronRuntime {
     return this.agentStatusByThread.get(threadId) ?? "waiting";
   }
 
+  /**
+   * Recently finished work merged across closed work-item efforts
+   * (per-thread) and updated wiki notes (global). Drives the rail's
+   * "Finished" section. Returns up to `limit` entries sorted by
+   * timestamp DESC.
+   */
+  listRecentlyFinished(threadId: string | null, limit: number):
+    Array<
+      | { kind: "work-item"; itemId: string; title: string; t: string }
+      | { kind: "note"; slug: string; title: string; t: string }
+    >
+  {
+    const items = this.effortStore.listRecentClosed(threadId, limit).map((row) => ({
+      kind: "work-item" as const,
+      itemId: row.itemId,
+      title: row.title,
+      t: row.endedAt,
+    }));
+    const notes = this.wikiNoteStore.list().slice(0, limit).map((note) => ({
+      kind: "note" as const,
+      slug: note.slug,
+      title: note.title,
+      t: note.updated_at,
+    }));
+    return [...items, ...notes]
+      .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0))
+      .slice(0, limit);
+  }
+
   listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {
     const out: Array<{ streamId: string; threadId: string; status: AgentStatus }> = [];
     for (const [threadId, status] of this.agentStatusByThread) {

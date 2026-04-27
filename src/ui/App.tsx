@@ -31,9 +31,12 @@ import {
   renameThread,
   renameStream,
   subscribeOxplowEvents,
+  subscribeWikiNoteEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
+  listRecentlyFinished,
+  type FinishedEntry,
   getConfig,
   setGeneratedDirs,
   selectThread,
@@ -1505,6 +1508,28 @@ export function App() {
     return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
   }, [currentSession.openOrder]);
 
+  // Recently-finished work merged across closed work-item efforts
+  // (per-thread) and updated wiki notes (global). Refetched on
+  // work-item or wiki-note changes; sub-100ms IPC, so coarse
+  // invalidation is fine.
+  const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listRecentlyFinished(selectedThreadId, 5)
+        .then((entries) => { if (!cancelled) setRecentlyFinished(entries); })
+        .catch(() => { /* ignore — empty list keeps the section hidden */ });
+    };
+    refresh();
+    const offWork = subscribeWorkItemEvents("all", () => refresh());
+    const offNotes = subscribeWikiNoteEvents(() => refresh());
+    return () => {
+      cancelled = true;
+      offWork();
+      offNotes();
+    };
+  }, [selectedThreadId]);
+
   const handleOpenPage = useCallback((ref: TabRef) => {
     switch (ref.kind) {
       case "agent":
@@ -2292,6 +2317,7 @@ export function App() {
           backlog={backlogState}
           agentStatus={agentThreadStatus}
           recentFiles={recentFileEntries}
+          recentlyFinished={recentlyFinished}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
             return {
