@@ -48,7 +48,6 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
     <Page
       testId="page-thread-settings"
       title={thread ? `Thread settings — ${thread.title}` : "Thread settings"}
-      kind="thread settings"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>

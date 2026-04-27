@@ -64,7 +64,7 @@ export function SubsystemDocsPage({ stream, onOpenPage }: SubsystemDocsPageProps
   }, [stream]);
 
   return (
-    <Page testId="page-subsystem-docs" title="Subsystem docs" kind="docs">
+    <Page testId="page-subsystem-docs" title="Subsystem docs">
       <div style={{ padding: "16px 20px", maxWidth: 720 }}>
         <p
           style={{

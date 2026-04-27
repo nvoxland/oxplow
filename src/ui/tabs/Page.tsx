@@ -127,6 +127,17 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
         color: "var(--text-primary)",
       }}
     >
+      {effectiveNavBar ? (
+        <PageNavBar
+          canBack={effectiveNavBar.canBack}
+          canForward={effectiveNavBar.canForward}
+          onBack={effectiveNavBar.onBack}
+          onForward={effectiveNavBar.onForward}
+          bookmark={effectiveNavBar.bookmark}
+          backlinks={effectiveNavBar.backlinks}
+          actions={effectiveNavBar.actions}
+        />
+      ) : null}
       <header
         data-testid="page-header"
         style={{
@@ -191,17 +202,6 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
         ) : null}
       </header>
-      {effectiveNavBar ? (
-        <PageNavBar
-          canBack={effectiveNavBar.canBack}
-          canForward={effectiveNavBar.canForward}
-          onBack={effectiveNavBar.onBack}
-          onForward={effectiveNavBar.onForward}
-          bookmark={effectiveNavBar.bookmark}
-          backlinks={effectiveNavBar.backlinks}
-          actions={effectiveNavBar.actions}
-        />
-      ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
         {children}
       </div>

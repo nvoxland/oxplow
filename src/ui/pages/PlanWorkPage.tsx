@@ -66,7 +66,7 @@ export function PlanWorkPage({ onOpenPage, ...rest }: PlanWorkPageProps) {
     </button>
   );
   return (
-    <Page testId="page-plan-work" title="Plan work" kind="work" actions={actions}>
+    <Page testId="page-plan-work" title="Plan work" actions={actions}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <PlanPane
           {...rest}

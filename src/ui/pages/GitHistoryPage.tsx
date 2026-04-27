@@ -15,7 +15,7 @@ export interface GitHistoryPageProps {
  */
 export function GitHistoryPage({ stream, onOpenDiff, revealSha }: GitHistoryPageProps) {
   return (
-    <Page testId="page-git-history" title="Git history" kind="commits">
+    <Page testId="page-git-history" title="Git history">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <HistoryPanel stream={stream} onOpenDiff={onOpenDiff} revealSha={revealSha} />
       </div>

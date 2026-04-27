@@ -52,7 +52,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "files", label: "📁  Files", ref: indexRef("files") },
     { id: "code-quality", label: "⚠  Code quality", ref: indexRef("code-quality") },
     { id: "local-history", label: "⏱  Local history", ref: indexRef("local-history") },
-    { id: "git-dashboard", label: "🌐  Git dashboard", ref: gitDashboardRef() },
+    { id: "git-dashboard", label: "🌐  Git", ref: gitDashboardRef() },
     { id: "uncommitted-changes", label: "✎  Uncommitted", ref: uncommittedChangesRef() },
     { id: "hook-events", label: "🪝  Hook events", ref: indexRef("hook-events") },
     { id: "subsystem-docs", label: "📑  Subsystem docs", ref: indexRef("subsystem-docs") },

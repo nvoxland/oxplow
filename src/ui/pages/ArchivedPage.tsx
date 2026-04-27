@@ -23,7 +23,7 @@ export type ArchivedPageProps =
  */
 export function ArchivedPage(props: ArchivedPageProps) {
   return (
-    <Page testId="page-archived" title="Archived" kind="work">
+    <Page testId="page-archived" title="Archived">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <PlanPane
           {...props}

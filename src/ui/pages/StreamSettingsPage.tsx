@@ -51,7 +51,6 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
     <Page
       testId="page-stream-settings"
       title={stream ? `Stream settings — ${stream.title}` : "Stream settings"}
-      kind="stream settings"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>

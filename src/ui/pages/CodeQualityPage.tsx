@@ -18,7 +18,6 @@ export function CodeQualityPage({ stream, onOpenFile }: CodeQualityPageProps) {
     <Page
       testId="page-code-quality"
       title="Code quality"
-      kind="findings"
     >
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <CodeQualityPanel stream={stream} onOpenFile={onOpenFile} />

@@ -86,7 +86,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     <Page
       testId="page-settings"
       title="Settings"
-      kind="settings"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>

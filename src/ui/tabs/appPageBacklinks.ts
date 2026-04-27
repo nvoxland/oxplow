@@ -112,7 +112,7 @@ export function gitDashboardBacklinks(_payload: unknown, ctx: AppBacklinkContext
 
 export function gitHistoryBacklinks(_payload: unknown, ctx: AppBacklinkContext): BacklinkEntry[] {
   const out: BacklinkEntry[] = [
-    { ref: gitDashboardRef(), label: "Git dashboard", subtitle: "page" },
+    { ref: gitDashboardRef(), label: "Git", subtitle: "page" },
     { ref: uncommittedChangesRef(), label: "Uncommitted changes", subtitle: "page" },
   ];
   // Notes mentioning any sha visible in the recent log.
