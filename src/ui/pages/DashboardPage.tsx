@@ -33,7 +33,7 @@ const VARIANT_TITLE: Record<DashboardVariant, string> = {
  */
 export function DashboardPage({ variant, stream, threadWork, backlog, onOpenPage }: DashboardPageProps) {
   return (
-    <Page testId={`page-dashboard-${variant}`} title={VARIANT_TITLE[variant]} kind="dashboard">
+    <Page testId={`page-dashboard-${variant}`} title={VARIANT_TITLE[variant]}>
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 960 }}>
         {variant === "planning" ? (
           <PlanningSections threadWork={threadWork} backlog={backlog} stream={stream} onOpenPage={onOpenPage} />

@@ -57,7 +57,6 @@ interface StreamWorktreeRow {
 }
 
 const RECENT_LIMIT = 5;
-const WORKTREE_BASE = "main";
 
 export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDashboardPageProps) {
   const nav = useOptionalPageNavigation();
@@ -109,10 +108,20 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         const match = streamByWorktreePath.get(wt.path);
         return match ? [{ wt, stream: match }] : [];
       });
+      // Compare worktree branches against the main repo's actual branch
+      // rather than the hardcoded "main" string. For the main worktree
+      // itself, fall back to its upstream so the row isn't always 0/0.
+      const mainBranch = streamWorktrees.find(({ wt }) => wt.isMain)?.wt.branch ?? null;
+      const mainUpstream = mainBranch
+        ? remoteBranches.find((r) => r.branch === mainBranch)?.shortName ?? null
+        : null;
       const streamRows: StreamWorktreeRow[] = await Promise.all(
         streamWorktrees.map(async ({ wt, stream: matchedStream }) => {
           if (!wt.branch) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
-          const counts = await getAheadBehind(streamId, WORKTREE_BASE, wt.branch);
+          const isMainRow = wt.isMain || wt.branch === mainBranch;
+          const base = isMainRow ? mainUpstream : mainBranch;
+          if (!base) return { worktree: wt, stream: matchedStream, ahead: 0, behind: 0 };
+          const counts = await getAheadBehind(streamId, base, wt.branch);
           return { worktree: wt, stream: matchedStream, ahead: counts.ahead, behind: counts.behind };
         }),
       );
@@ -205,22 +214,24 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
   if (!streamId) {
     return (
-      <Page testId="page-git-dashboard" title="Git dashboard" kind="git">
+      <Page testId="page-git-dashboard" title="Git dashboard">
         <div style={muted}>No stream selected.</div>
       </Page>
     );
   }
 
+  const dashboardTitle = data?.branchHeader.branch
+    ? `Git dashboard: ${data.branchHeader.branch}`
+    : "Git dashboard";
+
   return (
-    <Page testId="page-git-dashboard" title="Git dashboard" kind="git">
+    <Page testId="page-git-dashboard" title={dashboardTitle}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}
 
         {data ? (
           <>
-            <BranchHeaderCard data={data.branchHeader} />
-
             <UpstreamCard
               data={data.branchHeader}
               onPush={() =>
@@ -297,26 +308,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   );
 }
 
-function BranchHeaderCard({
-  data,
-}: {
-  data: DashboardData["branchHeader"];
-}) {
-  return (
-    <Card testId="git-dashboard-branch-header" title="Branch">
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>{data.branch ?? "(detached)"}</div>
-        {data.headSha ? (
-          <div style={subtle}>
-            HEAD <code>{data.headSha.slice(0, 7)}</code> {data.headSubject}
-            {data.headDate ? ` · ${formatDate(data.headDate)}` : ""}
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
-
 function UpstreamCard({
   data,
   onPush,
@@ -347,35 +338,37 @@ function UpstreamCard({
         ) : (
           <div style={subtle}>No upstream</div>
         )}
-        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-          <button
-            type="button"
-            data-testid="git-dashboard-push"
-            onClick={onPush}
-            disabled={!hasUpstream || pushing || nothingToPush}
-            style={primaryButton}
-          >
-            {pushing ? "Pushing…" : "Push"}
-          </button>
-          <button
-            type="button"
-            data-testid="git-dashboard-pull"
-            onClick={onPullUpstream}
-            disabled={!hasUpstream || pulling || nothingToPull}
-            style={smallButton}
-          >
-            {pulling ? "Pulling…" : "Pull"}
-          </button>
-          <button
-            type="button"
-            data-testid="git-dashboard-fetch"
-            onClick={onFetch}
-            disabled={fetching}
-            style={smallButton}
-          >
-            {fetching ? "Fetching…" : "Fetch"}
-          </button>
-        </div>
+        {hasUpstream ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button
+              type="button"
+              data-testid="git-dashboard-push"
+              onClick={onPush}
+              disabled={pushing || nothingToPush}
+              style={primaryButton}
+            >
+              {pushing ? "Pushing…" : "Push"}
+            </button>
+            <button
+              type="button"
+              data-testid="git-dashboard-pull"
+              onClick={onPullUpstream}
+              disabled={pulling || nothingToPull}
+              style={smallButton}
+            >
+              {pulling ? "Pulling…" : "Pull"}
+            </button>
+            <button
+              type="button"
+              data-testid="git-dashboard-fetch"
+              onClick={onFetch}
+              disabled={fetching}
+              style={smallButton}
+            >
+              {fetching ? "Fetching…" : "Fetch"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </Card>
   );
@@ -390,9 +383,10 @@ function UncommittedMiniCard({
 }) {
   const total = summary?.total ?? 0;
   return (
-    <Card testId="git-dashboard-uncommitted-mini" title="Uncommitted">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>{total === 0 ? "No uncommitted files" : `${total} uncommitted file${total === 1 ? "" : "s"}`}</div>
+    <Card
+      testId="git-dashboard-uncommitted-mini"
+      title="Uncommitted"
+      action={
         <button
           type="button"
           data-testid="git-dashboard-view-uncommitted"
@@ -401,8 +395,32 @@ function UncommittedMiniCard({
         >
           View uncommitted →
         </button>
-      </div>
+      }
+    >
+      {total === 0 || !summary ? (
+        <div style={subtle}>No uncommitted files</div>
+      ) : (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <MiniStat label="Total" value={summary.total} />
+          <MiniStat label="Modified" value={summary.modified} />
+          <MiniStat label="Added" value={summary.added} />
+          <MiniStat label="Deleted" value={summary.deleted} />
+          <MiniStat label="Renamed" value={summary.renamed} />
+          <MiniStat label="Untracked" value={summary.untracked} />
+        </div>
+      )}
     </Card>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minWidth: 64 }}>
+      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 18, fontWeight: 600, color: "var(--text-primary)" }}>{value}</span>
+    </div>
   );
 }
 
@@ -546,10 +564,8 @@ function PairwiseDiffPane({
   rows: StreamWorktreeRow[];
   selfBranch: string;
 }) {
-  const otherBranches = rows
-    .map((r) => r.worktree.branch)
-    .filter((b): b is string => !!b && b !== selfBranch);
-  const [target, setTarget] = useState<string>(otherBranches[0] ?? "");
+  const mainBranch = rows.find((r) => r.worktree.isMain)?.worktree.branch ?? null;
+  const target = mainBranch && mainBranch !== selfBranch ? mainBranch : "";
   const [commits, setCommits] = useState<GitLogCommit[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -572,8 +588,14 @@ function PairwiseDiffPane({
     };
   }, [streamId, selfBranch, target]);
 
-  if (otherBranches.length === 0) {
-    return <div style={{ ...subtle, padding: "4px 0 8px 26px" }}>No other worktrees to compare with.</div>;
+  if (!target) {
+    return (
+      <div style={{ ...subtle, padding: "4px 0 8px 26px" }}>
+        {mainBranch
+          ? `This is the main repo branch (${mainBranch}); nothing to compare against.`
+          : "Main repo branch not detected."}
+      </div>
+    );
   }
   return (
     <div
@@ -581,16 +603,9 @@ function PairwiseDiffPane({
       style={{ padding: "4px 0 8px 26px", display: "flex", flexDirection: "column", gap: 6 }}
     >
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={subtle}>Commits in <code>{selfBranch}</code> not in</span>
-        <select
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          style={{ fontSize: 12 }}
-        >
-          {otherBranches.map((b) => (
-            <option key={b} value={b}>{b}</option>
-          ))}
-        </select>
+        <span style={subtle}>
+          Commits in <code>{selfBranch}</code> not in <code>{target}</code>
+        </span>
       </div>
       {loading ? (
         <div style={subtle}>Loading…</div>

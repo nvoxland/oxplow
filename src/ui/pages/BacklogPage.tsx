@@ -25,7 +25,7 @@ export type BacklogPageProps =
  */
 export function BacklogPage(props: BacklogPageProps) {
   return (
-    <Page testId="page-backlog" title="Backlog" kind="work">
+    <Page testId="page-backlog" title="Backlog">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <PlanPane
           {...props}

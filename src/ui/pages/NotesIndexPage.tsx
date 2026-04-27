@@ -13,7 +13,7 @@ export interface NotesIndexPageProps {
  */
 export function NotesIndexPage({ stream, selectedSlug, onOpenNote }: NotesIndexPageProps) {
   return (
-    <Page testId="page-notes-index" title="Notes" kind="wiki">
+    <Page testId="page-notes-index" title="Notes">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <NotesPane stream={stream} selectedSlug={selectedSlug} onOpenNote={onOpenNote} />
       </div>

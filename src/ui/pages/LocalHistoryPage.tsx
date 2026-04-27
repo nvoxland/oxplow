@@ -17,7 +17,7 @@ export interface LocalHistoryPageProps {
  */
 export function LocalHistoryPage({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: LocalHistoryPageProps) {
   return (
-    <Page testId="page-local-history" title="Local history" kind="snapshots">
+    <Page testId="page-local-history" title="Local history">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <SnapshotsPanel
           stream={stream}

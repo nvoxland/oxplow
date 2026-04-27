@@ -25,7 +25,7 @@ export interface FilesPageProps {
  */
 export function FilesPage(props: FilesPageProps) {
   return (
-    <Page testId="page-files" title="Files" kind="browse">
+    <Page testId="page-files" title="Files">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <ProjectPanel {...props} />
       </div>

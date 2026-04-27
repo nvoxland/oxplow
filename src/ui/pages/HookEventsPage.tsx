@@ -21,7 +21,7 @@ export interface HookEventsPageProps {
  */
 export function HookEventsPage({ streamId }: HookEventsPageProps) {
   return (
-    <Page testId="page-hook-events" title="Hook events" kind="events">
+    <Page testId="page-hook-events" title="Hook events">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <BottomPanel streamId={streamId} />
       </div>
