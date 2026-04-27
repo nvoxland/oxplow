@@ -936,7 +936,7 @@ export class ElectronRuntime {
     return { content: readFileAtRef(stream.worktree_path, ref, path) };
   }
 
-  getGitLog(streamId: string, options?: { limit?: number }) {
+  getGitLog(streamId: string, options?: { limit?: number; all?: boolean }) {
     const stream = this.resolveStream(streamId);
     return getGitLog(stream.worktree_path, options);
   }

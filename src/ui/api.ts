@@ -494,7 +494,7 @@ export async function moveBacklogItemToThread(
 
 export async function getGitLog(
   streamId: string,
-  options?: { limit?: number },
+  options?: { limit?: number; all?: boolean },
 ): Promise<import("../git/git.js").GitLogResult> {
   return desktopApi().getGitLog(streamId, options);
 }

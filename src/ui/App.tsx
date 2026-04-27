@@ -1684,7 +1684,11 @@ export function App() {
           label: "Git dashboard",
           closable: true,
           render: () => (
-            <GitDashboardPage stream={stream} onOpenPage={handleOpenPage} />
+            <GitDashboardPage
+              stream={stream}
+              onOpenPage={handleOpenPage}
+              onRevealCommit={handleRevealCommit}
+            />
           ),
         });
       } else if (ref.kind === "uncommitted-changes") {

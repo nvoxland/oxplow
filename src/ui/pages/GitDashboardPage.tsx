@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import type { GitLogCommit, GitOpResult, GitWorktreeEntry, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { GitLogCommit, GitLogResult, GitOpResult, GitWorktreeEntry, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
 import {
   getAheadBehind,
   getCommitsAheadOf,
@@ -16,12 +16,14 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { Card, cardLinkButton } from "../components/Card.js";
+import { CommitGraphTable, indexRefsBySha } from "../components/History/CommitGraphTable.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
+  onRevealCommit(sha: string): void;
 }
 
 interface DashboardData {
@@ -35,7 +37,7 @@ interface DashboardData {
     behindUpstream: number;
   };
   uncommitted: WorkspaceStatusSummary | null;
-  recentCommits: GitLogCommit[];
+  recentLog: GitLogResult;
   worktrees: WorktreeRow[];
   remoteBranches: RemoteBranchEntry[];
 }
@@ -46,10 +48,10 @@ interface WorktreeRow {
   behind: number;
 }
 
-const RECENT_LIMIT = 10;
+const RECENT_LIMIT = 5;
 const WORKTREE_BASE = "main";
 
-export function GitDashboardPage({ stream, onOpenPage }: GitDashboardPageProps) {
+export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDashboardPageProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export function GitDashboardPage({ stream, onOpenPage }: GitDashboardPageProps) 
       setError(null);
       const [filesResult, log, worktrees, remoteBranches] = await Promise.all([
         listWorkspaceFiles(streamId),
-        getGitLog(streamId, { limit: RECENT_LIMIT }),
+        getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listSiblingWorktrees(streamId),
         listRecentRemoteBranches(streamId, 20),
       ]);
@@ -102,7 +104,7 @@ export function GitDashboardPage({ stream, onOpenPage }: GitDashboardPageProps) 
           behindUpstream,
         },
         uncommitted: filesResult.summary,
-        recentCommits: log.commits,
+        recentLog: log,
         worktrees: worktreeRows,
         remoteBranches,
       });
@@ -181,8 +183,8 @@ export function GitDashboardPage({ stream, onOpenPage }: GitDashboardPageProps) 
             />
 
             <RecentCommitsCard
-              commits={data.recentCommits}
-              onViewFullHistory={() => onOpenPage(indexRef("git-history"))}
+              log={data.recentLog}
+              onRevealCommit={onRevealCommit}
             />
 
             <WorktreesCard
@@ -292,12 +294,13 @@ function UncommittedMiniCard({
 }
 
 function RecentCommitsCard({
-  commits,
-  onViewFullHistory,
+  log,
+  onRevealCommit,
 }: {
-  commits: GitLogCommit[];
-  onViewFullHistory(): void;
+  log: GitLogResult;
+  onRevealCommit(sha: string): void;
 }) {
+  const refIndex = useMemo(() => indexRefsBySha(log), [log]);
   return (
     <Card
       testId="git-dashboard-recent-commits"
@@ -306,28 +309,23 @@ function RecentCommitsCard({
         <button
           type="button"
           data-testid="git-dashboard-view-full-history"
-          onClick={onViewFullHistory}
+          onClick={() => onRevealCommit(log.commits[0]?.sha ?? "")}
           style={linkButton}
         >
           View full history →
         </button>
       }
     >
-      {commits.length === 0 ? (
+      {log.commits.length === 0 ? (
         <div style={muted}>No commits yet.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {commits.map((c) => (
-            <div key={c.sha} style={{ display: "flex", gap: 8, fontSize: 13 }}>
-              <code style={{ width: 64, color: "var(--text-muted)" }}>{c.sha.slice(0, 7)}</code>
-              <div style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.commit.message}
-              </div>
-              <div style={subtle}>{c.commit.author.name}</div>
-              <div style={subtle}>{formatDate(c.commit.author.date)}</div>
-            </div>
-          ))}
-        </div>
+        <CommitGraphTable
+          commits={log.commits}
+          branchHeadsBySha={refIndex.branchHeadsBySha}
+          tagsBySha={refIndex.tagsBySha}
+          currentBranch={log.currentBranch}
+          onSelect={onRevealCommit}
+        />
       )}
     </Card>
   );

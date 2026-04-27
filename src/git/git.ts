@@ -341,12 +341,15 @@ export interface GitLogResult {
 const UNIT = "\x1f";
 const RECORD = "\x1e";
 
-export function getGitLog(projectDir: string, options?: { limit?: number }): GitLogResult {
+export function getGitLog(projectDir: string, options?: { limit?: number; all?: boolean }): GitLogResult {
   const limit = Math.max(1, Math.min(options?.limit ?? 500, 5000));
+  const all = options?.all ?? true;
   const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join(UNIT) + RECORD;
+  const args = ["log", "--date-order", `--max-count=${limit}`, `--pretty=format:${format}`];
+  if (all) args.splice(1, 0, "--all");
   let raw: string;
   try {
-    raw = git(projectDir, ["log", "--all", "--date-order", `--max-count=${limit}`, `--pretty=format:${format}`]);
+    raw = git(projectDir, args);
   } catch {
     return { commits: [], branchHeads: [], tags: [], currentBranch: detectCurrentBranch(projectDir) };
   }

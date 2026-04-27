@@ -334,6 +334,31 @@ test("gitMerge into current branch does not touch a sibling worktree's working d
   expect(siblingStatusBefore).toContain("?? wip.txt");
 });
 
+test("getGitLog with all:false returns only commits reachable from HEAD's current branch", async () => {
+  const { getGitLog } = await import("./git.js");
+  const repoDir = mkRepo();
+  // main: A → B
+  commitFile(repoDir, "a.txt", "a\n", "A on main");
+  commitFile(repoDir, "b.txt", "b\n", "B on main");
+  // feature off main with extra commit
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  commitFile(repoDir, "f.txt", "f\n", "F on feature");
+  // back to main, add another
+  execFileSync("git", ["-C", repoDir, "checkout", "main"], { stdio: "ignore" });
+  commitFile(repoDir, "c.txt", "c\n", "C on main");
+
+  const allLog = getGitLog(repoDir, { all: true });
+  const allMessages = allLog.commits.map((c) => c.commit.message);
+  expect(allMessages).toContain("F on feature");
+
+  const currentLog = getGitLog(repoDir, { all: false });
+  const currentMessages = currentLog.commits.map((c) => c.commit.message);
+  expect(currentMessages).toContain("C on main");
+  expect(currentMessages).toContain("B on main");
+  expect(currentMessages).toContain("A on main");
+  expect(currentMessages).not.toContain("F on feature");
+});
+
 test("listExistingWorktrees enumerates the main worktree plus every linked sibling", () => {
   const repoDir = mkRepo();
   const siblingA = mkdtempSync(join(tmpdir(), "oxplow-wt-a-"));

@@ -124,6 +124,11 @@ All git invocations go through `src/git/git.ts`. Notable:
   `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
   shows progress. The sync wrappers stay around for code paths that
   haven't been promoted yet (e.g. `gitCommitAll`'s internal calls).
+- `getGitLog` accepts an `all` option (defaults `true`). Pass
+  `{ all: false }` to drop `--all` so the log only walks commits
+  reachable from `HEAD`'s branch — used by the Git Dashboard's
+  "Recent commits" card so the graph stays scoped to the current
+  branch.
 - `getAheadBehind(projectDir, base, head?)` — wraps
   `git rev-list --left-right --count base...head` and returns
   `{ ahead, behind }` relative to `base`. `head` defaults to `HEAD`.
