@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type { AgentStatus, BacklogState, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, workItemRef } from "../../tabs/pageRefs.js";
-import { computePagesDirectory } from "./sections.js";
+import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -403,7 +403,7 @@ function PagesDirectory({
   onOpenPage(ref: TabRef): void;
   backlogReadyCount: number;
 }) {
-  const entries = computePagesDirectory({ backlogReadyCount });
+  const entries = computePagesDirectory({ backlogReadyCount }).filter((e) => RAIL_PAGE_IDS.has(e.id));
   return (
     <>
       <SectionHeading>Pages</SectionHeading>

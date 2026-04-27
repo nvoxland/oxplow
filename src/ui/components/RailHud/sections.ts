@@ -19,9 +19,23 @@ export interface PageDirectoryEntry {
 }
 
 /**
- * Static directory of top-level pages shown in the rail's "Pages" section.
- * Pure helper so it can be unit-tested without mounting the React component.
- * `backlogReadyCount` controls the badge on "Backlog".
+ * Ids in `computePagesDirectory` that the rail's "Pages" section
+ * actually renders. The full directory remains the discovery surface
+ * for QuickOpen; the rail keeps a curated subset so it doesn't sprawl.
+ */
+export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
+  "plan-work",
+  "notes-index",
+  "files",
+  "git-dashboard",
+]);
+
+/**
+ * Static directory of top-level pages. Used by QuickOpen as the
+ * "launcher" surface (every page is discoverable there) and filtered
+ * down to `RAIL_PAGE_IDS` for the rail's compact "Pages" section.
+ * Pure helper so it can be unit-tested without mounting the React
+ * component. `backlogReadyCount` controls the badge on "Backlog".
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [

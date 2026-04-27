@@ -110,6 +110,7 @@ import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettin
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
+import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -2342,9 +2343,15 @@ export function App() {
         open={quickOpenVisible}
         stream={stream}
         selectedFilePath={selectedFilePath}
+        pages={computePagesDirectory({
+          backlogReadyCount: backlogState?.items.filter((i) => i.status === "ready").length ?? 0,
+        })}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);
+        }}
+        onOpenPage={(ref) => {
+          handleOpenPage(ref);
         }}
       />
       {stream && externalFilePrompt ? (
