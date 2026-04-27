@@ -92,23 +92,26 @@ export function WorkItemPage({
       }));
   }, [efforts, itemId]);
 
-  const backlinks = (
-    <BacklinksList
-      entries={backlinkEntries}
-      snapshotEntries={snapshotBacklinks}
-      onOpenPage={onOpenPage}
-      onOpenSnapshot={(payload) => setSlideoverSnapshot({
-        snapshotId: payload.snapshotId,
-        label: payload.label ?? null,
-        source: payload.source ?? "",
-        workItemId: payload.workItemId ?? null,
-      })}
-      onOpenCommit={(payload) => setSlideoverCommit({
-        sha: payload.sha,
-        subject: payload.subject ?? "",
-      })}
-    />
-  );
+  const backlinks = {
+    count: backlinkEntries.length + snapshotBacklinks.length,
+    body: (
+      <BacklinksList
+        entries={backlinkEntries}
+        snapshotEntries={snapshotBacklinks}
+        onOpenPage={onOpenPage}
+        onOpenSnapshot={(payload) => setSlideoverSnapshot({
+          snapshotId: payload.snapshotId,
+          label: payload.label ?? null,
+          source: payload.source ?? "",
+          workItemId: payload.workItemId ?? null,
+        })}
+        onOpenCommit={(payload) => setSlideoverCommit({
+          sha: payload.sha,
+          subject: payload.subject ?? "",
+        })}
+      />
+    ),
+  };
 
   useEffect(() => {
     if (!item) return;

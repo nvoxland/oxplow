@@ -1,7 +1,9 @@
+import type { MouseEvent } from "react";
 import type { BacklinkEntry } from "./backlinksIndex.js";
 import type { TabRef } from "./tabState.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
+import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 
 /**
  * A backlink entry that points at a snapshot. Snapshots aren't a Page
@@ -106,6 +108,7 @@ export function BacklinksList({
   onOpenSnapshot,
   onOpenCommit,
 }: BacklinksListProps) {
+  const ctxNav = useOptionalPageNavigation();
   const totalEntries = entries.length + snapshotEntries.length + commitEntries.length;
   if (totalEntries === 0) {
     return (
@@ -166,7 +169,20 @@ export function BacklinksList({
           key={entry.ref.id}
           type="button"
           data-testid={`backlinks-entry-${entry.ref.id}`}
-          onClick={() => onOpenPage(entry.ref)}
+          onClick={(e: MouseEvent) => {
+            // Cmd/Ctrl-click opens in a new tab; default is in-tab
+            // navigation when a PageNavigation context is available,
+            // falling back to the host's onOpenPage (new tab) otherwise.
+            if ((e.metaKey || e.ctrlKey) || !ctxNav) {
+              onOpenPage(entry.ref);
+            } else {
+              ctxNav.navigate(entry.ref);
+            }
+          }}
+          onAuxClick={(e: MouseEvent) => {
+            if (e.button === 1) { e.preventDefault(); onOpenPage(entry.ref); }
+          }}
+          onContextMenu={(e: MouseEvent) => { e.preventDefault(); onOpenPage(entry.ref); }}
           draggable={ctxRef !== null}
           onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
           style={{

@@ -26,6 +26,7 @@ export type PageKind =
   | "local-history"
   | "git-history"
   | "git-dashboard"
+  | "git-commit"
   | "uncommitted-changes"
   | "hook-events"
   | "subsystem-docs"
@@ -43,6 +44,84 @@ export interface TabRef {
   kind: PageKind;
   /** Page-kind-specific data — file path, work item id, dashboard variant, etc. */
   payload: unknown;
+}
+
+/**
+ * Per-tab navigation slot. Tabs in the rail/strip carry a stable
+ * `slotId` that survives in-tab navigation; the *current* page they
+ * render is `current`, with `back`/`forward` stacks for browser-style
+ * history (most recent first). Pure data — operate on these via the
+ * helpers below (`createSlot`, `navigateInSlot`, `slotGoBack`,
+ * `slotGoForward`).
+ */
+export interface PageSlot {
+  slotId: string;
+  current: TabRef;
+  back: TabRef[];
+  forward: TabRef[];
+}
+
+let slotCounter = 0;
+
+/** Reset the auto-incrementing slot id counter. Tests only. */
+export function resetSlotCounter(): void {
+  slotCounter = 0;
+}
+
+/** Generate a stable, unique slot id. */
+export function nextSlotId(): string {
+  slotCounter += 1;
+  return `slot:${slotCounter}`;
+}
+
+/** Build a fresh slot anchored at `ref`. */
+export function createSlot(ref: TabRef, slotId?: string): PageSlot {
+  return { slotId: slotId ?? nextSlotId(), current: ref, back: [], forward: [] };
+}
+
+/**
+ * Navigate within a slot to a new ref. Pushes the current page onto
+ * `back`, clears `forward`. If `ref` is identical (by id) to the
+ * current page, returns the slot unchanged. If `ref` matches the top
+ * of `back`, treat as a back-navigation instead of a push (so a user
+ * navigating B → A while A is at the top of back doesn't double-stack).
+ */
+export function navigateInSlot(slot: PageSlot, ref: TabRef): PageSlot {
+  if (slot.current.id === ref.id) return slot;
+  const backTop = slot.back[slot.back.length - 1];
+  if (backTop && backTop.id === ref.id) {
+    return slotGoBack(slot) ?? slot;
+  }
+  return {
+    slotId: slot.slotId,
+    current: ref,
+    back: [...slot.back, slot.current],
+    forward: [],
+  };
+}
+
+/** Pop the top of `back` into `current`, push old current onto `forward`. */
+export function slotGoBack(slot: PageSlot): PageSlot | null {
+  if (slot.back.length === 0) return null;
+  const next = slot.back[slot.back.length - 1]!;
+  return {
+    slotId: slot.slotId,
+    current: next,
+    back: slot.back.slice(0, -1),
+    forward: [...slot.forward, slot.current],
+  };
+}
+
+/** Pop the top of `forward` into `current`, push old current onto `back`. */
+export function slotGoForward(slot: PageSlot): PageSlot | null {
+  if (slot.forward.length === 0) return null;
+  const next = slot.forward[slot.forward.length - 1]!;
+  return {
+    slotId: slot.slotId,
+    current: next,
+    back: [...slot.back, slot.current],
+    forward: slot.forward.slice(0, -1),
+  };
 }
 
 export interface ThreadTabState {

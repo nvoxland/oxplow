@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Stream, ThreadWorkState } from "../api.js";
-import { listCodeQualityFindings, listWikiNotes, readWikiNoteBody, listWorkItemEfforts } from "../api.js";
+import type { GitLogCommit, Stream, ThreadWorkState } from "../api.js";
+import { getBranchChanges, getGitLog, listCodeQualityFindings, listWikiNotes, readWikiNoteBody, listWorkItemEfforts } from "../api.js";
 import type { BacklinkContext, BacklinkEntry, BacklinkFindingEntry, BacklinkNoteEntry, BacklinkWorkItemEntry } from "./backlinksIndex.js";
 import { computeBacklinks } from "./backlinksIndex.js";
+import { APP_PAGE_BACKLINKS } from "./appPageBacklinks.js";
 import type { TabRef } from "./tabState.js";
 
 /**
@@ -22,6 +23,9 @@ export function useBacklinks(
   threadWork: ThreadWorkState | null,
 ): BacklinkEntry[] {
   const [ctx, setCtx] = useState<BacklinkContext>({ notes: [], workItems: [], findings: [] });
+  const [recentLog, setRecentLog] = useState<GitLogCommit[] | undefined>(undefined);
+  const [uncommittedPaths, setUncommittedPaths] = useState<string[] | undefined>(undefined);
+  const [currentBranch, setCurrentBranch] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!stream) {
@@ -88,5 +92,29 @@ export function useBacklinks(
     };
   }, [stream?.id, threadWork?.threadId]);
 
+  // Fetch git data slices when the target is an app-page kind that
+  // needs them. Cheap to skip when not relevant.
+  const isAppPage = target.kind in APP_PAGE_BACKLINKS;
+  useEffect(() => {
+    if (!isAppPage || !stream) return;
+    let cancelled = false;
+    void getGitLog(stream.id, { all: false, limit: 30 }).then((res) => {
+      if (cancelled) return;
+      setRecentLog(res.commits);
+      setCurrentBranch(res.currentBranch ?? undefined);
+    }).catch(() => { /* ignore */ });
+    if (target.kind === "uncommitted-changes") {
+      void getBranchChanges(stream.id, "HEAD").then((res) => {
+        if (cancelled) return;
+        setUncommittedPaths(res.files.map((c) => c.path));
+      }).catch(() => { /* ignore */ });
+    }
+    return () => { cancelled = true; };
+  }, [isAppPage, target.kind, stream?.id]);
+
+  const provider = APP_PAGE_BACKLINKS[target.kind];
+  if (provider) {
+    return provider(target.payload, { ...ctx, recentLog, uncommittedPaths, currentBranch });
+  }
   return computeBacklinks(target, ctx);
 }

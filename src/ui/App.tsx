@@ -79,6 +79,9 @@ import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
+import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
+import { useBookmarksStore } from "./tabs/useBookmarks.js";
+import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { StartPage } from "./pages/StartPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
@@ -102,6 +105,7 @@ import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
+import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
@@ -189,6 +193,13 @@ export function App() {
   // dispatch by kind. Independent of the legacy noteTabs/diffTabs lists,
   // which still drive the tabs they own.
   const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>({});
+  // Per-thread browser-style back/forward history for page tabs. Keyed by
+  // the tab's *current* ref id; when an in-tab navigation replaces a tab's
+  // ref, the entry is migrated to the new id along with the swap. Files,
+  // notes, diffs, and the agent tab don't participate.
+  const [threadPageHistory, setThreadPageHistory] = useState<
+    Record<string, Record<string, { back: TabRef[]; forward: TabRef[] }>>
+  >({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [noteTabs, setNoteTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1450,6 +1461,8 @@ export function App() {
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
+  const bookmarksStore = useBookmarksStore();
+
   const recentFileEntries = useMemo(() => {
     const order = currentSession.openOrder;
     return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
@@ -1479,6 +1492,7 @@ export function App() {
       case "local-history":
       case "git-history":
       case "git-dashboard":
+      case "git-commit":
       case "uncommitted-changes":
       case "hook-events":
       case "files":
@@ -1508,12 +1522,134 @@ export function App() {
     }
   }, [handleOpenFile, handleOpenNote, selectedThreadId, setCenterActive]);
 
+  /**
+   * Browser-style in-tab navigation. Replaces the page tab whose
+   * current id is `currentTabId` with `ref`, and pushes the prior ref
+   * onto that tab's back stack (carrying any existing back/forward
+   * with it). The tab's id changes to `ref.id`; centerActive follows.
+   * If `currentTabId` doesn't refer to a known page tab, falls back to
+   * `handleOpenPage` (open in new tab).
+   */
+  const handleNavigateInTab = useCallback((currentTabId: string, ref: TabRef) => {
+    if (!selectedThreadId) return;
+    const existing = threadPageTabs[selectedThreadId] ?? [];
+    const idx = existing.findIndex((t) => t.id === currentTabId);
+    if (idx < 0) {
+      handleOpenPage(ref);
+      return;
+    }
+    if (existing[idx]!.id === ref.id) return;
+    // Don't allow in-tab navigation to file/note/agent kinds — those
+    // live in their own tab tracks. Promote to a regular open instead.
+    if (ref.kind === "agent" || ref.kind === "file" || ref.kind === "note" || ref.kind === "diff") {
+      handleOpenPage(ref);
+      return;
+    }
+    const oldRef = existing[idx]!;
+    setThreadPageTabs((prev) => {
+      const list = prev[selectedThreadId] ?? [];
+      const next = list.slice();
+      // If `ref` already exists elsewhere as a page tab, drop the
+      // duplicate to mirror browser dedup-on-navigate.
+      const dupIdx = next.findIndex((t, i) => i !== idx && t.id === ref.id);
+      if (dupIdx >= 0) next.splice(dupIdx, 1);
+      const targetIdx = dupIdx >= 0 && dupIdx < idx ? idx - 1 : idx;
+      next[targetIdx] = ref;
+      return { ...prev, [selectedThreadId]: next };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      const old = perThread[currentTabId] ?? { back: [], forward: [] };
+      const { [currentTabId]: _drop, ...rest } = perThread;
+      return {
+        ...prev,
+        [selectedThreadId]: {
+          ...rest,
+          [ref.id]: { back: [...old.back, oldRef], forward: [] },
+        },
+      };
+    });
+    setCenterActive(ref.id);
+  }, [handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
+
+  const handleGoBack = useCallback((currentTabId: string) => {
+    if (!selectedThreadId) return;
+    const perThread = threadPageHistory[selectedThreadId] ?? {};
+    const entry = perThread[currentTabId];
+    if (!entry || entry.back.length === 0) return;
+    const target = entry.back[entry.back.length - 1]!;
+    const existing = threadPageTabs[selectedThreadId] ?? [];
+    const idx = existing.findIndex((t) => t.id === currentTabId);
+    if (idx < 0) return;
+    const oldRef = existing[idx]!;
+    setThreadPageTabs((prev) => {
+      const list = prev[selectedThreadId] ?? [];
+      const next = list.slice();
+      next[idx] = target;
+      return { ...prev, [selectedThreadId]: next };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      const { [currentTabId]: drop, ...rest } = perThread;
+      return {
+        ...prev,
+        [selectedThreadId]: {
+          ...rest,
+          [target.id]: {
+            back: entry.back.slice(0, -1),
+            forward: [...entry.forward, oldRef],
+          },
+        },
+      };
+    });
+    setCenterActive(target.id);
+  }, [selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
+
+  const handleGoForward = useCallback((currentTabId: string) => {
+    if (!selectedThreadId) return;
+    const perThread = threadPageHistory[selectedThreadId] ?? {};
+    const entry = perThread[currentTabId];
+    if (!entry || entry.forward.length === 0) return;
+    const target = entry.forward[entry.forward.length - 1]!;
+    const existing = threadPageTabs[selectedThreadId] ?? [];
+    const idx = existing.findIndex((t) => t.id === currentTabId);
+    if (idx < 0) return;
+    const oldRef = existing[idx]!;
+    setThreadPageTabs((prev) => {
+      const list = prev[selectedThreadId] ?? [];
+      const next = list.slice();
+      next[idx] = target;
+      return { ...prev, [selectedThreadId]: next };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      const { [currentTabId]: drop, ...rest } = perThread;
+      return {
+        ...prev,
+        [selectedThreadId]: {
+          ...rest,
+          [target.id]: {
+            back: [...entry.back, oldRef],
+            forward: entry.forward.slice(0, -1),
+          },
+        },
+      };
+    });
+    setCenterActive(target.id);
+  }, [selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
+
   const closePageTab = useCallback((id: string) => {
     if (!selectedThreadId) return;
     setThreadPageTabs((prev) => {
       const existing = prev[selectedThreadId] ?? [];
       if (!existing.some((t) => t.id === id)) return prev;
       return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      if (!(id in perThread)) return prev;
+      const { [id]: _drop, ...rest } = perThread;
+      return { ...prev, [selectedThreadId]: rest };
     });
     setCenterActive((current) => (current === id ? "agent" : current));
   }, [selectedThreadId, setCenterActive]);
@@ -1633,6 +1769,7 @@ export function App() {
       });
     }
     const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    const pageTabStartIdx = tabs.length;
     for (const ref of pageTabsForThread) {
       if (ref.kind === "start") {
         tabs.push({
@@ -1701,6 +1838,22 @@ export function App() {
               stream={stream}
               onOpenPage={handleOpenPage}
               onOpenFile={handleOpenFile}
+            />
+          ),
+        });
+      } else if (ref.kind === "git-commit") {
+        const sha = (ref.payload as { sha?: string } | null)?.sha ?? "";
+        tabs.push({
+          id: ref.id,
+          label: sha ? `${sha.slice(0, 7)}` : "commit",
+          closable: true,
+          render: () => (
+            <GitCommitPage
+              stream={stream}
+              sha={sha}
+              threadWork={selectedThreadWork}
+              onOpenDiff={handleOpenDiff}
+              onOpenPage={handleOpenPage}
             />
           ),
         });
@@ -1970,6 +2123,49 @@ export function App() {
         });
       }
     }
+    // Wrap each page-tab render with PageNavigationContext so descendants
+    // (BacklinksList, RouteLink, in-page cross-references) can navigate
+    // in-tab and the Page chrome auto-mounts a back/forward nav bar.
+    const perThreadHistory = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
+    const pageRefsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    for (let i = pageTabStartIdx; i < tabs.length; i++) {
+      const tab = tabs[i]!;
+      const tabId = tab.id;
+      const entry = perThreadHistory[tabId] ?? { back: [], forward: [] };
+      const ref = pageRefsForThread.find((r) => r.id === tabId);
+      const innerRender = tab.render;
+      const scopes = ref ? bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id) : [];
+      const lastScope = bookmarksStore.lastScope();
+      const navValue = {
+        navigate: (newRef: TabRef, opts?: { newTab?: boolean }) => {
+          if (opts?.newTab) handleOpenPage(newRef);
+          else handleNavigateInTab(tabId, newRef);
+        },
+        goBack: () => handleGoBack(tabId),
+        goForward: () => handleGoForward(tabId),
+        canGoBack: entry.back.length > 0,
+        canGoForward: entry.forward.length > 0,
+        bookmark: ref ? {
+          scopes,
+          lastScope,
+          toggle: (scope?: BookmarkScope) => {
+            const target = scope ?? lastScope;
+            const currentScopes = bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id);
+            if (currentScopes.includes(target)) {
+              bookmarksStore.remove(target, selectedThreadId, stream?.id ?? null, ref.id);
+            } else {
+              bookmarksStore.add(target, selectedThreadId, stream?.id ?? null, ref, tab.label);
+            }
+          },
+          setLastScope: (scope: BookmarkScope) => bookmarksStore.setLastScope(scope),
+        } : undefined,
+      };
+      tab.render = () => (
+        <PageNavigationContext.Provider value={navValue}>
+          {innerRender()}
+        </PageNavigationContext.Provider>
+      );
+    }
     return tabs;
   }, [
     selectedThread,
@@ -1987,8 +2183,13 @@ export function App() {
     handleOpenNote,
     selectedThreadId,
     threadPageTabs,
+    threadPageHistory,
     handleOpenPage,
+    handleNavigateInTab,
+    handleGoBack,
+    handleGoForward,
     closePageTab,
+    bookmarksStore,
     snapshotsReveal,
     historyReveal,
     workspaceContext.gitEnabled,
@@ -2052,6 +2253,15 @@ export function App() {
           backlog={backlogState}
           agentStatus={agentThreadStatus}
           recentFiles={recentFileEntries}
+          bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
+            const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
+            return {
+              ref: b.ref,
+              label: b.label ?? b.ref.id,
+              scopeBadge,
+              onRemove: () => bookmarksStore.remove(b.scope, selectedThreadId, stream?.id ?? null, b.ref.id),
+            };
+          })}
           onOpenPage={handleOpenPage}
           onOpenSearch={() => setQuickOpenVisible(true)}
         />

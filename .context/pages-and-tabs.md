@@ -25,8 +25,14 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `src/ui/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
 | `src/ui/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
-| `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, body, collapsible Backlinks region. Reads only semantic CSS variables (skin via theme). |
-| `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, recent files, pages directory. Passive — never auto-opens tabs. |
+| `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + future bookmark/backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Reads only semantic CSS variables (skin via theme). |
+| `src/ui/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
+| `src/ui/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward }` to descendants of an active page tab. Wrapped around each page-tab render in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. |
+| `src/ui/tabs/RouteLink.tsx` | Browser-style link button: left-click → in-tab navigate (or new tab when `pinnedSlot`), Cmd/Ctrl-click + middle-click + right-click → new tab. Falls back to caller-supplied `onNavigate` when used outside a `PageNavigationContext` (rail HUD, palette). |
+| `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
+| `src/ui/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
+| `src/ui/tabs/appPageBacklinks.ts` | App-page backlinks providers — pure `(payload, ctx) → BacklinkEntry[]` functions for `git-dashboard`, `git-history`, `uncommitted-changes`, `git-commit`. `useBacklinks` dispatches to them when `target.kind` matches. Add a new app-page provider by registering it in `APP_PAGE_BACKLINKS` and extending `useBacklinks` to fetch any new data slice it needs. |
+| `src/ui/pages/GitCommitPage.tsx` | Single-commit page (`git-commit:<sha>`). Reuses `CommitDetailBody` (now exported from `CommitDetailSlideover`). Routed via `gitCommitRef(sha)`. Bookmark-/history-friendly alternative to the slideover. |
 | `src/ui/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
 | `src/ui/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
 | `src/ui/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
@@ -50,7 +56,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 "agent" | "file" | "diff" | "note" | "work-item" | "finding"
 | "plan-work" | "done-work" | "backlog" | "archived"
 | "notes-index" | "files" | "code-quality"
-| "local-history" | "git-history" | "git-dashboard"
+| "local-history" | "git-history" | "git-dashboard" | "git-commit"
 | "uncommitted-changes" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
 | "new-stream" | "new-work-item"
@@ -72,6 +78,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | finding | `finding:<id>` | `finding:f-7` |
 | `*-index` | the kind name | `code-quality`, `start`, `settings` |
 | git-dashboard | `git-dashboard` | `git-dashboard` |
+| git-commit | `git-commit:<sha>` | `git-commit:abc1234567890` |
 | uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
 | new-stream | `new-stream` | `new-stream` |
@@ -244,6 +251,28 @@ it's now mounted directly at the bottom of `App.tsx` inside its own
 status-bar wrapper. The `BottomPanel`, `HistoryPanel`, `SnapshotsPanel`,
 and `CodeQualityPanel` modules are no longer imported from `App.tsx` —
 the only callers left are inside their own page wrappers.
+
+## Browser-style tab navigation (Phase 1)
+
+Page tabs now carry **per-tab back/forward history**. `App.tsx` keeps
+a parallel `threadPageHistory: Record<threadId, Record<tabId, { back; forward }>>`
+state alongside `threadPageTabs`. When a page-tab descendant calls
+`navigate(ref)` via `PageNavigationContext`, the active tab's current
+ref is replaced with `ref` and the prior ref is pushed onto its back
+stack — the tab id changes to `ref.id`, `centerActive` follows, and
+the history entry is migrated. `goBack` / `goForward` swap the
+current ref with the top of the back / forward stack.
+
+`navigate(ref, { newTab: true })`, Cmd/Ctrl-click on a `BacklinksList`
+entry, middle-click, and right-click all bypass in-tab navigation and
+fall through to `handleOpenPage` (the legacy "open as new page tab"
+path). Files / notes / diffs / agent live in their own tab tracks
+and don't participate — opening one of those refs from a page body
+still produces a separate tab.
+
+The bookmark toggle and backlinks dropdown affordances on
+`PageNavBar` are scaffolded but currently inert; Phases 2 and 3 wire
+them.
 
 ## Per-thread active tab (today)
 

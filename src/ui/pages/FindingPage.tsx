@@ -24,7 +24,10 @@ export interface FindingPageProps {
  */
 export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenFileAtLine }: FindingPageProps) {
   const backlinkEntries = useBacklinks(findingRef(findingId), stream, threadWork);
-  const backlinks = <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />;
+  const backlinks = {
+    count: backlinkEntries.length,
+    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+  };
   const [row, setRow] = useState<CodeQualityFindingRow | null>(null);
   const [snippet, setSnippet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

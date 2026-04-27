@@ -96,7 +96,7 @@ export function CommitDetailSlideover({
   );
 }
 
-function CommitDetailBody({
+export function CommitDetailBody({
   detail,
   onOpenDiff,
 }: {

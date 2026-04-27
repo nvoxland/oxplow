@@ -8,12 +8,22 @@ import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 
+export interface BookmarkRailEntry {
+  ref: TabRef;
+  label: string;
+  /** Single-letter scope marker rendered as a small badge (T/S/G). */
+  scopeBadge: "T" | "S" | "G";
+  /** Called when the user wants to remove the bookmark from this scope. */
+  onRemove(): void;
+}
+
 export interface RailHudProps {
   threadId: string | null;
   threadWork: ThreadWorkState | null;
   backlog: BacklogState | null;
   agentStatus: AgentStatus;
   recentFiles: RecentFileEntry[];
+  bookmarks?: BookmarkRailEntry[];
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
   /** Optional: invoked when the user clicks the search affordance. */
@@ -37,6 +47,7 @@ export function RailHud({
   backlog,
   agentStatus,
   recentFiles,
+  bookmarks,
   onOpenPage,
   onOpenSearch,
 }: RailHudProps) {
@@ -72,6 +83,10 @@ export function RailHud({
 
       {upNext.length > 0 ? (
         <UpNextSection items={upNext} onOpenPage={onOpenPage} />
+      ) : null}
+
+      {bookmarks && bookmarks.length > 0 ? (
+        <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
       ) : null}
 
       {recents.length > 0 ? (
@@ -268,6 +283,77 @@ function UpNextSection({
               {item.title}
             </span>
           </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function BookmarksSection({
+  entries,
+  onOpenPage,
+}: {
+  entries: BookmarkRailEntry[];
+  onOpenPage(ref: TabRef): void;
+}) {
+  return (
+    <>
+      <SectionHeading>Bookmarks</SectionHeading>
+      <div data-testid="rail-bookmarks" style={{ paddingBottom: 8 }}>
+        {entries.map((entry) => (
+          <div
+            key={entry.ref.id}
+            style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 6 }}
+          >
+            <button
+              type="button"
+              data-testid={`rail-bookmark-${entry.ref.id}`}
+              title={entry.label}
+              onClick={() => onOpenPage(entry.ref)}
+              style={{ ...rowHoverStyle(), flex: 1 }}
+            >
+              <span aria-hidden style={{ color: "var(--accent-fg)", fontSize: 11 }}>★</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {entry.label}
+              </span>
+              <span
+                title={
+                  entry.scopeBadge === "T" ? "Thread bookmark"
+                    : entry.scopeBadge === "S" ? "Stream bookmark"
+                    : "Global bookmark"
+                }
+                style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  background: "var(--surface-tab-inactive)",
+                  padding: "1px 4px",
+                  borderRadius: 3,
+                }}
+              >
+                {entry.scopeBadge}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-testid={`rail-bookmark-remove-${entry.ref.id}`}
+              title="Remove bookmark"
+              onClick={(e) => {
+                e.stopPropagation();
+                entry.onRemove();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+                padding: "2px 4px",
+                fontSize: 11,
+              }}
+            >
+              ×
+            </button>
+          </div>
         ))}
       </div>
     </>

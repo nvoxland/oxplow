@@ -76,6 +76,12 @@ export function uncommittedChangesRef(): TabRef {
   return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
 }
 
+/** Single git commit page — bookmark-/history-friendly version of the
+ *  commit slideover. Id format: `git-commit:<sha>`. */
+export function gitCommitRef(sha: string): TabRef {
+  return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
+}
+
 export type DashboardKind = "planning" | "review" | "quality";
 
 export function dashboardRef(variant: DashboardKind): TabRef {

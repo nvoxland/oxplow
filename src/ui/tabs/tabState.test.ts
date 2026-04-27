@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { createTabStore, type TabRef } from "./tabState.js";
+import {
+  createSlot,
+  createTabStore,
+  navigateInSlot,
+  resetSlotCounter,
+  slotGoBack,
+  slotGoForward,
+  type TabRef,
+} from "./tabState.js";
 
 const FILE_A: TabRef = { id: "file:src/a.ts", kind: "file", payload: { path: "src/a.ts" } };
 const FILE_B: TabRef = { id: "file:src/b.ts", kind: "file", payload: { path: "src/b.ts" } };
@@ -141,5 +149,87 @@ describe("tabStore", () => {
     const state = store.getThreadState("t-1");
     expect(state.tabs.map((t) => t.id)).toEqual([AGENT.id, FILE_A.id]);
     expect(state.activeId).toBe(FILE_A.id);
+  });
+});
+
+describe("PageSlot navigation", () => {
+  test("createSlot generates unique slot ids and seeds the current ref", () => {
+    resetSlotCounter();
+    const a = createSlot(FILE_A);
+    const b = createSlot(FILE_B);
+    expect(a.slotId).not.toBe(b.slotId);
+    expect(a.current).toBe(FILE_A);
+    expect(a.back).toEqual([]);
+    expect(a.forward).toEqual([]);
+  });
+
+  test("navigateInSlot pushes current onto back, sets new current, clears forward", () => {
+    let slot = createSlot(FILE_A);
+    slot = navigateInSlot(slot, FILE_B);
+    expect(slot.current).toBe(FILE_B);
+    expect(slot.back).toEqual([FILE_A]);
+    expect(slot.forward).toEqual([]);
+    slot = navigateInSlot(slot, WORK_ITEM);
+    expect(slot.current).toBe(WORK_ITEM);
+    expect(slot.back).toEqual([FILE_A, FILE_B]);
+  });
+
+  test("navigateInSlot to the same ref is a no-op", () => {
+    const slot = createSlot(FILE_A);
+    expect(navigateInSlot(slot, FILE_A)).toBe(slot);
+  });
+
+  test("navigateInSlot to the back-stack top is treated as a back-navigation", () => {
+    let slot = createSlot(FILE_A);
+    slot = navigateInSlot(slot, FILE_B);
+    slot = navigateInSlot(slot, FILE_A);
+    expect(slot.current).toBe(FILE_A);
+    expect(slot.back).toEqual([]);
+    expect(slot.forward).toEqual([FILE_B]);
+  });
+
+  test("slotGoBack walks back and pushes current onto forward", () => {
+    let slot = createSlot(FILE_A);
+    slot = navigateInSlot(slot, FILE_B);
+    const backed = slotGoBack(slot);
+    expect(backed?.current).toBe(FILE_A);
+    expect(backed?.back).toEqual([]);
+    expect(backed?.forward).toEqual([FILE_B]);
+  });
+
+  test("slotGoBack returns null when back is empty", () => {
+    expect(slotGoBack(createSlot(FILE_A))).toBeNull();
+  });
+
+  test("slotGoForward walks forward after a back", () => {
+    let slot = createSlot(FILE_A);
+    slot = navigateInSlot(slot, FILE_B);
+    slot = slotGoBack(slot)!;
+    const fwd = slotGoForward(slot);
+    expect(fwd?.current).toBe(FILE_B);
+    expect(fwd?.back).toEqual([FILE_A]);
+    expect(fwd?.forward).toEqual([]);
+  });
+
+  test("slotGoForward returns null when forward is empty", () => {
+    expect(slotGoForward(createSlot(FILE_A))).toBeNull();
+  });
+
+  test("a fresh navigateInSlot after going back clears forward", () => {
+    let slot = createSlot(FILE_A);
+    slot = navigateInSlot(slot, FILE_B);
+    slot = slotGoBack(slot)!;
+    slot = navigateInSlot(slot, WORK_ITEM);
+    expect(slot.forward).toEqual([]);
+    expect(slot.back).toEqual([FILE_A]);
+    expect(slot.current).toBe(WORK_ITEM);
+  });
+
+  test("slotId is preserved across navigations", () => {
+    let slot = createSlot(FILE_A, "slot:fixed");
+    slot = navigateInSlot(slot, FILE_B);
+    slot = slotGoBack(slot)!;
+    slot = slotGoForward(slot)!;
+    expect(slot.slotId).toBe("slot:fixed");
   });
 });

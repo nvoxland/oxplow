@@ -23,7 +23,10 @@ export interface NotePageProps {
  */
 export function NotePage({ stream, slug, threadWork, onClosed, onOpenNote, onOpenFile, onOpenPage }: NotePageProps) {
   const backlinkEntries = useBacklinks(noteRef(slug), stream, threadWork);
-  const backlinks = <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />;
+  const backlinks = {
+    count: backlinkEntries.length,
+    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+  };
   if (!stream) {
     return (
       <Page testId="page-note" title={slug} kind="note" backlinks={backlinks}>
