@@ -29,6 +29,7 @@ import {
   gitPushAsync,
   gitPull,
   gitPullAsync,
+  gitFetchAsync,
   gitCommitAll,
   listFileCommits,
   gitBlame,
@@ -998,6 +999,25 @@ export class ElectronRuntime {
       const result = await gitPullAsync(stream.worktree_path, options);
       if (result.ok) this.backgroundTaskStore.complete(taskId);
       else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
+  }
+
+  async gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult> {
+    const stream = this.resolveStream(streamId);
+    const remote = options?.remote ?? "origin";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Fetching ${remote}…`,
+    });
+    try {
+      const result = await gitFetchAsync(stream.worktree_path, options);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git fetch failed");
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

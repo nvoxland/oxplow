@@ -4,7 +4,9 @@ import {
   getAheadBehind,
   getCommitsAheadOf,
   getGitLog,
+  gitFetch,
   gitMergeInto,
+  gitPull,
   gitPullRemoteIntoCurrent,
   gitPush,
   gitPushCurrentTo,
@@ -217,16 +219,32 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
         {data ? (
           <>
-            <BranchHeaderCard
+            <BranchHeaderCard data={data.branchHeader} />
+
+            <UpstreamCard
               data={data.branchHeader}
-              onPushUpstream={() =>
+              onPush={() =>
                 runConfirmed(
-                  "Push to upstream",
+                  "Push",
                   `git push${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
                   () => gitPush(streamId),
                 )
               }
-              pending={pendingAction === "Push to upstream"}
+              onPullUpstream={() =>
+                runConfirmed(
+                  "Pull",
+                  `git pull${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
+                  () => gitPull(streamId),
+                )
+              }
+              onFetch={() =>
+                runConfirmed(
+                  "Fetch",
+                  "git fetch origin",
+                  () => gitFetch(streamId),
+                )
+              }
+              pendingAction={pendingAction}
             />
 
             <UncommittedMiniCard
@@ -281,40 +299,81 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
 function BranchHeaderCard({
   data,
-  onPushUpstream,
-  pending,
 }: {
   data: DashboardData["branchHeader"];
-  onPushUpstream(): void;
-  pending: boolean;
 }) {
   return (
     <Card testId="git-dashboard-branch-header" title="Branch">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ fontSize: 18, fontWeight: 600 }}>{data.branch ?? "(detached)"}</div>
-        {data.upstream ? (
-          <div style={subtle}>
-            tracks <code>{data.upstream}</code> · ahead {data.aheadUpstream}, behind{" "}
-            {data.behindUpstream}
-          </div>
-        ) : (
-          <div style={subtle}>no upstream tracking branch</div>
-        )}
         {data.headSha ? (
           <div style={subtle}>
             HEAD <code>{data.headSha.slice(0, 7)}</code> {data.headSubject}
             {data.headDate ? ` · ${formatDate(data.headDate)}` : ""}
           </div>
         ) : null}
-        <div style={{ marginTop: 6 }}>
+      </div>
+    </Card>
+  );
+}
+
+function UpstreamCard({
+  data,
+  onPush,
+  onPullUpstream,
+  onFetch,
+  pendingAction,
+}: {
+  data: DashboardData["branchHeader"];
+  onPush(): void;
+  onPullUpstream(): void;
+  onFetch(): void;
+  pendingAction: string | null;
+}) {
+  const hasUpstream = !!data.upstream;
+  const pushing = pendingAction === "Push";
+  const pulling = pendingAction === "Pull";
+  const fetching = pendingAction === "Fetch";
+  const nothingToPush = data.aheadUpstream === 0;
+  const nothingToPull = data.behindUpstream === 0;
+  return (
+    <Card testId="git-dashboard-upstream" title="Upstream">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {hasUpstream ? (
+          <div style={subtle}>
+            tracks <code>{data.upstream}</code> · ahead {data.aheadUpstream}, behind{" "}
+            {data.behindUpstream}
+          </div>
+        ) : (
+          <div style={subtle}>No upstream</div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <button
             type="button"
-            data-testid="git-dashboard-push-upstream"
-            onClick={onPushUpstream}
-            disabled={pending}
+            data-testid="git-dashboard-push"
+            onClick={onPush}
+            disabled={!hasUpstream || pushing || nothingToPush}
             style={primaryButton}
           >
-            {pending ? "Pushing…" : "Push to upstream"}
+            {pushing ? "Pushing…" : "Push"}
+          </button>
+          <button
+            type="button"
+            data-testid="git-dashboard-pull"
+            onClick={onPullUpstream}
+            disabled={!hasUpstream || pulling || nothingToPull}
+            style={smallButton}
+          >
+            {pulling ? "Pulling…" : "Pull"}
+          </button>
+          <button
+            type="button"
+            data-testid="git-dashboard-fetch"
+            onClick={onFetch}
+            disabled={fetching}
+            style={smallButton}
+          >
+            {fetching ? "Fetching…" : "Fetch"}
           </button>
         </div>
       </div>
