@@ -335,19 +335,23 @@ export class WorkItemEffortStore {
     threadId: string | null,
     limit: number,
   ): Array<{ itemId: string; title: string; endedAt: string }> {
+    // Collapse multiple efforts per work item to a single row anchored at
+    // the latest close. Reopen → reclose cycles otherwise surface as
+    // duplicate Finished entries for the same item.
     const rows = threadId
       ? this.stateDb.all<{
           work_item_id: string;
           ended_at: string;
           title: string | null;
         }>(
-          `SELECT e.work_item_id, e.ended_at, wi.title
+          `SELECT e.work_item_id, MAX(e.ended_at) AS ended_at, wi.title
            FROM work_item_effort e
            JOIN work_items wi ON wi.id = e.work_item_id
            WHERE wi.thread_id = ?
              AND wi.deleted_at IS NULL
              AND e.ended_at IS NOT NULL
-           ORDER BY e.ended_at DESC, e.rowid DESC
+           GROUP BY e.work_item_id
+           ORDER BY ended_at DESC
            LIMIT ?`,
           threadId,
           limit,
@@ -357,12 +361,13 @@ export class WorkItemEffortStore {
           ended_at: string;
           title: string | null;
         }>(
-          `SELECT e.work_item_id, e.ended_at, wi.title
+          `SELECT e.work_item_id, MAX(e.ended_at) AS ended_at, wi.title
            FROM work_item_effort e
            JOIN work_items wi ON wi.id = e.work_item_id
            WHERE wi.deleted_at IS NULL
              AND e.ended_at IS NOT NULL
-           ORDER BY e.ended_at DESC, e.rowid DESC
+           GROUP BY e.work_item_id
+           ORDER BY ended_at DESC
            LIMIT ?`,
           limit,
         );
