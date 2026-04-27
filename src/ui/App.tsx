@@ -36,7 +36,10 @@ import {
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   listRecentlyFinished,
+  clearRecentlyFinished,
   type FinishedEntry,
+  getBranchChanges,
+  subscribeGitRefsEvents,
   getConfig,
   setGeneratedDirs,
   selectThread,
@@ -1512,6 +1515,35 @@ export function App() {
   // (per-thread) and updated wiki notes (global). Refetched on
   // work-item or wiki-note changes; sub-100ms IPC, so coarse
   // invalidation is fine.
+  const [uncommittedSummary, setUncommittedSummary] = useState<{
+    added: number; modified: number; deleted: number; additions: number; deletions: number;
+  } | null>(null);
+  useEffect(() => {
+    const sid = stream?.id;
+    if (!sid) { setUncommittedSummary(null); return; }
+    let cancelled = false;
+    const refresh = () => {
+      void getBranchChanges(sid, "HEAD")
+        .then((res) => {
+          if (cancelled) return;
+          let added = 0, modified = 0, deleted = 0, additions = 0, deletions = 0;
+          for (const f of res.files) {
+            if (f.status === "added" || f.status === "untracked") added++;
+            else if (f.status === "modified" || f.status === "renamed") modified++;
+            else if (f.status === "deleted") deleted++;
+            additions += f.additions ?? 0;
+            deletions += f.deletions ?? 0;
+          }
+          setUncommittedSummary({ added, modified, deleted, additions, deletions });
+        })
+        .catch(() => { if (!cancelled) setUncommittedSummary(null); });
+    };
+    refresh();
+    const offGit = subscribeGitRefsEvents(sid, () => refresh());
+    const offWs = subscribeWorkspaceEvents(sid, () => refresh());
+    return () => { cancelled = true; offGit(); offWs(); };
+  }, [stream?.id]);
+
   const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -2318,6 +2350,8 @@ export function App() {
           agentStatus={agentThreadStatus}
           recentFiles={recentFileEntries}
           recentlyFinished={recentlyFinished}
+          uncommitted={uncommittedSummary}
+          onClearFinished={() => { void clearRecentlyFinished(selectedThreadId); }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
             return {

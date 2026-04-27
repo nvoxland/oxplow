@@ -1121,6 +1121,18 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`UPDATE work_items SET status = 'done', completed_at = COALESCE(completed_at, updated_at) WHERE status = 'human_check';`);
     },
   },
+  {
+    version: 44,
+    name: "finished_seen watermark",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE finished_seen (
+          scope TEXT PRIMARY KEY,
+          t TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

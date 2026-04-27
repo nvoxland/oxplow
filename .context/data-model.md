@@ -434,6 +434,16 @@ complete / fail; `CodeQualityPanel` (`src/ui/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
+### `finished_seen` — runtime watermark for the rail's Finished section
+
+`finished_seen (scope TEXT PRIMARY KEY, t TEXT NOT NULL)`. Tiny KV
+table holding "mark all as seen" watermarks for the rail's *Finished*
+section. Two scope keys are written: `thread:<id>` (filters work-item
+closes for that thread) and `notes` (filters wiki-note updates,
+globally). `listRecentlyFinished` filters out rows whose timestamp is
+≤ the matching watermark; `clearRecentlyFinished` upserts both scopes
+to `now()`.
+
 ## The `sort_index` queue
 
 `work_items.sort_index` orders work in a single numeric space scoped
