@@ -14,8 +14,9 @@ async function main() {
   const { window, close } = await launchOxplow(projectDir);
   try {
     await window.waitForTimeout(3_000);
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(500);
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
+    await window.waitForTimeout(300);
 
     // Read the root-level directory names in DOM order.
     const names = await window.evaluate(() => {

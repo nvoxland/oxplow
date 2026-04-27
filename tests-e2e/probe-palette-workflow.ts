@@ -6,8 +6,8 @@
  * target UI affordance, not just that it appears in the list.
  *
  * Steps:
- *   1. Cmd+K → "history" → Enter → bottom panel shows History.
- *   2. Cmd+K → "snapshot" → Enter → bottom panel shows Snapshots.
+ *   1. Cmd+K → "history" → Enter → Git history page becomes active.
+ *   2. Cmd+K → "snapshot" → Enter → Local history page becomes active.
  *   3. Cmd+K → "thread new" → Enter → inline thread-create input appears.
  */
 import { resolve, dirname } from "node:path";
@@ -39,27 +39,27 @@ async function main() {
       await window.screenshot({ path: resolve(outDir, `palette-wf-${step}.png`) });
     }
 
-    // Step 1: history.open
+    // Step 1: history.open — opens GitHistoryPage as a center tab
     await runPaletteEntry("history", "01-history");
     const historyActive = await window.evaluate(() => {
-      const panel = document.querySelector('[data-testid="dock-panel-history"]');
-      return panel?.getAttribute("data-active") === "true";
+      const page = document.querySelector('[data-testid="page-git-history"]') as HTMLElement | null;
+      return !!page && page.offsetParent !== null;
     });
-    probeLog(`[probe] history panel active: ${historyActive}`);
+    probeLog(`[probe] git-history page active: ${historyActive}`);
     if (!historyActive) {
-      probeLog("[probe] FAIL: history.open did not activate dock-panel-history");
+      probeLog("[probe] FAIL: history.open did not surface page-git-history");
       process.exit(2);
     }
 
-    // Step 2: snapshots.open
+    // Step 2: snapshots.open — opens LocalHistoryPage as a center tab
     await runPaletteEntry("snapshots", "02-snapshots");
     const snapshotsActive = await window.evaluate(() => {
-      const panel = document.querySelector('[data-testid="dock-panel-snapshots"]');
-      return panel?.getAttribute("data-active") === "true";
+      const page = document.querySelector('[data-testid="page-local-history"]') as HTMLElement | null;
+      return !!page && page.offsetParent !== null;
     });
-    probeLog(`[probe] snapshots panel active: ${snapshotsActive}`);
+    probeLog(`[probe] local-history page active: ${snapshotsActive}`);
     if (!snapshotsActive) {
-      probeLog("[probe] FAIL: snapshots.open did not activate dock-panel-snapshots");
+      probeLog("[probe] FAIL: snapshots.open did not surface page-local-history");
       process.exit(3);
     }
 

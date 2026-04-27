@@ -5,14 +5,11 @@ import type {
   Thread,
   ThreadWorkState,
 } from "../api.js";
-import { setThreadPrompt } from "../api.js";
 import { AgentStatusDot } from "./AgentStatusDot.js";
-import { ContextMenu } from "./ContextMenu.js";
+import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
-import { logUi } from "../logger.js";
 
 interface Props {
-  streamId: string;
   threads: Thread[];
   activeThreadId: string | null;
   selectedThreadId: string | null;
@@ -28,6 +25,9 @@ interface Props {
   onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
   onRequestCreateThread?(): void;
+  /** Open the per-thread settings page. The kebab "Settings" item
+   *  routes here. */
+  onOpenThreadSettings?(threadId: string): void;
   /** Bumping this number opens the "new thread" modal. */
   createRequest?: number;
 }
@@ -36,7 +36,6 @@ export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
 export const THREAD_DRAG_MIME = "application/x-oxplow-thread";
 
 export function ThreadRail({
-  streamId,
   threads,
   activeThreadId,
   selectedThreadId,
@@ -52,32 +51,11 @@ export function ThreadRail({
   onReorderThreads,
   onRequestCreateStream,
   onRequestCreateThread,
+  onOpenThreadSettings,
   createRequest,
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overThreadId, setOverThreadId] = useState<string | null>(null);
-  const [settingsThread, setSettingsThread] = useState<Thread | null>(null);
-  const [settingsPrompt, setSettingsPrompt] = useState("");
-  const [settingsSaving, setSettingsSaving] = useState(false);
-
-  function openThreadSettings(thread: Thread) {
-    setSettingsThread(thread);
-    setSettingsPrompt(thread.custom_prompt ?? "");
-    setSettingsSaving(false);
-  }
-
-  async function saveThreadSettings() {
-    if (!settingsThread) return;
-    setSettingsSaving(true);
-    try {
-      await setThreadPrompt(streamId, settingsThread.id, settingsPrompt.trim() || null);
-      setSettingsThread(null);
-    } catch (e) {
-      logUi("error", "failed to save thread prompt", { threadId: settingsThread.id, error: String(e) });
-    } finally {
-      setSettingsSaving(false);
-    }
-  }
 
   const { ordered, completed } = useMemo(() => {
     // All non-completed threads share a single sort_index sequence and are
@@ -95,7 +73,6 @@ export function ThreadRail({
   const hasQueued = threads.some((b) => b.status === "queued");
   const [showOverflow, setShowOverflow] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; thread: Thread } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,46 +80,46 @@ export function ThreadRail({
     setShowCreate(true);
   }, [createRequest]);
 
-  const contextMenuItems: MenuItem[] = contextMenu
-    ? [
-        {
-          id: "thread.promote",
-          label: "Promote to writer",
-          enabled: contextMenu.thread.id !== activeThreadId,
-          run: () => onPromoteThread(contextMenu.thread.id),
-        },
-        {
-          id: "thread.complete",
-          label: "Mark complete",
-          enabled: hasQueued,
-          run: () => onCompleteThread(contextMenu.thread.id),
-        },
-        {
-          id: "thread.rename",
-          label: "Rename…",
-          enabled: !!onRenameThread,
-          run: () => setRenamingId(contextMenu.thread.id),
-        },
-        {
-          id: "thread.settings",
-          label: "Settings",
-          enabled: true,
-          run: () => openThreadSettings(contextMenu.thread),
-        },
-        {
-          id: "thread.add-thread",
-          label: "Add thread",
-          enabled: !!onRequestCreateThread,
-          run: () => (onRequestCreateThread ? onRequestCreateThread() : setShowCreate(true)),
-        },
-        {
-          id: "thread.add-stream",
-          label: "Add stream",
-          enabled: !!onRequestCreateStream,
-          run: () => onRequestCreateStream?.(),
-        },
-      ]
-    : [];
+  function buildThreadMenu(thread: Thread): MenuItem[] {
+    return [
+      {
+        id: "thread.promote",
+        label: "Promote to writer",
+        enabled: thread.id !== activeThreadId,
+        run: () => onPromoteThread(thread.id),
+      },
+      {
+        id: "thread.complete",
+        label: "Mark complete",
+        enabled: hasQueued,
+        run: () => onCompleteThread(thread.id),
+      },
+      {
+        id: "thread.rename",
+        label: "Rename…",
+        enabled: !!onRenameThread,
+        run: () => setRenamingId(thread.id),
+      },
+      {
+        id: "thread.settings",
+        label: "Settings",
+        enabled: !!onOpenThreadSettings,
+        run: () => onOpenThreadSettings?.(thread.id),
+      },
+      {
+        id: "thread.add-thread",
+        label: "Add thread",
+        enabled: !!onRequestCreateThread,
+        run: () => (onRequestCreateThread ? onRequestCreateThread() : setShowCreate(true)),
+      },
+      {
+        id: "thread.add-stream",
+        label: "Add stream",
+        enabled: !!onRequestCreateStream,
+        run: () => onRequestCreateStream?.(),
+      },
+    ];
+  }
 
   return (
     <div style={railStyle}>
@@ -171,10 +148,7 @@ export function ThreadRail({
               if (!trimmed || trimmed === thread.title) return;
               await onRenameThread?.(thread.id, trimmed);
             }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setContextMenu({ x: event.clientX, y: event.clientY, thread });
-            }}
+            menuItems={buildThreadMenu(thread)}
             onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToThread) ? (payload) => {
               if (payload.fromThreadId === null) {
                 if (onMoveBacklogItemToThread) void onMoveBacklogItemToThread(payload.itemId, thread.id);
@@ -202,9 +176,20 @@ export function ThreadRail({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
-        <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate(true)} title="Create thread">
-          + New thread
-        </button>
+        {showCreate ? (
+          <InlineCreateThreadRow
+            nextIndex={threads.length + 1}
+            onCancel={() => setShowCreate(false)}
+            onSubmit={async (title) => {
+              await onCreateThread(title);
+              setShowCreate(false);
+            }}
+          />
+        ) : (
+          <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate(true)} title="Create thread">
+            + New thread
+          </button>
+        )}
         {completed.length > 0 ? (
           <div style={{ position: "relative" }}>
             <button type="button" style={smallBtn} onClick={() => setShowOverflow((v) => !v)}>
@@ -224,55 +209,6 @@ export function ThreadRail({
           </div>
         ) : null}
       </div>
-      {showCreate ? (
-        <CreateThreadModal
-          nextIndex={threads.length + 1}
-          onCancel={() => setShowCreate(false)}
-          onSubmit={async (title) => {
-            await onCreateThread(title);
-            setShowCreate(false);
-          }}
-        />
-      ) : null}
-      {contextMenu ? (
-        <ContextMenu
-          items={contextMenuItems}
-          position={{ x: contextMenu.x, y: contextMenu.y }}
-          onClose={() => setContextMenu(null)}
-          minWidth={180}
-        />
-      ) : null}
-      {settingsThread ? (
-        <div style={backdropStyle}>
-          <div style={settingsModalStyle}>
-            <div style={settingsModalHeaderStyle}>
-              <span>Thread settings — {settingsThread.title}</span>
-              <button type="button" onClick={() => setSettingsThread(null)} style={closeBtnStyle} aria-label="Close">×</button>
-            </div>
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={settingsLabelStyle}>
-                <span>Custom prompt</span>
-                <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                  This prompt is appended to the agent's system prompt for this thread.
-                </span>
-                <textarea
-                  value={settingsPrompt}
-                  onChange={(e) => setSettingsPrompt(e.target.value)}
-                  rows={6}
-                  style={{ ...settingsInputStyle, resize: "vertical", fontFamily: "inherit" }}
-                  placeholder="Enter standing instructions for this thread…"
-                />
-              </label>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setSettingsThread(null)} style={settingsBtnStyle}>Cancel</button>
-                <button type="button" onClick={() => void saveThreadSettings()} style={settingsBtnStyle} disabled={settingsSaving}>
-                  {settingsSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -287,7 +223,7 @@ function ThreadChip({
   onSelect,
   onPromote,
   onComplete,
-  onContextMenu,
+  menuItems,
   onDropWorkItem,
   isRenaming,
   onSubmitRename,
@@ -307,7 +243,7 @@ function ThreadChip({
   onSelect(): void;
   onPromote(): void;
   onComplete(): void;
-  onContextMenu?(event: React.MouseEvent): void;
+  menuItems?: MenuItem[];
   onDropWorkItem?(payload: { itemId: string; fromThreadId: string | null }): void;
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
@@ -438,7 +374,6 @@ function ThreadChip({
         onDragEnd={onDragEnd ? () => { setIsDragging(false); onDragEnd(); } : undefined}
         onClick={isRenaming ? undefined : onSelect}
         onKeyDown={isRenaming ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
-        onContextMenu={onContextMenu}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -516,6 +451,11 @@ function ThreadChip({
         {total > 0 ? (
           <span style={{ fontSize: 10, opacity: 0.75 }}>
             {done}/{total}
+          </span>
+        ) : null}
+        {menuItems && menuItems.length > 0 ? (
+          <span onClick={(e) => e.stopPropagation()}>
+            <Kebab items={menuItems} testId={`thread-chip-kebab-${thread.id}`} size={14} />
           </span>
         ) : null}
       </div>
@@ -650,7 +590,27 @@ function OverflowDropdown({
   );
 }
 
-function CreateThreadModal({
+/**
+ * Inline-new-row that retires `CreateThreadModal`. Mounts at the end of
+ * the thread chip strip when the user clicks "+ New thread"; Enter
+ * submits, Escape cancels. Existing `data-testid="thread-rail-create-input"`
+ * and `thread-rail-create-submit` testids stay so e2e probes (and the
+ * Cmd+K palette workflow) keep working.
+ */
+/**
+ * `nextThreadTitle` — pure helper for picking the default placeholder
+ * title for the inline-create row. When "another after submit" is on
+ * the form re-mounts in place, so we bump the index forward to avoid
+ * shipping two identical "Thread N" titles in a row.
+ *
+ * Exported for unit tests so the carry-forward logic is verified
+ * without mounting the renderer.
+ */
+export function nextThreadTitle(currentIndex: number): string {
+  return `Thread ${currentIndex}`;
+}
+
+function InlineCreateThreadRow({
   nextIndex,
   onSubmit,
   onCancel,
@@ -659,7 +619,7 @@ function CreateThreadModal({
   onSubmit(title: string): Promise<void>;
   onCancel(): void;
 }) {
-  const [title, setTitle] = useState(`Thread ${nextIndex}`);
+  const [title, setTitle] = useState(nextThreadTitle(nextIndex));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -667,17 +627,6 @@ function CreateThreadModal({
   useEffect(() => {
     inputRef.current?.select();
   }, []);
-
-  useEffect(() => {
-    function handler(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onCancel]);
 
   async function submit() {
     const trimmed = title.trim();
@@ -700,47 +649,47 @@ function CreateThreadModal({
   const canSubmit = !submitting && trimmed.length > 0;
 
   return (
-    <div role="dialog" aria-modal="true" data-testid="thread-rail-create-modal" style={backdropStyle}>
-      <form
-        style={createModalStyle}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!canSubmit) return;
-          void submit();
+    <form
+      style={{ display: "flex", alignItems: "center", gap: 6 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        void submit();
+      }}
+    >
+      <input
+        ref={inputRef}
+        value={title}
+        autoFocus
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
         }}
+        style={{ ...settingsInputStyle, width: 200, padding: "3px 6px" }}
+        placeholder="Thread title"
+        data-testid="thread-rail-create-input"
+        aria-label="New thread title"
+      />
+      <button
+        type="submit"
+        data-testid="thread-rail-create-submit"
+        style={smallBtn}
+        disabled={!canSubmit}
       >
-        <div style={settingsModalHeaderStyle}>
-          <span>New thread</span>
-          <button type="button" onClick={onCancel} style={closeBtnStyle} aria-label="Close">×</button>
-        </div>
-        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-          <label style={settingsLabelStyle}>
-            <span>Title</span>
-            <input
-              ref={inputRef}
-              value={title}
-              autoFocus
-              onChange={(e) => setTitle(e.target.value)}
-              style={settingsInputStyle}
-              placeholder="Thread title"
-              data-testid="thread-rail-create-input"
-            />
-          </label>
-          {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button type="button" onClick={onCancel} style={settingsBtnStyle}>Cancel</button>
-            <button
-              type="submit"
-              data-testid="thread-rail-create-submit"
-              style={settingsBtnStyle}
-              disabled={!canSubmit}
-            >
-              {submitting ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
+        {submitting ? "Creating…" : "Create"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        style={smallBtn}
+      >
+        Cancel
+      </button>
+      {error ? <span style={{ color: "#ff6b6b", fontSize: 11 }}>{error}</span> : null}
+    </form>
   );
 }
 
@@ -824,50 +773,6 @@ const overflowItemStyle: CSSProperties = {
   textAlign: "left",
 };
 
-const createModalStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 8,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
-  minWidth: 420,
-  maxWidth: 560,
-  display: "flex",
-  flexDirection: "column",
-};
-
-const backdropStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1100,
-};
-
-const settingsModalStyle: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 8,
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 24px 60px rgba(0,0,0,0.5)",
-  minWidth: 480,
-  maxWidth: 640,
-  maxHeight: "80vh",
-  display: "flex",
-  flexDirection: "column",
-};
-
-const settingsModalHeaderStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "10px 14px",
-  borderBottom: "1px solid var(--border)",
-  fontSize: 13,
-  fontWeight: 600,
-  background: "var(--bg-1, var(--bg-2))",
-};
-
 const settingsInputStyle: CSSProperties = {
   background: "var(--bg)",
   color: "var(--fg)",
@@ -878,24 +783,3 @@ const settingsInputStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
 };
-
-const settingsBtnStyle: CSSProperties = {
-  background: "var(--bg-2)",
-  color: "var(--fg)",
-  border: "1px solid var(--border)",
-  padding: "6px 12px",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
-
-const closeBtnStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "var(--muted)",
-  fontSize: 20,
-  lineHeight: 1,
-  cursor: "pointer",
-};
-
-const settingsLabelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };

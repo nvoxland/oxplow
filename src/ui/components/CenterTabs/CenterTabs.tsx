@@ -1,8 +1,7 @@
-import type { ReactNode } from "react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
-import { ContextMenu } from "../ContextMenu.js";
+import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
 
 export interface CenterTab {
@@ -11,8 +10,11 @@ export interface CenterTab {
   closable: boolean;
   render: () => ReactNode;
   agentStatus?: AgentStatus;
-  /** Right-click menu items for this tab. When present, right-clicking the
-   *  tab chip opens a ContextMenu with these entries. */
+  /** Per-tab kebab menu. When present, a `⋯` button appears on the
+   *  tab chip; clicking it opens a popover with these entries.
+   *  (The legacy right-click affordance was retired in phase 5 of the
+   *  IA redesign — visible kebab buttons are the new primary path.)
+   */
   contextMenu?: MenuItem[];
   /** Tabs that share a `reorderGroup` can be drag-reordered relative to
    *  each other. Tabs without a group are pinned (e.g. the agent tab). */
@@ -34,16 +36,16 @@ const TAB_DRAG_MIME = "application/x-oxplow-center-tab";
 
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReorder }: CenterTabsProps) {
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
-  const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  const menuTab = menu ? tabs.find((t) => t.id === menu.tabId) : null;
   const draggingTab = draggingId ? tabs.find((t) => t.id === draggingId) ?? null : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg-1)" }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
         {tabs.map((tab) => {
           const isActive = tab.id === active?.id;
+          const isHover = !isActive && hoverId === tab.id;
           const canDrag = !!onReorder && !!tab.reorderGroup;
           const isDropTarget =
             !!draggingTab &&
@@ -57,10 +59,8 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               data-testid={`center-tab-${tab.id}`}
               draggable={canDrag}
               onClick={() => onActivate(tab.id)}
-              onContextMenu={tab.contextMenu && tab.contextMenu.length > 0 ? (event) => {
-                event.preventDefault();
-                setMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
-              } : undefined}
+              onMouseEnter={() => setHoverId(tab.id)}
+              onMouseLeave={() => setHoverId((prev) => (prev === tab.id ? null : prev))}
               onDragStart={canDrag ? (event) => {
                 event.dataTransfer.setData(TAB_DRAG_MIME, tab.id);
                 event.dataTransfer.effectAllowed = "move";
@@ -99,20 +99,27 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 onReorder(next);
               } : undefined}
               style={{
-                padding: "8px 12px",
-                background: isActive ? "var(--bg)" : "transparent",
-                color: isActive ? "var(--fg)" : "var(--muted)",
-                borderRight: "1px solid var(--border)",
+                padding: "10px 14px",
+                background: isActive
+                  ? "var(--surface-tab-active)"
+                  : isHover
+                    ? "var(--surface-card)"
+                    : "transparent",
+                color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                borderRight: "1px solid var(--border-strong)",
+                borderTop: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
+                borderLeft: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
                 borderBottom: isActive
-                  ? "2px solid var(--accent)"
+                  ? "3px solid var(--accent)"
                   : isDropTarget
-                    ? "2px dashed var(--accent)"
-                    : "2px solid transparent",
+                    ? "3px dashed var(--accent)"
+                    : "3px solid transparent",
                 outline: isDropTarget ? "1px dashed var(--accent)" : "none",
                 outlineOffset: isDropTarget ? -2 : 0,
                 opacity: draggingId === tab.id ? 0.5 : 1,
                 cursor: canDrag ? "grab" : "pointer",
-                fontSize: 12,
+                fontSize: 13,
+                fontWeight: isActive ? 600 : 400,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
@@ -120,6 +127,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             >
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
               <span>{tab.label}</span>
+              {tab.contextMenu && tab.contextMenu.length > 0 ? (
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Kebab items={tab.contextMenu} testId={`center-tab-kebab-${tab.id}`} size={14} />
+                </span>
+              ) : null}
               {tab.closable && onClose ? (
                 <button type="button"
                   data-testid={`center-tab-close-${tab.id}`}
@@ -149,13 +161,6 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {active ? active.render() : null}
       </div>
-      {menu && menuTab?.contextMenu ? (
-        <ContextMenu
-          items={menuTab.contextMenu}
-          position={{ x: menu.x, y: menu.y }}
-          onClose={() => setMenu(null)}
-        />
-      ) : null}
     </div>
   );
 }

@@ -69,7 +69,7 @@ export async function launchOxplow(projectDir: string, opts: { timeoutMs?: numbe
 }
 
 /**
- * Wait until oxplow's chrome has mounted by polling for the dock-tab-plan
+ * Wait until oxplow's chrome has mounted by polling for the rail-hud
  * testid. Replaces the blind `await window.waitForTimeout(3_000)` that
  * every probe used to sleep for at startup. Returns as soon as the
  * marker is present (typically <1s on a warm machine), or throws if it
@@ -77,7 +77,7 @@ export async function launchOxplow(projectDir: string, opts: { timeoutMs?: numbe
  */
 export async function waitForOxplowReady(window: Page, opts: { timeoutMs?: number } = {}): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  await window.locator('[data-testid="dock-tab-plan"]').first().waitFor({ state: "visible", timeout: timeoutMs });
+  await window.locator('[data-testid="rail-hud"]').first().waitFor({ state: "visible", timeout: timeoutMs });
 }
 
 // Trigger a native-menu-backed command by its CommandId — same IPC channel
@@ -229,31 +229,17 @@ export async function dogfoodInnerAgent(
     tickMs?: number;
     quietTicks?: number;
     maxTicks?: number;
-    addCommitPoint?: boolean;
   },
 ): Promise<{ ticks: number; exitReason: "quiet" | "max" }> {
   const tickMs = opts.tickMs ?? 15_000;
   const quietTicks = opts.quietTicks ?? 3;
   const maxTicks = opts.maxTicks ?? 40;
-  const addCommitPoint = opts.addCommitPoint ?? true;
 
-  // Activate Work panel.
-  const workPanel = window.getByTestId("dock-panel-plan");
-  for (let i = 0; i < 3; i++) {
-    if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-    await window.getByTestId("dock-tab-plan").click();
-    await window.waitForTimeout(300);
-  }
-  probeLog(`[dogfood:${opts.slug}] Work panel active`);
-
-  // Add commit point so propose_commit has a target. Without this,
-  // the agent will narrate "no active commit point existed" and
-  // leave the suggestion as a work-note only.
-  if (addCommitPoint) {
-    await window.getByTestId("plan-add-commit-point").click();
-    await window.waitForTimeout(400);
-    probeLog(`[dogfood:${opts.slug}] + Commit when done clicked`);
-  }
+  // Activate Work page.
+  await window.getByTestId("rail-page-plan-work").click();
+  const workPanel = window.getByTestId("page-plan-work");
+  await workPanel.waitFor({ state: "visible", timeout: 5_000 });
+  probeLog(`[dogfood:${opts.slug}] Work page active`);
 
   // Create one work item for Plan-UI visibility (the allowed
   // single-item exception to "don't pre-queue").
@@ -331,7 +317,8 @@ export async function approveViaFiles(
   window: Page,
   opts: { slug: string; outDir?: string; message: string; includeUntracked?: boolean },
 ): Promise<void> {
-  await window.getByTestId("dock-tab-project").click();
+  await window.getByTestId("rail-page-files").click();
+  await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
   await window.waitForTimeout(400);
   await window.getByTestId("files-commit").click();
   await window.waitForTimeout(500);

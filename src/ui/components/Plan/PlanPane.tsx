@@ -5,42 +5,30 @@ import type {
   BacklogState,
   Thread,
   ThreadWorkState,
-  CommitPoint,
-  EffortDetail,
-  WaitPoint,
   WorkItem,
-  WorkItemKind,
   WorkItemPriority,
   WorkItemStatus,
-  WorkNote,
 } from "../../api.js";
 import {
-  createCommitPoint,
-  createWaitPoint,
-  getWorkNotes,
-  listCommitPoints,
-  listWaitPoints,
-  listWorkItemEfforts,
   removeFollowup,
   reorderThreadQueue,
-  setAutoCommit,
-  subscribeOxplowEvents,
-  updateCommitPoint,
 } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { ConfirmDialog } from "../ConfirmDialog.js";
+import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
-import { reportUiError, runWithError } from "../../ui-error.js";
+import { runWithError } from "../../ui-error.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { formatContextMention } from "../../agent-context-ref.js";
+import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
-import { ActivityTimeline } from "./WorkItemDetail.js";
 import {
+  applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
   classifyWorkItem,
-  inputStyle,
-  miniButtonStyle,
+  filterAutoAuthored,
   statusLabel,
   useCollapsedSections,
   type WorkItemSectionKind,
@@ -63,16 +51,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false;
 }
 
-interface CreateInput {
-  kind: WorkItemKind;
-  title: string;
-  description?: string;
-  acceptanceCriteria?: string | null;
-  parentId?: string | null;
-  status?: WorkItemStatus;
-  priority?: WorkItemPriority;
-}
-
 interface Props {
   thread: Thread | null;
   activeThreadId: string | null;
@@ -81,11 +59,9 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onCreateWorkItem(input: CreateInput): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onDeleteWorkItem(itemId: string): Promise<void>;
   onReorderWorkItems(orderedItemIds: string[]): Promise<void>;
-  onCreateBacklogItem(input: CreateInput): Promise<void>;
   onUpdateBacklogItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
   onDeleteBacklogItem(itemId: string): Promise<void>;
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
@@ -94,12 +70,51 @@ interface Props {
   /** Open the edit modal for the specified work item. Change the token to
    *  request again even if the itemId repeats. */
   editRequest?: { itemId: string; token: number } | null;
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
   /** On mount, PlanPane calls this with its openCreateModal function so
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
+  /** Route the "new task" / "+ Task on epic" buttons (and the edit-
+   *  double-click flow) to a NewWorkItemPage tab instead of the inline
+   *  modal. When omitted, the legacy modal path stays in place (used by
+   *  tests and standalone usages). When `editingItemId` is set the page
+   *  opens in edit mode against that item. */
+  onOpenNewWorkItemPage?(payload: { parentId?: string | null; editingItemId?: string | null }): void;
+  /** When true, agent-authored work items are filtered out of the visible
+   *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
+   *  pre-IA-redesign Plan pane. Epics are always kept so their children
+   *  don't silently lose their container row. */
+  hideAuto?: boolean;
+  /** Restrict the visible sections (To Do / Blocked / etc). Used by the
+   *  page split: Plan Work shows toDo+blocked+humanCheck+done previews,
+   *  Done Work / Archived show only "done", etc. Default = all five. */
+  visibleSections?: WorkItemSectionKind[];
+  /** Cap the number of items rendered per section after sort. Used by
+   *  Plan Work to render "last 5" previews of Human Check + Done. */
+  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  /** Override the default section header label per kind. The Archived
+   *  page uses this so the Done section reads "Archived". */
+  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  /** Filter raw items by status before grouping. Done Work passes
+   *  `excludeStatuses: ["archived"]`; Archived passes
+   *  `onlyStatuses: ["archived"]`. */
+  onlyStatuses?: WorkItemStatus[];
+  excludeStatuses?: WorkItemStatus[];
+  /** Per-section header link nodes (right-aligned, after `sectionActions`).
+   *  Used by Plan Work for "View all done →" links pointing at the
+   *  dedicated Done Work / Archived pages. */
+  extraSectionLinks?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
+  /** Pin the pane mode and disable the bottom-bar toggle. The Backlog
+   *  page passes `"backlog"` so the pane renders the stream-global
+   *  backlog full-pane. */
+  forceMode?: "thread" | "backlog";
+  /** Suppress the bottom Backlog chip entirely. The page split drops it
+   *  in favour of rail-nav + a "View backlog" link on Plan Work. */
+  hideBacklogChip?: boolean;
+  /** Suppress the built-in Done-section "Show archived (N) / Archive
+   *  all" controls. The page split owns archive flow via a dedicated
+   *  Archived page. */
+  hideArchiveToggle?: boolean;
 }
 
 interface ContextMenuState {
@@ -116,44 +131,33 @@ export function PlanPane({
   threadWork,
   agentStatus,
   backlog,
-  onCreateWorkItem,
   onUpdateWorkItem,
   onDeleteWorkItem,
   onReorderWorkItems,
-  onCreateBacklogItem,
   onUpdateBacklogItem,
   onDeleteBacklogItem,
   onReorderBacklog,
   onMoveItemToBacklog,
   openNewRequest,
   editRequest,
-  onOpenFile,
-  onShowInHistory,
   registerOpenCreate,
+  onOpenNewWorkItemPage,
+  hideAuto = false,
+  visibleSections,
+  sectionItemLimit,
+  sectionLabelOverrides,
+  onlyStatuses,
+  excludeStatuses,
+  extraSectionLinks,
+  forceMode,
+  hideBacklogChip = false,
+  hideArchiveToggle = false,
 }: Props) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [acceptance, setAcceptance] = useState("");
-  const [priority, setPriority] = useState<WorkItemPriority>("medium");
-  const [status, setStatus] = useState<WorkItemStatus>("ready");
-  // Modal surface: `create` = blank New Work Item form; `edit` = same modal
-  // shape but pre-filled from `editingItemId` and writing back via
-  // activeUpdate on submit. Plain clicks on a work-item row open edit mode
-  // (the legacy inline expansion + title click-to-edit were removed per the
-  // "change work item editing UI" task).
-  const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  // When opening the create modal from an epic's "+ Task" button, remember
-  // the epic id so the new item gets filed as a child. Null means top-level.
-  const [createParentId, setCreateParentId] = useState<string | null>(null);
-  const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<WorkItem | null>(null);
-  const [mode, setMode] = useState<"thread" | "backlog">("thread");
+  const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
+  const mode = forceMode ?? internalMode;
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
-  const [commitPoints, setCommitPoints] = useState<CommitPoint[]>([]);
-  const [waitPoints, setWaitPoints] = useState<WaitPoint[]>([]);
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
@@ -163,46 +167,23 @@ export function PlanPane({
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
-  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<string[] | null>(null);
-  // Commit point edit modal: opened by double-clicking a commit point row.
-  const [editingCommitPoint, setEditingCommitPoint] = useState<CommitPoint | null>(null);
-  // Notes for the currently-open edit modal.
-  const [editingItemNotes, setEditingItemNotes] = useState<WorkNote[]>([]);
-  // Efforts (in_progress → human_check cycles) for the currently-open edit
-  // modal's work item; each carries its own start/end snapshot pair.
-  const [editingItemEfforts, setEditingItemEfforts] = useState<EffortDetail[]>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
   const streamId = thread?.stream_id ?? null;
 
-  useEffect(() => {
-    if (!threadId) { setCommitPoints([]); setWaitPoints([]); return; }
-    let cancelled = false;
-    const refreshCommits = () => void listCommitPoints(threadId)
-      .then((points) => { if (!cancelled) setCommitPoints(points); })
-      .catch((err) => reportUiError("Load commit points", err));
-    const refreshWaits = () => void listWaitPoints(threadId)
-      .then((points) => { if (!cancelled) setWaitPoints(points); })
-      .catch((err) => reportUiError("Load wait points", err));
-    refreshCommits();
-    refreshWaits();
-    const off = subscribeOxplowEvents((event) => {
-      if (event.type === "commit-point.changed" && event.threadId === threadId) refreshCommits();
-      if (event.type === "wait-point.changed" && event.threadId === threadId) refreshWaits();
-    });
-    return () => { cancelled = true; off(); };
-  }, [threadId]);
-
   const groups = useMemo(() => {
-    return mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
-  }, [mode, threadWork, backlog]);
+    let raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    if (onlyStatuses || excludeStatuses) {
+      raw = applyStatusFilter(raw, { only: onlyStatuses, exclude: excludeStatuses });
+    }
+    return hideAuto ? filterAutoAuthored(raw) : raw;
+  }, [mode, threadWork, backlog, hideAuto, onlyStatuses, excludeStatuses]);
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
   // sync with the section split in WorkGroupList (In progress → To do →
-  // Blocked → Human check → Done). Commit/wait-point rows are deliberately excluded:
-  // they're not "selectable work" in the keyboard sense.
+  // Blocked → Human check → Done).
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
     for (const group of groups) {
@@ -291,7 +272,6 @@ export function PlanPane({
     return null;
   }, [groups, selectedId]);
 
-  const activeCreate = mode === "backlog" ? onCreateBacklogItem : onCreateWorkItem;
   const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
   const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
   const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;
@@ -366,12 +346,10 @@ export function PlanPane({
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   const openCreateModal = (parentId: string | null = null) => {
-    setTitle(""); setDescription(""); setAcceptance("");
-    setPriority("medium");
-    setStatus("ready");
-    setEditingItemId(null);
-    setCreateParentId(parentId);
-    setModalMode("create");
+    // The legacy inline NewWorkItemModal was retired by the IA redesign;
+    // creation always routes through a full-tab NewWorkItemPage now. Tests
+    // / standalone harnesses must wire `onOpenNewWorkItemPage`.
+    onOpenNewWorkItemPage?.({ parentId });
   };
 
   // Register the imperative opener with the parent so menu-click
@@ -391,32 +369,10 @@ export function PlanPane({
   }, [registerOpenCreate]);
 
   const openEditModal = (item: WorkItem) => {
-    setTitle(item.title);
-    setDescription(item.description ?? "");
-    setAcceptance(item.acceptance_criteria ?? "");
-    setPriority(item.priority);
-    setStatus(item.status);
+    // Edit flow now routes through a NewWorkItemPage tab in edit mode;
+    // the in-file NewWorkItemModal was deleted in the IA-redesign cleanup.
     setSelectedId(item.id);
-    setEditingItemId(item.id);
-    setEditingItem(item);
-    setEditingItemNotes([]);
-    setEditingItemEfforts([]);
-    setModalMode("edit");
-    void getWorkNotes(item.id)
-      .then((notes) => setEditingItemNotes(notes))
-      .catch(() => { /* non-fatal */ });
-    void listWorkItemEfforts(item.id)
-      .then((efforts) => setEditingItemEfforts(efforts))
-      .catch(() => { /* non-fatal */ });
-  };
-
-  const closeModal = () => {
-    setModalMode(null);
-    setEditingItemId(null);
-    setEditingItem(null);
-    setEditingItemNotes([]);
-    setEditingItemEfforts([]);
-    paneRef.current?.focus();
+    onOpenNewWorkItemPage?.({ parentId: item.parent_id, editingItemId: item.id });
   };
 
   useEffect(() => {
@@ -488,82 +444,71 @@ export function PlanPane({
       onClick={() => paneRef.current?.focus()}
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
-      {modalMode ? (
-        <NewWorkItemModal
-          title={title}
-          setTitle={setTitle}
-          description={description}
-          setDescription={setDescription}
-          acceptance={acceptance}
-          setAcceptance={setAcceptance}
-          priority={priority}
-          setPriority={setPriority}
-          status={status}
-          setStatus={setStatus}
-          onNavigate={modalMode === "edit" && editingItemId ? (direction) => {
-            const idx = navigableIds.indexOf(editingItemId);
-            if (idx < 0) return;
-            const nextIdx = direction === "next" ? idx + 1 : idx - 1;
-            if (nextIdx < 0 || nextIdx >= navigableIds.length) return;
-            const nextId = navigableIds[nextIdx]!;
-            const allItems = groups.flatMap((g) => [
-              ...g.items,
-              ...[...g.epicChildren.values()].flat(),
-            ]);
-            const nextItem = allItems.find((i) => i.id === nextId);
-            if (nextItem) openEditModal(nextItem);
-          } : undefined}
-          canNavigatePrev={modalMode === "edit" && editingItemId ? navigableIds.indexOf(editingItemId) > 0 : false}
-          canNavigateNext={modalMode === "edit" && editingItemId ? (() => {
-            const idx = navigableIds.indexOf(editingItemId);
-            return idx >= 0 && idx < navigableIds.length - 1;
-          })() : false}
-          showSaveAndAnother={modalMode === "create"}
-          notes={modalMode === "edit" ? editingItemNotes : []}
-          efforts={modalMode === "edit" ? editingItemEfforts : []}
-          item={modalMode === "edit" ? editingItem : null}
-          epics={threadWork?.epics ?? []}
-          onOpenItem={(target) => openEditModal(target)}
-          onOpenFile={onOpenFile}
-          onShowInHistory={onShowInHistory}
-          modalTitle={
-            modalMode === "edit"
-              ? "Edit work item"
-              : mode === "backlog" ? "New backlog item" : "New work item"
-          }
-          onClose={closeModal}
-          onSubmit={async (andAnother) => {
-            const nextTitle = title.trim();
-            if (!nextTitle) return;
-            if (modalMode === "edit" && editingItemId) {
-              await activeUpdate(editingItemId, {
-                title: nextTitle,
-                description,
-                acceptanceCriteria: acceptance || null,
-                priority,
-                status,
-              });
-              closeModal();
-              return;
-            }
-            await activeCreate({
-              kind: "task",
-              title: nextTitle,
-              description,
-              acceptanceCriteria: acceptance || null,
-              priority,
-              status: "ready",
-              parentId: createParentId,
-            });
-            setTitle(""); setDescription(""); setAcceptance("");
-            if (!andAnother) {
-              setPriority("medium");
-              closeModal();
-            }
-          }}
-        />
-      ) : null}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {(() => {
+          const allItems = groups.flatMap((g) => [
+            ...g.items,
+            ...[...g.epicChildren.values()].flat(),
+          ]);
+          const markedItems = [...markedIds]
+            .map((id) => allItems.find((item) => item.id === id))
+            .filter((item): item is WorkItem => item !== undefined);
+          if (markedItems.length === 0) return null;
+          return (
+            <SelectionActionBar
+              items={markedItems}
+              onClear={() => setMarkedIds(new Set())}
+              onChangeStatus={() => {
+                const liveIds = markedItems
+                  .filter((item) => item.status !== "in_progress")
+                  .map((item) => item.id);
+                if (liveIds.length === 0) return;
+                const anchor = markedItems.find((item) => item.status !== "in_progress") ?? markedItems[0]!;
+                setSelectedId(anchor.id);
+                setKbPicker({
+                  kind: "status",
+                  itemId: anchor.id,
+                  extraIds: liveIds.filter((id) => id !== anchor.id),
+                });
+              }}
+              onChangePriority={() => {
+                const ids = markedItems.map((item) => item.id);
+                const anchor = markedItems[0]!;
+                setSelectedId(anchor.id);
+                setKbPicker({
+                  kind: "priority",
+                  itemId: anchor.id,
+                  extraIds: ids.filter((id) => id !== anchor.id),
+                });
+              }}
+              onAddAllToAgent={() => {
+                // Reuse the same mention formatter the kebab "Add to agent
+                // context" path uses; concatenate so the user sees a
+                // space-separated chain of bracketed work-item refs.
+                const text = markedItems
+                  .map((item) => formatContextMention({
+                    kind: "work-item",
+                    itemId: item.id,
+                    title: item.title,
+                    status: item.status,
+                  }))
+                  .join("");
+                insertIntoAgent(text);
+              }}
+              onDelete={() => {
+                const liveIds = markedItems
+                  .filter((item) => item.status !== "in_progress")
+                  .map((item) => item.id);
+                if (liveIds.length === 0) return;
+                for (const id of liveIds) void activeDelete(id);
+                showToast({
+                  message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                });
+                setMarkedIds(new Set());
+              }}
+            />
+          );
+        })()}
         {groups.length === 0 ? (
           <>
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
@@ -574,12 +519,6 @@ export function PlanPane({
           groups.map((group) => {
             const isRootThread = mode === "thread";
             const isActive = isRootThread && thread?.id === activeThreadId;
-            const autoCommitOn = thread?.auto_commit ?? false;
-            // To Do section header actions: collapsed into a single
-            // ⋯ menu button so the header stays narrow and can absorb
-            // future commands without crowding. All actions (new task,
-            // commit-mode toggle, add commit point, add wait point)
-            // live as menu items inside the popup.
             const toDoMenuItems: MenuItem[] = [
               {
                 id: "plan-new-task",
@@ -588,45 +527,6 @@ export function PlanPane({
                 enabled: true,
                 run: () => openCreateModal(),
               },
-              ...(isRootThread && thread ? [
-                {
-                  id: "plan-commit-mode",
-                  label: autoCommitOn ? "Switch to manual commits" : "Switch to auto commits",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Set commit mode", setAutoCommit(streamId, threadId, !autoCommitOn));
-                  },
-                },
-                // Commit point only lives in manual mode (auto commits
-                // at every Stop, so queued commit markers would be
-                // redundant). Always visible in manual mode even when
-                // the To Do queue is empty — the command renders in the
-                // menu greyed so the user sees it exists and why it's
-                // disabled. canAddPoints gating dropped per user
-                // feedback; backend tolerates an empty queue.
-                ...(!autoCommitOn ? [{
-                  id: "plan-add-commit-point",
-                  label: "Add commit point",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Add commit point", createCommitPoint(streamId, threadId));
-                  },
-                }] : []),
-                // Wait point applies to both modes and doesn't depend
-                // on having waiting items — user can queue a wait
-                // marker proactively.
-                {
-                  id: "plan-add-wait-point",
-                  label: "Add wait point",
-                  enabled: !!streamId && !!threadId,
-                  run: () => {
-                    if (!streamId || !threadId) return;
-                    runWithError("Add wait point", createWaitPoint(streamId, threadId, null));
-                  },
-                },
-              ] : []),
             ];
             const toDoActions = (
               <span data-testid="plan-add-points-bar">
@@ -636,33 +536,36 @@ export function PlanPane({
             const sectionActions: Partial<Record<WorkItemSectionKind, React.ReactNode>> = {
               toDo: toDoActions,
             };
+            if (extraSectionLinks) {
+              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[WorkItemSectionKind, React.ReactNode]>) {
+                if (!node) continue;
+                const existing = sectionActions[k];
+                sectionActions[k] = existing ? (
+                  <>{existing}{node}</>
+                ) : node;
+              }
+            }
             return (
               <WorkGroupList
                 key={group.epic?.id ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
-                expandedId={expandedId}
-                onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                 onUpdateWorkItem={activeUpdate}
                 onReorderWorkItems={activeReorder}
-                commitPoints={isRootThread ? commitPoints : []}
-                waitPoints={isRootThread ? waitPoints : []}
                 onReorderMixed={isRootThread && streamId && threadId
                   ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
                   : undefined}
-                onContextMenu={(event, item) => {
-                  event.preventDefault();
+                onOpenMenu={(rect, item) => {
                   const groupIds = markedIds.has(item.id) && markedIds.size > 1
                     ? [...markedIds]
                     : null;
-                  setContextMenu({ x: event.clientX, y: event.clientY, item, groupIds });
+                  setContextMenu({ x: rect.right, y: rect.bottom + 4, item, groupIds });
                 }}
                 sectionActions={sectionActions}
                 selectedId={selectedId}
                 markedIds={markedIds}
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
-                onDoubleClickCommitPoint={(cp) => setEditingCommitPoint(cp)}
                 epicChildrenMap={group.epicChildren}
                 onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
@@ -674,14 +577,19 @@ export function PlanPane({
                 onDismissFollowup={isRootThread && threadId
                   ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))
                   : undefined}
+                visibleSections={visibleSections}
+                sectionItemLimit={sectionItemLimit}
+                sectionLabelOverrides={sectionLabelOverrides}
+                hideArchiveToggle={hideArchiveToggle}
               />
             );
           })
         )}
       </div>
+      {hideBacklogChip || forceMode ? null : (
       <div style={bottomBarStyle}>
         <button type="button"
-          onClick={() => setMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
+          onClick={() => setInternalMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
           onDragOver={handleBacklogChipDragOver}
           onDragLeave={() => setBacklogChipDragOver(false)}
           onDrop={handleBacklogChipDrop}
@@ -697,6 +605,7 @@ export function PlanPane({
           Backlog{backlog ? ` · ${backlog.items.length}` : ""}
         </button>
       </div>
+      )}
       {contextMenu ? (
         <ContextMenu
           items={contextMenu.groupIds
@@ -717,13 +626,34 @@ export function PlanPane({
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
                   const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
-                  if (liveIds.length > 0) setPendingDeleteGroup(liveIds);
+                  if (liveIds.length === 0) return;
+                  for (const id of liveIds) void activeDelete(id);
+                  showToast({
+                    message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                  });
+                },
+                onAddToAgent: (ids) => {
+                  setContextMenu(null);
+                  const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
+                  const text = ids
+                    .map((id) => allWi.find((i) => i.id === id))
+                    .filter((item): item is WorkItem => item !== undefined)
+                    .map((item) => formatContextMention({
+                      kind: "work-item",
+                      itemId: item.id,
+                      title: item.title,
+                      status: item.status,
+                    }))
+                    .join("");
+                  if (text.length > 0) insertIntoAgent(text);
                 },
               })
             : buildWorkItemMenu(contextMenu.item, {
                 onDelete: (item) => {
                   setContextMenu(null);
-                  setPendingDelete(item);
+                  if (expandedId === item.id) setExpandedId(null);
+                  void activeDelete(item.id);
+                  showToast({ message: `Deleted "${item.title}".` });
                 },
                 onRename: (item) => {
                   setContextMenu(null);
@@ -740,37 +670,19 @@ export function PlanPane({
                   setSelectedId(item.id);
                   setKbPicker({ kind: "priority", itemId: item.id });
                 },
+                onAddToAgent: (item) => {
+                  setContextMenu(null);
+                  insertIntoAgent(formatContextMention({
+                    kind: "work-item",
+                    itemId: item.id,
+                    title: item.title,
+                    status: item.status,
+                  }));
+                },
               })}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
           minWidth={160}
-        />
-      ) : null}
-      {pendingDelete ? (
-        <ConfirmDialog
-          message={`Delete "${pendingDelete.title}"?`}
-          confirmLabel="Delete"
-          destructive
-          onConfirm={() => {
-            const item = pendingDelete;
-            setPendingDelete(null);
-            if (expandedId === item.id) setExpandedId(null);
-            void activeDelete(item.id);
-          }}
-          onCancel={() => setPendingDelete(null)}
-        />
-      ) : null}
-      {pendingDeleteGroup ? (
-        <ConfirmDialog
-          message={`Delete ${pendingDeleteGroup.length} work items?`}
-          confirmLabel="Delete all"
-          destructive
-          onConfirm={() => {
-            const ids = pendingDeleteGroup;
-            setPendingDeleteGroup(null);
-            for (const id of ids) void activeDelete(id);
-          }}
-          onCancel={() => setPendingDeleteGroup(null)}
         />
       ) : null}
       {kbPicker && selectedItem ? (
@@ -790,16 +702,6 @@ export function PlanPane({
             paneRef.current?.focus();
           }}
           onClose={() => { setKbPicker(null); paneRef.current?.focus(); }}
-        />
-      ) : null}
-      {editingCommitPoint ? (
-        <CommitPointModal
-          cp={editingCommitPoint}
-          onSave={async (changes) => {
-            await updateCommitPoint(editingCommitPoint.id, changes);
-            setEditingCommitPoint(null);
-          }}
-          onClose={() => setEditingCommitPoint(null)}
         />
       ) : null}
     </div>
@@ -911,339 +813,6 @@ const kbPickerStyle: CSSProperties = {
   boxShadow: "0 12px 32px rgba(0,0,0,0.6)",
 };
 
-function NewWorkItemModal({
-  title,
-  setTitle,
-  description,
-  setDescription,
-  acceptance,
-  setAcceptance,
-  priority,
-  setPriority,
-  status,
-  setStatus,
-  onNavigate,
-  canNavigatePrev = false,
-  canNavigateNext = false,
-  showSaveAndAnother = true,
-  notes = [],
-  efforts = [],
-  item = null,
-  epics = [],
-  onOpenItem,
-  onOpenFile,
-  onShowInHistory,
-  modalTitle = "New work item",
-  onClose,
-  onSubmit,
-}: {
-  title: string;
-  setTitle(value: string): void;
-  description: string;
-  setDescription(value: string): void;
-  acceptance: string;
-  setAcceptance(value: string): void;
-  priority: WorkItemPriority;
-  setPriority(value: WorkItemPriority): void;
-  status: WorkItemStatus;
-  setStatus(value: WorkItemStatus): void;
-  onNavigate?(direction: "prev" | "next"): void;
-  canNavigatePrev?: boolean;
-  canNavigateNext?: boolean;
-  showSaveAndAnother?: boolean;
-  notes?: WorkNote[];
-  efforts?: EffortDetail[];
-  item?: WorkItem | null;
-  epics?: WorkItem[];
-  onOpenItem?(item: WorkItem): void;
-  onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
-  modalTitle?: string;
-  onClose(): void;
-  onSubmit(andAnother: boolean): Promise<void>;
-}) {
-  const readOnly = item?.status === "in_progress";
-  const canSubmit = !readOnly && title.trim().length > 0;
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const parentEpic = item?.parent_id ? epics.find((e) => e.id === item.parent_id) ?? null : null;
-  const updatedDiffers = item && item.updated_at && item.updated_at !== item.created_at;
-
-  return (
-    <div
-      // Stop click bubbling so the PlanPane's onClick={paneRef.focus()}
-      // doesn't steal focus from a textarea when the user mouses up
-      // after a drag-select — losing focus mid-selection clears the
-      // highlight.
-      onClick={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000,
-      }}
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSubmit) return;
-          void onSubmit(false);
-        }}
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 16,
-          width: "75vw",
-          maxWidth: 1100,
-          minWidth: 600,
-          height: "75vh",
-          maxHeight: 800,
-          minHeight: 500,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontWeight: 600 }}>{modalTitle}</div>
-          <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
-        </div>
-        <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-          {/* Left column: editable fields + notes */}
-          <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: 10, minWidth: 0, overflow: "auto" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-title" style={modalFieldLabelStyle}>Title</label>
-              <input
-                autoFocus
-                id="work-item-title"
-                data-testid="work-item-title"
-                value={title}
-                readOnly={readOnly}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title (required)"
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-description" style={modalFieldLabelStyle}>Description</label>
-              <textarea
-                id="work-item-description"
-                data-testid="work-item-description"
-                value={description}
-                readOnly={readOnly}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Description"
-                style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-acceptance" style={modalFieldLabelStyle}>Acceptance Criteria</label>
-              <textarea
-                id="work-item-acceptance"
-                data-testid="work-item-acceptance"
-                value={acceptance}
-                readOnly={readOnly}
-                onChange={(e) => setAcceptance(e.target.value)}
-                placeholder="Acceptance criteria, one per line"
-                style={{ ...inputStyle, minHeight: 100, resize: "vertical" }}
-              />
-            </div>
-            {item ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-                <div style={modalFieldLabelStyle}>Activity {notes.length + efforts.length > 0 ? `(${notes.length + efforts.length})` : ""}</div>
-                <ActivityTimeline
-                  notes={notes}
-                  efforts={efforts}
-                  formatTimestamp={formatNoteDate}
-                  onOpenFile={onOpenFile}
-                  onShowInHistory={onShowInHistory}
-                />
-              </div>
-            ) : null}
-          </div>
-          {/* Right column: metadata */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 200, overflow: "auto", borderLeft: "1px solid var(--border)", paddingLeft: 16 }}>
-            {item ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label htmlFor="work-item-status" style={modalFieldLabelStyle}>Status</label>
-                <select
-                  id="work-item-status"
-                  data-testid="work-item-status"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as WorkItemStatus)}
-                  style={inputStyle}
-                >
-                  <option value="ready">ready</option>
-                  {item?.status === "in_progress" ? (
-                    <option value="in_progress">in_progress</option>
-                  ) : null}
-                  <option value="blocked">blocked</option>
-                  <option value="human_check">human_check</option>
-                  <option value="done">done</option>
-                  <option value="archived">archived</option>
-                  <option value="canceled">canceled</option>
-                </select>
-              </div>
-            ) : null}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label htmlFor="work-item-priority" style={modalFieldLabelStyle}>Priority</label>
-              <select id="work-item-priority" data-testid="work-item-priority" value={priority} disabled={readOnly} onChange={(e) => setPriority(e.target.value as WorkItemPriority)} style={inputStyle}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </div>
-            {item ? (
-              <>
-                {parentEpic ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={modalFieldLabelStyle}>Inside</div>
-                    {onOpenItem ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenItem(parentEpic)}
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          padding: 0,
-                          color: "var(--accent)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          font: "inherit",
-                          textDecoration: "underline",
-                          fontSize: 12,
-                        }}
-                      >{parentEpic.title}</button>
-                    ) : (
-                      <div style={{ fontSize: 12 }}>{parentEpic.title}</div>
-                    )}
-                  </div>
-                ) : item.parent_id ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={modalFieldLabelStyle}>Inside</div>
-                    <div style={{ fontSize: 12, color: "var(--muted)" }}>Parent epic</div>
-                  </div>
-                ) : null}
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={modalFieldLabelStyle}>Author</div>
-                  <span style={authorBadgeStyle}>{item.created_by}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--muted)", fontSize: 11 }}>
-                  <div>Created {formatNoteDate(item.created_at)}</div>
-                  {updatedDiffers ? <div>Updated {formatNoteDate(item.updated_at)}</div> : null}
-                  {item.completed_at ? <div>Completed {formatNoteDate(item.completed_at)}</div> : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginTop: 4 }}>
-          {onNavigate ? (
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                type="button"
-                data-testid="work-item-prev"
-                disabled={!canNavigatePrev}
-                onClick={() => onNavigate("prev")}
-                style={{ ...miniButtonStyle, opacity: canNavigatePrev ? 1 : 0.4 }}
-                title="Previous work item"
-              >← Previous</button>
-              <button
-                type="button"
-                data-testid="work-item-next"
-                disabled={!canNavigateNext}
-                onClick={() => onNavigate("next")}
-                style={{ ...miniButtonStyle, opacity: canNavigateNext ? 1 : 0.4 }}
-                title="Next work item"
-              >Next →</button>
-            </div>
-          ) : null}
-          <span style={{ flex: 1 }} />
-          {readOnly ? (
-            <span style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>
-              Read-only — item is in progress
-            </span>
-          ) : null}
-          <button type="button" data-testid="work-item-cancel" onClick={onClose} style={miniButtonStyle}>
-            {readOnly ? "Close" : "Cancel"}
-          </button>
-          {!readOnly && showSaveAndAnother ? (
-            <button
-              type="button"
-              data-testid="work-item-save-another"
-              disabled={!canSubmit}
-              onClick={() => { if (canSubmit) void onSubmit(true); }}
-              style={{ ...miniButtonStyle, padding: "6px 10px", opacity: canSubmit ? 1 : 0.5 }}
-            >Save and Another</button>
-          ) : null}
-          {!readOnly ? (
-            <button
-              type="submit"
-              data-testid="work-item-save"
-              disabled={!canSubmit}
-              style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5 }}
-            >Save</button>
-          ) : null}
-        </div>
-      </form>
-    </div>
-  );
-}
-
-const modalFieldLabelStyle: CSSProperties = {
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  fontSize: 10,
-  color: "var(--muted)",
-  fontWeight: 600,
-};
-
-const authorBadgeStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "2px 8px",
-  borderRadius: 999,
-  background: "var(--bg-2)",
-  border: "1px solid var(--border)",
-  color: "var(--fg)",
-  fontSize: 11,
-  alignSelf: "flex-start",
-};
-
-function formatNoteDate(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    const now = Date.now();
-    const diffMs = now - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return "just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 7) return `${diffDay}d ago`;
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  } catch {
-    return isoString;
-  }
-}
 
 function buildWorkItemMenu(
   item: WorkItem,
@@ -1252,6 +821,7 @@ function buildWorkItemMenu(
     onRename: (item: WorkItem) => void;
     onChangeStatus: (item: WorkItem) => void;
     onChangePriority: (item: WorkItem) => void;
+    onAddToAgent: (item: WorkItem) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -1275,6 +845,12 @@ function buildWorkItemMenu(
       run: () => actions.onChangePriority(item),
     },
     {
+      id: "workitem.add-to-agent",
+      label: "Add to agent context",
+      enabled: true,
+      run: () => actions.onAddToAgent(item),
+    },
+    {
       id: "workitem.delete",
       label: "Delete",
       enabled: !locked,
@@ -1290,6 +866,7 @@ function buildGroupMenu(
     onChangeStatus: (item: WorkItem, ids: string[]) => void;
     onChangePriority: (item: WorkItem, ids: string[]) => void;
     onDelete: (item: WorkItem, ids: string[]) => void;
+    onAddToAgent: (ids: string[]) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -1308,6 +885,12 @@ function buildGroupMenu(
       run: () => actions.onChangePriority(item, groupIds),
     },
     {
+      id: "workitem.add-to-agent",
+      label: `Add to agent context (${n} items)`,
+      enabled: true,
+      run: () => actions.onAddToAgent(groupIds),
+    },
+    {
       id: "workitem.delete",
       label: `Delete (${n} items)`,
       enabled: !locked,
@@ -1315,18 +898,6 @@ function buildGroupMenu(
     },
   ];
 }
-
-const primaryButtonStyle: CSSProperties = {
-  borderRadius: 6, border: "1px solid var(--border)", background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit", padding: "6px 10px",
-};
-
-const labelStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-  fontSize: 12,
-  color: "var(--muted)",
-};
 
 const bottomBarStyle: CSSProperties = {
   display: "flex",
@@ -1352,128 +923,3 @@ const bottomChipStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/**
- * Modal for editing a commit point — opened by double-clicking a commit
- * divider row. Only lets the user change the mode (auto vs approve); the
- * drafted commit message now lives in chat between the agent and the user,
- * not in the commit point row.
- */
-function CommitPointModal({
-  cp,
-  onSave,
-  onClose,
-}: {
-  cp: CommitPoint;
-  onSave(changes: { mode?: "auto" | "approve" }): Promise<void>;
-  onClose(): void;
-}) {
-  const [mode, setMode] = useState<"auto" | "approve">(cp.mode);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const changes: { mode?: "auto" | "approve" } = {};
-      if (mode !== cp.mode) changes.mode = mode;
-      await onSave(changes);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000,
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 16,
-          width: "min(480px, 90vw)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>Edit commit point</div>
-          <button type="button" onClick={onClose} style={{ ...miniButtonStyle, border: "none", background: "transparent" }} aria-label="Close">✕</button>
-        </div>
-
-        <label style={labelStyle}>
-          Mode
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => setMode("approve")}
-              style={{
-                ...miniButtonStyle,
-                padding: "5px 12px",
-                background: mode === "approve" ? "var(--accent)" : "var(--bg-2)",
-                color: mode === "approve" ? "#fff" : "inherit",
-                border: `1px solid ${mode === "approve" ? "var(--accent)" : "var(--border)"}`,
-              }}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("auto")}
-              style={{
-                ...miniButtonStyle,
-                padding: "5px 12px",
-                background: mode === "auto" ? "var(--accent)" : "var(--bg-2)",
-                color: mode === "auto" ? "#fff" : "inherit",
-                border: `1px solid ${mode === "auto" ? "var(--accent)" : "var(--border)"}`,
-              }}
-            >
-              Auto
-            </button>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            {mode === "approve"
-              ? "Agent drafts a message, shows it in chat, and waits for your approval."
-              : "Agent commits immediately without waiting for approval."}
-          </div>
-        </label>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={miniButtonStyle} disabled={saving}>Cancel</button>
-          <button
-            type="button"
-            data-testid="commit-point-save"
-            onClick={() => void handleSave()}
-            disabled={saving}
-            style={{ ...primaryButtonStyle }}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

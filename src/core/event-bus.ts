@@ -2,7 +2,7 @@ import type { Logger } from "./logger.js";
 
 export type WorkspaceChangeKind = "created" | "updated" | "deleted";
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "auto-commit-changed" | "auto-committed" | "prompt-changed";
+export type ThreadLifecycleKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "summary-updated" | "renamed" | "prompt-changed";
 export type AgentStatus = "idle" | "working" | "waiting" | "done";
 export type PaneKind = "working" | "talking";
 
@@ -59,14 +59,6 @@ export interface WorkspaceContextChangedEvent {
   gitEnabled: boolean;
 }
 
-export interface CommitPointChangedEvent {
-  type: "commit-point.changed";
-  streamId: string | null;
-  threadId: string;
-  id: string | null;
-  kind: "created" | "updated" | "deleted" | "reordered";
-}
-
 export interface GitRefsChangedEvent {
   type: "git-refs.changed";
   streamId: string;
@@ -83,14 +75,6 @@ export interface ConfigChangedEvent {
   type: "config.changed";
 }
 
-export interface WaitPointChangedEvent {
-  type: "wait-point.changed";
-  streamId: string | null;
-  threadId: string;
-  id: string | null;
-  kind: "created" | "updated" | "deleted";
-}
-
 export interface WikiNoteChangedEvent {
   type: "wiki-note.changed";
   kind: "upserted" | "deleted";
@@ -104,11 +88,34 @@ export interface FollowupChangedEvent {
   id: string | null;
 }
 
+export interface BackgroundTaskChangedEvent {
+  type: "background-task.changed";
+  kind: "started" | "updated" | "ended";
+  id: string;
+}
+
+export interface UsageRecordedEvent {
+  type: "usage.recorded";
+  kind: string;
+  key: string;
+  streamId: string | null;
+  threadId: string | null;
+}
+
+export interface CodeQualityScannedEvent {
+  type: "code-quality.scanned";
+  streamId: string;
+  scanId: number;
+  tool: "lizard" | "jscpd";
+  scope: "codebase" | "diff";
+  status: "running" | "completed" | "failed";
+}
+
 export interface FileSnapshotCreatedEvent {
   type: "file-snapshot.created";
   streamId: string;
   snapshotId: string;
-  kind: "task-start" | "task-end" | "startup";
+  kind: "task-start" | "task-end" | "task-event" | "startup";
   effortId: string | null;
   threadId: string | null;
 }
@@ -122,13 +129,14 @@ export type OxplowEvent =
   | AgentStatusChangedEvent
   | FileSnapshotCreatedEvent
   | WorkspaceContextChangedEvent
-  | CommitPointChangedEvent
-  | WaitPointChangedEvent
   | GitRefsChangedEvent
   | StreamChangedEvent
   | ConfigChangedEvent
   | WikiNoteChangedEvent
-  | FollowupChangedEvent;
+  | UsageRecordedEvent
+  | CodeQualityScannedEvent
+  | FollowupChangedEvent
+  | BackgroundTaskChangedEvent;
 
 export type OxplowEventType = OxplowEvent["type"];
 

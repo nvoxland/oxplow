@@ -1,5 +1,4 @@
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import type { MutableRefObject } from "react";
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../../session/file-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
@@ -8,6 +7,7 @@ import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { getActiveMonacoTheme, subscribeMonacoTheme } from "../monaco-theme.js";
 
 interface Props {
   stream: Stream;
@@ -21,8 +21,6 @@ interface Props {
   openFileOrder: string[];
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
-  onSelectOpenFile(path: string): void;
-  onCloseOpenFile(path: string): void;
   onRevealCommit?(sha: string): void;
   onRevealWorkItem?(itemId: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
@@ -40,8 +38,6 @@ export function EditorPane({
   openFileOrder,
   openFiles,
   onNavigateToLocation,
-  onSelectOpenFile,
-  onCloseOpenFile,
   onRevealCommit,
   onRevealWorkItem,
   onCompareWithClipboard,
@@ -98,12 +94,19 @@ export function EditorPane({
       const editor = monaco.editor.create(hostRef.current, {
         value: "",
         language: "typescript",
-        theme: "vs-dark",
+        theme: getActiveMonacoTheme(),
         automaticLayout: true,
         minimap: { enabled: false },
         contextmenu: false,
       });
       editorRef.current = editor;
+      // Re-apply Monaco's theme whenever the user flips the app theme.
+      // Monaco's theme is global (set via `monaco.editor.setTheme`) so
+      // any open editor — including DiffPane — picks up the change.
+      const unsubTheme = subscribeMonacoTheme((next) => {
+        try { monaco.editor.setTheme(next); } catch { /* monaco may have unloaded */ }
+      });
+      focusDisposersRef.current.push({ dispose: unsubTheme });
       // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
       // editor has focus. The native Electron menu also binds this — menu
       // accelerators fire at the OS level BEFORE the keydown reaches the
@@ -115,7 +118,7 @@ export function EditorPane({
         () => { void onSaveRef.current(); },
       );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
-      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId), streamRef);
+      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId));
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
@@ -566,9 +569,8 @@ export function EditorPane({
             onGitClick={(sha) => {
               onRevealCommitRef.current?.(sha);
             }}
-            onGitContextMenu={(event, sha, authorMail) => {
-              event.preventDefault();
-              setBlameMenu({ x: event.clientX, y: event.clientY, sha, authorMail });
+            onOpenGitMenu={(rect, sha, authorMail) => {
+              setBlameMenu({ x: rect.right, y: rect.bottom + 4, sha, authorMail });
             }}
           />
         ) : null}
@@ -717,14 +719,20 @@ function BlameOverlay({
   lineHeight,
   onLocalClick,
   onGitClick,
-  onGitContextMenu,
+  onOpenGitMenu,
 }: {
   entries: LocalBlameEntry[];
   scrollTop: number;
   lineHeight: number;
   onLocalClick(itemId: string): void;
   onGitClick(sha: string): void;
-  onGitContextMenu(event: ReactMouseEvent, sha: string, authorMail: string): void;
+  /**
+   * Open the git-blame menu for `sha`. `rect` is the bounding rect of the
+   * trigger button so the popover can be anchored under it (matches the
+   * Kebab/ContextMenu positioning convention used elsewhere). Replaces
+   * the previous mouse-event-based right-click menu.
+   */
+  onOpenGitMenu(rect: DOMRect, sha: string, authorMail: string): void;
 }) {
   const nowSec = Date.now() / 1000;
   return (
@@ -771,19 +779,47 @@ function BlameOverlay({
             const date = formatBlameDate(entry.git.authorTime);
             const author = truncateAuthor(entry.git.author);
             const sha = entry.git.sha;
+            const authorMail = entry.git.authorMail;
             return (
               <div
                 key={entry.line}
-                title={`${sha.slice(0, 8)} ${entry.git.author} <${entry.git.authorMail}>\n${entry.git.summary}`}
+                title={`${sha.slice(0, 8)} ${entry.git.author} <${authorMail}>\n${entry.git.summary}`}
                 onClick={() => onGitClick(sha)}
-                onContextMenu={(event) => onGitContextMenu(event, sha, entry.git!.authorMail)}
+                className="oxplow-blame-row"
                 style={{
                   ...rowStyle(lineHeight, bg),
                   borderLeft: "2px solid var(--blame-git-border, #4a9eff)",
                   cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  position: "relative",
                 }}
               >
-                {`${date}  ${author}`}
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {`${date}  ${author}`}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Blame actions"
+                  className="oxplow-blame-row-kebab"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                    onOpenGitMenu(rect, sha, authorMail);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    lineHeight: 1,
+                    padding: "0 2px",
+                  }}
+                >
+                  ⋯
+                </button>
               </div>
             );
           }
@@ -889,7 +925,6 @@ function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promi
 function registerLspProviders(
   monaco: any,
   getClient: (languageId: string) => LspClient,
-  streamRef: MutableRefObject<Stream>,
 ) {
   for (const languageId of ["typescript", "javascript"]) {
     monaco.languages.registerDefinitionProvider(languageId, {
@@ -902,7 +937,7 @@ function registerLspProviders(
             character: position.column - 1,
           },
         });
-        return definitionResultToMonacoLocations(monaco, streamRef.current, result);
+        return definitionResultToMonacoLocations(monaco, result);
       },
     });
     monaco.languages.registerHoverProvider(languageId, {
@@ -966,7 +1001,7 @@ function normalizeDefinitionTarget(stream: Stream, result: unknown): EditorNavig
   return null;
 }
 
-function definitionResultToMonacoLocations(monaco: any, stream: Stream, result: unknown): any[] {
+function definitionResultToMonacoLocations(monaco: any, result: unknown): any[] {
   const locations = Array.isArray(result) ? result : result ? [result] : [];
   return locations
     .map((item) => referenceToMonacoLocation(monaco, item))

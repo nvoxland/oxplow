@@ -22,47 +22,42 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[verify] launched");
 
-    // History tab
-    const dockTabs = await window.evaluate(() => {
-      return Array.from(document.querySelectorAll("[data-testid^='dock-tab-']"))
-        .map((el) => el.getAttribute("data-testid"));
-    });
-    probeLog(`[verify] dock tabs found: ${dockTabs.join(",")}`);
-
-    const historyTab = window.locator("[data-testid='dock-tab-history']");
-    if (await historyTab.count() > 0) {
-      await historyTab.click();
+    // Git history page (rail HUD → Pages → Git history)
+    const historyEntry = window.locator("[data-testid='rail-page-git-history']");
+    if (await historyEntry.count() > 0) {
+      await historyEntry.click();
       await window.waitForTimeout(1_500);
       await window.screenshot({ path: resolve(outDir, "verify-history.png") });
       const historyText = await window.evaluate(() => {
-        const panel = document.querySelector("[data-testid='dock-panel-history']");
-        return panel ? (panel as HTMLElement).innerText.slice(0, 800) : "(no history panel)";
+        const panel = document.querySelector("[data-testid='page-git-history']");
+        return panel ? (panel as HTMLElement).innerText.slice(0, 800) : "(no history page)";
       });
       writeFileSync(resolve(outDir, "verify-history.txt"), historyText);
       probeLog(`[verify] history first 200 chars: ${historyText.slice(0, 200).replace(/\n/g, " ⏎ ")}`);
     } else {
-      probeLog("[verify] NO dock-tab-history found — finding for the log");
+      probeLog("[verify] NO rail-page-git-history entry — finding for the log");
     }
 
-    // Snapshots tab
-    const snapsTab = window.locator("[data-testid='dock-tab-snapshots']");
-    if (await snapsTab.count() > 0) {
-      await snapsTab.click();
+    // Local history (snapshots) page
+    const snapsEntry = window.locator("[data-testid='rail-page-local-history']");
+    if (await snapsEntry.count() > 0) {
+      await snapsEntry.click();
       await window.waitForTimeout(1_500);
       await window.screenshot({ path: resolve(outDir, "verify-snapshots.png") });
       const snapsText = await window.evaluate(() => {
-        const panel = document.querySelector("[data-testid='dock-panel-snapshots']");
-        return panel ? (panel as HTMLElement).innerText.slice(0, 800) : "(no snapshots panel)";
+        const panel = document.querySelector("[data-testid='page-local-history']");
+        return panel ? (panel as HTMLElement).innerText.slice(0, 800) : "(no local-history page)";
       });
       writeFileSync(resolve(outDir, "verify-snapshots.txt"), snapsText);
       probeLog(`[verify] snapshots first 200 chars: ${snapsText.slice(0, 200).replace(/\n/g, " ⏎ ")}`);
     } else {
-      probeLog("[verify] NO dock-tab-snapshots found — finding for the log");
+      probeLog("[verify] NO rail-page-local-history entry — finding for the log");
     }
 
-    // Files panel + filter modes
-    await window.locator("[data-testid='dock-tab-project']").click();
-    await window.waitForTimeout(800);
+    // Files page + filter modes
+    await window.locator("[data-testid='rail-page-files']").click();
+    await window.locator("[data-testid='page-files']").waitFor({ state: "visible", timeout: 5_000 });
+    await window.waitForTimeout(400);
     const filters = await window.evaluate(() => {
       return Array.from(document.querySelectorAll("button, [role='tab']"))
         .map((el) => (el as HTMLElement).innerText?.trim())

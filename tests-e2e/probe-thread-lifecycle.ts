@@ -1,10 +1,13 @@
 /**
- * Probe: thread lifecycle — create, rename via right-click, promote to writer,
+ * Probe: thread lifecycle — create, rename via row kebab, promote to writer,
  * complete.
  *
  * Scenario 7 from /self-ralph todo. Watches for stale UI when active thread
  * changes mid-flow: after promoting B2, the writer badge (✎) should move to
  * B2 and off B1 immediately without a reload.
+ *
+ * Right-click was migrated to the per-row kebab popover by the IA cleanup;
+ * this probe exercises the kebab path.
  */
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,13 +48,16 @@ async function main() {
     console.log("[probe] created thread1:", thread1Id);
     await window.screenshot({ path: resolve(outDir, "thread-01-created.png") });
 
-    // --- Step 2: rename via right-click context menu ---
+    // --- Step 2: rename via the chip's hover-revealed kebab ---
     const chip1 = window.getByTestId(`thread-chip-${thread1Id}`);
-    await chip1.click({ button: "right" });
+    await chip1.hover();
+    await window.waitForTimeout(300);
+    const kebab = window.getByTestId(`thread-chip-kebab-${thread1Id}`);
+    await kebab.waitFor({ timeout: 2_000 });
+    await kebab.click();
     await window.waitForTimeout(200);
-    // The shared ContextMenu component renders MenuList buttons with the
-    // label text. Rename… is the first item.
-    const renameBtn = window.locator('button:has-text("Rename…")').first();
+    const renameBtn = window.getByTestId("menu-item-thread.rename");
+    await renameBtn.waitFor({ timeout: 2_000 });
     await renameBtn.click();
     await window.waitForTimeout(200);
 

@@ -34,10 +34,9 @@ async function main() {
   try {
     await window.waitForTimeout(3_500);
 
-    // Left dock's default active tab is "plan" (Work), so click "project"
-    // (Files) to reveal the file tree.
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(600);
+    // Open the Files page from the rail HUD to reveal the file tree.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     await window.screenshot({ path: resolve(outDir, "pfe-01-startup.png") });
 
     // Expand tests-e2e/ directory.

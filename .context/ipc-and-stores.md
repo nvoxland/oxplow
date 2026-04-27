@@ -1,7 +1,7 @@
 # IPC and stores: end-to-end pattern
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `commit_point` as a worked example.
+needs persistence + IPC + UI, with `wiki_note` as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -25,8 +25,7 @@ touches roughly seven files. They sit in this order:
 3. **Runtime method** — `src/electron/runtime.ts`. Adds a method to
    `ElectronRuntime` that resolves stream/thread as needed and delegates
    to the store. Where cross-store atomicity matters, the runtime owns
-   that orchestration (e.g. `reorderBatchQueue` updates work_items,
-   commit_point, and wait_point in one go).
+   that orchestration.
 
 4. **IPC contract** — `src/electron/ipc-contract.ts`. Add the method
    signature to the `OxplowApi` interface. This is the source of truth for
@@ -49,39 +48,14 @@ touches roughly seven files. They sit in this order:
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
 
-## Worked example: `commit_point`
+## Worked example: `wiki_note`
 
-What landed across each layer when commit points were added:
-
-- **Migration v6** in `migrations.ts`: `CREATE TABLE commit_point (...)`,
-  plus indexes on `(thread_id, sort_index)` and `(thread_id, status)`.
-- **Store**: `src/persistence/commit-point-store.ts` —
-  `create/update/markCommitted/delete/setSortIndexes/listForBatch/get`.
-  Status machine is `pending → done`; the drafted message lives in
-  chat, not the DB. Every mutation calls `emit({ threadId, kind, id })`.
-- **Runtime / thread-queue-orchestrator**: methods
-  `createCommitPoint/deleteCommitPoint/listCommitPoints/
-  reorderBatchQueue/executeCommit` plus the Stop-hook integration via
-  `computeStopDirective`. `executeCommit` runs `gitCommitAll` inline
-  from the `oxplow__commit` MCP handler.
-- **Event**: `CommitPointChangedEvent` added to `src/core/event-bus.ts`,
-  published in `runtime.ts` from the store's `subscribe`.
-- **IPC contract / preload / main**: `listCommitPoints`,
-  `createCommitPoint`, `deleteCommitPoint`. (Approve/reject/setMode/
-  reset were removed — approval is chat-driven.)
-- **UI api**: `listCommitPoints/createCommitPoint/deleteCommitPoint/
-  reorderBatchQueue` in `src/ui/api.ts`.
-- **UI consumption**: `PlanPane.tsx` loads commit points on thread change
-  and refetches via `subscribeOxplowEvents` filtered to
-  `event.type === "commit-point.changed" && event.threadId === threadId`.
-- **MCP**: `commit` and `list_commit_points` registered in
-  `src/mcp/mcp-tools.ts`'s `buildWorkItemMcpTools` (also added
-  `commitPointStore` to its `McpToolDeps`). The agent drafts messages
-  in chat and calls `commit` once the user approves; there is no
-  `propose_commit` tool — the draft has no DB-side representation.
-
-That's the full template — duplicate the shape for any new persisted
-feature.
+Concrete instance of the 7-layer flow. Look at the `wiki_note` table,
+`WikiNoteStore`, the runtime's `listWikiNotes`/`writeWikiNoteBody`
+helpers, the matching IPC contract entries, the preload bindings, the
+main-process handlers, and the UI api wrappers. Every other persisted
+feature in this codebase follows the same shape — duplicate it for new
+work.
 
 ## Event bus
 
@@ -93,6 +67,36 @@ union. To add an event:
 3. Publish from `runtime.ts` inside the relevant store's `subscribe`
    block.
 4. Consume in the UI via `subscribeOxplowEvents((e) => { if (e.type === ...) ... })`.
+
+## Git dashboard / cross-worktree IPC
+
+The Git Dashboard page added five renderer-callable methods to
+`DesktopApi`. Each delegates to a helper in `src/git/git.ts` after
+resolving the stream's `worktree_path` (the same pattern as
+`getGitLog`):
+
+- `getAheadBehind(streamId, base, head?)` — `{ ahead, behind }` for
+  the branch header / worktree rows.
+- `getCommitsAheadOf(streamId, base, head, limit?)` —
+  `GitLogCommit[]` for pairwise commit-diff displays.
+- `listRecentRemoteBranches(streamId, limit?)` —
+  `RemoteBranchEntry[]` sorted by committer date.
+- `gitPushCurrentTo(streamId, remote, branch)` — refspec push of
+  HEAD into `<remote>/<branch>`. Wraps the async git helper and opens
+  a `BackgroundTaskStore` row.
+- `gitPullRemoteIntoCurrent(streamId, remote, branch)` — fetch +
+  merge, also background-task wrapped.
+- `listSiblingWorktrees(streamId)` — every git worktree of this repo
+  except the one backing `streamId`. Used by the dashboard's
+  worktrees card. Distinct from `listAdoptableWorktrees`, which
+  returns only worktrees NOT yet tracked as oxplow streams (used by
+  the new-stream adoption flow).
+
+The cross-worktree merge action reuses the existing `gitMergeInto`
+IPC method; no new method is needed because merging only ever runs in
+the *current* stream's working dir. See
+[git-integration.md](./git-integration.md) for the rationale on why
+no symmetric "push commits into another worktree" IPC exists.
 
 For commonly-filtered events there are scoped helpers in `src/ui/api.ts`:
 
@@ -219,6 +223,48 @@ if the deferred ask warrants a row the user reviews/accepts, file a
 task; if it's just a within-conversation bookmark, add a follow-up
 and remove it in the same turn you handle it. Never carry both.
 
+## Background tasks (long-running op progress)
+
+`BackgroundTaskStore` (`src/electron/background-task-store.ts`) is
+another in-memory store, modeled on `FollowupStore`. It surfaces "what
+is the runtime doing right now" rows in the bottom-bar
+`BackgroundTaskIndicator` (`src/ui/components/`). No SQLite, no
+migration, lost on restart. Done/failed rows linger for a 4s grace
+window so the UI can flash a checkmark before evicting.
+
+Producers call `start({ kind, label, detail?, progress? })` to register
+a row, optionally `update(id, patch)` for progress ticks, then
+`complete(id)` or `fail(id, message)`. `progress` is `0..1` for
+determinate work or `null` for indeterminate (animated stripes in the
+UI). Active producers:
+
+- **Git pull/push** — `runtime.gitPull` / `runtime.gitPush` use
+  `gitPullAsync` / `gitPushAsync` from `src/git/git.ts` so the main
+  process doesn't block during the network call. Indeterminate.
+- **Code-quality scans** — `runtime.runCodeQualityScan` opens a row in
+  parallel with the existing `code-quality.scanned` event flow. The
+  scan-status strip in CodeQualityPanel keeps its panel-local spinner;
+  the bottom-bar row is the global indicator. Indeterminate.
+- **LSP cold start** — `LspSessionManager` (`src/lsp/lsp.ts`) takes
+  optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
+  wires them to `start`/`complete`. Indeterminate.
+- **Notes wiki resync** — `NotesWatcher.start` (`src/git/notes-watch.ts`)
+  takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
+  runtime registers a row only when `total >= 5` (smaller dirs aren't
+  worth a flash). Determinate.
+
+IPC: one method `listBackgroundTasks()` returns the snapshot. Renderer
+subscribes via `subscribeBackgroundTaskEvents(onChange)` (filters
+`background-task.changed` events) and refetches. The renderer never
+writes — only the runtime starts/updates tasks. Cancellation is not
+supported (v1).
+
+Adding a new producer: don't widen the union — extend
+`BackgroundTaskKind` and pick the most relevant existing kind, or add
+one in `background-task-store.ts` plus a label entry in
+`BackgroundTaskIndicator.tsx` (`KIND_LABEL`). Wire `start`/`complete`
+or `fail` in the new spot; events publish automatically.
+
 ## Work panel in_progress bucket is task-only
 
 The Work panel's in_progress bucket is driven purely by `work_item`
@@ -249,6 +295,73 @@ state.
 
 Both follow the standard 7-layer IPC flow (migration → store →
 runtime → ipc-contract → preload → main → ui/api).
+
+## Generic usage tracking
+
+`UsageStore` (`src/persistence/usage-store.ts`) records `(kind, key,
+event)` rows with optional `stream_id` and a 30s coalesce window. The
+runtime exposes four read methods + one writer over IPC:
+
+- `recordUsage({ kind, key, event?, streamId?, threadId? })`
+- `listRecentUsage({ kind, streamId?, threadId?, limit?, since? })` —
+  most-recent keys aggregated by `key`, returning
+  `{ key, last_at, count }[]`. Pass `streamId` to scope to one
+  workspace, `threadId` to scope to one thread, or both to
+  intersect.
+- `listFrequentUsage({ kind, streamId?, threadId?, limit?, since? })`
+  — same shape ranked by count.
+- `listCurrentlyOpenUsage({ kind, streamId?, threadId? })` — keys
+  whose latest event is `"open"` with no later `"close"`. Returns
+  `[]` for kinds that don't emit close events yet.
+
+Subscribe in the UI via `subscribeUsageEvents(fn, { kind })`. The bus
+event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
+
+Active write hookpoints (all in `src/ui/App.tsx`, all pass both
+`streamId` and the active `threadId` so per-stream and per-thread
+queries both work):
+
+- `wiki-note` → `handleOpenNote`
+- `editor-file` → `handleOpenFile`
+- `work-item` → `handleRequestEditWorkItem`
+
+The wiki-note rows currently feed `NotesPane`'s "Recently visited"
+section; editor-file and work-item rows are recorded but not yet
+surfaced in any UI — the architecture is ready, the consumer is the
+follow-up.
+
+When wiring a new kind, record the visit at the moment the user
+*opens* the target — not on hover or focus — because the 30s coalesce
+relies on `occurred_at` being a real "user intent to read this"
+signal.
+
+## Code quality scans
+
+`CodeQualityStore` (`src/persistence/code-quality-store.ts`) is
+another straightforward 7-layer instance, plus a `src/subprocess/`
+module (the first user) that wraps the external CLIs. The runtime
+method `runCodeQualityScan` shows the canonical pattern for "store
++ subprocess + git-diff scoping":
+
+1. `store.startScan(...)` → `code-quality.scanned` event with
+   `status: "running"` fires immediately so the UI can show a
+   spinner before the subprocess settles.
+2. Resolve the stream's worktree, optionally call
+   `listBranchChanges(worktree, baseRef)` for `scope: "diff"` and
+   pass the changed-files list into the subprocess function.
+3. `runLizard` / `runJscpd` return *normalized* findings
+   (`{ path, startLine, endLine, kind, metricValue, extra }`); the
+   runtime never sees tool-specific shapes.
+4. On success, `store.completeScan(scanId, findings)` inserts
+   findings, flips status, and prunes old scans for the same
+   `(stream, tool, scope)` triple — all in one transaction.
+5. On `CodeQualityToolMissingError` (ENOENT), `failScan` records a
+   user-friendly "tool not installed" message that the UI surfaces
+   in its scan-status strip.
+
+When adding a third CLI tool, you only touch the subprocess module
+(new `runFoo` + parser) and the `CodeQualityTool` union — the
+store, runtime, IPC, and UI are tool-agnostic.
 
 ## Related
 

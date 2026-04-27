@@ -1,8 +1,7 @@
 # Data model
 
 What this doc covers: the SQLite tables, their store classes, and the
-single-`sort_index` queue invariant that ties work items, commit points,
-and wait points together. If you're adding a new persisted concept, also
+`sort_index` queue invariant for work items. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Storage
@@ -75,22 +74,20 @@ the sort_index=0 row). The rolling `summary` field + `record_batch_summary`
 MCP tool were removed in v13 — use the work-item log as the source of
 truth instead.
 
-`auto_commit` (migration v15, `INTEGER NOT NULL DEFAULT 0`) — when `true` on
-the active thread, the stop-hook pipeline runs `git commit` directly whenever
-settled work (`human_check`/`done` items) exists and no pending commit point
-is already in the queue. No `commit_point` row is created; the UI is
-notified via a `thread.changed`/`auto-committed` lifecycle event. Toggled via
-`setAutoCommit(threadId, enabled)` on `BatchStore`; IPC-exposed as
-`setAutoCommit(streamId, threadId, enabled)`. Surfaced in the Plan pane as an
-"Auto-commit" toggle button next to the queue marker bar; while on, the
-"+ Commit Point" button is hidden.
-
 `custom_prompt` (migration v18, nullable TEXT) — per-thread standing
 instructions appended to the agent's system prompt after the stream-level
 `custom_prompt`. Set via `setBatchPrompt(threadId, prompt)` on `BatchStore`;
 IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
 `thread.changed` event (kind: "prompt-changed") so the UI refreshes thread
 state.
+
+**Removed in v42:** the `auto_commit` column (added in v15) and the
+`commit_point` / `wait_point` tables (added in v6/v7). Commits are now
+user-driven only — the harness has no `git commit` path, no queueable
+commit/wait markers, and no auto-commit Stop directive. Consumers
+running an older DB get the columns/tables dropped on first launch with
+the new binary; existing rows are not migrated forward (no surface
+reads them).
 
 ### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
 
@@ -153,37 +150,6 @@ migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
   `oxplow__get_thread_notes` / `listThreadNotes(threadId, limit)` —
   reverse-chronological, capped at 100.
 
-### `commit_point` — `CommitPointStore` (`src/persistence/commit-point-store.ts`)
-
-Markers in the queue that say "commit at this point." Status:
-`pending → done`. `mode` is `approve` (default) or `auto`. Both modes
-now route through the agent: the Stop-hook directive asks the agent to
-inspect the diff and draft a message. The only difference is the user-
-approval gate — approve mode asks, auto mode commits in the same turn.
-Either way the agent calls `oxplow__commit({ commit_point_id, message })`,
-`git commit` runs synchronously, and the row flips to `done`. Drafted
-messages live only in chat; the row stores mode, status, and (once
-committed) the sha. See [agent-model.md](./agent-model.md) for the
-Stop-hook flow.
-
-`completed_at` (set when the row flips to `done`) is the cutoff for two
-downstream queries:
-
-- `CommitPointStore.getLatestDoneForThread(threadId)` — used by the
-  `mcp__oxplow__tasks_since_last_commit` MCP tool to bound "what's
-  changed since last commit?" for auto-commit drafting.
-- The `buildAutoCommitMessage` fallback filters settled work items by
-  `updated_at > completed_at` so its body reflects this commit's
-  changes, not every settled item in the thread's history.
-
-### `wait_point` — `WaitPointStore` (`src/persistence/wait-point-store.ts`)
-
-Markers that pause auto-progression. Status: `pending → triggered`.
-Optional `note` shown to the user. Once triggered (the agent stopped at
-this point), the marker is "consumed" — the next Stop hook treats it as
-past, so prompting the agent at all resumes auto-progression. There is no
-"continue" button.
-
 ### `work_item_effort` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
 
 An **effort** is one `in_progress → human_check` (or done/canceled) cycle
@@ -232,16 +198,9 @@ list of changed paths (computed from the pair diff).
 `work_item_commit` junction existed briefly (migration v27) but was
 removed in v28. Users commit outside oxplow all the time (IDE buttons,
 CLI, CI rebases, merges, squashes) and oxplow has no authoritative hook
-there; the best the runtime could do was a heuristic ("items whose
-efforts closed in the window since the last done commit_point"), which
-silently misattributes when work is split across multiple commits,
-committed earlier, or touched by reopened efforts. A blame-style
-feature built on that data would lie more often than it'd be useful.
-The supplementary `mcp__oxplow__tasks_since_last_commit` tool stays —
-it's advisory context for the agent drafting a commit message, not a
-persisted link — and `commit_point.commit_sha` stays (1:1 with the
-point the runtime itself closed). If a future feature wants "show me
-commits for this item," the answer is to scope `git log` by the files
+there. A blame-style feature built on that data would lie more often
+than it'd be useful. If a future feature wants "show me commits for
+this item," the answer is to scope `git log` by the files
 in `work_item_effort_file`.
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
@@ -344,15 +303,19 @@ as plain markdown files at `.oxplow/notes/<slug>.md` (not committed to
 git — this is a personal KB, not team docs). The table only holds
 metadata; the filesystem is the source of truth for content.
 
-Columns: `id, slug (UNIQUE), title, captured_head_sha,
-captured_refs_json, created_at, updated_at`.
+Columns: `id, slug (UNIQUE), title, body, captured_head_sha,
+captured_refs_json, created_at, updated_at`. The `body` column
+mirrors the on-disk markdown so MCP can run substring/content
+searches without reading every file — the filesystem is still the
+source of truth, and the watcher keeps the column in sync on every
+upsert.
 
 Workflow: the agent writes/edits note files directly with its
 Write/Edit tools (no MCP round-trip for bodies). A dedicated watcher
 (`src/git/notes-watch.ts`) picks up every file event, re-parses the
-file, and upserts metadata. **Every write — agent or user — re-baselines
-freshness**, because any write implicitly asserts "this is current as
-of now." There is no agent-vs-user distinction.
+file, and upserts metadata + body. **Every write — agent or user —
+re-baselines freshness**, because any write implicitly asserts "this
+is current as of now." There is no agent-vs-user distinction.
 
 Freshness is a general indicator, not a proof:
 - `captured_head_sha` is HEAD at last write. If HEAD advances, the
@@ -364,48 +327,120 @@ Freshness is a general indicator, not a proof:
   `very-stale`.
 
 MCP tools (`src/mcp/wiki-note-mcp-tools.ts`) are metadata-only —
-`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`,
-`delete_note`. There is no `create_note` or `update_note`: the agent
-Writes the file, then optionally calls `resync_note` to pin freshness
+`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`
+(title), `search_note_bodies` (content + ~200-char snippet),
+`find_notes_for_file` (backlinks via `captured_refs`), `delete_note`.
+There is no `create_note` or `update_note`: the agent Writes the
+file, then optionally calls `resync_note` to pin freshness
 immediately (otherwise the watcher catches up within a ~200ms
 debounce).
 
 UI: `NotesPane` (`src/ui/components/Notes/NotesPane.tsx`) is a
-left-dock `ToolWindow` — a list of notes with freshness badges and
-a `+ New` inline-input row for creating a new slug. Selecting a row
-opens the note as a center tab (`note:<slug>`) rendered by
-`NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which owns the
-view/edit/delete UI. Markdown rendering is delegated to the shared
+left-dock `ToolWindow` with a debounced full-text search input and a
+recency-driven TOC ("Recently visited" / "Recently modified" / "All
+notes"); each section caps at 8 rows with a "show all" toggle. The
+freshness dot + relative-timestamp pattern is shared by all rows.
+Selecting a row opens the note as a center tab (`note:<slug>`)
+rendered by `NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which
+owns the view/edit/delete UI . Markdown rendering is delegated to the shared
 `MarkdownView` (`src/ui/components/Notes/MarkdownView.tsx`) which
-wraps `react-markdown` + `remark-gfm` and post-renders mermaid
+wraps `react-markdown`
++ `remark-gfm` and post-renders mermaid
 fenced blocks into inline SVG when `renderMermaid` is set. The
 same component is reused for the Plan work-item description /
 acceptance fields (`WorkItemDetail`) so headings, lists, code,
 links, and emphasis come through there too — without mermaid.
 IPC surface: `listWikiNotes`, `readWikiNoteBody`,
-`writeWikiNoteBody`, `deleteWikiNote`, plus the `wiki-note.changed`
-event on the bus.
+`writeWikiNoteBody`, `deleteWikiNote`, `searchWikiNotes`, plus the
+`wiki-note.changed` event on the bus. Full-text search is backed by
+the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
+delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
+returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
-## The shared `sort_index` queue
+### `usage_event` — `UsageStore` (`src/persistence/usage-store.ts`)
 
-The most important invariant in the data model: **`work_items.sort_index`,
-`commit_point.sort_index`, and `wait_point.sort_index` all live in the
-same numeric space, scoped per thread.**
+Generic (kind, key) usage tracking. Append-only event log with columns
+`stream_id (nullable), thread_id (nullable), kind, key, event,
+occurred_at`. Aggregates (most-recent, most-frequent, currently-open)
+are derived by query rather than stored, so adding a new "kind"
+(editor file, work item, future surfaces) needs no schema change.
+Indexes: `(kind, key, occurred_at DESC)`, `(stream_id, kind,
+occurred_at DESC)`, `(thread_id, kind, occurred_at DESC)`. Both scopes
+are recorded simultaneously — `stream_id` is the workspace tab,
+`thread_id` is the active thread within it — so consumers can roll
+up by either dimension or intersect them.
 
-- `runtime.reorderBatchQueue(streamId, threadId, entries)` rewrites all
-  three tables' `sort_index` values in one operation. Each entry is
-  `{ kind: "work" | "commit" | "wait", id }` and gets `sort_index = position`.
-- The UI merges work items + commit points + wait points by `sort_index`
-  to render a single ordered list (`WorkGroupList` in `PlanPane.tsx`).
-- `runtime.findActiveCommitPoint` and `findActiveWaitPoint` walk the
-  merged list to find the lowest-`sort_index` non-terminal marker whose
-  preceding work items are all `done`/`canceled`. That's the marker the
-  Stop-hook pipeline acts on.
+The store coalesces rapid repeats: if the most recent matching
+`(kind, key, event, stream_id)` row is younger than `coalesceMs`
+(default 30s), `record()` bumps its `occurred_at` instead of inserting
+a new row. This keeps history clean when a user re-selects the same
+target several times in quick succession.
 
-There is **no foreign key** linking commit/wait points to specific work
-items. Reordering the queue immediately changes which work items a marker
-"covers" (everything before it, not yet covered by an earlier marker),
-with no migration step.
+Current write hookpoints (all in `src/ui/App.tsx`, all pass both
+`streamId` and `threadId`):
+
+- `wiki-note` — `handleOpenNote` records a visit when a note becomes
+  the active center tab. Drives the Notes pane's "Recently visited"
+  section via `listRecentUsage({ kind: "wiki-note", … })`.
+- `editor-file` — `handleOpenFile` records a visit when a file
+  becomes the active center tab. Not yet surfaced in UI; collected
+  for future "recent files" / "files this thread cares about" views.
+- `work-item` — `handleRequestEditWorkItem` records a visit when the
+  user opens the edit modal. Not yet surfaced.
+
+UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
+refresh on cross-window visits without polling.
+
+### `code_quality_scan` + `code_quality_finding` — `CodeQualityStore` (`src/persistence/code-quality-store.ts`)
+
+Deterministic, language-agnostic findings sourced from external CLIs
+(`lizard` and `jscpd`). Two tables, one store, one runtime method
+(`runCodeQualityScan`). The store doesn't run subprocesses itself —
+the runtime calls `src/subprocess/code-quality.ts` and hands
+normalized findings back via `completeScan`.
+
+`code_quality_scan` rows: `id, stream_id, tool ('lizard' | 'jscpd'),
+scope ('codebase' | 'diff'), base_ref (nullable, set when scope =
+'diff'), status ('running' | 'completed' | 'failed'), error_message,
+started_at, completed_at`. One row per CLI invocation per
+`(stream, tool, scope)` combination. Index on
+`(stream_id, tool, started_at DESC)` makes "latest scan per tool"
+cheap.
+
+`code_quality_finding` rows: `id, scan_id, path, start_line, end_line,
+kind ('complexity' | 'function-length' | 'parameter-count' |
+'duplicate-block'), metric_value (REAL), extra_json`. Lizard emits
+three findings per function (one per metric kind) with
+`extra.functionName` for grouping. jscpd emits two findings per
+duplicate-pair (one per side) with `extra.peerPath` /
+`extra.peerStartLine` / `extra.peerEndLine` so the UI can render
+"duplicates X lines from Y:Lstart-Lend" without re-querying.
+
+Retention is store-driven, not schema-driven: each `completeScan`
+prunes old scans for the same `(stream, tool, scope)` triple beyond
+`keepLast` (default 10), deleting their findings in the same
+transaction. Different scopes retain independently — running the
+diff scan many times doesn't evict the codebase scan.
+
+`listLatestFindings({ streamId, tool?, paths? })` joins on the most
+recent `completed` scan per `(stream, tool, scope)`, ignoring
+running/failed scans entirely so the panel never shows partial
+results. The `paths` filter (used by the Diff vs base tab) intersects
+findings against `listBranchChanges`'s file list at query time, so
+findings persisted by a codebase scan can also drive a focused
+"changed files only" view without re-running.
+
+The store publishes `code-quality.scanned` events on start /
+complete / fail; `CodeQualityPanel` (`src/ui/components/CodeQuality/`)
+subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
+refetches.
+
+## The `sort_index` queue
+
+`work_items.sort_index` orders work in a single numeric space scoped
+per thread. `runtime.reorderThreadQueue(streamId, threadId, entries)`
+rewrites the values in one operation; entries are `{ id }` with
+`sort_index = position`.
 
 **Visual vs persistence order for Human Check and Done.** Sections in
 `WorkGroupList` render ascending by `sort_index` *except* Human Check
@@ -415,7 +450,7 @@ line — the sections are only flipped at render time. When a
 drag-reorder persists a new order, `finalizeReorderIds` in
 `plan-utils.ts` reverses each descending run (`human_check`, plus the
 `done`/`canceled`/`archived` group) so the `reorderItems` /
-`reorderBatchQueue` "sort_index = position" rule produces the intended
+`reorderThreadQueue` "sort_index = position" rule produces the intended
 visual result. The drag handler passes the *effective* new status of a
 row whose status is changing as part of the drop (e.g. a Done row
 dropped onto a Human Check row) so the run detector sees the new
@@ -427,21 +462,12 @@ two paths agree on "newest-done on top." Any new section with a
 non-ascending display must either do the same reversal dance or get
 its own flat list.
 
-Constraint: commit and wait points cannot be the very first queue entry —
-they have nothing to fire after. Enforced both in the runtime
-(`createCommitPoint` / `createWaitPoint` throw if the thread has zero work
-items) and in the UI (buttons are disabled with an explanatory tooltip).
-
 ## Status diagrams (text)
 
 ```
 work item:    ready ─► in_progress ─► human_check ─► done ─► archived
                    ╰─────────► blocked
                    ╰─────────► canceled ─► archived
-
-commit point: pending ─► done
-
-wait point:   pending ─► triggered                     (consumed)
 ```
 
 ### Transitions to `in_progress` (server-side guard)
@@ -481,7 +507,6 @@ The runtime relays each store's changes onto the typed EventBus
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
 - `work-item.changed`, `backlog.changed`, `thread.changed`
 - `file-snapshot.created`, `agent-status.changed`
-- `commit-point.changed`, `wait-point.changed`
 - `hook.recorded`, `config.changed`
 
 UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
@@ -508,5 +533,5 @@ the docs in one diff:
 
 - [ipc-and-stores.md](./ipc-and-stores.md) — adding new stores and IPC.
 - [agent-model.md](./agent-model.md) — how the agent acts on this data.
-- [git-integration.md](./git-integration.md) — `gitCommitAll` reads
-  approved commit points and writes back the resulting sha.
+- [git-integration.md](./git-integration.md) — `gitCommitAll` for the
+  Files-panel commit button (user-driven).

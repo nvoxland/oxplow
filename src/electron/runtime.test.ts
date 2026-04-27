@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildAutoCommitMessage, buildAutoCommitStopReason, buildCommitPointStopReason, buildThreadMcpConfig, buildNextWorkItemStopReason, buildRecentHumanCheckReminder, buildSessionContextBlock, computeEffortFiles, describeHookHealth, isInsideWorktree, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentHumanCheckReminder, buildSessionContextBlock, buildWikiCaptureStopReason, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -186,148 +186,6 @@ test("buildSessionContextBlock omits ROLE CHANGE when initialRole is not supplie
 });
 
 
-test("buildNextWorkItemStopReason omits the nudge banner when uiChangeNudge is false / absent", () => {
-  const text = buildNextWorkItemStopReason(
-    { id: "wi-x", title: "do", kind: "task", thread_id: "b-y" },
-    "s-z",
-  );
-  expect(text).not.toContain("UI change detected");
-  expect(text).toMatch(/^The thread queue has ready work/);
-});
-
-test("buildNextWorkItemStopReason directs the agent to call read_work_options and dispatch a subagent", () => {
-  const text = buildNextWorkItemStopReason(
-    { id: "wi-abc", title: "Do the thing", kind: "task", thread_id: "b-xyz" },
-    "s-123",
-  );
-  expect(text).toContain("read_work_options");
-  expect(text).toContain("general-purpose");
-  // thread_id is embedded in the read_work_options call so the agent can pass the right threadId.
-  expect(text).toMatch(/threadId="b-xyz"/);
-  // Protocol details (one-at-a-time attribution, human_check, etc.) live in the
-  // merged oxplow-runtime skill — the directive just points at it to stay terse.
-  expect(text).toContain("oxplow-runtime");
-  // Trimmed: directive should be a single line / well under 400 tokens.
-  expect(text.length).toBeLessThan(400);
-});
-
-// ---- buildAutoCommitMessage: auto-mode commit point message generation ----
-
-test("buildAutoCommitMessage: no settled work → fallback message", () => {
-  const msg = buildAutoCommitMessage([workItem("w1", "ready"), workItem("w2", "in_progress")]);
-  expect(msg).toBe("chore: auto-commit at queue commit point");
-});
-
-test("buildAutoCommitMessage: single settled item → single-item conventional-commit", () => {
-  const msg = buildAutoCommitMessage([workItem("w1", "human_check", "Fix login bug")]);
-  expect(msg).toBe("chore: Fix login bug");
-});
-
-test("buildAutoCommitMessage: multiple settled items → multi-item summary", () => {
-  const items = [
-    workItem("w1", "done", "Add user auth"),
-    workItem("w2", "human_check", "Fix login bug"),
-  ];
-  const msg = buildAutoCommitMessage(items);
-  expect(msg).toMatch(/^chore: complete 2 work items/);
-  expect(msg).toContain("- Add user auth");
-  expect(msg).toContain("- Fix login bug");
-});
-
-test("buildAutoCommitMessage: canceled items count as settled", () => {
-  const msg = buildAutoCommitMessage([workItem("w1", "canceled", "Cancelled task")]);
-  expect(msg).toBe("chore: Cancelled task");
-});
-
-test("buildAutoCommitMessage: more than 5 settled items truncates with ellipsis", () => {
-  const items = Array.from({ length: 7 }, (_, i) =>
-    workItem(`w${i}`, "done", `Task ${i + 1}`),
-  );
-  const msg = buildAutoCommitMessage(items);
-  expect(msg).toContain("…and 2 more");
-  // Only first 5 listed.
-  expect(msg).toContain("- Task 1");
-  expect(msg).toContain("- Task 5");
-  expect(msg).not.toContain("- Task 6");
-});
-
-test("buildAutoCommitMessage: previousCommitCompletedAt filters out items updated before the prior commit", () => {
-  // The monotonically-growing-count bug: items settled BEFORE the previous
-  // commit re-appeared in every subsequent auto-commit message. Fix:
-  // filter by `updated_at > previousCommitCompletedAt`.
-  const older = { ...workItem("w1", "done", "Older done task"), updated_at: "2024-01-01T00:00:00Z" };
-  const newer = { ...workItem("w2", "human_check", "Fresh settled task"), updated_at: "2024-02-01T00:00:00Z" };
-  const msg = buildAutoCommitMessage([older, newer], "2024-01-15T00:00:00Z");
-  expect(msg).toBe("chore: Fresh settled task");
-  expect(msg).not.toContain("Older done task");
-});
-
-test("buildAutoCommitMessage: null previousCommitCompletedAt includes everything (first-commit case)", () => {
-  const a = { ...workItem("w1", "done", "A"), updated_at: "2024-01-01T00:00:00Z" };
-  const b = { ...workItem("w2", "human_check", "B"), updated_at: "2024-02-01T00:00:00Z" };
-  const msg = buildAutoCommitMessage([a, b], null);
-  expect(msg).toMatch(/complete 2 work items/);
-});
-
-test("buildAutoCommitMessage: no items survive the filter → fallback text", () => {
-  const older = { ...workItem("w1", "done", "Ancient"), updated_at: "2024-01-01T00:00:00Z" };
-  const msg = buildAutoCommitMessage([older], "2024-02-01T00:00:00Z");
-  expect(msg).toBe("chore: auto-commit at queue commit point");
-});
-
-test("buildAutoCommitStopReason: ad-hoc (cp=null) directive asks for auto shape without commit_point_id", () => {
-  const text = buildAutoCommitStopReason(null);
-  expect(text).toMatch(/auto: true, message/);
-  expect(text).not.toMatch(/commit_point_id/);
-  expect(text).toContain("tasks_since_last_commit");
-  // No approval gate: should explicitly forbid asking, not request it.
-  expect(text).toMatch(/do NOT ask the user to approve/i);
-  expect(text).not.toMatch(/(^|\s)ask the user to approve(?! first; commit)/i);
-  // Style-preference sentences must NOT live in the runtime directive — they
-  // belong in the consuming agent's memory / project CLAUDE.md. See
-  // wi-d716867f589a.
-  expect(text).not.toMatch(/Co-Authored-By/);
-  expect(text).not.toMatch(/Conventional-Commits/);
-  expect(text).not.toMatch(/self-attribution/);
-  // Neutral closer points at the repo's conventions.
-  expect(text).toMatch(/commit-message conventions/i);
-});
-
-test("buildAutoCommitStopReason: with a commit_point (auto-mode row) includes the id", () => {
-  const text = buildAutoCommitStopReason({
-    id: "cp-xyz",
-    thread_id: "b1",
-    sort_index: 0,
-    mode: "auto",
-    status: "pending",
-    commit_sha: null,
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    completed_at: null,
-  });
-  expect(text).toContain("cp-xyz");
-  expect(text).toContain("commit_point_id");
-  expect(text).not.toMatch(/auto: true/);
-});
-
-test("buildCommitPointStopReason: approve-mode directive keeps the user-approval gate", () => {
-  const text = buildCommitPointStopReason({
-    id: "cp-1",
-    thread_id: "b1",
-    sort_index: 0,
-    mode: "approve",
-    status: "pending",
-    commit_sha: null,
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    completed_at: null,
-  });
-  expect(text).toMatch(/ask the user to approve/i);
-  expect(text).toContain("cp-1");
-});
-
-// ---- stop-hook pipeline: approve-mode commit point blocks; auto-mode is handled by runtime before pipeline ----
-
 // ---- isInsideWorktree / shouldAcceptHookFilePath: hook path filtering ----
 
 test("isInsideWorktree: absolute path inside the worktree is accepted", () => {
@@ -440,26 +298,20 @@ test("buildRecentHumanCheckReminder: picks the most recent when multiple eligibl
   expect(out).not.toContain("wi-older");
 });
 
-test("decideStopDirective (via stop-hook-pipeline): approve-mode pending commit point blocks", async () => {
-  // Import the pure pipeline function directly — no need for the full runtime.
+test("decideStopDirective (via stop-hook-pipeline): empty thread allows stop", async () => {
   const { decideStopDirective } = await import("./stop-hook-pipeline.js");
-  const { default: threadFactory } = await Promise.resolve({ default: (overrides = {}) => ({
-    id: "b1", stream_id: "s1", title: "B", status: "active" as ThreadStatus, sort_index: 0,
-    pane_target: "p", resume_session_id: "", auto_commit: false, custom_prompt: null,
-    created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
-    ...overrides,
-  }) });
-  const cp = {
-    id: "cp1", thread_id: "b1", sort_index: 1, mode: "approve" as const,
-    status: "pending" as const, commit_sha: null,
-    created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", completed_at: null,
-  };
   const out = decideStopDirective(
-    { thread: threadFactory(), commitPoints: [cp], waitPoints: [], workItems: [], readyWorkItems: [] },
-    { buildCommitPointReason: (c) => `commit: ${c.id}`, buildNextWorkItemReason: (i) => `next: ${i.id}` },
+    {
+      thread: {
+        id: "b1", stream_id: "s1", title: "B", status: "active" as ThreadStatus, sort_index: 0,
+        pane_target: "p", resume_session_id: "", custom_prompt: null,
+        created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
+      },
+      workItems: [],
+    },
+    {},
   );
-  expect(out.directive?.decision).toBe("block");
-  expect(out.directive?.reason).toContain("commit: cp1");
+  expect(out.directive).toBeNull();
 });
 
 function seedHistoryHarness() {
@@ -825,9 +677,78 @@ describe("isWriteIntentTool", () => {
     expect(isWriteIntentTool("Bash", { command: "bun test src/foo.test.ts" })).toBe(false);
     expect(isWriteIntentTool("Bash", { command: "bunx tsc --noEmit" })).toBe(false);
   });
+  test("git commit / git push are NOT write-intent — the work being committed was already tracked", () => {
+    // Filing-enforcement Stop branch fires on write-intent. Counting a
+    // `git commit` as write-intent forces the agent to file a placeholder
+    // "Commit XYZ" item just to attribute the Bash invocation, which is
+    // bookkeeping noise for already-tracked work.
+    expect(isWriteIntentTool("Bash", { command: "git commit -m 'ship it'" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "git push origin main" })).toBe(false);
+    expect(isWriteIntentTool("Bash", { command: "git push" })).toBe(false);
+  });
+  test("other git mutating commands stay write-intent", () => {
+    // git rm / git checkout / git reset / git rebase still rewrite the
+    // working tree or refs in ways the Work panel SHOULD track.
+    expect(isWriteIntentTool("Bash", { command: "git rm src/foo.ts" })).toBe(true);
+    expect(isWriteIntentTool("Bash", { command: "git checkout -- src/foo.ts" })).toBe(true);
+    expect(isWriteIntentTool("Bash", { command: "git reset --hard origin/main" })).toBe(true);
+  });
   test("Bash with other/unknown command is write-intent (err toward auto-file)", () => {
     expect(isWriteIntentTool("Bash", { command: "npm install foo" })).toBe(true);
     expect(isWriteIntentTool("Bash", { command: "rm -rf dist" })).toBe(true);
+  });
+});
+
+describe("isReadIntentTool", () => {
+  test("Read/Grep/Glob always count as reads", () => {
+    expect(isReadIntentTool("Read", null)).toBe(true);
+    expect(isReadIntentTool("Grep", null)).toBe(true);
+    expect(isReadIntentTool("Glob", null)).toBe(true);
+  });
+  test("write-intent tools don't count as reads", () => {
+    expect(isReadIntentTool("Write", null)).toBe(false);
+    expect(isReadIntentTool("Edit", null)).toBe(false);
+  });
+  test("read-only Bash counts as a read", () => {
+    expect(isReadIntentTool("Bash", { command: "ls -la" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "git diff" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "bun test foo" })).toBe(true);
+  });
+  test("git commit / git push count as reads (activity but not write-intent)", () => {
+    // The "not write-intent" rule pulls them into the read column so a
+    // commit-only turn still counts as activity (no Q&A short-circuit)
+    // but doesn't trip filing-enforcement.
+    expect(isReadIntentTool("Bash", { command: "git commit -m 'foo'" })).toBe(true);
+    expect(isReadIntentTool("Bash", { command: "git push origin main" })).toBe(true);
+  });
+  test("write-intent Bash doesn't count as a read", () => {
+    expect(isReadIntentTool("Bash", { command: "rm -rf dist" })).toBe(false);
+    expect(isReadIntentTool("Bash", { command: "npm install" })).toBe(false);
+  });
+  test("MCP / other tool names don't count as reads or writes (out-of-scope)", () => {
+    expect(isReadIntentTool("mcp__oxplow__list_notes", null)).toBe(false);
+    expect(isReadIntentTool("Task", null)).toBe(false);
+  });
+});
+
+describe("buildWikiCaptureStopReason", () => {
+  test("names the wiki-capture skill and the resync_note pin", () => {
+    const text = buildWikiCaptureStopReason();
+    expect(text).toContain("oxplow-wiki-capture");
+    expect(text).toContain("resync_note");
+    expect(text).toContain(".oxplow/notes/");
+  });
+  test("documents the skipped escape hatch verbatim", () => {
+    const text = buildWikiCaptureStopReason();
+    expect(text).toContain("oxplow-note: skipped");
+  });
+  test("teaches the search-before-create flow", () => {
+    const text = buildWikiCaptureStopReason();
+    // All three search/find tools should be named so the agent knows
+    // which corner to check before deciding append-vs-new.
+    expect(text).toContain("search_notes");
+    expect(text).toContain("search_note_bodies");
+    expect(text).toContain("find_notes_for_file");
   });
 });
 

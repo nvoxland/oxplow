@@ -1,7 +1,8 @@
 /**
- * Probe: closing a dirty tab surfaces the themed ConfirmDialog (not the
- * unstyled native `window.confirm`). Verifies the Cancel path keeps the
- * tab open and the Discard path actually closes it.
+ * Probe: closing a dirty tab now closes immediately and surfaces an Undo
+ * toast (replaces the prior ConfirmDialog). Verifies the Undo path
+ * restores the tab + dirty draft, and that ignoring the toast leaves the
+ * tab closed.
  */
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,9 +16,9 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    // Open the file tree and a file.
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(300);
+    // Open the Files page so the file tree is mounted.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     // Find a visible file-tree entry (not hidden under a collapsed dir).
     const path = await window.evaluate(() => {
       const node = Array.from(
@@ -54,40 +55,53 @@ async function main() {
       process.exit(3);
     }
 
-    // Click the × close button — expect the themed dialog, not a native one.
+    // Click the × close button — expect the tab to close immediately and
+    // an Undo toast to appear.
     await window.getByTestId(`center-tab-close-${tabId}`).click();
-    await window.waitForTimeout(200);
-
-    const dialog = window.getByTestId("confirm-dialog");
-    await dialog.waitFor({ timeout: 2_000 });
-    console.log("[probe] themed confirm dialog visible");
-
-    // Cancel keeps the tab open.
-    await window.getByTestId("confirm-dialog-cancel").click();
     await window.waitForTimeout(300);
-    const tabStillOpen = await window.evaluate(
-      (id) => !!document.querySelector(`[data-testid="center-tab-${id}"]`),
+
+    const tabClosedFirst = await window.evaluate(
+      (id) => !document.querySelector(`[data-testid="center-tab-${id}"]`),
       tabId,
     );
-    if (!tabStillOpen) {
-      console.log("[probe] FAIL: Cancel closed the tab anyway");
+    if (!tabClosedFirst) {
+      console.log("[probe] FAIL: dirty-close did not close the tab immediately");
       process.exit(2);
     }
 
-    // Close again, then Discard — tab should go away.
+    const toast = window.getByTestId("undo-toast");
+    await toast.waitFor({ timeout: 2_000 });
+    console.log("[probe] undo toast visible");
+
+    // Undo restores the tab.
+    await window.getByTestId("undo-toast-undo").click();
+    await window.waitForTimeout(400);
+    const tabRestored = await window.evaluate(
+      (id) => !!document.querySelector(`[data-testid="center-tab-${id}"]`),
+      tabId,
+    );
+    if (!tabRestored) {
+      console.log("[probe] FAIL: Undo did not restore the tab");
+      process.exit(3);
+    }
+
+    // Close again, then ignore the toast — tab should stay closed.
     await window.getByTestId(`center-tab-close-${tabId}`).click();
-    await window.waitForTimeout(200);
-    await window.getByTestId("confirm-dialog-confirm").click();
+    await window.waitForTimeout(300);
+    const toastTwo = window.getByTestId("undo-toast");
+    await toastTwo.waitFor({ timeout: 2_000 });
+    // Dismiss explicitly so we don't have to wait the auto-dismiss window.
+    await window.getByTestId("undo-toast-dismiss").click();
     await window.waitForTimeout(400);
     const tabGone = await window.evaluate(
       (id) => !document.querySelector(`[data-testid="center-tab-${id}"]`),
       tabId,
     );
     if (!tabGone) {
-      console.log("[probe] FAIL: Discard did not close the tab");
-      process.exit(3);
+      console.log("[probe] FAIL: tab reappeared after dismissing the undo toast");
+      process.exit(4);
     }
-    console.log("[probe] OK: dirty-close dialog cancel keeps tab, confirm discards");
+    console.log("[probe] OK: dirty-close fires immediate close + undo toast; undo restores; dismiss leaves it closed");
   } finally {
     await close();
   }

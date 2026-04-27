@@ -7,8 +7,6 @@ import type {
   WorkItemStatus,
   WorkItemStore,
 } from "../persistence/work-item-store.js";
-import type { CommitPoint, CommitPointStore } from "../persistence/commit-point-store.js";
-import type { WaitPointStore } from "../persistence/wait-point-store.js";
 import type { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import type { FollowupStore } from "../electron/followup-store.js";
 
@@ -22,24 +20,22 @@ export interface McpToolDeps {
   threadStore: ThreadStore;
   streamStore: StreamStore;
   workItemStore: WorkItemStore;
-  commitPointStore: CommitPointStore;
-  /** Synchronously run `git commit` for a commit point (message is the final
-   *  text the user approved). Wired by the runtime to the thread queue
-   *  orchestrator; thrown errors bubble back to the agent so it can retry. */
-  executeCommit(cpId: string, message: string): CommitPoint;
-  /** Synchronously run `git commit` for an ad-hoc auto-commit (no
-   *  commit_point row). Called when the agent passes `{ auto: true }` to
-   *  `mcp__oxplow__commit` — the Stop-hook directive for auto_commit
-   *  threads asks for this shape. Throws on any git failure so the
-   *  agent can read the stderr and retry. */
-  executeAutoCommit(threadId: string, message: string): { sha: string; message: string };
-  waitPointStore: WaitPointStore;
   effortStore: WorkItemEffortStore;
-  /** Notify the runtime that the agent just called read_work_options, so
-   *  the Stop-hook pipeline can suppress the ready-work directive on the
-   *  next Stop when the set is unchanged. Optional — tests that don't
-   *  spin up a runtime can omit it. */
-  markReadWorkOptions?: (threadId: string, readyIds: string[]) => void;
+  /** Notify the runtime that the agent invoked `await_user` this turn.
+   *  Sets the awaiting-user flag so the next Stop hook allows-stop and
+   *  suppresses every directive (commit, audit, ready-work, filing
+   *  enforcement). Cleared by the next UserPromptSubmit. Optional for
+   *  tests that don't spin up a runtime. */
+  markAwaitingUser?: (threadId: string, question: string) => void;
+  /** Notify the runtime that the agent invoked a work-item-mutating tool
+   *  this turn (create_work_item, update_work_item, complete_task,
+   *  file_epic_with_children, transition_work_items, dispatch_work_item).
+   *  Used by the filing-enforcement Stop branch. Optional for tests. */
+  markFiledThisTurn?: (threadId: string) => void;
+  /** Stricter sibling: only called by `create_work_item` /
+   *  `file_epic_with_children` when the new row landed at `ready`.
+   *  Drives the Stop-hook "filed but didn't ship" advisory branch. */
+  markFiledReadyThisTurn?: (threadId: string) => void;
   /** Fork a thread on the same stream: seed with a note item from
    *  `summary`, optionally move `moveItemIds` across. Returns the new
    *  thread id. Optional for tests that don't wire the runtime. */
@@ -98,7 +94,6 @@ const DISPATCH_PREAMBLE = [
 
 const DISPATCH_CONSTRAINTS = [
   "Constraints:",
-  "- DO NOT COMMIT. Leave the working tree dirty when you finish; the user (or the orchestrator, if directed by a Stop-hook auto-commit directive) owns commit timing. Never run `git commit`, `git add && commit`, or `mcp__oxplow__commit` from inside this subagent — even if the change feels complete or obvious to commit.",
   "- No new runtime dependencies.",
   "- No DB mocks in tests — use `mkdtempSync`.",
   "- Singular table names on any new tables.",
@@ -267,8 +262,76 @@ function withRedoHint<T extends Record<string, unknown>>(
   };
 }
 
+/**
+ * Closing an epic to human_check / blocked when non-terminal children
+ * (ready / in_progress) remain produces a misleading rollup: the
+ * Plan-pane `classifyEpic` rollup prefers child statuses over the
+ * literal epic status, so the epic flips back into To Do or Blocked
+ * even though the agent meant to ship it. This guard rejects the
+ * call early with a structured error naming the stale children. The
+ * agent must either pass `cascade: true` (so this helper plus
+ * `cascadeChildrenStatus` flip the children in the same call) or
+ * close the children explicitly first.
+ *
+ * Returns `null` when the call is allowed, or a structured `{ error }`
+ * payload when it's rejected. Non-epic items always return `null` —
+ * the guard only kicks in for `kind === "epic"`.
+ */
+export function checkEpicCascadeGuard(
+  workItemStore: WorkItemStore,
+  threadId: string,
+  itemId: string,
+  cascade: boolean | undefined,
+): { error: string } | null {
+  if (cascade === true) return null;
+  const item = workItemStore.getItem(threadId, itemId);
+  if (!item || item.kind !== "epic") return null;
+  const stale = workItemStore
+    .listItems(threadId)
+    .filter((child) => child.parent_id === itemId && (child.status === "ready" || child.status === "in_progress"));
+  if (stale.length === 0) return null;
+  const childList = stale
+    .map((child) => `  • ${child.id} (${child.status}) "${child.title}"`)
+    .join("\n");
+  return {
+    error:
+      `Epic "${item.title}" (${itemId}) has ${stale.length} non-terminal child${stale.length === 1 ? "" : "ren"} ` +
+      `that must close along with it (otherwise the section rollup pulls the epic back into To Do):\n` +
+      `${childList}\n\n` +
+      `Either pass \`cascade: true\` to flip every non-terminal child to the same target status in one call, ` +
+      `or close the children explicitly first via \`mcp__oxplow__transition_work_items\`.`,
+  };
+}
+
+/**
+ * Companion to `checkEpicCascadeGuard`: when `cascade: true` is
+ * passed, flip every non-terminal child of the epic (ready /
+ * in_progress) to the target status. Each child transitions through
+ * `updateItem` so the same side effects fire (efforts, audit log,
+ * events) as a manual transition would.
+ */
+export function cascadeChildrenStatus(
+  workItemStore: WorkItemStore,
+  threadId: string,
+  epicId: string,
+  status: "human_check" | "blocked",
+): void {
+  const stale = workItemStore
+    .listItems(threadId)
+    .filter((child) => child.parent_id === epicId && (child.status === "ready" || child.status === "in_progress"));
+  for (const child of stale) {
+    workItemStore.updateItem({
+      threadId,
+      itemId: child.id,
+      status,
+      actorKind: "agent",
+      actorId: "mcp",
+    });
+  }
+}
+
 export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
-  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, commitPointStore, waitPointStore, executeCommit, executeAutoCommit, effortStore, markReadWorkOptions, forkThread, followupStore } = deps;
+  const { resolveStream, resolveThreadById, threadStore, streamStore, workItemStore, effortStore, markAwaitingUser, markFiledThisTurn, markFiledReadyThisTurn, forkThread, followupStore } = deps;
 
   // Prefer the thread row's own stream_id over whatever streamId the caller
   // passed (or didn't). Returns { thread, stream } — both guaranteed to agree
@@ -388,24 +451,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
       handler: (args: { streamId?: string; threadId: string; full?: boolean }) => {
         resolveThreadAndStream(args);
-        // Stop the dispatch unit at the first pending commit or wait point so
-        // the subagent never works across a queue boundary it shouldn't cross.
-        const commitCutoff = commitPointStore.listForThread(args.threadId)
-          .filter((cp) => cp.status !== "done")
-          .map((cp) => cp.sort_index)[0] ?? Infinity;
-        const waitCutoff = waitPointStore.listForThread(args.threadId)
-          .filter((wp) => wp.status === "pending")
-          .map((wp) => wp.sort_index)[0] ?? Infinity;
-        const cutoff = Math.min(commitCutoff, waitCutoff);
-        const result = workItemStore.readWorkOptions(args.threadId, cutoff < Infinity ? cutoff : undefined);
-        // Notify the runtime so the next Stop-hook can suppress the
-        // ready-work directive when the set hasn't changed. Use the raw
-        // ready list (not the post-cutoff cluster) — the Stop-hook sees the
-        // same listReady output and compares against that.
-        if (markReadWorkOptions) {
-          const readyIds = workItemStore.listReady(args.threadId).map((i) => i.id);
-          markReadWorkOptions(args.threadId, readyIds);
-        }
+        const result = workItemStore.readWorkOptions(args.threadId);
         if (result.mode === "empty") return { mode: "empty" };
         const full = args.full === true;
         if (result.mode === "epic") {
@@ -498,7 +544,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
           threadId: { type: "string", description: "Required thread id for the work you are managing." },
           parentId: { type: "string", description: "Optional parent epic/task id in the same thread." },
-          kind: { type: "string", description: "One of epic, task, subtask, bug, or note." },
+          kind: { type: "string", description: "One of epic, task, subtask, bug, or note. Defaults to \"task\" when omitted." },
           title: { type: "string", description: "Short title for the work item." },
           description: { type: "string", description: "Optional longer description of the approach." },
           acceptanceCriteria: { type: "string", description: "Optional plain-text checklist (one criterion per line) defining observable conditions for 'done'." },
@@ -510,13 +556,13 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             items: { type: "string" },
           },
         },
-        required: ["threadId", "kind", "title"],
+        required: ["threadId", "title"],
       },
       handler: (args: {
         streamId?: string;
         threadId: string;
         parentId?: string;
-        kind: WorkItemKind;
+        kind?: WorkItemKind;
         title: string;
         description?: string;
         acceptanceCriteria?: string | null;
@@ -525,6 +571,18 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         touchedFiles?: string[];
       }) => {
         resolveThreadAndStream(args);
+        if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // The Stop-hook "filed but didn't ship" advisory branch needs
+        // to know whether this filing was a new ready row (backlog
+        // capture) or already claimed (in_progress). Only signal the
+        // advisory flag for the ready / unspecified case.
+        if (markFiledReadyThisTurn && (args.status === undefined || args.status === "ready")) {
+          markFiledReadyThisTurn(args.threadId);
+        }
+        // Default to "task" — by far the most common kind. Forcing the agent
+        // to declare it on every call produced a guaranteed first-call
+        // failure ("missing required field: kind") for trivial fixes.
+        const kind: WorkItemKind = args.kind ?? "task";
         // Silent-failure guard: agents sometimes cram the acceptance
         // checklist into `description` instead of the dedicated top-level
         // `acceptanceCriteria` field. The DB accepts it either way, so the
@@ -556,7 +614,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           const created = workItemStore.createItem({
             threadId: args.threadId,
             parentId: args.parentId,
-            kind: args.kind,
+            kind,
             title: args.title,
             description: args.description,
             acceptanceCriteria: args.acceptanceCriteria,
@@ -595,7 +653,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         const item = workItemStore.createItem({
           threadId: args.threadId,
           parentId: args.parentId,
-          kind: args.kind,
+          kind,
           title: args.title,
           description: args.description,
           acceptanceCriteria: args.acceptanceCriteria,
@@ -620,7 +678,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         // the tool response keeps the rule on the critical path instead of
         // shelved in a skill doc. Non-epic responses stay terse — no field is
         // added there so the happy-path log doesn't grow.
-        if (args.kind === "epic") {
+        if (kind === "epic") {
           return withRedoHint({
             ok: true,
             id: item.id,
@@ -692,6 +750,11 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         }>;
       }) => {
         resolveThreadAndStream(args);
+        if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // file_epic_with_children always lands rows at the default
+        // (ready) status — the schema doesn't accept a status arg —
+        // so this always signals the advisory flag.
+        if (markFiledReadyThisTurn) markFiledReadyThisTurn(args.threadId);
         const result = workItemStore.fileEpicWithChildren({
           threadId: args.threadId,
           epic: {
@@ -736,6 +799,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
       handler: (args: { streamId?: string; threadId: string; itemId: string; extraContext?: string; autoStart?: boolean }) => {
         resolveThreadAndStream(args);
+        if (markFiledThisTurn) markFiledThisTurn(args.threadId);
         const item = workItemStore.getItem(args.threadId, args.itemId);
         if (!item) throw new Error(`unknown work item: ${args.itemId}`);
 
@@ -818,6 +882,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             description: "Optional list of repo-relative paths the agent edited during this effort. Attaches to the closing effort for Local History attribution. Skip if >100 files — the fallback (assume-all) is fine for large change sets.",
             items: { type: "string" },
           },
+          cascade: { type: "boolean", description: "When closing an epic: also flip every non-terminal child (ready/in_progress) to the same target status in one call. Required when the epic has any non-terminal children — otherwise the call is rejected so the children don't silently linger and the epic rollup doesn't pull the epic back into To Do." },
         },
         required: ["threadId", "itemId", "note"],
       },
@@ -828,8 +893,22 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         note: string;
         status?: "human_check" | "blocked";
         touchedFiles?: string[];
+        cascade?: boolean;
       }) => {
         resolveThreadAndStream(args);
+        if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // Epic-cascade guard: closing an epic without `cascade: true`
+        // when non-terminal children remain produces a misleading
+        // rollup (the epic flips back into To Do because
+        // classifyEpic prefers child statuses over the literal epic
+        // status). Reject early with a structured error naming the
+        // stale children. The agent must either pass cascade=true
+        // or close the children explicitly first.
+        const epicGuardError = checkEpicCascadeGuard(workItemStore, args.threadId, args.itemId, args.cascade);
+        if (epicGuardError) return epicGuardError;
+        if (args.cascade) {
+          cascadeChildrenStatus(workItemStore, args.threadId, args.itemId, args.status ?? "human_check");
+        }
         const item = workItemStore.completeTask({
           threadId: args.threadId,
           itemId: args.itemId,
@@ -877,6 +956,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
             description: "Optional list of files the agent touched during this effort. Pass when transitioning to `human_check` to support parallel-task attribution. Skip if >50 files — the fallback (assume-all) is fine for large change sets.",
             items: { type: "string" },
           },
+          cascade: { type: "boolean", description: "When transitioning an epic to `human_check`/`blocked`: also flip every non-terminal child (ready/in_progress) to the same target status. Required when the epic has any non-terminal children — otherwise the call is rejected." },
         },
         required: ["threadId", "itemId"],
       },
@@ -891,8 +971,21 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         status?: WorkItemStatus;
         priority?: WorkItemPriority;
         touchedFiles?: string[];
+        cascade?: boolean;
       }) => {
         resolveThreadAndStream(args);
+        if (markFiledThisTurn) markFiledThisTurn(args.threadId);
+        // Epic-cascade guard mirrors the one on complete_task: only
+        // applies when the status transition is to human_check or
+        // blocked (an "epic close"). Other transitions (e.g. epic →
+        // ready, epic → in_progress) pass through unchanged.
+        if (args.status === "human_check" || args.status === "blocked") {
+          const epicGuardError = checkEpicCascadeGuard(workItemStore, args.threadId, args.itemId, args.cascade);
+          if (epicGuardError) return epicGuardError;
+          if (args.cascade) {
+            cascadeChildrenStatus(workItemStore, args.threadId, args.itemId, args.status);
+          }
+        }
         const item = workItemStore.updateItem({
           threadId: args.threadId,
           itemId: args.itemId,
@@ -949,6 +1042,7 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
           if (!validatedThreads.has(t.threadId)) {
             resolveThreadAndStream({ threadId: t.threadId });
             validatedThreads.add(t.threadId);
+            if (markFiledThisTurn) markFiledThisTurn(t.threadId);
           }
         }
         const results: Array<{ id: string; status: WorkItemStatus }> = [];
@@ -1077,87 +1171,6 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
         resolveThreadAndStream(args);
         workItemStore.addNote(args.threadId, args.itemId ?? null, args.note, "agent", "mcp");
         return { ok: true };
-      },
-    },
-    {
-      name: "oxplow__commit",
-      description:
-        "Run git commit for this thread. Two shapes:\n" +
-        "  (1) Approve/auto mode with a queued commit_point row: pass `{ commit_point_id, message }`. For approve mode only call this AFTER the user approves the drafted message in chat; for auto mode (the row already has mode=auto) commit in the same turn without asking.\n" +
-        "  (2) Ad-hoc auto-commit (no commit_point row, used when thread.auto_commit=true): pass `{ auto: true, threadId, message }`. Commit immediately without asking the user — the auto-commit Stop-hook directive selects this shape.\n" +
-        "Throws on git failure; read the error, fix the underlying issue, and call again.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          commit_point_id: { type: "string", description: "Id of the commit_point to execute. Omit when `auto: true`." },
-          auto: { type: "boolean", description: "When true, commit without a commit_point row. Requires `threadId`. Used for thread-level auto_commit." },
-          threadId: { type: "string", description: "Required when `auto: true`. Ignored otherwise (the commit point carries its own thread)." },
-          message: { type: "string", description: "Required final commit message." },
-        },
-        required: ["message"],
-      },
-      handler: (args: { commit_point_id?: string; auto?: boolean; threadId?: string; message: string }) => {
-        if (typeof args.message !== "string" || args.message.trim().length === 0) {
-          throw new Error("oxplow__commit: `message` is required and must be non-empty");
-        }
-        if (args.auto === true) {
-          if (args.commit_point_id) {
-            throw new Error("oxplow__commit: pass either `commit_point_id` OR `auto: true`, not both");
-          }
-          if (!args.threadId) {
-            throw new Error("oxplow__commit: `threadId` is required when `auto: true`");
-          }
-          resolveThreadAndStream({ threadId: args.threadId });
-          const result = executeAutoCommit(args.threadId, args.message);
-          return { ok: true, commitSha: result.sha, message: result.message };
-        }
-        if (!args.commit_point_id) {
-          throw new Error("oxplow__commit: pass either `commit_point_id` or `auto: true`");
-        }
-        const updated = executeCommit(args.commit_point_id, args.message);
-        return { ok: true, commitPoint: updated, commitSha: updated.commit_sha };
-      },
-    },
-    {
-      name: "oxplow__tasks_since_last_commit",
-      description:
-        "Return work items whose efforts closed after the most recent completed commit_point for this thread. Supplementary context for drafting an auto-commit message when the agent has lost memory of earlier completed tasks; the diff is still the primary source of truth. Always pass the threadId from your session context.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
-          threadId: { type: "string", description: "Required thread id." },
-        },
-        required: ["threadId"],
-      },
-      handler: (args: { streamId?: string; threadId: string }) => {
-        resolveThreadAndStream(args);
-        const latest = commitPointStore.getLatestDoneForThread(args.threadId);
-        const items = effortStore.listClosedEffortsForThreadAfter(
-          args.threadId,
-          latest?.completed_at ?? null,
-        );
-        // Deduplicate by work item id, keeping the latest endedAt (a single
-        // item can have multiple efforts — re-opened tasks produce extras).
-        const byItem = new Map<string, { id: string; title: string; kind: string; status: string; ended_at: string }>();
-        for (const row of items) {
-          const existing = byItem.get(row.itemId);
-          if (!existing || row.endedAt > existing.ended_at) {
-            byItem.set(row.itemId, {
-              id: row.itemId,
-              title: row.title,
-              kind: row.kind,
-              status: row.status,
-              ended_at: row.endedAt,
-            });
-          }
-        }
-        return {
-          previousCommit: latest
-            ? { sha: latest.commit_sha, completed_at: latest.completed_at }
-            : null,
-          items: Array.from(byItem.values()),
-        };
       },
     },
     {
@@ -1331,19 +1344,65 @@ export function buildWorkItemMcpTools(deps: McpToolDeps): ToolDef[] {
       },
     },
     {
-      name: "oxplow__list_commit_points",
-      description: "List commit points for a thread, ordered by their position in the work queue.",
+      name: "oxplow__await_user",
+      description:
+        "Signal that you are explicitly waiting on the user to answer a question or make a decision before continuing. " +
+        "Call this when your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user's " +
+        "next message is needed before more work happens. Sets a per-turn flag the Stop hook reads: while set, the next Stop " +
+        "allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) so the agent does not " +
+        "march onto the next queue item past your open question. The flag is cleared automatically when the user sends a " +
+        "fresh prompt. Do NOT call this for rhetorical asides or status updates — only for genuine open questions.",
       inputSchema: {
         type: "object",
         properties: {
-          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted; only passed explicitly for the no-threadId form of get_thread_context." },
           threadId: { type: "string", description: "Required thread id." },
+          question: {
+            type: "string",
+            description:
+              "Short summary of what you are waiting on the user for — a sentence or two. Stored on the turn for telemetry / future UI surfacing; does not need to match your chat reply verbatim.",
+          },
         },
-        required: ["threadId"],
+        required: ["threadId", "question"],
       },
-      handler: (args: { streamId?: string; threadId: string }) => {
-        resolveThreadAndStream(args);
-        return { commitPoints: commitPointStore.listForThread(args.threadId) };
+      handler: (args: { threadId: string; question: string }) => {
+        resolveThreadAndStream({ threadId: args.threadId });
+        if (markAwaitingUser) markAwaitingUser(args.threadId, args.question);
+        return { ok: true };
+      },
+    },
+    {
+      name: "oxplow__get_subsystem_doc",
+      description:
+        "Return the contents of a `.context/<name>.md` doc from the stream's worktree. Cheap alternative to a Read call when you only need the durable subsystem knowledge — saves the model from re-reading the same .context doc 20+ times per session. Returns `{ name, path, content, exists }`. When the doc doesn't exist, `exists` is false and `content` is empty (no error) so the caller can branch on it instead of seeing a hard file-not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          streamId: { type: "string", description: "Optional. Server infers the owning stream from threadId when omitted." },
+          threadId: { type: "string", description: "Required thread id (used to find the stream's worktree)." },
+          name: {
+            type: "string",
+            description: "Doc name without the `.md` suffix or `.context/` prefix. Examples: \"data-model\", \"agent-model\", \"ipc-and-stores\", \"theming\", \"git-integration\", \"editor-and-monaco\", \"code-quality\", \"architecture\", \"usability\".",
+          },
+        },
+        required: ["threadId", "name"],
+      },
+      handler: (args: { streamId?: string; threadId: string; name: string }) => {
+        const { stream } = resolveThreadAndStream(args);
+        const safeName = String(args.name || "").trim();
+        // Reject any path-traversal / directory chars so the tool can't be
+        // used to read arbitrary files outside `.context/`.
+        if (!safeName || /[\\/]|\.\./.test(safeName)) {
+          throw new Error("get_subsystem_doc: `name` must be a bare doc name (no slashes, no ..)");
+        }
+        const fs = require("node:fs") as typeof import("node:fs");
+        const path = require("node:path") as typeof import("node:path");
+        const relPath = path.join(".context", `${safeName}.md`);
+        const absPath = path.join(stream.worktree_path, relPath);
+        if (!fs.existsSync(absPath)) {
+          return { name: safeName, path: relPath, content: "", exists: false };
+        }
+        const content = fs.readFileSync(absPath, "utf8");
+        return { name: safeName, path: relPath, content, exists: true };
       },
     },
   ];

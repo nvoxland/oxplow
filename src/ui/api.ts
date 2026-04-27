@@ -1,9 +1,7 @@
 import type { DesktopApi, OxplowEvent } from "../electron/ipc-contract.js";
 
 export type { OxplowEvent } from "../electron/ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry } from "../git/git.js";
-export type { CommitPoint, CommitPointMode, CommitPointStatus } from "../persistence/commit-point-store.js";
-export type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "../git/git.js";
 
 export interface Stream {
   id: string;
@@ -31,7 +29,6 @@ export interface Thread {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
-  auto_commit: boolean;
   custom_prompt: string | null;
 }
 
@@ -90,8 +87,7 @@ export interface WorkItemEvent {
 export type SnapshotSource =
   | "task-start"
   | "task-end"
-  | "turn-start"
-  | "turn-end"
+  | "task-event"
   | "startup";
 
 export interface FileSnapshot {
@@ -330,6 +326,10 @@ export async function listAdoptableWorktrees(): Promise<import("../git/git.js").
   return desktopApi().listAdoptableWorktrees();
 }
 
+export async function listSiblingWorktrees(streamId: string): Promise<import("../git/git.js").GitWorktreeEntry[]> {
+  return desktopApi().listSiblingWorktrees(streamId);
+}
+
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
   return desktopApi().checkoutStreamBranch(streamId, branch);
 }
@@ -368,10 +368,6 @@ export async function completeThread(streamId: string, threadId: string): Promis
 
 export async function renameThread(streamId: string, threadId: string, title: string): Promise<Thread> {
   return desktopApi().renameThread(streamId, threadId, title);
-}
-
-export async function setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]> {
-  return desktopApi().setAutoCommit(streamId, threadId, enabled);
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
@@ -498,7 +494,7 @@ export async function moveBacklogItemToThread(
 
 export async function getGitLog(
   streamId: string,
-  options?: { limit?: number },
+  options?: { limit?: number; all?: boolean },
 ): Promise<import("../git/git.js").GitLogResult> {
   return desktopApi().getGitLog(streamId, options);
 }
@@ -558,6 +554,46 @@ export async function gitCommitAll(
   return desktopApi().gitCommitAll(streamId, message, options);
 }
 
+export async function getAheadBehind(
+  streamId: string,
+  base: string,
+  head?: string,
+): Promise<{ ahead: number; behind: number }> {
+  return desktopApi().getAheadBehind(streamId, base, head);
+}
+
+export async function getCommitsAheadOf(
+  streamId: string,
+  base: string,
+  head: string,
+  limit?: number,
+): Promise<import("../git/git.js").GitLogCommit[]> {
+  return desktopApi().getCommitsAheadOf(streamId, base, head, limit);
+}
+
+export async function listRecentRemoteBranches(
+  streamId: string,
+  limit?: number,
+): Promise<import("../git/git.js").RemoteBranchEntry[]> {
+  return desktopApi().listRecentRemoteBranches(streamId, limit);
+}
+
+export async function gitPushCurrentTo(
+  streamId: string,
+  remote: string,
+  branch: string,
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPushCurrentTo(streamId, remote, branch);
+}
+
+export async function gitPullRemoteIntoCurrent(
+  streamId: string,
+  remote: string,
+  branch: string,
+): Promise<import("../git/git.js").GitOpResult> {
+  return desktopApi().gitPullRemoteIntoCurrent(streamId, remote, branch);
+}
+
 export async function listFileCommits(
   streamId: string,
   path: string,
@@ -582,11 +618,9 @@ export async function localBlame(
   return desktopApi().localBlame(streamId, path);
 }
 
-export async function listCommitPoints(threadId: string): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
-  return desktopApi().listCommitPoints(threadId);
-}
-
 export type WikiNoteSummary = import("../electron/ipc-contract.js").WikiNoteSummary;
+export type WikiNoteSearchHit = import("../electron/ipc-contract.js").WikiNoteSearchHit;
+export type UsageRollup = import("../electron/ipc-contract.js").UsageRollup;
 
 export async function listWikiNotes(streamId: string): Promise<WikiNoteSummary[]> {
   return desktopApi().listWikiNotes(streamId);
@@ -610,64 +644,142 @@ export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
   });
 }
 
-export async function createCommitPoint(
+export async function searchWikiNotes(
   streamId: string,
-  threadId: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().createCommitPoint(streamId, threadId);
+  query: string,
+  limit?: number,
+): Promise<WikiNoteSearchHit[]> {
+  return desktopApi().searchWikiNotes(streamId, query, limit);
 }
 
-export async function deleteCommitPoint(id: string): Promise<void> {
-  return desktopApi().deleteCommitPoint(id);
+export async function recordUsage(input: {
+  kind: string;
+  key: string;
+  event?: string;
+  streamId?: string | null;
+  threadId?: string | null;
+}): Promise<void> {
+  return desktopApi().recordUsage(input);
 }
 
-export async function updateCommitPoint(
-  id: string,
-  changes: { mode?: "auto" | "approve" },
-): Promise<import("../persistence/commit-point-store.js").CommitPoint[]> {
-  return desktopApi().updateCommitPoint(id, changes);
+export async function listRecentUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+  limit?: number;
+  since?: string;
+}): Promise<UsageRollup[]> {
+  return desktopApi().listRecentUsage(input);
 }
 
-export async function commitCommitPoint(
-  id: string,
-  message: string,
-): Promise<import("../persistence/commit-point-store.js").CommitPoint> {
-  return desktopApi().commitCommitPoint(id, message);
+export async function listFrequentUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+  limit?: number;
+  since?: string;
+}): Promise<UsageRollup[]> {
+  return desktopApi().listFrequentUsage(input);
+}
+
+export async function listCurrentlyOpenUsage(input: {
+  kind: string;
+  streamId?: string | null;
+  threadId?: string | null;
+}): Promise<string[]> {
+  return desktopApi().listCurrentlyOpenUsage(input);
+}
+
+export type CodeQualityTool = import("../electron/ipc-contract.js").CodeQualityTool;
+export type CodeQualityScope = import("../electron/ipc-contract.js").CodeQualityScope;
+export type CodeQualityScanStatus = import("../electron/ipc-contract.js").CodeQualityScanStatus;
+export type CodeQualityFindingKind = import("../electron/ipc-contract.js").CodeQualityFindingKind;
+export type CodeQualityScanRow = import("../electron/ipc-contract.js").CodeQualityScanRow;
+export type CodeQualityFindingRow = import("../electron/ipc-contract.js").CodeQualityFindingRow;
+
+export async function runCodeQualityScan(input: {
+  streamId: string;
+  tool: CodeQualityTool;
+  scope: CodeQualityScope;
+  baseRef?: string | null;
+}): Promise<CodeQualityScanRow> {
+  return desktopApi().runCodeQualityScan(input);
+}
+
+export async function listCodeQualityFindings(input: {
+  streamId: string;
+  tool?: CodeQualityTool;
+  paths?: string[];
+}): Promise<CodeQualityFindingRow[]> {
+  return desktopApi().listCodeQualityFindings(input);
+}
+
+export async function listCodeQualityScans(input: {
+  streamId: string;
+  limit?: number;
+}): Promise<CodeQualityScanRow[]> {
+  return desktopApi().listCodeQualityScans(input);
+}
+
+export function subscribeCodeQualityEvents(
+  streamId: string,
+  fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type !== "code-quality.scanned") return;
+    if (event.streamId !== streamId) return;
+    fn({ scanId: event.scanId, tool: event.tool, scope: event.scope, status: event.status });
+  });
+}
+
+export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
+  id: string;
+  title: string;
+  status: import("../persistence/work-item-store.js").WorkItemStatus;
+  thread_id: string | null;
+}>> {
+  return desktopApi().getWorkItemSummaries(ids);
+}
+
+/**
+ * Subscribe to `usage.recorded` events. Optionally filter by `kind` so a
+ * Notes-pane consumer only refetches on wiki-note visits.
+ */
+export function subscribeUsageEvents(
+  onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
+  filter?: { kind?: string },
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type !== "usage.recorded") return;
+    if (filter?.kind && event.kind !== filter.kind) return;
+    onEvent({ kind: event.kind, key: event.key, streamId: event.streamId, threadId: event.threadId });
+  });
 }
 
 export async function reorderThreadQueue(
   streamId: string,
   threadId: string,
-  entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+  entries: Array<{ id: string }>,
 ): Promise<void> {
   return desktopApi().reorderThreadQueue(streamId, threadId, entries);
 }
 
-export async function listWaitPoints(threadId: string): Promise<import("../persistence/wait-point-store.js").WaitPoint[]> {
-  return desktopApi().listWaitPoints(threadId);
-}
-
-export async function createWaitPoint(
-  streamId: string,
-  threadId: string,
-  note?: string | null,
-): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
-  return desktopApi().createWaitPoint(streamId, threadId, note);
-}
-
-export async function setWaitPointNote(
-  id: string,
-  note: string | null,
-): Promise<import("../persistence/wait-point-store.js").WaitPoint> {
-  return desktopApi().setWaitPointNote(id, note);
-}
-
-export async function deleteWaitPoint(id: string): Promise<void> {
-  return desktopApi().deleteWaitPoint(id);
-}
-
 export async function removeFollowup(threadId: string, id: string): Promise<void> {
   return desktopApi().removeFollowup(threadId, id);
+}
+
+export type BackgroundTask = import("../electron/background-task-store.js").BackgroundTask;
+
+export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
+  return desktopApi().listBackgroundTasks();
+}
+
+export function subscribeBackgroundTaskEvents(
+  onChange: () => void,
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type === "background-task.changed") onChange();
+  });
 }
 
 export async function listAllRefs(streamId: string): Promise<import("../git/git.js").RefOption[]> {

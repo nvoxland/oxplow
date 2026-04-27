@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommitDetail, GitLogCommit, GitLogResult, Stream } from "../../api.js";
 import { getCommitDetail, getGitLog, subscribeGitRefsEvents } from "../../api.js";
 import { logUi } from "../../logger.js";
-import { layoutCommits, type GraphRow } from "./layout.js";
+import { CommitGraphTable, indexRefsBySha } from "./CommitGraphTable.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 
 interface Props {
@@ -11,22 +11,6 @@ interface Props {
   onOpenDiff?(request: DiffRequest): void;
   revealSha?: { sha: string; token: number } | null;
 }
-
-const BRANCH_COLORS = [
-  "#4a9eff",
-  "#86efac",
-  "#e5a06a",
-  "#c4b5fd",
-  "#f472b6",
-  "#fcd34d",
-  "#60d394",
-  "#f87171",
-];
-
-const ROW_HEIGHT = 24;
-const LANE_WIDTH = 14;
-const NODE_RADIUS = 4;
-const GRAPH_PAD = 8;
 
 export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
   const [log, setLog] = useState<GitLogResult | null>(null);
@@ -165,33 +149,7 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
     return out;
   }, [visibleCommits, queryLower, author]);
 
-  const layout = useMemo(() => layoutCommits(visibleCommits), [visibleCommits]);
-
-  const branchHeadBySha = useMemo(() => {
-    const map = new Map<string, string[]>();
-    if (!log) return map;
-    for (const head of log.branchHeads) {
-      const list = map.get(head.commit.sha) ?? [];
-      list.push(head.name);
-      map.set(head.commit.sha, list);
-    }
-    return map;
-  }, [log]);
-  const tagBySha = useMemo(() => {
-    const map = new Map<string, string[]>();
-    if (!log) return map;
-    for (const tag of log.tags) {
-      const list = map.get(tag.commit.sha) ?? [];
-      list.push(tag.name);
-      map.set(tag.commit.sha, list);
-    }
-    return map;
-  }, [log]);
-
-  const graphWidth = Math.max(
-    GRAPH_PAD * 2 + LANE_WIDTH * Math.max(1, layout.totalColumns),
-    GRAPH_PAD * 2 + LANE_WIDTH,
-  );
+  const refIndex = useMemo(() => indexRefsBySha(log), [log]);
 
   const matchCount = matches ? matches.size : visibleCommits.length;
 
@@ -225,35 +183,17 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
               <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
             ) : !stream ? (
               <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
-            ) : !log ? null : layout.rows.length === 0 ? (
-              <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No commits.</div>
-            ) : (
-              layout.rows.map((row, index) => {
-                const next = layout.rows[index + 1] ?? null;
-                const matched = !matches || matches.has(row.commit.sha);
-                const sha = row.commit.sha;
-                return (
-                  <div
-                    key={sha}
-                    ref={(node) => {
-                      if (node) rowRefs.current.set(sha, node);
-                      else rowRefs.current.delete(sha);
-                    }}
-                  >
-                    <CommitRow
-                      row={row}
-                      nextRow={next}
-                      graphWidth={graphWidth}
-                      selected={selectedSha === sha}
-                      matched={matched}
-                      branchHeads={branchHeadBySha.get(sha) ?? []}
-                      tags={tagBySha.get(sha) ?? []}
-                      currentBranch={log.currentBranch}
-                      onClick={() => setSelectedSha(sha)}
-                    />
-                  </div>
-                );
-              })
+            ) : !log ? null : (
+              <CommitGraphTable
+                commits={visibleCommits}
+                branchHeadsBySha={refIndex.branchHeadsBySha}
+                tagsBySha={refIndex.tagsBySha}
+                currentBranch={log.currentBranch}
+                selectedSha={selectedSha}
+                matches={matches}
+                onSelect={(sha) => setSelectedSha(sha)}
+                rowRefs={rowRefs}
+              />
             )}
           </div>
         </div>
@@ -286,158 +226,6 @@ export function HistoryPanel({ stream, onOpenDiff, revealSha }: Props) {
   );
 }
 
-function CommitRow({
-  row,
-  nextRow,
-  graphWidth,
-  selected,
-  matched,
-  branchHeads,
-  tags,
-  currentBranch,
-  onClick,
-}: {
-  row: GraphRow;
-  nextRow: GraphRow | null;
-  graphWidth: number;
-  selected: boolean;
-  matched: boolean;
-  branchHeads: string[];
-  tags: string[];
-  currentBranch: string | null;
-  onClick(): void;
-}) {
-  const mid = ROW_HEIGHT / 2;
-  const colX = (k: number) => GRAPH_PAD + k * LANE_WIDTH + LANE_WIDTH / 2;
-
-  const lines: Array<{ x1: number; y1: number; x2: number; y2: number; color: string; key: string }> = [];
-
-  for (let k = 0; k < row.incoming.length; k++) {
-    const sha = row.incoming[k];
-    if (!sha) continue;
-    const color = BRANCH_COLORS[k % BRANCH_COLORS.length]!;
-    if (k === row.column) {
-      if (row.fromAbove) lines.push({ x1: colX(k), y1: 0, x2: colX(k), y2: mid, color, key: `in-${k}` });
-    } else {
-      // Pass-through lane: full vertical top to bottom.
-      lines.push({ x1: colX(k), y1: 0, x2: colX(k), y2: ROW_HEIGHT, color, key: `in-${k}` });
-    }
-  }
-
-  for (let k = 0; k < row.outgoing.length; k++) {
-    const sha = row.outgoing[k];
-    if (!sha) continue;
-    const incomingSame = row.incoming[k] === sha;
-    if (incomingSame && k !== row.column) continue;
-    const color = BRANCH_COLORS[k % BRANCH_COLORS.length]!;
-    if (k === row.column) {
-      lines.push({ x1: colX(k), y1: mid, x2: colX(k), y2: ROW_HEIGHT, color, key: `out-${k}` });
-    }
-  }
-
-  for (const edge of row.parentEdges) {
-    const color = BRANCH_COLORS[edge.toCol % BRANCH_COLORS.length]!;
-    if (edge.toCol === row.column) continue; // straight down handled by outgoing
-    lines.push({
-      x1: colX(row.column),
-      y1: mid,
-      x2: colX(edge.toCol),
-      y2: ROW_HEIGHT,
-      color,
-      key: `edge-${edge.toCol}-${edge.sha}`,
-    });
-  }
-
-  const nodeColor = BRANCH_COLORS[row.column % BRANCH_COLORS.length]!;
-  const date = formatRelative(row.commit.commit.author.date);
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        height: ROW_HEIGHT,
-        cursor: "pointer",
-        background: selected ? "rgba(74, 158, 255, 0.18)" : "transparent",
-        opacity: matched ? 1 : 0.35,
-        fontSize: 12,
-        lineHeight: 1,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-      }}
-    >
-      <svg width={graphWidth} height={ROW_HEIGHT} style={{ flexShrink: 0 }}>
-        {lines.map((line) => (
-          <line
-            key={line.key}
-            x1={line.x1}
-            y1={line.y1}
-            x2={line.x2}
-            y2={line.y2}
-            stroke={line.color}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-          />
-        ))}
-        <circle
-          cx={colX(row.column)}
-          cy={mid}
-          r={NODE_RADIUS}
-          fill={selected ? "#fff" : nodeColor}
-          stroke={nodeColor}
-          strokeWidth={1.5}
-        />
-      </svg>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, paddingRight: 8 }}>
-        <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.sha.slice(0, 7)}
-        </span>
-        {branchHeads.map((name) => (
-          <RefBadge key={`b-${name}`} label={name} tone={name === currentBranch ? "current" : "branch"} />
-        ))}
-        {tags.map((name) => (
-          <RefBadge key={`t-${name}`} label={name} tone="tag" />
-        ))}
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {row.commit.commit.message}
-        </span>
-        <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.commit.author.name}
-        </span>
-        <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11, minWidth: 64, textAlign: "right" }}>
-          {date}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function RefBadge({ label, tone }: { label: string; tone: "branch" | "current" | "tag" }) {
-  const styles: Record<typeof tone, CSSProperties> = {
-    branch: { borderColor: "#4a9eff", color: "#4a9eff" },
-    current: { borderColor: "#86efac", color: "#86efac", fontWeight: 600 },
-    tag: { borderColor: "#fcd34d", color: "#fcd34d" },
-  };
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        border: "1px solid",
-        borderRadius: 999,
-        padding: "0 6px",
-        fontSize: 10,
-        lineHeight: "14px",
-        flexShrink: 0,
-        ...styles[tone],
-      }}
-      title={tone === "tag" ? `tag: ${label}` : label}
-    >
-      {tone === "tag" ? "🏷 " : ""}{label}
-    </span>
-  );
-}
 
 function DetailPane({
   detail,
@@ -681,24 +469,6 @@ function reachableFromBranch(log: GitLogResult | null, branch: string): Set<stri
     for (const parent of parentsBySha.get(sha) ?? []) stack.push(parent);
   }
   return reachable;
-}
-
-function formatRelative(input: string): string {
-  if (!input) return "";
-  const then = new Date(input).getTime();
-  if (!Number.isFinite(then)) return input;
-  const diff = Date.now() - then;
-  const sec = Math.round(diff / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 30) return `${day}d`;
-  const mon = Math.round(day / 30);
-  if (mon < 12) return `${mon}mo`;
-  return `${Math.round(mon / 12)}y`;
 }
 
 function formatAbsolute(input: string): string {

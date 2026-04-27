@@ -1,4 +1,5 @@
 import { checkoutStreamBranch, type Stream } from "../api.js";
+import { BackgroundTaskIndicator } from "./BackgroundTaskIndicator.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 
 interface Props {
@@ -7,9 +8,10 @@ interface Props {
 }
 
 /**
- * Branch chip rendered inside the bottom dock rail (right-aligned). Opens an
- * IntelliJ-style branch picker popover on click and switches the current
- * stream's branch when an entry is selected.
+ * Right-aligned bottom-rail composite: background-task indicator (only
+ * visible when something's running) plus the IntelliJ-style branch
+ * picker chip. Clicking the branch chip opens the picker; clicking the
+ * task indicator opens its own popover with the live task list.
  */
 export function StatusBar({ stream, gitEnabled }: Props) {
   const canInteract = !!stream && gitEnabled;
@@ -28,7 +30,9 @@ export function StatusBar({ stream, gitEnabled }: Props) {
   }
 
   return (
-    <BranchPicker
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <BackgroundTaskIndicator />
+      <BranchPicker
       label={
         <>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
@@ -48,6 +52,7 @@ export function StatusBar({ stream, gitEnabled }: Props) {
       mode="manage"
       streamId={stream?.id ?? null}
       onPick={handlePick}
-    />
+      />
+    </div>
   );
 }

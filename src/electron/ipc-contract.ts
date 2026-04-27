@@ -17,8 +17,6 @@ import type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
-  CommitPoint,
-  WaitPoint,
   RefOption,
   ThreadWorkState,
   Stream,
@@ -61,8 +59,6 @@ export type {
   GitOpResult,
   GitLogCommit,
   BlameLine,
-  CommitPoint,
-  WaitPoint,
   RefOption,
   AgentStatus,
   MenuGroupSnapshot,
@@ -84,6 +80,52 @@ export type {
   StoredEvent,
 };
 
+export interface WikiNoteSearchHit {
+  slug: string;
+  title: string;
+  /** Snippet with `<mark>…</mark>` highlights around the matched terms. */
+  snippet: string;
+  updated_at: string;
+}
+
+export interface UsageRollup {
+  key: string;
+  last_at: string;
+  count: number;
+}
+
+export type CodeQualityTool = "lizard" | "jscpd";
+export type CodeQualityScope = "codebase" | "diff";
+export type CodeQualityScanStatus = "running" | "completed" | "failed";
+export type CodeQualityFindingKind =
+  | "complexity"
+  | "function-length"
+  | "parameter-count"
+  | "duplicate-block";
+
+export interface CodeQualityScanRow {
+  id: number;
+  stream_id: string;
+  tool: CodeQualityTool;
+  scope: CodeQualityScope;
+  base_ref: string | null;
+  status: CodeQualityScanStatus;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface CodeQualityFindingRow {
+  id: number;
+  scanId: number;
+  path: string;
+  startLine: number;
+  endLine: number;
+  kind: CodeQualityFindingKind;
+  metricValue: number;
+  extra: Record<string, unknown> | null;
+}
+
 export interface WikiNoteSummary {
   slug: string;
   title: string;
@@ -94,6 +136,10 @@ export interface WikiNoteSummary {
   changed_refs: string[];
   deleted_refs: string[];
   total_refs: number;
+  /** Workspace-relative paths the watcher parsed from the note body
+   *  (the same set that backs `total_refs` and freshness). Used by the
+   *  UI to render a clickable backlinks affordance. */
+  referenced_files: string[];
 }
 
 export interface UiLogPayload {
@@ -153,6 +199,7 @@ export interface DesktopApi {
     | { title: string; summary?: string; source: "worktree"; worktreePath: string },
   ): Promise<Stream>;
   listAdoptableWorktrees(): Promise<import("../git/git.js").GitWorktreeEntry[]>;
+  listSiblingWorktrees(streamId: string): Promise<import("../git/git.js").GitWorktreeEntry[]>;
   checkoutStreamBranch(streamId: string, branch: string): Promise<Stream>;
   getThreadState(streamId: string): Promise<ThreadState>;
   createThread(streamId: string, title: string): Promise<ThreadState>;
@@ -163,7 +210,6 @@ export interface DesktopApi {
   promoteThread(streamId: string, threadId: string): Promise<ThreadState>;
   completeThread(streamId: string, threadId: string): Promise<ThreadState>;
   renameThread(streamId: string, threadId: string, title: string): Promise<Thread>;
-  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Promise<Thread[]>;
   setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]>;
   setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]>;
   getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState>;
@@ -230,7 +276,7 @@ export interface DesktopApi {
   listEffortsEndingAtSnapshots(snapshotIds: string[]): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>>;
   restoreFileFromSnapshot(streamId: string, snapshotId: string, path: string): Promise<void>;
   getBranchChanges(streamId: string, baseRef?: string): Promise<BranchChanges & { resolvedBaseRef: string | null }>;
-  getGitLog(streamId: string, options?: { limit?: number }): Promise<GitLogResult>;
+  getGitLog(streamId: string, options?: { limit?: number; all?: boolean }): Promise<GitLogResult>;
   getCommitDetail(streamId: string, sha: string): Promise<CommitDetail | null>;
   getChangeScopes(streamId: string): Promise<ChangeScopes>;
   searchWorkspaceText(streamId: string, query: string, options?: { limit?: number }): Promise<TextSearchHit[]>;
@@ -239,6 +285,11 @@ export interface DesktopApi {
   gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
   gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
   gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
+  getAheadBehind(streamId: string, base: string, head?: string): Promise<{ ahead: number; behind: number }>;
+  getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): Promise<GitLogCommit[]>;
+  listRecentRemoteBranches(streamId: string, limit?: number): Promise<import("../git/git.js").RemoteBranchEntry[]>;
+  gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
+  gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
@@ -257,20 +308,24 @@ export interface DesktopApi {
   readWikiNoteBody(streamId: string, slug: string): Promise<string>;
   writeWikiNoteBody(streamId: string, slug: string, body: string): Promise<void>;
   deleteWikiNote(streamId: string, slug: string): Promise<void>;
-  listCommitPoints(threadId: string): Promise<CommitPoint[]>;
-  createCommitPoint(streamId: string, threadId: string): Promise<CommitPoint>;
-  deleteCommitPoint(id: string): Promise<void>;
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): Promise<CommitPoint[]>;
-  commitCommitPoint(id: string, message: string): Promise<CommitPoint>;
-  reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): Promise<void>;
+  searchWikiNotes(streamId: string, query: string, limit?: number): Promise<WikiNoteSearchHit[]>;
+  recordUsage(input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }): Promise<void>;
+  listRecentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
+  listFrequentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Promise<UsageRollup[]>;
+  listCurrentlyOpenUsage(input: { kind: string; streamId?: string | null; threadId?: string | null }): Promise<string[]>;
+  runCodeQualityScan(input: { streamId: string; tool: CodeQualityTool; scope: CodeQualityScope; baseRef?: string | null }): Promise<CodeQualityScanRow>;
+  listCodeQualityFindings(input: { streamId: string; tool?: CodeQualityTool; paths?: string[] }): Promise<CodeQualityFindingRow[]>;
+  listCodeQualityScans(input: { streamId: string; limit?: number }): Promise<CodeQualityScanRow[]>;
+  getWorkItemSummaries(ids: string[]): Promise<Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }>>;
+  reorderThreadQueue(streamId: string, threadId: string, entries: Array<{ id: string }>): Promise<void>;
   /** Drop a transient agent follow-up reminder. The store is in-memory
    *  on the runtime — adds happen via MCP tool calls; the UI only ever
    *  removes (the × button on each reminder line). */
   removeFollowup(threadId: string, id: string): Promise<void>;
-  listWaitPoints(threadId: string): Promise<WaitPoint[]>;
-  createWaitPoint(streamId: string, threadId: string, note?: string | null): Promise<WaitPoint>;
-  setWaitPointNote(id: string, note: string | null): Promise<WaitPoint>;
-  deleteWaitPoint(id: string): Promise<void>;
+  /** Snapshot of currently-running and recently-finished background
+   *  tasks (git ops, code-quality scans, LSP startup, notes resync).
+   *  Subscribe to `background-task.changed` events and refetch. */
+  listBackgroundTasks(): Promise<import("./background-task-store.js").BackgroundTask[]>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; threadId: string; status: AgentStatus }>>;
   ping(): Promise<boolean>;

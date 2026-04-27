@@ -1,17 +1,23 @@
 import { afterEach, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   detectBaseBranch,
   detectCurrentBranch,
+  getAheadBehind,
   getCommitDetail,
+  getCommitsAheadOf,
   gitBlame,
+  gitMerge,
+  gitPushCurrentTo,
   isGitRepo,
   isGitWorktree,
   listBranchChanges,
   listBranches,
+  listExistingWorktrees,
+  listRecentRemoteBranches,
   parseBlamePorcelain,
   readFileAtRef,
 } from "./git.js";
@@ -185,6 +191,229 @@ test("detectBaseBranch prefers main when no origin is configured", () => {
   const repoDir = mkRepo();
   expect(detectBaseBranch(repoDir)).toBe("main");
 });
+
+test("getAheadBehind reports commits diverged between base and head", () => {
+  const repoDir = mkRepo();
+  // Initial commit is on main. Branch off, add 2 commits on feature; add 1 on main.
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  commitFile(repoDir, "f1.txt", "1\n", "feature 1");
+  commitFile(repoDir, "f2.txt", "2\n", "feature 2");
+  execFileSync("git", ["-C", repoDir, "checkout", "main"], { stdio: "ignore" });
+  commitFile(repoDir, "m1.txt", "1\n", "main 1");
+
+  const result = getAheadBehind(repoDir, "main", "feature");
+  // base=main, head=feature: ahead = commits in feature not in main, behind = commits in main not in feature
+  expect(result).toEqual({ ahead: 2, behind: 1 });
+});
+
+test("getAheadBehind defaults head to HEAD", () => {
+  const repoDir = mkRepo();
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  commitFile(repoDir, "f1.txt", "1\n", "feature 1");
+  const result = getAheadBehind(repoDir, "main");
+  expect(result).toEqual({ ahead: 1, behind: 0 });
+});
+
+test("getCommitsAheadOf returns commits in head not in base, newest first", () => {
+  const repoDir = mkRepo();
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  commitFile(repoDir, "a.txt", "a\n", "feat a");
+  commitFile(repoDir, "b.txt", "b\n", "feat b");
+
+  const commits = getCommitsAheadOf(repoDir, "main", "feature");
+  expect(commits.length).toBe(2);
+  // git log default is newest first, so "feat b" comes before "feat a"
+  expect(commits[0]?.commit.message).toBe("feat b");
+  expect(commits[1]?.commit.message).toBe("feat a");
+});
+
+test("listRecentRemoteBranches sorts by committer date, newest first", () => {
+  const remoteDir = mkBareRemote();
+  const repoDir = mkRepo();
+  execFileSync("git", ["-C", repoDir, "remote", "add", "origin", remoteDir], { stdio: "ignore" });
+  // Push main, then create branches with different commit times.
+  execFileSync("git", ["-C", repoDir, "push", "origin", "main"], { stdio: "ignore" });
+
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "older"], { stdio: "ignore" });
+  commitFile(repoDir, "older.txt", "x\n", "older commit", { date: "2024-01-01T00:00:00Z" });
+  execFileSync("git", ["-C", repoDir, "push", "origin", "older"], { stdio: "ignore" });
+
+  execFileSync("git", ["-C", repoDir, "checkout", "main"], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "newer"], { stdio: "ignore" });
+  commitFile(repoDir, "newer.txt", "x\n", "newer commit", { date: "2025-06-01T00:00:00Z" });
+  execFileSync("git", ["-C", repoDir, "push", "origin", "newer"], { stdio: "ignore" });
+
+  const branches = listRecentRemoteBranches(repoDir, 10);
+  const names = branches.map((b) => b.shortName);
+  // origin/HEAD is filtered out; newer branches first
+  expect(names).toContain("origin/newer");
+  expect(names).toContain("origin/older");
+  expect(names.indexOf("origin/newer")).toBeLessThan(names.indexOf("origin/older"));
+  const newer = branches.find((b) => b.shortName === "origin/newer");
+  expect(newer?.remote).toBe("origin");
+  expect(newer?.branch).toBe("newer");
+  expect(newer?.lastCommitSubject).toBe("newer commit");
+});
+
+test("gitPushCurrentTo pushes HEAD into a named remote branch without touching local working dir", () => {
+  const remoteDir = mkBareRemote();
+  const repoDir = mkRepo();
+  execFileSync("git", ["-C", repoDir, "remote", "add", "origin", remoteDir], { stdio: "ignore" });
+  commitFile(repoDir, "ship.txt", "shipping\n", "ship it");
+
+  // Capture working dir state before push.
+  const statusBefore = execFileSync("git", ["-C", repoDir, "status", "--porcelain"], { encoding: "utf8" });
+  const headBefore = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+
+  const result = gitPushCurrentTo(repoDir, "origin", "release-target");
+  expect(result.ok).toBe(true);
+
+  // Remote ref was created and points at our HEAD.
+  const remoteRef = execFileSync("git", ["-C", remoteDir, "rev-parse", "refs/heads/release-target"], {
+    encoding: "utf8",
+  }).trim();
+  expect(remoteRef).toBe(headBefore);
+
+  // Local working dir is untouched.
+  const statusAfter = execFileSync("git", ["-C", repoDir, "status", "--porcelain"], { encoding: "utf8" });
+  expect(statusAfter).toBe(statusBefore);
+});
+
+test("gitMerge into current branch does not touch a sibling worktree's working dir", () => {
+  const repoDir = mkRepo();
+  // Create a sibling worktree on branch "sibling" with a dirty working file.
+  const siblingDir = mkdtempSync(join(tmpdir(), "oxplow-sibling-"));
+  tempDirs.push(siblingDir);
+  rmSync(siblingDir, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "sibling", siblingDir], { stdio: "ignore" });
+  // Leave the sibling worktree with an uncommitted file present.
+  writeFileSync(join(siblingDir, "wip.txt"), "in progress\n", "utf8");
+
+  // Capture sibling state before the merge (status + file content).
+  const siblingStatusBefore = execFileSync("git", ["-C", siblingDir, "status", "--porcelain"], {
+    encoding: "utf8",
+  });
+  const siblingWipBefore = readFileSync(join(siblingDir, "wip.txt"), "utf8");
+
+  // From the sibling worktree, advance its branch with a commit so the primary has something to merge in.
+  commitFileIn(siblingDir, "advance.txt", "advanced\n", "advance sibling");
+
+  // Re-capture sibling state after the commit but before primary merge.
+  const siblingHeadAdvanced = execFileSync("git", ["-C", siblingDir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+
+  // Merge sibling into the primary worktree's current branch.
+  const result = gitMerge(repoDir, "sibling");
+  expect(result.ok).toBe(true);
+
+  // Primary branch should now contain the sibling's tip commit.
+  const primaryHead = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  // After a fast-forward or merge, sibling's commit is reachable from primary HEAD.
+  const reachable = execFileSync("git", ["-C", repoDir, "merge-base", "--is-ancestor", siblingHeadAdvanced, primaryHead], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(reachable).toBe("");
+
+  // Sibling worktree should be byte-identical to its post-commit state — wip.txt unchanged, no surprise modifications.
+  const siblingHeadAfter = execFileSync("git", ["-C", siblingDir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  const siblingStatusAfter = execFileSync("git", ["-C", siblingDir, "status", "--porcelain"], {
+    encoding: "utf8",
+  });
+  const siblingWipAfter = readFileSync(join(siblingDir, "wip.txt"), "utf8");
+
+  expect(siblingHeadAfter).toBe(siblingHeadAdvanced);
+  expect(siblingWipAfter).toBe(siblingWipBefore);
+  // Status diff: only the new committed `advance.txt` should differ from the pre-commit baseline; wip.txt remains untracked.
+  expect(siblingStatusAfter).toContain("?? wip.txt");
+  expect(siblingStatusBefore).toContain("?? wip.txt");
+});
+
+test("getGitLog with all:false returns only commits reachable from HEAD's current branch", async () => {
+  const { getGitLog } = await import("./git.js");
+  const repoDir = mkRepo();
+  // main: A → B
+  commitFile(repoDir, "a.txt", "a\n", "A on main");
+  commitFile(repoDir, "b.txt", "b\n", "B on main");
+  // feature off main with extra commit
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  commitFile(repoDir, "f.txt", "f\n", "F on feature");
+  // back to main, add another
+  execFileSync("git", ["-C", repoDir, "checkout", "main"], { stdio: "ignore" });
+  commitFile(repoDir, "c.txt", "c\n", "C on main");
+
+  const allLog = getGitLog(repoDir, { all: true });
+  const allMessages = allLog.commits.map((c) => c.commit.message);
+  expect(allMessages).toContain("F on feature");
+
+  const currentLog = getGitLog(repoDir, { all: false });
+  const currentMessages = currentLog.commits.map((c) => c.commit.message);
+  expect(currentMessages).toContain("C on main");
+  expect(currentMessages).toContain("B on main");
+  expect(currentMessages).toContain("A on main");
+  expect(currentMessages).not.toContain("F on feature");
+});
+
+test("listExistingWorktrees enumerates the main worktree plus every linked sibling", () => {
+  const repoDir = mkRepo();
+  const siblingA = mkdtempSync(join(tmpdir(), "oxplow-wt-a-"));
+  tempDirs.push(siblingA);
+  rmSync(siblingA, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "feat-a", siblingA], { stdio: "ignore" });
+
+  const siblingB = mkdtempSync(join(tmpdir(), "oxplow-wt-b-"));
+  tempDirs.push(siblingB);
+  rmSync(siblingB, { recursive: true, force: true });
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "feat-b", siblingB], { stdio: "ignore" });
+
+  const entries = listExistingWorktrees(repoDir);
+  const byBranch = new Map(entries.map((wt) => [wt.branch, wt]));
+  expect(byBranch.get("main")?.isMain).toBe(true);
+  expect(byBranch.get("feat-a")?.isMain).toBe(false);
+  expect(byBranch.get("feat-b")?.isMain).toBe(false);
+  expect(entries.length).toBe(3);
+
+  // Filtering by path (the runtime's listSiblingWorktrees logic) leaves the others.
+  const siblings = entries.filter((wt) => wt.path !== entries.find((e) => e.isMain)!.path);
+  expect(siblings.map((wt) => wt.branch).sort()).toEqual(["feat-a", "feat-b"]);
+});
+
+function commitFile(
+  repoDir: string,
+  name: string,
+  contents: string,
+  message: string,
+  options?: { date?: string },
+): void {
+  commitFileIn(repoDir, name, contents, message, options);
+}
+
+function commitFileIn(
+  dir: string,
+  name: string,
+  contents: string,
+  message: string,
+  options?: { date?: string },
+): void {
+  writeFileSync(join(dir, name), contents, "utf8");
+  execFileSync("git", ["-C", dir, "add", name], { stdio: "ignore" });
+  const env = options?.date
+    ? { ...process.env, GIT_AUTHOR_DATE: options.date, GIT_COMMITTER_DATE: options.date }
+    : process.env;
+  execFileSync("git", ["-C", dir, "commit", "-m", message], { stdio: "ignore", env });
+}
+
+function mkBareRemote(): string {
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-remote-"));
+  tempDirs.push(dir);
+  execFileSync("git", ["init", "--bare", "-b", "main", dir], { stdio: "ignore" });
+  return dir;
+}
 
 function mkRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "oxplow-git-test-"));

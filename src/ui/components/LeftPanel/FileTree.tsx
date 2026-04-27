@@ -1,16 +1,57 @@
+import { useRef } from "react";
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
+import { setContextRefDrag } from "../../agent-context-dnd.js";
+
+/**
+ * `requestMenu` opens a menu anchored at the kebab's bottom-right
+ * corner. The parent (ProjectPanel) renders the actual menu using
+ * its existing ContextMenuTarget-keyed `contextMenuItems` builder.
+ *
+ * Phase 5 of the IA redesign retired the right-click trigger here in
+ * favor of a visible kebab `⋯` button on every row — discovery beats
+ * convention, and screen-reader users (or anyone without a real
+ * mouse) can now reach every file action from the same affordance.
+ */
+function KebabButton({ onClick, label = "More actions" }: { onClick(rect: DOMRect): void; label?: string }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        const rect = ref.current?.getBoundingClientRect();
+        if (rect) onClick(rect);
+      }}
+      style={{
+        background: "transparent",
+        border: "none",
+        color: "var(--muted)",
+        cursor: "pointer",
+        padding: "0 4px",
+        fontSize: 14,
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      ⋯
+    </button>
+  );
+}
 
 export function ChangedFilesSection({
   files,
   selectedFilePath,
   onOpenFile,
-  onContextMenu,
+  onOpenMenu,
 }: {
   files: WorkspaceIndexedFile[];
   selectedFilePath: string | null;
   onOpenFile(path: string): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%" }}>
@@ -24,7 +65,7 @@ export function ChangedFilesSection({
           gitStatus={file.gitStatus}
           active={selectedFilePath === file.path}
           onClick={() => onOpenFile(file.path)}
-          onContextMenu={onContextMenu}
+          onOpenMenu={onOpenMenu}
         />
       ))}
     </div>
@@ -40,7 +81,7 @@ export function TreeEntries({
   generatedSet,
   onToggleDirectory,
   onOpenFile,
-  onContextMenu,
+  onOpenMenu,
 }: {
   parentPath: string;
   entries: WorkspaceEntry[];
@@ -51,7 +92,7 @@ export function TreeEntries({
   generatedSet: Set<string>;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
@@ -65,10 +106,14 @@ export function TreeEntries({
         const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
         return (
           <div key={entry.path}>
-            <button type="button"
+            <div
               data-testid={`file-tree-entry-${entry.path}`}
               data-kind={entry.kind}
               data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
+              draggable={entry.kind === "file"}
+              onDragStart={entry.kind === "file"
+                ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
+                : undefined}
               onClick={() => {
                 if (entry.kind === "directory") {
                   void onToggleDirectory(entry.path);
@@ -78,15 +123,14 @@ export function TreeEntries({
                   onOpenFile(entry.path);
                 }
               }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                onContextMenu({
-                  path: entry.path,
-                  kind: entry.kind,
-                  name: entry.name,
-                  x: event.clientX,
-                  y: event.clientY,
-                });
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (entry.kind === "directory") void onToggleDirectory(entry.path);
+                  else if (entry.gitStatus !== "deleted") onOpenFile(entry.path);
+                }
               }}
               style={{
                 display: "flex",
@@ -94,11 +138,11 @@ export function TreeEntries({
                 gap: 6,
                 width: "100%",
                 minWidth: "100%",
-                padding: "4px 6px",
+                padding: "7px 8px",
                 border: "none",
                 borderRadius: 4,
-                background: selectedFilePath === entry.path ? "rgba(74, 158, 255, 0.18)" : "transparent",
-                color: selectedFilePath === entry.path ? "var(--fg)" : "inherit",
+                background: selectedFilePath === entry.path ? "var(--accent-soft-bg)" : "transparent",
+                color: selectedFilePath === entry.path ? "var(--text-primary)" : "inherit",
                 cursor: "pointer",
                 fontFamily: "inherit",
                 textAlign: "left",
@@ -159,7 +203,16 @@ export function TreeEntries({
                 </span>
               ) : null}
               {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
-            </button>
+              <KebabButton
+                onClick={(rect) => onOpenMenu({
+                  path: entry.path,
+                  kind: entry.kind,
+                  name: entry.name,
+                  x: rect.right,
+                  y: rect.bottom + 4,
+                })}
+              />
+            </div>
             {entry.kind === "directory" && expanded ? (
               <div style={{ paddingLeft: 18 }}>
                 {loadingDirs[entry.path] && children.length === 0 ? (
@@ -175,7 +228,7 @@ export function TreeEntries({
                     generatedSet={generatedSet}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
-                    onContextMenu={onContextMenu}
+                    onOpenMenu={onOpenMenu}
                   />
                 )}
               </div>
@@ -192,38 +245,38 @@ function FileRow({
   gitStatus,
   active,
   onClick,
-  onContextMenu,
+  onOpenMenu,
 }: {
   path: string;
   gitStatus: GitFileStatus | null;
   active: boolean;
   onClick(): void;
-  onContextMenu(target: ContextMenuTarget | null): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
   return (
-    <button type="button"
+    <div
       onClick={onClick}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onContextMenu({
-          path,
-          kind: "file",
-          name: basename(path),
-          x: event.clientX,
-          y: event.clientY,
-        });
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
       }}
+      draggable
+      onDragStart={(e) => setContextRefDrag(e, { kind: "file", path })}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 6,
         width: "100%",
         minWidth: "100%",
-        padding: "4px 6px",
+        padding: "7px 8px",
         border: "none",
         borderRadius: 4,
-        background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
-        color: active ? "var(--fg)" : "inherit",
+        background: active ? "var(--accent-soft-bg)" : "transparent",
+        color: active ? "var(--text-primary)" : "inherit",
         cursor: "pointer",
         fontFamily: "inherit",
         textAlign: "left",
@@ -233,6 +286,15 @@ function FileRow({
       <span>📄</span>
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
-    </button>
+      <KebabButton
+        onClick={(rect) => onOpenMenu({
+          path,
+          kind: "file",
+          name: basename(path),
+          x: rect.right,
+          y: rect.bottom + 4,
+        })}
+      />
+    </div>
   );
 }

@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import { buildAgentCommandForSession } from "../agent/agent-command.js";
 import { buildWriteGuardResponse, NON_WRITER_PROMPT_BLOCK } from "./write-guard.js";
 import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
-import { ThreadQueueOrchestrator } from "./thread-queue-orchestrator.js";
 import { ensureAgentPane } from "../terminal/fleet.js";
 import { ThreadStore, type Thread, type ThreadState } from "../persistence/thread-store.js";
 import {
@@ -26,9 +25,10 @@ import {
   addPath,
   appendToGitignore,
   gitPush,
+  gitPushAsync,
   gitPull,
+  gitPullAsync,
   gitCommitAll,
-  isWorktreeClean,
   listFileCommits,
   gitBlame,
   listAllRefs,
@@ -38,7 +38,13 @@ import {
   gitMerge,
   gitRebase,
   listExistingWorktrees,
+  getAheadBehind,
+  getCommitsAheadOf,
+  listRecentRemoteBranches,
+  gitPushCurrentToAsync,
+  gitPullRemoteIntoCurrent,
   type GitWorktreeEntry,
+  type RemoteBranchEntry,
   type BranchChanges,
   type GroupedGitRefs,
   type ChangeScopes,
@@ -61,13 +67,25 @@ import { buildLspMcpTools } from "../mcp/lsp-mcp-tools.js";
 import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
-import { CommitPointStore, type CommitPoint } from "../persistence/commit-point-store.js";
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
+import { UsageStore } from "../persistence/usage-store.js";
+import {
+  CodeQualityStore,
+  type CodeQualityFindingRow,
+  type CodeQualityScanRow,
+  type CodeQualityScope,
+  type CodeQualityTool,
+} from "../persistence/code-quality-store.js";
+import {
+  CodeQualityToolMissingError,
+  runJscpd,
+  runLizard,
+} from "../subprocess/code-quality.js";
 import { NotesWatcher, hashWorkspaceFile, notesDir as wikiNotesDir, syncNoteFromDisk } from "../git/notes-watch.js";
 import { buildWikiNoteMcpTools } from "../mcp/wiki-note-mcp-tools.js";
-import { WaitPointStore, type WaitPoint } from "../persistence/wait-point-store.js";
 import { WorkItemEffortStore } from "../persistence/work-item-effort-store.js";
 import { FollowupStore, type Followup } from "./followup-store.js";
+import { BackgroundTaskStore } from "./background-task-store.js";
 import {
   SnapshotStore,
   type FileSnapshot,
@@ -107,11 +125,10 @@ export class ElectronRuntime {
   readonly store: StreamStore;
   readonly threadStore: ThreadStore;
   private readonly workItemStore: WorkItemStore;
-  readonly commitPointStore: CommitPointStore;
   readonly wikiNoteStore: WikiNoteStore;
+  readonly usageStore: UsageStore;
+  readonly codeQualityStore: CodeQualityStore;
   private notesWatcher: NotesWatcher | null = null;
-  readonly waitPointStore: WaitPointStore;
-  readonly threadQueue: ThreadQueueOrchestrator;
   readonly effortStore: WorkItemEffortStore;
   readonly snapshotStore: SnapshotStore;
   /** Transient in-memory follow-up store. Backs the agent-only
@@ -119,6 +136,11 @@ export class ElectronRuntime {
    *  in the To Do section of the Work panel. No DB row, lost on
    *  runtime restart — see followup-store.ts. */
   readonly followupStore: FollowupStore;
+  /** Transient in-memory progress rows for long-running ops (git
+   *  pull/push/fetch, code-quality scans, LSP startup, notes resync).
+   *  Surfaced in the bottom bar; lost on restart. See
+   *  background-task-store.ts. */
+  readonly backgroundTaskStore: BackgroundTaskStore;
   readonly workItemApi: WorkItemApi;
   readonly hookEvents: HookEventStore;
   readonly lspManager: LspSessionManager;
@@ -150,18 +172,22 @@ export class ElectronRuntime {
    *  loud banner superseding the frozen NON_WRITER block in the agent's
    *  initial system prompt. Keyed by Claude session id. */
   private readonly initialRoleBySessionId = new Map<string, "writer" | "read-only">();
-  /** Per-thread record of the most recent `read_work_options` call: the set
-   *  of ready-item ids the agent saw. Consumed by the next Stop-hook
-   *  decision (then cleared) so the ready-work directive doesn't echo the
-   *  list the agent already has. Populated through the
-   *  markReadWorkOptions callback wired into the MCP tool surface. */
-  private readonly lastReadWorkOptionsByThread = new Map<string, string[]>();
+  /** Per-thread activity flag for the current turn. Seeded `false` on
+   *  UserPromptSubmit, flipped to `true` on the first qualifying
+   *  PostToolUse (write-intent / oxplow filing / dispatch — see
+   *  `isActivityTool`). Read on Stop: `false` means the turn was pure
+   *  Q&A (the agent answered or asked a question) and the entire
+   *  Stop-directive pipeline is suppressed so the agent stays stopped
+   *  waiting for the user. Absent key (no UserPromptSubmit yet) is
+   *  treated as "unknown → don't suppress" so behaviour stays stable
+   *  in tests and edge cases. */
+  private readonly turnActivityByThread = new Map<string, boolean>();
   /** Per-thread count of `Task` (subagent) tool calls that are
    *  PreToolUse-started but haven't yet seen a PostToolUse. Used by the
-   *  Stop-hook pipeline to suppress the in-progress audit and ready-work
-   *  directives while a subagent owns the in_progress item — re-firing
-   *  those nudges produces a visual loop where the parent acks each
-   *  Stop while still waiting on the subagent. See wi-593a50b62e22. */
+   *  Stop-hook pipeline to suppress the in-progress audit while a
+   *  subagent owns the in_progress item — re-firing the nudge produces
+   *  a visual loop where the parent acks each Stop while still waiting
+   *  on the subagent. See wi-593a50b62e22. */
   private readonly pendingSubagentsByThread = new Map<string, number>();
   /** Per-thread fingerprint of the in_progress set the runtime last
    *  emitted an audit directive for. The Stop pipeline compares the
@@ -170,6 +196,43 @@ export class ElectronRuntime {
    *  landed, set membership is identical). Cleared lazily by the next
    *  audit fire that records a fresh signature. See wi-c468e8fc093d. */
   private readonly lastAuditSignatureByThread = new Map<string, string>();
+  /** Per-thread read/write counters for the current turn. Bumped by
+   *  PostToolUse: reads on Read/Grep/Glob and read-only Bash, writes on
+   *  any write-intent tool (Edit/Write/MultiEdit/non-readonly Bash).
+   *  Read on Stop together with `turnHadActivity` to derive
+   *  `turnWasExploration` (reads >= 2 && writes === 0). Cleared on
+   *  UserPromptSubmit alongside `turnActivityByThread`. */
+  private readonly turnReadWriteByThread = new Map<string, { reads: number; writes: number }>();
+  /** Per-thread guard against firing the wiki-capture directive twice in
+   *  a row. Set when the directive is emitted; cleared on
+   *  UserPromptSubmit. The capture turn itself runs Write tools so
+   *  `turnHadActivity` flips true on its Stop and the directive wouldn't
+   *  re-fire anyway — but if the agent replies `oxplow-note: skipped`
+   *  with no tool calls, this prevents the directive from re-emitting
+   *  on the same prompt. */
+  private readonly lastEmittedWikiCaptureByThread = new Set<string>();
+  /** Per-thread "agent is awaiting the user" flag. Set by the
+   *  `await_user` MCP tool; consumed by Stop hook (allows-stop +
+   *  suppresses every directive); cleared on UserPromptSubmit. The
+   *  question text is stored alongside for telemetry / future UI
+   *  surfacing — the Stop hook only reads the boolean. */
+  private readonly awaitingUserByThread = new Map<string, { question: string; setAt: number }>();
+  /** Per-thread "filed/transitioned a work item this turn" flag. Set
+   *  when the agent calls any work-item-mutating MCP tool
+   *  (create_work_item, update_work_item, complete_task,
+   *  file_epic_with_children, transition_work_items, dispatch_work_item).
+   *  Consumed by Stop hook's filing-enforcement branch. Cleared on
+   *  UserPromptSubmit alongside the other per-turn flags. */
+  private readonly filedThisTurnByThread = new Set<string>();
+  /** Per-thread "filed at least one new ready item this turn (no
+   *  in_progress claim attached)" flag. Stricter subset of
+   *  `filedThisTurnByThread`: set only by `create_work_item` /
+   *  `file_epic_with_children` when the new row landed at `ready`
+   *  (the default). Drives the Stop-hook "filed but didn't ship"
+   *  advisory branch — catches turns where the agent logged work as
+   *  backlog when the user's instruction was to do it. Cleared
+   *  alongside the other per-turn flags on UserPromptSubmit. */
+  private readonly filedReadyThisTurnByThread = new Set<string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -199,24 +262,42 @@ export class ElectronRuntime {
     this.store = new StreamStore(projectDir, logger.child({ subsystem: "stream-store" }));
     this.threadStore = new ThreadStore(projectDir, logger.child({ subsystem: "thread-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
-    this.commitPointStore = new CommitPointStore(projectDir, logger.child({ subsystem: "commit-points" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
+    this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
+    this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
+    this.backgroundTaskStore = new BackgroundTaskStore(logger.child({ subsystem: "background-task-store" }));
+    let notesScanTaskId: string | null = null;
     this.notesWatcher = new NotesWatcher(
       projectDir,
       this.wikiNoteStore,
-      {},
+      {
+        onScanStart: (total) => {
+          // Skip the row entirely for tiny note dirs — no UI value, just churn.
+          if (total < 5) return;
+          notesScanTaskId = this.backgroundTaskStore.start({
+            kind: "notes-resync",
+            label: "Syncing wiki notes…",
+            detail: `0 / ${total}`,
+            progress: 0,
+          });
+        },
+        onScanProgress: ({ done, total, slug }) => {
+          if (!notesScanTaskId) return;
+          this.backgroundTaskStore.update(notesScanTaskId, {
+            progress: total > 0 ? done / total : null,
+            detail: `${done} / ${total} — ${slug}`,
+          });
+        },
+        onScanEnd: (error) => {
+          if (!notesScanTaskId) return;
+          if (error) this.backgroundTaskStore.fail(notesScanTaskId, error.message);
+          else this.backgroundTaskStore.complete(notesScanTaskId);
+          notesScanTaskId = null;
+        },
+      },
       logger.child({ subsystem: "notes-watch" }),
     );
     this.notesWatcher.start();
-    this.waitPointStore = new WaitPointStore(projectDir, logger.child({ subsystem: "wait-points" }));
-    this.threadQueue = new ThreadQueueOrchestrator(
-      this.store,
-      this.threadStore,
-      this.workItemStore,
-      this.commitPointStore,
-      this.waitPointStore,
-      logger.child({ subsystem: "thread-queue" }),
-    );
     this.effortStore = new WorkItemEffortStore(projectDir, logger.child({ subsystem: "effort-store" }));
     this.snapshotStore = new SnapshotStore(projectDir, logger.child({ subsystem: "snapshot-store" }));
     this.snapshotStore.setMaxFileBytes(config.snapshotMaxFileBytes);
@@ -230,7 +311,17 @@ export class ElectronRuntime {
     });
     this.events = new EventBus(logger.child({ subsystem: "event-bus" }));
     this.hookEvents = new HookEventStore(1000);
-    this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }));
+    this.lspManager = new LspSessionManager(logger.child({ subsystem: "lsp" }), {
+      onInitializeStart: (languageId) => this.backgroundTaskStore.start({
+        kind: "lsp",
+        label: `Starting ${languageId} language server…`,
+      }),
+      onInitializeEnd: (taskHandle, error) => {
+        if (!taskHandle) return;
+        if (error) this.backgroundTaskStore.fail(taskHandle, error.message);
+        else this.backgroundTaskStore.complete(taskHandle);
+      },
+    });
     this.editorFocusStore = new EditorFocusStore();
     this.agentPtyStore = new AgentPtyStore();
     this.workspaceWatchers = new WorkspaceWatcherRegistry(logger.child({ subsystem: "workspace-watch" }));
@@ -368,6 +459,15 @@ export class ElectronRuntime {
           change.touchedFiles,
         );
       }
+      if (change.kind === "created") {
+        // Capture a task-event snapshot on creation so Local History
+        // shows the moment the row appeared. Gap-gated by the same 5-min
+        // rule as task-end (see applyStatusTransition) — back-to-back
+        // creates / status changes don't pile up near-identical rows.
+        const lastSnapTs = this.snapshotStore.getMostRecentSnapshotTimestampForStream(thread.stream_id);
+        const skip = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
+        if (!skip) this.safeFlushSnapshot(thread.stream_id, "task-event", null);
+      }
       this.events.publish({
         type: "work-item.changed",
         streamId: thread.stream_id,
@@ -387,30 +487,17 @@ export class ElectronRuntime {
     this.store.subscribe((change) => {
       this.events.publish({ type: "stream.changed", kind: change.kind, streamId: change.streamId });
     });
-    this.waitPointStore.subscribe((change) => {
-      const thread = this.threadStore.findById(change.threadId);
-      this.events.publish({
-        type: "wait-point.changed",
-        streamId: thread?.stream_id ?? null,
-        threadId: change.threadId,
-        id: change.id,
-        kind: change.kind,
-      });
-    });
-    this.commitPointStore.subscribe((change) => {
-      const thread = this.threadStore.findById(change.threadId);
-      this.events.publish({
-        type: "commit-point.changed",
-        streamId: thread?.stream_id ?? null,
-        threadId: change.threadId,
-        id: change.id,
-        kind: change.kind,
-      });
-    });
     this.followupStore.subscribe((change) => {
       this.events.publish({
         type: "followup.changed",
         threadId: change.threadId,
+        kind: change.kind,
+        id: change.id,
+      });
+    });
+    this.backgroundTaskStore.subscribe((change) => {
+      this.events.publish({
+        type: "background-task.changed",
         kind: change.kind,
         id: change.id,
       });
@@ -420,6 +507,25 @@ export class ElectronRuntime {
         type: "wiki-note.changed",
         kind: change.kind,
         slug: change.slug,
+      });
+    });
+    this.usageStore.subscribe((change) => {
+      this.events.publish({
+        type: "usage.recorded",
+        kind: change.kind,
+        key: change.key,
+        streamId: change.streamId,
+        threadId: change.threadId,
+      });
+    });
+    this.codeQualityStore.subscribe((change) => {
+      this.events.publish({
+        type: "code-quality.scanned",
+        streamId: change.streamId,
+        scanId: change.scanId,
+        tool: change.tool,
+        scope: change.scope,
+        status: change.kind === "started" ? "running" : change.kind,
       });
     });
 
@@ -475,12 +581,10 @@ export class ElectronRuntime {
           threadStore: this.threadStore,
           streamStore: this.store,
           workItemStore: this.workItemStore,
-          commitPointStore: this.commitPointStore,
-          executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
-          executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-          waitPointStore: this.waitPointStore,
           effortStore: this.effortStore,
-          markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+          markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
+          markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
+          markFiledReadyThisTurn: (threadId) => this.markFiledReadyThisTurn(threadId),
           forkThread: (input) => this.forkThread(input),
           followupStore: this.followupStore,
         }),
@@ -586,12 +690,10 @@ export class ElectronRuntime {
             threadStore: this.threadStore,
             streamStore: this.store,
             workItemStore: this.workItemStore,
-            commitPointStore: this.commitPointStore,
-            executeCommit: (cpId, message) => this.threadQueue.executeCommit(cpId, message),
-            executeAutoCommit: (threadId, message) => this.executeAutoCommitForThread(threadId, message),
-            waitPointStore: this.waitPointStore,
             effortStore: this.effortStore,
-            markReadWorkOptions: (threadId, readyIds) => this.markReadWorkOptions(threadId, readyIds),
+            markAwaitingUser: (threadId, question) => this.markAwaitingUser(threadId, question),
+            markFiledThisTurn: (threadId) => this.markFiledThisTurn(threadId),
+            markFiledReadyThisTurn: (threadId) => this.markFiledReadyThisTurn(threadId),
             forkThread: (input) => this.forkThread(input),
           }),
           ...buildLspMcpTools({
@@ -798,6 +900,20 @@ export class ElectronRuntime {
    * streams. Powers the new-stream "adopt existing worktree" flow. The main
    * worktree (the project itself) is excluded since it's the primary stream.
    */
+  /**
+   * All git worktrees of this repo except the one backing `streamId`.
+   * Used by the Git Dashboard's worktrees card so the user can see their
+   * sibling streams' branches and merge from any of them. Unlike
+   * `listAdoptableWorktrees`, this returns *every* sibling — including
+   * worktrees already tracked as oxplow streams — because the dashboard
+   * is a navigation/comparison surface, not the adoption flow.
+   */
+  listSiblingWorktrees(streamId: string): GitWorktreeEntry[] {
+    const stream = this.resolveStream(streamId);
+    const selfPath = stream.worktree_path;
+    return listExistingWorktrees(this.projectDir).filter((wt) => wt.path !== selfPath);
+  }
+
   listAdoptableWorktrees(): GitWorktreeEntry[] {
     const known = new Set(
       this.store.list().map((s) => s.worktree_path).filter((p): p is string => !!p),
@@ -820,7 +936,7 @@ export class ElectronRuntime {
     return { content: readFileAtRef(stream.worktree_path, ref, path) };
   }
 
-  getGitLog(streamId: string, options?: { limit?: number }) {
+  getGitLog(streamId: string, options?: { limit?: number; all?: boolean }) {
     const stream = this.resolveStream(streamId);
     return getGitLog(stream.worktree_path, options);
   }
@@ -855,19 +971,100 @@ export class ElectronRuntime {
     return appendToGitignore(stream.worktree_path, path);
   }
 
-  gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): GitOpResult {
+  async gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitPush(stream.worktree_path, options);
+    const branch = options?.branch ?? stream.branch ?? "HEAD";
+    const remote = options?.remote ?? "origin";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pushing ${branch} to ${remote}…`,
+    });
+    try {
+      const result = await gitPushAsync(stream.worktree_path, options);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
-  gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): GitOpResult {
+  async gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): Promise<GitOpResult> {
     const stream = this.resolveStream(streamId);
-    return gitPull(stream.worktree_path, options);
+    const branch = options?.branch ?? stream.branch ?? "HEAD";
+    const remote = options?.remote ?? "origin";
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pulling ${branch} from ${remote}…`,
+    });
+    try {
+      const result = await gitPullAsync(stream.worktree_path, options);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
     const stream = this.resolveStream(streamId);
     return gitCommitAll(stream.worktree_path, message, options);
+  }
+
+  getAheadBehind(streamId: string, base: string, head?: string): { ahead: number; behind: number } {
+    const stream = this.resolveStream(streamId);
+    return getAheadBehind(stream.worktree_path, base, head);
+  }
+
+  getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): GitLogCommit[] {
+    const stream = this.resolveStream(streamId);
+    return getCommitsAheadOf(stream.worktree_path, base, head, limit);
+  }
+
+  listRecentRemoteBranches(streamId: string, limit?: number): RemoteBranchEntry[] {
+    const stream = this.resolveStream(streamId);
+    return listRecentRemoteBranches(stream.worktree_path, limit);
+  }
+
+  async gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+    const stream = this.resolveStream(streamId);
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pushing HEAD to ${remote}/${branch}…`,
+    });
+    try {
+      const result = await gitPushCurrentToAsync(stream.worktree_path, remote, branch);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
+  }
+
+  async gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+    const stream = this.resolveStream(streamId);
+    const taskId = this.backgroundTaskStore.start({
+      kind: "git",
+      label: `Pulling ${remote}/${branch} into current…`,
+    });
+    try {
+      const result = await gitPullRemoteIntoCurrent(stream.worktree_path, remote, branch);
+      if (result.ok) this.backgroundTaskStore.complete(taskId);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.backgroundTaskStore.fail(taskId, message);
+      throw err;
+    }
   }
 
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {
@@ -1100,11 +1297,6 @@ export class ElectronRuntime {
   renameThread(streamId: string, threadId: string, title: string): Thread {
     this.resolveStream(streamId);
     return this.threadStore.rename(streamId, threadId, title);
-  }
-
-  setAutoCommit(streamId: string, threadId: string, enabled: boolean): Thread[] {
-    this.resolveThread(streamId, threadId);
-    return this.threadStore.setAutoCommit(threadId, enabled);
   }
 
   setStreamPrompt(streamId: string, prompt: string | null): Stream[] {
@@ -1443,15 +1635,34 @@ export class ElectronRuntime {
   }
 
   /**
-   * Called by the `oxplow__read_work_options` MCP handler so the runtime
-   * can suppress the ready-work Stop directive on the very next Stop
-   * when the set the agent just saw is unchanged. The record is
-   * consumed (deleted) by the first Stop hook that reads it — a second
-   * Stop on the same thread without a fresh read_work_options call
-   * fires normally.
+   * Called by the `oxplow__await_user` MCP handler. Records that the
+   * agent is explicitly waiting on the user. The next Stop hook reads
+   * this and suppresses every directive so the agent doesn't march onto
+   * the next queue item past the open question. Cleared on
+   * UserPromptSubmit when the user's reply lands.
    */
-  markReadWorkOptions(threadId: string, readyIds: string[]): void {
-    this.lastReadWorkOptionsByThread.set(threadId, [...readyIds]);
+  markAwaitingUser(threadId: string, question: string): void {
+    this.awaitingUserByThread.set(threadId, { question, setAt: Date.now() });
+  }
+
+  /**
+   * Called by every work-item-mutating MCP handler (create / update /
+   * complete / file_epic / transition / dispatch). Marks the per-turn
+   * "agent filed something" flag the Stop-hook filing-enforcement branch
+   * reads. Cleared on UserPromptSubmit.
+   */
+  markFiledThisTurn(threadId: string): void {
+    this.filedThisTurnByThread.add(threadId);
+  }
+
+  /**
+   * Stricter sibling of `markFiledThisTurn`: called only by
+   * `create_work_item` / `file_epic_with_children` when the new row
+   * landed at `ready` (no in_progress claim). Drives the Stop-hook
+   * "filed but didn't ship" advisory branch.
+   */
+  markFiledReadyThisTurn(threadId: string): void {
+    this.filedReadyThisTurnByThread.add(threadId);
   }
 
   /**
@@ -1550,6 +1761,18 @@ export class ElectronRuntime {
       }
       if (envelope.event === "PostToolUse") {
         this.handlePostToolUseDirty(envelope);
+        const payload = (envelope.payload ?? {}) as { tool_name?: unknown; tool_input?: unknown };
+        const activityToolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+        if (activityToolName && envelope.threadId && isActivityTool(activityToolName, payload.tool_input)) {
+          this.turnActivityByThread.set(envelope.threadId, true);
+        }
+        if (activityToolName && envelope.threadId) {
+          const counters = this.turnReadWriteByThread.get(envelope.threadId)
+            ?? { reads: 0, writes: 0 };
+          if (isReadIntentTool(activityToolName, payload.tool_input)) counters.reads += 1;
+          else if (isWriteIntentTool(activityToolName, payload.tool_input)) counters.writes += 1;
+          this.turnReadWriteByThread.set(envelope.threadId, counters);
+        }
         // Match a PreToolUse for `Task` (subagent dispatch) — decrement
         // the per-thread pending-subagent counter so the Stop-hook
         // suppression lifts once the subagent returns.
@@ -1586,6 +1809,23 @@ export class ElectronRuntime {
       if (deny) return { body: deny };
     }
     if (envelope.event === "UserPromptSubmit") {
+      // Seed the per-turn activity flag — flips to true on the first
+      // qualifying PostToolUse. Read on Stop to suppress the full
+      // directive pipeline for pure Q&A turns.
+      if (envelope.threadId) {
+        this.turnActivityByThread.set(envelope.threadId, false);
+        // Reset the per-turn read/write counters for the wiki-capture
+        // exploration heuristic, and clear the "just emitted capture"
+        // suppression flag so a fresh prompt is allowed to re-trigger.
+        this.turnReadWriteByThread.set(envelope.threadId, { reads: 0, writes: 0 });
+        this.lastEmittedWikiCaptureByThread.delete(envelope.threadId);
+        // The user replied → clear the "agent is awaiting user" gate so
+        // the next Stop runs the directive pipeline normally. Also reset
+        // the per-turn filing flag so each turn enforces filing afresh.
+        this.awaitingUserByThread.delete(envelope.threadId);
+        this.filedThisTurnByThread.delete(envelope.threadId);
+        this.filedReadyThisTurnByThread.delete(envelope.threadId);
+      }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored human_check item was closed on this thread
       // very recently, there's a strong chance this new prompt is either
@@ -1655,76 +1895,65 @@ export class ElectronRuntime {
   /**
    * Stop-hook pipeline entry point. Snapshots the relevant stores, hands
    * the snapshot to the pure `decideStopDirective`, applies any returned
-   * side effects (e.g. flipping a wait point to `triggered`), and
-   * returns the hook body for Claude. The decision logic itself lives
-   * in `src/electron/stop-hook-pipeline.ts` so each branch is unit-
-   * testable without spinning up a runtime.
+   * side effects (e.g. recording the audit signature), and returns the
+   * hook body for Claude. The decision logic itself lives in
+   * `src/electron/stop-hook-pipeline.ts` so each branch is unit-testable
+   * without spinning up a runtime.
    */
   private computeStopDirective(threadId: string): Record<string, unknown> | null {
     const thread = this.threadStore.findById(threadId);
-    // Auto-commit (both ad-hoc via thread.auto_commit and manually-placed
-    // mode=auto commit points) is now routed through the agent via a
-    // Stop-hook directive — see buildAutoCommitStopReason. The runtime no
-    // longer generates a message mechanically; the agent inspects the diff
-    // and calls `mcp__oxplow__commit`. That unifies the approve-mode and
-    // auto-mode flows: the only remaining distinction is "ask the user
-    // first, yes/no." See .context/agent-model.md for the flow.
-    // Consume the just-read record (once per call). If the agent called
-    // read_work_options during the turn we're closing and the set matches
-    // what's currently ready, the pipeline suppresses the ready-work
-    // directive — the agent already has the list.
-    const justReadReadySet = this.lastReadWorkOptionsByThread.get(threadId);
-    this.lastReadWorkOptionsByThread.delete(threadId);
-    // Cheap clean-tree probe: suppresses the auto-commit directive when an
-    // ad-hoc `git commit` (Bash / Files panel) already landed the work, so
-    // the Stop hook doesn't refire a no-op commit directive. See
-    // wi-ec4c8e6f44fd. Read from the thread's worktree; null / unknown
-    // paths fall back to "assume dirty" so we don't accidentally mute a
-    // legit commit directive.
-    let worktreeClean = false;
-    const stream = thread ? this.store.get(thread.stream_id) ?? null : null;
-    if (stream) {
-      try { worktreeClean = isWorktreeClean(stream.worktree_path); } catch (err) {
-        this.logger.debug("isWorktreeClean probe failed", {
-          threadId, error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    // Consume the activity flag for this turn (once per Stop). Absent =
+    // unknown — pipeline treats undefined as "don't suppress" so older
+    // tests / edge cases stay stable.
+    const turnHadActivity = this.turnActivityByThread.get(threadId);
+    this.turnActivityByThread.delete(threadId);
+    // Derive the wiki-capture exploration flag from the per-turn read/write
+    // counters: a read-heavy turn (≥2 reads) with zero writes counts as
+    // exploration. Counters are cleared together with the activity flag so
+    // they don't leak into the next turn.
+    const counters = this.turnReadWriteByThread.get(threadId);
+    this.turnReadWriteByThread.delete(threadId);
+    const turnWasExploration = !!counters && counters.reads >= 2 && counters.writes === 0;
+    const justEmittedWikiCapture = this.lastEmittedWikiCaptureByThread.has(threadId);
+    const turnHadWrites = !!counters && counters.writes > 0;
+    // Consume the per-turn filing flag (once per Stop) so each turn
+    // enforces filing afresh. Don't `delete` here — the flag is also
+    // cleared on UserPromptSubmit; deleting on Stop would silently let
+    // the next Stop in the same prompt-gap pass without a filing check.
+    const turnHadFiling = this.filedThisTurnByThread.has(threadId);
+    const turnFiledReadyItem = this.filedReadyThisTurnByThread.has(threadId);
+    const awaitingUser = this.awaitingUserByThread.has(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
-      commitPoints: this.commitPointStore.listForThread(threadId),
-      waitPoints: this.waitPointStore.listForThread(threadId),
       workItems: this.workItemStore.listItems(threadId),
-      readyWorkItems: this.workItemStore.listReady(threadId),
-      autoCommit: thread?.auto_commit ?? false,
-      justReadReadySet,
-      worktreeClean,
+      turnHadActivity,
+      turnWasExploration,
+      justEmittedWikiCapture,
       subagentInFlight: (this.pendingSubagentsByThread.get(threadId) ?? 0) > 0,
       lastInProgressAuditSignature: this.lastAuditSignatureByThread.get(threadId),
+      turnHadWrites,
+      turnHadFiling,
+      turnFiledReadyItem,
+      awaitingUser,
     };
-    // The item's own thread_id is what matters for the directive text (not
-    // `threadId` — they agree today but could diverge if listReady ever
-    // returns cross-thread candidates). stream_id comes off the thread row.
-    const streamId = thread?.stream_id ?? "";
     const outcome = decideStopDirective(snapshot, {
-      buildCommitPointReason: buildCommitPointStopReason,
-      buildAutoCommitReason: buildAutoCommitStopReason,
-      // item.thread_id is typed nullable (WorkItem covers backlog items too),
-      // but decideStopDirective only emits this reason for in-thread rows, so
-      // a fall-back to `threadId` keeps the directive stable.
-      buildNextWorkItemReason: (item) =>
-        buildNextWorkItemStopReason({ ...item, thread_id: item.thread_id ?? threadId }, streamId),
       buildInProgressAuditReason: buildInProgressAuditStopReason,
+      buildWikiCaptureReason: buildWikiCaptureStopReason,
+      buildFilingEnforcementReason: buildFilingEnforcementStopReason,
+      buildFiledButDidntShipReason: buildFiledButDidntShipStopReason,
+      buildStaleEpicChildrenReason: buildStaleEpicChildrenStopReason,
     });
+    // If the wiki-capture directive fired, latch the suppression flag so
+    // we don't re-emit on the same prompt (cleared on UserPromptSubmit).
+    if (
+      outcome.directive &&
+      snapshot.turnHadActivity === false &&
+      snapshot.turnWasExploration === true
+    ) {
+      this.lastEmittedWikiCaptureByThread.add(threadId);
+    }
     for (const effect of outcome.sideEffects) {
-      if (effect.kind === "trigger-wait-point") {
-        try { this.waitPointStore.trigger(effect.id); } catch (err) {
-          this.logger.warn("trigger-wait-point side effect failed", {
-            id: effect.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      } else if (effect.kind === "record-audit-signature") {
+      if (effect.kind === "record-audit-signature") {
         this.lastAuditSignatureByThread.set(threadId, effect.signature);
       }
     }
@@ -1981,6 +2210,7 @@ export class ElectronRuntime {
     changed_refs: string[];
     deleted_refs: string[];
     total_refs: number;
+    referenced_files: string[];
   }> {
     const stream = this.resolveStream(streamId);
     const projectDir = stream.worktree_path;
@@ -2000,6 +2230,7 @@ export class ElectronRuntime {
         changed_refs: freshness.changedRefs,
         deleted_refs: freshness.deletedRefs,
         total_refs: freshness.totalRefs,
+        referenced_files: n.captured_refs.map((r) => r.path),
       };
     });
   }
@@ -2032,91 +2263,120 @@ export class ElectronRuntime {
     this.wikiNoteStore.deleteBySlug(slug);
   }
 
-  // -------- commit points (IPC-exposed delegations) --------
-
-  listCommitPoints(threadId: string): CommitPoint[] {
-    return this.threadQueue.listCommitPoints(threadId);
+  searchWikiNotes(_streamId: string, query: string, limit?: number): Array<{
+    slug: string;
+    title: string;
+    snippet: string;
+    updated_at: string;
+  }> {
+    return this.wikiNoteStore.searchBodies(query, limit);
   }
 
-  createCommitPoint(streamId: string, threadId: string): CommitPoint {
-    this.resolveThread(streamId, threadId);
-    return this.threadQueue.createCommitPoint(threadId);
+  // -------- code quality scans (IPC-exposed) --------
+
+  async runCodeQualityScan(input: {
+    streamId: string;
+    tool: CodeQualityTool;
+    scope: CodeQualityScope;
+    baseRef?: string | null;
+  }): Promise<CodeQualityScanRow> {
+    const stream = this.resolveStream(input.streamId);
+    const scanId = this.codeQualityStore.startScan({
+      streamId: input.streamId,
+      tool: input.tool,
+      scope: input.scope,
+      baseRef: input.scope === "diff" ? input.baseRef ?? null : null,
+    });
+    const taskId = this.backgroundTaskStore.start({
+      kind: "code-quality",
+      label: `${input.tool} scan (${input.scope})`,
+    });
+
+    try {
+      let files: string[] | undefined;
+      if (input.scope === "diff") {
+        const baseRef = input.baseRef?.trim() || detectBaseBranch(stream.worktree_path);
+        if (!baseRef) {
+          this.codeQualityStore.failScan(scanId, "No base ref available for diff scope");
+          this.backgroundTaskStore.fail(taskId, "No base ref available for diff scope");
+          return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
+        }
+        const changes = listBranchChanges(stream.worktree_path, baseRef);
+        files = changes.files
+          .filter((f) => f.status !== "deleted")
+          .map((f) => f.path);
+        if (files.length === 0) {
+          this.codeQualityStore.completeScan(scanId, []);
+          this.backgroundTaskStore.complete(taskId);
+          return this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId)!;
+        }
+      }
+
+      const findings = input.tool === "lizard"
+        ? await runLizard(stream.worktree_path, { files })
+        : await runJscpd(stream.worktree_path, { files });
+      this.codeQualityStore.completeScan(scanId, findings);
+      this.backgroundTaskStore.complete(taskId);
+    } catch (error) {
+      const message = error instanceof CodeQualityToolMissingError
+        ? `${input.tool} is not installed (install via pip/npm and ensure it's on PATH)`
+        : error instanceof Error ? error.message : String(error);
+      this.codeQualityStore.failScan(scanId, message);
+      this.backgroundTaskStore.fail(taskId, message);
+    }
+
+    const row = this.codeQualityStore.listScans({ streamId: input.streamId }).find((s) => s.id === scanId);
+    if (!row) throw new Error(`code_quality_scan ${scanId} vanished after run`);
+    return row;
   }
 
-  deleteCommitPoint(id: string): void {
-    this.threadQueue.deleteCommitPoint(id);
+  listCodeQualityFindings(input: {
+    streamId: string;
+    tool?: CodeQualityTool;
+    paths?: string[];
+  }): CodeQualityFindingRow[] {
+    return this.codeQualityStore.listLatestFindings(input);
   }
 
-  updateCommitPoint(id: string, changes: { mode?: "auto" | "approve" }): CommitPoint[] {
-    return this.threadQueue.updateCommitPoint(id, changes);
+  listCodeQualityScans(input: { streamId: string; limit?: number }): CodeQualityScanRow[] {
+    return this.codeQualityStore.listScans(input);
   }
 
-  /** IPC-exposed: run the git commit for a commit point immediately. */
-  commitCommitPoint(id: string, message: string): CommitPoint {
-    return this.threadQueue.executeCommit(id, message);
+  // -------- generic usage tracking (IPC-exposed) --------
+
+  recordUsage(input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }): void {
+    this.usageStore.record(input);
+  }
+
+  listRecentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Array<{ key: string; last_at: string; count: number }> {
+    return this.usageStore.mostRecent(input);
+  }
+
+  listFrequentUsage(input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }): Array<{ key: string; last_at: string; count: number }> {
+    return this.usageStore.mostFrequent(input);
+  }
+
+  listCurrentlyOpenUsage(input: { kind: string; streamId?: string | null; threadId?: string | null }): string[] {
+    return this.usageStore.currentlyOpen(input);
+  }
+
+  getWorkItemSummaries(ids: string[]) {
+    return this.workItemStore.getSummariesByIds(ids);
   }
 
   /**
-   * Execute an agent-drafted auto-commit for a thread (no commit_point
-   * row). Called from the `mcp__oxplow__commit` tool when the agent
-   * passes `{ auto: true, message }`. Runs `git commit` synchronously,
-   * publishes the `auto-committed` thread lifecycle event, and throws
-   * on failure so the agent sees the stderr and can retry. Falls back
-   * to `buildAutoCommitMessage` when `message` is empty/missing.
+   * Reorder the thread's work-item queue. Sort_indexes are rewritten to
+   * match the desired top-to-bottom order. Marker rows (commit/wait
+   * points) used to share this sort_index space; they no longer exist
+   * so the entry kind is implicit.
    */
-  executeAutoCommitForThread(threadId: string, message: string | undefined): { sha: string; message: string } {
-    const thread = this.threadStore.findById(threadId);
-    if (!thread) throw new Error(`unknown thread: ${threadId}`);
-    if (thread.status !== "active") throw new Error(`thread ${threadId} is not the writer; only active threads can commit`);
-    const stream = this.store.get(thread.stream_id);
-    if (!stream) throw new Error(`thread ${threadId} has no stream`);
-    const finalMessage = (message && message.trim().length > 0)
-      ? message
-      : (() => {
-          const workItems = this.workItemStore.listItems(threadId);
-          const latestDone = this.commitPointStore.getLatestDoneForThread(threadId);
-          return buildAutoCommitMessage(workItems, latestDone?.completed_at ?? null);
-        })();
-    const result = gitCommitAll(stream.worktree_path, finalMessage, { includeUntracked: true });
-    if (!result.ok || !result.sha) {
-      throw new Error(`git commit failed: ${result.stderr || "unknown"}`);
-    }
-    this.logger.info("auto-commit: committed", { threadId, sha: result.sha, message: finalMessage });
-    this.events.publish({
-      type: "thread.changed",
-      streamId: thread.stream_id,
-      threadId: thread.id,
-      kind: "auto-committed",
-    });
-    return { sha: result.sha, message: finalMessage };
-  }
-
   reorderThreadQueue(
     streamId: string,
     threadId: string,
-    entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>,
+    entries: Array<{ id: string }>,
   ): void {
     this.resolveThread(streamId, threadId);
-    this.threadQueue.reorderThreadQueue(threadId, entries);
-  }
-
-  // -------- wait points (IPC-exposed delegations) --------
-
-  listWaitPoints(threadId: string): WaitPoint[] {
-    return this.threadQueue.listWaitPoints(threadId);
-  }
-
-  createWaitPoint(streamId: string, threadId: string, note?: string | null): WaitPoint {
-    this.resolveThread(streamId, threadId);
-    return this.threadQueue.createWaitPoint(threadId, note ?? null);
-  }
-
-  setWaitPointNote(id: string, note: string | null): WaitPoint {
-    return this.threadQueue.setWaitPointNote(id, note);
-  }
-
-  deleteWaitPoint(id: string): void {
-    this.threadQueue.deleteWaitPoint(id);
+    this.workItemStore.setItemSortIndexes(threadId, entries.map((entry, index) => ({ id: entry.id, sortIndex: index })));
   }
 }
 
@@ -2187,13 +2447,6 @@ export function terminalInputIsInterrupt(message: string): boolean {
   return decoded === "\x1b" || decoded === "\x03";
 }
 
-export function buildNextWorkItemStopReason(
-  item: { id: string; title: string; kind: string; thread_id: string },
-  _streamId: string,
-): string {
-  return `The thread queue has ready work (threadId="${item.thread_id}"). Call \`mcp__oxplow__read_work_options\` and dispatch to a \`general-purpose\` subagent per the oxplow-runtime skill.`;
-}
-
 /**
  * Audit nudge for the Stop-hook in-progress branch. Lists every
  * `in_progress` work item on the thread and asks the agent to reconcile
@@ -2219,85 +2472,84 @@ export function buildInProgressAuditStopReason(items: WorkItem[]): string {
 }
 
 /**
- * Fallback auto-commit message builder used only when the agent-drafted
- * path fails (no message provided to `mcp__oxplow__commit`). The primary
- * path is agent-drafted via the Stop-hook directive — this keeps the
- * runtime able to land *something* rather than stall.
- *
- * `previousCommitCompletedAt` bounds the set of work items to those
- * whose `updated_at` is strictly after that moment — i.e., items that
- * settled since the previous commit landed. Passing `null` disables the
- * filter (first-commit case). Without this bound the message
- * monotonically re-counted every settled item in the thread, so each
- * auto-commit produced "complete N work items" with N climbing forever
- * and a body of whichever titles sorted first, regardless of what
- * actually changed.
+ * Stop-hook directive text for the wiki-capture branch. Fires on
+ * read-heavy / no-write turns (`turnHadActivity === false`,
+ * `turnWasExploration === true`). The agent is expected to follow the
+ * `oxplow-wiki-capture` skill: search existing notes, decide append vs
+ * new, write the body to `.oxplow/notes/<slug>.md`, then call
+ * `mcp__oxplow__resync_note`. The escape hatch (`oxplow-note: skipped`)
+ * is honoured implicitly: the suppression flag latches when the
+ * directive fires and clears on the next user prompt, so a "skipped"
+ * reply doesn't loop.
  */
-export function buildAutoCommitMessage(
-  workItems: WorkItem[],
-  previousCommitCompletedAt: string | null = null,
-): string {
-  const settled = workItems.filter((item) => {
-    if (
-      item.status !== "human_check" &&
-      item.status !== "done" &&
-      item.status !== "canceled"
-    ) {
-      return false;
-    }
-    if (!previousCommitCompletedAt) return true;
-    return item.updated_at > previousCommitCompletedAt;
-  });
-  if (settled.length === 0) {
-    return "chore: auto-commit at queue commit point";
-  }
-  if (settled.length === 1) {
-    return `chore: ${settled[0]!.title}`;
-  }
-  const items = settled
-    .slice(0, 5)
-    .map((item) => `- ${item.title}`)
-    .join("\n");
-  const suffix = settled.length > 5 ? `\n…and ${settled.length - 5} more` : "";
-  return `chore: complete ${settled.length} work items\n\n${items}${suffix}`;
-}
-
 /**
- * Directive text for auto-commit — identical to the approve-mode variant
- * minus the "ask the user to approve" gate. The agent inspects the diff,
- * drafts a message, and commits in one turn. Used both when
- * `thread.auto_commit=true` triggers an ad-hoc commit (no DB row) and
- * when a manually-placed commit_point row has `mode="auto"`.
- *
- * Passing `commit_point_id: null` selects the no-row shape; the agent
- * calls `mcp__oxplow__commit` with `{ auto: true, message }`. With a
- * commit point id, the agent passes it so the row flips to done.
+ * Filing-enforcement Stop reason. Fires when the turn made writes on
+ * project files but no work-item-mutating tool was called AND no
+ * in_progress item exists to claim the work. The agent must either
+ * file/transition an item describing what was just edited, or revert
+ * the edits, before stopping.
  */
-export function buildAutoCommitStopReason(cp: CommitPoint | null): string {
-  const commitArgs = cp
-    ? `{ commit_point_id: "${cp.id}", message: "<final message>" }`
-    : `{ auto: true, message: "<final message>" }`;
-  const lines = [
-    `Auto-commit is due in this thread${cp ? ` (commit_point_id=${cp.id}, mode=auto)` : ""}. Inspect the unstaged/staged changes with read-only git commands (\`git status\`, \`git diff\`, \`git diff --staged\`), draft a concise commit message from what you see, then call \`mcp__oxplow__commit\` with ${commitArgs}.`,
+export function buildFilingEnforcementStopReason(): string {
+  return [
+    `BLOCKED: this turn edited project files but no work item was filed or transitioned, and no in_progress item exists to claim the work. Every write requires a tracked work item — there is no trivial-edit carve-out.`,
     ``,
-    `Your own memory of this turn's work is the primary source; if you've lost context of earlier completed tasks that should be part of this commit, call \`mcp__oxplow__tasks_since_last_commit\` for supplementary context. The diff is still the source of truth — don't list items that aren't represented in the diff.`,
+    `Pick one of these before stopping:`,
+    `  • If the edits are a fix/redo of a recently-closed human_check item, reopen it: \`mcp__oxplow__update_work_item\` → status=in_progress, then \`mcp__oxplow__complete_task\` back to human_check when settled.`,
+    `  • If the edits are a genuinely new concern, file a new task: \`mcp__oxplow__create_work_item\` with status=in_progress, then \`mcp__oxplow__complete_task\` to close it.`,
+    `  • If the edits should not have happened, revert them (e.g. via the Files panel or \`git checkout -- <path>\`), then stop normally.`,
     ``,
-    `Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style. This is auto-commit — do NOT ask the user to approve first; commit in this turn.`,
+    `Do not file a placeholder "untracked work" item just to dismiss this — describe the real edits that landed. The Work panel needs to honestly reflect what shipped this turn.`,
+  ].join("\n");
+}
+
+export function buildStaleEpicChildrenStopReason(
+  pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>,
+): string {
+  const lines: string[] = [
+    `BLOCKED: ${pairs.length === 1 ? "an epic" : `${pairs.length} epics`} on this thread ${pairs.length === 1 ? "is" : "are"} closed (human_check/blocked) but still ${pairs.length === 1 ? "has" : "have"} non-terminal children. The Plan-pane epic rollup will pull the epic back into To Do, hiding the closed state from the rail counts.`,
+    ``,
   ];
+  for (const { epic, staleChildren } of pairs) {
+    lines.push(`Epic "${epic.title}" (${epic.id}) — status=${epic.status} but has ${staleChildren.length} non-terminal child${staleChildren.length === 1 ? "" : "ren"}:`);
+    for (const child of staleChildren) {
+      lines.push(`  • ${child.id} (${child.status}) "${child.title}"`);
+    }
+    lines.push(``);
+  }
+  lines.push(
+    `Fix one of:`,
+    `  • If the children's work shipped with the epic, close them via \`mcp__oxplow__transition_work_items\` (target=human_check or blocked).`,
+    `  • If the children still need work, reopen the epic via \`mcp__oxplow__update_work_item\` (status=ready or in_progress).`,
+  );
   return lines.join("\n");
 }
 
-export function buildCommitPointStopReason(cp: CommitPoint): string {
-  const lines = [
-    `A commit point is due in this thread's work queue (commit_point_id=${cp.id}).`,
+export function buildFiledButDidntShipStopReason(): string {
+  return [
+    `ADVISORY: this turn filed at least one new \`ready\` work item but didn't edit any project files, and you have nothing in_progress.`,
     ``,
-    `Inspect the unstaged/staged changes since the last commit using read-only commands (\`git status\`, \`git diff\`, \`git diff --staged\`), then draft a concise commit message describing those changes. Follow the repo's commit-message conventions (see CLAUDE.md or your user memory) for style.`,
+    `\`status: "ready"\` is for **backlog** — "I noticed this for later". When the user gives a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), the deliverable is the change itself, not the row that tracks it.`,
     ``,
-    `Output the drafted message in your chat reply and ask the user to approve or suggest changes. Do NOT run \`git add\` or \`git commit\` yourself.`,
+    `If the user told you to do the work this turn:`,
+    `  • Reopen the relevant ready row(s): \`mcp__oxplow__update_work_item\` → status=in_progress.`,
+    `  • Make the edits. Close back to \`human_check\` with \`complete_task\`.`,
     ``,
-    `When the user approves, call \`mcp__oxplow__commit\` with { commit_point_id: "${cp.id}", message: "<final message>" } — that runs the git commit. If the user suggests changes, redraft the message in your next reply and ask again; only call \`mcp__oxplow__commit\` once the user has explicitly approved.`,
-  ];
-  return lines.join("\n");
+    `If the user only asked you to log/file/remember the items (legitimate backlog capture), reply briefly confirming what you filed and stop — the directive is advisory, not a wall.`,
+  ].join("\n");
+}
+
+export function buildWikiCaptureStopReason(): string {
+  return [
+    `This turn was code exploration — read-heavy with no write activity. Before stopping, capture the synthesized understanding into a wiki note so it's durable for future sessions.`,
+    ``,
+    `Follow the \`oxplow-wiki-capture\` skill:`,
+    `1. Search existing notes by title (\`mcp__oxplow__search_notes\`), body content (\`mcp__oxplow__search_note_bodies\`), and file backlinks (\`mcp__oxplow__find_notes_for_file\` for each non-trivial file you read this turn).`,
+    `2. If a clearly-relevant note already covers the topic, append a new \`## <yyyy-mm-dd> — <focus>\` section. Only create a new note if no topic match.`,
+    `3. Write the body to \`.oxplow/notes/<slug>.md\` (kebab-case slug, ≤50 chars, topic-shaped).`,
+    `4. Call \`mcp__oxplow__resync_note\` to pin freshness.`,
+    ``,
+    `If the exploration was genuinely too trivial to capture (a single-file lookup with no synthesis), reply with the single line \`oxplow-note: skipped\` and stop — that's the escape hatch.`,
+  ].join("\n");
 }
 
 class RuntimeSocket extends EventEmitter {
@@ -2337,7 +2589,9 @@ function buildThreadAgentPrompt(
     activeThread && activeThread.id !== thread.id
       ? `ACTIVE (writer) thread: "${activeThread.title}" (id: ${activeThread.id}). Only that thread can commit; your thread is read-only.`
       : `Your thread is the ACTIVE writer — the only thread allowed to commit.`,
-    `When you realize you're about to change project files and aren't already on a work item, file one with status \`in_progress\` and track your work against it. Pick the shape by structure, not by whether you planned it: \`mcp__oxplow__create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`mcp__oxplow__file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently (distinct phases, handoffs, or subsystems). Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task — plenty of plans describe single tasks. No "auto" placeholder items — commit to a real, durable row. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (normal finish; pass \`touchedFiles\` with paths you edited so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). It's fine for an item to stay \`in_progress\` across turns when you're mid-flight or waiting on a user question — just don't leave finished work parked there. Load the oxplow-runtime skill for tool details.`,
+    `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`human_check\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`human_check\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
+    `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
+    `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -2621,11 +2875,13 @@ export function applyStatusTransition(
     // "open effort" marker. We need the id to attach the touched-files
     // payload to the row just closed.
     const openEffort = deps.effortStore.getOpenEffort(workItemId);
-    // 5-minute gap rule: skip the end-of-effort snapshot when the
-    // stream's most recent snapshot is younger than the threshold.
-    // Leaves effort.end_snapshot_id null; computeEffortFiles already
-    // returns null for an open-ended effort, so the History view will
-    // wait until the next snapshot lands.
+    // Any move out of in_progress (human_check / blocked / ready /
+    // canceled / archived) triggers a possible task-end snapshot — the
+    // work just paused, so capture the worktree state. The 5-minute gap
+    // rule suppresses the flush when the stream's most recent snapshot
+    // is younger than the threshold so back-to-back transitions don't
+    // pile up near-identical rows. Leaves effort.end_snapshot_id null
+    // in the skip case; computeEffortFiles already tolerates a null end.
     const lastSnapTs = deps.getMostRecentSnapshotTimestamp?.() ?? null;
     const skipEnd = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
     const endSnapshotId = skipEnd
@@ -2642,6 +2898,16 @@ export function applyStatusTransition(
         }
       }
     }
+  } else if (previous && next && previous !== next) {
+    // Any other status transition (e.g. ready ↔ blocked, human_check →
+    // done, etc.) where neither side is `in_progress`. No effort opens
+    // or closes, but capture the worktree state with a `task-event`
+    // snapshot so the user sees these moments in Local History. Same
+    // 5-minute gap rule as task-end so back-to-back changes don't pile
+    // up near-identical rows.
+    const lastSnapTs = deps.getMostRecentSnapshotTimestamp?.() ?? null;
+    const skip = lastSnapTs !== null && shouldSkipEndSnapshot(lastSnapTs, Date.now());
+    if (!skip) deps.flushSnapshot("task-event", { effortId: null });
   }
 }
 
@@ -2771,6 +3037,16 @@ const READONLY_BASH_LEADING: ReadonlySet<string> = new Set([
 ]);
 const READONLY_BASH_TWO_WORD: ReadonlySet<string> = new Set([
   "git log", "git diff", "git status", "git show", "git blame",
+  // `git commit` / `git push` modify .git but not project files, and the
+  // work being committed is already tracked by the work items that
+  // landed earlier — counting them as write-intent makes the filing-
+  // enforcement Stop branch fire on every "commit my changes" turn,
+  // forcing the agent to file a placeholder "Commit XYZ" item just to
+  // attribute the Bash invocation. They still count as activity (a
+  // turn with a commit isn't a Q&A turn) because `isReadIntentTool`'s
+  // "Bash that isn't write-intent counts as a read" rule pulls them
+  // into the read column.
+  "git commit", "git push",
   "bun test", "bunx tsc",
 ]);
 
@@ -2781,6 +3057,23 @@ const READONLY_BASH_TWO_WORD: ReadonlySet<string> = new Set([
  * positives are cheap (an extra auto-filed item) — we err toward
  * write-intent when unsure so we don't miss genuine edits.
  */
+/** Tools that count as "read activity" for the wiki-capture exploration
+ *  heuristic. Read/Grep/Glob always count; Bash counts only when its
+ *  command starts with a known read-only verb (same allowlist used by
+ *  `isWriteIntentTool` for the inverse decision). MCP read tools that
+ *  aren't filing/dispatch are intentionally excluded — those don't
+ *  represent code exploration. */
+const ALWAYS_READ_INTENT_TOOLS: ReadonlySet<string> = new Set([
+  "Read", "Grep", "Glob",
+]);
+
+export function isReadIntentTool(toolName: string, toolInput: unknown): boolean {
+  if (ALWAYS_READ_INTENT_TOOLS.has(toolName)) return true;
+  if (toolName !== "Bash") return false;
+  // Read-only Bash counts as a read; write-intent Bash doesn't.
+  return !isWriteIntentTool(toolName, toolInput);
+}
+
 export function isWriteIntentTool(toolName: string, toolInput: unknown): boolean {
   if (ALWAYS_WRITE_INTENT_TOOLS.has(toolName)) return true;
   if (toolName !== "Bash") return false;

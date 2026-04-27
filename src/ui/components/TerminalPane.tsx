@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../../electron/ipc-contract.js";
@@ -9,6 +9,18 @@ import {
   shouldRouteWheelToTmuxHistory,
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
+import { subscribeAgentInput } from "../agent-input-bus.js";
+import {
+  WORK_ITEM_DRAG_MIME_VALUE,
+  decodeWorkItemDragRefs,
+  dragHasContextRef,
+  dragHasWorkItemRefs,
+  readContextRef,
+} from "../agent-context-dnd.js";
+import { formatContextMention } from "../agent-context-ref.js";
+import { Kebab } from "./Kebab.js";
+import type { MenuItem } from "../menu.js";
+import { getActiveXtermTheme, subscribeXtermTheme } from "../xterm-theme.js";
 
 /**
  * Read the system clipboard as text. Prefers Electron's main-process
@@ -47,11 +59,60 @@ export function TerminalPane({
   const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
+  const [dragHovering, setDragHovering] = useState(false);
 
   function setInteractionMode(next: "live" | "history") {
     modeRef.current = next;
     setMode(next);
   }
+
+  const pasteFromClipboard = () => {
+    const term = termRef.current;
+    if (!term) return;
+    void readClipboard().then((text) => {
+      if (text) {
+        term.paste(text);
+        term.focus();
+      }
+    }).catch((error) => {
+      logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
+    });
+  };
+
+  const copySelection = () => {
+    const term = termRef.current;
+    if (!term) return;
+    const selection = term.getSelection();
+    if (!selection) return;
+    try {
+      void navigator.clipboard.writeText(selection).catch((error) => {
+        logUi("warn", "terminal copy: clipboard write failed", { error: String(error) });
+      });
+    } catch {
+      // ignored — older browsers without async clipboard API
+    }
+  };
+
+  const headerMenu: MenuItem[] = [
+    {
+      id: "terminal.copy",
+      label: "Copy selection",
+      enabled: true,
+      run: copySelection,
+    },
+    {
+      id: "terminal.paste",
+      label: "Paste",
+      enabled: true,
+      run: pasteFromClipboard,
+    },
+    {
+      id: "terminal.clear",
+      label: "Clear",
+      enabled: true,
+      run: () => { termRef.current?.clear(); termRef.current?.focus(); },
+    },
+  ];
 
   useEffect(() => {
     if (!visible) return;
@@ -62,6 +123,71 @@ export function TerminalPane({
     setInteractionMode("live");
   }, [paneTarget, transportMode, visible]);
 
+  // Subscribe to the "Add to agent context" bus only while this pane is
+  // visible — `insertIntoAgent` from a drag-drop or right-click anywhere
+  // in the UI naturally targets the agent the user is currently looking
+  // at. `term.paste(text)` writes through xterm's input pipeline so the
+  // existing `onData` handler ships the bytes to the agent process for
+  // both direct and tmux transports — no transport branching here.
+  useEffect(() => {
+    if (!visible) return;
+    const unsub = subscribeAgentInput((text) => {
+      const term = termRef.current;
+      if (!term) return;
+      term.paste(text);
+      term.focus();
+    });
+    return unsub;
+  }, [visible]);
+
+  function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
+    // Accept either the standalone "context ref" MIME (file/note/work-item
+    // single-row drag) or a multi-id work-item DnD payload (Plan pane
+    // marked-set drag). Both end up inserted as @-mentions / bracketed
+    // refs through the same `term.paste` pipeline.
+    if (!dragHasContextRef(e) && !dragHasWorkItemRefs(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragHovering) setDragHovering(true);
+  }
+
+  function handleDragLeave(e: ReactDragEvent<HTMLDivElement>) {
+    // Fires for child-element transitions too; only clear when the
+    // pointer truly leaves the host.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragHovering(false);
+  }
+
+  function handleDrop(e: ReactDragEvent<HTMLDivElement>) {
+    setDragHovering(false);
+    const term = termRef.current;
+    if (!term) return;
+
+    // Multi-id work-item payload first — when present, iterate every id
+    // and paste a space-separated chain of context mentions. This is the
+    // path for "drag a marked Plan-pane row into the agent" (one or many).
+    if (dragHasWorkItemRefs(e)) {
+      const raw = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME_VALUE);
+      const refs = decodeWorkItemDragRefs(raw);
+      if (refs.length > 0) {
+        e.preventDefault();
+        const text = refs.map(formatContextMention).join("");
+        term.paste(text);
+        term.focus();
+        return;
+      }
+      // Fall through if the items slice was missing — older drag sources
+      // may not embed it; still try the standalone CONTEXT_REF_MIME path.
+    }
+
+    const ref = readContextRef(e);
+    if (!ref || (ref.kind === "file" && ref.path === "")) return;
+    e.preventDefault();
+    const text = formatContextMention(ref);
+    term.paste(text);
+    term.focus();
+  }
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -69,7 +195,7 @@ export function TerminalPane({
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
-      theme: { background: "#0e0e0e", foreground: "#e6e6e6" },
+      theme: getActiveXtermTheme(),
       scrollback: 5000,
       cursorBlink: true,
       scrollSensitivity: 2,
@@ -80,6 +206,11 @@ export function TerminalPane({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Re-tint the terminal whenever the user flips the app theme. xterm
+    // applies `options.theme = next` on the live terminal — no re-mount.
+    const unsubTheme = subscribeXtermTheme((next) => {
+      try { term.options.theme = next; } catch { /* terminal may have disposed */ }
+    });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {
         return true;
@@ -237,19 +368,10 @@ export function TerminalPane({
       };
       host.addEventListener("paste", handlePaste);
 
-      // Electron disables the browser's default context menu in renderers,
-      // so a plain right-click shows nothing. Match the tmux / iTerm2
-      // convention — right-click = paste — instead of wiring up a full menu
-      // for a single item.
-      const handleContextMenu = (event: MouseEvent) => {
-        event.preventDefault();
-        void readClipboard().then((text) => {
-          if (text) term.paste(text);
-        }).catch((error) => {
-          logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
-        });
-      };
-      host.addEventListener("contextmenu", handleContextMenu);
+      // Right-click no longer pastes — the IA redesign moved every per-row
+      // / per-pane action to a visible kebab `⋯` (see `.context/usability.md`).
+      // The header-bar kebab below carries the Paste action; Cmd/Ctrl+V still
+      // pastes via the keydown handler in the surrounding mousedown listener.
 
       // Direct-mode agents replay their scrollback synchronously from inside
       // the openTerminalSession handler, so terminal-event messages may reach
@@ -326,7 +448,6 @@ export function TerminalPane({
       cleanupRef.current = () => {
         host.removeEventListener("mousedown", handleMouseDown);
         host.removeEventListener("paste", handlePaste);
-        host.removeEventListener("contextmenu", handleContextMenu);
         unsubscribe();
         prevCleanup?.();
       };
@@ -338,6 +459,7 @@ export function TerminalPane({
       disposed = true;
       cleanupRef.current?.();
       ro?.disconnect();
+      unsubTheme();
       dataDisp.dispose();
       binaryDisp.dispose();
       const sessionId = sessionIdRef.current;
@@ -351,8 +473,50 @@ export function TerminalPane({
   }, [paneTarget, transportMode]);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <div ref={hostRef} style={{ width: "100%", height: "100%" }} />
+    <div
+      style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          padding: "2px 6px",
+          borderBottom: "1px solid var(--border-subtle)",
+          background: "var(--surface-rail)",
+          flex: "0 0 auto",
+        }}
+      >
+        <Kebab
+          items={headerMenu}
+          size={16}
+          testId="terminal-pane-kebab"
+          label="Terminal actions"
+        />
+      </div>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: "100%" }} />
+      {dragHovering ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            border: "2px dashed var(--accent)",
+            background: "var(--accent-soft-bg)",
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            zIndex: 5,
+          }}
+        >
+          Drop to add to agent context
+        </div>
+      ) : null}
       {mode === "history" ? (
         <div
           style={{

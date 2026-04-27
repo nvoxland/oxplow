@@ -96,8 +96,11 @@ test("MCP handshake: initialize, tools/list, tools/call oxplow__ping", async () 
     const list = await rpc(ws, 2, "tools/list", {});
     expect(list.error).toBeUndefined();
     const tools = list.result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toContain("oxplow__ping");
+    expect(tools.map((t) => t.name)).toContain("ping");
 
+    // Both the exposed short name and the legacy `oxplow__` long form must
+    // resolve to the same tool — keep back-compat for callers that haven't
+    // refreshed their tool list.
     const call = await rpc(ws, 3, "tools/call", {
       name: "oxplow__ping",
       arguments: {},
@@ -153,7 +156,7 @@ test("HTTP MCP handshake: initialize, tools/list, tools/call oxplow__ping", asyn
     expect(listRes.status).toBe(200);
     const list = await listRes.json();
     expect(list.error).toBeUndefined();
-    expect((list.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toContain("oxplow__ping");
+    expect((list.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toContain("ping");
 
     const callRes = await fetch(server.httpUrl, {
       method: "POST",

@@ -177,6 +177,24 @@ describe("applyStatusTransition + 5-minute gap rule", () => {
     rmSync(h.dir, { recursive: true, force: true });
   });
 
+  test("effort-end flushes a snapshot on any move out of in_progress (e.g. blocked)", () => {
+    const h = harness();
+    applyStatusTransition(h.deps, {
+      threadId: "t", workItemId: h.itemId, previous: "ready", next: "in_progress",
+    });
+    writeFileSync(join(h.dir, "a.txt"), "v1");
+    // Past the 5-minute gap — flush should fire even for a non-human_check
+    // close, since the work paused and Local History wants the state.
+    h.setTsOverride(new Date(Date.now() - 10 * 60_000).toISOString());
+    applyStatusTransition(h.deps, {
+      threadId: "t", workItemId: h.itemId, previous: "in_progress", next: "blocked",
+    });
+    const closed = h.efforts.listEffortsForWorkItem(h.itemId)[0]!;
+    expect(closed.ended_at).not.toBeNull();
+    expect(closed.end_snapshot_id).not.toBeNull();
+    rmSync(h.dir, { recursive: true, force: true });
+  });
+
   test("end snapshot carries effort_id back to the file_snapshot row", () => {
     const h = harness();
     // Mutate before each transition so neither snapshot dedups onto an

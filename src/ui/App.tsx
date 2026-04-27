@@ -12,7 +12,6 @@ import {
   reorderWorkItems,
   moveWorkItemToThread,
   getBacklogState,
-  createBacklogItem,
   updateBacklogItem,
   deleteBacklogItem,
   reorderBacklog,
@@ -39,6 +38,7 @@ import {
   setGeneratedDirs,
   selectThread,
   promoteThread,
+  recordUsage,
   reorderThreads,
   reorderStreams,
   switchStream,
@@ -70,22 +70,40 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { StreamRail } from "./components/StreamRail.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { SettingsModal } from "./components/SettingsModal.js";
-import { ConfirmDialog } from "./components/ConfirmDialog.js";
+import { showToast } from "./components/toastStore.js";
+import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
-import { BottomPanel } from "./components/BottomPanel.js";
-import { DockShell } from "./components/Dock/DockShell.js";
-import type { ToolWindow } from "./components/Dock/ToolWindow.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import { ThreadRail } from "./components/ThreadRail.js";
-import { ProjectPanel } from "./components/Panels/ProjectPanel.js";
 import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
-import { PlanPane } from "./components/Plan/PlanPane.js";
-import { NotesPane } from "./components/Notes/NotesPane.js";
-import { NoteTab } from "./components/Notes/NoteTab.js";
-import { HistoryPanel } from "./components/History/HistoryPanel.js";
-import { SnapshotsPanel } from "./components/Snapshots/SnapshotsPanel.js";
+import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
+import { RailHud } from "./components/RailHud/RailHud.js";
+import type { TabRef } from "./tabs/tabState.js";
+import { StartPage } from "./pages/StartPage.js";
+import { SettingsPage } from "./pages/SettingsPage.js";
+import { CodeQualityPage } from "./pages/CodeQualityPage.js";
+import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
+import { GitHistoryPage } from "./pages/GitHistoryPage.js";
+import { GitDashboardPage } from "./pages/GitDashboardPage.js";
+import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
+import { HookEventsPage } from "./pages/HookEventsPage.js";
+import { FilesPage } from "./pages/FilesPage.js";
+import { NotesIndexPage } from "./pages/NotesIndexPage.js";
+import { PlanWorkPage } from "./pages/PlanWorkPage.js";
+import { DoneWorkPage } from "./pages/DoneWorkPage.js";
+import { BacklogPage } from "./pages/BacklogPage.js";
+import { ArchivedPage } from "./pages/ArchivedPage.js";
+import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
+import { WorkItemPage } from "./pages/WorkItemPage.js";
+import { FindingPage } from "./pages/FindingPage.js";
+import { NotePage } from "./pages/NotePage.js";
+import { DashboardPage } from "./pages/DashboardPage.js";
+import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
+import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
+import { NewStreamPage } from "./pages/NewStreamPage.js";
+import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
+import { indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -160,7 +178,18 @@ export function App() {
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [stream, setStream] = useState<Stream | null>(null);
-  const [centerActive, setCenterActive] = useState<string>(() => readPersistedCenterActive() ?? "agent");
+  // Per-thread active center tab. The map is the source of truth; `centerActive`
+  // and `setCenterActive` below are derived helpers so existing handler code
+  // keeps working unchanged. Each thread remembers its last active tab so
+  // switching threads restores it. The initial seed comes from the legacy
+  // global localStorage key (the "default" thread inherits whatever was last
+  // active before the per-thread refactor).
+  const [threadCenterActive, setThreadCenterActive] = useState<Record<string, string>>({});
+  // Per-thread open "page" tabs that aren't files/notes/diffs (Start, future
+  // index/dashboard pages). Stored as TabRef so the rendering side can
+  // dispatch by kind. Independent of the legacy noteTabs/diffTabs lists,
+  // which still drive the tabs they own.
+  const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [noteTabs, setNoteTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -173,14 +202,11 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [pendingDirtyClose, setPendingDirtyClose] = useState<{ path: string; basename: string } | null>(null);
   const [historyReveal, setHistoryReveal] = useState<{ sha: string; token: number } | null>(null);
   const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
-  const [bottomActivate, setBottomActivate] = useState<{ id: string; token: number } | undefined>(undefined);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
@@ -264,7 +290,16 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
       const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-      setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
+      // Seed the new thread's center-active only if we don't already have a
+      // remembered value for it. Per-thread persistence means returning to a
+      // thread restores its prior tab; only initial entry uses the file-session
+      // selected path as a heuristic.
+      if (nextThread) {
+        const seeded = nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent";
+        setThreadCenterActive((prev) => (
+          prev[nextThread.id] !== undefined ? prev : { ...prev, [nextThread.id]: seeded }
+        ));
+      }
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -302,6 +337,10 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
       const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
       if (thread) {
+        const seeded = "agent";
+        setThreadCenterActive((prev) => (
+          prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
+        ));
         void getThreadWorkState(next.id, thread.id).then((work) => {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
@@ -314,8 +353,6 @@ export function App() {
       return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
     });
     setStream(next);
-    const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
-    setCenterActive(nextSession.selectedPath ? `file:${nextSession.selectedPath}` : "agent");
     setError(null);
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
@@ -334,6 +371,13 @@ export function App() {
     });
     setCenterActive(`file:${path}`);
     setError(null);
+    void recordUsage({
+      kind: "editor-file",
+      key: path,
+      event: "open",
+      streamId: stream.id,
+      threadId: selectedThread?.id ?? null,
+    }).catch(() => {});
     if (existing && !existing.isLoading) return;
     try {
       const file = await readWorkspaceFile(stream.id, path);
@@ -409,11 +453,33 @@ export function App() {
   function handleCloseOpenFile(path: string) {
     if (!stream) return;
     // Guard against silently dropping unsaved edits when a user closes a
-    // dirty tab via the × or Cmd+W. Mirrors IntelliJ / VS Code behavior.
+    // dirty tab via the × or Cmd+W. Phase-5 redesign: fire-and-undo
+    // instead of a blocking confirm — close immediately, surface a
+    // toast that offers Undo for ~7s. The toast captures the draft so
+    // undo restores the unsaved buffer; if the user lets the toast
+    // expire, the draft is gone (same end-state as the old "Discard").
     const currentFile = fileSessions[stream.id]?.files[path];
+    const targetStream = stream;
     if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
       const basename = path.split("/").pop() ?? path;
-      setPendingDirtyClose({ path, basename });
+      const stashed = {
+        savedContent: currentFile.savedContent,
+        draftContent: currentFile.draftContent,
+      };
+      closeOpenFileNow(path);
+      showToast({
+        message: `Closed "${basename}" with unsaved changes.`,
+        actionLabel: "Undo",
+        onUndo: () => {
+          setFileSessions((prev) => {
+            const session = prev[targetStream.id] ?? createEmptyFileSession();
+            const restored = setLoadedFileContent(session, path, stashed.savedContent);
+            const withDraft = updateFileDraft(restored, path, stashed.draftContent);
+            return { ...prev, [targetStream.id]: withDraft };
+          });
+          setCenterActive(`file:${path}`);
+        },
+      });
       return;
     }
     closeOpenFileNow(path);
@@ -669,17 +735,6 @@ export function App() {
     }
   }
 
-  async function handleCreateBacklogItem(input: Parameters<typeof createBacklogItem>[0]) {
-    try {
-      const next = await createBacklogItem(input);
-      setBacklogState(next);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
   async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
     try {
       const next = await updateBacklogItem(itemId, changes);
@@ -725,6 +780,25 @@ export function App() {
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
+  const selectedThreadId = selectedThread?.id ?? null;
+  // Derived from the per-thread map. When no thread is selected, fall back to
+  // a sentinel that keeps existing UI selectors happy (they all default to
+  // "agent" eventually).
+  const centerActive = selectedThreadId
+    ? threadCenterActive[selectedThreadId] ?? readPersistedCenterActive() ?? "agent"
+    : "agent";
+  const setCenterActive = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      if (!selectedThreadId) return;
+      setThreadCenterActive((prev) => {
+        const current = prev[selectedThreadId] ?? readPersistedCenterActive() ?? "agent";
+        const value = typeof next === "function" ? next(current) : next;
+        if (value === current) return prev;
+        return { ...prev, [selectedThreadId]: value };
+      });
+    },
+    [selectedThreadId],
+  );
   // Reset terminal transport to direct whenever the active pane target
   // changes — matches the old TerminalPane's internal useEffect.
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
@@ -1121,8 +1195,6 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  const [leftDockActivate, setLeftDockActivate] = useState<{ id: string; token: number } | undefined>(undefined);
-  const [planNewRequest, setPlanNewRequest] = useState(0);
   // Agent-terminal transport — lifted from TerminalPane so the Agent
   // tab's right-click menu can toggle between direct stdin and tmux.
   // Reset to direct when the active thread changes (the old TerminalPane
@@ -1137,6 +1209,10 @@ export function App() {
   // useEffect chain can stall for 10+ seconds before committing. Direct
   // ref call inside flushSync sidesteps the scheduler entirely.
   const planOpenCreateRef = useRef<(() => void) | null>(null);
+  // Forward ref so commandHandlers (declared above handleOpenPage) can
+  // route through the same page-tab opener used by every other caller.
+  // The ref is populated in a useEffect after handleOpenPage is defined.
+  const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commandState = useMemo(
     () => ({
@@ -1169,35 +1245,27 @@ export function App() {
       if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
     },
     newWorkItem() {
-      // Open the Plan dock (mounts PlanPane if it's not already) and
-      // open the create modal. If PlanPane is mounted, call its
-      // registered opener directly so setModalMode commits inside the
-      // parent's flushSync — the fallback via setPlanNewRequest handles
-      // the edge case where PlanPane hasn't mounted yet (its
-      // openNewRequest useEffect will fire once it does).
-      setLeftDockActivate((prev) => ({ id: "plan", token: (prev?.token ?? 0) + 1 }));
-      if (planOpenCreateRef.current) {
-        planOpenCreateRef.current();
-      } else {
-        setPlanNewRequest((prev) => prev + 1);
-      }
+      // handleOpenPage is declared further down; forward through the ref
+      // so the menu/keyboard handler routes to a NewWorkItemPage tab
+      // (replaces the legacy openCreateModal-via-PlanPane path).
+      handleOpenPageRef.current?.(newWorkItemRef());
     },
     newStream() {
-      setStreamCreateRequest((n) => n + 1);
+      handleOpenPageRef.current?.(newStreamRef());
     },
     newThread() {
       if (!stream) return;
       setThreadCreateRequest((n) => n + 1);
     },
     openHistory() {
-      setBottomActivate({ id: "history", token: Date.now() });
+      handleOpenPageRef.current?.(indexRef("git-history"));
     },
     openSnapshots() {
-      setBottomActivate({ id: "snapshots", token: Date.now() });
+      handleOpenPageRef.current?.(indexRef("local-history"));
     },
     commitFiles() {
       if (!stream || !workspaceContext.gitEnabled) return;
-      setLeftDockActivate((prev) => ({ id: "project", token: (prev?.token ?? 0) + 1 }));
+      handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
     },
   }), [stream, selectedFilePath, workspaceContext.gitEnabled]);
@@ -1285,13 +1353,15 @@ export function App() {
     });
   }, [commandMap, isElectron]);
 
+  const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
     const ids = new Set(["agent"]);
     for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
     for (const slug of noteTabs) ids.add(`note:${slug}`);
+    for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
-  }, [currentSession.openOrder, diffTabs, noteTabs]);
+  }, [currentSession.openOrder, diffTabs, noteTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1332,19 +1402,26 @@ export function App() {
   const handleRevealCommit = (sha: string) => {
     const token = Date.now();
     setHistoryReveal({ sha, token });
-    setBottomActivate({ id: "history", token });
+    handleOpenPage(indexRef("git-history"));
   };
 
   const handleRequestEditWorkItem = (itemId: string) => {
     const token = Date.now();
-    setLeftDockActivate({ id: "plan", token });
+    handleOpenPage(indexRef("plan-work"));
     setPlanEditRequest({ itemId, token });
+    void recordUsage({
+      kind: "work-item",
+      key: itemId,
+      event: "open",
+      streamId: stream?.id ?? null,
+      threadId: selectedThread?.id ?? null,
+    }).catch(() => {});
   };
 
   const handleShowSnapshotInHistory = (snapshotId: string) => {
     const token = Date.now();
-    setBottomActivate({ id: "snapshots", token });
     setSnapshotsReveal({ snapshotId, token });
+    handleOpenPage(indexRef("local-history"));
   };
 
   const closeDiffTab = (id: string) => {
@@ -1355,7 +1432,17 @@ export function App() {
   const handleOpenNote = useCallback((slug: string) => {
     setNoteTabs((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
     setCenterActive(`note:${slug}`);
-  }, []);
+    const sid = stream?.id ?? null;
+    if (sid) {
+      void recordUsage({
+        kind: "wiki-note",
+        key: slug,
+        event: "open",
+        streamId: sid,
+        threadId: selectedThread?.id ?? null,
+      }).catch(() => {});
+    }
+  }, [stream?.id, selectedThread?.id]);
 
   const closeNoteTab = useCallback((slug: string) => {
     setNoteTabs((prev) => prev.filter((s) => s !== slug));
@@ -1393,6 +1480,81 @@ export function App() {
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "idle" : "idle";
 
+  const recentFileEntries = useMemo(() => {
+    const order = currentSession.openOrder;
+    return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
+  }, [currentSession.openOrder]);
+
+  const handleOpenPage = useCallback((ref: TabRef) => {
+    switch (ref.kind) {
+      case "agent":
+        setCenterActive("agent");
+        return;
+      case "file": {
+        const payload = ref.payload as { path?: string } | null;
+        if (payload?.path) void handleOpenFile(payload.path);
+        return;
+      }
+      case "note": {
+        const payload = ref.payload as { slug?: string } | null;
+        if (payload?.slug) handleOpenNote(payload.slug);
+        return;
+      }
+      case "work-item":
+      case "finding":
+      case "dashboard":
+      case "start":
+      case "settings":
+      case "code-quality":
+      case "local-history":
+      case "git-history":
+      case "git-dashboard":
+      case "uncommitted-changes":
+      case "hook-events":
+      case "files":
+      case "notes-index":
+      case "plan-work":
+      case "done-work":
+      case "backlog":
+      case "archived":
+      case "subsystem-docs":
+      case "stream-settings":
+      case "thread-settings":
+      case "new-stream":
+      case "new-work-item": {
+        // Open as a per-thread page tab.
+        if (selectedThreadId) {
+          setThreadPageTabs((prev) => {
+            const existing = prev[selectedThreadId] ?? [];
+            if (existing.some((t) => t.id === ref.id)) return prev;
+            return { ...prev, [selectedThreadId]: [...existing, ref] };
+          });
+          setCenterActive(ref.id);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }, [handleOpenFile, handleOpenNote, selectedThreadId, setCenterActive]);
+
+  const closePageTab = useCallback((id: string) => {
+    if (!selectedThreadId) return;
+    setThreadPageTabs((prev) => {
+      const existing = prev[selectedThreadId] ?? [];
+      if (!existing.some((t) => t.id === id)) return prev;
+      return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
+    });
+    setCenterActive((current) => (current === id ? "agent" : current));
+  }, [selectedThreadId, setCenterActive]);
+
+  // Keep the forward ref in sync with the latest handleOpenPage. Used by
+  // commandHandlers (declared above handleOpenPage) so menu/keyboard
+  // dispatches route through the same page-tab opener.
+  useEffect(() => {
+    handleOpenPageRef.current = handleOpenPage;
+  }, [handleOpenPage]);
+
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [
       {
@@ -1410,11 +1572,21 @@ export function App() {
         ] : undefined,
         render: () =>
           selectedThread ? (
-            <TerminalPane
-              paneTarget={selectedThread.pane_target}
-              visible={effectiveCenterActive === "agent"}
-              transportMode={agentTransportMode}
-            />
+            <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+              <WikiActivityBar
+                streamId={stream?.id ?? null}
+                onOpenNote={handleOpenNote}
+                onOpenFile={(path) => { void handleOpenFile(path); }}
+                onOpenWorkItem={handleRequestEditWorkItem}
+              />
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <TerminalPane
+                  paneTarget={selectedThread.pane_target}
+                  visible={effectiveCenterActive === "agent"}
+                  transportMode={agentTransportMode}
+                />
+              </div>
+            </div>
           ) : (
             <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
           ),
@@ -1446,8 +1618,6 @@ export function App() {
             onNavigateToLocation={handleNavigateToLocation}
             openFileOrder={currentSession.openOrder}
             openFiles={currentSession.files}
-            onSelectOpenFile={handleSelectOpenFile}
-            onCloseOpenFile={handleCloseOpenFile}
             onRevealCommit={handleRevealCommit}
             onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
@@ -1462,7 +1632,15 @@ export function App() {
         closable: true,
         reorderGroup: "note",
         render: () => stream ? (
-          <NoteTab stream={stream} slug={slug} onClosed={() => closeNoteTab(slug)} onOpenNoteInNewTab={handleOpenNote} />
+          <NotePage
+            stream={stream}
+            slug={slug}
+            threadWork={selectedThreadWork}
+            onClosed={() => closeNoteTab(slug)}
+            onOpenNote={handleOpenNote}
+            onOpenFile={(p) => { void handleOpenFile(p); }}
+            onOpenPage={handleOpenPage}
+          />
         ) : null,
       });
     }
@@ -1487,6 +1665,344 @@ export function App() {
         ) : null,
       });
     }
+    const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    for (const ref of pageTabsForThread) {
+      if (ref.kind === "start") {
+        tabs.push({
+          id: ref.id,
+          label: "Start",
+          closable: true,
+          render: () => <StartPage onOpenPage={handleOpenPage} />,
+        });
+      } else if (ref.kind === "settings") {
+        tabs.push({
+          id: ref.id,
+          label: "Settings",
+          closable: true,
+          render: () => <SettingsPage onClose={() => closePageTab(ref.id)} />,
+        });
+      } else if (ref.kind === "code-quality") {
+        tabs.push({
+          id: ref.id,
+          label: "Code quality",
+          closable: true,
+          render: () => <CodeQualityPage stream={stream} onOpenFile={handleOpenFile} />,
+        });
+      } else if (ref.kind === "local-history") {
+        tabs.push({
+          id: ref.id,
+          label: "Local history",
+          closable: true,
+          render: () => (
+            <LocalHistoryPage
+              stream={stream}
+              onOpenDiff={handleOpenDiff}
+              revealSnapshotId={snapshotsReveal}
+              onRequestEditWorkItem={handleRequestEditWorkItem}
+            />
+          ),
+        });
+      } else if (ref.kind === "git-history") {
+        tabs.push({
+          id: ref.id,
+          label: "Git history",
+          closable: true,
+          render: () => (
+            <GitHistoryPage stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />
+          ),
+        });
+      } else if (ref.kind === "git-dashboard") {
+        tabs.push({
+          id: ref.id,
+          label: "Git dashboard",
+          closable: true,
+          render: () => (
+            <GitDashboardPage
+              stream={stream}
+              onOpenPage={handleOpenPage}
+              onRevealCommit={handleRevealCommit}
+            />
+          ),
+        });
+      } else if (ref.kind === "uncommitted-changes") {
+        tabs.push({
+          id: ref.id,
+          label: "Uncommitted",
+          closable: true,
+          render: () => (
+            <UncommittedChangesPage
+              stream={stream}
+              onOpenPage={handleOpenPage}
+              onOpenFile={handleOpenFile}
+            />
+          ),
+        });
+      } else if (ref.kind === "hook-events") {
+        tabs.push({
+          id: ref.id,
+          label: "Hook events",
+          closable: true,
+          render: () => <HookEventsPage streamId={stream?.id ?? null} />,
+        });
+      } else if (ref.kind === "files") {
+        tabs.push({
+          id: ref.id,
+          label: "Files",
+          closable: true,
+          render: () => (
+            <FilesPage
+              stream={stream}
+              gitEnabled={workspaceContext.gitEnabled}
+              selectedFilePath={selectedFilePath}
+              generatedDirs={generatedDirs}
+              onOpenFile={handleOpenFile}
+              onOpenDiff={handleOpenDiff}
+              onCreateFile={handleCreateFile}
+              onCreateDirectory={handleCreateDirectory}
+              onRenamePath={handleRenamePath}
+              onDeletePath={handleDeletePath}
+              onToggleGeneratedDir={handleToggleGeneratedDir}
+              commitRequest={commitFilesRequest}
+            />
+          ),
+        });
+      } else if (ref.kind === "notes-index") {
+        tabs.push({
+          id: ref.id,
+          label: "Notes",
+          closable: true,
+          render: () => (
+            <NotesIndexPage
+              stream={stream}
+              selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
+              onOpenNote={handleOpenNote}
+            />
+          ),
+        });
+      } else if (
+        ref.kind === "plan-work"
+        || ref.kind === "done-work"
+        || ref.kind === "backlog"
+        || ref.kind === "archived"
+      ) {
+        const sharedProps = {
+          thread: selectedThread,
+          activeThreadId: currentThreadState.activeThreadId,
+          threadWork: selectedThreadWork,
+          agentStatus: agentThreadStatus,
+          backlog: backlogState,
+          onUpdateWorkItem: handleUpdateWorkItem,
+          onDeleteWorkItem: handleDeleteWorkItem,
+          onReorderWorkItems: handleReorderWorkItems,
+          onUpdateBacklogItem: handleUpdateBacklogItem,
+          onDeleteBacklogItem: handleDeleteBacklogItem,
+          onReorderBacklog: handleReorderBacklog,
+          onMoveItemToBacklog: handleMoveItemToBacklog,
+          editRequest: planEditRequest,
+          registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
+          onOpenNewWorkItemPage: (payload: { parentId?: string | null; editingItemId?: string | null }) =>
+            handleOpenPage(newWorkItemRef(payload)),
+        };
+        const labelByKind: Record<string, string> = {
+          "plan-work": "Plan work",
+          "done-work": "Done work",
+          "backlog": "Backlog",
+          "archived": "Archived",
+        };
+        tabs.push({
+          id: ref.id,
+          label: labelByKind[ref.kind] ?? ref.kind,
+          closable: true,
+          render: () => {
+            switch (ref.kind) {
+              case "plan-work":
+                return <PlanWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+              case "done-work":
+                return <DoneWorkPage {...sharedProps} onOpenPage={handleOpenPage} />;
+              case "backlog":
+                return <BacklogPage {...sharedProps} />;
+              case "archived":
+                return <ArchivedPage {...sharedProps} />;
+              default:
+                return null;
+            }
+          },
+        });
+      } else if (ref.kind === "subsystem-docs") {
+        tabs.push({
+          id: ref.id,
+          label: "Subsystem docs",
+          closable: true,
+          render: () => <SubsystemDocsPage stream={stream} onOpenPage={handleOpenPage} />,
+        });
+      } else if (ref.kind === "work-item") {
+        const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
+        const items = selectedThreadWork?.items ?? [];
+        const matching = items.find((i) => i.id === itemId);
+        tabs.push({
+          id: ref.id,
+          label: matching ? matching.title.slice(0, 40) : itemId,
+          closable: true,
+          render: () => (
+            <WorkItemPage
+              stream={stream}
+              thread={selectedThread}
+              itemId={itemId}
+              items={items}
+              threadWork={selectedThreadWork}
+              onOpenPage={handleOpenPage}
+              onOpenFile={handleOpenFile}
+              onShowInHistory={handleShowSnapshotInHistory}
+              onOpenDiff={handleOpenDiff}
+              onOpenCommitDiff={handleOpenDiff}
+            />
+          ),
+        });
+      } else if (ref.kind === "finding") {
+        const findingId = (ref.payload as { findingId?: string } | null)?.findingId ?? "";
+        tabs.push({
+          id: ref.id,
+          label: `Finding ${findingId}`,
+          closable: true,
+          render: () => (
+            <FindingPage
+              stream={stream}
+              findingId={findingId}
+              threadWork={selectedThreadWork}
+              onOpenPage={handleOpenPage}
+              onOpenFileAtLine={(p) => { void handleOpenFile(p); }}
+            />
+          ),
+        });
+      } else if (ref.kind === "stream-settings") {
+        const targetStreamId = (ref.payload as { streamId?: string } | null)?.streamId ?? "";
+        const targetStream = streams.find((s) => s.id === targetStreamId) ?? null;
+        tabs.push({
+          id: ref.id,
+          label: targetStream ? `Settings · ${targetStream.title}` : "Stream settings",
+          closable: true,
+          render: () => (
+            <StreamSettingsPage
+              stream={targetStream}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(next) => setStreams(next)}
+            />
+          ),
+        });
+      } else if (ref.kind === "thread-settings") {
+        const targetThreadId = (ref.payload as { threadId?: string } | null)?.threadId ?? "";
+        const targetThread = currentThreadState.threads.find((t) => t.id === targetThreadId) ?? null;
+        tabs.push({
+          id: ref.id,
+          label: targetThread ? `Settings · ${targetThread.title}` : "Thread settings",
+          closable: true,
+          render: () => (
+            <ThreadSettingsPage
+              streamId={stream?.id ?? ""}
+              thread={targetThread}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(nextThreads) => {
+                if (!stream) return;
+                setThreadStates((prev) => ({
+                  ...prev,
+                  [stream.id]: {
+                    ...(prev[stream.id] ?? { selectedThreadId: null, activeThreadId: null, threads: [] }),
+                    threads: nextThreads,
+                  },
+                }));
+              }}
+            />
+          ),
+        });
+      } else if (ref.kind === "new-stream") {
+        tabs.push({
+          id: ref.id,
+          label: "New stream",
+          closable: true,
+          render: () => (
+            <NewStreamPage
+              gitEnabled={workspaceContext.gitEnabled}
+              defaultTitle={`Stream ${streams.length + 1}`}
+              onClose={() => closePageTab(ref.id)}
+              onCreated={(created) => {
+                handleStreamCreated(created);
+                closePageTab(ref.id);
+              }}
+            />
+          ),
+        });
+      } else if (ref.kind === "new-work-item") {
+        const payload = (ref.payload as {
+          parentId?: string | null;
+          initialCategory?: string | null;
+          initialPriority?: string | null;
+          editingItemId?: string | null;
+        } | null) ?? {};
+        const editingItemId = payload.editingItemId ?? null;
+        // Look up the live work item from the loaded thread state. The
+        // edit page mutates against this id; if the item isn't loaded
+        // (e.g. it lives in a different thread) we fall through to
+        // create-mode rather than rendering a broken edit page.
+        const allItems = selectedThreadWork
+          ? [
+              ...selectedThreadWork.epics,
+              ...selectedThreadWork.waiting,
+              ...selectedThreadWork.inProgress,
+              ...selectedThreadWork.done,
+            ]
+          : [];
+        const editingItem = editingItemId
+          ? allItems.find((i) => i.id === editingItemId) ?? null
+          : null;
+        tabs.push({
+          id: ref.id,
+          label: editingItem ? "Edit work item" : "New work item",
+          closable: true,
+          render: () => (
+            <NewWorkItemPage
+              defaults={{
+                parentId: payload.parentId ?? null,
+                initialCategory: payload.initialCategory ?? null,
+                initialPriority: payload.initialPriority ?? null,
+              }}
+              epics={selectedThreadWork?.epics ?? []}
+              editingItem={editingItem}
+              onClose={() => closePageTab(ref.id)}
+              onSubmit={async (input) => {
+                await handleCreateWorkItem({
+                  kind: input.kind,
+                  title: input.title,
+                  description: input.description,
+                  acceptanceCriteria: input.acceptanceCriteria ?? null,
+                  parentId: input.parentId ?? null,
+                  status: input.status ?? "ready",
+                  priority: input.priority ?? "medium",
+                });
+              }}
+              onUpdate={async (itemId, changes) => {
+                await handleUpdateWorkItem(itemId, changes);
+              }}
+            />
+          ),
+        });
+      } else if (ref.kind === "dashboard") {
+        const variant = (ref.payload as { variant?: "planning" | "review" | "quality" } | null)?.variant ?? "planning";
+        tabs.push({
+          id: ref.id,
+          label: `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,
+          closable: true,
+          render: () => (
+            <DashboardPage
+              variant={variant}
+              stream={stream}
+              threadWork={selectedThreadWork}
+              backlog={backlogState}
+              onOpenPage={handleOpenPage}
+            />
+          ),
+        });
+      }
+    }
     return tabs;
   }, [
     selectedThread,
@@ -1502,92 +2018,22 @@ export function App() {
     noteTabs,
     closeNoteTab,
     handleOpenNote,
-  ]);
-
-  const leftToolWindows: ToolWindow[] = useMemo(() => [
-    {
-      id: "plan",
-      label: "Work",
-      render: () => (
-        <PlanPane
-          thread={selectedThread}
-          activeThreadId={currentThreadState.activeThreadId}
-          threadWork={selectedThreadWork}
-          agentStatus={agentThreadStatus}
-          backlog={backlogState}
-          onCreateWorkItem={handleCreateWorkItem}
-          onUpdateWorkItem={handleUpdateWorkItem}
-          onDeleteWorkItem={handleDeleteWorkItem}
-          onReorderWorkItems={handleReorderWorkItems}
-          onCreateBacklogItem={handleCreateBacklogItem}
-          onUpdateBacklogItem={handleUpdateBacklogItem}
-          onDeleteBacklogItem={handleDeleteBacklogItem}
-          onReorderBacklog={handleReorderBacklog}
-          onMoveItemToBacklog={handleMoveItemToBacklog}
-          openNewRequest={planNewRequest}
-          editRequest={planEditRequest}
-          onOpenFile={handleOpenFile}
-          onShowInHistory={handleShowSnapshotInHistory}
-          registerOpenCreate={(fn) => { planOpenCreateRef.current = fn; }}
-        />
-      ),
-    },
-    {
-      id: "project",
-      label: "Files",
-      render: () => (
-        <ProjectPanel
-          stream={stream}
-          gitEnabled={workspaceContext.gitEnabled}
-          selectedFilePath={selectedFilePath}
-          generatedDirs={generatedDirs}
-          onOpenFile={handleOpenFile}
-          onOpenDiff={handleOpenDiff}
-          onCreateFile={handleCreateFile}
-          onCreateDirectory={handleCreateDirectory}
-          onRenamePath={handleRenamePath}
-          onDeletePath={handleDeletePath}
-          onToggleGeneratedDir={handleToggleGeneratedDir}
-          commitRequest={commitFilesRequest}
-        />
-      ),
-    },
-    {
-      id: "notes",
-      label: "Notes",
-      render: () => (
-        <NotesPane
-          stream={stream}
-          selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
-          onOpenNote={handleOpenNote}
-        />
-      ),
-    },
-  ], [
-    stream,
-    selectedFilePath,
+    selectedThreadId,
+    threadPageTabs,
+    handleOpenPage,
+    closePageTab,
+    snapshotsReveal,
+    historyReveal,
     workspaceContext.gitEnabled,
-    selectedThread,
+    selectedFilePath,
+    generatedDirs,
+    commitFilesRequest,
+    centerActive,
+    currentThreadState.activeThreadId,
     selectedThreadWork,
+    backlogState,
+    planEditRequest,
   ]);
-
-  const bottomToolWindows: ToolWindow[] = [
-    {
-      id: "hook-events",
-      label: "Hook events",
-      render: () => <BottomPanel streamId={stream?.id ?? null} />,
-    },
-    {
-      id: "history",
-      label: "Git history",
-      render: () => <HistoryPanel stream={stream} onOpenDiff={handleOpenDiff} revealSha={historyReveal} />,
-    },
-    {
-      id: "snapshots",
-      label: "Local history",
-      render: () => <SnapshotsPanel stream={stream} onOpenDiff={handleOpenDiff} revealSnapshotId={snapshotsReveal} onRequestEditWorkItem={handleRequestEditWorkItem} />,
-    },
-  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -1600,17 +2046,16 @@ export function App() {
           streamActiveThreadIds={streamActiveThreadIds}
           gitEnabled={workspaceContext.gitEnabled}
           onSwitch={handleSwitch}
-          onStreamCreated={handleStreamCreated}
           onRenameStream={(id, title) => handleRenameStreamById(id, title)}
           onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenStreamSettings={(targetStreamId) => handleOpenPage(streamSettingsRef(targetStreamId))}
+          onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
           onReorderStreams={handleReorderStreams}
           createRequest={streamCreateRequest}
         />
         {stream ? (
           <ThreadRail
-            streamId={stream.id}
             threads={currentThreadState.threads}
             activeThreadId={currentThreadState.activeThreadId}
             selectedThreadId={currentThreadState.selectedThreadId}
@@ -1625,6 +2070,7 @@ export function App() {
             onRenameThread={handleRenameThreadById}
             onReorderThreads={handleReorderThreads}
             onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
+            onOpenThreadSettings={(targetThreadId) => handleOpenPage(threadSettingsRef(targetThreadId))}
             createRequest={threadCreateRequest}
           />
         ) : null}
@@ -1633,15 +2079,14 @@ export function App() {
         ) : null}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
-        <DockShell
-          side="left"
-          toolWindows={leftToolWindows}
-          storageKey="left"
-          defaultSize={300}
-          minSize={220}
-          maxSize={640}
-          railMode="always"
-          activateRequest={leftDockActivate}
+        <RailHud
+          threadId={selectedThread?.id ?? null}
+          threadWork={selectedThreadWork}
+          backlog={backlogState}
+          agentStatus={agentThreadStatus}
+          recentFiles={recentFileEntries}
+          onOpenPage={handleOpenPage}
+          onOpenSearch={() => setQuickOpenVisible(true)}
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
           {stream ? (
@@ -1656,24 +2101,28 @@ export function App() {
                 if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
                 else if (id.startsWith("diff:")) closeDiffTab(id);
                 else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
+                else closePageTab(id);
               }}
               onReorder={handleReorderCenterTabs}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
         </div>
       </div>
-      <DockShell
-        side="bottom"
-        toolWindows={bottomToolWindows}
-        storageKey="bottom"
-        defaultOpen={false}
-        defaultSize={200}
-        minSize={120}
-        maxSize={480}
-        railMode="always"
-        activateRequest={bottomActivate}
-        railExtra={<StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />}
-      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 8,
+          padding: "4px 10px",
+          borderTop: "1px solid var(--border)",
+          background: "var(--bg-2)",
+          flexShrink: 0,
+          minHeight: 26,
+        }}
+      >
+        <StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />
+      </div>
       <QuickOpenOverlay
         open={quickOpenVisible}
         stream={stream}
@@ -1683,7 +2132,6 @@ export function App() {
           void handleOpenFile(path);
         }}
       />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {stream && externalFilePrompt ? (
         <ExternalFileChangedDialog
           path={externalFilePrompt.path}
@@ -1711,19 +2159,7 @@ export function App() {
       {paletteOpen ? (
         <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
       ) : null}
-      {pendingDirtyClose ? (
-        <ConfirmDialog
-          message={`"${pendingDirtyClose.basename}" has unsaved changes. Close and discard them?`}
-          confirmLabel="Discard"
-          destructive
-          onConfirm={() => {
-            const { path } = pendingDirtyClose;
-            setPendingDirtyClose(null);
-            closeOpenFileNow(path);
-          }}
-          onCancel={() => setPendingDirtyClose(null)}
-        />
-      ) : null}
+      <UndoToastStack />
     </div>
   );
 }

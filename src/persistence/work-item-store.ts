@@ -317,6 +317,29 @@ export class WorkItemStore {
     return row ? toWorkItem(row) : null;
   }
 
+  /**
+   * Thread-agnostic lookup of `{id, title, status, thread_id}` for a set
+   * of item ids. Skips deleted rows. Used by the recent-activity surfaces
+   * that need to render usage events as titles regardless of which thread
+   * the item currently belongs to (or whether it's now in the backlog).
+   */
+  getSummariesByIds(ids: string[]): Array<{ id: string; title: string; status: WorkItemStatus; thread_id: string | null }> {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.stateDb.all<{ id: string; title: string; status: string; thread_id: string | null }>(
+      `SELECT id, title, status, thread_id
+         FROM work_items
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+      ...ids,
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: requireWorkItemStatus(r.status),
+      thread_id: r.thread_id,
+    }));
+  }
+
   getItem(threadId: string, itemId: string): WorkItem | null {
     const row = this.stateDb.get<Record<string, unknown>>(
       `SELECT work_items.*,
@@ -430,11 +453,13 @@ export class WorkItemStore {
     const now = new Date().toISOString();
     const nextParentId = input.parentId !== undefined ? input.parentId : existing.parent_id;
     const nextStatus = input.status ? requireWorkItemStatus(input.status) : existing.status;
-    // Transition guard: block any non-ready, non-human_check source from
-    // jumping directly to in_progress. Callers must explicitly un-block
-    // (or un-terminal) by moving through `ready` first. See wi-6285706789c5.
+    // Transition guard: block jumping to in_progress from terminal states
+    // (done/canceled/archived). For `blocked → in_progress`, accept the
+    // request — agents pushing back into work after a block IS the
+    // deliberate unblock gesture; forcing a separate hop through `ready`
+    // was friction without value. See wi-6285706789c5.
     if (nextStatus === "in_progress" && existing.status !== nextStatus) {
-      if (existing.status !== "ready" && existing.status !== "human_check") {
+      if (existing.status === "done" || existing.status === "canceled" || existing.status === "archived") {
         throw new Error(
           `cannot transition \`${existing.status}\` → \`in_progress\` directly; move to \`ready\` first`,
         );
@@ -707,8 +732,7 @@ export class WorkItemStore {
     }
   }
 
-  /** Explicit sort_index writes — used by the mixed thread-queue reorder so
-   *  work items and commit points share a single index space. */
+  /** Explicit sort_index writes — used by the thread-queue reorder. */
   setItemSortIndexes(threadId: string, entries: Array<{ id: string; sortIndex: number }>): void {
     if (entries.length === 0) return;
     const now = new Date().toISOString();

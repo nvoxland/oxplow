@@ -92,6 +92,44 @@ test("createElectronPlugin writes the merged oxplow-runtime skill Claude Code ca
   expect(body).toMatch(/read_work_options|dispatch_work_item|general-purpose/i);
 });
 
+test("createElectronPlugin writes the wiki-capture skill", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
+  const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
+
+  const expectedPath = join(plugin.pluginDir, "skills", "oxplow-wiki-capture", "SKILL.md");
+  expect(plugin.wikiCaptureSkillPath).toBe(expectedPath);
+  expect(existsSync(plugin.wikiCaptureSkillPath)).toBe(true);
+  const body = readFileSync(plugin.wikiCaptureSkillPath, "utf8");
+  expect(body.startsWith("---\n")).toBe(true);
+  expect(body).toContain("name: oxplow-wiki-capture");
+  // Trigger phrases should be in the description so Claude's router
+  // matches exploration questions and the wiki MCP tools.
+  expect(body).toMatch(/search_note_bodies|find_notes_for_file/);
+  // Body should teach the find-or-create flow + the skipped escape hatch.
+  expect(body).toMatch(/oxplow-note: skipped/);
+  expect(body).toMatch(/append/i);
+});
+
+test("createElectronPlugin writes the /work-next command so any project running oxplow can invoke it", () => {
+  // Plugin-emitted commands live under <pluginDir>/commands/. They ship to
+  // every consumer; the repo-local .claude/commands/ directory is scoped
+  // to oxplow-on-oxplow dogfooding and isn't relevant here.
+  const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
+  const plugin = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });
+
+  const expectedPath = join(plugin.pluginDir, "commands", "work-next.md");
+  expect(plugin.workNextCommandPath).toBe(expectedPath);
+  expect(existsSync(plugin.workNextCommandPath)).toBe(true);
+  const body = readFileSync(plugin.workNextCommandPath, "utf8");
+  expect(body.startsWith("---\n")).toBe(true);
+  expect(body).toContain("description:");
+  // Body should point the agent at the same dispatch protocol the old
+  // Stop-hook directive named.
+  expect(body).toContain("read_work_options");
+  expect(body).toContain("general-purpose");
+  expect(body).toContain("oxplow-runtime");
+});
+
 test("createElectronPlugin is idempotent across calls", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "oxplow-project-"));
   const first = createElectronPlugin({ projectDir, hookUrl: "http://127.0.0.1:1/hook" });

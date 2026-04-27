@@ -89,10 +89,18 @@ export function listRegisteredLanguageServers(): LanguageServerRegistration[] {
   return REGISTRY.map((entry) => ({ ...entry, extensions: [...entry.extensions], args: [...entry.args] }));
 }
 
+export interface LspSessionManagerHooks {
+  /** Called once per cold-start of a language server, around the
+   *  initialize handshake. Returns an opaque id passed back to onInitializeEnd
+   *  so producers (the background-task store) can correlate start/end. */
+  onInitializeStart?(languageId: string, streamId: string): string | null;
+  onInitializeEnd?(taskHandle: string | null, error?: Error): void;
+}
+
 export class LspSessionManager {
   private sessions = new Map<string, LspSession>();
 
-  constructor(private readonly logger: Logger) {}
+  constructor(private readonly logger: Logger, private readonly hooks: LspSessionManagerHooks = {}) {}
 
   async attachClient(ws: BridgeSocket, stream: Stream, languageId: string): Promise<void> {
     const session = await this.ensureSession(stream, languageId);
@@ -116,11 +124,15 @@ export class LspSessionManager {
       if (!registration) throw new Error(`LSP not configured for language: ${languageId}`);
       session = new LspSession(stream, registration, this.logger.child({ streamId: stream.id, languageId }));
       this.sessions.set(key, session);
+      const taskHandle = this.hooks.onInitializeStart?.(languageId, stream.id) ?? null;
       try {
         await session.initialize();
+        this.hooks.onInitializeEnd?.(taskHandle);
       } catch (error) {
         this.sessions.delete(key);
         await session.dispose();
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.hooks.onInitializeEnd?.(taskHandle, err);
         throw error;
       }
     }

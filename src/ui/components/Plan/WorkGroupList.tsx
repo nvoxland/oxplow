@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, CommitPoint, ThreadFollowup, WaitPoint, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { AgentStatus, ThreadFollowup, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
-  classifyWorkItem,
+  classifyRow,
   finalizeReorderIds,
   sectionDefaultStatus,
   miniButtonStyle,
@@ -16,14 +16,6 @@ import {
   type WorkItemSectionKind,
 } from "./plan-utils.js";
 import { PriorityIcon } from "./plan-icons.js";
-import {
-  commitDividerBadgeStyle,
-  commitDividerLineStyle,
-  commitDividerStyle,
-  commitModeBadgeStyle,
-  waitDividerBadgeStyle,
-} from "./queue-markers.js";
-import { WaitPointRow } from "./WaitPointRow.js";
 import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
@@ -32,12 +24,7 @@ import type { MenuItem } from "../../menu.js";
  * Renders one work-item group (an epic + its children, or the root group
  * with no epic). Items are split by status into four sections —
  * In progress → To do → Blocked → Human check → Done — with dividers between non-empty
- * sections. Commit / wait points are interleaved into the To do section
- * only (they represent work yet to run); clicking a divider expands its
- * CommitPointRow / WaitPointRow inline. The "+ Commit when done" and
- * "+ Wait here" buttons hang off the tail of the To do section via
- * `addPointsSlot` so the shape of the queue doesn't require scrolling past
- * done work.
+ * sections.
  *
  * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
  * section boundaries also changes its status to that section's default
@@ -47,10 +34,7 @@ import type { MenuItem } from "../../menu.js";
  * sections stay hidden until a drag is active, at which point they appear
  * as drop targets.
  */
-export type QueueRow =
-  | { kind: "work"; id: string; sortIndex: number; item: WorkItem }
-  | { kind: "commit"; id: string; sortIndex: number; cp: CommitPoint }
-  | { kind: "wait"; id: string; sortIndex: number; wp: WaitPoint };
+export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: WorkItem };
 
 interface SectionBucket {
   kind: WorkItemSectionKind;
@@ -69,20 +53,15 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
 export function WorkGroupList({
   group,
   scopeThreadId,
-  expandedId,
-  onToggleExpand,
   onUpdateWorkItem,
   onReorderWorkItems,
-  commitPoints,
-  waitPoints,
   onReorderMixed,
-  onContextMenu,
+  onOpenMenu,
   sectionActions,
   selectedId,
   markedIds,
   onSelect,
   onRequestEdit,
-  onDoubleClickCommitPoint,
   epicChildrenMap,
   onReparentWorkItem,
   onAddChildTask,
@@ -92,17 +71,17 @@ export function WorkGroupList({
   onToggleSectionCollapsed,
   followups,
   onDismissFollowup,
+  visibleSections,
+  sectionItemLimit,
+  sectionLabelOverrides,
+  hideArchiveToggle,
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
-  expandedId: string | null;
-  onToggleExpand(id: string): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
   onReorderWorkItems: (orderedItemIds: string[]) => Promise<void>;
-  commitPoints?: CommitPoint[];
-  waitPoints?: WaitPoint[];
-  onReorderMixed?(entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>): void;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onReorderMixed?(entries: Array<{ id: string }>): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
@@ -112,7 +91,6 @@ export function WorkGroupList({
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
-  onDoubleClickCommitPoint?(cp: CommitPoint): void;
   epicChildrenMap: Map<string, WorkItem[]>;
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
@@ -132,6 +110,23 @@ export function WorkGroupList({
    *  epics inherit nothing. */
   followups?: ThreadFollowup[];
   onDismissFollowup?: (id: string) => void;
+  /** When provided, only sections in this list render. Used by the
+   *  page split (Plan Work / Done Work / Archived) to restrict the
+   *  panel to a subset of the five buckets. Default = all. */
+  visibleSections?: WorkItemSectionKind[];
+  /** Cap rows per section after the in-section sort. Used by Plan
+   *  Work to render previews of Human Check / Done. Sections with no
+   *  entry render fully. */
+  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  /** Override the default section header label per kind. Used by the
+   *  Archived page so the (singular) Done section reads "Archived". */
+  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  /** Suppress the built-in "Show archived (N) / Archive all" controls
+   *  on the Done section header. Plan Work, Done Work, and Archived
+   *  all set this — those pages own their own archive flow (a
+   *  cross-page link to the Archived page) so the inline toggle is
+   *  redundant. */
+  hideArchiveToggle?: boolean;
 }) {
   // When the thread is not the active writer, in_progress items are not agent-owned
   // and can be freely reordered — only lock them when this thread is active.
@@ -153,24 +148,18 @@ export function WorkGroupList({
       inProgress: [], toDo: [], humanCheck: [], blocked: [], done: [],
     };
     for (const row of work) {
-      if (row.kind !== "work") continue;
-      buckets[classifyWorkItem(row.item.status)].push(row);
-    }
-    // Commit / wait points only belong to the To do section — they represent
-    // a future action. Done / triggered markers are historical; hide them so
-    // the To do list is actually the to-do list (the commit sha is in git
-    // log; the wait point already fired).
-    for (const cp of commitPoints ?? []) {
-      if (cp.status === "done") continue;
-      buckets.toDo.push({ kind: "commit", id: cp.id, sortIndex: cp.sort_index, cp });
-    }
-    for (const wp of waitPoints ?? []) {
-      if (wp.status === "triggered") continue;
-      buckets.toDo.push({ kind: "wait", id: wp.id, sortIndex: wp.sort_index, wp });
+      // Epics roll up their children's statuses into an effective section
+      // (`classifyEpic`) so the epic + its children render as one block in
+      // whichever section the rollup picks. Non-epics use their literal
+      // status. See plan-utils.ts.
+      buckets[classifyRow(row.item, epicChildrenMap)].push(row);
     }
     const orderedSections: SectionBucket[] = [];
     const flat: QueueRow[] = [];
-    for (const { kind, label } of SECTION_ORDER) {
+    const allowedKinds = visibleSections ? new Set(visibleSections) : null;
+    for (const { kind, label: defaultLabel } of SECTION_ORDER) {
+      if (allowedKinds && !allowedKinds.has(kind)) continue;
+      const label = sectionLabelOverrides?.[kind] ?? defaultLabel;
       // Human Check and Done render descending by sort_index — newest-finished
       // items surface at the top so the user can triage (or reopen) them
       // without scrolling. For Done specifically, the "drop into Done lands at
@@ -186,15 +175,33 @@ export function WorkGroupList({
       // can drop into an empty "Done" / "Human check" to create the first
       // item there. When nothing is dragging, empty sections are suppressed
       // by the renderer below.
-      if (buckets[kind].length === 0) {
+      const limit = sectionItemLimit?.[kind];
+      const limited = typeof limit === "number" ? buckets[kind].slice(0, limit) : buckets[kind];
+      if (limited.length === 0) {
         orderedSections.push({ kind, label, rows: [] });
       } else {
-        orderedSections.push({ kind, label, rows: buckets[kind] });
-        flat.push(...buckets[kind]);
+        orderedSections.push({ kind, label, rows: limited });
+        // The DnD index (`allRows`) only needs the visible rows — items
+        // hidden by the preview cap aren't drag targets on this surface.
+        flat.push(...limited);
       }
     }
     return { sections: orderedSections, allRows: flat };
-  }, [group.items, commitPoints, waitPoints]);
+  }, [group.items, epicChildrenMap, visibleSections, sectionItemLimit, sectionLabelOverrides]);
+
+  // Index every work item visible in this group (root + every epic's
+  // children) so the drag-start handler can encode the resolved
+  // {id, title, status} slice into the WORK_ITEM_DRAG_MIME payload.
+  // The agent terminal reads this slice to add each marked row as a
+  // context ref without needing its own work-item lookup.
+  const allWorkItemsById = useMemo(() => {
+    const map = new Map<string, WorkItem>();
+    for (const item of group.items) map.set(item.id, item);
+    for (const children of epicChildrenMap.values()) {
+      for (const child of children) map.set(child.id, child);
+    }
+    return map;
+  }, [group.items, epicChildrenMap]);
 
   const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
 
@@ -225,15 +232,19 @@ export function WorkGroupList({
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
-      const fromSection = classifyWorkItem(dragged.item.status);
-      const toSection = classifyWorkItem(target.item.status);
-      if (fromSection !== toSection) {
+      const fromSection = classifyRow(dragged.item, epicChildrenMap);
+      const toSection = classifyRow(target.item, epicChildrenMap);
+      // Epics never carry a literal status of their own — their section
+      // is computed from children. Don't try to mutate an epic's status
+      // when it crosses a section boundary; the rollup will follow once
+      // its children change.
+      if (fromSection !== toSection && dragged.item.kind !== "epic") {
         const nextStatus = sectionDefaultStatus(toSection);
         if (nextStatus) {
           if (isMultiDrag && markedIds) {
             for (const id of markedIds) {
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
-              if (row && row.kind === "work" && row.item.status !== nextStatus) {
+              if (row && row.kind === "work" && row.item.kind !== "epic" && row.item.status !== nextStatus) {
                 void onUpdateWorkItem(id, { status: nextStatus });
                 statusOverrides.set(id, nextStatus);
               }
@@ -251,7 +262,7 @@ export function WorkGroupList({
     // overriding the insert position to the head of the Done bucket in the
     // reordered list (Done renders descending, so "top" = index 0 of the
     // Done run in visual order).
-    const targetSection = target.kind === "work" ? classifyWorkItem(target.item.status) : null;
+    const targetSection = target.kind === "work" ? classifyRow(target.item, epicChildrenMap) : null;
     const dropsIntoDone = targetSection === "done";
 
     // Reorder: multi-drag moves all marked rows as a block to the drop position.
@@ -266,7 +277,7 @@ export function WorkGroupList({
         // visually, since Done renders descending). If there's no Done row
         // yet, append — this is the first Done item.
         const doneIdx = unmarked.findIndex(
-          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+          (r) => r.kind === "work" && classifyRow(r.item, epicChildrenMap) === "done",
         );
         insertAt = doneIdx < 0 ? unmarked.length : doneIdx;
       } else {
@@ -279,7 +290,7 @@ export function WorkGroupList({
       const [moved] = next.splice(from, 1);
       if (dropsIntoDone) {
         const doneIdx = next.findIndex(
-          (r) => r.kind === "work" && classifyWorkItem(r.item.status) === "done",
+          (r) => r.kind === "work" && classifyRow(r.item, epicChildrenMap) === "done",
         );
         const insertAt = doneIdx < 0 ? next.length : doneIdx;
         next.splice(insertAt, 0, moved!);
@@ -304,19 +315,8 @@ export function WorkGroupList({
         status: statusOverrides.get(row.id) ?? row.item.status,
       }));
     const persistedWorkIds = finalizeReorderIds(workRowsInVisualOrder);
-    if (onReorderMixed && ((commitPoints?.length ?? 0) > 0 || (waitPoints?.length ?? 0) > 0)) {
-      // Rebuild the mixed entries list using the persisted work-item order.
-      // Non-work rows stay in their `next` positions; work rows are replaced
-      // in-order with the finalized id sequence.
-      let workCursor = 0;
-      const entries: Array<{ kind: "work" | "commit" | "wait"; id: string }> = next.map((row) => {
-        if (row.kind === "work") {
-          const id = persistedWorkIds[workCursor++]!;
-          return { kind: "work" as const, id };
-        }
-        return { kind: row.kind, id: row.id };
-      });
-      onReorderMixed(entries);
+    if (onReorderMixed) {
+      onReorderMixed(persistedWorkIds.map((id) => ({ id })));
     } else {
       void onReorderWorkItems(persistedWorkIds);
     }
@@ -327,12 +327,19 @@ export function WorkGroupList({
     const nextStatus = sectionDefaultStatus(section);
     resetDrag();
     if (!nextStatus) return;
-    if (classifyWorkItem(draggedWorkItem.status) === section) return;
+    // Epics never carry a literal status — their section is computed
+    // from children. Section drops on an epic are no-ops.
+    if (draggedWorkItem.kind === "epic") return;
+    if (classifyRow(draggedWorkItem, epicChildrenMap) === section) return;
     const isMultiDrag = markedIds && markedIds.has(draggedWorkItem.id) && markedIds.size > 1;
     if (isMultiDrag && markedIds) {
       for (const id of markedIds) {
         const row = allRows.find((r) => r.kind === "work" && r.id === id);
-        if (row && row.kind === "work" && classifyWorkItem(row.item.status) !== section) {
+        if (
+          row && row.kind === "work" &&
+          row.item.kind !== "epic" &&
+          classifyRow(row.item, epicChildrenMap) !== section
+        ) {
           void onUpdateWorkItem(id, { status: nextStatus });
         }
       }
@@ -346,91 +353,10 @@ export function WorkGroupList({
     // Human Check / Done drops always land at the top of the section, so a
     // between-rows indicator on those targets would lie about where the
     // dragged item will end up. Suppress it there.
-    const targetSection = row.kind === "work" ? classifyWorkItem(row.item.status) : null;
+    const targetSection = classifyRow(row.item, epicChildrenMap);
     const suppressDropLine = targetSection === "humanCheck" || targetSection === "done";
     const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
-    if (row.kind === "commit") {
-      return (
-        <div key={key}>
-          <div
-            draggable
-            onDragStart={(event) => {
-              // Same drag-cancel workaround as the work-item rows —
-              // see the longer comment on `sharedDragHandlers` below.
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", row.id);
-              queueMicrotask(() => setDraggingKey(key));
-            }}
-            onDragEnd={resetDrag}
-            onDragOver={(event) => {
-              if (!draggingKey || draggingKey === key) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              if (overKey !== key) setOverKey(key);
-            }}
-            onDragLeave={() => { if (overKey === key) setOverKey(null); }}
-            onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
-            onClick={() => onDoubleClickCommitPoint?.(row.cp)}
-            style={{
-              ...commitDividerStyle,
-              cursor: isDragging ? "grabbing" : "pointer",
-              borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
-              background: isDragging ? "rgba(74,158,255,0.08)" : "transparent",
-            }}
-            title="Commit point — click to edit, drag to reposition"
-          >
-            <span style={commitDividerBadgeStyle(row.cp.status)}>
-              commit
-            </span>
-            <span style={commitModeBadgeStyle(row.cp.mode)}>
-              {row.cp.mode === "auto" ? "Auto" : "Approve"}
-            </span>
-          </div>
-        </div>
-      );
-    }
-    if (row.kind === "wait") {
-      const isExpanded = expandedId === key;
-      return (
-        <div key={key}>
-          <div
-            draggable
-            onDragStart={(event) => {
-              // Same drag-cancel workaround as the work-item rows.
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", row.id);
-              queueMicrotask(() => setDraggingKey(key));
-            }}
-            onDragEnd={resetDrag}
-            onDragOver={(event) => {
-              if (!draggingKey || draggingKey === key) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              if (overKey !== key) setOverKey(key);
-            }}
-            onDragLeave={() => { if (overKey === key) setOverKey(null); }}
-            onDrop={(event) => { event.preventDefault(); handleDropOnKey(key); }}
-            onClick={() => onToggleExpand(key)}
-            style={{
-              ...commitDividerStyle,
-              cursor: isDragging ? "grabbing" : "pointer",
-              borderTopColor: isOver ? "var(--accent)" : commitDividerStyle.borderTopColor,
-              background: isDragging ? "rgba(217,119,6,0.08)" : "transparent",
-            }}
-            title="Wait point — drag to reposition"
-          >
-            <span style={commitDividerLineStyle} />
-            <span style={waitDividerBadgeStyle(row.wp.status)}>
-              wait{row.wp.note ? ` · ${row.wp.note}` : ""}
-              {row.wp.status === "triggered" ? " · stopped" : ""}
-            </span>
-            <span style={commitDividerLineStyle} />
-          </div>
-          {isExpanded ? <WaitPointRow wp={row.wp} /> : null}
-        </div>
-      );
-    }
     const isMarked = markedIds?.has(row.item.id) ?? false;
     const sharedDragHandlers = {
       onDragStart: (event: React.DragEvent) => {
@@ -449,11 +375,21 @@ export function WorkGroupList({
         const ids = isMarked && markedIds && markedIds.size > 1
           ? [...markedIds]
           : [row.item.id];
+        // Embed the resolved {id,title,status} slice for each carried id
+        // so cross-pane drop targets (e.g. the agent terminal) can build
+        // ContextRefs without their own lookup. The dragged row is
+        // always present even if not in the page-local index — it's the
+        // row the user actually grabbed.
+        const items = ids
+          .map((id) => allWorkItemsById.get(id) ?? (id === row.item.id ? row.item : null))
+          .filter((item): item is WorkItem => item !== null)
+          .map((item) => ({ id: item.id, title: item.title, status: item.status }));
         event.dataTransfer.setData(
           WORK_ITEM_DRAG_MIME,
           JSON.stringify({
             itemId: row.item.id,
             itemIds: ids,
+            items,
             fromThreadId: scopeThreadId,
           }),
         );
@@ -484,6 +420,15 @@ export function WorkGroupList({
     if (row.item.kind === "epic") {
       const isExpanded = expandedEpicIds.has(row.item.id);
       const children = epicChildrenMap.get(row.item.id) ?? [];
+      // Surface stale-epic-children: when the epic is closed but
+      // children are still ready/in_progress the rollup pulls the
+      // epic back into To Do, hiding the closed state. The banner
+      // gives the user a one-click cascade fix.
+      const epicStatus = row.item.status;
+      const staleChildren =
+        epicStatus === "human_check" || epicStatus === "blocked"
+          ? children.filter((c) => c.status === "ready" || c.status === "in_progress")
+          : [];
       return (
         <div key={key}>
           <EpicInlineRow
@@ -507,9 +452,20 @@ export function WorkGroupList({
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
-            onContextMenu={onContextMenu}
+            onOpenMenu={onOpenMenu}
             {...sharedDragHandlers}
           />
+          {staleChildren.length > 0 ? (
+            <StaleEpicChildrenBanner
+              epic={row.item}
+              staleChildren={staleChildren}
+              onCascade={(targetStatus) => {
+                for (const child of staleChildren) {
+                  void onUpdateWorkItem(child.id, { status: targetStatus });
+                }
+              }}
+            />
+          ) : null}
           {isExpanded ? (
             <EpicChildrenPane
               epicId={row.item.id}
@@ -517,7 +473,7 @@ export function WorkGroupList({
               onReorderWorkItems={onReorderWorkItems}
               onReparentWorkItem={onReparentWorkItem}
               onUpdateWorkItem={onUpdateWorkItem}
-              onContextMenu={onContextMenu}
+              onOpenMenu={onOpenMenu}
               scopeThreadId={scopeThreadId}
               onRequestEdit={onRequestEdit}
               selectedId={selectedId}
@@ -543,7 +499,7 @@ export function WorkGroupList({
         onRequestEdit={onRequestEdit}
         onSelect={onSelect}
         onUpdateWorkItem={onUpdateWorkItem}
-        onContextMenu={onContextMenu}
+        onOpenMenu={onOpenMenu}
         {...sharedDragHandlers}
       />
     );
@@ -562,7 +518,8 @@ export function WorkGroupList({
         }
         const canDrop = !!draggedWorkItem
           && section.kind !== "inProgress"
-          && classifyWorkItem(draggedWorkItem.status) !== section.kind;
+          && draggedWorkItem.kind !== "epic"
+          && classifyRow(draggedWorkItem, epicChildrenMap) !== section.kind;
         const isOverSection = canDrop && overSection === section.kind;
         const headerDropHandlers = canDrop
           ? {
@@ -601,11 +558,10 @@ export function WorkGroupList({
           : 0;
         const customActions = sectionActions?.[section.kind];
         const isCollapsed = isSectionCollapsed(section.kind);
-        // Count only work items (not commit/wait point dividers) for the
-        // header badge. For Done, count visible rows (excluding archived
-        // unless the user toggled them on).
+        // For Done, count visible rows (excluding archived unless the
+        // user toggled them on).
         const countRows = isDone ? visibleDoneRows : section.rows;
-        const itemCount = countRows.filter((r) => r.kind === "work").length;
+        const itemCount = countRows.length;
         return (
           <Fragment key={section.kind}>
           <div data-testid={`plan-section-${section.kind}`}>
@@ -621,13 +577,13 @@ export function WorkGroupList({
                   {itemCount}
                 </span>
               </span>
-              {customActions || isDone ? (
+              {customActions || (isDone && !hideArchiveToggle) ? (
                 <span
                   onClick={(event) => event.stopPropagation()}
                   style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", letterSpacing: 0 }}
                 >
                   {customActions}
-                  {isDone ? (
+                  {isDone && !hideArchiveToggle ? (
                     <DoneHeaderActions
                       archivableCount={archivableCount}
                       archivedCount={archivedRows.length}
@@ -660,11 +616,9 @@ export function WorkGroupList({
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     {section.kind === "inProgress"
-                      ? (isActive === false
-                          ? "<NOT ACTIVE>"
-                          : (agentStatus === "working"
-                              ? <span><BrailleSpinner /> Thinking...</span>
-                              : "Waiting"))
+                      ? (isActive !== false && agentStatus === "working"
+                          ? <span><BrailleSpinner /> Thinking...</span>
+                          : "Waiting")
                       : "(nothing here)"}
                   </div>
                 ) : null}
@@ -801,9 +755,8 @@ const firstSectionLabelStyle: CSSProperties = {
 export function SectionHeaderMenu({ items, testId }: { items: MenuItem[]; testId?: string }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   // Render the ⋯ button whenever there are any items at all, including
-  // disabled ones — hiding them was confusing ("the menu is missing
-  // + Commit Point"). ContextMenu greys disabled items so users can
-  // see the command exists and why it isn't currently applicable.
+  // disabled ones — ContextMenu greys disabled items so users can see
+  // the command exists and why it isn't currently applicable.
   if (items.length === 0) return null;
   return (
     <>
@@ -841,7 +794,7 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"]
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
   isSelected, isMarked, isOver, isDragging,
-  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onContextMenu,
+  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onOpenMenu,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
@@ -857,7 +810,7 @@ function EpicInlineRow({
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -886,14 +839,13 @@ function EpicInlineRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
-      onContextMenu={(event) => onContextMenu(event, item)}
       style={{
-        display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
+        display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
         borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
-        borderLeft: isMarked ? "2px solid var(--priority-urgent)" : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-        background: isMarked ? "rgba(234,179,8,0.14)" : isSelected ? "rgba(74,158,255,0.12)" : isDragging ? "rgba(255,255,255,0.04)" : "transparent",
-        fontSize: 12, userSelect: "none", opacity: dimmed ? 0.6 : 1,
+        borderLeft: isMarked ? "3px solid var(--status-waiting)" : isSelected ? "3px solid var(--accent)" : "3px solid transparent",
+        background: isMarked ? "rgba(217,119,6,0.10)" : isSelected ? "var(--accent-soft-bg)" : isDragging ? "var(--surface-tab-inactive)" : "transparent",
+        fontSize: 13, userSelect: "none", opacity: dimmed ? 0.6 : 1,
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
@@ -921,13 +873,32 @@ function EpicInlineRow({
         ) : null}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
+      <button
+        type="button"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
+        }}
+        data-testid={`work-item-row-kebab-${item.id}`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 14,
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >⋯</button>
     </div>
   );
 }
 
 function EpicChildrenPane({
   epicId, children, onReorderWorkItems, onReparentWorkItem,
-  onUpdateWorkItem, onContextMenu, scopeThreadId, onRequestEdit,
+  onUpdateWorkItem, onOpenMenu, scopeThreadId, onRequestEdit,
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
   epicId: string;
@@ -935,7 +906,7 @@ function EpicChildrenPane({
   onReorderWorkItems(ids: string[]): Promise<void>;
   onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
   onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   scopeThreadId: string | null;
   onRequestEdit?(item: WorkItem): void;
   selectedId?: string | null;
@@ -996,7 +967,7 @@ function EpicChildrenPane({
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
             onUpdateWorkItem={onUpdateWorkItem}
-            onContextMenu={onContextMenu}
+            onOpenMenu={onOpenMenu}
             onDragStart={(event) => {
               // Same drag-cancel workaround as the parent pane's rows —
               // populate dataTransfer first, defer state mutation that
@@ -1004,9 +975,18 @@ function EpicChildrenPane({
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", child.id);
               const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
+              // Only resolve the items we can see locally — this pane
+              // only carries the epic's children. The parent group's
+              // drag-start handler has the full visible set; for
+              // multi-drag from a child row, callers receive whatever
+              // titles we can find here. Unresolved ids drop through.
+              const items = ids
+                .map((id) => children.find((c) => c.id === id) ?? (id === child.id ? child : null))
+                .filter((item): item is WorkItem => item !== null)
+                .map((item) => ({ id: item.id, title: item.title, status: item.status }));
               event.dataTransfer.setData(
                 WORK_ITEM_DRAG_MIME,
-                JSON.stringify({ itemId: child.id, itemIds: ids, fromThreadId: scopeThreadId, parentEpicId: epicId }),
+                JSON.stringify({ itemId: child.id, itemIds: ids, items, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
               queueMicrotask(() => setDraggingKey(key));
             }}
@@ -1079,7 +1059,7 @@ function InlineItemRow({
   onSelect,
   onRequestEdit,
   onUpdateWorkItem,
-  onContextMenu,
+  onOpenMenu,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -1097,7 +1077,7 @@ function InlineItemRow({
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: WorkItem): void;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onContextMenu(event: React.MouseEvent, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: WorkItem): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -1135,25 +1115,24 @@ function InlineItemRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
-      onContextMenu={(event) => onContextMenu(event, item)}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
+        gap: 8,
+        padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
         borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
         borderLeft: isMarked
-          ? "2px solid var(--priority-urgent)"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+          ? "3px solid var(--status-waiting)"
+          : isSelected ? "3px solid var(--accent)" : "3px solid transparent",
         background: isMarked
-          ? "rgba(234,179,8,0.14)"
+          ? "rgba(217,119,6,0.10)"
           : isSelected
-            ? "rgba(74,158,255,0.12)"
+            ? "var(--accent-soft-bg)"
             : isDragging
-              ? "rgba(255,255,255,0.04)"
+              ? "var(--surface-tab-inactive)"
               : "transparent",
-        fontSize: 12,
+        fontSize: 13,
         userSelect: "none",
         opacity: dimmed ? 0.6 : 1,
       }}
@@ -1191,6 +1170,25 @@ function InlineItemRow({
         priority={item.priority}
         onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
       />
+      <button
+        type="button"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
+        }}
+        data-testid={`work-item-row-kebab-${item.id}`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 14,
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >⋯</button>
     </div>
   );
 }
@@ -1268,5 +1266,60 @@ function InlinePriorityPicker({
         ))}
       </select>
     </span>
+  );
+}
+
+function StaleEpicChildrenBanner({
+  epic,
+  staleChildren,
+  onCascade,
+}: {
+  epic: WorkItem;
+  staleChildren: WorkItem[];
+  onCascade: (targetStatus: WorkItemStatus) => void;
+}) {
+  // The classifyEpic rollup will pull this epic back into To Do because
+  // its children are still ready/in_progress, so the rail counts will
+  // misrepresent the closed state. Surface a one-click cascade fix that
+  // mirrors the server-side cascade guard the MCP tools enforce.
+  const targetStatus = epic.status === "blocked" ? "blocked" : "human_check";
+  const n = staleChildren.length;
+  const noun = n === 1 ? "child" : "children";
+  const label = `Close ${n} ${noun} as ${statusLabel(targetStatus)}`;
+  return (
+    <div
+      data-testid={`stale-epic-children-banner-${epic.id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        margin: "0 0 4px 24px",
+        background: "var(--surface-warning, rgba(255,200,0,0.08))",
+        border: "1px solid var(--border-warning, rgba(255,200,0,0.4))",
+        borderRadius: 4,
+        fontSize: 12,
+      }}
+    >
+      <span style={{ flex: 1, color: "var(--text-warning, var(--fg))" }}>
+        Epic closed but {n} {noun} still {n === 1 ? "is" : "are"} pending — rollup will pull it back into To Do.
+      </span>
+      <button
+        type="button"
+        onClick={() => onCascade(targetStatus)}
+        data-testid={`stale-epic-children-cascade-${epic.id}`}
+        style={{
+          padding: "2px 8px",
+          fontSize: 11,
+          background: "var(--surface-action, #2563eb)",
+          color: "var(--text-inverse, white)",
+          border: "none",
+          borderRadius: 4,
+          cursor: "pointer",
+        }}
+      >
+        {label}
+      </button>
+    </div>
   );
 }

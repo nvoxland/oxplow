@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { GitFileStatus } from "./workspace-files.js";
@@ -338,12 +341,15 @@ export interface GitLogResult {
 const UNIT = "\x1f";
 const RECORD = "\x1e";
 
-export function getGitLog(projectDir: string, options?: { limit?: number }): GitLogResult {
+export function getGitLog(projectDir: string, options?: { limit?: number; all?: boolean }): GitLogResult {
   const limit = Math.max(1, Math.min(options?.limit ?? 500, 5000));
+  const all = options?.all ?? true;
   const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join(UNIT) + RECORD;
+  const args = ["log", "--date-order", `--max-count=${limit}`, `--pretty=format:${format}`];
+  if (all) args.splice(1, 0, "--all");
   let raw: string;
   try {
-    raw = git(projectDir, ["log", "--all", "--date-order", `--max-count=${limit}`, `--pretty=format:${format}`]);
+    raw = git(projectDir, args);
   } catch {
     return { commits: [], branchHeads: [], tags: [], currentBranch: detectCurrentBranch(projectDir) };
   }
@@ -565,6 +571,24 @@ function runGit(projectDir: string, args: string[]): GitOpResult {
   }
 }
 
+async function runGitAsync(projectDir: string, args: string[]): Promise<GitOpResult> {
+  try {
+    const { stdout, stderr } = await execFileP("git", ["-C", projectDir, ...args], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return { ok: true, stdout: stdout ?? "", stderr: stderr ?? "", exitCode: 0 };
+  } catch (error) {
+    const err = error as { code?: number; stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? err.message ?? "unknown git error",
+      exitCode: typeof err.code === "number" ? err.code : null,
+    };
+  }
+}
+
 export function restorePath(projectDir: string, path: string): GitOpResult {
   // `checkout HEAD -- <path>` restores both staged and working-tree copies,
   // matching IntelliJ's "Rollback" behaviour for a single file.
@@ -601,6 +625,150 @@ export function gitMerge(projectDir: string, other: string): GitOpResult {
 /** `git rebase <onto>` — rebase the currently-checked-out branch onto `onto`. */
 export function gitRebase(projectDir: string, onto: string): GitOpResult {
   return runGit(projectDir, ["rebase", onto]);
+}
+
+/**
+ * Counts of commits diverged between two refs. Wraps
+ * `git rev-list --left-right --count base...head` whose output is
+ * `<base-only>\t<head-only>` — interpreted here as `behind`/`ahead`
+ * relative to `base`. `head` defaults to `HEAD`. Returns zeros on any
+ * git error so the caller can render a header without branching.
+ */
+export function getAheadBehind(projectDir: string, base: string, head?: string): { ahead: number; behind: number } {
+  if (!isGitRepo(projectDir)) return { ahead: 0, behind: 0 };
+  const target = head ?? "HEAD";
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", projectDir, "rev-list", "--left-right", "--count", `${base}...${target}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const [behindRaw, aheadRaw] = out.split(/\s+/);
+    const behind = Number.parseInt(behindRaw ?? "0", 10);
+    const ahead = Number.parseInt(aheadRaw ?? "0", 10);
+    return {
+      ahead: Number.isFinite(ahead) ? ahead : 0,
+      behind: Number.isFinite(behind) ? behind : 0,
+    };
+  } catch {
+    return { ahead: 0, behind: 0 };
+  }
+}
+
+/**
+ * Commits in `head` not in `base`, newest first — `git log base..head`.
+ * Returns the same `GitLogCommit` shape as `getGitLog` so callers can
+ * reuse rendering. Empty array on any failure.
+ */
+export function getCommitsAheadOf(projectDir: string, base: string, head: string, limit = 50): GitLogCommit[] {
+  if (!isGitRepo(projectDir)) return [];
+  const cap = Math.max(1, Math.min(limit, 1000));
+  const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join(UNIT) + RECORD;
+  let raw: string;
+  try {
+    raw = git(projectDir, ["log", `--max-count=${cap}`, `--pretty=format:${format}`, `${base}..${head}`]);
+  } catch {
+    return [];
+  }
+  const commits: GitLogCommit[] = [];
+  for (const record of raw.split(RECORD)) {
+    const line = record.replace(/^\n/, "");
+    if (!line) continue;
+    const [sha, parentsRaw, authorName, authorEmail, authorDate, subject, refsRaw] = line.split(UNIT);
+    if (!sha) continue;
+    const parents = (parentsRaw ?? "").split(/\s+/).filter(Boolean).map((p) => ({ sha: p }));
+    const refs = (refsRaw ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+    commits.push({
+      sha,
+      parents,
+      commit: {
+        author: { name: authorName ?? "", email: authorEmail ?? "", date: authorDate ?? "" },
+        message: subject ?? "",
+      },
+      refs,
+    });
+  }
+  return commits;
+}
+
+export interface RemoteBranchEntry {
+  shortName: string;
+  remote: string;
+  branch: string;
+  lastCommitSha: string;
+  lastCommitSubject: string;
+  lastCommitDate: string;
+  lastCommitAuthor: string;
+}
+
+/**
+ * Remote-tracking branches sorted by committer date (newest first).
+ * Excludes `<remote>/HEAD` symbolic refs. Used by the Git Dashboard's
+ * "recent remote branches" card.
+ */
+export function listRecentRemoteBranches(projectDir: string, limit = 20): RemoteBranchEntry[] {
+  if (!isGitRepo(projectDir)) return [];
+  const cap = Math.max(1, Math.min(limit, 200));
+  const format = ["%(refname:short)", "%(objectname)", "%(committerdate:iso-strict)", "%(authorname)", "%(subject)"].join(UNIT);
+  let raw: string;
+  try {
+    raw = git(projectDir, [
+      "for-each-ref",
+      "--sort=-committerdate",
+      `--count=${cap + 5}`, // pad so we can drop HEAD aliases without short-changing the cap
+      `--format=${format}`,
+      "refs/remotes",
+    ]);
+  } catch {
+    return [];
+  }
+  const out: RemoteBranchEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    const [shortName, sha, date, author, subject] = line.split(UNIT);
+    if (!shortName || !sha) continue;
+    if (shortName.endsWith("/HEAD")) continue;
+    const slash = shortName.indexOf("/");
+    if (slash <= 0) continue;
+    const remote = shortName.slice(0, slash);
+    const branch = shortName.slice(slash + 1);
+    out.push({
+      shortName,
+      remote,
+      branch,
+      lastCommitSha: sha,
+      lastCommitSubject: subject ?? "",
+      lastCommitDate: date ?? "",
+      lastCommitAuthor: author ?? "",
+    });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/**
+ * Push the current HEAD into `<remote>/<branch>` via the refspec
+ * `HEAD:<branch>` — does not touch any local working dir. Sync variant
+ * suitable for tests + small repos; UI should prefer
+ * `gitPushCurrentToAsync` so the BackgroundTaskStore can show progress.
+ */
+export function gitPushCurrentTo(projectDir: string, remote: string, branch: string): GitOpResult {
+  return runGit(projectDir, ["push", remote, `HEAD:refs/heads/${branch}`]);
+}
+
+export function gitPushCurrentToAsync(projectDir: string, remote: string, branch: string): Promise<GitOpResult> {
+  return runGitAsync(projectDir, ["push", remote, `HEAD:refs/heads/${branch}`]);
+}
+
+/**
+ * Fetch `<remote>/<branch>` and merge it into the current branch of
+ * `projectDir`. Both steps run sequentially in the same working dir;
+ * fetch failure short-circuits before the merge runs.
+ */
+export async function gitPullRemoteIntoCurrent(projectDir: string, remote: string, branch: string): Promise<GitOpResult> {
+  const fetched = await runGitAsync(projectDir, ["fetch", remote, branch]);
+  if (!fetched.ok) return fetched;
+  return runGit(projectDir, ["merge", `${remote}/${branch}`]);
 }
 
 export interface GitWorktreeEntry {
@@ -706,12 +874,20 @@ export function appendToGitignore(projectDir: string, path: string): GitOpResult
 }
 
 export function gitPush(projectDir: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): GitOpResult {
+  return runGit(projectDir, buildPushArgs(options));
+}
+
+export function gitPushAsync(projectDir: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult> {
+  return runGitAsync(projectDir, buildPushArgs(options));
+}
+
+function buildPushArgs(options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): string[] {
   const args = ["push"];
   if (options?.force) args.push("--force-with-lease");
   if (options?.setUpstream) args.push("--set-upstream");
   if (options?.remote) args.push(options.remote);
   if (options?.branch) args.push(options.branch);
-  return runGit(projectDir, args);
+  return args;
 }
 
 /**
@@ -722,29 +898,8 @@ export function gitPush(projectDir: string, options?: { force?: boolean; setUpst
  * Returns the new commit sha on success, or a GitOpResult-shaped error
  * if either `git add` or `git commit` fails.
  */
-/**
- * Cheap clean-tree probe: returns true iff `git diff --quiet` and
- * `git diff --cached --quiet` both exit zero. Used by the Stop-hook
- * auto-commit suppressor (wi-ec4c8e6f44fd) so we don't fire the
- * auto-commit directive on a thread whose settled work has already
- * landed. Untracked files don't count — `git diff --quiet` doesn't
- * see them, and the commit directive's job is still to capture
- * staged/unstaged changes, not a stray new file the user forgot
- * about.
- */
-export function isWorktreeClean(projectDir: string): boolean {
-  try {
-    execFileSync("git", ["-C", projectDir, "diff", "--quiet"], { stdio: "ignore" });
-    execFileSync("git", ["-C", projectDir, "diff", "--cached", "--quiet"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Read the current HEAD sha for a worktree. Returns null on any failure
- *  (not a git repo, detached state we can't resolve, etc.). Used by the
- *  `git-refs.changed` backfill path in wi-ec4c8e6f44fd. */
+ *  (not a git repo, detached state we can't resolve, etc.). */
 export function readWorktreeHeadSha(projectDir: string): string | null {
   try {
     const sha = execFileSync("git", ["-C", projectDir, "rev-parse", "HEAD"], {
@@ -775,11 +930,29 @@ export function gitCommitAll(projectDir: string, message: string, options?: { in
 }
 
 export function gitPull(projectDir: string, options?: { rebase?: boolean; remote?: string; branch?: string }): GitOpResult {
+  return runGit(projectDir, buildPullArgs(options));
+}
+
+export function gitPullAsync(projectDir: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult> {
+  return runGitAsync(projectDir, buildPullArgs(options));
+}
+
+function buildPullArgs(options?: { rebase?: boolean; remote?: string; branch?: string }): string[] {
   const args = ["pull"];
   if (options?.rebase) args.push("--rebase");
   if (options?.remote) args.push(options.remote);
   if (options?.branch) args.push(options.branch);
-  return runGit(projectDir, args);
+  return args;
+}
+
+/** Async git fetch — used by the periodic refs watcher and any other
+ *  caller that wants progress feedback in the bottom bar. */
+export function gitFetchAsync(projectDir: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult> {
+  const args = ["fetch"];
+  if (options?.all) args.push("--all");
+  if (options?.prune) args.push("--prune");
+  if (options?.remote) args.push(options.remote);
+  return runGitAsync(projectDir, args);
 }
 
 /**

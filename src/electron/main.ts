@@ -220,6 +220,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:getWorkspaceContext", () => currentRuntime.getWorkspaceContext());
   handle("oxplow:createStream", (_event, input) => currentRuntime.createStream(input));
   handle("oxplow:listAdoptableWorktrees", () => currentRuntime.listAdoptableWorktrees());
+  handle("oxplow:listSiblingWorktrees", (_event, streamId: string) => currentRuntime.listSiblingWorktrees(streamId));
   handle("oxplow:checkoutStreamBranch", (_event, streamId: string, branch: string) =>
     currentRuntime.checkoutStreamBranch(streamId, branch),
   );
@@ -232,7 +233,6 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:promoteThread", (_event, streamId: string, threadId: string) => currentRuntime.promoteThread(streamId, threadId));
   handle("oxplow:completeThread", (_event, streamId: string, threadId: string) => currentRuntime.completeThread(streamId, threadId));
   handle("oxplow:renameThread", (_event, streamId: string, threadId: string, title: string) => currentRuntime.renameThread(streamId, threadId, title));
-  handle("oxplow:setAutoCommit", (_event, streamId: string, threadId: string, enabled: boolean) => currentRuntime.setAutoCommit(streamId, threadId, enabled));
   handle("oxplow:setStreamPrompt", (_event, streamId: string, prompt: string | null) => currentRuntime.setStreamPrompt(streamId, prompt));
   handle("oxplow:setThreadPrompt", (_event, streamId: string, threadId: string, prompt: string | null) => currentRuntime.setThreadPrompt(streamId, threadId, prompt));
   handle("oxplow:getThreadWorkState", (_event, streamId: string, threadId: string) => currentRuntime.workItemApi.getThreadWorkState(streamId, threadId));
@@ -257,6 +257,11 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:gitAppendToGitignore", (_event, streamId: string, path: string) => currentRuntime.gitAppendToGitignore(streamId, path));
   handle("oxplow:gitPush", (_event, streamId: string, options) => currentRuntime.gitPush(streamId, options));
   handle("oxplow:gitPull", (_event, streamId: string, options) => currentRuntime.gitPull(streamId, options));
+  handle("oxplow:getAheadBehind", (_event, streamId: string, base: string, head?: string) => currentRuntime.getAheadBehind(streamId, base, head));
+  handle("oxplow:getCommitsAheadOf", (_event, streamId: string, base: string, head: string, limit?: number) => currentRuntime.getCommitsAheadOf(streamId, base, head, limit));
+  handle("oxplow:listRecentRemoteBranches", (_event, streamId: string, limit?: number) => currentRuntime.listRecentRemoteBranches(streamId, limit));
+  handle("oxplow:gitPushCurrentTo", (_event, streamId: string, remote: string, branch: string) => currentRuntime.gitPushCurrentTo(streamId, remote, branch));
+  handle("oxplow:gitPullRemoteIntoCurrent", (_event, streamId: string, remote: string, branch: string) => currentRuntime.gitPullRemoteIntoCurrent(streamId, remote, branch));
   handle("oxplow:gitCommitAll", (_event, streamId: string, message: string, options) => currentRuntime.gitCommitAll(streamId, message, options));
   handle("oxplow:listFileCommits", (_event, streamId: string, path: string, limit?: number) => currentRuntime.listFileCommits(streamId, path, limit));
   handle("oxplow:gitBlame", (_event, streamId: string, path: string) => currentRuntime.gitBlame(streamId, path));
@@ -286,19 +291,20 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:readWikiNoteBody", (_event, streamId: string, slug: string) => currentRuntime.readWikiNoteBody(streamId, slug));
   handle("oxplow:writeWikiNoteBody", (_event, streamId: string, slug: string, body: string) => currentRuntime.writeWikiNoteBody(streamId, slug, body));
   handle("oxplow:deleteWikiNote", (_event, streamId: string, slug: string) => currentRuntime.deleteWikiNote(streamId, slug));
-  handle("oxplow:listCommitPoints", (_event, threadId: string) => currentRuntime.listCommitPoints(threadId));
-  handle("oxplow:createCommitPoint", (_event, streamId: string, threadId: string) => currentRuntime.createCommitPoint(streamId, threadId));
-  handle("oxplow:deleteCommitPoint", (_event, id: string) => currentRuntime.deleteCommitPoint(id));
-  handle("oxplow:updateCommitPoint", (_event, id: string, changes: { mode?: "auto" | "approve" }) => currentRuntime.updateCommitPoint(id, changes));
-  handle("oxplow:commitCommitPoint", (_event, id: string, message: string) => currentRuntime.commitCommitPoint(id, message));
-  handle("oxplow:reorderThreadQueue", (_event, streamId: string, threadId: string, entries: Array<{ kind: "work" | "commit" | "wait"; id: string }>) => currentRuntime.reorderThreadQueue(streamId, threadId, entries));
-  handle("oxplow:listWaitPoints", (_event, threadId: string) => currentRuntime.listWaitPoints(threadId));
-  handle("oxplow:createWaitPoint", (_event, streamId: string, threadId: string, note?: string | null) => currentRuntime.createWaitPoint(streamId, threadId, note));
-  handle("oxplow:setWaitPointNote", (_event, id: string, note: string | null) => currentRuntime.setWaitPointNote(id, note));
-  handle("oxplow:deleteWaitPoint", (_event, id: string) => currentRuntime.deleteWaitPoint(id));
+  handle("oxplow:searchWikiNotes", (_event, streamId: string, query: string, limit?: number) => currentRuntime.searchWikiNotes(streamId, query, limit));
+  handle("oxplow:recordUsage", (_event, input: { kind: string; key: string; event?: string; streamId?: string | null; threadId?: string | null }) => currentRuntime.recordUsage(input));
+  handle("oxplow:listRecentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listRecentUsage(input));
+  handle("oxplow:listFrequentUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null; limit?: number; since?: string }) => currentRuntime.listFrequentUsage(input));
+  handle("oxplow:listCurrentlyOpenUsage", (_event, input: { kind: string; streamId?: string | null; threadId?: string | null }) => currentRuntime.listCurrentlyOpenUsage(input));
+  handle("oxplow:runCodeQualityScan", (_event, input: { streamId: string; tool: "lizard" | "jscpd"; scope: "codebase" | "diff"; baseRef?: string | null }) => currentRuntime.runCodeQualityScan(input));
+  handle("oxplow:listCodeQualityFindings", (_event, input: { streamId: string; tool?: "lizard" | "jscpd"; paths?: string[] }) => currentRuntime.listCodeQualityFindings(input));
+  handle("oxplow:listCodeQualityScans", (_event, input: { streamId: string; limit?: number }) => currentRuntime.listCodeQualityScans(input));
+  handle("oxplow:getWorkItemSummaries", (_event, ids: string[]) => currentRuntime.getWorkItemSummaries(ids));
+  handle("oxplow:reorderThreadQueue", (_event, streamId: string, threadId: string, entries: Array<{ id: string }>) => currentRuntime.reorderThreadQueue(streamId, threadId, entries));
   handle("oxplow:removeFollowup", (_event, threadId: string, id: string) => {
     currentRuntime.followupStore.remove(threadId, id);
   });
+  handle("oxplow:listBackgroundTasks", () => currentRuntime.backgroundTaskStore.list());
   handle("oxplow:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
   handle("oxplow:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   handle("oxplow:ping", () => currentRuntime.ping());

@@ -19,7 +19,6 @@ export interface Thread {
   updated_at: string;
   pane_target: string;
   resume_session_id: string;
-  auto_commit: boolean;
   custom_prompt: string | null;
 }
 
@@ -29,7 +28,7 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-export type ThreadChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "auto-commit-changed" | "prompt-changed";
+export type ThreadChangeKind = "created" | "selected" | "reordered" | "promoted" | "completed" | "resume-updated" | "renamed" | "prompt-changed";
 
 export interface ThreadChange {
   streamId: string;
@@ -86,7 +85,6 @@ export class ThreadStore {
       updated_at: now,
       pane_target: stream.panes.working,
       resume_session_id: stream.resume.working_session_id,
-      auto_commit: false,
       custom_prompt: null,
     };
     this.insertThread(thread);
@@ -144,7 +142,6 @@ export class ThreadStore {
       updated_at: now,
       pane_target: `${paneSessionName(stream)}:thread-${createWindowName()}`,
       resume_session_id: "",
-      auto_commit: false,
       custom_prompt: null,
     };
     this.insertThread(thread);
@@ -259,19 +256,6 @@ export class ThreadStore {
       threadId,
     );
     this.emitChange({ streamId, threadId, kind: "resume-updated" });
-  }
-
-  setAutoCommit(threadId: string, enabled: boolean): Thread[] {
-    const thread = this.findById(threadId);
-    if (!thread) throw new Error(`unknown thread: ${threadId}`);
-    this.stateDb.run(
-      "UPDATE threads SET auto_commit = ?, updated_at = ? WHERE id = ?",
-      enabled ? 1 : 0,
-      new Date().toISOString(),
-      threadId,
-    );
-    this.emitChange({ streamId: thread.stream_id, threadId, kind: "auto-commit-changed" });
-    return this.fetchThreads(thread.stream_id);
   }
 
   setThreadPrompt(threadId: string, prompt: string | null): Thread[] {
@@ -400,7 +384,6 @@ function rowToThread(row: Record<string, unknown>): Thread {
     updated_at: String(row.updated_at ?? row.created_at ?? new Date(0).toISOString()),
     pane_target: String(row.pane_target ?? ""),
     resume_session_id: String(row.resume_session_id ?? ""),
-    auto_commit: row.auto_commit === 1 || row.auto_commit === true,
     custom_prompt: row.custom_prompt != null ? String(row.custom_prompt) : null,
   };
 }

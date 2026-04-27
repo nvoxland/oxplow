@@ -953,6 +953,162 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 38,
+    name: "wiki_note.body",
+    up: (db) => {
+      // Mirror the on-disk note body in SQLite so the agent can run
+      // content searches without reading every file. The watcher
+      // (`syncNoteFromDisk`) writes both metadata and body on every
+      // upsert, so the column stays in sync with the filesystem
+      // source-of-truth. Existing rows default to '' and are populated
+      // on the next watcher pass (`scanAndSyncAll` runs at startup).
+      db.exec(`ALTER TABLE wiki_note ADD COLUMN body TEXT NOT NULL DEFAULT '';`);
+    },
+  },
+  {
+    version: 39,
+    name: "usage_event + wiki_note_fts",
+    up: (db) => {
+      // Generic (kind, key) usage tracking. Append-only event log so
+      // rollups stay derived rather than persisted — adding a new "kind"
+      // (editor file, work item, future) doesn't require a new table.
+      // `stream_id` is nullable so cross-stream targets (e.g. work items
+      // viewed from the backlog) can record without a stream context.
+      // The runtime writer coalesces events arriving < 30s apart for the
+      // same (kind, key, event) by bumping `occurred_at` instead of
+      // inserting, so rapid re-selects of the same target don't spam
+      // history.
+      db.exec(`
+        CREATE TABLE usage_event (
+          id INTEGER PRIMARY KEY,
+          stream_id TEXT,
+          kind TEXT NOT NULL,
+          key TEXT NOT NULL,
+          event TEXT NOT NULL,
+          occurred_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_usage_event_lookup ON usage_event(kind, key, occurred_at DESC);
+        CREATE INDEX idx_usage_event_stream ON usage_event(stream_id, kind, occurred_at DESC);
+      `);
+
+      // FTS5 virtual table mirroring wiki_note (title + body) for ranked
+      // full-text search. `content='wiki_note'` makes this a contentless
+      // index so the source rows aren't duplicated; triggers keep the
+      // index in sync. Backfill fires once via the special 'rebuild'
+      // command for any rows that already exist.
+      db.exec(`
+        CREATE VIRTUAL TABLE wiki_note_fts USING fts5(
+          slug UNINDEXED,
+          title,
+          body,
+          content='wiki_note',
+          content_rowid='rowid'
+        );
+
+        CREATE TRIGGER wiki_note_ai AFTER INSERT ON wiki_note BEGIN
+          INSERT INTO wiki_note_fts(rowid, slug, title, body)
+            VALUES (new.rowid, new.slug, new.title, new.body);
+        END;
+
+        CREATE TRIGGER wiki_note_ad AFTER DELETE ON wiki_note BEGIN
+          INSERT INTO wiki_note_fts(wiki_note_fts, rowid, slug, title, body)
+            VALUES ('delete', old.rowid, old.slug, old.title, old.body);
+        END;
+
+        CREATE TRIGGER wiki_note_au AFTER UPDATE ON wiki_note BEGIN
+          INSERT INTO wiki_note_fts(wiki_note_fts, rowid, slug, title, body)
+            VALUES ('delete', old.rowid, old.slug, old.title, old.body);
+          INSERT INTO wiki_note_fts(rowid, slug, title, body)
+            VALUES (new.rowid, new.slug, new.title, new.body);
+        END;
+
+        INSERT INTO wiki_note_fts(wiki_note_fts) VALUES('rebuild');
+      `);
+    },
+  },
+  {
+    version: 40,
+    name: "usage_event.thread_id",
+    up: (db) => {
+      // Per-thread scope on usage rows. Stream is the user-visible
+      // workspace tab; thread is the work context within it. Queries
+      // can group either dimension (or both, intersected) to answer
+      // "what did this thread care about?" vs "what did this stream
+      // care about?". Nullable so kinds without a thread context (e.g.
+      // wiki-note visits today) and pre-migration rows are handled.
+      db.exec(`
+        ALTER TABLE usage_event ADD COLUMN thread_id TEXT;
+        CREATE INDEX idx_usage_event_thread ON usage_event(thread_id, kind, occurred_at DESC);
+      `);
+    },
+  },
+  {
+    version: 41,
+    name: "code_quality_scan + code_quality_finding",
+    up: (db) => {
+      // Deterministic, language-agnostic code-quality findings sourced
+      // from external CLIs (lizard, jscpd). One scan = one CLI invocation
+      // for one (stream, tool, scope) combination. Findings are wiped on
+      // re-scan via the store's retention pass; the schema doesn't enforce
+      // FK cascade so the store stays in control of what counts as
+      // "current" for a given stream + tool + scope.
+      db.exec(`
+        CREATE TABLE code_quality_scan (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          stream_id TEXT NOT NULL,
+          tool TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          base_ref TEXT,
+          status TEXT NOT NULL,
+          error_message TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX idx_code_quality_scan_stream_tool_started
+          ON code_quality_scan(stream_id, tool, started_at DESC);
+
+        CREATE TABLE code_quality_finding (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scan_id INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          start_line INTEGER NOT NULL,
+          end_line INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          metric_value REAL NOT NULL,
+          extra_json TEXT
+        );
+        CREATE INDEX idx_code_quality_finding_scan
+          ON code_quality_finding(scan_id);
+        CREATE INDEX idx_code_quality_finding_scan_path
+          ON code_quality_finding(scan_id, path);
+        CREATE INDEX idx_code_quality_finding_scan_kind_value
+          ON code_quality_finding(scan_id, kind, metric_value DESC);
+      `);
+    },
+  },
+  {
+    version: 42,
+    name: "drop commit/wait point markers + auto_commit",
+    up: (db) => {
+      // Commits are now driven exclusively by the user (CLI / Bash). The
+      // queueable commit/wait point markers and the per-thread auto_commit
+      // toggle are gone — Stop hook no longer emits commit directives, and
+      // the runtime no longer runs `git commit`. Drop the marker tables
+      // and the column outright; existing rows are not migrated forward
+      // because no surface in the new system reads them. SQLite supports
+      // DROP COLUMN since 3.35; bun's bundled sqlite is current enough.
+      db.exec(`
+        DROP INDEX IF EXISTS idx_commit_point_thread_sort;
+        DROP INDEX IF EXISTS idx_commit_point_thread_status;
+        DROP INDEX IF EXISTS idx_wait_point_thread_sort;
+        DROP INDEX IF EXISTS idx_wait_point_thread_status;
+        DROP TABLE IF EXISTS commit_point;
+        DROP TABLE IF EXISTS wait_point;
+        ALTER TABLE threads DROP COLUMN auto_commit;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

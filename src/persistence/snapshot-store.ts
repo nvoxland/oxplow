@@ -16,6 +16,7 @@ import { getStateDatabase } from "./state-db.js";
 export type SnapshotSource =
   | "task-start"
   | "task-end"
+  | "task-event"
   | "startup";
 
 /**

@@ -23,6 +23,7 @@ Write the report against each lens. Cite specific turns / tool calls as evidence
 3. **Correctness & verification** — Where did you assume instead of verify? Did any change ship without a reasonable test or runtime check? Were there claims ("all tests pass", "UI works") that weren't actually verified?
 4. **Agent ↔ user collaboration** — Were requests clear enough? Where did you guess instead of ask? Where did the user have to re-course-correct? Were the work-item notes / thread summaries useful to them?
 5. **oxplow tooling itself** — Missing MCP tools, confusing prompt instructions, noisy hooks, stop-hook behavior, work-item statuses, permissions friction, anything in the harness that got in the way. Be specific about *which file* to change.
+6. **Oxplow-imposed overhead** — Where did oxplow force you down a less efficient path than you'd naturally take? Examples: mandatory work-item filing for trivial edits, required `.context/` reads for one-line changes, stop-hook directives that re-asked you to do something already done, prompt instructions that pulled context you didn't need, status transitions that turned a one-shot task into a multi-step ceremony. Quantify the cost (extra tool calls, extra tokens, extra round-trips) and propose where the rule should be relaxed or scoped narrower.
 
 ## Step 3 — Produce a prioritized improvement list
 

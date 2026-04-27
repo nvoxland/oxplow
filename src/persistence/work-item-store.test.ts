@@ -252,11 +252,11 @@ describe("WorkItemStore.readWorkOptions", () => {
     expect(ids).toContain(subtask.id);
   });
 
-  test("beforeSortIndex cuts off items at or beyond a commit/wait boundary", () => {
+  test("beforeSortIndex cuts off items at or beyond a sort_index boundary", () => {
     const { workItems, threadId } = seedThread();
     const t1 = workItems.createItem({ threadId, kind: "task", title: "Before", createdBy: "user", actorId: "ui" });
     const t2 = workItems.createItem({ threadId, kind: "task", title: "After", createdBy: "user", actorId: "ui" });
-    // t1 has sort_index 0, t2 has sort_index 1; commit point sits at index 1
+    // t1 has sort_index 0, t2 has sort_index 1; cutoff sits at index 1
     const cutoff = t2.sort_index;
     const result = workItems.readWorkOptions(threadId, cutoff);
     expect(result.mode).toBe("standalone");
@@ -450,15 +450,28 @@ describe("copyLastItemNotes (used by fork_thread)", () => {
 });
 
 describe("WorkItemStore status transition guard (wi-6285706789c5)", () => {
-  test("updateItem rejects blocked -> in_progress with a descriptive error", () => {
+  test("updateItem accepts blocked -> in_progress (deliberate unblock)", () => {
+    // The previous guard required a manual blocked → ready → in_progress
+    // hop, but every agent caller hit the error on the first try. The
+    // unblock gesture IS the deliberate transition; no extra hop needed.
     const { workItems, threadId } = seedThread();
     const item = workItems.createItem({
       threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "blocked",
     });
+    workItems.updateItem({
+      threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
+    });
+    expect(workItems.getItem(threadId, item.id)!.status).toBe("in_progress");
+  });
+
+  test("updateItem still rejects done -> in_progress (terminal state)", () => {
+    const { workItems, threadId } = seedThread();
+    const item = workItems.createItem({
+      threadId, kind: "task", title: "t", createdBy: "user", actorId: "ui", status: "done",
+    });
     expect(() => workItems.updateItem({
       threadId, itemId: item.id, status: "in_progress", actorKind: "agent", actorId: "mcp",
-    })).toThrow(/blocked.*in_progress|move to.*ready.*first/i);
-    expect(workItems.getItem(threadId, item.id)!.status).toBe("blocked");
+    })).toThrow(/done.*in_progress|move to.*ready.*first/i);
   });
 
   test("updateItem accepts blocked -> ready (explicit unblock)", () => {

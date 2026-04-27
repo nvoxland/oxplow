@@ -107,18 +107,68 @@ All git invocations go through `src/git/git.ts`. Notable:
   `parseBlamePorcelain`. Powers the editor blame overlay.
 - `gitCommitAll(projectDir, message, options?)` — `git add -u` (or
   `git add -A` when `options.includeUntracked` is true) then
-  `git commit -m message`, returning the new sha. The Files-commit
-  dialog defaults the include-untracked toggle OFF and only renders the
-  checkbox when the workspace has untracked files; the orchestrator's
-  commit-point commit passes `{ includeUntracked: true }` to keep
-  its historical behaviour. Used by `batchQueue.executeCommit`, which
-  is called synchronously from the `oxplow__commit` MCP tool after the
-  user approves the drafted message in chat.
+  `git commit -m message`, returning the new sha. Only used by the
+  Files-panel commit dialog — the runtime never calls it elsewhere
+  and no MCP tool invokes git commits. Commits not started from the
+  Files dialog are user-driven via `git commit` in the terminal.
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
-  `gitPush`, `gitPull`, `listFileCommits`, `listAllRefs`,
+  `listFileCommits`, `listAllRefs`,
   `readFileAtRef`, `listGitStatuses` — straight `execFileSync` wrappers
   exposed via IPC for UI consumption.
+- `gitPush` / `gitPull` ship sync wrappers plus async siblings
+  `gitPushAsync` / `gitPullAsync` (and a `gitFetchAsync` helper) backed
+  by `child_process.execFile` + `promisify`. The runtime IPC handlers
+  use the async variants so the main process stays responsive during
+  the network call, and they register a row with the
+  `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
+  shows progress. The sync wrappers stay around for code paths that
+  haven't been promoted yet (e.g. `gitCommitAll`'s internal calls).
+- `getGitLog` accepts an `all` option (defaults `true`). Pass
+  `{ all: false }` to drop `--all` so the log only walks commits
+  reachable from `HEAD`'s branch — used by the Git Dashboard's
+  "Recent commits" card so the graph stays scoped to the current
+  branch.
+- `getAheadBehind(projectDir, base, head?)` — wraps
+  `git rev-list --left-right --count base...head` and returns
+  `{ ahead, behind }` relative to `base`. `head` defaults to `HEAD`.
+  Powers the Git Dashboard branch header and worktree rows.
+- `getCommitsAheadOf(projectDir, base, head, limit=50)` — wraps
+  `git log base..head` with the same parser used by `getGitLog`, for
+  pairwise commit-diff displays.
+- `listRecentRemoteBranches(projectDir, limit=20)` — wraps
+  `git for-each-ref --sort=-committerdate refs/remotes` and returns
+  `RemoteBranchEntry[]` (filters out `<remote>/HEAD`). Drives the
+  dashboard's recent-remote-branches card.
+- `gitPushCurrentTo` / `gitPushCurrentToAsync(projectDir, remote, branch)`
+  — runs `git push <remote> HEAD:refs/heads/<branch>`. Refspec push;
+  never touches any local working dir. The runtime IPC handler uses
+  the async variant + `BackgroundTaskStore`.
+- `gitPullRemoteIntoCurrent(projectDir, remote, branch)` — fetches
+  `<remote>/<branch>` then merges it into the current branch of
+  `projectDir`. Fetch failure short-circuits the merge.
+
+### Cross-worktree push: deliberately unsupported
+
+There is no helper that pushes the active stream's commits *into*
+another worktree's branch. Every available path mutates the other
+worktree:
+
+- `git push <other-worktree-path> <branch>` is refused by default for
+  the currently-checked-out branch (`receive.denyCurrentBranch`).
+- `git merge` / `git pull` inside the other worktree obviously
+  mutates its working dir.
+- `git update-ref` from our side advances the ref but leaves the
+  other worktree's HEAD/index/working tree divergent — it then
+  silently appears "dirty".
+
+The supported direction is the inverse: from the other stream, the
+Git Dashboard's worktrees card lists *our* branch with a
+"Merge into current" action so a human in that stream pulls our
+commits in safely. Tests pin this invariant: the gitMerge sibling-
+worktree test in `src/git/git.test.ts` asserts byte-equal HEAD,
+status, and file content on the sibling after merging *its* branch
+into the primary.
 
 `isGitRepo` requires the project root *itself* to be the git toplevel —
 nested git repos and parent-dir lookups are explicitly refused (see
@@ -132,34 +182,13 @@ The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
 header toolbar whenever `gitEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
 textarea; submitting runs `gitCommitAll` through a dedicated
-`oxplow:gitCommitAll` IPC method. This is the UI entry point for the
-**ad-hoc commit path** (the path `agent-model.md` distinguishes from
-commit points). The commit-point flow still owns automated threads;
-the button is for "I've got changes and want to land them now."
+`oxplow:gitCommitAll` IPC method. This is the UI entry point for
+user-driven commits. The agent doesn't drive commits — the Stop-hook
+emits no commit directives.
 
 Button carries `data-testid="files-commit"`; the dialog's message
 textarea is `files-commit-message` and the submit button is
 `files-commit-submit`.
-
-## Two commit paths
-
-oxplow supports two paths for landing a commit, and they exist for
-different reasons:
-
-1. **Ad-hoc.** The writer-thread agent runs `git add` / `git commit`
-   directly via Bash when the user tells it to commit. No commit
-   point, no approval UI. This is the default shape for "I've got
-   changes, land them now."
-2. **Commit-point / approval.** A `commit_point` row exists in the
-   queue and the Stop-hook has blocked the agent with a directive
-   telling it to inspect the diff, draft a message in its chat reply,
-   and ask the user to approve. On approval the agent calls
-   `mcp__oxplow__commit` (or in auto mode the runtime commits
-   immediately) which runs `gitCommitAll` through the runtime. The
-   row records the commit sha for provenance.
-
-The drafted message lives only in chat — there is no `propose_commit`
-tool and no DB-side drafted-message column.
 
 ### Non-writer threads still cannot call git
 
@@ -172,7 +201,7 @@ Bash (which the hook can't classify reliably).
 
 ## Related
 
-- [data-model.md](./data-model.md) — commit_point and wait_point tables.
-- [agent-model.md](./agent-model.md) — how the Stop-hook pipeline asks
-  the agent to propose commits.
+- [data-model.md](./data-model.md) — schema overview.
+- [agent-model.md](./agent-model.md) — Stop-hook pipeline (no commit
+  branches; commits are user-driven).
 - [editor-and-monaco.md](./editor-and-monaco.md) — blame overlay UI.

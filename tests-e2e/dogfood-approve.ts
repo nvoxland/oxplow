@@ -19,14 +19,10 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[approve] oxplow launched");
 
-    // Work panel should be first dock tab.
-    const workPanel = window.getByTestId("dock-panel-plan");
-    for (let i = 0; i < 3; i++) {
-      if ((await workPanel.getAttribute("data-active")) === "true" && (await workPanel.isVisible())) break;
-      await window.getByTestId("dock-tab-plan").click();
-      await window.waitForTimeout(300);
-    }
-    probeLog("[approve] Work panel active");
+    // Open the All work page from the rail HUD.
+    await window.getByTestId("rail-page-plan-work").click();
+    await window.getByTestId("page-plan-work").waitFor({ state: "visible", timeout: 5_000 });
+    probeLog("[approve] All work page active");
 
     await window.screenshot({ path: resolve(outDir, "approve-01-work-panel.png") });
 

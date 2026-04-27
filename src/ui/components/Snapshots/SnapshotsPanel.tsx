@@ -17,7 +17,7 @@ import {
 } from "../../api.js";
 import { logUi } from "../../logger.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
-import { ConfirmDialog } from "../ConfirmDialog.js";
+import { InlineConfirm } from "../InlineConfirm.js";
 import { InlineStatusPicker } from "../Plan/WorkGroupList.js";
 
 interface Props {
@@ -44,7 +44,6 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEffortId, setSelectedEffortId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
-  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
   const [compareBaseId, setCompareBaseId] = useState<string | null>(null);
@@ -233,11 +232,6 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     }
   };
 
-  const handleRestore = (path: string) => {
-    if (!stream || !selectedId) return;
-    setPendingRestore(path);
-  };
-
   const performRestore = async (path: string) => {
     if (!stream || !selectedId) return;
     try {
@@ -273,7 +267,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
 
   // Hide `-start` rows: they're only shown via their paired `-end`.
   const visibleSnapshots = snapshots.filter(
-    (snap) => snap.source !== "task-start" && snap.source !== "turn-start",
+    (snap) => snap.source !== "task-start",
   );
 
   // Synthesize one row per effort when multiple efforts end at the same
@@ -416,7 +410,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
             summary={summary}
             loading={summaryLoading}
             onOpenFileDiff={handleOpenFileDiff}
-            onRestore={handleRestore}
+            onRestore={(path) => { void performRestore(path); }}
             workItemId={
               selectedId && selectedEffortId
                 ? (effortsBySnapshot[selectedId] ?? []).find((e) => e.effortId === selectedEffortId)?.workItemId ?? null
@@ -426,19 +420,6 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
           />
         </div>
       </div>
-      {pendingRestore ? (
-        <ConfirmDialog
-          message={`Restore ${pendingRestore} to its content from this snapshot? This overwrites the current file in the worktree.`}
-          confirmLabel="Restore"
-          destructive
-          onConfirm={() => {
-            const path = pendingRestore;
-            setPendingRestore(null);
-            void performRestore(path);
-          }}
-          onCancel={() => setPendingRestore(null)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -450,12 +431,15 @@ function snapshotLabel(snap: FileSnapshot): string {
       return "Task started";
     case "task-end":
       return "Task ended";
-    case "turn-start":
-      return "Turn started";
-    case "turn-end":
-      return "Turn ended";
+    case "task-event":
+      // Task created or status changed (non-in_progress transition).
+      // Gap-gated like task-end so back-to-back events don't pile up.
+      return "Task update";
     case "startup":
-      return "App startup";
+      // Startup snapshots capture changes that happened while the app
+      // was down — the source is "startup" but semantically these are
+      // external (non-agent) edits to the worktree.
+      return "External changes";
     default:
       return "Snapshot";
   }
@@ -463,7 +447,6 @@ function snapshotLabel(snap: FileSnapshot): string {
 
 function endFamily(source: string): "task" | "turn" | null {
   if (source === "task-end") return "task";
-  if (source === "turn-end") return "turn";
   return null;
 }
 
@@ -473,9 +456,6 @@ function snapshotIconKind(snap: FileSnapshot): "task" | "turn" | "system" {
     case "task-start":
     case "task-end":
       return "task";
-    case "turn-start":
-    case "turn-end":
-      return "turn";
     default:
       return "system";
   }
@@ -525,8 +505,8 @@ function SnapshotRow({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        height: 24,
+        gap: 8,
+        height: 36,
         cursor: "pointer",
         // Flashing (reveal) > selected > compareBase > default.
         // Flashing uses a bright accent bg + left stripe so the user's
@@ -546,8 +526,8 @@ function SnapshotRow({
             ? "inset 2px 0 0 var(--accent)"
             : undefined,
         transition: "background 0.2s ease-out",
-        padding: "0 8px",
-        fontSize: 12,
+        padding: "0 12px",
+        fontSize: 13,
         whiteSpace: "nowrap",
         overflow: "hidden",
       }}
@@ -658,16 +638,11 @@ function DetailPane({
             const canRestore = row.kind !== "deleted" && row.entry.state === "present";
             const hint = oversize
               ? `Oversize (${formatBytes(row.entry.size)}) — no content diff available.`
-              : "Click to open diff. Right-click to restore this version.";
+              : "Click to open diff. Use the Restore button to restore this version.";
             return (
               <div
                 key={path}
                 onClick={() => onOpenFileDiff(path)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  if (!canRestore) return;
-                  onRestore(path);
-                }}
                 title={hint}
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: "pointer" }}
               >
@@ -675,6 +650,16 @@ function DetailPane({
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }} title={path}>
                   {path}
                 </span>
+                {canRestore ? (
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <InlineConfirm
+                      triggerLabel="Restore"
+                      confirmLabel="Restore"
+                      triggerStyle={{ fontSize: 10, padding: "2px 6px" }}
+                      onConfirm={() => onRestore(path)}
+                    />
+                  </span>
+                ) : null}
                 {oversize ? (
                   <span
                     title="Too large to blob. Size/mtime tracked only."

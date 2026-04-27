@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { decideStopDirective, type ThreadSnapshot } from "./stop-hook-pipeline.js";
+import { decideStopDirective, findStaleEpicChildrenPairs, type ThreadSnapshot } from "./stop-hook-pipeline.js";
 import type { Thread } from "../persistence/thread-store.js";
-import type { CommitPoint, CommitPointStatus } from "../persistence/commit-point-store.js";
-import type { WaitPoint, WaitPointStatus } from "../persistence/wait-point-store.js";
 import type { WorkItem, WorkItemKind, WorkItemPriority, WorkItemStatus } from "../persistence/work-item-store.js";
 
 const builders = {
-  buildCommitPointReason: (cp: CommitPoint) => `commit: ${cp.id}`,
-  buildNextWorkItemReason: (item: WorkItem) => `next: ${item.id}`,
   buildInProgressAuditReason: (items: WorkItem[]) =>
     `audit: ${items.map((i) => i.id).join(",")}`,
+  buildWikiCaptureReason: () => "wiki-capture",
+  buildFilingEnforcementReason: () => "file an item",
+  buildFiledButDidntShipReason: () => "filed but didn't ship",
+  buildStaleEpicChildrenReason: (pairs: Array<{ epic: WorkItem; staleChildren: WorkItem[] }>) =>
+    `stale-epics: ${pairs.map((p) => `${p.epic.id}=>${p.staleChildren.map((c) => c.id).join(",")}`).join("|")}`,
 };
 
 function thread(overrides: Partial<Thread> = {}): Thread {
@@ -23,7 +24,6 @@ function thread(overrides: Partial<Thread> = {}): Thread {
     updated_at: "2024-01-01T00:00:00Z",
     pane_target: "p",
     resume_session_id: "",
-    auto_commit: false,
     custom_prompt: null,
     ...overrides,
   };
@@ -52,95 +52,25 @@ function workItem(id: string, sort_index: number, status: WorkItemStatus = "read
   };
 }
 
-function commitPoint(id: string, sort_index: number, status: CommitPointStatus = "pending", mode: import("../persistence/commit-point-store.js").CommitPointMode = "approve"): CommitPoint {
-  return {
-    id,
-    thread_id: "b1",
-    sort_index,
-    mode,
-    status,
-    commit_sha: null,
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    completed_at: null,
-  };
-}
-
-function waitPoint(id: string, sort_index: number, status: WaitPointStatus = "pending"): WaitPoint {
-  return {
-    id,
-    thread_id: "b1",
-    sort_index,
-    status,
-    note: null,
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    completed_at: null,
-  };
-}
-
 function snapshot(parts: Partial<ThreadSnapshot>): ThreadSnapshot {
   return {
     thread: thread(),
-    commitPoints: [],
-    waitPoints: [],
     workItems: [],
-    readyWorkItems: [],
     ...parts,
   };
 }
 
 describe("decideStopDirective", () => {
-  test("pending commit point with no preceding items: block with commit reason", () => {
-    const cp = commitPoint("cp1", 1);
-    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
-    expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
-    expect(out.sideEffects).toEqual([]);
-  });
-
-  test("pending commit point waits until preceding work items are done", () => {
-    const items = [workItem("w1", 0, "in_progress")];
-    const cp = commitPoint("cp1", 1);
-    const out = decideStopDirective(snapshot({ commitPoints: [cp], workItems: items }), builders);
-    // The audit branch fires for the in_progress item — commit waits behind it.
-    expect(out.directive).toEqual({ decision: "block", reason: "audit: w1" });
-  });
-
-  test("pending wait point fires once preceding items are human_check (agents never self-mark done)", () => {
-    const items = [workItem("w1", 0, "human_check")];
-    const wp = waitPoint("wp1", 1);
-    const out = decideStopDirective(snapshot({ waitPoints: [wp], workItems: items }), builders);
+  test("writer thread with ready work item and no in_progress: allow stop (queue progression is user-driven)", () => {
+    const ready = workItem("w1", 0);
+    const out = decideStopDirective(snapshot({ workItems: [ready] }), builders);
     expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([{ kind: "trigger-wait-point", id: "wp1" }]);
   });
 
-  test("pending wait point: emits trigger side effect, allows stop", () => {
-    const wp = waitPoint("wp1", 1);
-    const out = decideStopDirective(snapshot({ waitPoints: [wp] }), builders);
-    expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([{ kind: "trigger-wait-point", id: "wp1" }]);
-  });
-
-  test("triggered wait point is treated as consumed", () => {
-    const wp = waitPoint("wp1", 1, "triggered");
-    const out = decideStopDirective(snapshot({ waitPoints: [wp] }), builders);
-    expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([]);
-  });
-
-  test("writer thread with ready work item and no in_progress: block with next-item reason", () => {
+  test("non-writer thread with ready work item: allow stop", () => {
     const ready = workItem("w1", 0);
     const out = decideStopDirective(
-      snapshot({ workItems: [ready], readyWorkItems: [ready] }),
-      builders,
-    );
-    expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
-  });
-
-  test("non-writer thread with ready work item: allow stop (no auto-progression)", () => {
-    const ready = workItem("w1", 0);
-    const out = decideStopDirective(
-      snapshot({ thread: thread({ status: "queued" }), workItems: [ready], readyWorkItems: [ready] }),
+      snapshot({ thread: thread({ status: "queued" }), workItems: [ready] }),
       builders,
     );
     expect(out.directive).toBeNull();
@@ -152,202 +82,100 @@ describe("decideStopDirective", () => {
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("commit point takes priority over wait point at same position", () => {
-    const cp = commitPoint("cp1", 1);
-    const wp = waitPoint("wp1", 1);
-    const out = decideStopDirective(snapshot({ commitPoints: [cp], waitPoints: [wp] }), builders);
-    expect(out.directive?.reason).toContain("commit: cp1");
-  });
-
-  test("done commit points are skipped, the next pending one wins", () => {
-    const done = commitPoint("cp0", 0, "done");
-    const pending = commitPoint("cp1", 2);
+  test("read-heavy Q&A turn (turnWasExploration=true) emits the wiki-capture directive", () => {
     const out = decideStopDirective(
-      snapshot({ commitPoints: [done, pending], workItems: [workItem("w1", 1, "done")] }),
+      snapshot({ turnHadActivity: false, turnWasExploration: true }),
       builders,
     );
-    expect(out.directive?.reason).toContain("commit: cp1");
+    expect(out.directive).toEqual({ decision: "block", reason: "wiki-capture" });
   });
 
-  test("non-writer thread with pending commit point: allow stop (only the active thread commits)", () => {
-    const cp = commitPoint("cp1", 1);
+  test("wiki-capture directive is suppressed when justEmittedWikiCapture is true", () => {
     const out = decideStopDirective(
-      snapshot({ thread: thread({ status: "queued" }), commitPoints: [cp] }),
+      snapshot({
+        turnHadActivity: false,
+        turnWasExploration: true,
+        justEmittedWikiCapture: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("wiki-capture directive only fires on active threads", () => {
+    const out = decideStopDirective(
+      snapshot({
+        thread: thread({ status: "queued" }),
+        turnHadActivity: false,
+        turnWasExploration: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("wiki-capture directive only fires when turnHadActivity is false (real-work turns take precedence)", () => {
+    const inProgress = workItem("w1", 0, "in_progress");
+    const out = decideStopDirective(
+      snapshot({
+        workItems: [inProgress],
+        turnHadActivity: true,
+        turnWasExploration: true,
+      }),
+      builders,
+    );
+    expect(out.directive).toEqual({ decision: "block", reason: "audit: w1" });
+  });
+
+  test("wiki-capture is skipped when buildWikiCaptureReason isn't wired (older callers)", () => {
+    const out = decideStopDirective(
+      snapshot({ turnHadActivity: false, turnWasExploration: true }),
+      {
+        buildInProgressAuditReason: builders.buildInProgressAuditReason,
+      },
+    );
+    expect(out.directive).toBeNull();
+  });
+
+  test("Q&A turn (turnHadActivity=false) suppresses every directive", () => {
+    const ready = workItem("w1", 0);
+    const inProgress = workItem("w2", 1, "in_progress");
+    const out = decideStopDirective(
+      snapshot({
+        workItems: [inProgress, ready],
+        turnHadActivity: false,
+      }),
       builders,
     );
     expect(out.directive).toBeNull();
     expect(out.sideEffects).toEqual([]);
   });
 
-  test("auto-mode commit point done: pipeline allows stop (no double-block)", () => {
-    const cp = commitPoint("cp1", 0, "done", "auto");
-    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
-    expect(out.directive).toBeNull();
-    expect(out.sideEffects).toEqual([]);
-  });
-
-  test("auto-mode commit point pending with buildAutoCommitReason wired: emits the auto-commit directive", () => {
-    const cp = commitPoint("cp1", 0, "pending", "auto");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), autoBuilders);
-    expect(out.directive).toEqual({ decision: "block", reason: "auto: cp1" });
-  });
-
-  test("auto-mode commit point pending without buildAutoCommitReason: falls back to the approve-mode directive", () => {
-    const cp = commitPoint("cp1", 0, "pending", "auto");
-    const out = decideStopDirective(snapshot({ commitPoints: [cp] }), builders);
-    expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
-  });
-
-  test("auto_commit=true with settled work and no commit point: emits the ad-hoc auto-commit directive", () => {
-    const settled = workItem("w1", 0, "human_check");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
+  test("turnHadActivity=true behaves the same as undefined (no suppression)", () => {
+    const inProgress = workItem("w2", 1, "in_progress");
     const out = decideStopDirective(
-      snapshot({
-        thread: thread({ auto_commit: true }),
-        workItems: [settled],
-        autoCommit: true,
-      }),
-      autoBuilders,
+      snapshot({ workItems: [inProgress], turnHadActivity: true }),
+      builders,
     );
-    expect(out.directive).toEqual({ decision: "block", reason: "auto: ad-hoc" });
-  });
-
-  test("auto_commit=true with settled work but a clean worktree: suppress directive (wi-ec4c8e6f44fd)", () => {
-    const settled = workItem("w1", 0, "human_check");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(
-      snapshot({
-        thread: thread({ auto_commit: true }),
-        workItems: [settled],
-        autoCommit: true,
-        worktreeClean: true,
-      }),
-      autoBuilders,
-    );
-    expect(out.directive).toBeNull();
-  });
-
-  test("auto-mode commit point pending but a clean worktree: suppress directive (wi-ec4c8e6f44fd)", () => {
-    const cp = commitPoint("cp1", 0, "pending", "auto");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(
-      snapshot({ commitPoints: [cp], worktreeClean: true }),
-      autoBuilders,
-    );
-    expect(out.directive).toBeNull();
-  });
-
-  test("auto_commit=true with no settled work: allow stop (nothing to commit)", () => {
-    // No settled items, no commit_point → auto-commit branch passes through.
-    // Ready/in_progress branches handle the rest. Here neither: allow stop.
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(
-      snapshot({
-        thread: thread({ auto_commit: true }),
-        workItems: [],
-        autoCommit: true,
-      }),
-      autoBuilders,
-    );
-    expect(out.directive).toBeNull();
-  });
-
-  test("auto_commit=true with a ready work item: ad-hoc auto-commit wins over ready-work directive", () => {
-    const settled = workItem("w1", 0, "human_check");
-    const ready = workItem("w2", 1, "ready");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(
-      snapshot({
-        thread: thread({ auto_commit: true }),
-        workItems: [settled, ready],
-        readyWorkItems: [ready],
-        autoCommit: true,
-      }),
-      autoBuilders,
-    );
-    expect(out.directive?.reason).toBe("auto: ad-hoc");
-  });
-
-  test("auto_commit=true on a non-active thread: no auto-commit directive (only writers commit)", () => {
-    const settled = workItem("w1", 0, "human_check");
-    const autoBuilders = {
-      ...builders,
-      buildAutoCommitReason: (c: CommitPoint | null) => `auto: ${c?.id ?? "ad-hoc"}`,
-    };
-    const out = decideStopDirective(
-      snapshot({
-        thread: thread({ auto_commit: true, status: "queued" }),
-        workItems: [settled],
-        autoCommit: true,
-      }),
-      autoBuilders,
-    );
-    expect(out.directive).toBeNull();
+    expect(out.directive).toEqual({ decision: "block", reason: "audit: w2" });
   });
 
   describe("in-progress audit branch", () => {
     test("fires when any work item is in_progress, listing each id", () => {
       const a = workItem("w-a", 0, "in_progress");
       const b = workItem("w-b", 1, "in_progress");
-      const out = decideStopDirective(
-        snapshot({ workItems: [a, b] }),
-        builders,
-      );
+      const out = decideStopDirective(snapshot({ workItems: [a, b] }), builders);
       expect(out.directive).toEqual({ decision: "block", reason: "audit: w-a,w-b" });
     });
 
-    test("fires even when ready work is also queued — audit takes priority", () => {
-      // The audit ensures stale in_progress rows are reconciled before the
-      // agent picks anything new up.
+    test("fires even when ready work is also queued", () => {
       const inFlight = workItem("w-a", 0, "in_progress");
       const ready = workItem("w-b", 1, "ready");
       const out = decideStopDirective(
-        snapshot({ workItems: [inFlight, ready], readyWorkItems: [ready] }),
+        snapshot({ workItems: [inFlight, ready] }),
         builders,
       );
       expect(out.directive?.reason).toBe("audit: w-a");
-    });
-
-    test("commit point still takes priority over the audit", () => {
-      // Commit point at sort_index 0 with no preceding items beats the audit.
-      const cp = commitPoint("cp1", 0);
-      const inFlight = workItem("w-a", 1, "in_progress");
-      const out = decideStopDirective(
-        snapshot({ workItems: [inFlight], commitPoints: [cp] }),
-        builders,
-      );
-      expect(out.directive?.reason).toBe("commit: cp1");
-    });
-
-    test("wait point still takes priority over the audit", () => {
-      // Wait point with no preceding items emits side effect and allows stop.
-      const wp = waitPoint("wp1", 0);
-      const inFlight = workItem("w-a", 1, "in_progress");
-      const out = decideStopDirective(
-        snapshot({ workItems: [inFlight], waitPoints: [wp] }),
-        builders,
-      );
-      expect(out.directive).toBeNull();
-      expect(out.sideEffects).toEqual([{ kind: "trigger-wait-point", id: "wp1" }]);
     });
 
     test("non-writer thread does not emit the audit (read-only thread)", () => {
@@ -362,24 +190,13 @@ describe("decideStopDirective", () => {
     test("is opt-in — omitting buildInProgressAuditReason skips the branch entirely", () => {
       const inFlight = workItem("w-a", 0, "in_progress");
       const ready = workItem("w-b", 1, "ready");
-      const noAuditBuilders = {
-        buildCommitPointReason: builders.buildCommitPointReason,
-        buildNextWorkItemReason: builders.buildNextWorkItemReason,
-      };
-      const out = decideStopDirective(
-        snapshot({ workItems: [inFlight, ready], readyWorkItems: [ready] }),
-        noAuditBuilders,
-      );
-      // Falls through to ready-work.
-      expect(out.directive).toEqual({ decision: "block", reason: "next: w-b" });
+      const out = decideStopDirective(snapshot({ workItems: [inFlight, ready] }), {});
+      expect(out.directive).toBeNull();
     });
   });
 
   describe("subagent-in-flight suppression", () => {
     test("in-progress audit is suppressed while a subagent is in flight", () => {
-      // The orchestrator dispatched a Task subagent that owns the
-      // in_progress item. Re-firing the audit nudge mid-flight produces
-      // the visual loop the user complained about.
       const inFlight = workItem("w-a", 0, "in_progress");
       const out = decideStopDirective(
         snapshot({ workItems: [inFlight], subagentInFlight: true }),
@@ -388,37 +205,12 @@ describe("decideStopDirective", () => {
       expect(out.directive).toBeNull();
       expect(out.sideEffects).toEqual([]);
     });
-
-    test("ready-work directive is suppressed while a subagent is in flight", () => {
-      // The parent shouldn't pick up a new item while a subagent is
-      // still working — same noise loop, different branch.
-      const ready = workItem("w-b", 0, "ready");
-      const out = decideStopDirective(
-        snapshot({ workItems: [ready], readyWorkItems: [ready], subagentInFlight: true }),
-        builders,
-      );
-      expect(out.directive).toBeNull();
-    });
-
-    test("commit/wait points still fire even with a subagent in flight", () => {
-      // Markers are user-placed and represent explicit work, not the
-      // queue-management nudges this suppression targets.
-      const cp = commitPoint("cp1", 1);
-      const out = decideStopDirective(
-        snapshot({ commitPoints: [cp], subagentInFlight: true }),
-        builders,
-      );
-      expect(out.directive).toEqual({ decision: "block", reason: "commit: cp1" });
-    });
   });
 
   describe("in-progress audit no-change suppression", () => {
     test("first fire emits the audit and a record-signature side effect", () => {
       const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
-      const out = decideStopDirective(
-        snapshot({ workItems: [a] }),
-        builders,
-      );
+      const out = decideStopDirective(snapshot({ workItems: [a] }), builders);
       expect(out.directive?.reason).toBe("audit: w-a");
       const recorded = out.sideEffects.find((e) => e.kind === "record-audit-signature");
       expect(recorded).toBeDefined();
@@ -433,7 +225,6 @@ describe("decideStopDirective", () => {
         builders,
       );
       expect(out.directive).toBeNull();
-      // No new signature recorded — nothing changed.
       expect(out.sideEffects).toEqual([]);
     });
 
@@ -469,8 +260,7 @@ describe("decideStopDirective", () => {
       expect(out.directive?.reason).toBe("audit: w-a,w-b");
     });
 
-    test("shrinking the in_progress set: surviving signature still matches → suppressed; otherwise re-armed", () => {
-      // Drop w-b → only w-a remains; signature for just w-a matches.
+    test("shrinking the in_progress set: surviving signature still matches → suppressed", () => {
       const a = workItem("w-a", 0, "in_progress", { updated_at: "2024-02-01T00:00:00Z" });
       const sig = `w-a|2024-02-01T00:00:00Z|0`;
       const out = decideStopDirective(
@@ -481,57 +271,253 @@ describe("decideStopDirective", () => {
     });
   });
 
-  describe("ready-work suppression rules", () => {
-    test("just-read-ready: ready set matches last read, suppressed", () => {
-      const ready = workItem("w1", 0, "ready");
+  describe("awaitingUser branch", () => {
+    test("awaitingUser=true allows stop even with ready items", () => {
+      const ready = workItem("wi-r", 1, "ready");
       const out = decideStopDirective(
         snapshot({
           workItems: [ready],
-          readyWorkItems: [ready],
-          justReadReadySet: ["w1"],
+          turnHadActivity: true,
+          awaitingUser: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+      expect(out.sideEffects).toEqual([]);
+    });
+
+    test("awaitingUser=true suppresses in-progress audit", () => {
+      const ip = workItem("wi-ip", 1, "in_progress");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ip],
+          turnHadActivity: true,
+          awaitingUser: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
+
+  describe("filing-enforcement branch", () => {
+    test("turn had writes but no filing and no open in_progress: block with filing directive", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: false,
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "file an item" });
+    });
+
+    test("turn had writes AND filing call: pass through (no enforcement block)", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: true,
         }),
         builders,
       );
       expect(out.directive).toBeNull();
     });
 
-    test("just-read-ready: ready set differs, directive fires", () => {
-      const ready = workItem("w2", 0, "ready");
+    test("turn had writes under a pre-existing in_progress item: audit handles it", () => {
+      const ip = workItem("wi-ip", 1, "in_progress");
       const out = decideStopDirective(
         snapshot({
-          workItems: [ready],
-          readyWorkItems: [ready],
-          justReadReadySet: ["w1"],
+          workItems: [ip],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: false,
         }),
         builders,
       );
-      expect(out.directive).toEqual({ decision: "block", reason: "next: w2" });
+      expect(out.directive).toEqual({ decision: "block", reason: "audit: wi-ip" });
     });
 
-    test("just-read-ready: no prior read recorded, directive fires", () => {
-      const ready = workItem("w1", 0, "ready");
+    test("read-only turn does not trigger filing enforcement", () => {
       const out = decideStopDirective(
         snapshot({
-          workItems: [ready],
-          readyWorkItems: [ready],
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: false,
         }),
         builders,
       );
-      expect(out.directive).toEqual({ decision: "block", reason: "next: w1" });
+      expect(out.directive).toBeNull();
     });
 
-    test("just-read-ready does NOT suppress the in-progress audit branch", () => {
-      // The audit is independent of ready-work suppression.
-      const inFlight = workItem("w-a", 0, "in_progress");
+    test("awaitingUser overrides filing enforcement", () => {
       const out = decideStopDirective(
         snapshot({
-          workItems: [inFlight],
-          readyWorkItems: [],
-          justReadReadySet: ["w-a"],
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: false,
+          awaitingUser: true,
         }),
         builders,
       );
-      expect(out.directive?.reason).toBe("audit: w-a");
+      expect(out.directive).toBeNull();
+    });
+  });
+
+  describe("stale-epic-children advisory branch", () => {
+    test("epic in human_check with a ready child: emit advisory", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toEqual({
+        decision: "block",
+        reason: "stale-epics: wi-epic=>wi-child",
+      });
+    });
+
+    test("epic in blocked with an in_progress child: emit advisory", () => {
+      const epic = workItem("wi-epic", 0, "blocked", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "in_progress", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive?.decision).toBe("block");
+      expect(out.directive?.reason).toContain("wi-child");
+    });
+
+    test("epic in human_check with all-terminal children: no advisory", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "human_check", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("ready epic with ready children: not closed, no advisory", () => {
+      const epic = workItem("wi-epic", 0, "ready", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("awaitingUser overrides stale-epic-children", () => {
+      const epic = workItem("wi-epic", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      const out = decideStopDirective(
+        snapshot({ workItems: [epic, child], turnHadActivity: true, awaitingUser: true }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+  });
+
+  describe("findStaleEpicChildrenPairs", () => {
+    test("returns empty array when no epics are closed", () => {
+      const epic = workItem("wi-epic", 0, "ready", { kind: "epic" as WorkItemKind });
+      const child = workItem("wi-child", 1, "ready", { parent_id: "wi-epic" });
+      expect(findStaleEpicChildrenPairs([epic, child])).toEqual([]);
+    });
+
+    test("returns each closed epic with its non-terminal children", () => {
+      const e1 = workItem("e1", 0, "human_check", { kind: "epic" as WorkItemKind });
+      const c1a = workItem("c1a", 1, "ready", { parent_id: "e1" });
+      const c1b = workItem("c1b", 2, "human_check", { parent_id: "e1" });
+      const e2 = workItem("e2", 3, "blocked", { kind: "epic" as WorkItemKind });
+      const c2a = workItem("c2a", 4, "in_progress", { parent_id: "e2" });
+      const pairs = findStaleEpicChildrenPairs([e1, c1a, c1b, e2, c2a]);
+      expect(pairs).toHaveLength(2);
+      expect(pairs[0]!.epic.id).toBe("e1");
+      expect(pairs[0]!.staleChildren.map((c) => c.id)).toEqual(["c1a"]);
+      expect(pairs[1]!.epic.id).toBe("e2");
+      expect(pairs[1]!.staleChildren.map((c) => c.id)).toEqual(["c2a"]);
+    });
+  });
+
+  describe("filed-but-didn't-ship advisory branch", () => {
+    test("filed a ready item, no writes, no in_progress: emit advisory", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "filed but didn't ship" });
+    });
+
+    test("filed a ready item AND made writes: pass through (writes are the legitimate path)", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: true,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("filed a ready item but has an in_progress item: audit takes precedence", () => {
+      const ip = workItem("wi-ip", 1, "in_progress");
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [ip],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toEqual({ decision: "block", reason: "audit: wi-ip" });
+    });
+
+    test("filing call but no ready row landed (e.g. transition only): no advisory", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: false,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
+    });
+
+    test("awaitingUser overrides filed-but-didn't-ship", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+          awaitingUser: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
     });
   });
 });

@@ -14,6 +14,11 @@ it this way" notes.
    convention, or something you'd want to remember next session — write
    it into the matching doc.
 
+Prefer `mcp__oxplow__get_subsystem_doc({ threadId, name })` over a raw
+`Read` when you only need the doc body — it's cheap, returns
+`{ content, exists }`, and avoids hard-erroring when the doc doesn't
+exist yet.
+
 ## Always-on rules
 
 - **`.context/architecture.md`** — the high-level stance. Don't violate
@@ -26,16 +31,36 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD or a subagent dispatch.
 
+**No trivial-edit carve-out for filing.** Every write to project files
+requires a tracked work item — typos, single-line CSS tweaks, and
+one-file fixes included. The Stop hook enforces this: a turn that
+edited files without a filing/transition tool call AND with no
+in_progress item gets blocked. The carve-out previously documented
+here was abused into "skip filing for any small thing", which left the
+Work panel lying about what shipped. The `.context/` read rule still
+gets a soft pass for tiny mechanical edits — just don't skip the work
+item.
+
+**Asking the user a question.** When your reply ends with a real
+clarifying question, A/B/C choice, or any ask where the user owns the
+next move, call `mcp__oxplow__await_user({ threadId, question })` and
+end your turn. The Stop hook honours this and suppresses every
+directive (no dispatch nudge, no audit, no filing-enforcement) until
+the user replies. Don't call it for rhetorical asides — only genuine
+open questions.
+
 ## Subsystem docs — when to read which
 
 | If you're touching… | Read first |
 |---|---|
-| Tables, stores, work queue, commit/wait points, sort_index, migrations | `.context/data-model.md` |
+| Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |
+| Code quality scans (lizard / jscpd subprocess + findings store + Code quality panel) | `.context/code-quality.md` |
+| Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |
 
 When you finish a change that alters how a subsystem works, **update
 the matching `.context/` doc in the same commit**. Concrete triggers:
@@ -64,77 +89,44 @@ spinner. When the turn Stops, the row disappears. No synthesized work
 items, no auto-file/auto-complete, no adoption — you don't need to
 narrate turn boundaries.
 
-**File a durable work item before you start editing.** When you realize
-you're about to change project files in a turn and you aren't already
-working against an existing item, file one with status `in_progress`
-and track your progress against it across however many turns it takes
-— including stops to ask the user questions. The item should describe
-the real piece of work you're committing to shipping, not a placeholder
-"auto" row that may or may not get reshaped into something real. When
-it's settled, call `complete_task` to ship an explicit summary.
+**File a durable work item before you start editing** (unless the
+change qualifies for the trivial-edit carve-out above). When you're
+about to change project files in a turn and you aren't already working
+against an existing item, file one with status `in_progress`. The item
+should describe the real piece of work you're committing to ship, not
+a placeholder. When it's settled, call `complete_task` to ship an
+explicit summary.
 
-**Pick between `create_work_item` and `file_epic_with_children`:** the
-trigger is structure, not plan-mode. Plenty of plans describe a small
-change that still boils down to one task.
+**Pick `create_work_item` (kind defaults to `task`) for one coherent
+change**, even if it spans a few files. Use `file_epic_with_children`
+only when the work has ≥3 sub-steps a reviewer would naturally
+inspect independently — distinct phases, handoffs, or separable
+subsystems. The test: could a child close to `human_check` on its own
+and have the user inspect just that piece? If no, it's one task.
 
-- **Task** (`create_work_item` with `kind: "task"`): the work is one
-  coherent change, even if it touches a few files. A rename, a bug
-  fix, a new component, a small feature that lives in one subsystem —
-  all tasks, whether or not you planned them first.
-- **Epic** (`file_epic_with_children`): the work has ≥3 sub-steps that
-  a reviewer would naturally check off independently — distinct
-  phases, clear handoffs, or separable subsystems ("schema → runtime →
-  IPC → UI → docs"). The test: could you close one sub-step to
-  `human_check`, pause, and have the user meaningfully inspect just
-  that piece? If yes, it's an epic. If the "sub-steps" are really
-  sequential chores in one change (edit, typecheck, test), it's still
-  one task.
+**One user-visible concern per ROW.** Independent concerns must be
+separate items (sibling tasks or epic children) — a reviewer has to be
+able to accept one and push back on another. Test: if a reasonable
+reviewer would want to check them independently, they're separate
+rows.
 
-Close each epic child to `human_check` as it ships so the Work panel
-shows progress accumulating. If a "plan" turns out to be a single
-task mid-execution, don't retroactively wrap it in an epic — just
-finish the task.
+**Every new ask gets its own item.** When the user sends a new request
+mid-turn, file a new work item rather than silently expanding the
+current item's scope. The exception: if the new ask is genuinely a
+correction to the same concern (a fix/redo on something you just
+shipped to `human_check`), reopen that item — call `update_work_item`
+to flip it back to `in_progress`, redo the work, then `complete_task`
+back to `human_check`. Filing a "Fix what I just did" task
+fragments the history.
 
-**One user-visible concern per ROW.** Independent concerns (even if
-filed in the same edit pass) must be separate work items — a reviewer
-has to be able to accept one and push back on another. That applies
-both to sibling tasks and to children within one epic: two QA-separate
-concerns are two child tasks, not one "misc" child. Test: if a
-reasonable reviewer would want to check them independently, they're
-separate rows.
+**File backlog ideas as you have them.** When you notice a follow-up
+worth doing later — a deferred polish item, a TODO surfaced while
+finishing something else — file it as a `ready` work item right then.
+Don't bury follow-ups in prose at the end of a reply where they'll be
+forgotten. The backlog is the durable record; replies are not.
 
-**Every new ask gets its own item.** When the user sends a new
-request mid-turn (including via `<system-reminder>` interruptions)
-while you're already on an in-progress item, don't silently expand the
-current item's scope. File a new work item for the new ask. It's fine
-to keep both `in_progress` briefly while you finish — the point is
-that the durable record matches what the user actually asked for, one
-ask per row. If the new ask is genuinely a correction to the same
-concern (not a separate concern), updating the existing item is OK.
-
-**Fixes/redos on a just-shipped item reopen that item — do NOT file a
-new task.** When the user pushes back on work you just closed to
-`human_check` (asks you to fix it, redo it, revert it, or take a
-different approach on the same concern), call `update_work_item` to
-flip that item from `human_check` back to `in_progress`, do the new
-effort, then `complete_task` back to `human_check`. The reopened
-transition opens a second effort so Local History attributes the
-redo correctly, and the Work panel keeps one row per user-visible
-concern instead of a littered trail of "Fix what I just did" tasks.
-Genuinely new concerns still get new items — this rule covers only
-"user rejected my last attempt at this same item."
-
-**Tasks persist across turn boundaries.** If a turn ends with work
-mid-flight (you asked the user a question, Stop fired before
-finishing, the user interrupted), the task stays `in_progress`. Only
-close to `human_check` when the work is actually shipped. There is
-no "turn closed → task closed" coupling — turns aren't tracked as a
-user-visible concept.
-
-**Stop-hook task audit.** At the end of every turn, the runtime
-nudges the writer thread to verify each `in_progress` item is still
-in progress. Reconcile each: still active → leave alone; acceptance
-criteria met → `complete_task` (status `human_check`, never
-self-mark `done`); stuck → `blocked`; paused/deferred → `ready`;
-obsolete → `canceled`. Without this audit step stale `in_progress`
-rows pile up because nothing forces a settle.
+The runtime handles the rest of the state machine for you: tasks
+persist across turn boundaries automatically, the Stop hook reminds
+you to audit `in_progress` items only when something actually changed,
+and the redo-detection hint on `create_work_item` flags when a new
+"Fix …" task probably belongs as a reopen instead.

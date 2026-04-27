@@ -83,6 +83,51 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   }
 }
 
+/**
+ * Effective section for an epic, derived from its children's statuses.
+ * Epics move between sections as a block — the epic + all its children
+ * render together under whichever section the rollup picks. Children
+ * retain their literal statuses (badges, drag rules, etc.); only the
+ * epic's *placement* changes.
+ *
+ * Priority order:
+ *   1. any child blocked → blocked
+ *   2. all children terminal (done/canceled/archived) → done
+ *   3. all children human_check → humanCheck
+ *   4. any child in_progress, or any done child mixed with non-done
+ *      non-blocked siblings → inProgress
+ *   5. all children ready → toDo
+ *
+ * Edge cases: an epic with no children falls back to its own literal
+ * status; an empty epic that's `ready` goes to To Do, etc.
+ */
+export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSectionKind {
+  if (children.length === 0) return classifyWorkItem(epic.status);
+  let anyBlocked = false;
+  let anyInProgress = false;
+  let anyDone = false;
+  let allTerminal = true;
+  let allHumanCheck = true;
+  let allReady = true;
+  for (const child of children) {
+    const s = child.status;
+    if (s === "blocked") anyBlocked = true;
+    if (s === "in_progress") anyInProgress = true;
+    if (s === "done" || s === "canceled" || s === "archived") anyDone = true;
+    if (s !== "done" && s !== "canceled" && s !== "archived") allTerminal = false;
+    if (s !== "human_check") allHumanCheck = false;
+    if (s !== "ready") allReady = false;
+  }
+  if (anyBlocked) return "blocked";
+  if (allTerminal) return "done";
+  if (allHumanCheck) return "humanCheck";
+  if (anyInProgress || anyDone) return "inProgress";
+  if (allReady) return "toDo";
+  // Fallback: mixed ready/human_check with no started or done items —
+  // treat as in-progress so review-pending work doesn't hide in To Do.
+  return "inProgress";
+}
+
 // Default landing status when a work item is dragged *into* a section. Returns
 // null for inProgress: the agent owns that status, and in-progress items are
 // drag-locked anyway, so we don't let users promote items into it by drop.
@@ -94,6 +139,22 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
     case "blocked": return "blocked";
     case "done": return "done";
   }
+}
+
+/**
+ * Classify a row for section placement, applying epic rollup when the
+ * row is an epic. Non-epics use their literal status. Pass the
+ * epicChildrenMap from `buildGroups` so the rollup sees the same
+ * children the renderer will display.
+ */
+export function classifyRow(
+  item: WorkItem,
+  epicChildrenMap: Map<string, WorkItem[]>,
+): WorkItemSectionKind {
+  if (item.kind === "epic") {
+    return classifyEpic(item, epicChildrenMap.get(item.id) ?? []);
+  }
+  return classifyWorkItem(item.status);
 }
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
@@ -183,6 +244,62 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
   return [{ epic: null, items, epicChildren: new Map() }];
 }
 
+/**
+ * Filter out runtime/agent-authored work items. Used by the AllWorkPage
+ * "Hide auto" toggle (`plan-toggle-hide-auto`) to suppress the auto-
+ * filed "agent observed X" rows so the user can see only their own
+ * work + epic rollups.
+ *
+ * Always passes through `epic`-kind rows regardless of author — an epic
+ * with auto-filed children would otherwise lose its container row and
+ * the children would silently disappear too. The visible-children set is
+ * filtered in the same pass; the epic's group placement still derives
+ * from whatever children remain (an epic with all-auto children just
+ * renders empty, like an explicitly empty epic).
+ *
+ * Pure — exported for tests.
+ */
+export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
+  return groups.map((group) => {
+    const items = group.items.filter((item) => item.kind === "epic" || item.created_by !== "agent");
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epicId, children] of group.epicChildren.entries()) {
+      epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));
+    }
+    return { epic: group.epic, items, epicChildren };
+  });
+}
+
+/**
+ * Filter group items by status. Used by the page split: Done Work
+ * passes `excludeStatuses: ["archived"]`, Archived passes
+ * `onlyStatuses: ["archived"]`. Epics pass through untouched — an
+ * empty epic still anchors its slot, like in `filterAutoAuthored`.
+ *
+ * Pure — exported for tests.
+ */
+export function applyStatusFilter(
+  groups: WorkItemGroup[],
+  opts: { only?: WorkItemStatus[]; exclude?: WorkItemStatus[] },
+): WorkItemGroup[] {
+  const onlySet = opts.only ? new Set(opts.only) : null;
+  const excludeSet = opts.exclude ? new Set(opts.exclude) : null;
+  const keep = (item: WorkItem) => {
+    if (item.kind === "epic") return true;
+    if (onlySet && !onlySet.has(item.status)) return false;
+    if (excludeSet && excludeSet.has(item.status)) return false;
+    return true;
+  };
+  return groups.map((group) => {
+    const items = group.items.filter(keep);
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epicId, children] of group.epicChildren.entries()) {
+      epicChildren.set(epicId, children.filter(keep));
+    }
+    return { epic: group.epic, items, epicChildren };
+  });
+}
+
 export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[] {
   if (!threadWork) return [];
   const all = [...threadWork.waiting, ...threadWork.inProgress, ...threadWork.done];
@@ -199,10 +316,10 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
     if (item.kind === "epic") continue;
     if (item.parent_id && epicIdSet.has(item.parent_id)) {
       epicChildrenMap.get(item.parent_id)!.push(item);
-      // in_progress children also surface in the top-level In Progress section
-      // so they're visible without expanding the epic. All other statuses stay
-      // exclusively inside the epic pane.
-      if (item.status === "in_progress") rootItems.push(item);
+      // Children render exclusively inside the epic pane; the epic
+      // itself moves between sections as a block based on its rollup
+      // (`classifyEpic`), bringing its expand toggle + child rows with
+      // it. No surface-to-root lift.
     } else {
       rootItems.push(item);
     }
@@ -287,15 +404,15 @@ export const deleteButtonStyle: CSSProperties = {
 export const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  padding: "6px 10px",
+  padding: "10px 12px",
   fontSize: 11,
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: 0.8,
-  color: "var(--fg)",
-  borderTop: "1px solid var(--border-strong, var(--border))",
-  borderBottom: "1px solid var(--border)",
-  background: "var(--bg-2)",
+  color: "var(--text-secondary)",
+  borderTop: "1px solid var(--border-subtle)",
+  borderBottom: "1px solid var(--border-subtle)",
+  background: "var(--surface-app)",
   position: "sticky",
   top: 0,
   zIndex: 1,
@@ -304,8 +421,7 @@ export const sectionHeaderStyle: CSSProperties = {
 // Action-button style shared by every section header. Promoted from
 // WorkGroupList's previous private `miniDoneHeaderButtonStyle` so every
 // section's action buttons read as one family. Compact enough for icon-
-// only buttons (+ New Task, + Commit Point, etc.) without crowding the
-// section header — the header is narrow in practice.
+// only buttons without crowding the section header.
 export const sectionActionButtonStyle: CSSProperties = {
   borderRadius: 6,
   border: "1px solid var(--border)",
@@ -323,12 +439,12 @@ export const sectionActionButtonStyle: CSSProperties = {
 export const groupHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  padding: "6px 8px",
-  background: "var(--bg-2)",
-  borderTop: "1px solid var(--border)",
-  borderBottom: "1px solid var(--border)",
+  padding: "10px 12px",
+  background: "var(--surface-app)",
+  borderTop: "1px solid var(--border-subtle)",
+  borderBottom: "1px solid var(--border-subtle)",
   fontSize: 11,
   textTransform: "uppercase",
   letterSpacing: 0.4,
-  color: "var(--muted)",
+  color: "var(--text-secondary)",
 };

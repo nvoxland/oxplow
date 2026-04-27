@@ -45,22 +45,42 @@ export function syncNoteFromDisk(
     const abs = join(projectDir, r.path);
     return { path: r.path, blobSha: hashFile(abs), mtimeMs: mtimeMsOf(abs) };
   });
-  store.upsert({ slug, title, capturedHeadSha, capturedRefs });
+  store.upsert({ slug, title, body, capturedHeadSha, capturedRefs });
+}
+
+export interface ScanProgress {
+  /** Total `.md` files discovered. */
+  total: number;
+  /** Files synced so far (1-indexed at the call site). */
+  done: number;
+  /** Slug just synced. */
+  slug: string;
 }
 
 /**
  * Sync every `.md` file in the notes directory and prune rows that no
- * longer have a matching file. Called once at watcher startup.
+ * longer have a matching file. Called once at watcher startup. Pass an
+ * onProgress callback to surface determinate progress (e.g. for the
+ * background-task store).
  */
-export function scanAndSyncAll(projectDir: string, store: WikiNoteStore): void {
+export function scanAndSyncAll(
+  projectDir: string,
+  store: WikiNoteStore,
+  onProgress?: (progress: ScanProgress) => void,
+): void {
   const dir = notesDir(projectDir);
   mkdirSync(dir, { recursive: true });
-  const present = new Set<string>();
+  const slugs: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(MD_SUFFIX)) continue;
-    const slug = entry.name.slice(0, -MD_SUFFIX.length);
-    present.add(slug);
+    slugs.push(entry.name.slice(0, -MD_SUFFIX.length));
+  }
+  const present = new Set<string>(slugs);
+  let done = 0;
+  for (const slug of slugs) {
     syncNoteFromDisk(projectDir, store, slug);
+    done++;
+    onProgress?.({ total: slugs.length, done, slug });
   }
   for (const row of store.list()) {
     if (!present.has(row.slug)) {
@@ -71,12 +91,21 @@ export function scanAndSyncAll(projectDir: string, store: WikiNoteStore): void {
 
 export interface NotesWatcherOptions {
   debounceMs?: number;
+  /** Optional progress sink — wired by the runtime to surface initial
+   *  scan progress in the bottom-bar background task store. */
+  onScanProgress?: (progress: ScanProgress) => void;
+  /** Called once at the start of the initial scan with total file count
+   *  so the producer can decide whether to register a progress row at all. */
+  onScanStart?: (total: number) => void;
+  /** Called after the initial scan finishes (or crashes). */
+  onScanEnd?: (error?: Error) => void;
 }
 
 export class NotesWatcher {
   private watcher: FSWatcher | null = null;
   private readonly pending = new Map<string, NodeJS.Timeout>();
   private readonly debounceMs: number;
+  private readonly options: NotesWatcherOptions;
 
   constructor(
     private readonly projectDir: string,
@@ -85,12 +114,24 @@ export class NotesWatcher {
     private readonly logger?: Logger,
   ) {
     this.debounceMs = options.debounceMs ?? 200;
+    this.options = options;
   }
 
   start(): void {
     const dir = notesDir(this.projectDir);
     mkdirSync(dir, { recursive: true });
-    scanAndSyncAll(this.projectDir, this.store);
+    const dirEntries = readdirSync(dir, { withFileTypes: true });
+    const total = dirEntries.filter((e) => e.isFile() && e.name.endsWith(MD_SUFFIX)).length;
+    this.options.onScanStart?.(total);
+    let scanError: Error | undefined;
+    try {
+      scanAndSyncAll(this.projectDir, this.store, this.options.onScanProgress);
+    } catch (error) {
+      scanError = error instanceof Error ? error : new Error(String(error));
+      throw scanError;
+    } finally {
+      this.options.onScanEnd?.(scanError);
+    }
     try {
       this.watcher = watch(dir, (_event, filename) => {
         if (typeof filename !== "string" || filename.length === 0) return;

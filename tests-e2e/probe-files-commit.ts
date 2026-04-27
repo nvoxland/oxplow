@@ -26,13 +26,9 @@ async function main() {
   try {
     await window.waitForTimeout(3_000);
 
-    // Activate Files tab.
-    const proj = window.getByTestId("dock-panel-project");
-    for (let i = 0; i < 3; i++) {
-      if ((await proj.getAttribute("data-active")) === "true" && (await proj.isVisible())) break;
-      await window.getByTestId("dock-tab-project").click();
-      await window.waitForTimeout(300);
-    }
+    // Open the Files page from the rail HUD.
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
 
     const commitBtn = window.getByTestId("files-commit");
     await commitBtn.waitFor({ state: "visible", timeout: 5_000 });

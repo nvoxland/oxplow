@@ -1,14 +1,14 @@
-// Dogfood pass (exploratory): poke the dock-tab-hook-events panel.
+// Dogfood pass (exploratory): poke the Hook Events page.
 // Prior passes flagged xterm-noise from PreToolUse/PostToolUse as a
-// `[F]`; this pass investigates whether the hook-events panel
+// `[F]`; this pass investigates whether the hook-events page
 // already shows the same data more cleanly, which would justify
 // suppressing the duplicate xterm output.
 //
 // Procedure:
 //   1. Launch oxplow
-//   2. Switch to dock-tab-hook-events
+//   2. Open the Hook events page (rail HUD → Pages → Hook events)
 //   3. Prompt the inner agent with a trivial echo task so events flow
-//   4. Capture the hook-events panel rows + xterm rows side-by-side
+//   4. Capture the hook-events page rows + xterm rows side-by-side
 //   5. The "finding" is the comparison itself — no commit expected
 //      this pass unless something obviously broken surfaces.
 import { resolve, dirname } from "node:path";
@@ -28,22 +28,22 @@ async function main() {
     await window.waitForTimeout(3_000);
     probeLog("[hook-poke] launched");
 
-    // Dock tabs first — confirm hook-events tab is reachable
-    const tabsBefore = await window.evaluate(() =>
-      Array.from(document.querySelectorAll("[data-testid^='dock-tab-']"))
+    // Confirm the rail-HUD "Pages" entries are reachable
+    const railPages = await window.evaluate(() =>
+      Array.from(document.querySelectorAll("[data-testid^='rail-page-']"))
         .map((el) => el.getAttribute("data-testid"))
     );
-    probeLog(`[hook-poke] dock tabs: ${tabsBefore.join(",")}`);
+    probeLog(`[hook-poke] rail pages: ${railPages.join(",")}`);
 
-    // Click the hook-events tab
-    await window.getByTestId("dock-tab-hook-events").click();
+    // Open the Hook events page from the rail
+    await window.getByTestId("rail-page-hook-events").click();
     await window.waitForTimeout(800);
     await window.screenshot({ path: resolve(outDir, "hook-poke-01-empty.png") });
 
     const initialPanelText = await window.evaluate(() =>
-      (document.querySelector("[data-testid='dock-panel-hook-events']") as HTMLElement)?.innerText ?? "(no panel)"
+      (document.querySelector("[data-testid='page-hook-events']") as HTMLElement)?.innerText ?? "(no panel)"
     );
-    probeLog(`[hook-poke] initial hook-events panel (first 300): ${initialPanelText.slice(0, 300).replace(/\n/g, " ⏎ ")}`);
+    probeLog(`[hook-poke] initial hook-events page (first 300): ${initialPanelText.slice(0, 300).replace(/\n/g, " ⏎ ")}`);
 
     // Now prompt the inner agent to do something tiny.
     const xterm = window.locator(".xterm").first();
@@ -59,7 +59,7 @@ async function main() {
     for (let tick = 1; tick <= 10; tick++) {
       await window.waitForTimeout(15_000);
       const panelText = await window.evaluate(() =>
-        (document.querySelector("[data-testid='dock-panel-hook-events']") as HTMLElement)?.innerText ?? "(no panel)"
+        (document.querySelector("[data-testid='page-hook-events']") as HTMLElement)?.innerText ?? "(no panel)"
       );
       const xtermText = await window.evaluate(() => {
         const r = document.querySelector(".xterm-rows");

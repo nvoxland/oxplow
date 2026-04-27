@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ContextMenu } from "../ContextMenu.js";
-import type { MenuItem, MenuPosition } from "../../menu.js";
+import { Kebab } from "../Kebab.js";
+import type { MenuItem } from "../../menu.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -83,12 +83,6 @@ export function MarkdownView({
   className,
 }: MarkdownViewProps) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [linkMenu, setLinkMenu] = useState<{
-    position: MenuPosition;
-    href: string;
-    kind: "internal" | "external";
-    internalSlug?: string;
-  } | null>(null);
 
   const handleLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     const href = event.currentTarget.getAttribute("href") ?? "";
@@ -107,18 +101,27 @@ export function MarkdownView({
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
   }, [onNavigateInternal, onOpenInNewTab]);
 
-  const handleLinkContextMenu = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
-    const href = event.currentTarget.getAttribute("href") ?? "";
+  const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
-    if (parsed.kind === "anchor" || parsed.kind === "empty") return;
-    event.preventDefault();
-    setLinkMenu({
-      position: { x: event.clientX, y: event.clientY },
-      href,
-      kind: parsed.kind === "external" ? "external" : "internal",
-      internalSlug: parsed.kind === "internal" ? parsed.slug : undefined,
-    });
-  }, []);
+    if (parsed.kind === "internal") {
+      const target = parsed.slug;
+      const items: MenuItem[] = [];
+      if (onNavigateInternal) {
+        items.push({ id: "open", label: "Open", enabled: true, run: () => onNavigateInternal(target) });
+      }
+      if (onOpenInNewTab) {
+        items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) });
+      }
+      return items;
+    }
+    if (parsed.kind === "external") {
+      return [
+        { id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(href, "_blank", "noopener,noreferrer"); } },
+        { id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(href).catch(() => {}); } },
+      ];
+    }
+    return [];
+  }, [onNavigateInternal, onOpenInNewTab]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
@@ -142,7 +145,7 @@ export function MarkdownView({
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") {
           const err = document.createElement("div");
-          err.style.color = "var(--color-status-error, #c95a5a)";
+          err.style.color = "var(--severity-critical)";
           err.style.fontSize = "12px";
           err.textContent = `Mermaid parse error: ${String(error)}`;
           pre.after(err);
@@ -150,25 +153,6 @@ export function MarkdownView({
       }
     });
   }, [body, renderMermaid]);
-
-  const menuItems: MenuItem[] = useMemo(() => {
-    if (!linkMenu) return [];
-    if (linkMenu.kind === "internal" && linkMenu.internalSlug) {
-      const target = linkMenu.internalSlug;
-      const items: MenuItem[] = [];
-      if (onNavigateInternal) {
-        items.push({ id: "open", label: "Open", enabled: true, run: () => onNavigateInternal(target) });
-      }
-      if (onOpenInNewTab) {
-        items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) });
-      }
-      return items;
-    }
-    return [
-      { id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(linkMenu.href, "_blank", "noopener,noreferrer"); } },
-      { id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(linkMenu.href).catch(() => {}); } },
-    ];
-  }, [linkMenu, onNavigateInternal, onOpenInNewTab]);
 
   const wrapperStyle: CSSProperties = {
     ...(maxHeight !== undefined ? { maxHeight, overflowY: "auto" } : {}),
@@ -180,25 +164,30 @@ export function MarkdownView({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node, ...props }) => (
-            <a
-              {...props}
-              onClick={handleLinkClick}
-              onAuxClick={handleLinkClick}
-              onContextMenu={handleLinkContextMenu}
-            />
-          ),
+          a: ({ node, ...props }) => {
+            const href = (props.href as string | undefined) ?? "";
+            const parsed = parseMarkdownLink(href);
+            // Anchor and empty links don't get a kebab — there's no useful
+            // action besides "jump in page" for those.
+            if (parsed.kind === "anchor" || parsed.kind === "empty") {
+              return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
+            }
+            const items = buildLinkMenu(href);
+            return (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }} className="oxplow-md-link">
+                <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />
+                {items.length > 0 ? (
+                  <span className="oxplow-md-link-kebab" style={{ display: "inline-flex" }}>
+                    <Kebab items={items} size={12} label="Link actions" />
+                  </span>
+                ) : null}
+              </span>
+            );
+          },
         }}
       >
         {body}
       </ReactMarkdown>
-      {linkMenu && (
-        <ContextMenu
-          items={menuItems}
-          position={linkMenu.position}
-          onClose={() => setLinkMenu(null)}
-        />
-      )}
     </div>
   );
 }

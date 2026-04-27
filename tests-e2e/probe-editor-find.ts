@@ -23,8 +23,8 @@ async function main() {
     await window.waitForTimeout(3_000);
 
     // Open a file so there IS an editor to drive find on.
-    await window.getByTestId("dock-tab-project").click();
-    await window.waitForTimeout(300);
+    await window.getByTestId("rail-page-files").click();
+    await window.getByTestId("page-files").waitFor({ state: "visible", timeout: 5_000 });
     const firstFile = window.locator('[data-testid^="file-tree-entry-"][data-kind="file"]:visible').first();
     await firstFile.waitFor({ timeout: 5_000 });
     await firstFile.click();

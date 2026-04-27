@@ -86,8 +86,8 @@ async function main() {
     }
     await window.screenshot({ path: resolve(outDir, "blame-01-overlay.png") });
 
-    // Click the first committed blame row; expect history panel to
-    // activate (dock-tab-history becomes active / panel visible).
+    // Click the first committed blame row; expect the GitHistoryPage to
+    // activate as a center tab (page-git-history becomes visible).
     const clicked = await window.evaluate(() => {
       const row = Array.from(document.querySelectorAll<HTMLElement>("div[title]"))
         .find((d) => /^[0-9a-f]{8} /.test(d.getAttribute("title") ?? ""));
@@ -101,25 +101,23 @@ async function main() {
     await window.waitForTimeout(1_000);
     await window.screenshot({ path: resolve(outDir, "blame-02-after-reveal.png") });
 
-    // The history dock-tab should now be active. Look for a visible
-    // dock-panel-history.
+    // The Git history page should be the active center tab.
     const historyActive = await window.evaluate(() => {
-      const panel = document.querySelector<HTMLElement>('[data-testid="dock-panel-history"]');
+      const page = document.querySelector<HTMLElement>('[data-testid="page-git-history"]');
       return {
-        panelPresent: !!panel,
-        panelVisible: panel ? panel.offsetParent !== null : false,
+        panelPresent: !!page,
+        panelVisible: page ? page.offsetParent !== null : false,
       };
     });
-    console.log("[probe] history panel after reveal:", historyActive);
+    console.log("[probe] git-history page after reveal:", historyActive);
     if (!historyActive.panelVisible) {
-      console.log("[probe] FAIL: history panel did not open after clicking blame row");
+      console.log("[probe] FAIL: git-history page did not open after clicking blame row");
       process.exit(6);
     }
 
-    // Close the history panel so we can test "uncommitted click should NOT
-    // reopen it." There's no close button exposed; collapse the dock by
-    // clicking the active tab.
-    await window.getByTestId("dock-tab-history").click();
+    // Close the git-history tab so we can test "uncommitted click should
+    // NOT reopen it." Center-tab close is exposed via center-tab-close-<id>.
+    await window.getByTestId("center-tab-close-git-history").click();
     await window.waitForTimeout(300);
 
     // Make a dirty edit so we get at least one uncommitted blame line.
@@ -146,11 +144,11 @@ async function main() {
     } else {
       await window.waitForTimeout(600);
       const historyAfterUncommittedClick = await window.evaluate(() => {
-        const panel = document.querySelector<HTMLElement>('[data-testid="dock-panel-history"]');
-        return panel ? panel.offsetParent !== null : false;
+        const page = document.querySelector<HTMLElement>('[data-testid="page-git-history"]');
+        return page ? page.offsetParent !== null : false;
       });
       if (historyAfterUncommittedClick) {
-        console.log("[probe] FAIL: uncommitted blame row opened the history panel");
+        console.log("[probe] FAIL: uncommitted blame row opened the git-history page");
         process.exit(7);
       }
       console.log("[probe] OK: uncommitted blame row does not trigger history reveal");

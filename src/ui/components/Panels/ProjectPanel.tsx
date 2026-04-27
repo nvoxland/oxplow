@@ -30,8 +30,10 @@ import {
 import type { DiffRequest } from "../Diff/diff-request.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { ConfirmDialog } from "../ConfirmDialog.js";
-import { PromptDialog } from "../PromptDialog.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
+import { formatContextMention } from "../../agent-context-ref.js";
+import { InlineConfirm } from "../InlineConfirm.js";
+import { Slideover } from "../Slideover.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
@@ -72,12 +74,16 @@ export function ProjectPanel({
   const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
-  // Destructive-action confirmations that used to be window.confirm().
-  const [pendingConfirm, setPendingConfirm] = useState<
-    { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
-  >(null);
+  // Inline-prompt state for new-file/new-folder/rename. Replaces the
+  // PromptDialog modal — renders as a small input strip at the top of
+  // the panel until submitted/canceled.
   const [pendingPrompt, setPendingPrompt] = useState<
     { message: string; initialValue: string; confirmLabel: string; run: (value: string) => void | Promise<void> } | null
+  >(null);
+  // Inline-confirm state for destructive ops (delete-file, rollback).
+  // Renders a banner with an InlineConfirm pair at the top of the panel.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    { message: string; confirmLabel: string; run: () => void | Promise<void> } | null
   >(null);
   const loadingDirsRef = useRef<Record<string, boolean>>({});
   const entriesByDirRef = useRef<Record<string, WorkspaceEntry[]>>({});
@@ -432,7 +438,7 @@ export function ProjectPanel({
   async function handleContextAction(
     action:
       | "open" | "new-file" | "new-folder" | "rename" | "delete"
-      | "copy" | "copy-reference" | "find-usages"
+      | "copy" | "copy-reference" | "find-usages" | "add-to-agent"
       | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
       | "mark-generated" | "unmark-generated"
       | "diff-uncommitted" | "diff-branch" | "diff-origin",
@@ -443,6 +449,10 @@ export function ProjectPanel({
         case "open":
           onOpenFile(contextMenu.path);
           break;
+        case "add-to-agent":
+          insertIntoAgent(formatContextMention({ kind: "file", path: contextMenu.path }));
+          setContextMenu(null);
+          return;
         case "diff-uncommitted":
           openUncommittedDiff(contextMenu.path);
           break;
@@ -597,6 +607,7 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [
             { id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") },
+            { id: "files.add-to-agent", label: "Add to agent context", enabled: true, run: () => handleContextAction("add-to-agent") },
             ...(gitEnabled && !!onOpenDiff
               ? [
                   {
@@ -703,6 +714,31 @@ export function ProjectPanel({
           scopes={scopes}
         />
       </div>
+      {pendingPrompt ? (
+        <InlinePromptStrip
+          message={pendingPrompt.message}
+          initialValue={pendingPrompt.initialValue}
+          confirmLabel={pendingPrompt.confirmLabel}
+          onSubmit={(value) => {
+            const { run } = pendingPrompt;
+            setPendingPrompt(null);
+            void run(value);
+          }}
+          onCancel={() => setPendingPrompt(null)}
+        />
+      ) : null}
+      {pendingConfirm ? (
+        <InlineConfirmStrip
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          onConfirm={() => {
+            const { run } = pendingConfirm;
+            setPendingConfirm(null);
+            void run();
+          }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      ) : null}
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
         {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
         {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
@@ -723,7 +759,7 @@ export function ProjectPanel({
               generatedSet={generatedSet}
               onToggleDirectory={toggleDirectory}
               onOpenFile={openForCurrentFilter}
-              onContextMenu={setContextMenu}
+              onOpenMenu={setContextMenu}
             />
           </>
         )}
@@ -811,32 +847,6 @@ export function ProjectPanel({
           title={opResult.title}
           result={opResult.result}
           onClose={() => setOpResult(null)}
-        />
-      ) : null}
-      {pendingConfirm ? (
-        <ConfirmDialog
-          message={pendingConfirm.message}
-          confirmLabel={pendingConfirm.confirmLabel}
-          destructive
-          onConfirm={() => {
-            const { run } = pendingConfirm;
-            setPendingConfirm(null);
-            void run();
-          }}
-          onCancel={() => setPendingConfirm(null)}
-        />
-      ) : null}
-      {pendingPrompt ? (
-        <PromptDialog
-          message={pendingPrompt.message}
-          initialValue={pendingPrompt.initialValue}
-          confirmLabel={pendingPrompt.confirmLabel}
-          onSubmit={(value) => {
-            const { run } = pendingPrompt;
-            setPendingPrompt(null);
-            void run(value);
-          }}
-          onCancel={() => setPendingPrompt(null)}
         />
       ) : null}
     </div>
@@ -984,9 +994,8 @@ function FileHistoryModal({
   onClose(): void;
   onOpenDiff(sha: string, parent: string | null): void;
 }) {
-  useEscape(onClose);
   return (
-    <ModalShell onClose={onClose} title={`History · ${state.path}`}>
+    <Slideover open onClose={onClose} title={`History · ${state.path}`} testId="file-history-slideover">
       {state.loading && !state.commits ? (
         <div style={modalEmptyStyle}>Loading…</div>
       ) : !state.commits || state.commits.length === 0 ? (
@@ -1009,7 +1018,7 @@ function FileHistoryModal({
           </button>
         ))
       )}
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1023,16 +1032,15 @@ function CompareWithModal({
   onPick(ref: string): void;
 }) {
   const [filter, setFilter] = useState("");
-  useEscape(onClose);
   const filtered = (state.refs ?? []).filter((ref) => ref.name.toLowerCase().includes(filter.toLowerCase()));
   return (
-    <ModalShell onClose={onClose} title={`Compare With… · ${state.path}`}>
+    <Slideover open onClose={onClose} title={`Compare With… · ${state.path}`} testId="compare-with-slideover">
       <input
         autoFocus
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Filter branches/tags…"
-        style={{ margin: "6px 12px", ...modalInputStyle }}
+        style={{ marginBottom: 8, ...modalInputStyle, width: "100%", boxSizing: "border-box" }}
       />
       {state.loading && !state.refs ? (
         <div style={modalEmptyStyle}>Loading refs…</div>
@@ -1048,7 +1056,7 @@ function CompareWithModal({
           </button>
         ))
       )}
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1067,7 +1075,6 @@ function PushPullDialog({
   const [setUpstream, setSetUpstream] = useState(false);
   const [rebase, setRebase] = useState(false);
   const [running, setRunning] = useState(false);
-  useEscape(onClose);
 
   const run = async () => {
     setRunning(true);
@@ -1079,10 +1086,28 @@ function PushPullDialog({
   };
 
   return (
-    <ModalShell onClose={onClose} title={kind === "push" ? "Push" : "Pull"}>
+    <Slideover
+      open
+      onClose={onClose}
+      title={kind === "push" ? "Push" : "Pull"}
+      testId={`push-pull-${kind}-slideover`}
+      footer={(
+        <>
+          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void run()}
+            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff" }}
+          >
+            {running ? "Running…" : kind === "push" ? "Push" : "Pull"}
+          </button>
+        </>
+      )}
+    >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 12 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
       >
         {kind === "push" ? (
           <>
@@ -1101,14 +1126,10 @@ function PushPullDialog({
             Rebase instead of merge
           </label>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
-          <button type="submit" disabled={running} style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff" }}>
-            {running ? "Running…" : kind === "push" ? "Push" : "Pull"}
-          </button>
-        </div>
+        {/* Hidden submit so Enter form-submit works. */}
+        <button type="submit" style={{ display: "none" }} aria-hidden="true" tabIndex={-1} disabled={running}>submit</button>
       </form>
-    </ModalShell>
+    </Slideover>
   );
 }
 
@@ -1130,7 +1151,6 @@ function CommitDialog({
   // Default OFF so probe scripts / lock files don't ride along — three
   // dogfood passes shipped commits that bundled local-only files.
   const [includeUntracked, setIncludeUntracked] = useState(false);
-  useEscape(onClose);
 
   const trimmed = message.trim();
   const canSubmit = trimmed.length > 0 && !running;
@@ -1144,10 +1164,29 @@ function CommitDialog({
   };
 
   return (
-    <ModalShell onClose={onClose} title={`Commit ${pathCount} change${pathCount === 1 ? "" : "s"}`}>
+    <Slideover
+      open
+      onClose={onClose}
+      title={`Commit ${pathCount} change${pathCount === 1 ? "" : "s"}`}
+      testId="files-commit-slideover"
+      footer={(
+        <>
+          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
+          <button
+            type="button"
+            data-testid="files-commit-submit"
+            disabled={!canSubmit}
+            onClick={() => void run()}
+            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff", opacity: canSubmit ? 1 : 0.5 }}
+          >
+            {running ? "Committing…" : "Commit"}
+          </button>
+        </>
+      )}
+    >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", fontSize: 12, minWidth: 380 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
       >
         <label htmlFor="files-commit-message" style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
           Commit message
@@ -1160,7 +1199,7 @@ function CommitDialog({
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Summary line&#10;&#10;Optional body"
           style={{
-            minHeight: 96,
+            minHeight: 140,
             resize: "vertical",
             background: "var(--bg)",
             color: "var(--fg)",
@@ -1191,28 +1230,18 @@ function CommitDialog({
           Runs <code>{includeUntracked ? "git add -A" : "git add -u"} &amp;&amp; git commit -m …</code> in the stream's worktree.
           Cmd/Ctrl+Enter to commit.
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <button type="button" onClick={onClose} style={modalBtnStyle}>Cancel</button>
-          <button
-            type="submit"
-            data-testid="files-commit-submit"
-            disabled={!canSubmit}
-            style={{ ...modalBtnStyle, background: "var(--accent)", color: "#fff", opacity: canSubmit ? 1 : 0.5 }}
-          >
-            {running ? "Committing…" : "Commit"}
-          </button>
-        </div>
+        {/* Hidden submit so Cmd/Ctrl+Enter form-submit path works. */}
+        <button type="submit" style={{ display: "none" }} aria-hidden="true" tabIndex={-1} disabled={!canSubmit}>submit</button>
       </form>
-    </ModalShell>
+    </Slideover>
   );
 }
 
 function GitOpResultModal({ title, result, onClose }: { title: string; result: GitOpResult; onClose(): void }) {
-  useEscape(onClose);
   const colour = result.ok ? "#86efac" : "#f87171";
   return (
-    <ModalShell onClose={onClose} title={title}>
-      <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+    <Slideover open onClose={onClose} title={title} testId="git-op-result-slideover">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ color: colour, fontSize: 12, fontWeight: 600 }}>
           {result.ok ? "Success" : `Failed (exit ${result.exitCode ?? "?"})`}
         </div>
@@ -1223,56 +1252,8 @@ function GitOpResultModal({ title, result, onClose }: { title: string; result: G
           <pre style={{ ...modalPreStyle, color: "#f87171" }}>{result.stderr}</pre>
         ) : null}
       </div>
-    </ModalShell>
+    </Slideover>
   );
-}
-
-function ModalShell({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        zIndex: 2000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          width: "min(640px, 92vw)",
-          maxHeight: "80vh",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useEscape(handler: () => void) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); handler(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handler]);
 }
 
 const modalEmptyStyle = { padding: 14, color: "var(--muted)", fontSize: 12 } as const;
@@ -1493,4 +1474,138 @@ const filterStatusBarStyle: CSSProperties = {
   alignItems: "center",
   gap: 8,
   flexShrink: 0,
+};
+
+/**
+ * Inline prompt strip — replaces the modal PromptDialog for new-file /
+ * new-folder / rename flows. Renders just under the Files header.
+ * Submit on Enter; Escape (or Cancel) reverts.
+ */
+function InlinePromptStrip({
+  message,
+  initialValue,
+  confirmLabel,
+  onSubmit,
+  onCancel,
+}: {
+  message: string;
+  initialValue: string;
+  confirmLabel: string;
+  onSubmit(value: string): void;
+  onCancel(): void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.select(); }, []);
+  const trimmed = value.trim();
+  return (
+    <form
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--bg-2)",
+      }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (trimmed.length === 0) return;
+        onSubmit(trimmed);
+      }}
+    >
+      <div style={{ color: "var(--muted)", fontSize: 11 }}>{message}</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          autoFocus
+          style={{
+            flex: 1,
+            background: "var(--bg)",
+            color: "var(--fg)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            padding: "4px 6px",
+            fontFamily: "inherit",
+            fontSize: 12,
+          }}
+        />
+        <button type="button" onClick={onCancel} style={{ ...miniInlineButton }}>
+          Cancel
+        </button>
+        <button type="submit" disabled={trimmed.length === 0} style={{ ...miniInlinePrimary, opacity: trimmed.length === 0 ? 0.5 : 1 }}>
+          {confirmLabel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Inline-confirm strip for non-row-anchored destructives (delete-file
+ * triggered from a context-menu, git-rollback). Replaces the
+ * ConfirmDialog modal. The confirm button auto-focuses; Escape cancels.
+ */
+function InlineConfirmStrip({
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  message: string;
+  confirmLabel: string;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--bg-2)",
+        fontSize: 12,
+      }}
+    >
+      <span style={{ flex: 1, color: "var(--fg)" }}>{message}</span>
+      <InlineConfirm
+        triggerLabel={confirmLabel}
+        confirmLabel={confirmLabel}
+        onConfirm={onConfirm}
+      />
+      <button type="button" onClick={onCancel} style={miniInlineButton}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+const miniInlineButton: CSSProperties = {
+  background: "var(--bg)",
+  color: "var(--fg)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "4px 8px",
+  fontSize: 11,
+  cursor: "pointer",
+};
+
+const miniInlinePrimary: CSSProperties = {
+  background: "var(--accent)",
+  color: "#fff",
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  padding: "4px 10px",
+  fontSize: 11,
+  cursor: "pointer",
 };
