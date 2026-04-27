@@ -133,11 +133,15 @@ describe("computePagesDirectory", () => {
     expect(uncommitted?.ref).toEqual(uncommittedChangesRef());
   });
 
-  test("Git dashboard appears above Uncommitted, which appears above Git history", () => {
+  test("Git dashboard appears above Uncommitted", () => {
     const entries = computePagesDirectory({ backlogReadyCount: 0 });
     const ids = entries.map((e) => e.id);
     expect(ids.indexOf("git-dashboard")).toBeLessThan(ids.indexOf("uncommitted-changes"));
-    expect(ids.indexOf("uncommitted-changes")).toBeLessThan(ids.indexOf("git-history"));
+  });
+
+  test("Git history is not a top-level rail entry", () => {
+    const entries = computePagesDirectory({ backlogReadyCount: 0 });
+    expect(entries.find((e) => e.id === "git-history")).toBeUndefined();
   });
 
   test("Backlog badge surfaces only when backlogReadyCount is > 0", () => {
