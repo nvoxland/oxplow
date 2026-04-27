@@ -89,16 +89,16 @@ export function RailHud({
         <UpNextSection items={upNext} onOpenPage={onOpenPage} />
       ) : null}
 
-      {bookmarks && bookmarks.length > 0 ? (
-        <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
-      ) : null}
-
       {recents.length > 0 ? (
         <RecentFilesSection entries={recents} onOpenPage={onOpenPage} />
       ) : null}
 
       {recentlyFinished && recentlyFinished.length > 0 ? (
         <FinishedSection entries={recentlyFinished} onOpenPage={onOpenPage} />
+      ) : null}
+
+      {bookmarks && bookmarks.length > 0 ? (
+        <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
       ) : null}
 
       <PagesDirectory onOpenPage={onOpenPage} backlogReadyCount={backlogReadyCount} />
