@@ -6,7 +6,7 @@ import { fileRef, noteRef, opErrorRef, planWorkRef, uncommittedChangesRef, workI
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
-import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
+import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
 
 export interface UncommittedSummary {
@@ -80,6 +80,7 @@ export function RailHud({
   onOpenSearch,
 }: RailHudProps) {
   const activeItem = useMemo(() => computeActiveItem(threadWork), [threadWork]);
+  const activeEpic = useMemo(() => computeActiveEpicContext(threadWork, activeItem), [threadWork, activeItem]);
   const upNext = useMemo(() => computeUpNext(threadWork, 3), [threadWork]);
   const recents = useMemo(() => sortRecentFiles(recentFiles, 6), [recentFiles]);
   const backlogReadyCount = backlog?.items.filter((i) => i.status === "ready").length ?? 0;
@@ -107,6 +108,7 @@ export function RailHud({
       {threadId ? (
         <ActiveItemSection
           item={activeItem}
+          epicContext={activeEpic}
           agentStatus={agentStatus}
           onOpenPage={onOpenPage}
         />
@@ -300,15 +302,40 @@ function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
   );
 }
 
+function statusIcon(status: WorkItem["status"]): string {
+  switch (status) {
+    case "done": return "✓";
+    case "in_progress": return "◐";
+    case "blocked": return "⚠";
+    case "canceled": return "✗";
+    case "archived": return "▣";
+    case "ready":
+    default: return "☐";
+  }
+}
+
+function statusIconColor(status: WorkItem["status"]): string {
+  switch (status) {
+    case "done": return "var(--diff-add-fg, #2ea043)";
+    case "in_progress": return "var(--accent-fg, #58a6ff)";
+    case "blocked": return "var(--diff-del-fg, #f85149)";
+    case "canceled": return "var(--text-muted)";
+    default: return "var(--text-secondary)";
+  }
+}
+
 function ActiveItemSection({
   item,
+  epicContext,
   agentStatus,
   onOpenPage,
 }: {
   item: WorkItem | null;
+  epicContext: { epic: WorkItem; children: WorkItem[] } | null;
   agentStatus: AgentStatus;
   onOpenPage(ref: TabRef): void;
 }) {
+  const [expanded, setExpanded] = useState(true);
   if (!item) {
     const working = agentStatus === "working";
     return (
@@ -331,6 +358,124 @@ function ActiveItemSection({
       </>
     );
   }
+
+  if (epicContext) {
+    const { epic, children } = epicContext;
+    return (
+      <>
+        <SectionHeading>Current Work</SectionHeading>
+        <div
+          data-testid="rail-active-epic"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "4px 8px 4px 14px",
+          }}
+        >
+          <button
+            type="button"
+            data-testid="rail-active-epic-toggle"
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "Collapse" : "Expand"}
+            aria-expanded={expanded}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              padding: "0 2px",
+              fontSize: 10,
+              width: 14,
+            }}
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+          <button
+            type="button"
+            data-testid="rail-active-epic-row"
+            onClick={() => onOpenPage(workItemRef(epic.id))}
+            draggable
+            onDragStart={(ev) => setContextRefDrag(ev, {
+              kind: "work-item",
+              itemId: epic.id,
+              title: epic.title,
+              status: epic.status,
+            })}
+            style={{
+              ...rowStyle,
+              padding: "2px 6px",
+              flex: 1,
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 11, color: "var(--text-secondary)" }}>📚</span>
+            <span
+              style={{
+                flex: 1,
+                color: "var(--text-primary)",
+                fontWeight: 500,
+                fontSize: 13,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {epic.title}
+            </span>
+          </button>
+        </div>
+        {expanded ? (
+          <div
+            data-testid="rail-active-epic-children"
+            style={{ paddingBottom: 8 }}
+          >
+            {children.map((child) => {
+              const isActive = child.id === item.id;
+              return (
+                <button
+                  key={child.id}
+                  type="button"
+                  data-testid={`rail-active-epic-child-${child.id}`}
+                  onClick={() => onOpenPage(workItemRef(child.id))}
+                  draggable
+                  onDragStart={(ev) => setContextRefDrag(ev, {
+                    kind: "work-item",
+                    itemId: child.id,
+                    title: child.title,
+                    status: child.status,
+                  })}
+                  style={{
+                    ...rowStyle,
+                    padding: "4px 14px 4px 32px",
+                    background: isActive ? "var(--surface-card)" : "transparent",
+                    fontWeight: isActive ? 500 : 400,
+                  }}
+                  title={child.title}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 14,
+                      display: "inline-flex",
+                      justifyContent: "center",
+                      color: statusIconColor(child.status),
+                      fontSize: 12,
+                    }}
+                  >
+                    {statusIcon(child.status)}
+                  </span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {child.title}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <>
       <SectionHeading>Current Work</SectionHeading>

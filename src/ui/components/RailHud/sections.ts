@@ -82,6 +82,25 @@ export function computeActiveItem(state: ThreadWorkState | null): WorkItem | nul
 }
 
 /**
+ * If the active in-progress item is a child of an epic, return the epic
+ * and its non-archived children (sorted by sort_index ascending). When
+ * the active item is standalone, returns null.
+ */
+export function computeActiveEpicContext(
+  state: ThreadWorkState | null,
+  active: WorkItem | null,
+): { epic: WorkItem; children: WorkItem[] } | null {
+  if (!state || !active || !active.parent_id) return null;
+  const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
+  const epic = pool.find((i) => i.id === active.parent_id && i.kind === "epic");
+  if (!epic) return null;
+  const children = pool
+    .filter((i) => i.parent_id === epic.id && i.status !== "archived")
+    .sort((a, b) => a.sort_index - b.sort_index);
+  return { epic, children };
+}
+
+/**
  * Return the next-up `ready` items, sorted by sort_index ascending,
  * truncated to `limit`. The "Up next" rail section uses this.
  */

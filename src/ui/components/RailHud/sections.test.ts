@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadWorkState, WorkItem } from "../../api.js";
-import { computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
+import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
 import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
 function makeItem(partial: Partial<WorkItem> & { id: string; status: WorkItem["status"] }): WorkItem {
@@ -67,6 +67,30 @@ describe("computeActiveItem", () => {
     expect(computeActiveItem(null)).toBeNull();
   });
 
+});
+
+describe("computeActiveEpicContext", () => {
+  test("returns the parent epic and its children sorted by sort_index", () => {
+    const epic = makeItem({ id: "wi-epic", kind: "epic", status: "in_progress", sort_index: 0 });
+    const c1 = makeItem({ id: "wi-c1", parent_id: "wi-epic", status: "done", sort_index: 1 });
+    const c2 = makeItem({ id: "wi-c2", parent_id: "wi-epic", status: "in_progress", sort_index: 2 });
+    const c3 = makeItem({ id: "wi-c3", parent_id: "wi-epic", status: "ready", sort_index: 3 });
+    const state = baseState([epic, c2, c1, c3]);
+    const ctx = computeActiveEpicContext(state, c2);
+    expect(ctx?.epic.id).toBe("wi-epic");
+    expect(ctx?.children.map((c) => c.id)).toEqual(["wi-c1", "wi-c2", "wi-c3"]);
+  });
+
+  test("returns null when active item has no parent", () => {
+    const t = makeItem({ id: "wi-t", status: "in_progress" });
+    expect(computeActiveEpicContext(baseState([t]), t)).toBeNull();
+  });
+
+  test("returns null when parent is not an epic", () => {
+    const parent = makeItem({ id: "wi-p", kind: "task", status: "in_progress" });
+    const child = makeItem({ id: "wi-c", parent_id: "wi-p", status: "in_progress" });
+    expect(computeActiveEpicContext(baseState([parent, child]), child)).toBeNull();
+  });
 });
 
 describe("computeUpNext", () => {
