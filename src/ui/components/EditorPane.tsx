@@ -5,6 +5,7 @@ import type { LocalBlameEntry, Stream } from "../api.js";
 import { localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
+import { logUi } from "../logger.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 
@@ -220,6 +221,8 @@ export function EditorPane({
     const monaco = monacoRef.current;
     const editor = editorRef.current;
     if (!monaco || !editor) return;
+    const t0 = performance.now();
+    logUi("debug", "editor: model-setup start", { path: filePath, valueLength: value.length });
 
     const uri = filePath
       ? monaco.Uri.parse(streamFileUri(stream, filePath))
@@ -235,6 +238,7 @@ export function EditorPane({
     closeFindWidget(editor);
     editor.setModel(model);
     changeDisposeRef.current?.dispose();
+    logUi("debug", "editor: model-setup end", { path: filePath, ms: Math.round(performance.now() - t0) });
     changeDisposeRef.current = editor.onDidChangeModelContent(() => {
       const next = editor.getValue();
       if (next !== value) onChangeRef.current(next);
@@ -261,6 +265,8 @@ export function EditorPane({
   useEffect(() => {
     const monaco = monacoRef.current;
     if (!monaco) return;
+    const t0 = performance.now();
+    logUi("debug", "editor: lsp-sync start", { fileCount: openFileOrder.length });
     const nextOpenDocs = new Map<string, string>();
     for (const path of openFileOrder) {
       const openFile = openFiles[path];
@@ -295,6 +301,11 @@ export function EditorPane({
     }
 
     trackedOpenDocsRef.current = nextOpenDocs;
+    logUi("debug", "editor: lsp-sync end", {
+      fileCount: openFileOrder.length,
+      tracked: trackedOpenDocsRef.current.size,
+      ms: Math.round(performance.now() - t0),
+    });
   }, [openFileOrder, openFiles, stream]);
 
   useEffect(() => {
@@ -358,14 +369,25 @@ export function EditorPane({
     if (!filePath) return;
     let cancelled = false;
     const sid = stream.id;
+    const t0 = performance.now();
+    logUi("debug", "editor: readHEAD start", { path: filePath });
     (async () => {
       try {
         const { content } = await readFileAtRef(sid, "HEAD", filePath);
         if (cancelled) return;
+        logUi("debug", "editor: readHEAD end", {
+          path: filePath,
+          headSize: content?.length ?? 0,
+          ms: Math.round(performance.now() - t0),
+        });
         headByPathRef.current.set(filePath, content);
         applyDiffDecorations();
       } catch {
         if (cancelled) return;
+        logUi("debug", "editor: readHEAD end (error)", {
+          path: filePath,
+          ms: Math.round(performance.now() - t0),
+        });
         headByPathRef.current.set(filePath, null);
         applyDiffDecorations();
       }
@@ -388,10 +410,21 @@ export function EditorPane({
       // HEAD not fetched yet — leave any existing decorations in place.
       return;
     }
+    const t0 = performance.now();
     const newLines = model.getValue().split("\n");
     const oldLines = head === null ? [] : head.split("\n");
+    logUi("debug", "editor: diff-decorations start", {
+      path: filePath,
+      oldLines: oldLines.length,
+      newLines: newLines.length,
+    });
     const decos = computeDiffDecorations(monaco, oldLines, newLines);
     diffDecoIdsRef.current = editor.deltaDecorations(diffDecoIdsRef.current, decos);
+    logUi("debug", "editor: diff-decorations end", {
+      path: filePath,
+      decoCount: decos.length,
+      ms: Math.round(performance.now() - t0),
+    });
   }
 
   async function refreshBlame(path: string) {
