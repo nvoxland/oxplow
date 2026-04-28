@@ -38,6 +38,11 @@ async function main() {
       return;
     }
     event.preventDefault();
+    if (runtime && !confirmQuitWithRunningTasks()) {
+      // User chose to wait — leave quitting=false so a later quit
+      // attempt re-runs the check (a task may have finished by then).
+      return;
+    }
     quitting = true;
     void disposeRuntime().finally(() => {
       releaseProjectLock();
@@ -466,6 +471,38 @@ function buildNativeSubmenu(group: MenuGroupSnapshot): MenuItemConstructorOption
 
 function toElectronAccelerator(shortcut: string) {
   return shortcut.replace("Ctrl/Cmd", "CommandOrControl");
+}
+
+/**
+ * Show a confirm dialog when the user tries to quit while background
+ * tasks are still running. Returns true when the user chose to quit
+ * anyway, false when they want to wait. Returning false leaves
+ * `quitting=false` so a later quit attempt re-runs the check.
+ */
+function confirmQuitWithRunningTasks(): boolean {
+  const current = runtime;
+  if (!current) return true;
+  const running = current.backgroundTaskStore.listRunning();
+  if (running.length === 0) return true;
+  const focusWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+  const previewLines = running.slice(0, 5).map((t) => `• ${t.label}${t.detail ? ` — ${t.detail}` : ""}`);
+  if (running.length > previewLines.length) {
+    previewLines.push(`…and ${running.length - previewLines.length} more`);
+  }
+  const detail = previewLines.join("\n");
+  const messageBoxOpts: Electron.MessageBoxSyncOptions = {
+    type: "warning",
+    title: "Quit Oxplow?",
+    message: `${running.length} background task${running.length === 1 ? "" : "s"} still running.`,
+    detail,
+    buttons: ["Wait", "Quit anyway"],
+    defaultId: 0,
+    cancelId: 0,
+  };
+  const choice = focusWindow
+    ? dialog.showMessageBoxSync(focusWindow, messageBoxOpts)
+    : dialog.showMessageBoxSync(messageBoxOpts);
+  return choice === 1;
 }
 
 async function disposeRuntime() {

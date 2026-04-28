@@ -144,6 +144,17 @@ export class BackgroundTaskStore {
     return arr.map((t) => ({ ...t }));
   }
 
+  /** Snapshot of currently-running tasks. Used by the quit confirmation
+   *  dialog to surface a list of what's still in flight. */
+  listRunning(): BackgroundTask[] {
+    const out: BackgroundTask[] = [];
+    for (const t of this.tasks.values()) {
+      if (t.status === "running") out.push({ ...t });
+    }
+    out.sort((a, b) => a.startedAt - b.startedAt);
+    return out;
+  }
+
   subscribe(listener: (change: BackgroundTaskChange) => void): () => void {
     return this.emitter.subscribe(listener);
   }
