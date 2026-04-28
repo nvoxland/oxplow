@@ -29,6 +29,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
+import { FileStatusCountsForSummary } from "../components/FileStatusCounts.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
@@ -221,6 +222,23 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     [refresh, onOpenPage],
   );
 
+  const runUnconfirmed = useCallback(
+    async (label: string, action: () => Promise<GitOpResult>) => {
+      setPendingAction(label);
+      try {
+        const result = await action();
+        if (!result.ok) {
+          window.alert(`${label} failed:\n${result.stderr || "git error"}`);
+        } else {
+          await refresh();
+        }
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [refresh],
+  );
+
   if (!streamId) {
     return (
       <Page testId="page-git-dashboard" title="Git dashboard">
@@ -257,13 +275,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   () => gitPull(streamId),
                 )
               }
-              onFetch={() =>
-                runConfirmed(
-                  "Fetch",
-                  "git fetch origin",
-                  () => gitFetch(streamId),
-                )
-              }
+              onFetch={() => runUnconfirmed("Fetch", () => gitFetch(streamId))}
               pendingAction={pendingAction}
             />
 
@@ -284,6 +296,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               rows={data.streams}
               currentBranch={data.branchHeader.branch}
               workingByStreamId={streamWorkingFlags}
+              onSelectCommit={handleSelectCommit}
               onMerge={(branch) =>
                 runConfirmed(
                   `Merge ${branch} into current`,
@@ -350,9 +363,13 @@ function UpstreamCard({
     <Card testId="git-dashboard-upstream" title="Upstream">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {hasUpstream ? (
-          <div style={subtle}>
-            tracks <code>{data.upstream}</code> · ahead {data.aheadUpstream}, behind{" "}
-            {data.behindUpstream}
+          <div style={{ ...subtle, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <span>tracks <code>{data.upstream}</code></span>
+            <AheadBehindBadge
+              ahead={data.aheadUpstream}
+              behind={data.behindUpstream}
+              context={data.upstream ?? "upstream"}
+            />
           </div>
         ) : (
           <div style={subtle}>No upstream</div>
@@ -421,47 +438,21 @@ function UncommittedMiniCard({
       {total === 0 || !summary ? (
         <div style={subtle}>No uncommitted files</div>
       ) : (
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <MiniStat label="Total" value={summary.total} />
-          <MiniStat label="Modified" value={summary.modified} />
-          <MiniStat label="Added" value={summary.added} />
-          <MiniStat label="Deleted" value={summary.deleted} />
-          <MiniStat label="Renamed" value={summary.renamed} />
-          <MiniStat label="Untracked" value={summary.untracked} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13 }}>{summary.total} changed</span>
+          <FileStatusCountsForSummary summary={summary} testId="git-dashboard-uncommitted-counts" />
         </div>
       )}
     </Card>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", minWidth: 64 }}>
-      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 18, fontWeight: 600, color: "var(--text-primary)" }}>{value}</span>
-    </div>
-  );
-}
-
-function RecentCommitsCard({
-  streamId,
-  log,
-  onSelectCommit,
-  onViewFullHistory,
-}: {
-  streamId: string;
-  log: GitLogResult;
-  onSelectCommit(sha: string): void;
-  onViewFullHistory(): void;
-}) {
-  const refIndex = useMemo(() => indexRefsBySha(log), [log]);
+function useCommitStats(streamId: string, commits: GitLogCommit[]): Map<string, CommitStats> {
   const [stats, setStats] = useState<Map<string, CommitStats>>(new Map());
-
+  const shaKey = commits.map((c) => c.sha).join(",");
   useEffect(() => {
     let cancelled = false;
-    const shas = log.commits.map((c) => c.sha);
+    const shas = commits.map((c) => c.sha);
     void Promise.all(
       shas.map(async (sha) => {
         const detail = await getCommitDetail(streamId, sha);
@@ -489,7 +480,24 @@ function RecentCommitsCard({
     return () => {
       cancelled = true;
     };
-  }, [streamId, log]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamId, shaKey]);
+  return stats;
+}
+
+function RecentCommitsCard({
+  streamId,
+  log,
+  onSelectCommit,
+  onViewFullHistory,
+}: {
+  streamId: string;
+  log: GitLogResult;
+  onSelectCommit(sha: string): void;
+  onViewFullHistory(): void;
+}) {
+  const refIndex = useMemo(() => indexRefsBySha(log), [log]);
+  const stats = useCommitStats(streamId, log.commits);
 
   return (
     <Card
@@ -528,6 +536,7 @@ function StreamsCard({
   currentBranch,
   onMerge,
   onRebase,
+  onSelectCommit,
   pendingAction,
   workingByStreamId,
 }: {
@@ -536,6 +545,7 @@ function StreamsCard({
   currentBranch: string | null;
   onMerge(branch: string): void;
   onRebase(branch: string): void;
+  onSelectCommit(sha: string): void;
   pendingAction: string | null;
   workingByStreamId: Record<string, boolean>;
 }) {
@@ -588,9 +598,11 @@ function StreamsCard({
                     </span>
                   </div>
                   <UncommittedSummaryInline summary={row.uncommitted} />
-                  <div style={subtle}>
-                    ↑{row.ahead} ↓{row.behind}
-                  </div>
+                  <AheadBehindBadge
+                    ahead={row.ahead}
+                    behind={row.behind}
+                    context={row.worktree.isMain || row.worktree.branch === mainBranchOf(rows) ? "its upstream" : "the main repo branch"}
+                  />
                   {row.worktree.branch ? (
                     <MergeRebaseSplitButton
                       streamId={streamId}
@@ -607,6 +619,7 @@ function StreamsCard({
                     streamId={streamId}
                     siblingBranch={row.worktree.branch}
                     currentBranch={currentBranch}
+                    onSelectCommit={onSelectCommit}
                   />
                 ) : null}
               </div>
@@ -620,22 +633,44 @@ function StreamsCard({
 
 function UncommittedSummaryInline({ summary }: { summary: WorkspaceStatusSummary | null }) {
   if (!summary || summary.total === 0) {
-    return <span style={{ ...subtle, fontStyle: "italic" }}>clean</span>;
+    return (
+      <span
+        style={{ ...subtle, fontStyle: "italic" }}
+        title="Working tree is clean — no uncommitted changes."
+      >
+        clean
+      </span>
+    );
   }
-  const addedLike = summary.added + summary.untracked;
-  const modifiedLike = summary.modified + summary.renamed;
+  return <FileStatusCountsForSummary summary={summary} testId="git-dashboard-stream-uncommitted" />;
+}
+
+function AheadBehindBadge({
+  ahead,
+  behind,
+  context,
+  testId,
+}: {
+  ahead: number;
+  behind: number;
+  /** Short noun for the comparand, e.g. "main" or "origin/main" — interpolated into the tooltip. */
+  context: string;
+  testId?: string;
+}) {
+  const title =
+    `↑ ${ahead} outgoing — commits in this branch not yet in ${context}\n` +
+    `↓ ${behind} incoming — commits in ${context} not yet in this branch`;
   return (
     <span
-      data-testid="git-dashboard-stream-uncommitted"
-      style={{ ...subtle, display: "inline-flex", gap: 6 }}
-      title={`${summary.total} uncommitted: ${summary.modified} modified, ${summary.added} added, ${summary.deleted} deleted, ${summary.renamed} renamed, ${summary.untracked} untracked`}
+      data-testid={testId}
+      title={title}
+      style={{ ...subtle, cursor: "help", whiteSpace: "nowrap" }}
     >
-      <span>A{addedLike}</span>
-      <span>M{modifiedLike}</span>
-      <span>D{summary.deleted}</span>
+      ↑{ahead} ↓{behind}
     </span>
   );
 }
+
 
 type MergeRebaseMode = "merge" | "rebase";
 
@@ -788,14 +823,17 @@ function PairwiseDiffPane({
   streamId,
   siblingBranch,
   currentBranch,
+  onSelectCommit,
 }: {
   streamId: string;
   siblingBranch: string;
   currentBranch: string | null;
+  onSelectCommit(sha: string): void;
 }) {
   const target = currentBranch && currentBranch !== siblingBranch ? currentBranch : "";
   const [commits, setCommits] = useState<GitLogCommit[]>([]);
   const [loading, setLoading] = useState(false);
+  const stats = useCommitStats(streamId, commits);
 
   useEffect(() => {
     if (!target) {
@@ -840,20 +878,23 @@ function PairwiseDiffPane({
       ) : commits.length === 0 ? (
         <div style={subtle}>No commits ahead.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {commits.map((c) => (
-            <div key={c.sha} style={{ display: "flex", gap: 8, fontSize: 12 }}>
-              <code style={{ color: "var(--text-muted)" }}>{c.sha.slice(0, 7)}</code>
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.commit.message}
-              </span>
-              <span style={subtle}>{c.commit.author.name}</span>
-            </div>
-          ))}
-        </div>
+        <CommitGraphTable
+          commits={commits}
+          branchHeadsBySha={EMPTY_REF_MAP}
+          tagsBySha={EMPTY_REF_MAP}
+          currentBranch={null}
+          statsBySha={stats}
+          onSelect={onSelectCommit}
+        />
       )}
     </div>
   );
+}
+
+const EMPTY_REF_MAP: Map<string, string[]> = new Map();
+
+function mainBranchOf(rows: StreamWorktreeRow[]): string | null {
+  return rows.find((r) => r.worktree.isMain)?.worktree.branch ?? null;
 }
 
 function RemoteBranchesCard({
@@ -917,9 +958,11 @@ function RemoteBranchesCard({
                     {row.lastCommitSubject} · {row.lastCommitAuthor} · {formatDate(row.lastCommitDate)}
                   </div>
                 </div>
-                <div style={subtle}>
-                  ↑{c?.ahead ?? 0} ↓{c?.behind ?? 0}
-                </div>
+                <AheadBehindBadge
+                  ahead={c?.ahead ?? 0}
+                  behind={c?.behind ?? 0}
+                  context={row.shortName}
+                />
                 <button
                   type="button"
                   onClick={() => onPull(row.remote, row.branch)}

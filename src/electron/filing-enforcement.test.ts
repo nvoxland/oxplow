@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Thread } from "../persistence/thread-store.js";
-import { buildFilingEnforcementPreToolDeny } from "./filing-enforcement.js";
+import { buildFilingEnforcementPreToolDeny, isPlanModePlanFile } from "./filing-enforcement.js";
 
 function thread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -109,5 +109,49 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       filedThisTurn: false,
     });
     expect(out).toBeNull();
+  });
+
+  describe("plan-mode plan-file exemption", () => {
+    const originalHome = process.env.HOME;
+    beforeEach(() => {
+      process.env.HOME = "/Users/agent";
+    });
+    afterEach(() => {
+      process.env.HOME = originalHome;
+    });
+
+    test("allows Write to ~/.claude/plans/<slug>.md with no in_progress item", () => {
+      const out = buildFilingEnforcementPreToolDeny({
+        thread: thread(),
+        toolName: "Write",
+        hasInProgressItem: false,
+        filedThisTurn: false,
+        filePath: "/Users/agent/.claude/plans/some-plan.md",
+      });
+      expect(out).toBeNull();
+    });
+
+    test("still denies a non-plan write under no-item conditions", () => {
+      const out = buildFilingEnforcementPreToolDeny({
+        thread: thread(),
+        toolName: "Write",
+        hasInProgressItem: false,
+        filedThisTurn: false,
+        filePath: "/Users/agent/project/src/foo.ts",
+      });
+      expect(out).not.toBeNull();
+    });
+
+    test("isPlanModePlanFile carve-out is narrow: requires .md extension under .claude/plans/", () => {
+      expect(isPlanModePlanFile("/Users/agent/.claude/plans/p.md")).toBe(true);
+      expect(isPlanModePlanFile("/Users/agent/.claude/plans/sub/p.md")).toBe(true);
+      // Sibling .claude paths must NOT be exempt — only the plans dir.
+      expect(isPlanModePlanFile("/Users/agent/.claude/settings.json")).toBe(false);
+      expect(isPlanModePlanFile("/Users/agent/.claude/plans/p.txt")).toBe(false);
+      expect(isPlanModePlanFile("/Users/agent/project/.claude/plans/p.md")).toBe(false);
+      expect(isPlanModePlanFile(null)).toBe(false);
+      expect(isPlanModePlanFile(undefined)).toBe(false);
+      expect(isPlanModePlanFile("")).toBe(false);
+    });
   });
 });

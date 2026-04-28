@@ -231,8 +231,8 @@ function CommitRow({
         />
       </svg>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, paddingRight: 8 }}>
-        <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.sha.slice(0, 7)}
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {row.commit.commit.message}
         </span>
         {branchHeads.map((name) => (
           <RefBadge key={`b-${name}`} label={name} tone={name === currentBranch ? "current" : "branch"} />
@@ -240,34 +240,47 @@ function CommitRow({
         {tags.map((name) => (
           <RefBadge key={`t-${name}`} label={name} tone="tag" />
         ))}
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {row.commit.commit.message}
+        <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
+          {row.commit.commit.author.name}
         </span>
         {stats ? (
           <span
             data-testid="commit-graph-row-stats"
-            style={{ flexShrink: 0, fontSize: 11, color: "var(--muted)", display: "inline-flex", gap: 6 }}
+            style={{
+              flexShrink: 0,
+              fontSize: 11,
+              fontFamily: "var(--mono, monospace)",
+              color: "var(--muted)",
+              display: "inline-flex",
+              gap: 6,
+              whiteSpace: "pre",
+            }}
             title={`${stats.filesAdded} added, ${stats.filesModified} modified, ${stats.filesDeleted} deleted · +${stats.additions} −${stats.deletions} lines`}
           >
-            <span>A{stats.filesAdded}</span>
-            <span>M{stats.filesModified}</span>
-            <span>D{stats.filesDeleted}</span>
-            <span style={{ color: "var(--text-success, #16a34a)" }}>+{stats.additions}</span>
-            <span style={{ color: "var(--text-danger, #dc2626)" }}>−{stats.deletions}</span>
+            <span style={{ color: "var(--text-success, #16a34a)" }}>{`A${pad2(stats.filesAdded)}`}</span>
+            <span>{`M${pad2(stats.filesModified)}`}</span>
+            <span style={{ color: "var(--text-danger, #dc2626)" }}>{`D${pad2(stats.filesDeleted)}`}</span>
+            <span style={{ color: "var(--text-success, #16a34a)" }}>{`+${pad3(stats.additions)}`}</span>
+            <span style={{ color: "var(--text-danger, #dc2626)" }}>{`−${pad3(stats.deletions)}`}</span>
           </span>
         ) : null}
-        <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.commit.author.name}
-        </span>
         <span
           style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11, minWidth: 132, textAlign: "right" }}
-          title={row.commit.commit.author.date}
+          title={`${row.commit.commit.author.date}\n${row.commit.sha}`}
         >
           {date}
         </span>
       </div>
     </div>
   );
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, " ");
+}
+
+function pad3(n: number): string {
+  return String(n).padStart(3, " ");
 }
 
 function RefBadge({ label, tone }: { label: string; tone: "branch" | "current" | "tag" }) {
