@@ -922,11 +922,20 @@ export function readWorktreeHeadSha(projectDir: string): string | null {
   }
 }
 
-export function gitCommitAll(projectDir: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
-  const addArgs = options?.includeUntracked ? ["add", "-A"] : ["add", "-u"];
+export function gitCommitAll(projectDir: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): GitOpResult & { sha?: string } {
+  const paths = options?.paths?.filter((p) => p && p.length > 0) ?? null;
+  const hasPaths = paths != null && paths.length > 0;
+  const addArgs = hasPaths
+    ? ["add", "--", ...paths!]
+    : options?.includeUntracked
+      ? ["add", "-A"]
+      : ["add", "-u"];
   const add = runGit(projectDir, addArgs);
   if (!add.ok) return add;
-  const commit = runGit(projectDir, ["commit", "-m", message]);
+  const commitArgs = hasPaths
+    ? ["commit", "-m", message, "--only", "--", ...paths!]
+    : ["commit", "-m", message];
+  const commit = runGit(projectDir, commitArgs);
   if (!commit.ok) return commit;
   try {
     const sha = execFileSync("git", ["-C", projectDir, "rev-parse", "HEAD"], {

@@ -1082,7 +1082,7 @@ export class ElectronRuntime {
     }
   }
 
-  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
+  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): GitOpResult & { sha?: string } {
     const stream = this.resolveStream(streamId);
     return gitCommitAll(stream.worktree_path, message, options);
   }

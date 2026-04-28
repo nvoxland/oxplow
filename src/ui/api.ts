@@ -569,7 +569,7 @@ export async function gitFetch(
 export async function gitCommitAll(
   streamId: string,
   message: string,
-  options?: { includeUntracked?: boolean },
+  options?: { includeUntracked?: boolean; paths?: string[] },
 ): Promise<import("../git/git.js").GitOpResult & { sha?: string }> {
   return desktopApi().gitCommitAll(streamId, message, options);
 }
