@@ -60,6 +60,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "dashboard-planning", label: "📊  Planning", ref: dashboardRef("planning") },
     { id: "dashboard-review", label: "📊  Review", ref: dashboardRef("review") },
     { id: "dashboard-quality", label: "📊  Quality", ref: dashboardRef("quality") },
+    { id: "dashboard-visits", label: "📊  Visits", ref: dashboardRef("visits") },
   ];
 }
 

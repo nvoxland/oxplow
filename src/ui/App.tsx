@@ -117,7 +117,8 @@ import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
-import { deriveDefaultLabel, recordHistoryVisit } from "./components/RailHud/history.js";
+import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
+import { recordPageVisit } from "./api.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -1564,7 +1565,7 @@ export function App() {
   }, [selectedThreadId]);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
-    if (ref.kind !== "agent") {
+    if (!NON_TRACKED_KINDS.has(ref.kind)) {
       let label = deriveDefaultLabel(ref);
       if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId;
@@ -1579,7 +1580,14 @@ export function App() {
           : null;
         if (found?.title) label = found.title;
       }
-      recordHistoryVisit(ref, label);
+      void recordPageVisit({
+        refKind: ref.kind,
+        refId: ref.id,
+        payload: ref.payload,
+        label,
+        streamId: stream?.id ?? null,
+        threadId: selectedThreadId,
+      });
     }
     switch (ref.kind) {
       case "agent":
@@ -1631,7 +1639,7 @@ export function App() {
       default:
         return;
     }
-  }, [handleOpenFile, handleOpenNote, selectedThreadId, selectedThreadWork, setCenterActive]);
+  }, [handleOpenFile, handleOpenNote, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
@@ -2224,7 +2232,7 @@ export function App() {
           ),
         });
       } else if (ref.kind === "dashboard") {
-        const variant = (ref.payload as { variant?: "planning" | "review" | "quality" } | null)?.variant ?? "planning";
+        const variant = (ref.payload as { variant?: "planning" | "review" | "quality" | "visits" } | null)?.variant ?? "planning";
         tabs.push({
           id: ref.id,
           label: `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,

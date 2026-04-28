@@ -82,7 +82,7 @@ export function gitCommitRef(sha: string): TabRef {
   return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
 }
 
-export type DashboardKind = "planning" | "review" | "quality";
+export type DashboardKind = "planning" | "review" | "quality" | "visits";
 
 export function dashboardRef(variant: DashboardKind): TabRef {
   return { id: `dashboard:${variant}`, kind: "dashboard", payload: { variant } };

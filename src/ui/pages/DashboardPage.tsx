@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BacklogState, CodeQualityFindingRow, FileSnapshot, Stream, ThreadWorkState, WikiNoteSummary, WorkItem } from "../api.js";
+import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiNoteSummary, WorkItem } from "../api.js";
 import {
+  countPageVisitsByDay,
   listCodeQualityFindings,
   listSnapshots,
   listWikiNotes,
+  subscribePageVisitEvents,
+  topVisitedPages,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { findingRef, indexRef, noteRef, workItemRef } from "../tabs/pageRefs.js";
 
-export type DashboardVariant = "planning" | "review" | "quality";
+export type DashboardVariant = "planning" | "review" | "quality" | "visits";
 
 export interface DashboardPageProps {
   variant: DashboardVariant;
@@ -24,6 +27,7 @@ const VARIANT_TITLE: Record<DashboardVariant, string> = {
   planning: "Planning",
   review: "Review",
   quality: "Quality",
+  visits: "Visits",
 };
 
 /**
@@ -43,6 +47,9 @@ export function DashboardPage({ variant, stream, threadWork, backlog, onOpenPage
         ) : null}
         {variant === "quality" ? (
           <QualitySections stream={stream} onOpenPage={onOpenPage} />
+        ) : null}
+        {variant === "visits" ? (
+          <VisitsSections onOpenPage={onOpenPage} />
         ) : null}
       </div>
     </Page>
@@ -312,5 +319,101 @@ function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpen
   );
 }
 
+function VisitsSections({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
+  const [top, setTop] = useState<TopVisitedRowApi[]>([]);
+  const [byDay, setByDay] = useState<CountByDayRowApi[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      void topVisitedPages({ limit: 25, sinceT: since }).then((rows) => {
+        if (!cancelled) setTop(rows);
+      });
+      void countPageVisitsByDay({ sinceT: since }).then((rows) => {
+        if (!cancelled) setByDay(rows);
+      });
+    };
+    refresh();
+    const off = subscribePageVisitEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  return (
+    <>
+      <Section title="Visits per day (last 30d)">
+        <DailyChart rows={byDay} />
+      </Section>
+      <Section title="Top 25 most visited (last 30d)">
+        {top.length === 0 ? <EmptyHint>No visits recorded yet.</EmptyHint> : null}
+        {top.map((r) => (
+          <RowButton
+            key={r.refId}
+            label={r.label}
+            subtitle={`${r.count} visit${r.count === 1 ? "" : "s"} · ${r.refKind} · last ${formatRelative(r.lastT)}`}
+            onClick={() => onOpenPage({ id: r.refId, kind: r.refKind as TabRef["kind"], payload: r.payload })}
+          />
+        ))}
+      </Section>
+    </>
+  );
+}
+
+function DailyChart({ rows }: { rows: CountByDayRowApi[] }) {
+  if (rows.length === 0) {
+    return <EmptyHint>No visits in the last 30 days.</EmptyHint>;
+  }
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  return (
+    <div
+      style={{
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: "12px 14px",
+      }}
+    >
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>
+        {total} total · peak {max}/day
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
+        {rows.map((r) => (
+          <div
+            key={r.day}
+            title={`${r.day}: ${r.count}`}
+            style={{
+              flex: 1,
+              minWidth: 4,
+              height: `${Math.max(2, (r.count / max) * 100)}%`,
+              background: "var(--accent-fg, #58a6ff)",
+              borderRadius: "2px 2px 0 0",
+              opacity: 0.85,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10, color: "var(--text-muted)" }}>
+        <span>{rows[0]?.day}</span>
+        <span>{rows[rows.length - 1]?.day}</span>
+      </div>
+    </div>
+  );
+}
+
+function formatRelative(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return iso;
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return `${d}d ago`;
+}
+
 // Re-export so test files can stub:
-export const DASHBOARD_VARIANTS: DashboardVariant[] = ["planning", "review", "quality"];
+export const DASHBOARD_VARIANTS: DashboardVariant[] = ["planning", "review", "quality", "visits"];

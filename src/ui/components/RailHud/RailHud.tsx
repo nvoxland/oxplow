@@ -7,7 +7,14 @@ import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
-import { type HistoryEntry, useHistory } from "./history.js";
+import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
+import {
+  listRecentPageVisits,
+  subscribePageVisitEvents,
+  topVisitedPages,
+  type PageVisitApi,
+  type TopVisitedRowApi,
+} from "../../api.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -129,7 +136,7 @@ export function RailHud({
         <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
       ) : null}
 
-      <HistorySection onOpenPage={onOpenPage} />
+      <HistorySection onOpenPage={onOpenPage} threadId={threadId} />
 
       <PagesDirectory onOpenPage={onOpenPage} backlogReadyCount={backlogReadyCount} />
       </div>
@@ -765,33 +772,121 @@ function FinishedSection({
 
 function HistorySection({
   onOpenPage,
+  threadId,
 }: {
   onOpenPage(ref: TabRef): void;
+  threadId: string | null;
 }) {
-  const all = useHistory();
   const [expanded, setExpanded] = useState(false);
-  if (all.length === 0) return null;
+  const [mode, setMode] = useState<"recent" | "top">("recent");
+  const [recent, setRecent] = useState<PageVisitApi[]>([]);
+  const [top, setTop] = useState<TopVisitedRowApi[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listRecentPageVisits({
+        threadId,
+        limit: 10,
+        dedupeByRef: true,
+        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
+      }).then((rows) => {
+        if (!cancelled) setRecent(rows);
+      });
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      void topVisitedPages({
+        threadId,
+        sinceT: since,
+        limit: 10,
+        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
+      }).then((rows) => {
+        if (!cancelled) setTop(rows);
+      });
+    };
+    refresh();
+    const off = subscribePageVisitEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [threadId]);
+
+  const source = mode === "recent" ? recent : top;
+  if (source.length === 0) return null;
   const limit = expanded ? 10 : 5;
-  const entries = all.slice(0, limit);
-  const hasMore = all.length > 5;
+  const entries = source.slice(0, limit);
+  const hasMore = source.length > 5;
+
   return (
     <>
-      <SectionHeading>History</SectionHeading>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "12px 14px 4px",
+        }}
+      >
+        <span
+          style={{
+            flex: 1,
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--text-secondary)",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          {mode === "recent" ? "History" : "Most visited"}
+        </span>
+        <button
+          type="button"
+          data-testid="rail-history-mode"
+          onClick={() => setMode((m) => (m === "recent" ? "top" : "recent"))}
+          title={mode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            fontSize: 10,
+            padding: "0 4px",
+          }}
+        >
+          {mode === "recent" ? "top" : "recent"}
+        </button>
+      </div>
       <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
-        {entries.map((e: HistoryEntry) => (
-          <button
-            key={e.ref.id}
-            type="button"
-            data-testid={`rail-history-${e.ref.id}`}
-            title={e.label}
-            onClick={() => onOpenPage(e.ref)}
-            style={rowHoverStyle()}
-          >
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {e.label}
-            </span>
-          </button>
-        ))}
+        {entries.map((e) => {
+          const ref: TabRef = { id: e.refId, kind: e.refKind as TabRef["kind"], payload: e.payload };
+          const trailing = mode === "top" ? (e as TopVisitedRowApi).count : null;
+          return (
+            <button
+              key={e.refId}
+              type="button"
+              data-testid={`rail-history-${e.refId}`}
+              title={e.label}
+              onClick={() => onOpenPage(ref)}
+              style={rowHoverStyle()}
+            >
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.label}
+              </span>
+              {trailing != null ? (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-secondary)",
+                    background: "var(--surface-tab-inactive)",
+                    padding: "1px 6px",
+                    borderRadius: 999,
+                  }}
+                >
+                  {trailing}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
         {hasMore ? (
           <button
             type="button"
@@ -804,7 +899,7 @@ function HistorySection({
               padding: "4px 14px 8px",
             }}
           >
-            {expanded ? "show less" : `show more (${Math.min(10, all.length)})`}
+            {expanded ? "show less" : `show more (${Math.min(10, source.length)})`}
           </button>
         ) : null}
       </div>

@@ -311,6 +311,10 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   handle("oxplow:listRecentlyFinished", (_event, threadId: string | null, limit: number) => currentRuntime.listRecentlyFinished(threadId, limit));
   handle("oxplow:clearRecentlyFinished", (_event, threadId: string | null) => currentRuntime.clearRecentlyFinished(threadId));
+  handle("oxplow:recordPageVisit", (_event, input) => currentRuntime.recordPageVisit(input));
+  handle("oxplow:listRecentPageVisits", (_event, opts) => currentRuntime.listRecentPageVisits(opts));
+  handle("oxplow:topVisitedPages", (_event, opts) => currentRuntime.topVisitedPages(opts));
+  handle("oxplow:countPageVisitsByDay", (_event, opts) => currentRuntime.countPageVisitsByDay(opts));
   handle("oxplow:ping", () => currentRuntime.ping());
   handle("oxplow:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
   handle("oxplow:updateEditorFocus", (_event, payload: EditorFocusPayload) => currentRuntime.updateEditorFocus(payload));

@@ -72,6 +72,16 @@ import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
 import { UsageStore } from "../persistence/usage-store.js";
 import {
+  PageVisitStore,
+  type CountByDayOpts,
+  type CountByDayRow,
+  type ListRecentOpts,
+  type PageVisit,
+  type PageVisitInput,
+  type TopVisitedOpts,
+  type TopVisitedRow,
+} from "../persistence/page-visit-store.js";
+import {
   CodeQualityStore,
   type CodeQualityFindingRow,
   type CodeQualityScanRow,
@@ -129,6 +139,7 @@ export class ElectronRuntime {
   private readonly workItemStore: WorkItemStore;
   readonly wikiNoteStore: WikiNoteStore;
   readonly usageStore: UsageStore;
+  readonly pageVisitStore: PageVisitStore;
   readonly codeQualityStore: CodeQualityStore;
   private notesWatcher: NotesWatcher | null = null;
   readonly effortStore: WorkItemEffortStore;
@@ -256,6 +267,7 @@ export class ElectronRuntime {
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
     this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
+    this.pageVisitStore = new PageVisitStore(projectDir, logger.child({ subsystem: "page-visit" }));
     this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
     this.backgroundTaskStore = new BackgroundTaskStore(logger.child({ subsystem: "background-task-store" }));
     let notesScanTaskId: string | null = null;
@@ -507,6 +519,14 @@ export class ElectronRuntime {
         kind: change.kind,
         key: change.key,
         streamId: change.streamId,
+        threadId: change.threadId,
+      });
+    });
+    this.pageVisitStore.subscribe((change) => {
+      this.events.publish({
+        type: "page-visit.changed",
+        refId: change.refId,
+        refKind: change.refKind,
         threadId: change.threadId,
       });
     });
@@ -817,6 +837,22 @@ export class ElectronRuntime {
     );
     this.events.publish({ type: "work-item.changed", id: null, kind: "list" } as any);
     this.events.publish({ type: "wiki-note.changed", kind: "upserted", slug: "" } as any);
+  }
+
+  recordPageVisit(input: PageVisitInput): void {
+    this.pageVisitStore.record(input);
+  }
+
+  listRecentPageVisits(opts: ListRecentOpts): PageVisit[] {
+    return this.pageVisitStore.listRecent(opts);
+  }
+
+  topVisitedPages(opts: TopVisitedOpts): TopVisitedRow[] {
+    return this.pageVisitStore.topVisited(opts);
+  }
+
+  countPageVisitsByDay(opts: CountByDayOpts): CountByDayRow[] {
+    return this.pageVisitStore.countByDay(opts);
   }
 
   listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {
