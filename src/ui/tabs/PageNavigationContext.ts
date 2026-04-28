@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
 import type { TabRef } from "./tabState.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
@@ -31,6 +31,20 @@ export interface PageNavigation {
   canGoForward: boolean;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
+  /**
+   * Register the page's current title with the host so the tab strip
+   * label and the shared chrome header pull from a single source.
+   * Pages call this through the `usePageTitle(...)` helper rather than
+   * directly. Optional so existing pages that pass `title` to `Page`
+   * keep working unchanged.
+   */
+  setTitle?(title: string): void;
+  /**
+   * The current title registered for this tab — populated by the host
+   * after a `setTitle` call. `Page` reads this when no explicit
+   * `title` prop is supplied.
+   */
+  title?: string;
 }
 
 export const PageNavigationContext = createContext<PageNavigation | null>(null);
@@ -45,4 +59,20 @@ export function usePageNavigation(): PageNavigation {
 /** Optional read — returns null when there's no provider (e.g., rail HUD). */
 export function useOptionalPageNavigation(): PageNavigation | null {
   return useContext(PageNavigationContext);
+}
+
+/**
+ * Register the current page's title with the host tab. Called by every
+ * page that wants its title to surface in the shared chrome and in the
+ * tab strip without owning duplicate header markup. Safe to call from
+ * components rendered outside a provider — it just no-ops.
+ */
+export function usePageTitle(title: string | null | undefined): void {
+  const ctx = useContext(PageNavigationContext);
+  const set = ctx?.setTitle;
+  useEffect(() => {
+    if (!set) return;
+    if (title == null || title === "") return;
+    set(title);
+  }, [set, title]);
 }
