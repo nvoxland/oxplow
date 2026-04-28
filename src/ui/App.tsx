@@ -122,7 +122,7 @@ import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newS
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
-import { EditorPane } from "./components/EditorPane.js";
+import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
@@ -1892,11 +1892,8 @@ export function App() {
         closable: true,
         reorderGroup: "file",
         render: () => stream ? (
-          // One shared EditorPane across all file tabs — React keeps the same
-          // component instance as long as the element type in the same slot
-          // is unchanged, so Monaco's editor stays alive and just swaps models
-          // when `filePath` changes.
-          <EditorPane
+          <FilePage
+            dirty={dirty}
             stream={stream}
             filePath={path}
             value={file?.draftContent ?? ""}
@@ -1970,7 +1967,8 @@ export function App() {
           closable: true,
           reorderGroup: "file",
           render: () => stream ? (
-            <EditorPane
+            <FilePage
+              dirty={dirty}
               stream={stream}
               filePath={path}
               value={file?.draftContent ?? ""}
