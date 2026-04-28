@@ -2584,7 +2584,15 @@ export function App() {
                 else setCenterActive(id);
               }}
               onClose={(id) => {
-                if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
+                if (id.startsWith("file:")) {
+                  handleCloseOpenFile(id.slice("file:".length));
+                  // A file can also live in threadPageTabs when it was
+                  // reached via in-tab navigation from a page (Files
+                  // index, git history, etc.). Removing only the
+                  // session entry left the page-tab clinging with a
+                  // blank EditorPane, uncloseable on a second click.
+                  closePageTab(id);
+                }
                 else if (id.startsWith("diff:")) closeDiffTab(id);
                 else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
                 else closePageTab(id);
