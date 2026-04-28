@@ -102,6 +102,13 @@ export interface UsageRecordedEvent {
   threadId: string | null;
 }
 
+export interface PageVisitChangedEvent {
+  type: "page-visit.changed";
+  refId: string;
+  refKind: string;
+  threadId: string | null;
+}
+
 export interface CodeQualityScannedEvent {
   type: "code-quality.scanned";
   streamId: string;
@@ -134,6 +141,7 @@ export type OxplowEvent =
   | ConfigChangedEvent
   | WikiNoteChangedEvent
   | UsageRecordedEvent
+  | PageVisitChangedEvent
   | CodeQualityScannedEvent
   | FollowupChangedEvent
   | BackgroundTaskChangedEvent;

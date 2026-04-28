@@ -339,6 +339,13 @@ export interface DesktopApi {
     >
   >;
   clearRecentlyFinished(threadId: string | null): Promise<void>;
+  recordPageVisit(input: import("../persistence/page-visit-store.js").PageVisitInput): Promise<void>;
+  listRecentPageVisits(opts: import("../persistence/page-visit-store.js").ListRecentOpts):
+    Promise<import("../persistence/page-visit-store.js").PageVisit[]>;
+  topVisitedPages(opts: import("../persistence/page-visit-store.js").TopVisitedOpts):
+    Promise<import("../persistence/page-visit-store.js").TopVisitedRow[]>;
+  countPageVisitsByDay(opts: import("../persistence/page-visit-store.js").CountByDayOpts):
+    Promise<import("../persistence/page-visit-store.js").CountByDayRow[]>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   updateEditorFocus(payload: EditorFocusPayload): Promise<void>;

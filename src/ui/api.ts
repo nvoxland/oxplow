@@ -1023,6 +1023,79 @@ export async function clearRecentlyFinished(threadId: string | null): Promise<vo
   return desktopApi().clearRecentlyFinished(threadId);
 }
 
+export interface PageVisitInputApi {
+  refKind: string;
+  refId: string;
+  payload: unknown;
+  label: string;
+  streamId?: string | null;
+  threadId?: string | null;
+  source?: string | null;
+}
+
+export interface PageVisitApi {
+  id: number;
+  t: string;
+  streamId: string | null;
+  threadId: string | null;
+  refKind: string;
+  refId: string;
+  payload: unknown;
+  label: string;
+  source: string | null;
+}
+
+export interface TopVisitedRowApi {
+  refId: string;
+  refKind: string;
+  payload: unknown;
+  label: string;
+  count: number;
+  lastT: string;
+}
+
+export interface CountByDayRowApi {
+  day: string;
+  count: number;
+}
+
+export async function recordPageVisit(input: PageVisitInputApi): Promise<void> {
+  return desktopApi().recordPageVisit(input);
+}
+
+export async function listRecentPageVisits(opts: {
+  threadId?: string | null;
+  limit: number;
+  dedupeByRef?: boolean;
+  excludeKinds?: string[];
+}): Promise<PageVisitApi[]> {
+  return desktopApi().listRecentPageVisits(opts);
+}
+
+export async function topVisitedPages(opts: {
+  threadId?: string | null;
+  sinceT?: string | null;
+  limit: number;
+  excludeKinds?: string[];
+}): Promise<TopVisitedRowApi[]> {
+  return desktopApi().topVisitedPages(opts);
+}
+
+export async function countPageVisitsByDay(opts: {
+  refId?: string;
+  threadId?: string | null;
+  sinceT?: string;
+  untilT?: string;
+}): Promise<CountByDayRowApi[]> {
+  return desktopApi().countPageVisitsByDay(opts);
+}
+
+export function subscribePageVisitEvents(onEvent: () => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type === "page-visit.changed") onEvent();
+  });
+}
+
 export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,

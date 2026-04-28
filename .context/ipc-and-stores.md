@@ -337,6 +337,32 @@ When wiring a new kind, record the visit at the moment the user
 relies on `occurred_at` being a real "user intent to read this"
 signal.
 
+## `PageVisitStore` — page navigation event log
+
+Distinct from `UsageStore` (which is a generic kind/key tracker with
+coalescing). `PageVisitStore` records every `App.handleOpenPage` call
+as a fresh event with the full `TabRef` (kind + id + payload + label).
+Append-only, no coalescing — analytics queries collapse as needed.
+
+IPC:
+
+- `recordPageVisit(input)` — called from `handleOpenPage` for every
+  ref except `agent`/`new-stream`/`new-work-item`. The label is
+  resolved from richer context first (work item title) and falls back
+  to `deriveDefaultLabel(ref)` from
+  `src/ui/components/RailHud/history.ts`.
+- `listRecentPageVisits({threadId,limit,dedupeByRef,excludeKinds})`
+  — newest-first; with `dedupeByRef` collapses to one row per
+  `ref_id`. Drives the rail's History section.
+- `topVisitedPages({threadId,sinceT,limit,excludeKinds})` — count
+  rollup with the latest payload+label per ref. Drives the rail's
+  "Most visited" toggle and the Visits dashboard.
+- `countPageVisitsByDay({refId,threadId,sinceT,untilT})` — daily
+  bucketed counts for behavior-over-time charts.
+
+Subscribe via `subscribePageVisitEvents(fn)`; bus event is
+`page-visit.changed` with `{ refId, refKind, threadId }`.
+
 ## Code quality scans
 
 `CodeQualityStore` (`src/persistence/code-quality-store.ts`) is

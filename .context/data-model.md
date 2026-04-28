@@ -449,6 +449,29 @@ complete / fail; `CodeQualityPanel` (`src/ui/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
+### `page_visit` — `PageVisitStore` (`src/persistence/page-visit-store.ts`)
+
+Append-only event log of in-app page navigations. One row per visit
+recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
+`new-work-item`).
+
+Columns: `id`, `t` (ISO), `stream_id?`, `thread_id?`, `ref_kind`,
+`ref_id`, `payload_json` (serialized `TabRef.payload`), `label`,
+`source?` (`rail|tab-click|quick-open|in-tab-nav|command`).
+
+Indexes on `t DESC`, `ref_id`, `(thread_id, t DESC)`, `(ref_kind, t
+DESC)`. Aggregates derived by query, not stored:
+
+- `listRecent({threadId,limit,dedupeByRef,excludeKinds})` — drives the
+  rail History (with `dedupeByRef`).
+- `topVisited({threadId,sinceT,limit})` — most-visited rollup with
+  payload+label of the latest visit per ref. Drives the rail's
+  "Most visited" toggle and the Visits dashboard.
+- `countByDay({refId,threadId,sinceT,untilT})` — daily bucketed
+  counts for behavior-over-time charts.
+
+Insert publishes `page-visit.changed` for renderer-side invalidation.
+
 ### `finished_seen` — runtime watermark for the rail's Finished section
 
 `finished_seen (scope TEXT PRIMARY KEY, t TEXT NOT NULL)`. Tiny KV

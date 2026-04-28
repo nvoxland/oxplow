@@ -1149,6 +1149,29 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 45,
+    name: "page_visit event log",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE page_visit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          t TEXT NOT NULL,
+          stream_id TEXT,
+          thread_id TEXT,
+          ref_kind TEXT NOT NULL,
+          ref_id TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          label TEXT NOT NULL,
+          source TEXT
+        );
+        CREATE INDEX idx_page_visit_t ON page_visit(t DESC);
+        CREATE INDEX idx_page_visit_ref ON page_visit(ref_id);
+        CREATE INDEX idx_page_visit_thread_t ON page_visit(thread_id, t DESC);
+        CREATE INDEX idx_page_visit_kind_t ON page_visit(ref_kind, t DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {
