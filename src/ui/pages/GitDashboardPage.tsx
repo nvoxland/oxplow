@@ -237,10 +237,17 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     return out;
   }, [agentStatuses]);
 
-  const runConfirmed = useCallback(
-    async (label: string, command: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
-      const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
-      if (!ok) return;
+  const runOp = useCallback(
+    async (
+      label: string,
+      command: string,
+      action: () => Promise<import("../api.js").GitOpKickoff>,
+      opts?: { confirm?: boolean },
+    ) => {
+      if (opts?.confirm) {
+        const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
+        if (!ok) return;
+      }
       addPending(label);
       let task: import("../api.js").BackgroundTask | null = null;
       try {
@@ -315,14 +322,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
             <UpstreamCard
               data={data.branchHeader}
               onPush={() =>
-                runConfirmed(
+                runOp(
                   "Push",
                   `git push${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
                   () => gitPush(streamId),
+                  { confirm: true },
                 )
               }
               onPullUpstream={() =>
-                runConfirmed(
+                runOp(
                   "Pull",
                   `git pull${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
                   () => gitPull(streamId),
@@ -351,17 +359,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               workingByStreamId={streamWorkingFlags}
               onSelectCommit={handleSelectCommit}
               onMerge={(branch) =>
-                runConfirmed(
+                runOp(
                   `Merge ${branch} into current`,
                   `git merge ${branch}`,
                   () => gitMergeInto(streamId, branch),
                 )
               }
               onRebase={(branch) =>
-                runConfirmed(
+                runOp(
                   `Rebase current onto ${branch}`,
                   `git rebase ${branch}`,
                   () => gitRebaseOnto(streamId, branch),
+                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -371,17 +380,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               streamId={streamId}
               rows={data.remoteBranches}
               onPull={(remote, branch) =>
-                runConfirmed(
+                runOp(
                   `Pull ${remote}/${branch} into current`,
                   `git fetch ${remote} ${branch} && git merge ${remote}/${branch}`,
                   () => gitPullRemoteIntoCurrent(streamId, remote, branch),
                 )
               }
               onPush={(remote, branch) =>
-                runConfirmed(
+                runOp(
                   `Push current → ${remote}/${branch}`,
                   `git push ${remote} HEAD:refs/heads/${branch}`,
                   () => gitPushCurrentTo(streamId, remote, branch),
+                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -1031,7 +1041,12 @@ function RemoteBranchesCard({
                 <button
                   type="button"
                   onClick={() => onPull(row.remote, row.branch)}
-                  disabled={isPending(pullLabel)}
+                  disabled={isPending(pullLabel) || (c?.behind ?? 0) === 0}
+                  title={
+                    (c?.behind ?? 0) === 0
+                      ? `${row.shortName} has no commits not already in current — nothing to pull.`
+                      : undefined
+                  }
                   style={smallButton}
                 >
                   {isPending(pullLabel) ? "Pulling…" : "Pull into"}
@@ -1039,7 +1054,12 @@ function RemoteBranchesCard({
                 <button
                   type="button"
                   onClick={() => onPush(row.remote, row.branch)}
-                  disabled={isPending(pushLabel)}
+                  disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
+                  title={
+                    (c?.ahead ?? 0) === 0
+                      ? `Current has no commits not already in ${row.shortName} — nothing to push.`
+                      : undefined
+                  }
                   style={smallButton}
                 >
                   {isPending(pushLabel) ? "Pushing…" : "Push to"}
