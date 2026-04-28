@@ -36,6 +36,7 @@ import {
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   listRecentlyFinished,
+  openExternalUrl,
   type FinishedEntry,
   getConfig,
   setGeneratedDirs,
@@ -2117,10 +2118,24 @@ export function App() {
           id: ref.id,
           label: label.length > 40 ? label.slice(0, 40) + "…" : label,
           closable: true,
+          contextMenu: [
+            {
+              id: "external-url.open-in-browser",
+              label: "Open in browser",
+              enabled: true,
+              run: () => { void openExternalUrl(externalUrl); },
+            },
+            {
+              id: "external-url.copy",
+              label: "Copy URL",
+              enabled: true,
+              run: () => { void navigator.clipboard.writeText(externalUrl).catch(() => {}); },
+            },
+          ],
           render: () => (
             <ExternalUrlPage
               url={externalUrl}
-              onOpenInBrowser={(u) => { window.open(u, "_blank", "noopener,noreferrer"); }}
+              onOpenInBrowser={(u) => { void openExternalUrl(u); }}
             />
           ),
         });

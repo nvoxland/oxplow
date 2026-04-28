@@ -188,6 +188,13 @@ export interface DesktopApi {
   listBranches(): Promise<BranchRef[]>;
   getDefaultBranch(): Promise<string | null>;
   clipboardReadText(): Promise<string>;
+  /**
+   * Open an http(s) URL in the user's OS browser via Electron's
+   * `shell.openExternal`. Validated against the same scheme allowlist
+   * as the renderer; non-allowed URLs are rejected. Returns `{ ok }`
+   * so callers can surface a refusal toast.
+   */
+  openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }>;
   listGitRefs(): Promise<GroupedGitRefs>;
   renameGitBranch(from: string, to: string): Promise<GitOpResult>;
   deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<GitOpResult>;

@@ -220,6 +220,13 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   // non-text-flavor-primary payloads. Reading via Electron's main-process
   // clipboard goes straight to NSPasteboard, bypassing both limitations.
   handle("oxplow:clipboardReadText", () => clipboard.readText());
+  handle("oxplow:openExternalUrl", async (_event, url: string) => {
+    const { classifyExternalUrl } = await import("../ui/external-url-allowlist.js");
+    const verdict = classifyExternalUrl(url);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    void shell.openExternal(verdict.url);
+    return { ok: true };
+  });
   handle("oxplow:listGitRefs", () => currentRuntime.listGitRefs());
   handle("oxplow:renameGitBranch", (_event, from: string, to: string) => currentRuntime.renameGitBranch(from, to));
   handle("oxplow:deleteGitBranch", (_event, branch: string, options?: { force?: boolean }) =>

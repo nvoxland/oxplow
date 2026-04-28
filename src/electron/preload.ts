@@ -25,6 +25,7 @@ const api: DesktopApi = {
   listBranches: () => ipcRenderer.invoke("oxplow:listBranches"),
   getDefaultBranch: () => ipcRenderer.invoke("oxplow:getDefaultBranch"),
   clipboardReadText: () => ipcRenderer.invoke("oxplow:clipboardReadText"),
+  openExternalUrl: (url) => ipcRenderer.invoke("oxplow:openExternalUrl", url),
   listGitRefs: () => ipcRenderer.invoke("oxplow:listGitRefs"),
   renameGitBranch: (from, to) => ipcRenderer.invoke("oxplow:renameGitBranch", from, to),
   deleteGitBranch: (branch, options) => ipcRenderer.invoke("oxplow:deleteGitBranch", branch, options),

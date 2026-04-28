@@ -1118,3 +1118,13 @@ function desktopApi(): DesktopApi {
   }
   return window.oxplowApi;
 }
+
+/**
+ * Open an http(s) URL in the user's OS browser. The main process
+ * re-validates the URL against the same scheme allowlist as the
+ * renderer; non-allowed URLs return `{ ok: false }` so callers can
+ * show a refusal toast.
+ */
+export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {
+  return desktopApi().openExternalUrl(url);
+}
