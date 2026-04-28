@@ -23,7 +23,7 @@ export function attachPane(ws: BridgeSocket, paneTarget: string, cols: number, r
     name: "xterm-256color",
     cols,
     rows,
-    env: process.env as Record<string, string>,
+    env: { ...process.env, COLORTERM: "truecolor" } as Record<string, string>,
   });
 
   // Force tmux to repaint the freshly-attached client. Without this, when the

@@ -46,7 +46,7 @@ function defaultSpawnPty(spec: AgentPtySpec): IPtyLike {
     cwd: spec.cwd,
     cols: spec.cols,
     rows: spec.rows,
-    env: process.env as Record<string, string>,
+    env: { ...process.env, COLORTERM: "truecolor" } as Record<string, string>,
   }) as IPtyLike;
 }
 
