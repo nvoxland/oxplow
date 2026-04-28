@@ -117,7 +117,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, noteRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -225,10 +225,6 @@ export function App() {
     Record<string, Record<string, { back: TabRef[]; forward: TabRef[] }>>
   >({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
-  // Per-thread open wiki note tabs, keyed by thread id. Each thread maintains
-  // its own open-note list so opening or closing a note in one thread doesn't
-  // leak into another (matches threadPageTabs behavior).
-  const [noteTabs, setNoteTabs] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
@@ -930,12 +926,6 @@ export function App() {
       if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive("agent");
       return;
     }
-    if (centerActive.startsWith("note:")) {
-      const slug = centerActive.slice("note:".length);
-      const slugs = selectedThreadId ? noteTabs[selectedThreadId] ?? [] : [];
-      if (!slugs.includes(slug)) setCenterActive("agent");
-      return;
-    }
     // Page tabs (work-item, plan-work, git-history, …) — validate
     // against the per-thread page-tab list. Reset to agent only when
     // the page wasn't restored. The previous unknown-id fall-through
@@ -943,7 +933,7 @@ export function App() {
     // first click after startup.
     const pageTabs = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
     if (!pageTabs.some((ref) => ref.id === centerActive)) setCenterActive("agent");
-  }, [stream, fileSessions, centerActive, diffTabs, noteTabs, selectedThreadId, threadPageTabs]);
+  }, [stream, fileSessions, centerActive, diffTabs, selectedThreadId, threadPageTabs]);
 
   // Restore previously-open file tabs the first time each stream becomes
   // active. We add the paths to the session in openOrder, mark each as
@@ -1413,15 +1403,13 @@ export function App() {
   }, [commandMap, isElectron]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-  const noteTabsForActiveThread = selectedThreadId ? noteTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
     const ids = new Set(["agent"]);
     for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
-    for (const slug of noteTabsForActiveThread) ids.add(`note:${slug}`);
     for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
-  }, [currentSession.openOrder, diffTabs, noteTabsForActiveThread, pageTabsForActiveThread]);
+  }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1490,12 +1478,13 @@ export function App() {
   const handleOpenNote = useCallback((slug: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
-    setNoteTabs((prev) => {
+    const ref = noteRef(slug);
+    setThreadPageTabs((prev) => {
       const existing = prev[tid] ?? [];
-      if (existing.includes(slug)) return prev;
-      return { ...prev, [tid]: [...existing, slug] };
+      if (existing.some((t) => t.id === ref.id)) return prev;
+      return { ...prev, [tid]: [...existing, ref] };
     });
-    setCenterActive(`note:${slug}`);
+    setCenterActive(ref.id);
     const sid = stream?.id ?? null;
     if (sid) {
       void recordUsage({
@@ -1507,17 +1496,6 @@ export function App() {
       }).catch(() => {});
     }
   }, [stream?.id, selectedThread?.id]);
-
-  const closeNoteTab = useCallback((slug: string) => {
-    const tid = selectedThread?.id ?? null;
-    if (!tid) return;
-    setNoteTabs((prev) => {
-      const existing = prev[tid] ?? [];
-      if (!existing.includes(slug)) return prev;
-      return { ...prev, [tid]: existing.filter((s) => s !== slug) };
-    });
-    setCenterActive((current) => (current === `note:${slug}` ? "agent" : current));
-  }, [selectedThread?.id]);
 
   /**
    * Open an http(s) URL as an in-app sandboxed external-url tab.
@@ -1544,27 +1522,15 @@ export function App() {
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
     const orderedFiles: string[] = [];
-    const orderedNotes: string[] = [];
     const orderedDiffIds: string[] = [];
     for (const id of orderedIds) {
       if (id.startsWith("file:")) orderedFiles.push(id.slice("file:".length));
-      else if (id.startsWith("note:")) orderedNotes.push(id.slice("note:".length));
       else if (id.startsWith("diff:")) orderedDiffIds.push(id);
     }
     setFileSessions((prev) => {
       const base = prev[stream.id] ?? createEmptyFileSession();
       return { ...prev, [stream.id]: reorderOpenFiles(base, orderedFiles) };
     });
-    const tid = selectedThread?.id ?? null;
-    if (tid) {
-      setNoteTabs((prev) => {
-        const existing = prev[tid] ?? [];
-        if (orderedNotes.length !== existing.length) return prev;
-        const known = new Set(existing);
-        if (!orderedNotes.every((s) => known.has(s))) return prev;
-        return { ...prev, [tid]: orderedNotes };
-      });
-    }
     setDiffTabs((prev) => {
       if (orderedDiffIds.length !== prev.length) return prev;
       const byId = new Map(prev.map((d) => [d.id, d] as const));
@@ -1673,11 +1639,7 @@ export function App() {
         if (payload?.path) void handleOpenFile(payload.path);
         return;
       }
-      case "note": {
-        const payload = ref.payload as { slug?: string } | null;
-        if (payload?.slug) handleOpenNote(payload.slug);
-        return;
-      }
+      case "note":
       case "work-item":
       case "finding":
       case "dashboard":
@@ -1739,7 +1701,7 @@ export function App() {
     // agent/note/diff still live in their own tab tracks — promote to
     // a regular open. File refs DO support in-tab nav: the page tab
     // becomes a file viewer (back returns to the prior page).
-    if (ref.kind === "agent" || ref.kind === "note" || ref.kind === "diff") {
+    if (ref.kind === "agent" || ref.kind === "diff") {
       handleOpenPage(ref);
       return;
     }
@@ -1948,29 +1910,6 @@ export function App() {
             onRevealCommit={handleRevealCommit}
             onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
-          />
-        ) : null,
-      });
-    }
-    for (const slug of noteTabsForActiveThread) {
-      const noteTabId = `note:${slug}`;
-      const noteNavOpen = (newRef: TabRef) => handleNavigateInTab(noteTabId, newRef);
-      tabs.push({
-        id: noteTabId,
-        label: slug,
-        closable: true,
-        reorderGroup: "note",
-        render: () => stream ? (
-          <NotePage
-            stream={stream}
-            slug={slug}
-            threadWork={selectedThreadWork}
-            onClosed={() => closeNoteTab(slug)}
-            onOpenNote={handleOpenNote}
-            onOpenFile={(p) => { void handleOpenFile(p); }}
-            onOpenPage={noteNavOpen}
-            onOpenCommit={handleOpenCommit}
-            onOpenExternalUrl={handleOpenExternalUrl}
           />
         ) : null,
       });
@@ -2269,6 +2208,27 @@ export function App() {
             />
           ),
         });
+      } else if (ref.kind === "note") {
+        const slug = (ref.payload as { slug?: string } | null)?.slug ?? "";
+        const noteNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+        tabs.push({
+          id: ref.id,
+          label: slug,
+          closable: true,
+          render: () => stream ? (
+            <NotePage
+              stream={stream}
+              slug={slug}
+              threadWork={selectedThreadWork}
+              onClosed={() => closePageTab(ref.id)}
+              onOpenNote={handleOpenNote}
+              onOpenFile={(p) => { void handleOpenFile(p); }}
+              onOpenPage={noteNavOpen}
+              onOpenCommit={handleOpenCommit}
+              onOpenExternalUrl={handleOpenExternalUrl}
+            />
+          ) : null,
+        });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         const items = selectedThreadWork?.items ?? [];
@@ -2494,9 +2454,9 @@ export function App() {
     editorFindRequest,
     editorNavigationTarget,
     diffTabs,
-    noteTabsForActiveThread,
-    closeNoteTab,
     handleOpenNote,
+    handleOpenCommit,
+    handleOpenExternalUrl,
     selectedThreadId,
     threadPageTabs,
     threadPageHistory,
@@ -2607,7 +2567,6 @@ export function App() {
               onClose={(id) => {
                 if (id.startsWith("file:")) handleCloseOpenFile(id.slice("file:".length));
                 else if (id.startsWith("diff:")) closeDiffTab(id);
-                else if (id.startsWith("note:")) closeNoteTab(id.slice("note:".length));
                 else closePageTab(id);
               }}
               onReorder={handleReorderCenterTabs}
