@@ -114,6 +114,13 @@ export interface MarkdownViewProps {
   /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
   onOpenFile?: (path: string, line?: number) => void;
   /**
+   * Optional handler for external (http/https) link clicks. When present,
+   * left-click on an external link calls this instead of opening in the
+   * OS browser; the host wires it to "open as in-app external-url tab".
+   * Right-click "Open in browser" still goes to the OS browser regardless.
+   */
+  onOpenExternalUrl?: (url: string) => void;
+  /**
    * Render mermaid code blocks as SVG diagrams. NoteTab uses this; the
    * work-item modal disables it (default false) since work-item notes
    * tend to be short and a stray code fence shouldn't trigger rendering.
@@ -144,6 +151,7 @@ export function MarkdownView({
   onNavigateInternal,
   onOpenInNewTab,
   onOpenFile,
+  onOpenExternalUrl,
   renderMermaid = false,
   maxHeight,
   style,
@@ -159,7 +167,8 @@ export function MarkdownView({
     event.preventDefault();
     if (parsed.kind === "empty") return;
     if (parsed.kind === "external") {
-      window.open(href, "_blank", "noopener,noreferrer");
+      if (onOpenExternalUrl) onOpenExternalUrl(href);
+      else window.open(href, "_blank", "noopener,noreferrer");
       return;
     }
     if (parsed.kind === "file") {
@@ -171,7 +180,7 @@ export function MarkdownView({
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenExternalUrl]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
@@ -187,10 +196,13 @@ export function MarkdownView({
       return items;
     }
     if (parsed.kind === "external") {
-      return [
-        { id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(href, "_blank", "noopener,noreferrer"); } },
-        { id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(href).catch(() => {}); } },
-      ];
+      const items: MenuItem[] = [];
+      if (onOpenExternalUrl) {
+        items.push({ id: "open-in-app", label: "Open in app", enabled: true, run: () => onOpenExternalUrl(href) });
+      }
+      items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(href, "_blank", "noopener,noreferrer"); } });
+      items.push({ id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(href).catch(() => {}); } });
+      return items;
     }
     if (parsed.kind === "file") {
       const items: MenuItem[] = [];
@@ -201,7 +213,7 @@ export function MarkdownView({
       return items;
     }
     return [];
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenExternalUrl]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.

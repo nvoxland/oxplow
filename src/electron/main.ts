@@ -134,6 +134,12 @@ function createWindow(openDevTools: boolean, title: string) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Enables <webview> tag for the in-app external-url tab. Per-guest
+      // attributes (sandbox=yes, partition=persist:external) plus the
+      // will-attach-webview / setWindowOpenHandler / permission lockdown
+      // configured in registerExternalContentLockdown gate what guests
+      // can do.
+      webviewTag: true,
     },
   });
 
