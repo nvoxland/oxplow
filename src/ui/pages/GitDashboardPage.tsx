@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GitLogCommit, GitLogResult, GitOpResult, GitWorktreeEntry, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
 import {
   getAheadBehind,
@@ -72,7 +72,30 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  // Set of action labels that are currently in-flight. Driven by the
+  // BackgroundTaskStore: when a kickoff IPC returns its taskId we add
+  // the label and subscribe; the subscription removes the label once the
+  // task ends. This means buttons stay "pending" for the entire duration
+  // of the underlying git op even when the IPC promise resolved long
+  // ago, and any other surface watching the same store sees the same
+  // state.
+  const [pendingLabels, setPendingLabels] = useState<ReadonlySet<string>>(new Set());
+  const isPending = useCallback((label: string) => pendingLabels.has(label), [pendingLabels]);
+  const addPending = useCallback((label: string) => {
+    setPendingLabels((prev) => {
+      const next = new Set(prev);
+      next.add(label);
+      return next;
+    });
+  }, []);
+  const removePending = useCallback((label: string) => {
+    setPendingLabels((prev) => {
+      if (!prev.has(label)) return prev;
+      const next = new Set(prev);
+      next.delete(label);
+      return next;
+    });
+  }, []);
   // Per-(stream, thread) agent status. The Streams card aggregates over
   // each stream's threads to render the "working" indicator.
   const [agentStatuses, setAgentStatuses] = useState<Record<string, Record<string, string>>>({});
@@ -155,15 +178,33 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     void refresh();
   }, [refresh]);
 
+  // Debounce watcher-driven refreshes: a single `git rebase`/`git merge`
+  // can fire .git/refs and workspace events dozens of times in quick
+  // succession. Each refresh is 5+ parallel IPC calls — without
+  // debouncing, the avalanche locks up the renderer and stalls the
+  // post-action refresh awaited by `runConfirmed`.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      void refresh();
+    }, 250);
+  }, [refresh]);
+
   useEffect(() => {
     if (!streamId) return;
-    const unsubGit = subscribeGitRefsEvents(streamId, () => void refresh());
-    const unsubWorkspace = subscribeWorkspaceEvents(streamId, () => void refresh());
+    const unsubGit = subscribeGitRefsEvents(streamId, scheduleRefresh);
+    const unsubWorkspace = subscribeWorkspaceEvents(streamId, scheduleRefresh);
     return () => {
       unsubGit();
       unsubWorkspace();
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
     };
-  }, [streamId, refresh]);
+  }, [streamId, scheduleRefresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,46 +238,52 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   }, [agentStatuses]);
 
   const runConfirmed = useCallback(
-    async (label: string, command: string, action: () => Promise<GitOpResult>) => {
+    async (label: string, command: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
       const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
       if (!ok) return;
-      setPendingAction(label);
+      addPending(label);
+      let task: import("../api.js").BackgroundTask | null = null;
       try {
-        const result = await action();
-        if (!result.ok) {
-          const errorId = recordOpError({
-            label,
-            command,
-            stderr: result.stderr ?? "",
-            stdout: result.stdout ?? "",
-            exitCode: result.exitCode ?? null,
-          });
-          onOpenPage(opErrorRef(errorId), { newTab: true });
-        } else {
-          await refresh();
-        }
+        const { awaitDone } = await action();
+        task = await awaitDone;
       } finally {
-        setPendingAction(null);
+        removePending(label);
+      }
+      const result = task?.result as GitOpResult | undefined;
+      if (!result || !result.ok) {
+        const errorId = recordOpError({
+          label,
+          command,
+          stderr: result?.stderr ?? task?.error ?? "",
+          stdout: result?.stdout ?? "",
+          exitCode: result?.exitCode ?? null,
+        });
+        onOpenPage(opErrorRef(errorId), { newTab: true });
+      } else {
+        void refresh();
       }
     },
-    [refresh, onOpenPage],
+    [refresh, onOpenPage, addPending, removePending],
   );
 
   const runUnconfirmed = useCallback(
-    async (label: string, action: () => Promise<GitOpResult>) => {
-      setPendingAction(label);
+    async (label: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
+      addPending(label);
+      let task: import("../api.js").BackgroundTask | null = null;
       try {
-        const result = await action();
-        if (!result.ok) {
-          window.alert(`${label} failed:\n${result.stderr || "git error"}`);
-        } else {
-          await refresh();
-        }
+        const { awaitDone } = await action();
+        task = await awaitDone;
       } finally {
-        setPendingAction(null);
+        removePending(label);
+      }
+      const result = task?.result as GitOpResult | undefined;
+      if (!result || !result.ok) {
+        window.alert(`${label} failed:\n${result?.stderr || task?.error || "git error"}`);
+      } else {
+        void refresh();
       }
     },
-    [refresh],
+    [refresh, addPending, removePending],
   );
 
   if (!streamId) {
@@ -276,7 +323,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                 )
               }
               onFetch={() => runUnconfirmed("Fetch", () => gitFetch(streamId))}
-              pendingAction={pendingAction}
+              isPending={isPending}
             />
 
             <UncommittedMiniCard
@@ -311,7 +358,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   () => gitRebaseOnto(streamId, branch),
                 )
               }
-              pendingAction={pendingAction}
+              isPending={isPending}
             />
 
             <RemoteBranchesCard
@@ -331,7 +378,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   () => gitPushCurrentTo(streamId, remote, branch),
                 )
               }
-              pendingAction={pendingAction}
+              isPending={isPending}
             />
           </>
         ) : null}
@@ -345,18 +392,18 @@ function UpstreamCard({
   onPush,
   onPullUpstream,
   onFetch,
-  pendingAction,
+  isPending,
 }: {
   data: DashboardData["branchHeader"];
   onPush(): void;
   onPullUpstream(): void;
   onFetch(): void;
-  pendingAction: string | null;
+  isPending(label: string): boolean;
 }) {
   const hasUpstream = !!data.upstream;
-  const pushing = pendingAction === "Push";
-  const pulling = pendingAction === "Pull";
-  const fetching = pendingAction === "Fetch";
+  const pushing = isPending("Push");
+  const pulling = isPending("Pull");
+  const fetching = isPending("Fetch");
   const nothingToPush = data.aheadUpstream === 0;
   const nothingToPull = data.behindUpstream === 0;
   return (
@@ -537,7 +584,7 @@ function StreamsCard({
   onMerge,
   onRebase,
   onSelectCommit,
-  pendingAction,
+  isPending,
   workingByStreamId,
 }: {
   streamId: string;
@@ -546,7 +593,7 @@ function StreamsCard({
   onMerge(branch: string): void;
   onRebase(branch: string): void;
   onSelectCommit(sha: string): void;
-  pendingAction: string | null;
+  isPending(label: string): boolean;
   workingByStreamId: Record<string, boolean>;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -609,8 +656,8 @@ function StreamsCard({
                       branch={row.worktree.branch}
                       onMerge={onMerge}
                       onRebase={onRebase}
-                      mergePending={pendingAction === mergeLabel}
-                      rebasePending={pendingAction === rebaseLabel}
+                      mergePending={isPending(mergeLabel)}
+                      rebasePending={isPending(rebaseLabel)}
                       ahead={row.ahead}
                     />
                   ) : null}
@@ -914,13 +961,13 @@ function RemoteBranchesCard({
   rows,
   onPull,
   onPush,
-  pendingAction,
+  isPending,
 }: {
   streamId: string;
   rows: RemoteBranchEntry[];
   onPull(remote: string, branch: string): void;
   onPush(remote: string, branch: string): void;
-  pendingAction: string | null;
+  isPending(label: string): boolean;
 }) {
   const [counts, setCounts] = useState<Record<string, { ahead: number; behind: number }>>({});
 
@@ -978,18 +1025,18 @@ function RemoteBranchesCard({
                 <button
                   type="button"
                   onClick={() => onPull(row.remote, row.branch)}
-                  disabled={pendingAction === pullLabel}
+                  disabled={isPending(pullLabel)}
                   style={smallButton}
                 >
-                  {pendingAction === pullLabel ? "Pulling…" : "Pull into"}
+                  {isPending(pullLabel) ? "Pulling…" : "Pull into"}
                 </button>
                 <button
                   type="button"
                   onClick={() => onPush(row.remote, row.branch)}
-                  disabled={pendingAction === pushLabel}
+                  disabled={isPending(pushLabel)}
                   style={smallButton}
                 >
-                  {pendingAction === pushLabel ? "Pushing…" : "Push to"}
+                  {isPending(pushLabel) ? "Pushing…" : "Push to"}
                 </button>
               </div>
             );

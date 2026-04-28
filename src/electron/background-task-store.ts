@@ -25,6 +25,10 @@ export interface BackgroundTask {
   startedAt: number;
   endedAt?: number;
   error?: string;
+  /** Producer-supplied opaque payload attached at complete/fail time so
+   *  consumers awaiting the task by id can read the final result (e.g.
+   *  the GitOpResult) without a separate channel. */
+  result?: unknown;
 }
 
 export interface BackgroundTaskChange {
@@ -85,24 +89,31 @@ export class BackgroundTaskStore {
     this.emitter.emit({ kind: "updated", id });
   }
 
-  complete(id: string): void {
+  complete(id: string, result?: unknown): void {
     const task = this.tasks.get(id);
     if (!task || task.status !== "running") return;
     task.status = "done";
     task.endedAt = Date.now();
     if (task.progress !== null) task.progress = 1;
+    if (result !== undefined) task.result = result;
     this.scheduleEviction(id);
     this.emitter.emit({ kind: "ended", id });
   }
 
-  fail(id: string, errorMessage: string): void {
+  fail(id: string, errorMessage: string, result?: unknown): void {
     const task = this.tasks.get(id);
     if (!task || task.status !== "running") return;
     task.status = "failed";
     task.error = errorMessage;
     task.endedAt = Date.now();
+    if (result !== undefined) task.result = result;
     this.scheduleEviction(id);
     this.emitter.emit({ kind: "ended", id });
+  }
+
+  get(id: string): BackgroundTask | null {
+    const task = this.tasks.get(id);
+    return task ? { ...task } : null;
   }
 
   list(): BackgroundTask[] {

@@ -307,12 +307,40 @@ export async function deleteGitBranch(branch: string, options?: { force?: boolea
   return desktopApi().deleteGitBranch(branch, options);
 }
 
-export async function gitMergeInto(streamId: string, other: string): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitMergeInto(streamId, other);
+/**
+ * Long-running git ops are kickoff-style — the IPC promise resolves
+ * immediately with a `taskId` once the BackgroundTaskStore row is
+ * registered, and the actual work runs in the background. Each
+ * renderer-side wrapper also exposes an `awaitDone` promise that
+ * resolves with the final `BackgroundTask` (status, error, and
+ * `result` payload — typically a `GitOpResult`). Pattern:
+ *
+ *     const { taskId, awaitDone } = await gitRebaseOnto(...);
+ *     // mark UI pending using taskId / a label
+ *     const task = await awaitDone;
+ *     // task.result is the GitOpResult
+ *
+ * Callers that don't need the final result can ignore `awaitDone`;
+ * any other surface watching `subscribeBackgroundTaskEvents` still
+ * sees the same in-flight state.
+ */
+export interface GitOpKickoff {
+  taskId: string;
+  awaitDone: Promise<BackgroundTask | null>;
 }
 
-export async function gitRebaseOnto(streamId: string, onto: string): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitRebaseOnto(streamId, onto);
+function attachAwait(taskId: string): GitOpKickoff {
+  return { taskId, awaitDone: awaitBackgroundTask(taskId) };
+}
+
+export async function gitMergeInto(streamId: string, other: string): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitMergeInto(streamId, other);
+  return attachAwait(taskId);
+}
+
+export async function gitRebaseOnto(streamId: string, onto: string): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitRebaseOnto(streamId, onto);
+  return attachAwait(taskId);
 }
 
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
@@ -548,22 +576,25 @@ export async function gitAppendToGitignore(streamId: string, path: string): Prom
 export async function gitPush(
   streamId: string,
   options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string },
-): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitPush(streamId, options);
+): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitPush(streamId, options);
+  return attachAwait(taskId);
 }
 
 export async function gitPull(
   streamId: string,
   options?: { rebase?: boolean; remote?: string; branch?: string },
-): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitPull(streamId, options);
+): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitPull(streamId, options);
+  return attachAwait(taskId);
 }
 
 export async function gitFetch(
   streamId: string,
   options?: { remote?: string; prune?: boolean; all?: boolean },
-): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitFetch(streamId, options);
+): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitFetch(streamId, options);
+  return attachAwait(taskId);
 }
 
 export async function gitCommitAll(
@@ -602,16 +633,18 @@ export async function gitPushCurrentTo(
   streamId: string,
   remote: string,
   branch: string,
-): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitPushCurrentTo(streamId, remote, branch);
+): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitPushCurrentTo(streamId, remote, branch);
+  return attachAwait(taskId);
 }
 
 export async function gitPullRemoteIntoCurrent(
   streamId: string,
   remote: string,
   branch: string,
-): Promise<import("../git/git.js").GitOpResult> {
-  return desktopApi().gitPullRemoteIntoCurrent(streamId, remote, branch);
+): Promise<GitOpKickoff> {
+  const { taskId } = await desktopApi().gitPullRemoteIntoCurrent(streamId, remote, branch);
+  return attachAwait(taskId);
 }
 
 export async function listFileCommits(
@@ -794,11 +827,57 @@ export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
   return desktopApi().listBackgroundTasks();
 }
 
+export async function getBackgroundTask(id: string): Promise<BackgroundTask | null> {
+  return desktopApi().getBackgroundTask(id);
+}
+
 export function subscribeBackgroundTaskEvents(
   onChange: () => void,
 ): () => void {
   return subscribeOxplowEvents((event) => {
     if (event.type === "background-task.changed") onChange();
+  });
+}
+
+/**
+ * Subscribe to changes for a single background task. The callback
+ * receives the change kind ("started" | "updated" | "ended"). Use this
+ * to drive in-flight UI off a kickoff IPC's returned `taskId`.
+ */
+export function subscribeBackgroundTask(
+  taskId: string,
+  onChange: (kind: "started" | "updated" | "ended") => void,
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.type === "background-task.changed" && event.id === taskId) {
+      onChange(event.kind);
+    }
+  });
+}
+
+/**
+ * Resolve when a background task ends (done or failed). Reads the final
+ * task row so callers can inspect `task.status`, `task.error`, and
+ * `task.result`. Returns null if the task disappeared (evicted) before
+ * we could read it.
+ */
+export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      resolve(await getBackgroundTask(taskId));
+    };
+    const unsubscribe = subscribeBackgroundTask(taskId, (kind) => {
+      if (kind === "ended") void finish();
+    });
+    // Race condition: the task may have already ended before we
+    // subscribed. Check the current row once on entry.
+    void getBackgroundTask(taskId).then((task) => {
+      if (task && (task.status === "done" || task.status === "failed")) void finish();
+    });
   });
 }
 

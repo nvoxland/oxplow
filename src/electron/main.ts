@@ -329,6 +329,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
     currentRuntime.followupStore.remove(threadId, id);
   });
   handle("oxplow:listBackgroundTasks", () => currentRuntime.backgroundTaskStore.list());
+  handle("oxplow:getBackgroundTask", (_event, id: string) => currentRuntime.getBackgroundTask(id));
   handle("oxplow:listHookEvents", (_event, streamId?: string) => currentRuntime.listHookEvents(streamId));
   handle("oxplow:listAgentStatuses", (_event, streamId?: string) => currentRuntime.listAgentStatuses(streamId));
   handle("oxplow:listRecentlyFinished", (_event, threadId: string | null, limit: number) => currentRuntime.listRecentlyFinished(threadId, limit));
