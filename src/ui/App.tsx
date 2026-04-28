@@ -84,7 +84,8 @@ import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import { ThreadRail } from "./components/ThreadRail.js";
-import { DiffPane, type DiffSpec } from "./components/Diff/DiffPane.js";
+import type { DiffSpec } from "./components/Diff/DiffPane.js";
+import { DiffPage } from "./pages/DiffPage.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
@@ -1914,6 +1915,10 @@ export function App() {
         ) : null,
       });
     }
+    // The unified-chrome wrap loop below applies to every tab pushed
+    // after this index — diffs, all per-thread page tabs (notes, files-
+    // index, work items, etc.). Only the agent at index 0 is excluded.
+    const pageTabStartIdx = tabs.length;
     for (const diff of diffTabs) {
       const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
       const suffix = diff.spec.labelOverride ?? "diff";
@@ -1923,7 +1928,7 @@ export function App() {
         closable: true,
         reorderGroup: "diff",
         render: () => stream ? (
-          <DiffPane
+          <DiffPage
             stream={stream}
             spec={diff.spec}
             visible={effectiveCenterActive === diff.id}
@@ -1936,7 +1941,6 @@ export function App() {
       });
     }
     const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    const pageTabStartIdx = tabs.length;
     for (const ref of pageTabsForThread) {
       // Default for any in-page navigation: replace the current page in this
       // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
