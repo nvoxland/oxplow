@@ -370,7 +370,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Rebase current onto ${branch}`,
                   `git rebase ${branch}`,
                   () => gitRebaseOnto(streamId, branch),
-                  { confirm: true },
                 )
               }
               isPending={isPending}

@@ -102,6 +102,13 @@
        * column-aligned digits. Opt-in via class so prose stays proportional. */
       .oxplow-tabular { font-variant-numeric: tabular-nums; font-size: 12px; }
       * { box-sizing: border-box; }
+      /* Disabled controls — without this, inline-styled buttons look
+         identical when disabled (cursor: pointer + same colors), and
+         users misread an unavailable action as ready-to-click. */
+      button:disabled, input:disabled, select:disabled, textarea:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
       @keyframes oxplow-pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.35; }
