@@ -1125,6 +1125,7 @@ export function subscribeWorkItemEvents(
 ): () => void {
   return subscribeOxplowEvents((event) => {
     if (event.type !== "work-item.changed") return;
+    if (!event.streamId || !event.threadId) return;
     if (streamId !== "all" && event.streamId !== streamId) return;
     onEvent({
       streamId: event.streamId,
