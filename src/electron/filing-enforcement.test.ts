@@ -142,6 +142,17 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       expect(out).not.toBeNull();
     });
 
+    test("allows edits while a git operation is in progress (merge/rebase/cherry-pick)", () => {
+      const out = buildFilingEnforcementPreToolDeny({
+        thread: thread(),
+        toolName: "Edit",
+        hasInProgressItem: false,
+        filePath: "/Users/agent/project/src/foo.ts",
+        gitOperationInProgress: true,
+      });
+      expect(out).toBeNull();
+    });
+
     test("isPlanModePlanFile carve-out is narrow: requires .md extension under .claude/plans/", () => {
       expect(isPlanModePlanFile("/Users/agent/.claude/plans/p.md")).toBe(true);
       expect(isPlanModePlanFile("/Users/agent/.claude/plans/sub/p.md")).toBe(true);

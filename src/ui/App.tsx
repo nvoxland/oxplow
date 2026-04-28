@@ -40,6 +40,7 @@ import {
   openExternalUrl,
   type FinishedEntry,
   getBranchChanges,
+  getRepoConflictState,
   subscribeGitRefsEvents,
   getConfig,
   setGeneratedDirs,
@@ -1573,14 +1574,15 @@ export function App() {
   // invalidation is fine.
   const [uncommittedSummary, setUncommittedSummary] = useState<{
     added: number; modified: number; deleted: number; additions: number; deletions: number;
+    conflictedCount: number; gitOperation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
   } | null>(null);
   useEffect(() => {
     const sid = stream?.id;
     if (!sid) { setUncommittedSummary(null); return; }
     let cancelled = false;
     const refresh = () => {
-      void getBranchChanges(sid, "HEAD")
-        .then((res) => {
+      void Promise.all([getBranchChanges(sid, "HEAD"), getRepoConflictState(sid)])
+        .then(([res, conflict]) => {
           if (cancelled) return;
           let added = 0, modified = 0, deleted = 0, additions = 0, deletions = 0;
           for (const f of res.files) {
@@ -1590,7 +1592,11 @@ export function App() {
             additions += f.additions ?? 0;
             deletions += f.deletions ?? 0;
           }
-          setUncommittedSummary({ added, modified, deleted, additions, deletions });
+          setUncommittedSummary({
+            added, modified, deleted, additions, deletions,
+            conflictedCount: conflict.conflictedCount,
+            gitOperation: conflict.operation,
+          });
         })
         .catch(() => { if (!cancelled) setUncommittedSummary(null); });
     };

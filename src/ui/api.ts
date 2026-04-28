@@ -1183,6 +1183,12 @@ export async function forgetPage(refKind: string, refId: string): Promise<void> 
   return desktopApi().forgetPage(refKind, refId);
 }
 
+export async function getRepoConflictState(
+  streamId: string,
+): Promise<import("../git/git.js").RepoConflictState> {
+  return desktopApi().getRepoConflictState(streamId);
+}
+
 export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,

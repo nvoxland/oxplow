@@ -40,6 +40,8 @@ import {
   gitMergeAsync,
   gitRebaseAsync,
   listExistingWorktrees,
+  isGitOperationInProgress,
+  getRepoConflictState,
   getAheadBehind,
   getCommitsAheadOf,
   listRecentRemoteBranches,
@@ -54,6 +56,7 @@ import {
   type GitLogCommit,
   type GitOpResult,
   type RefOption,
+  type RepoConflictState,
   type TextSearchHit,
 } from "../git/git.js";
 import { HookEventStore, ingestHookPayload } from "../session/hook-ingest.js";
@@ -1112,6 +1115,11 @@ export class ElectronRuntime {
     return { content: readFileAtRef(stream.worktree_path, ref, path) };
   }
 
+  getRepoConflictState(streamId: string): RepoConflictState {
+    const stream = this.resolveStream(streamId);
+    return getRepoConflictState(stream.worktree_path);
+  }
+
   getGitLog(streamId: string, options?: { limit?: number; all?: boolean }) {
     const stream = this.resolveStream(streamId);
     return getGitLog(stream.worktree_path, options);
@@ -1994,11 +2002,18 @@ export class ElectronRuntime {
       const toolInputFilePath = extractEditedFilePath(
         (envelope.payload as { tool_input?: unknown })?.tool_input,
       );
+      const worktreeForMergeCheck = thread
+        ? this.store.get(thread.stream_id)?.worktree_path ?? null
+        : null;
+      const gitOperationInProgress = worktreeForMergeCheck
+        ? isGitOperationInProgress(worktreeForMergeCheck)
+        : false;
       const filingDeny = buildFilingEnforcementPreToolDeny({
         thread,
         toolName,
         hasInProgressItem: inProgressOpen,
         filePath: toolInputFilePath,
+        gitOperationInProgress,
       });
       if (filingDeny) return { body: filingDeny };
     }

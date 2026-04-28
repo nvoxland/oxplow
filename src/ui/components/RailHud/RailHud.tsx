@@ -22,6 +22,8 @@ export interface UncommittedSummary {
   deleted: number;
   additions: number;
   deletions: number;
+  conflictedCount?: number;
+  gitOperation?: "merge" | "rebase" | "cherry-pick" | "revert" | null;
 }
 
 export interface BookmarkRailEntry {
@@ -118,7 +120,11 @@ export function RailHud({
         />
       ) : null}
 
-      {uncommitted && (uncommitted.added + uncommitted.modified + uncommitted.deleted) > 0 ? (
+      {uncommitted && (
+        uncommitted.added + uncommitted.modified + uncommitted.deleted > 0
+        || (uncommitted.conflictedCount ?? 0) > 0
+        || uncommitted.gitOperation
+      ) ? (
         <UncommittedSection summary={uncommitted} onOpenPage={onOpenPage} />
       ) : null}
 
@@ -510,31 +516,66 @@ function UncommittedSection({
   if (summary.added > 0) parts.push(`${summary.added}A`);
   if (summary.modified > 0) parts.push(`${summary.modified}M`);
   if (summary.deleted > 0) parts.push(`${summary.deleted}D`);
+  const conflictedCount = summary.conflictedCount ?? 0;
+  const op = summary.gitOperation ?? null;
+  const hasFileSummary = parts.length > 0;
+  const hasConflictRow = conflictedCount > 0 || op !== null;
   return (
     <>
       <SectionHeading>Uncommitted</SectionHeading>
-      <button
-        type="button"
-        data-testid="rail-uncommitted"
-        onClick={() => onOpenPage(uncommittedChangesRef())}
-        title="Open uncommitted changes"
-        style={{
-          ...rowStyle,
-          padding: "4px 14px 12px",
-          gap: 8,
-        }}
-      >
-        <span style={{ color: "var(--text-primary)", fontSize: 12 }}>
-          {parts.join(" · ")}
-        </span>
-        <span style={{ flex: 1 }} />
-        <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>
-          +{summary.additions}
-        </span>
-        <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>
-          −{summary.deletions}
-        </span>
-      </button>
+      {hasFileSummary ? (
+        <button
+          type="button"
+          data-testid="rail-uncommitted"
+          onClick={() => onOpenPage(uncommittedChangesRef())}
+          title="Open uncommitted changes"
+          style={{
+            ...rowStyle,
+            padding: hasConflictRow ? "4px 14px 4px" : "4px 14px 12px",
+            gap: 8,
+          }}
+        >
+          <span style={{ color: "var(--text-primary)", fontSize: 12 }}>
+            {parts.join(" · ")}
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>
+            +{summary.additions}
+          </span>
+          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>
+            −{summary.deletions}
+          </span>
+        </button>
+      ) : null}
+      {hasConflictRow ? (
+        <button
+          type="button"
+          data-testid="rail-uncommitted-conflicts"
+          onClick={() => onOpenPage(uncommittedChangesRef())}
+          title={
+            op
+              ? `${op} in progress${conflictedCount > 0 ? ` — ${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}` : ""}`
+              : `${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}`
+          }
+          style={{
+            ...rowStyle,
+            padding: "4px 14px 12px",
+            gap: 8,
+          }}
+        >
+          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 12 }}>
+            {op ? `${op} in progress` : `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`}
+          </span>
+          {op && conflictedCount > 0 ? (
+            <>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>
+                {conflictedCount} conflict{conflictedCount === 1 ? "" : "s"}
+              </span>
+            </>
+          ) : null}
+        </button>
+      ) : null}
     </>
   );
 }

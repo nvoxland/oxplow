@@ -27,6 +27,13 @@ import { ALWAYS_WRITE_INTENT_TOOL_NAMES } from "./filing-enforcement-tools.js";
  * for any lingering `in_progress` item still runs, so a turn that
  * legitimately edits via Bash under an open item is unaffected.
  *
+ * Edits during an in-flight git operation (merge / rebase /
+ * cherry-pick / revert) are also exempt — the authored change is the
+ * merge commit, not a separate work item, and forcing a filing call
+ * dead-locks the agent that is mid-conflict-resolution. The runtime
+ * passes `gitOperationInProgress` after stat-checking MERGE_HEAD and
+ * friends in the worktree's gitdir.
+ *
  * Read-only threads are out of scope here — the write-guard
  * (`buildWriteGuardResponse`) blocks them on a more fundamental
  * "you are not the writer" rule and runs first.
@@ -53,6 +60,14 @@ export interface FilingEnforcementContext {
    * blocking the plan-file write here would dead-lock the workflow.
    */
   filePath?: string | null;
+  /**
+   * True when the writer's worktree is mid-merge / rebase / cherry-pick
+   * / revert. Conflict resolution edits don't need a separate work
+   * item — the authored change is the merge commit itself, and forcing
+   * a filing call dead-locks the workflow when the agent is just
+   * fixing markers.
+   */
+  gitOperationInProgress?: boolean;
 }
 
 /** True for paths under the harness's plan-mode plans directory. */
@@ -76,6 +91,7 @@ export function buildFilingEnforcementPreToolDeny(
   if (!ALWAYS_WRITE_INTENT_TOOL_NAMES.has(ctx.toolName)) return null;
   if (ctx.hasInProgressItem) return null;
   if (isPlanModePlanFile(ctx.filePath)) return null;
+  if (ctx.gitOperationInProgress) return null;
   return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

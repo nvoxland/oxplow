@@ -56,6 +56,110 @@ export function isGitWorktree(projectDir: string): boolean {
   }
 }
 
+/**
+ * True when the worktree has an in-flight merge / rebase / cherry-pick /
+ * revert that the user is mid-resolving. Used by filing-enforcement to
+ * exempt edits made while resolving conflicts: the authored change is
+ * the merge itself, captured in the merge commit, not a separate work
+ * item.
+ *
+ * Resolves the gitdir so we work with both regular repos (`.git/` is a
+ * directory) and secondary worktrees (`.git` is a file containing
+ * `gitdir: <path>`).
+ */
+export function isGitOperationInProgress(worktreePath: string): boolean {
+  return detectGitOperation(worktreePath) !== null;
+}
+
+export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
+
+export interface RepoConflictState {
+  /** Active long-running git op, or null when the worktree is clean. */
+  operation: GitOperationKind | null;
+  /** Number of paths reported as unmerged by `git status --porcelain`. */
+  conflictedCount: number;
+}
+
+/**
+ * Snapshot the worktree's conflict state for the rail HUD. Cheap —
+ * one fs stat for the operation kind plus one git status when an op
+ * is active. Conflicts can also exist outside an in-progress op (e.g.
+ * after `git stash pop`), so we still scan porcelain for `U`-flag
+ * codes when no MERGE_HEAD is present.
+ */
+export function getRepoConflictState(worktreePath: string): RepoConflictState {
+  const operation = detectGitOperation(worktreePath);
+  const conflictedCount = countUnmergedPaths(worktreePath);
+  return { operation, conflictedCount };
+}
+
+function detectGitOperation(worktreePath: string): GitOperationKind | null {
+  try {
+    const gitDir = resolveGitDir(worktreePath);
+    if (!gitDir) return null;
+    if (existsMarker(gitDir, "MERGE_HEAD")) return "merge";
+    if (existsMarker(gitDir, "CHERRY_PICK_HEAD")) return "cherry-pick";
+    if (existsMarker(gitDir, "REVERT_HEAD")) return "revert";
+    if (existsMarker(gitDir, "REBASE_HEAD")) return "rebase";
+    if (existsDir(gitDir, "rebase-merge") || existsDir(gitDir, "rebase-apply")) return "rebase";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function existsMarker(gitDir: string, name: string): boolean {
+  try {
+    statSync(join(gitDir, name));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function existsDir(gitDir: string, name: string): boolean {
+  try {
+    return statSync(join(gitDir, name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function countUnmergedPaths(worktreePath: string): number {
+  if (!isGitRepo(worktreePath)) return 0;
+  const out = safeGit(worktreePath, ["status", "--porcelain"]);
+  if (!out) return 0;
+  let count = 0;
+  for (const line of out.split("\n")) {
+    if (!line) continue;
+    const code = line.slice(0, 2);
+    // Unmerged states: DD AA UU AU UA DU UD — i.e. 'U' in either
+    // index or worktree column, OR a same-letter conflict (DD/AA).
+    if (code.includes("U") || code === "DD" || code === "AA") count++;
+  }
+  return count;
+}
+
+function resolveGitDir(worktreePath: string): string | null {
+  try {
+    const dotGit = join(worktreePath, ".git");
+    const stats = statSync(dotGit);
+    if (stats.isDirectory()) return dotGit;
+    if (stats.isFile()) {
+      const contents = readFileSync(dotGit, "utf8");
+      const match = contents.match(/^gitdir:\s*(.+?)\s*$/m);
+      if (!match) return null;
+      const target = match[1]!;
+      // gitdir paths are typically absolute; if relative, resolve
+      // against the worktree path.
+      return target.startsWith("/") ? target : join(worktreePath, target);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function listBranches(projectDir: string): BranchRef[] {
   if (!isGitRepo(projectDir)) return [];
   const local = gitLines(projectDir, [

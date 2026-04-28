@@ -40,7 +40,12 @@ tool is denied at the moment it's invoked, not at end-of-turn. File
 the item (or flip a ready row to in_progress), then re-issue the edit.
 Bash is intentionally exempt — `git merge`, `git pull`, codegen, and
 formatters mutate the worktree as a side effect without representing
-authored change worth filing. The `.context/` read rule still gets a
+authored change worth filing. Edits made while the worktree is mid
+git operation (merge / rebase / cherry-pick / revert — i.e. when
+`MERGE_HEAD` / `REBASE_HEAD` / `CHERRY_PICK_HEAD` / `REVERT_HEAD`
+exists in the gitdir) are also exempt: the authored change is the
+merge commit itself, and conflict resolution would otherwise dead-
+lock against the filing rule. The `.context/` read rule still gets a
 soft pass for tiny mechanical edits — just don't skip the work item.
 
 **Asking the user a question.** When your reply ends with a real

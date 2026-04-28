@@ -128,6 +128,7 @@ const api: DesktopApi = {
   topVisitedPages: (opts) => ipcRenderer.invoke("oxplow:topVisitedPages", opts),
   countPageVisitsByDay: (opts) => ipcRenderer.invoke("oxplow:countPageVisitsByDay", opts),
   forgetPage: (refKind, refId) => ipcRenderer.invoke("oxplow:forgetPage", refKind, refId),
+  getRepoConflictState: (streamId) => ipcRenderer.invoke("oxplow:getRepoConflictState", streamId),
   ping: () => ipcRenderer.invoke("oxplow:ping"),
   logUi: (payload) => ipcRenderer.invoke("oxplow:logUi", payload),
   updateEditorFocus: (payload) => ipcRenderer.invoke("oxplow:updateEditorFocus", payload),
