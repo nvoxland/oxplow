@@ -611,6 +611,7 @@ function StreamsCard({
                       onRebase={onRebase}
                       mergePending={pendingAction === mergeLabel}
                       rebasePending={pendingAction === rebaseLabel}
+                      ahead={row.ahead}
                     />
                   ) : null}
                 </div>
@@ -704,6 +705,7 @@ function MergeRebaseSplitButton({
   onRebase,
   mergePending,
   rebasePending,
+  ahead,
 }: {
   streamId: string;
   branch: string;
@@ -711,6 +713,9 @@ function MergeRebaseSplitButton({
   onRebase(branch: string): void;
   mergePending: boolean;
   rebasePending: boolean;
+  /** Number of commits in `branch` not in the current branch. When 0,
+   *  there is nothing to merge or rebase, so the button is disabled. */
+  ahead: number;
 }) {
   const [mode, setMode] = useState<MergeRebaseMode>(() => readMergeMode(streamId, branch));
   const [menuOpen, setMenuOpen] = useState(false);
@@ -733,8 +738,13 @@ function MergeRebaseSplitButton({
   };
 
   const pending = mode === "merge" ? mergePending : rebasePending;
+  const nothingToDo = ahead === 0;
+  const disabled = pending || nothingToDo;
   const idleLabel = mode === "merge" ? "Merge In" : "Rebase Onto";
   const busyLabel = mode === "merge" ? "Merging…" : "Rebasing…";
+  const primaryTitle = nothingToDo
+    ? `${branch} has no commits not already in the current branch — nothing to ${mode === "merge" ? "merge" : "rebase"}.`
+    : undefined;
   const onPrimary = () => (mode === "merge" ? onMerge(branch) : onRebase(branch));
 
   return (
@@ -744,7 +754,8 @@ function MergeRebaseSplitButton({
         data-testid="git-dashboard-stream-merge-rebase"
         data-mode={mode}
         onClick={onPrimary}
-        disabled={pending}
+        disabled={disabled}
+        title={primaryTitle}
         style={{ ...smallButton, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
       >
         {pending ? busyLabel : idleLabel}
@@ -757,7 +768,8 @@ function MergeRebaseSplitButton({
           e.stopPropagation();
           setMenuOpen((v) => !v);
         }}
-        disabled={pending}
+        disabled={disabled}
+        title={primaryTitle}
         style={{
           ...smallButton,
           padding: "2px 6px",
