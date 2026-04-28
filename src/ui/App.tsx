@@ -209,7 +209,10 @@ export function App() {
     Record<string, Record<string, { back: TabRef[]; forward: TabRef[] }>>
   >({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
-  const [noteTabs, setNoteTabs] = useState<string[]>([]);
+  // Per-thread open wiki note tabs, keyed by thread id. Each thread maintains
+  // its own open-note list so opening or closing a note in one thread doesn't
+  // leak into another (matches threadPageTabs behavior).
+  const [noteTabs, setNoteTabs] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
@@ -898,7 +901,8 @@ export function App() {
     }
     if (centerActive.startsWith("note:")) {
       const slug = centerActive.slice("note:".length);
-      if (!noteTabs.includes(slug)) setCenterActive("agent");
+      const slugs = selectedThreadId ? noteTabs[selectedThreadId] ?? [] : [];
+      if (!slugs.includes(slug)) setCenterActive("agent");
       return;
     }
     // Page tabs (work-item, plan-work, git-history, …) — validate
@@ -1378,14 +1382,15 @@ export function App() {
   }, [commandMap, isElectron]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+  const noteTabsForActiveThread = selectedThreadId ? noteTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
     const ids = new Set(["agent"]);
     for (const path of currentSession.openOrder) ids.add(`file:${path}`);
     for (const tab of diffTabs) ids.add(tab.id);
-    for (const slug of noteTabs) ids.add(`note:${slug}`);
+    for (const slug of noteTabsForActiveThread) ids.add(`note:${slug}`);
     for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
-  }, [currentSession.openOrder, diffTabs, noteTabs, pageTabsForActiveThread]);
+  }, [currentSession.openOrder, diffTabs, noteTabsForActiveThread, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1454,7 +1459,13 @@ export function App() {
   };
 
   const handleOpenNote = useCallback((slug: string) => {
-    setNoteTabs((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
+    const tid = selectedThread?.id ?? null;
+    if (!tid) return;
+    setNoteTabs((prev) => {
+      const existing = prev[tid] ?? [];
+      if (existing.includes(slug)) return prev;
+      return { ...prev, [tid]: [...existing, slug] };
+    });
     setCenterActive(`note:${slug}`);
     const sid = stream?.id ?? null;
     if (sid) {
@@ -1463,15 +1474,21 @@ export function App() {
         key: slug,
         event: "open",
         streamId: sid,
-        threadId: selectedThread?.id ?? null,
+        threadId: tid,
       }).catch(() => {});
     }
   }, [stream?.id, selectedThread?.id]);
 
   const closeNoteTab = useCallback((slug: string) => {
-    setNoteTabs((prev) => prev.filter((s) => s !== slug));
+    const tid = selectedThread?.id ?? null;
+    if (!tid) return;
+    setNoteTabs((prev) => {
+      const existing = prev[tid] ?? [];
+      if (!existing.includes(slug)) return prev;
+      return { ...prev, [tid]: existing.filter((s) => s !== slug) };
+    });
     setCenterActive((current) => (current === `note:${slug}` ? "agent" : current));
-  }, []);
+  }, [selectedThread?.id]);
 
   /**
    * Open an http(s) URL as an in-app sandboxed external-url tab.
@@ -1509,12 +1526,16 @@ export function App() {
       const base = prev[stream.id] ?? createEmptyFileSession();
       return { ...prev, [stream.id]: reorderOpenFiles(base, orderedFiles) };
     });
-    setNoteTabs((prev) => {
-      if (orderedNotes.length !== prev.length) return prev;
-      const known = new Set(prev);
-      if (!orderedNotes.every((s) => known.has(s))) return prev;
-      return orderedNotes;
-    });
+    const tid = selectedThread?.id ?? null;
+    if (tid) {
+      setNoteTabs((prev) => {
+        const existing = prev[tid] ?? [];
+        if (orderedNotes.length !== existing.length) return prev;
+        const known = new Set(existing);
+        if (!orderedNotes.every((s) => known.has(s))) return prev;
+        return { ...prev, [tid]: orderedNotes };
+      });
+    }
     setDiffTabs((prev) => {
       if (orderedDiffIds.length !== prev.length) return prev;
       const byId = new Map(prev.map((d) => [d.id, d] as const));
@@ -1522,7 +1543,7 @@ export function App() {
       if (next.length !== prev.length) return prev;
       return next;
     });
-  }, [stream]);
+  }, [stream, selectedThread?.id]);
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
@@ -1838,7 +1859,7 @@ export function App() {
         ) : null,
       });
     }
-    for (const slug of noteTabs) {
+    for (const slug of noteTabsForActiveThread) {
       const noteTabId = `note:${slug}`;
       const noteNavOpen = (newRef: TabRef) => handleNavigateInTab(noteTabId, newRef);
       tabs.push({
@@ -2365,7 +2386,7 @@ export function App() {
     editorFindRequest,
     editorNavigationTarget,
     diffTabs,
-    noteTabs,
+    noteTabsForActiveThread,
     closeNoteTab,
     handleOpenNote,
     selectedThreadId,
