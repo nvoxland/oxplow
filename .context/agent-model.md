@@ -144,7 +144,7 @@ to `runtime.handleHookEnvelope`, which:
    blocks the tool (read-only thread; see Write guard below) or if
    `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
    MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item or a filing call this turn; see `filing-enforcement.ts`).
+   item; see `filing-enforcement.ts`).
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
    from the stores — see `buildSessionContextBlock` in `runtime.ts`)
@@ -192,18 +192,24 @@ next UserPromptSubmit.
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
 `filing-enforcement.ts`), not the Stop hook. When the agent invokes
 Edit / Write / MultiEdit / NotebookEdit on a writer thread and the
-thread has no `in_progress` work item AND no filing call has fired
-yet this turn, the hook returns `permissionDecision: "deny"` and the
-edit is rejected before it lands. The agent files an item (or flips
-an existing ready row to in_progress) and re-issues the edit. Filing-
-counted tools: `create_work_item`, `update_work_item`,
-`complete_task`, `file_epic_with_children`, `transition_work_items`,
-`dispatch_work_item` (each calls `markFiledThisTurn` from its MCP
-handler). Bash is **excluded** — shell commands routinely mutate the
-worktree as a side effect (`git merge`, `git pull`, codegen,
-formatters) without representing authored change worth filing. The
-Stop-hook in-progress audit still fires for any lingering items, so
-real edits made via Bash under an open item are unaffected.
+thread has no `in_progress` work item, the hook returns
+`permissionDecision: "deny"` and the edit is rejected before it
+lands. The agent files an item at `in_progress` (or flips an existing
+ready row to `in_progress`) and re-issues the edit. **A `ready`-status
+filing call alone does NOT satisfy the guard** — `ready` is backlog
+("noticed for later"), only `in_progress` is a commitment to ship
+now. Earlier versions accepted "any filing call this turn" via a
+per-thread `filedThisTurn` flag; that let the agent create a ready
+row and quietly edit against it without ever transitioning. The
+`hasInProgressItem` predicate is now computed live from the
+work-item store on each PreToolUse, so a `create_work_item` /
+`update_work_item` / `transition_work_items` that lands at
+`in_progress` is reflected immediately. Bash is **excluded** — shell
+commands routinely mutate the worktree as a side effect (`git
+merge`, `git pull`, codegen, formatters) without representing
+authored change worth filing. The Stop-hook in-progress audit still
+fires for any lingering items, so real edits made via Bash under an
+open item are unaffected.
 
 **Plan-mode plan file is exempt** (`isPlanModePlanFile` in
 `filing-enforcement.ts`). Writes whose `tool_input.file_path` lands
@@ -226,19 +232,40 @@ fires when the prior item already closed, this one fires when it's
 still running. Builder lives in `runtime.ts` next to
 `buildRecentDoneReminder`.
 
+**Ready-match nudge (UserPromptSubmit).** Sibling of the prior-prompt
+reminder, but for `ready` rows. `buildReadyMatchReminder(items,
+promptText)` tokenizes the prompt and each ready item's title +
+description into lowercase alphanumeric runs ≥ 4 chars (excluding a
+small stop-word list), scores intersection size, and emits a
+`<ready-item-match-reminder>` block iff exactly one ready item has
+≥ 2 shared tokens AND no other ready item is within 1 of its score.
+Catches the failure mode where the agent files a fresh task that
+duplicates a ready row already on the board, instead of flipping the
+existing row to in_progress. Conservative — silent on ambiguity, since
+the safer default is "file a new row" if the agent isn't confident
+the prompt is the same concern.
+
 **Wiki-capture is a UserPromptSubmit hint, not a Stop directive.**
-When the user's prompt looks like exploration / synthesis (regex match
-on "how does", "explain", "trace", "describe", "walk me through",
-"give me an overview", "high-level architecture", "summarize the
-codebase", etc.), the runtime injects a `<wiki-capture-hint>` block
-into `additionalContext` via `buildWikiCaptureHint(prompt)`. The hint
-points the agent at the `oxplow-wiki-capture` skill (search existing
-notes → append-or-create → `mcp__oxplow__resync_note`) and notes that
-the write-guard wiki carve-out applies, so capture works on read-only
-threads too. Non-exploration prompts pay no token cost — the builder
-returns `null`. The Stop hook no longer carries a wiki-capture
-branch; the old directive fired post-hoc, after the answer had
-already gone to chat with no durable home.
+The wiki is for any non-trivial exploratory Q&A — codebase
+walkthroughs AND general synthesis (design rationale, comparisons,
+tradeoffs, recommendations, advice). Two regex families in
+`buildWikiCaptureHint(prompt)` cover both: a codebase pattern (matches
+"how does", "explain", "trace", "describe", "walk me through", "give
+me an overview", "high-level architecture", "summarize the codebase",
+etc.) and a general-synthesis pattern (matches "why does/did/should",
+"what's the difference", "compare X to Y", "tradeoffs", "pros and
+cons", "should I", "best way", "is it better", "advice on",
+"recommend", "rationale behind"). Either match injects a
+`<wiki-capture-hint>` block into `additionalContext`. The hint points
+the agent at the `oxplow-wiki-capture` skill (search existing notes →
+append-or-create → `mcp__oxplow__resync_note`) and notes that the
+write-guard wiki carve-out applies, so capture works on read-only
+threads too. Fix/feature/yes-ack prompts pay no token cost — the
+builder returns `null`. The Stop hook no longer carries a
+wiki-capture branch; the old directive fired post-hoc, after the
+answer had already gone to chat with no durable home. The standing
+WIKI CAPTURE line in `buildThreadAgentPrompt` carries the same
+broadened framing — wiki ≠ codebase-only.
 
 The pipeline runs in priority order:
 
@@ -261,7 +288,19 @@ The pipeline runs in priority order:
    agent answers "still in progress" → Stop fires → identical audit
    nudge → same answer, costing the user a wall of repeated lines and
    model tokens. See wi-c468e8fc093d.
-2. **Otherwise.** Allow stop.
+2. **Filed-but-didn't-ship advisory.** Fires when the turn filed at
+   least one new `ready` work item, made zero project edits, and has
+   nothing `in_progress` — the "user said do X, agent logged it as
+   backlog and stopped" misread. Same dedup pattern as the audit
+   branch: a per-thread `filedButDidntShipFiredByThread` flag is set
+   by a `record-filed-but-didnt-ship-fired` side effect after the
+   first fire, suppressing re-emission on subsequent Stops within the
+   same prompt gap. Cleared on UserPromptSubmit alongside the other
+   per-turn filing flags. Without dedup the advisory loops forever
+   because its triggering condition (ready item filed, no edits) is a
+   property of accumulated turn state and never changes between Stop
+   acks.
+3. **Otherwise.** Allow stop.
 
 **No commit / wait-point branches.** The runtime never drives `git
 commit` and there are no queueable commit / wait-point markers. Commits

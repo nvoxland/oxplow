@@ -4,12 +4,21 @@ import { ALWAYS_WRITE_INTENT_TOOL_NAMES } from "./filing-enforcement-tools.js";
 /**
  * PreToolUse filing-enforcement guard. Fires before an Edit / Write /
  * MultiEdit / NotebookEdit lands when the writer thread has no
- * `in_progress` work item to claim the change AND no filing call has
- * happened this turn. Catches the "started editing without filing"
- * misread at the moment it's actionable — the agent can file the
- * item, then re-issue the edit — instead of at end-of-turn when the
- * write has already shipped and the Work panel was lying for the
- * duration.
+ * `in_progress` work item to claim the change. Catches the "started
+ * editing without claiming work" misread at the moment it's
+ * actionable — the agent files / transitions an item to in_progress,
+ * then re-issues the edit — instead of at end-of-turn when the write
+ * has already shipped and the Work panel was lying for the duration.
+ *
+ * Note: a `ready`-status filing call alone does NOT satisfy the
+ * guard. `ready` is bookkeeping for later (a backlog row); only
+ * `in_progress` is a commitment to ship now. Earlier versions of this
+ * guard accepted "any filing call this turn" as sufficient, which let
+ * the agent file a `ready` row and quietly edit against it without
+ * ever transitioning. The `hasInProgressItem` predicate is computed
+ * live from the work-item store on each PreToolUse, so a
+ * `create_work_item` / `update_work_item` / `transition_work_items`
+ * that lands at status=in_progress is reflected immediately.
  *
  * Bash is intentionally excluded: shell commands frequently mutate
  * the worktree as a side effect (`git merge`, `git pull`, codegen
@@ -35,7 +44,6 @@ export interface FilingEnforcementContext {
   thread: Thread | null;
   toolName: string;
   hasInProgressItem: boolean;
-  filedThisTurn: boolean;
   /**
    * Absolute path being written, when the tool input carries one
    * (Write/Edit/MultiEdit/NotebookEdit all do). Used to exempt writes
@@ -67,7 +75,6 @@ export function buildFilingEnforcementPreToolDeny(
   if (ctx.thread.status !== "active") return null;
   if (!ALWAYS_WRITE_INTENT_TOOL_NAMES.has(ctx.toolName)) return null;
   if (ctx.hasInProgressItem) return null;
-  if (ctx.filedThisTurn) return null;
   if (isPlanModePlanFile(ctx.filePath)) return null;
   return {
     hookSpecificOutput: {
@@ -82,7 +89,7 @@ export function buildFilingEnforcementPreToolReason(toolName: string): string {
   return [
     `BLOCKED: ${toolName} requires a tracked work item on this thread before edits can land.`,
     ``,
-    `No \`in_progress\` work item exists and no filing call has fired this turn. The Work panel needs to honestly reflect what's shipping while it ships, not after.`,
+    `No \`in_progress\` work item exists on this thread. \`ready\`-status rows don't count — \`ready\` is backlog, \`in_progress\` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.`,
     ``,
     `Pick one before re-issuing the edit:`,
     `  • New concern → \`mcp__oxplow__create_work_item\` with status=in_progress, then re-run ${toolName}. Close to done via \`complete_task\` when settled.`,

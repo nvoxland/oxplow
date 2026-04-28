@@ -159,8 +159,10 @@ export function MarkdownView({
     ...style,
   };
 
+  const wrapperClassName = ["oxplow-md", className].filter(Boolean).join(" ");
+
   return (
-    <div ref={ref} className={className} style={wrapperStyle}>
+    <div ref={ref} className={wrapperClassName} style={wrapperStyle}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

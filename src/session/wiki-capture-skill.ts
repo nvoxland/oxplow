@@ -1,9 +1,10 @@
-// Model-invoked skill for capturing code-exploration findings into the
+// Model-invoked skill for capturing exploratory findings into the
 // per-project wiki. Loads when the agent is using the wiki MCP tools or
-// when the user prompts a question about how code works. The skill body
-// teaches: when to capture, how to find existing notes before creating a
-// new one, slug/body conventions, and how to fold in Explore-subagent
-// findings.
+// when the user asks any non-trivial exploratory question — code
+// walkthroughs, design rationale, comparisons, tradeoffs, advice. The
+// skill body teaches: when to capture, how to find existing notes
+// before creating a new one, slug/body conventions, and how to fold in
+// Explore-subagent findings.
 
 export const WIKI_CAPTURE_SKILL_NAME = "oxplow-wiki-capture";
 export const WIKI_CAPTURE_SKILL_FILE = "SKILL.md";
@@ -11,28 +12,33 @@ export const WIKI_CAPTURE_SKILL_FILE = "SKILL.md";
 export function buildWikiCaptureSkill(): string {
   return `---
 name: ${WIKI_CAPTURE_SKILL_NAME}
-description: Capturing code exploration into wiki notes. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki notes — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
-# Wiki notes — code-exploration capture
+# Wiki notes — exploratory capture
 
 The per-project wiki at \`.oxplow/notes/<slug>.md\` is where durable
-understanding of the codebase lives: how subsystems work, why a design
-landed, follow-up analyses. The agent writes it as the user asks
-questions about code. Bodies are markdown files; metadata is synced by
-a watcher, so you author with the **Write** tool and call
-\`mcp__oxplow__resync_note\` to pin freshness.
+understanding lives: how subsystems work, why a design landed, the
+tradeoffs of an approach, recommendations, comparisons, follow-up
+analyses. **It is NOT codebase-only** — any non-trivial exploratory
+Q&A belongs here, including general design / process / rationale
+discussions. The agent writes it as the user asks questions. Bodies
+are markdown files; metadata is synced by a watcher, so you author
+with the **Write** tool and call \`mcp__oxplow__resync_note\` to pin
+freshness.
 
 ## When to capture
 
 Capture when **all** are true:
 
-- The user asked about how code works, where something lives, asked you
-  to explain or trace something — i.e. an exploration question, not a
-  fix/feature/refactor request.
-- The turn read code (Read/Grep/Glob, read-only Bash) and produced
-  synthesized understanding worth keeping.
-- The answer is not trivial (a single-file lookup with no analysis).
+- The user asked an exploratory question — how something works, where
+  something lives, why a design choice was made, what the tradeoffs
+  are, which approach is better, what the rationale behind X is, etc.
+  Both code-flavored and general questions qualify; the wiki is for
+  any durable understanding, not just code walkthroughs.
+- The answer involved synthesis — pulled together facts, weighed
+  options, surfaced reasoning — not just a one-line lookup.
+- The synthesis is worth keeping. Trivial restatements aren't.
 
 Skip when:
 
@@ -40,7 +46,8 @@ Skip when:
   capture them.
 - You're asking the user a clarifying question (no answer to capture
   yet — wait for the next turn).
-- The exploration was a single-file lookup with no synthesis.
+- The exploration was a single-file lookup with no synthesis, or a
+  one-line factual answer with no reasoning attached.
 
 If the user types \`/note\` or says "save this" / "add to the wiki" /
 "add a note", capture even if the trigger heuristic above wouldn't

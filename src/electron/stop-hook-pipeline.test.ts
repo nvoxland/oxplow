@@ -364,7 +364,7 @@ describe("decideStopDirective", () => {
   });
 
   describe("filed-but-didn't-ship advisory branch", () => {
-    test("filed a ready item, no writes, no in_progress: emit advisory", () => {
+    test("filed a ready item, no writes, no in_progress: emit advisory and record fired flag", () => {
       const out = decideStopDirective(
         snapshot({
           workItems: [],
@@ -376,6 +376,22 @@ describe("decideStopDirective", () => {
         builders,
       );
       expect(out.directive).toEqual({ decision: "block", reason: "filed but didn't ship" });
+      expect(out.sideEffects).toContainEqual({ kind: "record-filed-but-didnt-ship-fired" });
+    });
+
+    test("advisory does not re-fire once filedButDidntShipFired is set: prevents ack-loop", () => {
+      const out = decideStopDirective(
+        snapshot({
+          workItems: [],
+          turnHadActivity: true,
+          turnHadWrites: false,
+          turnHadFiling: true,
+          turnFiledReadyItem: true,
+          filedButDidntShipFired: true,
+        }),
+        builders,
+      );
+      expect(out.directive).toBeNull();
     });
 
     test("filed a ready item AND made writes: pass through (writes are the legitimate path)", () => {

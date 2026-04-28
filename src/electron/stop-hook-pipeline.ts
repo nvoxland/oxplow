@@ -91,6 +91,12 @@ export interface ThreadSnapshot {
    *  where the agent logged work as backlog when the user's
    *  instruction was to do it now. */
   turnFiledReadyItem?: boolean;
+  /** Whether the filed-but-didn't-ship advisory has already fired
+   *  during the current prompt gap. Prevents the ack-loop where the
+   *  agent says "Stopping", the Stop hook re-evaluates the same flags,
+   *  and re-blocks with the same advisory ad infinitum. Cleared on
+   *  UserPromptSubmit alongside the other per-turn filing flags. */
+  filedButDidntShipFired?: boolean;
 }
 
 export interface StopDirective {
@@ -99,7 +105,8 @@ export interface StopDirective {
 }
 
 export type StopHookSideEffect =
-  | { kind: "record-audit-signature"; signature: string };
+  | { kind: "record-audit-signature"; signature: string }
+  | { kind: "record-filed-but-didnt-ship-fired" };
 
 export interface StopHookOutcome {
   directive: StopDirective | null;
@@ -184,11 +191,12 @@ export function decideStopDirective(
     snapshot.turnFiledReadyItem &&
     !snapshot.turnHadWrites &&
     inProgressAll.length === 0 &&
+    !snapshot.filedButDidntShipFired &&
     builders.buildFiledButDidntShipReason
   ) {
     return {
       directive: { decision: "block", reason: builders.buildFiledButDidntShipReason() },
-      sideEffects,
+      sideEffects: [...sideEffects, { kind: "record-filed-but-didnt-ship-fired" }],
     };
   }
 

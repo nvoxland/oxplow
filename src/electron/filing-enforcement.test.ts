@@ -23,17 +23,20 @@ function thread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("buildFilingEnforcementPreToolDeny", () => {
-  test("blocks Edit on writer thread with no in_progress item and no filing this turn", () => {
+  test("blocks Edit on writer thread with no in_progress item", () => {
     const out = buildFilingEnforcementPreToolDeny({
       thread: thread(),
       toolName: "Edit",
       hasInProgressItem: false,
-      filedThisTurn: false,
     });
     expect(out).not.toBeNull();
     expect(out?.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(out?.hookSpecificOutput.permissionDecisionReason).toContain("Edit");
     expect(out?.hookSpecificOutput.permissionDecisionReason).toContain("create_work_item");
+    // The deny reason must call out that ready rows don't satisfy the
+    // guard — earlier the guard accepted "any filing this turn", which
+    // let the agent file a ready row and quietly edit against it.
+    expect(out?.hookSpecificOutput.permissionDecisionReason).toMatch(/ready/i);
   });
 
   test("blocks Write, MultiEdit, NotebookEdit identically", () => {
@@ -42,8 +45,7 @@ describe("buildFilingEnforcementPreToolDeny", () => {
         thread: thread(),
         toolName,
         hasInProgressItem: false,
-        filedThisTurn: false,
-      });
+        });
       expect(out).not.toBeNull();
       expect(out?.hookSpecificOutput.permissionDecisionReason).toContain(toolName);
     }
@@ -54,19 +56,23 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       thread: thread(),
       toolName: "Edit",
       hasInProgressItem: true,
-      filedThisTurn: false,
     });
     expect(out).toBeNull();
   });
 
-  test("allows when filing happened earlier this turn", () => {
+  test("ready-only filing this turn does NOT satisfy the guard (in_progress required)", () => {
+    // Earlier behavior accepted "any filing call this turn" as
+    // sufficient, which let the agent create a ready row and quietly
+    // edit without ever flipping it to in_progress. The guard now
+    // ignores filing-call history and only consults the live store —
+    // a `ready` create leaves `hasInProgressItem` false and the deny
+    // still fires.
     const out = buildFilingEnforcementPreToolDeny({
       thread: thread(),
       toolName: "Edit",
       hasInProgressItem: false,
-      filedThisTurn: true,
     });
-    expect(out).toBeNull();
+    expect(out).not.toBeNull();
   });
 
   test("does not enforce on Bash (git merge / codegen / etc.)", () => {
@@ -74,7 +80,6 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       thread: thread(),
       toolName: "Bash",
       hasInProgressItem: false,
-      filedThisTurn: false,
     });
     expect(out).toBeNull();
   });
@@ -85,8 +90,7 @@ describe("buildFilingEnforcementPreToolDeny", () => {
         thread: thread(),
         toolName,
         hasInProgressItem: false,
-        filedThisTurn: false,
-      });
+        });
       expect(out).toBeNull();
     }
   });
@@ -96,7 +100,6 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       thread: thread({ status: "queued" }),
       toolName: "Edit",
       hasInProgressItem: false,
-      filedThisTurn: false,
     });
     expect(out).toBeNull();
   });
@@ -106,7 +109,6 @@ describe("buildFilingEnforcementPreToolDeny", () => {
       thread: null,
       toolName: "Edit",
       hasInProgressItem: false,
-      filedThisTurn: false,
     });
     expect(out).toBeNull();
   });
@@ -125,8 +127,7 @@ describe("buildFilingEnforcementPreToolDeny", () => {
         thread: thread(),
         toolName: "Write",
         hasInProgressItem: false,
-        filedThisTurn: false,
-        filePath: "/Users/agent/.claude/plans/some-plan.md",
+          filePath: "/Users/agent/.claude/plans/some-plan.md",
       });
       expect(out).toBeNull();
     });
@@ -136,8 +137,7 @@ describe("buildFilingEnforcementPreToolDeny", () => {
         thread: thread(),
         toolName: "Write",
         hasInProgressItem: false,
-        filedThisTurn: false,
-        filePath: "/Users/agent/project/src/foo.ts",
+          filePath: "/Users/agent/project/src/foo.ts",
       });
       expect(out).not.toBeNull();
     });

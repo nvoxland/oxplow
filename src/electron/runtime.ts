@@ -225,6 +225,13 @@ export class ElectronRuntime {
    *  backlog when the user's instruction was to do it. Cleared
    *  alongside the other per-turn flags on UserPromptSubmit. */
   private readonly filedReadyThisTurnByThread = new Set<string>();
+  /** Per-thread "the filed-but-didn't-ship Stop advisory has already
+   *  fired in this prompt gap" flag. Set by a pipeline side effect
+   *  after the advisory fires; checked on the next Stop to suppress
+   *  the loop where the agent acks the advisory and the Stop hook
+   *  immediately re-blocks with the same message. Cleared on
+   *  UserPromptSubmit alongside the other per-turn filing flags. */
+  private readonly filedButDidntShipFiredByThread = new Set<string>();
   private mcp: McpServerHandle | null = null;
   private gitEnabledCached = false;
   private gitRootWatcher: FSWatcher | null = null;
@@ -1932,13 +1939,14 @@ export class ElectronRuntime {
       if (deny) return { body: deny };
       // Filing-enforcement guard: block Edit/Write/MultiEdit/NotebookEdit
       // when the writer thread has no in_progress item to claim the
-      // change AND no filing call has fired this turn yet. Catches the
-      // misread at the moment the agent can act on it (file → re-edit)
-      // instead of at end-of-turn after the write has already shipped.
+      // change. Catches the misread at the moment the agent can act on
+      // it (file/transition → re-edit) instead of at end-of-turn after
+      // the write has already shipped. A `ready`-status filing call
+      // alone does NOT satisfy the guard — `ready` is backlog, only
+      // `in_progress` is a commitment to ship.
       const inProgressOpen = this.workItemStore
         .listItems(envelope.threadId)
         .some((item) => item.status === "in_progress");
-      const filedThisTurn = this.filedThisTurnByThread.has(envelope.threadId);
       const toolInputFilePath = extractEditedFilePath(
         (envelope.payload as { tool_input?: unknown })?.tool_input,
       );
@@ -1946,7 +1954,6 @@ export class ElectronRuntime {
         thread,
         toolName,
         hasInProgressItem: inProgressOpen,
-        filedThisTurn,
         filePath: toolInputFilePath,
       });
       if (filingDeny) return { body: filingDeny };
@@ -1966,6 +1973,7 @@ export class ElectronRuntime {
         this.awaitingUserByThread.delete(envelope.threadId);
         this.filedThisTurnByThread.delete(envelope.threadId);
         this.filedReadyThisTurnByThread.delete(envelope.threadId);
+        this.filedButDidntShipFiredByThread.delete(envelope.threadId);
       }
       const focusContext = formatEditorFocusForAgent(this.editorFocusStore.get(streamId));
       // If an agent-authored done item was closed on this thread very
@@ -1998,6 +2006,14 @@ export class ElectronRuntime {
         ? (envelope.payload as { prompt: string }).prompt
         : "";
       const wikiCaptureHint = buildWikiCaptureHint(promptText) ?? "";
+      // Ready-match nudge: if exactly one ready item on this thread
+      // plausibly matches the new prompt, point at it so the agent
+      // flips the existing row to in_progress instead of filing a
+      // duplicate task. Conservative — silent on ambiguity. Skipped
+      // entirely when there's no thread (system events).
+      const readyMatchReminder = envelope.threadId
+        ? buildReadyMatchReminder(this.workItemStore.listItems(envelope.threadId), promptText)
+        : "";
       // Re-inject the session context each turn — the agent's system-prompt
       // SESSION CONTEXT line is frozen at launch, but the UI's active /
       // selected thread can flip mid-session. Reading the live state here
@@ -2023,7 +2039,7 @@ export class ElectronRuntime {
       // session-context / focus / redo blocks the agent treats it as a
       // post-answer afterthought and skips the note write; leading with
       // it sets the turn's frame as "synthesis = write a note".
-      const additionalContext = [wikiCaptureHint, sessionContext, focusContext, redoReminder, priorPromptInProgressReminder].filter(Boolean).join("\n\n");
+      const additionalContext = [wikiCaptureHint, sessionContext, focusContext, redoReminder, priorPromptInProgressReminder, readyMatchReminder].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -2085,6 +2101,7 @@ export class ElectronRuntime {
     // the next Stop in the same prompt-gap pass without a filing check.
     const turnHadFiling = this.filedThisTurnByThread.has(threadId);
     const turnFiledReadyItem = this.filedReadyThisTurnByThread.has(threadId);
+    const filedButDidntShipFired = this.filedButDidntShipFiredByThread.has(threadId);
     const awaitingUser = this.awaitingUserByThread.has(threadId);
     const snapshot: ThreadSnapshot = {
       thread,
@@ -2095,6 +2112,7 @@ export class ElectronRuntime {
       turnHadWrites,
       turnHadFiling,
       turnFiledReadyItem,
+      filedButDidntShipFired,
       awaitingUser,
     };
     const outcome = decideStopDirective(snapshot, {
@@ -2105,6 +2123,8 @@ export class ElectronRuntime {
     for (const effect of outcome.sideEffects) {
       if (effect.kind === "record-audit-signature") {
         this.lastAuditSignatureByThread.set(threadId, effect.signature);
+      } else if (effect.kind === "record-filed-but-didnt-ship-fired") {
+        this.filedButDidntShipFiredByThread.add(threadId);
       }
     }
     return outcome.directive ? { ...outcome.directive } : null;
@@ -2659,25 +2679,33 @@ export function buildFiledButDidntShipStopReason(): string {
 
 /**
  * UserPromptSubmit-time hint that nudges the agent to capture
- * exploration / synthesis turns into the per-project wiki. Returns
- * `null` when the prompt doesn't look like exploration — non-exploration
- * prompts pay no token cost. Replaces the old Stop-hook wiki-capture
- * directive (which fired post-hoc, after the answer had already been
- * written to chat with no durable home). Path-allowed under the wiki
- * carve-out in `write-guard.ts`, so the hint is valid on read-only
- * threads too.
+ * non-trivial exploratory Q&A turns into the per-project wiki. Fires
+ * on both codebase exploration (how/where/explain/trace, architecture
+ * walkthroughs) AND general synthesis (why questions, comparisons,
+ * tradeoffs, recommendations, rationale) — anywhere a substantive
+ * answer would be worth keeping rather than letting it scroll out of
+ * chat. Returns `null` when the prompt looks like a fix/feature/yes
+ * ack — those don't produce capturable synthesis. Replaces the old
+ * Stop-hook wiki-capture directive (which fired post-hoc, after the
+ * answer had already been written to chat with no durable home).
+ * Path-allowed under the wiki carve-out in `write-guard.ts`, so the
+ * hint is valid on read-only threads too.
  */
 export function buildWikiCaptureHint(prompt: string): string | null {
   if (typeof prompt !== "string") return null;
   const normalized = prompt.trim();
   if (!normalized) return null;
   // Match anywhere in the prompt — the user often opens with greetings or
-  // context before the actual ask.
-  const explorationPattern = /\b(how (?:does|do|is|are|was)|where (?:is|are|does)|explain|trace|describe(?: the)?(?: architecture)?|walk (?:me )?through|give (?:me )?an? (?:overview|summary|tour|architecture)|what (?:is|are) the architecture|architecture of|summari[sz]e (?:the )?(?:code|codebase|module|system)|high(?:[- ]level)? (?:architecture|overview|summary)|overview of (?:the )?(?:code|codebase|module|system))\b/i;
-  if (!explorationPattern.test(normalized)) return null;
+  // context before the actual ask. Two regex families: codebase
+  // exploration (how/where/architecture/overview) and general synthesis
+  // (why/compare/tradeoffs/should-i/rationale/recommend). Either match
+  // qualifies the turn for capture.
+  const codebaseExploration = /\b(how (?:does|do|is|are|was)|where (?:is|are|does)|explain|trace|describe(?: the)?(?: architecture)?|walk (?:me )?through|give (?:me )?an? (?:overview|summary|tour|architecture)|what (?:is|are) the architecture|architecture of|summari[sz]e (?:the )?(?:code|codebase|module|system)|high(?:[- ]level)? (?:architecture|overview|summary)|overview of (?:the )?(?:code|codebase|module|system))\b/i;
+  const generalExploration = /\b(why (?:does|do|is|are|did|didn't|don't|doesn't|isn't|aren't|would|wouldn't|should|shouldn't|can|can't)|what(?:'s| is| are) the (?:difference|tradeoffs?|trade-offs?|pros and cons|advantages|disadvantages|relationship|reason|rationale|impact|implication|consequences?)|compare\b[^.?!]*\b(?:to|and|with|vs|versus)\b|trade-?offs?\b|pros and cons|should (?:i|we|you) (?:use|pick|do|prefer|go with|choose|consider|worry|expect)|best (?:way|practice|approach|strategy|option|choice|pattern)|is (?:it|this|that) (?:better|worse|safer|faster|preferable|safe|correct|right|ok|okay)|advice (?:on|for|about)|recommend(?:ation)?(?: for| on| about)?|rationale (?:for|behind)|reasoning behind)\b/i;
+  if (!codebaseExploration.test(normalized) && !generalExploration.test(normalized)) return null;
   return [
     `<wiki-capture-hint>`,
-    `This is a synthesis / exploration turn. Before responding, search existing notes (\`mcp__oxplow__search_notes\` / \`search_note_bodies\` / \`find_notes_for_file\`), then Write \`.oxplow/notes/<slug>.md\` (append-or-create) and call \`mcp__oxplow__resync_note\`. The chat reply should summarize the note, not substitute for it. The write guard allows this on read-only threads.`,
+    `This looks like a non-trivial exploratory question — codebase walkthrough, design rationale, comparison, tradeoffs, or general synthesis. Before responding, search existing notes (\`mcp__oxplow__search_notes\` / \`search_note_bodies\` / \`find_notes_for_file\`), then Write \`.oxplow/notes/<slug>.md\` (append-or-create) and call \`mcp__oxplow__resync_note\`. The chat reply should summarize the note, not substitute for it. The wiki is for any durable understanding, not just code questions. The write guard allows this on read-only threads.`,
     `</wiki-capture-hint>`,
   ].join("\n");
 }
@@ -2723,7 +2751,7 @@ function buildThreadAgentPrompt(
     `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
     `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
     `AFTER \`ExitPlanMode\` APPROVAL, KEEP GOING. Plan approval IS the go-ahead — file or transition the implementation work item(s) and start editing in the same turn. Do not pause for a separate "shall I start?" check, and don't \`await_user\` unless something genuinely new is unclear.`,
-    `WIKI CAPTURE: when a turn is exploration / synthesis (architecture, overview, "how does X work", trace, walk-through, summary), write the answer into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first, append-or-create, then \`mcp__oxplow__resync_note\`. Allowed on read-only threads too (the write guard exempts the notes dir).`,
+    `WIKI CAPTURE: any non-trivial exploratory Q&A goes into the wiki — codebase walkthroughs ("how does X work", trace, architecture, overview) AND general synthesis (why questions, comparisons, tradeoffs, design rationale, recommendations, advice). Wiki ≠ codebase-only; it's the durable home for any understanding worth keeping. Write the answer into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first, append-or-create, then \`mcp__oxplow__resync_note\`. The chat reply summarizes the note, not the other way around. Allowed on read-only threads too (the write guard exempts the notes dir).`,
   ];
   if (thread.status !== "active") {
     lines.push(NON_WRITER_PROMPT_BLOCK);
@@ -2867,6 +2895,83 @@ export function buildPriorPromptInProgressReminder(
     "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id.",
     "</prior-prompt-in-progress-reminder>",
   ].join("\n");
+}
+
+/**
+ * When a UserPromptSubmit arrives and exactly one `ready` item on the
+ * thread plausibly matches the new prompt by content (≥2 shared
+ * significant tokens), produce a reminder pointing at it. Catches the
+ * failure mode where the agent files a fresh task that duplicates a
+ * ready row already on the board, instead of flipping the existing
+ * row to in_progress. Returns "" when there's no match, when the
+ * match is ambiguous (multiple ready items score similarly), or when
+ * the prompt itself is too short to extract meaningful tokens.
+ *
+ * Heuristic — intentionally cheap and conservative:
+ *   1. Tokenize prompt and item (title + description) into lowercase
+ *      alphanumeric runs of length ≥ 4 that aren't in `STOP_TOKENS`.
+ *   2. Score each ready item = |prompt-tokens ∩ item-tokens|.
+ *   3. Emit only when the top-scoring item has ≥ 2 shared tokens AND
+ *      no other ready item is within 1 of its score. Ambiguous → skip
+ *      (the spec is "clear single match"); the agent will file a new
+ *      row, which is the safer default.
+ */
+export function buildReadyMatchReminder(
+  items: WorkItem[],
+  promptText: string,
+): string {
+  const promptTokens = tokenizeForReadyMatch(promptText);
+  if (promptTokens.size < 2) return "";
+  const scored: Array<{ id: string; title: string; score: number }> = [];
+  for (const item of items) {
+    if (item.status !== "ready") continue;
+    const itemTokens = tokenizeForReadyMatch(`${item.title} ${item.description ?? ""}`);
+    let score = 0;
+    for (const tok of promptTokens) if (itemTokens.has(tok)) score++;
+    if (score >= 2) scored.push({ id: item.id, title: item.title, score });
+  }
+  if (scored.length === 0) return "";
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored[0]!;
+  const runnerUp = scored[1];
+  if (runnerUp && top.score - runnerUp.score < 2) return "";
+  return [
+    "<ready-item-match-reminder>",
+    `The user's new prompt looks like it could be the existing ready item "${top.title}" (id ${top.id}) on this thread.`,
+    "If it is — flip that row to in_progress instead of filing a duplicate:",
+    `  • \`mcp__oxplow__update_work_item\` itemId="${top.id}" status=in_progress, then ship and \`complete_task\`.`,
+    "If it's a different concern, file a new row as usual and ignore this reminder.",
+    "Filing a fresh task that duplicates an existing ready row fragments the backlog.",
+    "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id.",
+    "</ready-item-match-reminder>",
+  ].join("\n");
+}
+
+const READY_MATCH_STOP_TOKENS = new Set([
+  "this", "that", "with", "from", "have", "your", "what", "when", "where",
+  "which", "their", "they", "them", "then", "than", "into", "onto", "some",
+  "make", "made", "thing", "things", "stuff", "should", "would", "could",
+  "will", "just", "like", "also", "even", "very", "much", "many", "more",
+  "most", "such", "still", "after", "before", "while", "about", "over",
+  "under", "again", "back", "here", "there", "want", "need", "needs",
+  "doesn", "didn", "wasn", "isn", "aren", "won", "don", "the", "and",
+  "for", "but", "you", "your", "our", "all", "any", "out", "off", "own",
+  "ask", "user", "users", "users", "item", "items", "work", "thread",
+  "threads", "prompt", "prompts", "turn", "turns", "agent", "agents",
+  "code", "page", "pages", "file", "files", "fix", "make", "add", "do",
+  "does", "did", "be", "is", "are", "was", "were", "an", "as", "in",
+  "on", "of", "to", "if", "or", "by", "we", "us",
+]);
+
+function tokenizeForReadyMatch(text: string): Set<string> {
+  const out = new Set<string>();
+  if (typeof text !== "string") return out;
+  const matches = text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+  for (const tok of matches) {
+    if (READY_MATCH_STOP_TOKENS.has(tok)) continue;
+    out.add(tok);
+  }
+  return out;
 }
 
 export function buildThreadMcpConfig(mcp: McpServerHandle | null): string {

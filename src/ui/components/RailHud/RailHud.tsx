@@ -1,11 +1,10 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentStatus, BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
+import type { BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, noteRef, opErrorRef, planWorkRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
-import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
 
@@ -30,7 +29,6 @@ export interface RailHudProps {
   threadId: string | null;
   threadWork: ThreadWorkState | null;
   backlog: BacklogState | null;
-  agentStatus: AgentStatus;
   recentFiles: RecentFileEntry[];
   bookmarks?: BookmarkRailEntry[];
   /** Most recently finished work — closed work item efforts merged
@@ -67,7 +65,6 @@ export function RailHud({
   threadId,
   threadWork,
   backlog,
-  agentStatus,
   recentFiles,
   bookmarks,
   recentlyFinished,
@@ -109,7 +106,6 @@ export function RailHud({
         <ActiveItemSection
           item={activeItem}
           epicContext={activeEpic}
-          agentStatus={agentStatus}
           onOpenPage={onOpenPage}
         />
       ) : null}
@@ -327,36 +323,15 @@ function statusIconColor(status: WorkItem["status"]): string {
 function ActiveItemSection({
   item,
   epicContext,
-  agentStatus,
   onOpenPage,
 }: {
   item: WorkItem | null;
   epicContext: { epic: WorkItem; children: WorkItem[] } | null;
-  agentStatus: AgentStatus;
   onOpenPage(ref: TabRef): void;
 }) {
   const [expanded, setExpanded] = useState(true);
   if (!item) {
-    const working = agentStatus === "working";
-    return (
-      <>
-        <SectionHeading>Current Work</SectionHeading>
-        <div
-          data-testid="rail-active-empty"
-          style={{
-            padding: "4px 14px 12px",
-            fontSize: 12,
-            color: "var(--text-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <AgentStatusDot status={agentStatus} />
-          <span>{working ? "Working..." : "No item in progress."}</span>
-        </div>
-      </>
-    );
+    return null;
   }
 
   if (epicContext) {

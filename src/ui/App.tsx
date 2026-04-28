@@ -2420,7 +2420,6 @@ export function App() {
           threadId={selectedThread?.id ?? null}
           threadWork={selectedThreadWork}
           backlog={backlogState}
-          agentStatus={agentThreadStatus}
           recentFiles={recentFileEntries}
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}

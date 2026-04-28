@@ -140,6 +140,26 @@
       .oxplow-md-link-kebab { opacity: 0; transition: opacity 80ms ease; }
       .oxplow-md-link:hover .oxplow-md-link-kebab,
       .oxplow-md-link-kebab:focus-within { opacity: 1; }
+      /* Markdown view: GFM tables. ReactMarkdown + remark-gfm emit
+         <table>/<thead>/<tbody>/<tr>/<th>/<td> with no styling otherwise,
+         which leaves columns running together visually. */
+      .oxplow-md table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        border-collapse: collapse;
+        margin: 12px 0;
+        font-size: 13px;
+      }
+      .oxplow-md thead { background: var(--surface-card, #1f242c); }
+      .oxplow-md th, .oxplow-md td {
+        border: 1px solid var(--border-subtle, #2a313a);
+        padding: 6px 10px;
+        vertical-align: top;
+        text-align: left;
+      }
+      .oxplow-md th { font-weight: 600; }
+      .oxplow-md tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     </style>
   </head>
   <body>

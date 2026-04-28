@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildPriorPromptInProgressReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildPriorPromptInProgressReminder, buildReadyMatchReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -770,8 +770,57 @@ describe("isReadIntentTool", () => {
   });
 });
 
+describe("buildReadyMatchReminder", () => {
+  function readyItem(id: string, title: string, description = ""): WorkItem {
+    return { ...workItem(id, "ready" as WorkItemStatus, title), description };
+  }
+  test("points at a single matching ready item by shared content tokens", () => {
+    const items = [
+      readyItem("wi-1", "Style markdown tables in MarkdownView so wiki notes render readably"),
+      readyItem("wi-2", "Refactor the snapshot store"),
+    ];
+    const out = buildReadyMatchReminder(items, "the markdown table in the wiki note isn't rendering nicely");
+    expect(out).toContain("<ready-item-match-reminder>");
+    expect(out).toContain("wi-1");
+    expect(out).toContain("Style markdown tables");
+  });
+  test("returns empty when no ready item shares ≥2 significant tokens with the prompt", () => {
+    const items = [readyItem("wi-1", "Refactor the snapshot store")];
+    expect(buildReadyMatchReminder(items, "fix the login redirect bug please")).toBe("");
+  });
+  test("returns empty when match is ambiguous (multiple ready items score similarly)", () => {
+    const items = [
+      readyItem("wi-1", "PreToolUse filing hook in_progress requirement"),
+      readyItem("wi-2", "PreToolUse filing hook ready vs in_progress wording"),
+    ];
+    // Both items share the same significant tokens with the prompt, so
+    // the reminder should silently skip rather than guess.
+    expect(buildReadyMatchReminder(items, "tighten the pretooluse filing hook in_progress requirement")).toBe("");
+  });
+  test("ignores non-ready items even if their content matches", () => {
+    const inProgress = { ...workItem("wi-ip", "in_progress" as WorkItemStatus, "Style markdown tables in wiki notes") };
+    expect(buildReadyMatchReminder([inProgress], "the markdown table in the wiki note isn't rendering nicely")).toBe("");
+  });
+  test("returns empty for trivial prompts that don't have ≥2 significant tokens", () => {
+    const items = [readyItem("wi-1", "Style markdown tables in MarkdownView so wiki notes render readably")];
+    expect(buildReadyMatchReminder(items, "yes")).toBe("");
+    expect(buildReadyMatchReminder(items, "do it")).toBe("");
+  });
+  test("matches against item description, not just title", () => {
+    const items = [
+      readyItem(
+        "wi-1",
+        "Capture follow-ups",
+        "When the agent files a backlog row, the UserPromptSubmit nudge should suggest flipping it to in_progress.",
+      ),
+    ];
+    const out = buildReadyMatchReminder(items, "userpromptsubmit nudge for the backlog row should fire here");
+    expect(out).toContain("wi-1");
+  });
+});
+
 describe("buildWikiCaptureHint", () => {
-  test("returns a hint block for exploration prompts", () => {
+  test("returns a hint block for codebase exploration prompts", () => {
     for (const prompt of [
       "how does the stop hook work?",
       "explain the wiki note storage",
@@ -787,9 +836,28 @@ describe("buildWikiCaptureHint", () => {
       const text = buildWikiCaptureHint(prompt);
       expect(text, `expected hint for: ${prompt}`).not.toBeNull();
       expect(text!).toContain("<wiki-capture-hint>");
-      expect(text!).toContain("synthesis / exploration");
+      expect(text!).toContain("non-trivial exploratory");
       expect(text!).toContain(".oxplow/notes/");
       expect(text!).toContain("resync_note");
+    }
+  });
+  test("returns a hint block for general synthesis prompts (not just codebase questions)", () => {
+    for (const prompt of [
+      "why didn't you capture that to a wiki page?",
+      "what's the difference between ready and in_progress?",
+      "what are the tradeoffs of approach A vs approach B?",
+      "is it better to store this in memory or a wiki?",
+      "should I use opus or sonnet for this?",
+      "compare the old approach to the new one",
+      "what's the rationale behind the dedup pattern",
+      "any advice on structuring the work item filing rules?",
+      "what would you recommend for the cache TTL?",
+      "why does the stop hook keep re-firing the advisory",
+      "pros and cons of merging vs rebasing here",
+    ]) {
+      const text = buildWikiCaptureHint(prompt);
+      expect(text, `expected hint for: ${prompt}`).not.toBeNull();
+      expect(text!).toContain("<wiki-capture-hint>");
     }
   });
   test("returns null for non-exploration prompts", () => {
