@@ -37,21 +37,35 @@ export function OpErrorPage({ errorId }: OpErrorPageProps) {
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16, overflow: "auto" }}>
         <Field label="Operation" value={entry.label} />
         {entry.command ? <Field label="Command" value={entry.command} mono /> : null}
+        {entry.args && entry.args.length > 0 ? (
+          <Field label="Argv" value={JSON.stringify(entry.args)} mono />
+        ) : null}
         <Field
           label="When"
-          value={`${when.toLocaleString()}${entry.exitCode != null ? ` · exit ${entry.exitCode}` : ""}`}
+          value={`${when.toLocaleString()}${formatTiming(entry)}`}
         />
+        {entry.signal ? <Field label="Signal" value={entry.signal} mono /> : null}
         {entry.stderr ? <Block label="stderr" body={entry.stderr} tone="error" /> : null}
         {entry.stdout ? <Block label="stdout" body={entry.stdout} /> : null}
         {entry.message && !entry.stderr ? <Block label="Message" body={entry.message} tone="error" /> : null}
         {!entry.stderr && !entry.stdout && !entry.message ? (
           <div style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
             No output was captured.
+            {entry.blankFailure
+              ? " (Runner reported a blank failure — no stderr, stdout, or exit code. Likely an awaitDone race or process kill; check the main-process log for the matching `git op` entry.)"
+              : ""}
           </div>
         ) : null}
       </div>
     </Page>
   );
+}
+
+function formatTiming(entry: { exitCode: number | null; durationMs: number | null }): string {
+  const parts: string[] = [];
+  if (entry.exitCode != null) parts.push(`exit ${entry.exitCode}`);
+  if (entry.durationMs != null) parts.push(`${entry.durationMs} ms`);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

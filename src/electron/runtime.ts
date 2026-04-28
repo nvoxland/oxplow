@@ -1040,10 +1040,29 @@ export class ElectronRuntime {
   ): Promise<void> {
     try {
       const result = await invoke();
-      if (result.ok) this.backgroundTaskStore.complete(taskId, result);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || fallbackError, result);
+      const meta = {
+        taskId,
+        args: result.args,
+        durationMs: result.durationMs,
+        exitCode: result.exitCode,
+        signal: result.signal ?? null,
+      };
+      if (result.ok) {
+        this.logger.debug("git op ok", meta);
+        this.backgroundTaskStore.complete(taskId, result);
+      } else {
+        this.logger.warn("git op failed", {
+          ...meta,
+          blankFailure: result.blankFailure ?? false,
+          stderr: truncateForLog(result.stderr),
+          stdout: truncateForLog(result.stdout),
+        });
+        this.backgroundTaskStore.fail(taskId, result.stderr || fallbackError, result);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      this.logger.error("git op threw", { taskId, message, stack });
       this.backgroundTaskStore.fail(taskId, message);
     }
   }
@@ -2598,6 +2617,11 @@ export interface HookHealthReport {
  * broken" hint so the user can judge. Pure so the test pins the exact
  * phrasing of both hint kinds.
  */
+function truncateForLog(s: string | undefined, max = 2000): string {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max) + "…[truncated]" : s;
+}
+
 export function describeHookHealth(
   registered: readonly string[],
   seen: ReadonlySet<string>,

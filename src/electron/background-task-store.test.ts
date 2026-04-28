@@ -83,4 +83,42 @@ describe("BackgroundTaskStore", () => {
     expect(list[1].id).toBe(a);
     store.dispose();
   });
+
+  it("get(id) still returns the snapshot after eviction so awaitDone races recover", async () => {
+    // graceMs=20 evicts quickly; snapshotRetentionMs=10_000 keeps the snapshot.
+    const store = new BackgroundTaskStore(undefined, 20, 10_000);
+    const id = store.start({ kind: "git", label: "rebase main" });
+    const result = { ok: true, stdout: "Successfully rebased.", stderr: "", exitCode: 0 };
+    store.complete(id, result);
+    await sleep(60);
+    expect(store.list()).toHaveLength(0); // active row is gone
+    const snap = store.get(id);
+    expect(snap).not.toBeNull();
+    expect(snap?.status).toBe("done");
+    expect(snap?.result).toEqual(result);
+    store.dispose();
+  });
+
+  it("snapshot retains failure result with stderr after eviction", async () => {
+    const store = new BackgroundTaskStore(undefined, 20, 10_000);
+    const id = store.start({ kind: "git", label: "push" });
+    const result = { ok: false, stdout: "", stderr: "rejected", exitCode: 1 };
+    store.fail(id, "rejected", result);
+    await sleep(60);
+    expect(store.list()).toHaveLength(0);
+    const snap = store.get(id);
+    expect(snap?.status).toBe("failed");
+    expect(snap?.error).toBe("rejected");
+    expect(snap?.result).toEqual(result);
+    store.dispose();
+  });
+
+  it("snapshot expires after snapshotRetentionMs", async () => {
+    const store = new BackgroundTaskStore(undefined, 20, 50);
+    const id = store.start({ kind: "git", label: "fetch" });
+    store.complete(id, { ok: true });
+    await sleep(120);
+    expect(store.get(id)).toBeNull();
+    store.dispose();
+  });
 });

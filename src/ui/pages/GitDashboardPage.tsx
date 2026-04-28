@@ -257,6 +257,12 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
           stderr: result?.stderr ?? task?.error ?? "",
           stdout: result?.stdout ?? "",
           exitCode: result?.exitCode ?? null,
+          args: result?.args,
+          durationMs: result?.durationMs,
+          signal: result?.signal ?? null,
+          blankFailure:
+            result?.blankFailure ??
+            (!result || (!result.stderr && !result.stdout && result.exitCode == null)),
         });
         onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {

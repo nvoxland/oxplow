@@ -551,40 +551,92 @@ export interface GitOpResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  /** The git args invoked (without the leading `-C <projectDir>`). Always
+   *  populated so the op-error UI can show what actually ran. */
+  args?: string[];
+  /** Project directory the command ran in. */
+  projectDir?: string;
+  /** Wall-clock duration in ms. */
+  durationMs?: number;
+  /** Signal name if the child was killed by signal (SIGKILL, SIGTERM, …). */
+  signal?: string | null;
+  /** True if the runner caught an exception with no captured stderr/stdout
+   *  and no exit code — used to flag "blank failure" cases on the UI. */
+  blankFailure?: boolean;
 }
 
 function runGit(projectDir: string, args: string[]): GitOpResult {
+  const start = Date.now();
   try {
     const stdout = execFileSync("git", ["-C", projectDir, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return { ok: true, stdout, stderr: "", exitCode: 0 };
+    return { ok: true, stdout, stderr: "", exitCode: 0, args, projectDir, durationMs: Date.now() - start };
   } catch (error) {
-    const err = error as { status?: number; stdout?: string; stderr?: string; message?: string };
+    const err = error as {
+      status?: number;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+      signal?: string | null;
+    };
+    const stdout = err.stdout ?? "";
+    const stderr = err.stderr ?? "";
+    const exitCode = typeof err.status === "number" ? err.status : null;
+    const blankFailure = !stdout && !stderr && exitCode === null;
     return {
       ok: false,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message ?? "unknown git error",
-      exitCode: typeof err.status === "number" ? err.status : null,
+      stdout,
+      stderr: stderr || err.message || "unknown git error",
+      exitCode,
+      args,
+      projectDir,
+      durationMs: Date.now() - start,
+      signal: err.signal ?? null,
+      blankFailure,
     };
   }
 }
 
 async function runGitAsync(projectDir: string, args: string[]): Promise<GitOpResult> {
+  const start = Date.now();
   try {
     const { stdout, stderr } = await execFileP("git", ["-C", projectDir, ...args], {
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
     });
-    return { ok: true, stdout: stdout ?? "", stderr: stderr ?? "", exitCode: 0 };
+    return {
+      ok: true,
+      stdout: stdout ?? "",
+      stderr: stderr ?? "",
+      exitCode: 0,
+      args,
+      projectDir,
+      durationMs: Date.now() - start,
+    };
   } catch (error) {
-    const err = error as { code?: number; stdout?: string; stderr?: string; message?: string };
+    const err = error as {
+      code?: number;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+      signal?: string | null;
+    };
+    const stdout = err.stdout ?? "";
+    const stderr = err.stderr ?? "";
+    const exitCode = typeof err.code === "number" ? err.code : null;
+    const blankFailure = !stdout && !stderr && exitCode === null;
     return {
       ok: false,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? err.message ?? "unknown git error",
-      exitCode: typeof err.code === "number" ? err.code : null,
+      stdout,
+      stderr: stderr || err.message || "unknown git error",
+      exitCode,
+      args,
+      projectDir,
+      durationMs: Date.now() - start,
+      signal: err.signal ?? null,
+      blankFailure,
     };
   }
 }

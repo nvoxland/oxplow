@@ -22,11 +22,24 @@ export interface OpErrorInput {
   exitCode?: number | null;
   /** Free-form long message when no stderr is available (thrown Error etc.). */
   message?: string;
+  /** Argv passed to the underlying child process (without `git -C <dir>`). */
+  args?: string[];
+  /** Wall-clock duration in ms, if measured. */
+  durationMs?: number;
+  /** Signal name if the child was killed by signal (SIGKILL, SIGTERM, …). */
+  signal?: string | null;
+  /** True when the runner caught a failure but stderr/stdout/exitCode were
+   *  all empty — diagnostic flag for the "blank op-error" race. */
+  blankFailure?: boolean;
 }
 
-export interface OpError extends Required<Omit<OpErrorInput, "exitCode">> {
+export interface OpError extends Required<Omit<OpErrorInput, "exitCode" | "args" | "durationMs" | "signal" | "blankFailure">> {
   id: string;
   exitCode: number | null;
+  args: string[] | null;
+  durationMs: number | null;
+  signal: string | null;
+  blankFailure: boolean;
   at: number;
   /** Has the user opened the page for this error? Used to gate the
    *  RailHud "unread" dot. */
@@ -76,6 +89,10 @@ export function createOpErrorsStore(): OpErrorsStore {
         stdout: input.stdout ?? "",
         message: input.message ?? "",
         exitCode: input.exitCode ?? null,
+        args: input.args ?? null,
+        durationMs: input.durationMs ?? null,
+        signal: input.signal ?? null,
+        blankFailure: input.blankFailure ?? false,
         at: Date.now(),
         seen: false,
       };

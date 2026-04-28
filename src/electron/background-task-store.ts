@@ -50,16 +50,30 @@ export interface BackgroundTaskUpdateInput {
 }
 
 const DEFAULT_GRACE_MS = 4000;
+/** Snapshots of completed tasks survive UI eviction by this much longer so
+ *  late `awaitDone` lookups can still retrieve `result`/`error` after the
+ *  in-flight row has been pruned from the status bar. Long-tail safety net. */
+const SNAPSHOT_RETENTION_MS = 5 * 60_000;
+const SNAPSHOT_MAX_ENTRIES = 200;
 
 export class BackgroundTaskStore {
   private readonly tasks = new Map<string, BackgroundTask>();
   private readonly evictTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Frozen snapshots of completed/failed tasks, retained well past
+   *  `graceMs` so callers awaiting `getBackgroundTask(id)` after the
+   *  row has been evicted still get the final `result` / `error`.
+   *  This was added after a `git rebase` op that succeeded silently
+   *  surfaced an op-error page with no stderr/stdout/exitCode — the
+   *  renderer's `awaitBackgroundTask` lookup raced eviction. */
+  private readonly snapshots = new Map<string, BackgroundTask>();
+  private readonly snapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly emitter: StoreEmitter<BackgroundTaskChange>;
   private nextSeq = 1;
 
   constructor(
     logger?: Logger,
     private readonly graceMs = DEFAULT_GRACE_MS,
+    private readonly snapshotRetentionMs = SNAPSHOT_RETENTION_MS,
   ) {
     this.emitter = new StoreEmitter<BackgroundTaskChange>("background-task-store", logger);
   }
@@ -96,6 +110,7 @@ export class BackgroundTaskStore {
     task.endedAt = Date.now();
     if (task.progress !== null) task.progress = 1;
     if (result !== undefined) task.result = result;
+    this.snapshot(task);
     this.scheduleEviction(id);
     this.emitter.emit({ kind: "ended", id });
   }
@@ -107,12 +122,15 @@ export class BackgroundTaskStore {
     task.error = errorMessage;
     task.endedAt = Date.now();
     if (result !== undefined) task.result = result;
+    this.snapshot(task);
     this.scheduleEviction(id);
     this.emitter.emit({ kind: "ended", id });
   }
 
+  /** Returns the live row, falling back to the post-eviction snapshot so
+   *  late `awaitDone` lookups still see `result` / `error`. */
   get(id: string): BackgroundTask | null {
-    const task = this.tasks.get(id);
+    const task = this.tasks.get(id) ?? this.snapshots.get(id);
     return task ? { ...task } : null;
   }
 
@@ -133,7 +151,34 @@ export class BackgroundTaskStore {
   dispose(): void {
     for (const timer of this.evictTimers.values()) clearTimeout(timer);
     this.evictTimers.clear();
+    for (const timer of this.snapshotTimers.values()) clearTimeout(timer);
+    this.snapshotTimers.clear();
     this.tasks.clear();
+    this.snapshots.clear();
+  }
+
+  private snapshot(task: BackgroundTask): void {
+    this.snapshots.set(task.id, { ...task });
+    const existing = this.snapshotTimers.get(task.id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.snapshotTimers.delete(task.id);
+      this.snapshots.delete(task.id);
+    }, this.snapshotRetentionMs);
+    if (typeof timer === "object" && timer && "unref" in timer && typeof timer.unref === "function") {
+      timer.unref();
+    }
+    this.snapshotTimers.set(task.id, timer);
+    // LRU cap: drop the oldest snapshot if we're over budget.
+    if (this.snapshots.size > SNAPSHOT_MAX_ENTRIES) {
+      const oldest = this.snapshots.keys().next().value;
+      if (oldest && oldest !== task.id) {
+        this.snapshots.delete(oldest);
+        const t = this.snapshotTimers.get(oldest);
+        if (t) clearTimeout(t);
+        this.snapshotTimers.delete(oldest);
+      }
+    }
   }
 
   private scheduleEviction(id: string): void {

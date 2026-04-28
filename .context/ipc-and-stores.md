@@ -261,6 +261,17 @@ subscribes via `subscribeBackgroundTaskEvents(onChange)` (filters
 writes — only the runtime starts/updates tasks. Cancellation is not
 supported (v1).
 
+`get(id)` falls back to a longer-retention **snapshot map** when the
+live row has been evicted. The snapshot is captured on
+`complete()`/`fail()` and retained for `SNAPSHOT_RETENTION_MS` (5 min,
+LRU-capped) so the renderer's `awaitBackgroundTask` can still read the
+final `result` / `error` even if the 4s grace window expired between
+the "ended" event and the IPC re-fetch. Without this, fast git ops
+that succeed silently could surface a blank op-error page (no stderr,
+no stdout, no exitCode) — see the diagnostics fields on `GitOpResult`
+(`args`, `projectDir`, `durationMs`, `signal`, `blankFailure`) which
+flow into `OpError` and the OpErrorPage when something does fail.
+
 Adding a new producer: don't widen the union — extend
 `BackgroundTaskKind` and pick the most relevant existing kind, or add
 one in `background-task-store.ts` plus a label entry in

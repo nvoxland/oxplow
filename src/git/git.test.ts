@@ -377,6 +377,27 @@ test("gitRebaseAsync resolves with ok=true when rebasing a no-op", async () => {
   expect(result.ok).toBe(true);
 });
 
+test("gitRebaseAsync result carries args, projectDir, durationMs for op-error diagnostics", async () => {
+  const repoDir = mkRepo();
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature"], { stdio: "ignore" });
+  const result = await gitRebaseAsync(repoDir, "main");
+  expect(result.args).toEqual(["rebase", "main"]);
+  expect(result.projectDir).toBe(repoDir);
+  expect(typeof result.durationMs).toBe("number");
+  expect(result.durationMs!).toBeGreaterThanOrEqual(0);
+});
+
+test("runGit failure path records args, exit code, and clears blankFailure flag", async () => {
+  const repoDir = mkRepo();
+  // Try to rebase onto a ref that doesn't exist — expect ok=false with stderr.
+  const result = await gitRebaseAsync(repoDir, "no-such-ref");
+  expect(result.ok).toBe(false);
+  expect(result.args).toEqual(["rebase", "no-such-ref"]);
+  expect(result.stderr.length).toBeGreaterThan(0);
+  // exitCode should be a number (git exited non-zero), so blankFailure is false.
+  expect(result.blankFailure).toBe(false);
+});
+
 test("getGitLog with all:false returns only commits reachable from HEAD's current branch", async () => {
   const { getGitLog } = await import("./git.js");
   const repoDir = mkRepo();
