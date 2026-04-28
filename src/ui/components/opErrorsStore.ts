@@ -22,11 +22,16 @@ export interface OpErrorInput {
   exitCode?: number | null;
   /** Free-form long message when no stderr is available (thrown Error etc.). */
   message?: string;
+  /** Thread the operation was started from. When omitted, defaults to
+   *  the store's active-thread context (set via setActiveThread). null
+   *  is the explicit "no thread / stream-wide" sentinel. */
+  threadId?: string | null;
 }
 
-export interface OpError extends Required<Omit<OpErrorInput, "exitCode">> {
+export interface OpError extends Required<Omit<OpErrorInput, "exitCode" | "threadId">> {
   id: string;
   exitCode: number | null;
+  threadId: string | null;
   at: number;
   /** Has the user opened the page for this error? Used to gate the
    *  RailHud "unread" dot. */
@@ -41,6 +46,10 @@ export interface OpErrorsStore {
   dismiss(id: string): void;
   clear(): void;
   get(id: string): OpError | null;
+  /** Set the thread that newly-pushed errors are attributed to when
+   *  the caller doesn't pass an explicit threadId. App.tsx wires this
+   *  to the currently-selected thread. */
+  setActiveThread(threadId: string | null): void;
 }
 
 let nextSeq = 1;
@@ -50,6 +59,7 @@ function makeId(): string {
 
 export function createOpErrorsStore(): OpErrorsStore {
   let entries: OpError[] = [];
+  let activeThreadId: string | null = null;
   const listeners = new Set<() => void>();
 
   function emit() {
@@ -76,6 +86,7 @@ export function createOpErrorsStore(): OpErrorsStore {
         stdout: input.stdout ?? "",
         message: input.message ?? "",
         exitCode: input.exitCode ?? null,
+        threadId: input.threadId !== undefined ? input.threadId : activeThreadId,
         at: Date.now(),
         seen: false,
       };
@@ -108,6 +119,9 @@ export function createOpErrorsStore(): OpErrorsStore {
     },
     get(id) {
       return entries.find((e) => e.id === id) ?? null;
+    },
+    setActiveThread(threadId) {
+      activeThreadId = threadId;
     },
   };
 }

@@ -53,4 +53,28 @@ describe("opErrorsStore", () => {
     expect(snap[0]?.label).toBe("e24");
     expect(snap[19]?.label).toBe("e5");
   });
+
+  test("push tags entry with active thread when threadId not provided", () => {
+    const store = createOpErrorsStore();
+    store.setActiveThread("b-thread-1");
+    store.push({ label: "a" });
+    store.setActiveThread("b-thread-2");
+    store.push({ label: "b" });
+    store.setActiveThread(null);
+    store.push({ label: "c" });
+    const [c, b, a] = store.getSnapshot();
+    expect(a?.threadId).toBe("b-thread-1");
+    expect(b?.threadId).toBe("b-thread-2");
+    expect(c?.threadId).toBe(null);
+  });
+
+  test("explicit threadId in push input overrides active thread", () => {
+    const store = createOpErrorsStore();
+    store.setActiveThread("b-active");
+    store.push({ label: "a", threadId: "b-explicit" });
+    store.push({ label: "b", threadId: null });
+    const [b, a] = store.getSnapshot();
+    expect(a?.threadId).toBe("b-explicit");
+    expect(b?.threadId).toBe(null);
+  });
 });

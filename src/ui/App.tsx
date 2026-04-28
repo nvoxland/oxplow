@@ -124,7 +124,7 @@ import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { recordPageVisit } from "./api.js";
+import { forgetPage, recordPageVisit } from "./api.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -236,7 +236,7 @@ export function App() {
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
   const opErrorsStore = getOpErrorsStore();
-  const opErrors = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
+  const opErrorsAll = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.oxplowDesktop?.isElectron;
@@ -831,6 +831,13 @@ export function App() {
   // changes — matches the old TerminalPane's internal useEffect.
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
+  const opErrors = useMemo(
+    () => opErrorsAll.filter((e) => e.threadId === null || e.threadId === selectedThreadId),
+    [opErrorsAll, selectedThreadId],
+  );
+  useEffect(() => {
+    opErrorsStore.setActiveThread(selectedThreadId);
+  }, [selectedThreadId, opErrorsStore]);
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -2532,8 +2539,15 @@ export function App() {
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
           opErrors={opErrors}
-          onDismissOpError={(id) => opErrorsStore.dismiss(id)}
-          onClearOpErrors={() => opErrorsStore.clear()}
+          onDismissOpError={(id) => {
+            opErrorsStore.dismiss(id);
+            void forgetPage("op-error", `op-error:${id}`);
+          }}
+          onClearOpErrors={() => {
+            const ids = opErrorsAll.map((e) => e.id);
+            opErrorsStore.clear();
+            for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
+          }}
           onClearFinished={() => { void clearRecentlyFinished(selectedThreadId); }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
