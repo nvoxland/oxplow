@@ -25,9 +25,11 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `src/ui/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
 | `src/ui/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
-| `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + future bookmark/backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Reads only semantic CSS variables (skin via theme). |
+| `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
 | `src/ui/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
-| `src/ui/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward }` to descendants of an active page tab. Wrapped around each page-tab render in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. |
+| `src/ui/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
+| `src/ui/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
+| `src/ui/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
 | `src/ui/tabs/RouteLink.tsx` | Browser-style link button: left-click → in-tab navigate (or new tab when `pinnedSlot`), Cmd/Ctrl-click + middle-click + right-click → new tab. Falls back to caller-supplied `onNavigate` when used outside a `PageNavigationContext` (rail HUD, palette). |
 | `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
 | `src/ui/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
@@ -41,7 +43,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
 | `src/ui/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
 | `src/ui/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
-| `src/ui/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get a Backlinks panel. |
+| `src/ui/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(noteRef)` so they participate in tab-level history. |
 | `src/ui/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `src/ui/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
 | `src/ui/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
@@ -269,9 +271,11 @@ current ref with the top of the back / forward stack.
 `navigate(ref, { newTab: true })`, Cmd/Ctrl-click on a `BacklinksList`
 entry, middle-click, and right-click all bypass in-tab navigation and
 fall through to `handleOpenPage` (the legacy "open as new page tab"
-path). Files / notes / diffs / agent live in their own tab tracks
-and don't participate — opening one of those refs from a page body
-still produces a separate tab.
+path). Notes participate in tab-level history (they live in
+`threadPageTabs` like every other page kind); diffs and files have
+their own list state but still get the shared chrome wrap, so back/
+forward is no-op for them but the title row + nav bar UI is the same
+as everywhere else.
 
 The bookmark toggle and backlinks dropdown affordances on
 `PageNavBar` are scaffolded but currently inert; Phases 2 and 3 wire
@@ -284,9 +288,12 @@ derives `centerActive` from it. `setCenterActive` writes to the map for
 the currently selected thread. Switching threads automatically restores
 each thread's last active tab.
 
-The full tab-list is still stream-scoped (`fileSessions[stream.id]`,
-`noteTabs`, `diffTabs`). Per-thread tab-list scoping is a follow-on; the
-active-tab pointer is the bigger UX win and lands first.
+Note tabs are now per-thread (they live in `threadPageTabs` like every
+other page kind, so opening or closing a note in one thread doesn't
+leak into another). File and diff tab lists are still stream-scoped
+(`fileSessions[stream.id]`, `diffTabs`) — file content/dirty
+intentionally crosses threads within a stream; per-thread file tabs
+remain a future refactor.
 
 ## When to update this doc
 
