@@ -212,6 +212,21 @@ export class PageVisitStore {
   pruneOlderThan(cutoffIso: string): void {
     this.stateDb.run(`DELETE FROM page_visit WHERE t < ?`, cutoffIso);
   }
+
+  /**
+   * Forget every visit for a given page reference. Used when a page
+   * is deleted (real persistent page or virtual one like an op-error
+   * entry) so it disappears from rail history. Emits a single change
+   * event so subscribers refresh.
+   */
+  forget(refKind: string, refId: string): void {
+    this.stateDb.run(
+      `DELETE FROM page_visit WHERE ref_kind = ? AND ref_id = ?`,
+      refKind,
+      refId,
+    );
+    this.emitter.emit({ refId, refKind, threadId: null });
+  }
 }
 
 interface RawRow {

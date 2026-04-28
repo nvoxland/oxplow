@@ -359,9 +359,15 @@ IPC:
   "Most visited" toggle and the Visits dashboard.
 - `countPageVisitsByDay({refId,threadId,sinceT,untilT})` — daily
   bucketed counts for behavior-over-time charts.
+- `forgetPage(refKind, refId)` — wipes every visit row for a page
+  reference and emits `page-visit.changed`. Used when a page is
+  deleted (real persistent or virtual, e.g. an op-error entry being
+  dismissed/cleared) so it disappears from rail history. Generic — not
+  tied to any one page kind.
 
 Subscribe via `subscribePageVisitEvents(fn)`; bus event is
-`page-visit.changed` with `{ refId, refKind, threadId }`.
+`page-visit.changed` with `{ refId, refKind, threadId }`. The same
+event fires on `forget`, with `threadId: null` (the row spans threads).
 
 ## Code quality scans
 

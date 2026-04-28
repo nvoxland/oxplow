@@ -338,6 +338,7 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   handle("oxplow:listRecentPageVisits", (_event, opts) => currentRuntime.listRecentPageVisits(opts));
   handle("oxplow:topVisitedPages", (_event, opts) => currentRuntime.topVisitedPages(opts));
   handle("oxplow:countPageVisitsByDay", (_event, opts) => currentRuntime.countPageVisitsByDay(opts));
+  handle("oxplow:forgetPage", (_event, refKind: string, refId: string) => currentRuntime.forgetPage(refKind, refId));
   handle("oxplow:ping", () => currentRuntime.ping());
   handle("oxplow:logUi", (_event, payload: UiLogPayload) => currentRuntime.logUi(payload));
   handle("oxplow:updateEditorFocus", (_event, payload: EditorFocusPayload) => currentRuntime.updateEditorFocus(payload));

@@ -873,6 +873,10 @@ export class ElectronRuntime {
     return this.pageVisitStore.countByDay(opts);
   }
 
+  forgetPage(refKind: string, refId: string): void {
+    this.pageVisitStore.forget(refKind, refId);
+  }
+
   listAgentStatuses(streamId?: string): Array<{ streamId: string; threadId: string; status: AgentStatus }> {
     const out: Array<{ streamId: string; threadId: string; status: AgentStatus }> = [];
     for (const [threadId, status] of this.agentStatusByThread) {

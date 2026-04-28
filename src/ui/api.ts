@@ -1175,6 +1175,14 @@ export function subscribePageVisitEvents(onEvent: () => void): () => void {
   });
 }
 
+/** Drop every visit row for a given page reference. Used when a page
+ *  is deleted (real persistent or virtual, e.g. an op-error entry) so
+ *  it disappears from rail history. Generic — not tied to any one
+ *  page kind. */
+export async function forgetPage(refKind: string, refId: string): Promise<void> {
+  return desktopApi().forgetPage(refKind, refId);
+}
+
 export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,

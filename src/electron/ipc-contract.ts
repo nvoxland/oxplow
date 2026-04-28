@@ -354,6 +354,7 @@ export interface DesktopApi {
     Promise<import("../persistence/page-visit-store.js").TopVisitedRow[]>;
   countPageVisitsByDay(opts: import("../persistence/page-visit-store.js").CountByDayOpts):
     Promise<import("../persistence/page-visit-store.js").CountByDayRow[]>;
+  forgetPage(refKind: string, refId: string): Promise<void>;
   ping(): Promise<boolean>;
   logUi(payload: UiLogPayload): Promise<void>;
   updateEditorFocus(payload: EditorFocusPayload): Promise<void>;

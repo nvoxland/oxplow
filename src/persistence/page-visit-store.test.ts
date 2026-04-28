@@ -106,4 +106,16 @@ describe("PageVisitStore", () => {
     const rows = store.listRecent({ limit: 10 });
     expect(rows.map((r) => r.refId)).toEqual(["new"]);
   });
+
+  test("forget removes every visit for a refKind+refId and emits change", () => {
+    store.record({ refKind: "op-error", refId: "op-error:oe-1", payload: null, label: "E1", occurredAt: ISO(1) });
+    store.record({ refKind: "op-error", refId: "op-error:oe-1", payload: null, label: "E1", occurredAt: ISO(2) });
+    store.record({ refKind: "op-error", refId: "op-error:oe-2", payload: null, label: "E2", occurredAt: ISO(3) });
+    const events: string[] = [];
+    store.subscribe((c) => events.push(`${c.refKind}:${c.refId}`));
+    store.forget("op-error", "op-error:oe-1");
+    const rows = store.listRecent({ limit: 10 });
+    expect(rows.map((r) => r.refId)).toEqual(["op-error:oe-2"]);
+    expect(events).toEqual(["op-error:op-error:oe-1"]);
+  });
 });
