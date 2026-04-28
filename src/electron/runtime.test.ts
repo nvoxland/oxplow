@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildPriorPromptInProgressReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildPriorPromptInProgressReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt, wikiNoteSlugFromPath } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -335,6 +335,19 @@ test("buildPriorPromptInProgressReminder: picks the most-recently-touched in_pro
   const out = buildPriorPromptInProgressReminder([older, newer], now);
   expect(out).toContain("wi-newer");
   expect(out).not.toContain("wi-older");
+});
+
+describe("wikiNoteSlugFromPath", () => {
+  test("matches a worktree-relative note path", () => {
+    expect(wikiNoteSlugFromPath(".oxplow/notes/intro.md")).toBe("intro");
+    expect(wikiNoteSlugFromPath("./.oxplow/notes/auth-dive.md")).toBe("auth-dive");
+  });
+  test("rejects non-note paths", () => {
+    expect(wikiNoteSlugFromPath("src/foo.ts")).toBeNull();
+    expect(wikiNoteSlugFromPath(".oxplow/worktrees/x/something.md")).toBeNull();
+    expect(wikiNoteSlugFromPath(".oxplow/notes/sub/nested.md")).toBeNull();
+    expect(wikiNoteSlugFromPath(".oxplow/notes/intro.txt")).toBeNull();
+  });
 });
 
 test("decideStopDirective (via stop-hook-pipeline): empty thread allows stop", async () => {

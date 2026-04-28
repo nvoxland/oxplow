@@ -1137,6 +1137,38 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 45,
+    name: "wiki_note_thread_update",
+    up: (db) => {
+      // Per-thread attribution for wiki note edits. Notes themselves stay
+      // global (one body per slug, shared across streams), but the rail's
+      // Finished list is per-thread (matching how task efforts are
+      // attributed via work_item_effort.thread_id). Without this side
+      // table the rail showed the same global wiki tail under every
+      // thread.
+      //
+      // PK is (slug, thread_id) so each (note, thread) pair has at most
+      // one row — repeated edits in the same thread upsert in place.
+      // Index drives the rail's "most recent updates for this thread"
+      // query.
+      //
+      // No backfill: we can't know which thread historically owned
+      // existing edits. The rail will simply omit untouched notes until
+      // their next edit attributes them.
+      db.exec(`
+        CREATE TABLE wiki_note_thread_update (
+          slug TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (slug, thread_id)
+        );
+
+        CREATE INDEX idx_wiki_note_thread_update_recent
+          ON wiki_note_thread_update(thread_id, updated_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {
