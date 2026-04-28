@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
 import type { CommandId, EditorFocusPayload, LspEvent, MenuGroupSnapshot, OxplowEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
+import { registerExternalContentLockdown } from "./external-content-lockdown.js";
 
 let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -52,6 +53,12 @@ async function main() {
   });
 
   await app.whenReady();
+
+  // Apply security lockdown for any embedded web content (external-url
+  // tabs use a sandboxed <webview>). Must run before the first window
+  // is created so will-attach-webview / web-contents-created listeners
+  // are in place.
+  registerExternalContentLockdown();
 
   const lockResult = acquireProjectLock(projectDir);
   if (!lockResult.ok) {
