@@ -24,7 +24,23 @@ export type ParsedLink =
   | { kind: "anchor" }
   | { kind: "external" }
   | { kind: "internal"; slug: string }
-  | { kind: "file"; path: string; line?: number };
+  | { kind: "file"; path: string; line?: number }
+  | { kind: "git-commit"; sha: string };
+
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * Heuristic: does a wikilink target look like a git commit reference?
+ * Either the explicit `git:<sha>` form or a bare 7-40 char hex string.
+ * Bare-hex detection is safe alongside file paths because file targets
+ * always carry a slash or recognizable extension; safe alongside note
+ * slugs because slugs are kebab-case English words, not hex.
+ */
+export function parseGitRefTarget(target: string): string | null {
+  const stripped = target.startsWith("git:") ? target.slice(4) : target;
+  if (!SHA_RE.test(stripped)) return null;
+  return stripped.toLowerCase();
+}
 
 /**
  * Classify a markdown link href. Shared by NoteTab (wiki navigation) and
@@ -44,6 +60,11 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
       return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]) };
     }
     return { kind: "file", path: raw };
+  }
+  if (rawHref.startsWith("gitcommit:")) {
+    const sha = rawHref.slice("gitcommit:".length);
+    if (!sha) return { kind: "empty" };
+    return { kind: "git-commit", sha };
   }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
@@ -96,6 +117,13 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
       const target = rawTarget.trim();
       const display = (label ?? "").trim() || target;
       if (!target) return _match;
+      const sha = parseGitRefTarget(target);
+      if (sha) {
+        // Display short sha when the user didn't supply a label and the
+        // raw target is the full hex (avoid 40-char inline link text).
+        const shortDisplay = label ? display : sha.slice(0, 7);
+        return `[${shortDisplay}](gitcommit:${sha})`;
+      }
       if (looksLikeFilePath(target)) {
         return `[${display}](file:${target})`;
       }
@@ -113,6 +141,8 @@ export interface MarkdownViewProps {
   onOpenInNewTab?: (slug: string) => void;
   /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
   onOpenFile?: (path: string, line?: number) => void;
+  /** Optional git-commit-link handler — invoked for `[[<sha>]]` / `[[git:<sha>]]` wikilinks. */
+  onOpenCommit?: (sha: string) => void;
   /**
    * Optional handler for external (http/https) link clicks. When present,
    * left-click on an external link calls this instead of opening in the
@@ -151,6 +181,7 @@ export function MarkdownView({
   onNavigateInternal,
   onOpenInNewTab,
   onOpenFile,
+  onOpenCommit,
   onOpenExternalUrl,
   renderMermaid = false,
   maxHeight,
@@ -175,12 +206,16 @@ export function MarkdownView({
       onOpenFile?.(parsed.path, parsed.line);
       return;
     }
+    if (parsed.kind === "git-commit") {
+      onOpenCommit?.(parsed.sha);
+      return;
+    }
     // Internal link
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenExternalUrl]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
@@ -212,8 +247,16 @@ export function MarkdownView({
       items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
       return items;
     }
+    if (parsed.kind === "git-commit") {
+      const items: MenuItem[] = [];
+      if (onOpenCommit) {
+        items.push({ id: "open-commit", label: "Open commit", enabled: true, run: () => onOpenCommit(parsed.sha) });
+      }
+      items.push({ id: "copy-sha", label: "Copy SHA", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.sha).catch(() => {}); } });
+      return items;
+    }
     return [];
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenExternalUrl]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.

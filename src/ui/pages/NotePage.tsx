@@ -14,6 +14,8 @@ export interface NotePageProps {
   onOpenNote(slug: string): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
+  /** Optional handler for git-commit wikilink clicks — routes to GitCommitPage. */
+  onOpenCommit?(sha: string): void;
   /** Optional handler for external URL clicks — routes to in-app tab. */
   onOpenExternalUrl?(url: string): void;
 }
@@ -23,7 +25,7 @@ export interface NotePageProps {
  * through the page chrome so a Backlinks panel sits at the bottom of
  * every wiki note alongside the existing in-tab freshness UI.
  */
-export function NotePage({ stream, slug, threadWork, onClosed, onOpenNote, onOpenFile, onOpenPage, onOpenExternalUrl }: NotePageProps) {
+export function NotePage({ stream, slug, threadWork, onClosed, onOpenNote, onOpenFile, onOpenPage, onOpenCommit, onOpenExternalUrl }: NotePageProps) {
   const backlinkEntries = useBacklinks(noteRef(slug), stream, threadWork);
   const backlinks = {
     count: backlinkEntries.length,
@@ -47,6 +49,7 @@ export function NotePage({ stream, slug, threadWork, onClosed, onOpenNote, onOpe
           onClosed={onClosed}
           onOpenNoteInNewTab={onOpenNote}
           onOpenFile={onOpenFile}
+          onOpenCommit={onOpenCommit}
           onOpenExternalUrl={onOpenExternalUrl}
         />
       </div>

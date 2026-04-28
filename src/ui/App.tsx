@@ -112,7 +112,7 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
-import { closedThreadsRef, externalUrlRef, fileRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
@@ -1489,6 +1489,12 @@ export function App() {
     handleOpenPageRef.current?.(externalUrlRef(verdict.url));
   }, []);
 
+  /** Open the GitCommitPage for a wikilink-resolved commit SHA. */
+  const handleOpenCommit = useCallback((sha: string) => {
+    if (!sha) return;
+    handleOpenPageRef.current?.(gitCommitRef(sha));
+  }, []);
+
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
     const orderedFiles: string[] = [];
@@ -1849,6 +1855,7 @@ export function App() {
             onOpenNote={handleOpenNote}
             onOpenFile={(p) => { void handleOpenFile(p); }}
             onOpenPage={noteNavOpen}
+            onOpenCommit={handleOpenCommit}
             onOpenExternalUrl={handleOpenExternalUrl}
           />
         ) : null,

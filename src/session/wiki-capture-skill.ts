@@ -100,6 +100,7 @@ Files referenced: \`src/foo.ts\`, \`src/bar/baz.ts\`
   - \`[[src/foo.ts]]\` — file
   - \`[[src/foo.ts:42]]\` — file at line 42
   - \`[[src/foo.ts|the foo helper]]\` — custom display text
+  - \`[[abc1234]]\` or \`[[git:abc1234]]\` — git commit (SHA, 7-40 hex)
   - \`[[some-other-note]]\` — link to another wiki note by slug
 - Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
   calls \`onDrop\` after validating the target."

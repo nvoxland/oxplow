@@ -426,17 +426,20 @@ title → body → file backlinks before creating), slug/body
 conventions, and the "fold in `oxplow__get_thread_notes` from any
 query subagents this turn dispatched" guidance.
 
-**Wikilinks for file references.** The skill instructs the agent to
-write repo file references as `[[path/to/file.ts]]` wikilinks, with
-optional `:line` suffix and `|display` override. Backticks remain for
-code-ish identifiers. The wiki renderer
+**Wikilinks for file + commit references.** The skill instructs the
+agent to write repo file references as `[[path/to/file.ts]]` wikilinks,
+with optional `:line` suffix and `|display` override. Git commits are
+written as `[[abc1234]]` (bare 7-40 char hex) or `[[git:abc1234]]` —
+both resolve to the GitCommitPage. Backticks remain for code-ish
+identifiers. The wiki renderer
 (`src/ui/components/Notes/MarkdownView.tsx`, `preprocessWikilinks`)
-rewrites `[[ ]]` into clickable links — file-shaped targets become
-`file:` links that open in an editor tab via `onOpenFile`; bare slugs
-route to wiki navigation. The reference parser
-(`src/persistence/wiki-note-refs.ts`) already picks paths out of `[[ ]]`
-because the bracket characters fall outside its lookbehind, so
-backlinks/freshness work without parser changes. The
+rewrites `[[ ]]` into clickable links — SHA-shaped targets become
+`gitcommit:` links that dispatch through `onOpenCommit`; file-shaped
+targets become `file:` links that open in an editor tab via
+`onOpenFile`; bare slugs route to wiki navigation. The reference
+parser (`src/persistence/wiki-note-refs.ts`) already picks paths out
+of `[[ ]]` because the bracket characters fall outside its lookbehind,
+so backlinks/freshness work without parser changes. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits
 (see "Wiki-capture is a UserPromptSubmit hint" above) auto-loads the
 skill; the `/note` slash command at `.claude/commands/note.md`

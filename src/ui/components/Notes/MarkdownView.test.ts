@@ -96,3 +96,51 @@ test("preprocessWikilinks: nested-looking brackets do not match", () => {
   expect(preprocessWikilinks("[[ ]]"))
     .toBe("[[ ]]");
 });
+
+test("preprocessWikilinks: bare 7-char hex resolves to a git-commit link", () => {
+  // The display text shrinks to the canonical short SHA so a 40-char raw
+  // target doesn't blow up inline prose.
+  expect(preprocessWikilinks("introduced in [[abc1234]]"))
+    .toBe("introduced in [abc1234](gitcommit:abc1234)");
+});
+
+test("preprocessWikilinks: full 40-char SHA renders short display, full target", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  expect(preprocessWikilinks(`see [[${sha}]]`))
+    .toBe(`see [0123456](gitcommit:${sha})`);
+});
+
+test("preprocessWikilinks: explicit git: prefix", () => {
+  expect(preprocessWikilinks("[[git:deadbeef]]"))
+    .toBe("[deadbee](gitcommit:deadbeef)");
+});
+
+test("preprocessWikilinks: |display label overrides short-sha shrinking", () => {
+  expect(preprocessWikilinks("[[abc1234|the migration commit]]"))
+    .toBe("[the migration commit](gitcommit:abc1234)");
+});
+
+test("preprocessWikilinks: SHA detection is case-insensitive and normalizes to lowercase", () => {
+  // Display text + href both normalize to lowercase so two notes spelling
+  // the same sha differently render identically and hit the same tab.
+  expect(preprocessWikilinks("[[ABC1234]]"))
+    .toBe("[abc1234](gitcommit:abc1234)");
+});
+
+test("preprocessWikilinks: 6-char hex is too short to be a SHA — treated as slug", () => {
+  expect(preprocessWikilinks("[[abc123]]"))
+    .toBe("[abc123](abc123)");
+});
+
+test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
+  expect(preprocessWikilinks("[[abc-1234]]"))
+    .toBe("[abc-1234](abc-1234)");
+});
+
+test("parseMarkdownLink: gitcommit: scheme", () => {
+  expect(parseMarkdownLink("gitcommit:abc1234")).toEqual({ kind: "git-commit", sha: "abc1234" });
+});
+
+test("parseMarkdownLink: gitcommit: with empty target", () => {
+  expect(parseMarkdownLink("gitcommit:")).toEqual({ kind: "empty" });
+});
