@@ -121,6 +121,18 @@ to flip it back to `in_progress`, redo the work, then `complete_task`
 back to `done`. Filing a "Fix what I just did" task
 fragments the history.
 
+**Mid-turn user prompts are a new ask boundary.** When a
+`<system-reminder>` injects a new user message while you are still
+working on something, treat it as a fresh ask — not as more scope for
+the current `in_progress` item. Default action: file a new row before
+the next edit. Only stay inside the current item if the new prompt is
+a direct correction to that exact item; otherwise the rule above
+applies. The Work panel must reflect every distinct concern the user
+raised, not just the first one. Runtime nudge: a UserPromptSubmit
+reminder fires whenever a new prompt arrives and the thread already
+has an `in_progress` item from a prior prompt — it points at the open
+item and asks you to choose explicitly. Don't ignore it.
+
 **File backlog ideas as you have them.** When you notice a follow-up
 worth doing later — a deferred polish item, a TODO surfaced while
 finishing something else — file it as a `ready` work item right then.

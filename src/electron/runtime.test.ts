@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
+import { applyStatusTransition, buildThreadMcpConfig, buildRecentDoneReminder, buildPriorPromptInProgressReminder, buildSessionContextBlock, buildWikiCaptureHint, computeEffortFiles, describeHookHealth, isInsideWorktree, isReadIntentTool, isWriteIntentTool, shouldAcceptHookFilePath, terminalInputIsInterrupt } from "./runtime.js";
 import { ThreadStore } from "../persistence/thread-store.js";
 import { SnapshotStore } from "../persistence/snapshot-store.js";
 import { StreamStore } from "../persistence/stream-store.js";
@@ -294,6 +294,45 @@ test("buildRecentDoneReminder: picks the most recent when multiple eligible item
   const older = makeDoneItem({ id: "wi-older", updated_at: "2024-05-01T11:50:00Z" });
   const newer = makeDoneItem({ id: "wi-newer", updated_at: "2024-05-01T11:58:00Z" });
   const out = buildRecentDoneReminder([older, newer], now);
+  expect(out).toContain("wi-newer");
+  expect(out).not.toContain("wi-older");
+});
+
+test("buildPriorPromptInProgressReminder: points at an in_progress item with the new-ask instructions", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const open = makeDoneItem({
+    id: "wi-open",
+    title: "Wire up the paste handler",
+    status: "in_progress" as WorkItemStatus,
+    updated_at: "2024-05-01T11:50:00Z",
+  });
+  const out = buildPriorPromptInProgressReminder([open], now);
+  expect(out).toContain("<prior-prompt-in-progress-reminder>");
+  expect(out).toContain("Wire up the paste handler");
+  expect(out).toContain("create_work_item");
+  expect(out).toContain("update_work_item");
+  expect(out).toContain("Bundling a new ask");
+});
+
+test("buildPriorPromptInProgressReminder: empty when no in_progress items exist", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const done = makeDoneItem({ id: "wi-done", updated_at: "2024-05-01T11:55:00Z" });
+  expect(buildPriorPromptInProgressReminder([done], now)).toBe("");
+});
+
+test("buildPriorPromptInProgressReminder: picks the most-recently-touched in_progress item", () => {
+  const now = Date.parse("2024-05-01T12:00:00Z");
+  const older = makeDoneItem({
+    id: "wi-older",
+    status: "in_progress" as WorkItemStatus,
+    updated_at: "2024-05-01T10:00:00Z",
+  });
+  const newer = makeDoneItem({
+    id: "wi-newer",
+    status: "in_progress" as WorkItemStatus,
+    updated_at: "2024-05-01T11:30:00Z",
+  });
+  const out = buildPriorPromptInProgressReminder([older, newer], now);
   expect(out).toContain("wi-newer");
   expect(out).not.toContain("wi-older");
 });

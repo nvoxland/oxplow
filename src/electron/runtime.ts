@@ -1664,6 +1664,10 @@ export class ElectronRuntime {
     return buildRecentDoneReminder(this.workItemStore.listItems(threadId), Date.now());
   }
 
+  private buildPriorPromptInProgressReminder(threadId: string): string {
+    return buildPriorPromptInProgressReminder(this.workItemStore.listItems(threadId), Date.now());
+  }
+
   private resolveActiveThreadForPrompt(streamId: string): Thread | null {
     const activeId = this.threadStore.list(streamId).activeThreadId;
     if (!activeId) return null;
@@ -1896,11 +1900,15 @@ export class ElectronRuntime {
         .listItems(envelope.threadId)
         .some((item) => item.status === "in_progress");
       const filedThisTurn = this.filedThisTurnByThread.has(envelope.threadId);
+      const toolInputFilePath = extractEditedFilePath(
+        (envelope.payload as { tool_input?: unknown })?.tool_input,
+      );
       const filingDeny = buildFilingEnforcementPreToolDeny({
         thread,
         toolName,
         hasInProgressItem: inProgressOpen,
         filedThisTurn,
+        filePath: toolInputFilePath,
       });
       if (filingDeny) return { body: filingDeny };
     }
@@ -1929,6 +1937,17 @@ export class ElectronRuntime {
       // duplicate "Fix …" task.
       const redoReminder = envelope.threadId
         ? this.buildRecentDoneReminder(envelope.threadId)
+        : "";
+      // When a new user prompt arrives while an in_progress item from a
+      // prior prompt is still open, nudge the agent to either file a
+      // fresh row (new concern) or explicitly reopen the existing one
+      // (fix/redo). Catches the failure mode where mid-turn user
+      // messages get silently bundled into whatever item happened to be
+      // open. Pairs with the recent-done reminder above — that fires
+      // when the prior item already closed; this one fires when it's
+      // still running.
+      const priorPromptInProgressReminder = envelope.threadId
+        ? this.buildPriorPromptInProgressReminder(envelope.threadId)
         : "";
       // Wiki-capture hint: when the prompt looks like exploration /
       // synthesis, nudge the agent up-front to plan on writing a wiki
@@ -1965,7 +1984,7 @@ export class ElectronRuntime {
       // session-context / focus / redo blocks the agent treats it as a
       // post-answer afterthought and skips the note write; leading with
       // it sets the turn's frame as "synthesis = write a note".
-      const additionalContext = [wikiCaptureHint, sessionContext, focusContext, redoReminder].filter(Boolean).join("\n\n");
+      const additionalContext = [wikiCaptureHint, sessionContext, focusContext, redoReminder, priorPromptInProgressReminder].filter(Boolean).join("\n\n");
       if (additionalContext) {
         return {
           body: {
@@ -2664,6 +2683,7 @@ function buildThreadAgentPrompt(
     `WORK ITEMS TRACK THE WORK; THEY ARE NOT THE WORK. Filing an item is bookkeeping — the deliverable is the code/docs/config change. Before your first Edit/Write/MultiEdit to project files in a turn, you MUST have an \`in_progress\` work item attributable to this turn — either pre-existing and being continued, or newly created via \`mcp__oxplow__create_work_item\` (status=in_progress) or \`mcp__oxplow__update_work_item\` (→ in_progress). There is no trivial-edit carve-out: typos, single-line CSS tweaks, and one-file fixes all require an item. The Stop hook will block any turn that wrote files without a filing/transition tool call. Pick the shape by structure: \`create_work_item\` with kind \`task\` for one coherent change (even if it spans a few files); \`file_epic_with_children\` when the work has ≥3 sub-steps a reviewer would check off independently. Test: could a child close to \`done\` on its own and have the user inspect just that piece? If no, it's one task. No "auto" placeholder items. **When the work (or each epic child) actually ships, close that row in the same turn** via \`mcp__oxplow__complete_task\` (pass \`touchedFiles\` so Local History can attribute writes) or \`update_work_item\` with \`status: "blocked"\` (need a user decision). Closing an epic does NOT cascade to children — pass them through \`transition_work_items\` in the same turn or the rollup will pull the epic back into To Do. REDO RULE: if the new edits fix/continue something you just closed to \`done\`, REOPEN that item (\`update_work_item\` → in_progress) and re-close it; do NOT file a parallel "Fix …" task. Load the oxplow-runtime skill for tool details.`,
     `READY VS IN_PROGRESS — DON'T CONFLATE THEM. \`status: "ready"\` means "I noticed this for later" (a backlog item). \`status: "in_progress"\` (with edits in the same turn) means "I'm doing this now". When the user gives you a direct instruction ("do this", "yes, proceed", "fix that", "implement X"), default to in_progress + ship in the same turn. Only file as ready when YOU surfaced an idea the user didn't ask for, or when the user explicitly says "log this" / "file as backlog" / "remember to". Filing a ready item in response to "do those" is a misread of the request.`,
     `WHEN YOU ASK THE USER A QUESTION, STOP AND WAIT. If your reply ends with a real clarifying question, an A/B/C choice, or any other ask where the user owns the next move, call \`mcp__oxplow__await_user({ threadId, question })\` and end your turn. Do NOT pick up the next queue item, do NOT call \`read_work_options\`, do NOT dispatch a subagent, do NOT start unrelated work. The Stop hook honours \`await_user\` — it allows-stop and suppresses every directive (commit, audit, ready-work, filing-enforcement) until the user replies. The flag clears automatically on the next user prompt. Don't call \`await_user\` for rhetorical asides or status updates — only for genuine open questions.`,
+    `AFTER \`ExitPlanMode\` APPROVAL, KEEP GOING. Plan approval IS the go-ahead — file or transition the implementation work item(s) and start editing in the same turn. Do not pause for a separate "shall I start?" check, and don't \`await_user\` unless something genuinely new is unclear.`,
     `WIKI CAPTURE: when a turn is exploration / synthesis (architecture, overview, "how does X work", trace, walk-through, summary), write the answer into \`.oxplow/notes/<slug>.md\` via the \`oxplow-wiki-capture\` skill — search existing notes first, append-or-create, then \`mcp__oxplow__resync_note\`. Allowed on read-only threads too (the write guard exempts the notes dir).`,
   ];
   if (thread.status !== "active") {
@@ -2768,6 +2788,45 @@ export function buildRecentDoneReminder(
     "If the new prompt is a GENUINELY separate concern, file a new item as usual and ignore this reminder.",
     "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id. The id is internal to tool calls; the user doesn't see or know it.",
     "</recent-done-reminder>",
+  ].join("\n");
+}
+
+/**
+ * When a UserPromptSubmit arrives and at least one `in_progress` item
+ * already exists on this thread (i.e. it was started under a prior
+ * prompt and is still open), produce a reminder pointing at it. The
+ * agent then either files a fresh row (new concern) or explicitly
+ * reopens the existing one (fix/redo) — instead of silently bundling
+ * the new ask into whatever happened to be open. Returns empty when
+ * the thread has no `in_progress` items.
+ */
+export function buildPriorPromptInProgressReminder(
+  items: WorkItem[],
+  now: number,
+): string {
+  // Pick the most-recently-touched in_progress item — that's the one
+  // the agent's most likely to bundle a new ask into.
+  let candidate: { id: string; title: string; ts: number } | null = null;
+  for (const item of items) {
+    if (item.status !== "in_progress") continue;
+    const ts = Date.parse(item.updated_at);
+    // Items in_progress in the future (clock skew) shouldn't suppress
+    // the reminder — fall through with ts = -Infinity instead.
+    const safeTs = Number.isFinite(ts) && ts <= now ? ts : -Infinity;
+    if (!candidate || safeTs > candidate.ts) {
+      candidate = { id: item.id, title: item.title, ts: safeTs };
+    }
+  }
+  if (!candidate) return "";
+  return [
+    "<prior-prompt-in-progress-reminder>",
+    `A new user prompt arrived while "${candidate.title}" (id ${candidate.id}) is still in_progress on this thread from a prior prompt.`,
+    "Default to treating this as a NEW ask:",
+    "  • Separate concern → `mcp__oxplow__create_work_item` with status=in_progress, then ship and `complete_task`.",
+    `  • Fix/redo of "${candidate.title}" → \`mcp__oxplow__update_work_item\` itemId="${candidate.id}" to keep working under that item; do NOT bundle silently.`,
+    "Bundling a new ask into an unrelated open item makes the Work panel under-report the concerns the user actually raised.",
+    "When you mention this item to the user in chat, refer to it by its quoted title — never by its `wi-…` id.",
+    "</prior-prompt-in-progress-reminder>",
   ].join("\n");
 }
 

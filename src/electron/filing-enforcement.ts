@@ -36,6 +36,28 @@ export interface FilingEnforcementContext {
   toolName: string;
   hasInProgressItem: boolean;
   filedThisTurn: boolean;
+  /**
+   * Absolute path being written, when the tool input carries one
+   * (Write/Edit/MultiEdit/NotebookEdit all do). Used to exempt writes
+   * to the Plan-mode plan file (`~/.claude/plans/<slug>.md`) — that
+   * file is owned by the harness's plan workflow, not by project work,
+   * and the harness denies every other tool while plan mode is on, so
+   * blocking the plan-file write here would dead-lock the workflow.
+   */
+  filePath?: string | null;
+}
+
+/** True for paths under the harness's plan-mode plans directory. */
+export function isPlanModePlanFile(filePath: string | null | undefined): boolean {
+  if (!filePath) return false;
+  // Stable convention surfaced via the plan-mode system message:
+  // `~/.claude/plans/<slug>.md`. The harness owns the directory, so a
+  // simple prefix match is sufficient — and intentionally narrow, so
+  // the carve-out can't drift to other `.claude/` files.
+  const home = process.env.HOME ?? "";
+  if (!home) return false;
+  const prefix = `${home}/.claude/plans/`;
+  return filePath.startsWith(prefix) && filePath.endsWith(".md");
 }
 
 export function buildFilingEnforcementPreToolDeny(
@@ -46,6 +68,7 @@ export function buildFilingEnforcementPreToolDeny(
   if (!ALWAYS_WRITE_INTENT_TOOL_NAMES.has(ctx.toolName)) return null;
   if (ctx.hasInProgressItem) return null;
   if (ctx.filedThisTurn) return null;
+  if (isPlanModePlanFile(ctx.filePath)) return null;
   return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

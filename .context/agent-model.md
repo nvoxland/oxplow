@@ -205,6 +205,27 @@ formatters) without representing authored change worth filing. The
 Stop-hook in-progress audit still fires for any lingering items, so
 real edits made via Bash under an open item are unaffected.
 
+**Plan-mode plan file is exempt** (`isPlanModePlanFile` in
+`filing-enforcement.ts`). Writes whose `tool_input.file_path` lands
+under `$HOME/.claude/plans/<slug>.md` skip the filing guard — that
+file is owned by the harness's plan workflow, not project work, and
+plan mode denies every other tool while it's on, so blocking the
+plan-file write would dead-lock the workflow. The carve-out is
+narrow: only paths under `.claude/plans/` ending in `.md`.
+
+**Mid-turn-prompt reminder (UserPromptSubmit).** When a new
+`UserPromptSubmit` arrives on the writer thread and the thread
+already has any `in_progress` item from a prior prompt, the runtime
+injects a `<prior-prompt-in-progress-reminder>` block into
+`additionalContext` via `buildPriorPromptInProgressReminder`. It
+names the open item and tells the agent to either file a new row
+(separate concern) or explicitly reopen the existing one (fix/redo)
+— so multi-prompt turns don't quietly pile new asks into whichever
+item was already open. Pairs with the recent-done reminder: that one
+fires when the prior item already closed, this one fires when it's
+still running. Builder lives in `runtime.ts` next to
+`buildRecentDoneReminder`.
+
 **Wiki-capture is a UserPromptSubmit hint, not a Stop directive.**
 When the user's prompt looks like exploration / synthesis (regex match
 on "how does", "explain", "trace", "describe", "walk me through",
