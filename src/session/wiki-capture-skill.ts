@@ -95,9 +95,22 @@ Files referenced: \`src/foo.ts\`, \`src/bar/baz.ts\`
 \`\`\`
 
 - Append entries with \`## <date> — <focus>\` headings.
-- Inline file references as backticked workspace-relative paths
-  (\`src/foo.ts\`) — the watcher's parser picks them up so the note
-  shows backlinks and tracks freshness.
+- Inline file references as **wikilinks** with workspace-relative
+  paths: \`[[src/foo.ts]]\`. The renderer turns these into clickable
+  links that open the file in an editor tab, and the watcher's parser
+  picks them up so the note shows backlinks and tracks freshness.
+- Backticks stay reserved for code-ish things (identifiers, types,
+  shell commands, config keys) — \`EditorPane\`, \`bun test\`,
+  \`NODE_ENV\`. If it's a path the reader should be able to click,
+  use a wikilink, not backticks.
+- Wikilink target shapes:
+  - \`[[src/foo.ts]]\` — file
+  - \`[[src/foo.ts:42]]\` — file at line 42
+  - \`[[src/foo.ts|the foo helper]]\` — custom display text
+  - \`[[abc1234]]\` or \`[[git:abc1234]]\` — git commit (SHA, 7-40 hex)
+  - \`[[some-other-note]]\` — link to another wiki note by slug
+- Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
+  calls \`onDrop\` after validating the target."
 
 ## Write mechanics
 

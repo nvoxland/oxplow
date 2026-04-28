@@ -31,9 +31,16 @@ interface Props {
   onClosed: () => void;
   onOpenNoteInNewTab: (slug: string) => void;
   onOpenFile: (path: string) => void;
+  /** Optional handler for git-commit wikilink clicks — opens the
+   *  GitCommitPage for the SHA. */
+  onOpenCommit?: (sha: string) => void;
+  /** Optional handler for external (http/https) link clicks — host opens
+   *  it as an in-app external-url tab. Falls back to OS browser when
+   *  unset. */
+  onOpenExternalUrl?: (url: string) => void;
 }
 
-export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTab, onOpenFile }: Props) {
+export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
   const [history, setHistory] = useState<string[]>([initialSlug]);
   const [historyIdx, setHistoryIdx] = useState(0);
   const currentSlug = history[historyIdx] ?? initialSlug;
@@ -271,6 +278,9 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
             body={draftInitialized ? draft : body}
             onNavigateInternal={navigate}
             onOpenInNewTab={onOpenNoteInNewTab}
+            onOpenFile={(path) => onOpenFile(path)}
+            onOpenCommit={onOpenCommit}
+            onOpenExternalUrl={onOpenExternalUrl}
             renderMermaid
           />
         )}

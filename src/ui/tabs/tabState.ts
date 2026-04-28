@@ -37,7 +37,8 @@ export type PageKind =
   | "stream-settings"
   | "thread-settings"
   | "closed-threads"
-  | "op-error";
+  | "op-error"
+  | "external-url";
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

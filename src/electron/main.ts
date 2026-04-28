@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join, resolve } from "node:path";
 import { ElectronRuntime } from "./runtime.js";
 import type { CommandId, EditorFocusPayload, LspEvent, MenuGroupSnapshot, OxplowEvent, TerminalEvent, UiLogPayload } from "./ipc-contract.js";
+import { registerExternalContentLockdown } from "./external-content-lockdown.js";
 
 let runtime: ElectronRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -52,6 +53,12 @@ async function main() {
   });
 
   await app.whenReady();
+
+  // Apply security lockdown for any embedded web content (external-url
+  // tabs use a sandboxed <webview>). Must run before the first window
+  // is created so will-attach-webview / web-contents-created listeners
+  // are in place.
+  registerExternalContentLockdown();
 
   const lockResult = acquireProjectLock(projectDir);
   if (!lockResult.ok) {
@@ -134,6 +141,12 @@ function createWindow(openDevTools: boolean, title: string) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Enables <webview> tag for the in-app external-url tab. Per-guest
+      // attributes (sandbox=yes, partition=persist:external) plus the
+      // will-attach-webview / setWindowOpenHandler / permission lockdown
+      // configured in registerExternalContentLockdown gate what guests
+      // can do.
+      webviewTag: true,
     },
   });
 
@@ -207,6 +220,13 @@ function registerIpc(currentRuntime: ElectronRuntime) {
   // non-text-flavor-primary payloads. Reading via Electron's main-process
   // clipboard goes straight to NSPasteboard, bypassing both limitations.
   handle("oxplow:clipboardReadText", () => clipboard.readText());
+  handle("oxplow:openExternalUrl", async (_event, url: string) => {
+    const { classifyExternalUrl } = await import("../ui/external-url-allowlist.js");
+    const verdict = classifyExternalUrl(url);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    void shell.openExternal(verdict.url);
+    return { ok: true };
+  });
   handle("oxplow:listGitRefs", () => currentRuntime.listGitRefs());
   handle("oxplow:renameGitBranch", (_event, from: string, to: string) => currentRuntime.renameGitBranch(from, to));
   handle("oxplow:deleteGitBranch", (_event, branch: string, options?: { force?: boolean }) =>

@@ -62,6 +62,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | "new-stream" | "new-work-item"
 | "stream-settings" | "thread-settings"
 | "op-error"
+| "external-url"
 ```
 
 `agent` is implicit per thread. The `*-index` kinds are full-page
@@ -87,6 +88,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | stream-settings | `stream-settings:<streamId>` | `stream-settings:s-7` |
 | thread-settings | `thread-settings:<threadId>` | `thread-settings:t-3` |
 | op-error | `op-error:<errorId>` | `op-error:oe-abc123` |
+| external-url | `external-url:<url>` | `external-url:https://example.com/path` |
 
 ## Rail HUD contract
 

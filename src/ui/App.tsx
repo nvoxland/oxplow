@@ -37,6 +37,7 @@ import {
   subscribeWorkspaceEvents,
   listRecentlyFinished,
   clearRecentlyFinished,
+  openExternalUrl,
   type FinishedEntry,
   getBranchChanges,
   subscribeGitRefsEvents,
@@ -103,6 +104,7 @@ import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
+import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
@@ -114,8 +116,9 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
+import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1476,6 +1479,28 @@ export function App() {
     setCenterActive((current) => (current === `note:${slug}` ? "agent" : current));
   }, []);
 
+  /**
+   * Open an http(s) URL as an in-app sandboxed external-url tab.
+   * Validates through the scheme allowlist; rejected URLs are routed to
+   * the OS browser via window.open (which the main process turns into a
+   * shell.openExternal call) so the user still gets to follow the link
+   * even if it can't be embedded.
+   */
+  const handleOpenExternalUrl = useCallback((rawUrl: string) => {
+    const verdict = classifyExternalUrl(rawUrl);
+    if (!verdict.ok) {
+      window.open(rawUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    handleOpenPageRef.current?.(externalUrlRef(verdict.url));
+  }, []);
+
+  /** Open the GitCommitPage for a wikilink-resolved commit SHA. */
+  const handleOpenCommit = useCallback((sha: string) => {
+    if (!sha) return;
+    handleOpenPageRef.current?.(gitCommitRef(sha));
+  }, []);
+
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
     const orderedFiles: string[] = [];
@@ -1626,7 +1651,8 @@ export function App() {
       case "thread-settings":
       case "new-stream":
       case "new-work-item":
-      case "closed-threads": {
+      case "closed-threads":
+      case "external-url": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {
@@ -1888,6 +1914,8 @@ export function App() {
             onOpenNote={handleOpenNote}
             onOpenFile={(p) => { void handleOpenFile(p); }}
             onOpenPage={noteNavOpen}
+            onOpenCommit={handleOpenCommit}
+            onOpenExternalUrl={handleOpenExternalUrl}
           />
         ) : null,
       });
@@ -2153,6 +2181,38 @@ export function App() {
           label: "Closed threads",
           closable: true,
           render: () => <ClosedThreadsPage stream={stream} />,
+        });
+      } else if (ref.kind === "external-url") {
+        const externalUrl = (ref.payload as { url?: string } | null)?.url ?? "";
+        let label = externalUrl;
+        try {
+          const u = new URL(externalUrl);
+          label = u.host + (u.pathname && u.pathname !== "/" ? u.pathname : "");
+        } catch { /* keep raw */ }
+        tabs.push({
+          id: ref.id,
+          label: label.length > 40 ? label.slice(0, 40) + "…" : label,
+          closable: true,
+          contextMenu: [
+            {
+              id: "external-url.open-in-browser",
+              label: "Open in browser",
+              enabled: true,
+              run: () => { void openExternalUrl(externalUrl); },
+            },
+            {
+              id: "external-url.copy",
+              label: "Copy URL",
+              enabled: true,
+              run: () => { void navigator.clipboard.writeText(externalUrl).catch(() => {}); },
+            },
+          ],
+          render: () => (
+            <ExternalUrlPage
+              url={externalUrl}
+              onOpenInBrowser={(u) => { void openExternalUrl(u); }}
+            />
+          ),
         });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";

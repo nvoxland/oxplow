@@ -149,3 +149,20 @@ export function closedThreadsRef(): TabRef {
 export function opErrorRef(errorId: string): TabRef {
   return { id: `op-error:${errorId}`, kind: "op-error", payload: { errorId } };
 }
+
+export interface ExternalUrlPayload {
+  url: string;
+}
+
+/**
+ * Tab ref for an external (http/https) URL rendered inside a sandboxed
+ * <webview> in the app. The URL is used as the tab id so reopening the
+ * same link reuses the existing tab rather than stacking duplicates.
+ *
+ * Callers MUST validate the URL through `classifyExternalUrl` from
+ * `src/ui/external-url-allowlist.ts` before constructing this ref —
+ * the renderer trusts that the payload has already been gated.
+ */
+export function externalUrlRef(url: string): TabRef {
+  return { id: `external-url:${url}`, kind: "external-url", payload: { url } };
+}
