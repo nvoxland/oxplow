@@ -10,6 +10,7 @@ import {
 } from "../../api.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { recordOpError } from "../opErrorsStore.js";
+import { usePageTitle } from "../../tabs/PageNavigationContext.js";
 
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
@@ -29,6 +30,10 @@ interface Props {
   stream: Stream;
   slug: string;
   onClosed: () => void;
+  /** Called for plain in-tab wikilink-to-note navigation. Routes through
+   *  the host's PageNavigationContext so back/forward live in the shared
+   *  chrome rather than a per-NoteTab history. */
+  onNavigateInternalNote: (slug: string) => void;
   onOpenNoteInNewTab: (slug: string) => void;
   onOpenFile: (path: string) => void;
   /** Optional handler for git-commit wikilink clicks — opens the
@@ -40,33 +45,7 @@ interface Props {
   onOpenExternalUrl?: (url: string) => void;
 }
 
-export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
-  const [history, setHistory] = useState<string[]>([initialSlug]);
-  const [historyIdx, setHistoryIdx] = useState(0);
-  const currentSlug = history[historyIdx] ?? initialSlug;
-
-  // If the parent swaps in a new initialSlug (shouldn't happen in practice —
-  // tab id is stable per slug — but guard for prop-rebinds), reset history.
-  useEffect(() => {
-    setHistory([initialSlug]);
-    setHistoryIdx(0);
-  }, [initialSlug]);
-
-  const navigate = useCallback((nextSlug: string) => {
-    if (history[historyIdx] === nextSlug) return;
-    const truncated = history.slice(0, historyIdx + 1);
-    setHistory([...truncated, nextSlug]);
-    setHistoryIdx(truncated.length);
-  }, [history, historyIdx]);
-
-  const goBack = useCallback(() => {
-    setHistoryIdx((idx) => Math.max(0, idx - 1));
-  }, []);
-
-  const goForward = useCallback(() => {
-    setHistoryIdx((idx) => Math.min(history.length - 1, idx + 1));
-  }, [history.length]);
-
+export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpenNoteInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
   const [summary, setSummary] = useState<WikiNoteSummary | null>(null);
   const [body, setBody] = useState<string>("");
   const [editing, setEditing] = useState(false);
@@ -74,13 +53,18 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
+  // Title flows through the shared PageNavigationContext so it surfaces in
+  // the chrome header and the tab strip without a duplicate row inside the
+  // note body. Falls back to the slug until the summary loads.
+  usePageTitle(summary?.title ?? slug);
+
   const refresh = useCallback(async () => {
     try {
       const all = await listWikiNotes(stream.id);
-      setSummary(all.find((n) => n.slug === currentSlug) ?? null);
+      setSummary(all.find((n) => n.slug === slug) ?? null);
     } catch {}
     try {
-      const text = await readWikiNoteBody(stream.id, currentSlug);
+      const text = await readWikiNoteBody(stream.id, slug);
       setBody(text);
       setNotFound(false);
       setLoadError(null);
@@ -95,7 +79,7 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
         setNotFound(false);
       }
     }
-  }, [stream.id, currentSlug]);
+  }, [stream.id, slug]);
 
   useEffect(() => {
     void refresh();
@@ -106,9 +90,6 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
 
   const [draftInitialized, setDraftInitialized] = useState(false);
 
-  // When the underlying body (re)loads, seed the draft only if the user hasn't
-  // started editing yet. Otherwise leave their in-progress draft alone so
-  // toggling between view/edit doesn't clobber unsaved work.
   useEffect(() => {
     if (!draftInitialized) {
       setDraft(body);
@@ -116,10 +97,9 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
     }
   }, [body, draftInitialized]);
 
-  // Reset draft initialization when the slug changes — new note, new draft.
   useEffect(() => {
     setDraftInitialized(false);
-  }, [currentSlug]);
+  }, [slug]);
 
   const enterEdit = useCallback(() => {
     if (!draftInitialized) {
@@ -139,20 +119,20 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
 
   const handleSave = useCallback(async () => {
     try {
-      await writeWikiNoteBody(stream.id, currentSlug, draft);
+      await writeWikiNoteBody(stream.id, slug, draft);
       setBody(draft);
     } catch (error) {
       recordOpError({
-        label: `Save note "${currentSlug}"`,
+        label: `Save note "${slug}"`,
         message: String(error),
       });
     }
-  }, [stream.id, currentSlug, draft]);
+  }, [stream.id, slug, draft]);
 
   const handleCreate = useCallback(async () => {
-    const seed = `# ${currentSlug}\n\n`;
+    const seed = `# ${slug}\n\n`;
     try {
-      await writeWikiNoteBody(stream.id, currentSlug, seed);
+      await writeWikiNoteBody(stream.id, slug, seed);
       setNotFound(false);
       setBody(seed);
       setDraft(seed);
@@ -160,61 +140,41 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
       setEditing(true);
     } catch (error) {
       recordOpError({
-        label: `Create note "${currentSlug}"`,
+        label: `Create note "${slug}"`,
         message: String(error),
       });
     }
-  }, [stream.id, currentSlug]);
+  }, [stream.id, slug]);
 
   const handleDelete = useCallback(async () => {
-    if (!window.confirm(`Delete note "${currentSlug}"? The file will be removed.`)) return;
+    if (!window.confirm(`Delete note "${slug}"? The file will be removed.`)) return;
     try {
-      await deleteWikiNote(stream.id, currentSlug);
+      await deleteWikiNote(stream.id, slug);
       onClosed();
     } catch (error) {
       recordOpError({
-        label: `Delete note "${currentSlug}"`,
+        label: `Delete note "${slug}"`,
         message: String(error),
       });
     }
-  }, [stream.id, currentSlug, onClosed]);
-
-  const canBack = historyIdx > 0;
-  const canForward = historyIdx < history.length - 1;
-
-  const title = summary?.title ?? currentSlug;
+  }, [stream.id, slug, onClosed]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <header style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 10px",
-        borderBottom: "1px solid var(--border-subtle)",
-      }}>
-        <button
-          type="button"
-          onClick={goBack}
-          disabled={!canBack}
-          title={canBack ? `Back to ${history[historyIdx - 1]}` : "No previous page"}
-          style={{ padding: "2px 8px" }}
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          onClick={goForward}
-          disabled={!canForward}
-          title={canForward ? `Forward to ${history[historyIdx + 1]}` : "No next page"}
-          style={{ padding: "2px 8px" }}
-        >
-          →
-        </button>
-        <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginLeft: 4 }}>
-          {title}
-        </strong>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 12px",
+          borderBottom: "1px solid var(--border-subtle)",
+          background: "var(--surface-app)",
+          fontSize: 12,
+          flexShrink: 0,
+        }}
+      >
         {summary && <FreshnessBadge note={summary} />}
+        <div style={{ flex: 1 }} />
         {notFound ? (
           <button type="button" onClick={() => void handleCreate()}>Create page</button>
         ) : (
@@ -243,14 +203,14 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
             <button type="button" onClick={() => void handleDelete()} title="Delete note">Delete</button>
           </>
         )}
-      </header>
+      </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
         {notFound ? (
           <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
             <div style={{ fontSize: 15, marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
-            <div>No note exists with slug <code>{currentSlug}</code>.</div>
+            <div>No note exists with slug <code>{slug}</code>.</div>
             <div style={{ marginTop: 8 }}>
-              Click <strong>Create page</strong> above to start a new note at <code>.oxplow/notes/{currentSlug}.md</code>.
+              Click <strong>Create page</strong> above to start a new note at <code>.oxplow/notes/{slug}.md</code>.
             </div>
           </div>
         ) : loadError ? (
@@ -276,7 +236,7 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
           <MarkdownView
             className="wiki-note-markdown"
             body={draftInitialized ? draft : body}
-            onNavigateInternal={navigate}
+            onNavigateInternal={onNavigateInternalNote}
             onOpenInNewTab={onOpenNoteInNewTab}
             onOpenFile={(path) => onOpenFile(path)}
             onOpenCommit={onOpenCommit}
@@ -388,4 +348,3 @@ function FreshnessBadge({ note }: { note: WikiNoteSummary }) {
     </span>
   );
 }
-
