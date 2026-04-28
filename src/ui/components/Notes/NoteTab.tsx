@@ -261,6 +261,7 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
             body={draftInitialized ? draft : body}
             onNavigateInternal={navigate}
             onOpenInNewTab={onOpenNoteInNewTab}
+            onOpenFile={(path) => onOpenFile(path)}
             renderMermaid
           />
         )}

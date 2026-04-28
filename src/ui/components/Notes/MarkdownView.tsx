@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -23,7 +23,8 @@ export type ParsedLink =
   | { kind: "empty" }
   | { kind: "anchor" }
   | { kind: "external" }
-  | { kind: "internal"; slug: string };
+  | { kind: "internal"; slug: string }
+  | { kind: "file"; path: string; line?: number };
 
 /**
  * Classify a markdown link href. Shared by NoteTab (wiki navigation) and
@@ -35,10 +36,73 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) {
     return { kind: "external" };
   }
+  if (rawHref.startsWith("file:")) {
+    const raw = rawHref.slice("file:".length);
+    if (!raw) return { kind: "empty" };
+    const lineMatch = raw.match(/^(.+?):(\d+)$/);
+    if (lineMatch) {
+      return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]) };
+    }
+    return { kind: "file", path: raw };
+  }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
   return target ? { kind: "internal", slug: target } : { kind: "empty" };
+}
+
+/**
+ * Heuristic: does a wikilink target look like a repo file path rather
+ * than a wiki note slug? File paths contain a slash or end in a recognizable
+ * extension; bare slugs like `architecture` are routed to wiki navigation.
+ */
+function looksLikeFilePath(target: string): boolean {
+  if (target.includes("/")) return true;
+  // Tail extension other than .md → file. .md → wiki note.
+  const dot = target.lastIndexOf(".");
+  if (dot <= 0) return false;
+  const ext = target.slice(dot + 1).toLowerCase();
+  return ext.length > 0 && ext !== "md" && /^[a-z0-9]+$/i.test(ext);
+}
+
+/**
+ * Preprocess `[[ ]]` wikilinks in a markdown body into standard markdown
+ * links so the existing ReactMarkdown pipeline renders them clickable.
+ *
+ * Supported target shapes:
+ * - `[[path/to/file.ts]]`         → file link
+ * - `[[path/to/file.ts:42]]`      → file link with line
+ * - `[[path/to/file.ts|label]]`   → file link with custom display text
+ * - `[[some-slug]]`               → wiki internal link (note slug)
+ *
+ * Wikilinks inside fenced code blocks or inline code are left alone so
+ * documentation about the syntax itself doesn't get rewritten.
+ */
+export function preprocessWikilinks(body: string): string {
+  // Split out fenced code blocks (```...```) and protect them.
+  const segments = body.split(/(```[\s\S]*?```)/g);
+  return segments.map((seg, idx) => {
+    if (idx % 2 === 1) return seg; // fenced block — leave alone
+    return rewriteWikilinksOutsideInlineCode(seg);
+  }).join("");
+}
+
+function rewriteWikilinksOutsideInlineCode(text: string): string {
+  // Split on inline backtick spans. Even-index = prose, odd = code.
+  const parts = text.split(/(`[^`\n]*`)/g);
+  return parts.map((part, idx) => {
+    if (idx % 2 === 1) return part;
+    return part.replace(/\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]+))?\]\]/g, (_match, rawTarget: string, label?: string) => {
+      const target = rawTarget.trim();
+      const display = (label ?? "").trim() || target;
+      if (!target) return _match;
+      if (looksLikeFilePath(target)) {
+        return `[${display}](file:${target})`;
+      }
+      // Treat as wiki note slug.
+      return `[${display}](${target})`;
+    });
+  }).join("");
 }
 
 export interface MarkdownViewProps {
@@ -47,6 +111,8 @@ export interface MarkdownViewProps {
   onNavigateInternal?: (slug: string) => void;
   /** Optional new-tab handler (NoteTab opens slug in another tab). */
   onOpenInNewTab?: (slug: string) => void;
+  /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
+  onOpenFile?: (path: string, line?: number) => void;
   /**
    * Render mermaid code blocks as SVG diagrams. NoteTab uses this; the
    * work-item modal disables it (default false) since work-item notes
@@ -77,11 +143,13 @@ export function MarkdownView({
   body,
   onNavigateInternal,
   onOpenInNewTab,
+  onOpenFile,
   renderMermaid = false,
   maxHeight,
   style,
   className,
 }: MarkdownViewProps) {
+  const processedBody = useMemo(() => preprocessWikilinks(body), [body]);
   const ref = useRef<HTMLDivElement | null>(null);
 
   const handleLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -94,12 +162,16 @@ export function MarkdownView({
       window.open(href, "_blank", "noopener,noreferrer");
       return;
     }
+    if (parsed.kind === "file") {
+      onOpenFile?.(parsed.path, parsed.line);
+      return;
+    }
     // Internal link
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
-  }, [onNavigateInternal, onOpenInNewTab]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
@@ -120,8 +192,16 @@ export function MarkdownView({
         { id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(href).catch(() => {}); } },
       ];
     }
+    if (parsed.kind === "file") {
+      const items: MenuItem[] = [];
+      if (onOpenFile) {
+        items.push({ id: "open-file", label: "Open file", enabled: true, run: () => onOpenFile(parsed.path, parsed.line) });
+      }
+      items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
+      return items;
+    }
     return [];
-  }, [onNavigateInternal, onOpenInNewTab]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
@@ -186,7 +266,7 @@ export function MarkdownView({
           },
         }}
       >
-        {body}
+        {processedBody}
       </ReactMarkdown>
     </div>
   );
