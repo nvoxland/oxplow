@@ -7,6 +7,7 @@ import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
+import { type HistoryEntry, useHistory } from "./history.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -127,6 +128,8 @@ export function RailHud({
       {bookmarks && bookmarks.length > 0 ? (
         <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
       ) : null}
+
+      <HistorySection onOpenPage={onOpenPage} />
 
       <PagesDirectory onOpenPage={onOpenPage} backlogReadyCount={backlogReadyCount} />
       </div>
@@ -755,6 +758,55 @@ function FinishedSection({
             </button>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+function HistorySection({
+  onOpenPage,
+}: {
+  onOpenPage(ref: TabRef): void;
+}) {
+  const all = useHistory();
+  const [expanded, setExpanded] = useState(false);
+  if (all.length === 0) return null;
+  const limit = expanded ? 10 : 5;
+  const entries = all.slice(0, limit);
+  const hasMore = all.length > 5;
+  return (
+    <>
+      <SectionHeading>History</SectionHeading>
+      <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
+        {entries.map((e: HistoryEntry) => (
+          <button
+            key={e.ref.id}
+            type="button"
+            data-testid={`rail-history-${e.ref.id}`}
+            title={e.label}
+            onClick={() => onOpenPage(e.ref)}
+            style={rowHoverStyle()}
+          >
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {e.label}
+            </span>
+          </button>
+        ))}
+        {hasMore ? (
+          <button
+            type="button"
+            data-testid="rail-history-toggle"
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              ...rowHoverStyle(),
+              color: "var(--text-secondary)",
+              fontSize: 11,
+              padding: "4px 14px 8px",
+            }}
+          >
+            {expanded ? "show less" : `show more (${Math.min(10, all.length)})`}
+          </button>
+        ) : null}
       </div>
     </>
   );

@@ -117,6 +117,7 @@ import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
+import { deriveDefaultLabel, recordHistoryVisit } from "./components/RailHud/history.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -1563,6 +1564,23 @@ export function App() {
   }, [selectedThreadId]);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
+    if (ref.kind !== "agent") {
+      let label = deriveDefaultLabel(ref);
+      if (ref.kind === "work-item") {
+        const itemId = (ref.payload as { itemId?: string } | null)?.itemId;
+        const found = selectedThreadWork
+          ? [
+              ...selectedThreadWork.items,
+              ...selectedThreadWork.epics,
+              ...selectedThreadWork.inProgress,
+              ...selectedThreadWork.waiting,
+              ...selectedThreadWork.done,
+            ].find((i) => i.id === itemId)
+          : null;
+        if (found?.title) label = found.title;
+      }
+      recordHistoryVisit(ref, label);
+    }
     switch (ref.kind) {
       case "agent":
         setCenterActive("agent");
@@ -1613,7 +1631,7 @@ export function App() {
       default:
         return;
     }
-  }, [handleOpenFile, handleOpenNote, selectedThreadId, setCenterActive]);
+  }, [handleOpenFile, handleOpenNote, selectedThreadId, selectedThreadWork, setCenterActive]);
 
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
