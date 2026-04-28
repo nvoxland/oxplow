@@ -1652,7 +1652,8 @@ export function App() {
       case "new-stream":
       case "new-work-item":
       case "closed-threads":
-      case "external-url": {
+      case "external-url":
+      case "op-error": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
           setThreadPageTabs((prev) => {

@@ -13,7 +13,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 
 export interface UncommittedChangesPageProps {
   stream: Stream | null;
-  onOpenPage(ref: TabRef): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
 }
 
@@ -142,7 +142,7 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
           stdout: result.stdout ?? "",
           exitCode: result.exitCode ?? null,
         });
-        onOpenPage(opErrorRef(errorId));
+        onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {
         setCommitMessage("");
         await refresh();

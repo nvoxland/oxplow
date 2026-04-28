@@ -33,7 +33,7 @@ import { FileStatusCountsForSummary } from "../components/FileStatusCounts.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
-  onOpenPage(ref: TabRef): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onRevealCommit(sha: string): void;
 }
 
@@ -211,7 +211,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
             stdout: result.stdout ?? "",
             exitCode: result.exitCode ?? null,
           });
-          onOpenPage(opErrorRef(errorId));
+          onOpenPage(opErrorRef(errorId), { newTab: true });
         } else {
           await refresh();
         }
