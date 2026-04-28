@@ -301,7 +301,7 @@ export interface DesktopApi {
   listRecentRemoteBranches(streamId: string, limit?: number): Promise<import("../git/git.js").RemoteBranchEntry[]>;
   gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
   gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
-  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): Promise<GitOpResult & { sha?: string }>;
+  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
   localBlame(streamId: string, path: string): Promise<import("./local-blame.js").LocalBlameEntry[]>;

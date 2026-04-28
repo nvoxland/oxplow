@@ -70,6 +70,7 @@ import { getStateDatabase } from "../persistence/state-db.js";
 import { StreamStore, type PaneKind, type Stream } from "../persistence/stream-store.js";
 import { BACKLOG_SCOPE, WorkItemStore, type WorkItem } from "../persistence/work-item-store.js";
 import { WikiNoteStore, computeFreshness as computeWikiNoteFreshness, type WikiNote } from "../persistence/wiki-note-store.js";
+import { WikiNoteThreadUpdateStore } from "../persistence/wiki-note-thread-update-store.js";
 import { UsageStore } from "../persistence/usage-store.js";
 import {
   PageVisitStore,
@@ -138,6 +139,7 @@ export class ElectronRuntime {
   readonly threadStore: ThreadStore;
   private readonly workItemStore: WorkItemStore;
   readonly wikiNoteStore: WikiNoteStore;
+  readonly wikiNoteThreadUpdateStore: WikiNoteThreadUpdateStore;
   readonly usageStore: UsageStore;
   readonly pageVisitStore: PageVisitStore;
   readonly codeQualityStore: CodeQualityStore;
@@ -273,6 +275,7 @@ export class ElectronRuntime {
     this.threadStore = new ThreadStore(projectDir, logger.child({ subsystem: "thread-store" }));
     this.workItemStore = new WorkItemStore(projectDir, logger.child({ subsystem: "work-items" }));
     this.wikiNoteStore = new WikiNoteStore(projectDir, logger.child({ subsystem: "wiki-notes" }));
+    this.wikiNoteThreadUpdateStore = new WikiNoteThreadUpdateStore(projectDir, logger.child({ subsystem: "wiki-note-thread-updates" }));
     this.usageStore = new UsageStore(projectDir, logger.child({ subsystem: "usage" }));
     this.pageVisitStore = new PageVisitStore(projectDir, logger.child({ subsystem: "page-visit" }));
     this.codeQualityStore = new CodeQualityStore(projectDir, logger.child({ subsystem: "code-quality" }));
@@ -614,6 +617,7 @@ export class ElectronRuntime {
         ...buildWikiNoteMcpTools({
           resolveStream: (streamId) => this.resolveStream(streamId),
           wikiNoteStore: this.wikiNoteStore,
+          recordNoteUpdate: (slug, threadId) => this.wikiNoteThreadUpdateStore.recordUpdate(slug, threadId),
         }),
       ],
       onHook: (envelope) => this.handleHookEnvelope(envelope),
@@ -806,16 +810,23 @@ export class ElectronRuntime {
       title: row.title,
       t: row.endedAt,
     }));
-    const notes = this.wikiNoteStore
-      .list()
-      .filter((n) => !noteSince || n.updated_at > noteSince)
-      .slice(0, limit)
-      .map((note) => ({
-        kind: "note" as const,
-        slug: note.slug,
-        title: note.title,
-        t: note.updated_at,
-      }));
+    // Notes are global, but the rail attributes each edit to the thread
+    // that authored it (mirrors how task efforts attribute via
+    // work_item_effort.thread_id). Without a thread we have nothing to
+    // attribute against, so the note feed is empty in that case.
+    const notes: Array<{ kind: "note"; slug: string; title: string; t: string }> = [];
+    if (threadId) {
+      for (const row of this.wikiNoteThreadUpdateStore.listRecentByThread(threadId, limit)) {
+        const note = this.wikiNoteStore.getBySlug(row.slug);
+        if (!note) continue;
+        notes.push({
+          kind: "note",
+          slug: note.slug,
+          title: note.title,
+          t: row.updated_at,
+        });
+      }
+    }
     return [...items, ...notes]
       .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0))
       .slice(0, limit);
@@ -1164,7 +1175,7 @@ export class ElectronRuntime {
     }
   }
 
-  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean }): GitOpResult & { sha?: string } {
+  gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): GitOpResult & { sha?: string } {
     const stream = this.resolveStream(streamId);
     return gitCommitAll(stream.worktree_path, message, options);
   }
@@ -2193,6 +2204,18 @@ export class ElectronRuntime {
       return;
     }
     if (thread) this.markDirty(thread.stream_id, normalizedPath);
+    // Per-thread wiki note attribution for the rail's Finished list. When
+    // the agent writes `.oxplow/notes/<slug>.md` directly via the Write
+    // tool (the wiki-capture skill's main path), tag this thread as the
+    // author. The watcher will reparse the file shortly after; this
+    // records the attribution side row immediately so the rail isn't
+    // racing the debounce.
+    if (thread && stream) {
+      const slug = wikiNoteSlugFromPath(normalizedPath);
+      if (slug) {
+        this.wikiNoteThreadUpdateStore.recordUpdate(slug, threadId);
+      }
+    }
   }
 
   /**
@@ -2467,6 +2490,7 @@ export class ElectronRuntime {
       rmSync(path, { force: true });
     } catch {}
     this.wikiNoteStore.deleteBySlug(slug);
+    this.wikiNoteThreadUpdateStore.deleteBySlug(slug);
   }
 
   searchWikiNotes(_streamId: string, query: string, limit?: number): Array<{
@@ -3065,6 +3089,18 @@ function parseLogLevel(value: unknown): LogLevel {
 
 const UI_WRITE_ECHO_WINDOW_MS = 1000;
 const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+/**
+ * If a worktree-relative path points at a wiki note file
+ * (`.oxplow/notes/<slug>.md`), return the slug; otherwise null. Used by
+ * the PostToolUse handler to attribute Write-driven note edits to the
+ * authoring thread without going through the file watcher.
+ */
+export function wikiNoteSlugFromPath(relPath: string): string | null {
+  const normalized = relPath.replace(/^\.\//, "").replace(/\\/g, "/");
+  const m = /^\.oxplow\/notes\/([^/]+)\.md$/.exec(normalized);
+  return m ? m[1]! : null;
+}
 
 function extractEditedFilePath(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;

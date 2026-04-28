@@ -371,6 +371,36 @@ the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
 delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
 returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
+### `wiki_note_thread_update` — `WikiNoteThreadUpdateStore` (`src/persistence/wiki-note-thread-update-store.ts`)
+
+Per-thread attribution side table for wiki note edits. Notes themselves
+are global (one body per slug, shared across all threads/streams), but
+the rail's "Finished" list filters by which thread last touched each
+note — mirrors how task efforts attribute via
+`work_item_effort.thread_id`.
+
+Columns: `slug, thread_id, updated_at`. PK `(slug, thread_id)` so
+repeated edits in the same thread upsert in place. Index on
+`(thread_id, updated_at DESC)` drives the rail query.
+
+Writers funnel through two seams, both routing through
+`Runtime.wikiNoteThreadUpdateStore.recordUpdate(slug, threadId)`:
+
+- **`oxplow__resync_note` MCP** — accepts `threadId` and records the
+  edit when present. The wiki-capture skill always supplies it.
+- **PostToolUse hook** in `runtime.ts` — when the agent writes a path
+  matching `.oxplow/notes/<slug>.md` via Write/Edit/MultiEdit, attribution
+  is recorded immediately, no waiting on the watcher debounce.
+
+The notes file watcher itself does not record attribution (it has no
+thread context). `Runtime.writeWikiNoteBody` (the editor save IPC)
+also intentionally skips attribution — the notes editor isn't
+thread-bound, so guessing would be worse than abstaining.
+
+`Runtime.deleteWikiNote` clears every attribution row for the slug
+when the note is deleted, so removed notes don't linger on the rail
+under their last author.
+
 ### `usage_event` — `UsageStore` (`src/persistence/usage-store.ts`)
 
 Generic (kind, key) usage tracking. Append-only event log with columns

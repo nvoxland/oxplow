@@ -92,6 +92,32 @@ describe("wiki note MCP tools", () => {
     expect(store.getBySlug("x")).not.toBeNull();
   });
 
+  test("resync_note attributes the edit to the calling thread", async () => {
+    writeFileSync(join(projectDir, ".oxplow", "notes", "y.md"), "# Y");
+    const calls: Array<{ slug: string; threadId: string }> = [];
+    const localTools = buildWikiNoteMcpTools({
+      resolveStream: () => stream,
+      wikiNoteStore: store,
+      recordNoteUpdate: (slug, threadId) => calls.push({ slug, threadId }),
+    });
+    const tool = findTool(localTools, "oxplow__resync_note");
+    await tool.handler({ slug: "y", threadId: "b-thread-1" });
+    expect(calls).toEqual([{ slug: "y", threadId: "b-thread-1" }]);
+  });
+
+  test("resync_note skips attribution when threadId is omitted", async () => {
+    writeFileSync(join(projectDir, ".oxplow", "notes", "z.md"), "# Z");
+    const calls: Array<{ slug: string; threadId: string }> = [];
+    const localTools = buildWikiNoteMcpTools({
+      resolveStream: () => stream,
+      wikiNoteStore: store,
+      recordNoteUpdate: (slug, threadId) => calls.push({ slug, threadId }),
+    });
+    const tool = findTool(localTools, "oxplow__resync_note");
+    await tool.handler({ slug: "z" });
+    expect(calls).toEqual([]);
+  });
+
   test("delete_note removes file and row", async () => {
     writeFileSync(join(projectDir, ".oxplow", "notes", "del.md"), "# Del");
     syncNoteFromDisk(projectDir, store, "del");

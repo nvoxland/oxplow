@@ -42,6 +42,8 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [committing, setCommitting] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     if (!streamId) {
@@ -78,13 +80,60 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
   const summary = useMemo(() => summarize(data?.files ?? []), [data]);
   const tree = useMemo(() => buildTree(data?.files ?? []), [data]);
 
-  const onCommitAll = useCallback(async () => {
+  const seenRef = useMemo(() => ({ paths: new Set<string>() }), []);
+  useEffect(() => {
+    const allPaths = (data?.files ?? []).map((f) => f.path);
+    const present = new Set(allPaths);
+    setSelected((prev) => {
+      const next = new Set<string>();
+      for (const p of prev) if (present.has(p)) next.add(p);
+      for (const p of allPaths) {
+        if (!seenRef.paths.has(p)) next.add(p);
+      }
+      seenRef.paths = present;
+      return next;
+    });
+  }, [data, seenRef]);
+
+  const toggleFile = useCallback((path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const toggleDirSelection = useCallback((paths: string[], allSelected: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const p of paths) next.delete(p);
+      } else {
+        for (const p of paths) next.add(p);
+      }
+      return next;
+    });
+  }, []);
+
+  const hasUntrackedSelected = useMemo(() => {
+    for (const f of data?.files ?? []) {
+      if (f.status === "untracked" && selected.has(f.path)) return true;
+    }
+    return false;
+  }, [data, selected]);
+
+  const onCommit = useCallback(async () => {
     if (!streamId) return;
-    const message = window.prompt("Commit message:");
-    if (!message || !message.trim()) return;
+    const message = commitMessage.trim();
+    if (!message) return;
+    if (selected.size === 0) return;
     setCommitting(true);
     try {
-      const result = await gitCommitAll(streamId, message.trim());
+      const result = await gitCommitAll(streamId, message, {
+        paths: [...selected],
+        includeUntracked: hasUntrackedSelected,
+      });
       if (!result.ok) {
         const errorId = recordOpError({
           label: "Commit all changes",
@@ -95,12 +144,13 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
         });
         onOpenPage(opErrorRef(errorId));
       } else {
+        setCommitMessage("");
         await refresh();
       }
     } finally {
       setCommitting(false);
     }
-  }, [streamId, refresh, onOpenPage]);
+  }, [streamId, refresh, onOpenPage, commitMessage, selected, hasUntrackedSelected]);
 
   const toggleDir = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -128,18 +178,7 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
         {data ? (
           <>
             <section data-testid="uncommitted-summary" style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ fontWeight: 600 }}>Summary</div>
-                <button
-                  type="button"
-                  data-testid="uncommitted-commit-all"
-                  onClick={onCommitAll}
-                  disabled={committing || summary.total === 0}
-                  style={primaryButton}
-                >
-                  {committing ? "Committing…" : "Commit all…"}
-                </button>
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Summary</div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 <Stat label="Total files" value={summary.total} />
                 <Stat label="Modified" value={summary.modified} />
@@ -151,6 +190,55 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
                 <Stat label="− lines" value={summary.deletions} color="var(--text-danger, #dc2626)" />
               </div>
             </section>
+
+            {summary.total > 0 ? (
+              <section data-testid="uncommitted-commit-form" style={card}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Commit</div>
+                <textarea
+                  data-testid="uncommitted-commit-message"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  placeholder="Commit message"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: 8,
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: 4,
+                    background: "var(--surface-input, var(--surface-card))",
+                    color: "var(--text-primary)",
+                    resize: "vertical",
+                  }}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      void onCommit();
+                    }
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                  <span style={subtle}>
+                    {selected.size} of {summary.total} file{summary.total === 1 ? "" : "s"} selected
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="uncommitted-commit-button"
+                    onClick={onCommit}
+                    disabled={committing || selected.size === 0 || commitMessage.trim().length === 0}
+                    style={{
+                      ...primaryButton,
+                      opacity: committing || selected.size === 0 || commitMessage.trim().length === 0 ? 0.5 : 1,
+                      cursor: committing || selected.size === 0 || commitMessage.trim().length === 0 ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {committing ? "Committing…" : `Commit ${selected.size}`}
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             <section data-testid="uncommitted-tree" style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -173,6 +261,9 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
                   toggle={toggleDir}
                   onOpenFile={onOpenFile}
                   depth={0}
+                  selected={selected}
+                  onToggleFile={toggleFile}
+                  onToggleDir={toggleDirSelection}
                 />
               )}
             </section>
@@ -183,45 +274,74 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
   );
 }
 
+function collectPaths(node: DirNode, out: string[] = []): string[] {
+  for (const f of node.files) out.push(f.path);
+  for (const child of node.children.values()) collectPaths(child, out);
+  return out;
+}
+
 function DirTreeView({
   node,
   expanded,
   toggle,
   onOpenFile,
   depth,
+  selected,
+  onToggleFile,
+  onToggleDir,
 }: {
   node: DirNode;
   expanded: Set<string>;
   toggle(path: string): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   depth: number;
+  selected: Set<string>;
+  onToggleFile(path: string): void;
+  onToggleDir(paths: string[], allSelected: boolean): void;
 }) {
   const isExpanded = expanded.has(node.path);
   const children = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name));
   const files = [...node.files].sort((a, b) => a.path.localeCompare(b.path));
   const showHeader = depth > 0 || node.path !== "";
+  const dirPaths = useMemo(() => collectPaths(node), [node]);
+  const dirSelectedCount = dirPaths.reduce((acc, p) => acc + (selected.has(p) ? 1 : 0), 0);
+  const dirAllSelected = dirSelectedCount === dirPaths.length && dirPaths.length > 0;
+  const dirIndeterminate = dirSelectedCount > 0 && dirSelectedCount < dirPaths.length;
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       {showHeader ? (
         <div
           data-testid="uncommitted-tree-folder"
-          onClick={() => toggle(node.path)}
           style={{
             display: "flex",
             gap: 8,
             alignItems: "center",
             paddingLeft: depth * 12,
-            cursor: "pointer",
             userSelect: "none",
           }}
         >
-          <span style={{ width: 12 }}>{isExpanded ? "▾" : "▸"}</span>
-          <span style={{ flex: 1, fontWeight: 500 }}>{node.name || "/"}</span>
-          <span style={subtle}>
-            {node.totalFiles} file{node.totalFiles === 1 ? "" : "s"}
+          <input
+            type="checkbox"
+            data-testid="uncommitted-tree-folder-checkbox"
+            checked={dirAllSelected}
+            ref={(el) => {
+              if (el) el.indeterminate = dirIndeterminate;
+            }}
+            onChange={() => onToggleDir(dirPaths, dirAllSelected)}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <span
+            onClick={() => toggle(node.path)}
+            style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, cursor: "pointer" }}
+          >
+            <span style={{ width: 12 }}>{isExpanded ? "▾" : "▸"}</span>
+            <span style={{ flex: 1, fontWeight: 500 }}>{node.name || "/"}</span>
+            <span style={subtle}>
+              {node.totalFiles} file{node.totalFiles === 1 ? "" : "s"}
+            </span>
+            <span style={addCol}>+{node.totalAdditions}</span>
+            <span style={delCol}>−{node.totalDeletions}</span>
           </span>
-          <span style={addCol}>+{node.totalAdditions}</span>
-          <span style={delCol}>−{node.totalDeletions}</span>
         </div>
       ) : null}
       {(!showHeader || isExpanded) && (
@@ -234,38 +354,51 @@ function DirTreeView({
               toggle={toggle}
               onOpenFile={onOpenFile}
               depth={depth + (showHeader ? 1 : 0)}
+              selected={selected}
+              onToggleFile={onToggleFile}
+              onToggleDir={onToggleDir}
             />
           ))}
           {files.map((file) => (
             <div
               key={file.path}
               data-testid="uncommitted-tree-file"
-              onClick={(e) => onOpenFile(file.path, { newTab: e.metaKey || e.ctrlKey })}
-              onAuxClick={(e) => {
-                if (e.button === 1) {
-                  e.preventDefault();
-                  onOpenFile(file.path, { newTab: true });
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                onOpenFile(file.path, { newTab: true });
-              }}
               style={{
                 display: "flex",
                 gap: 8,
                 alignItems: "center",
                 paddingLeft: (depth + (showHeader ? 1 : 0)) * 12 + 12,
-                cursor: "pointer",
                 fontSize: 13,
               }}
             >
-              <span style={{ width: 14, color: "var(--text-muted)" }}>{STATUS_LABELS[file.status]}</span>
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {basename(file.path)}
+              <input
+                type="checkbox"
+                data-testid="uncommitted-tree-file-checkbox"
+                checked={selected.has(file.path)}
+                onChange={() => onToggleFile(file.path)}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <span
+                onClick={(e) => onOpenFile(file.path, { newTab: e.metaKey || e.ctrlKey })}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    onOpenFile(file.path, { newTab: true });
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  onOpenFile(file.path, { newTab: true });
+                }}
+                style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, cursor: "pointer" }}
+              >
+                <span style={{ width: 14, color: "var(--text-muted)" }}>{STATUS_LABELS[file.status]}</span>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {basename(file.path)}
+                </span>
+                <span style={addCol}>{file.additions == null ? "" : `+${file.additions}`}</span>
+                <span style={delCol}>{file.deletions == null ? "" : `−${file.deletions}`}</span>
               </span>
-              <span style={addCol}>{file.additions == null ? "" : `+${file.additions}`}</span>
-              <span style={delCol}>{file.deletions == null ? "" : `−${file.deletions}`}</span>
             </div>
           ))}
         </div>

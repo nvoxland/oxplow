@@ -14,10 +14,17 @@ import { readWorktreeHeadSha } from "../git/git.js";
 export interface WikiNoteMcpDeps {
   resolveStream(streamId: string | undefined): Stream;
   wikiNoteStore: WikiNoteStore;
+  /**
+   * Tag the (slug, thread) pair so the rail's Finished list can attribute
+   * the edit to the calling thread. Optional — tests omit it. Production
+   * runtime always wires the WikiNoteThreadUpdateStore.recordUpdate.
+   */
+  recordNoteUpdate?(slug: string, threadId: string): void;
 }
 
 interface BaseArgs {
   streamId?: string;
+  threadId?: string;
 }
 interface SlugArgs extends BaseArgs {
   slug: string;
@@ -106,11 +113,15 @@ export function buildWikiNoteMcpTools(deps: WikiNoteMcpDeps): ToolDef[] {
     {
       name: "oxplow__resync_note",
       description:
-        "Force an immediate re-parse of `.oxplow/notes/<slug>.md` and re-baseline its freshness against current HEAD. Call this right after writing a note so its captured refs are pinned to the current workspace state without waiting for the watcher's debounce.",
+        "Force an immediate re-parse of `.oxplow/notes/<slug>.md` and re-baseline its freshness against current HEAD. Call this right after writing a note so its captured refs are pinned to the current workspace state without waiting for the watcher's debounce. Pass `threadId` so the rail's Finished list can attribute the edit to your thread.",
       inputSchema: {
         type: "object",
         properties: {
           streamId: STREAM_ID_SCHEMA,
+          threadId: {
+            type: "string",
+            description: "Thread that authored the edit. Used to attribute the note update on the rail's Finished list.",
+          },
           slug: { type: "string", description: "Note slug (filename without .md)." },
         },
         required: ["slug"],
@@ -119,6 +130,9 @@ export function buildWikiNoteMcpTools(deps: WikiNoteMcpDeps): ToolDef[] {
         const slug = requireSlug(args.slug);
         const projectDir = projectDirFor(deps, args.streamId);
         syncNoteFromDisk(projectDir, wikiNoteStore, slug);
+        if (args.threadId && deps.recordNoteUpdate) {
+          deps.recordNoteUpdate(slug, args.threadId);
+        }
         const note = wikiNoteStore.getBySlug(slug);
         if (!note) return { slug, removed: true };
         return summarizeNote(projectDir, note);
