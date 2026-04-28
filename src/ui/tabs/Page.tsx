@@ -30,8 +30,12 @@ export interface PageChip {
 }
 
 export interface PageProps {
-  /** Page title shown in the header. */
-  title: ReactNode;
+  /** Page title shown in the header. Optional — when omitted, Page
+   *  falls back to the title registered on `PageNavigationContext`
+   *  via `usePageTitle`. Pages should prefer that programmatic path
+   *  so the same string drives both the chrome header and the tab
+   *  strip label. */
+  title?: ReactNode;
   /** Optional kind/type label rendered as a small chip ("file", "work item"…). */
   kind?: string;
   /** Optional status / metadata chips rendered next to the kind. */
@@ -52,6 +56,13 @@ export interface PageProps {
   navBar?: PageNavBarConfig;
   /** Test id applied to the page root. */
   testId?: string;
+  /** When false, suppress the browser-style nav bar even if a
+   *  PageNavigationContext is present. Defaults to true. The agent
+   *  tab uses this to opt out; future bare-content pages can too. */
+  showNavBar?: boolean;
+  /** When false, suppress the title/chips/actions header. Defaults
+   *  to true. */
+  showHeader?: boolean;
 }
 
 /**
@@ -63,7 +74,7 @@ export interface PageProps {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, navBar, testId }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -89,7 +100,8 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
   const backlinksCount: number | undefined = backlinksHasCount
     ? (backlinks as { count: number; body: ReactNode }).count
     : undefined;
-  const baseNavBar: PageNavBarConfig | undefined = navBar ?? (ctxNav ? {
+  const effectiveTitle: ReactNode = title ?? ctxNav?.title ?? "";
+  const baseNavBar: PageNavBarConfig | undefined = !showNavBar ? undefined : navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,
     canForward: ctxNav.canGoForward,
     onBack: ctxNav.goBack,
@@ -138,6 +150,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           actions={effectiveNavBar.actions}
         />
       ) : null}
+      {showHeader ? (
       <header
         data-testid="page-header"
         style={{
@@ -162,7 +175,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
               whiteSpace: "nowrap",
             }}
           >
-            {title}
+            {effectiveTitle}
           </span>
           {kind ? (
             <span
@@ -202,6 +215,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
         ) : null}
       </header>
+      ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
         {children}
       </div>

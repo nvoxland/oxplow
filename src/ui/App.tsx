@@ -209,6 +209,14 @@ export function App() {
   // dispatch by kind. Independent of the legacy noteTabs/diffTabs lists,
   // which still drive the tabs they own.
   const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>({});
+  // Per-tab page titles, keyed by tab id. Pages register their title via
+  // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
+  // the tab strip label and the shared chrome header so the title lives in
+  // exactly one place.
+  const [pageTitles, setPageTitles] = useState<Record<string, string>>({});
+  const setPageTitle = useCallback((tabId: string, title: string) => {
+    setPageTitles((prev) => (prev[tabId] === title ? prev : { ...prev, [tabId]: title }));
+  }, []);
   // Per-thread browser-style back/forward history for page tabs. Keyed by
   // the tab's *current* ref id; when an in-tab navigation replaces a tab's
   // ref, the entry is migrated to the new id along with the swap. Files,
@@ -1845,6 +1853,11 @@ export function App() {
       const { [id]: _drop, ...rest } = perThread;
       return { ...prev, [selectedThreadId]: rest };
     });
+    setPageTitles((prev) => {
+      if (!(id in prev)) return prev;
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
     setCenterActive((current) => (current === id ? "agent" : current));
   }, [selectedThreadId, setCenterActive]);
 
@@ -2436,6 +2449,7 @@ export function App() {
       const ref = pageRefsForThread.find((r) => r.id === tabId);
       const innerRender = tab.render;
       const scopes = ref ? bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id) : [];
+      const registeredTitle = pageTitles[tabId];
       const navValue = {
         navigate: (newRef: TabRef, opts?: { newTab?: boolean }) => {
           if (opts?.newTab) handleOpenPage(newRef);
@@ -2445,6 +2459,8 @@ export function App() {
         goForward: () => handleGoForward(tabId),
         canGoBack: entry.back.length > 0,
         canGoForward: entry.forward.length > 0,
+        setTitle: (t: string) => setPageTitle(tabId, t),
+        title: registeredTitle,
         bookmark: ref ? {
           scopes,
           toggle: (scope: BookmarkScope) => {
@@ -2452,11 +2468,14 @@ export function App() {
             if (currentScopes.includes(scope)) {
               bookmarksStore.remove(scope, selectedThreadId, stream?.id ?? null, ref.id);
             } else {
-              bookmarksStore.add(scope, selectedThreadId, stream?.id ?? null, ref, tab.label);
+              bookmarksStore.add(scope, selectedThreadId, stream?.id ?? null, ref, registeredTitle ?? tab.label);
             }
           },
         } : undefined,
       };
+      if (registeredTitle && registeredTitle !== tab.label) {
+        tab.label = registeredTitle;
+      }
       tab.render = () => (
         <PageNavigationContext.Provider value={navValue}>
           {innerRender()}
@@ -2486,6 +2505,8 @@ export function App() {
     handleGoBack,
     handleGoForward,
     closePageTab,
+    pageTitles,
+    setPageTitle,
     bookmarksStore,
     snapshotsReveal,
     workspaceContext.gitEnabled,
