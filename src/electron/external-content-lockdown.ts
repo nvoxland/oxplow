@@ -1,5 +1,11 @@
 import { app, session, shell, type WebContents } from "electron";
 import { classifyExternalUrl } from "../ui/external-url-allowlist.js";
+import {
+  EXTERNAL_PARTITION as POLICY_PARTITION,
+  isInternalUrl,
+  sanitizeOutboundHeaders,
+  withInjectedCsp,
+} from "./external-content-policy.js";
 
 /**
  * Centralized hardening for any web content other than the host renderer.
@@ -13,7 +19,7 @@ import { classifyExternalUrl } from "../ui/external-url-allowlist.js";
  * once at app startup.
  */
 
-export const EXTERNAL_PARTITION = "persist:external";
+export const EXTERNAL_PARTITION = POLICY_PARTITION;
 
 export function registerExternalContentLockdown(): void {
   // Enforce hardened webPreferences on every <webview> guest at attach
@@ -131,8 +137,27 @@ export function applyGuestContentsHardening(host: WebContents): void {
 }
 
 function configureExternalSession(): void {
-  // Touch the session so it's instantiated up front (Electron creates it
-  // lazily on first use). CSP + request-rewriting hooks are wired here
-  // by the request-hygiene commit.
-  void session.fromPartition(EXTERNAL_PARTITION);
+  const sess = session.fromPartition(EXTERNAL_PARTITION);
+
+  // Strip cookies + Authorization on every outbound request so the
+  // app's auth state never leaks to embedded sites. Set a strict-ish
+  // referrer policy so cross-origin nav doesn't include the path that
+  // the user followed (commit URLs, etc.).
+  sess.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: sanitizeOutboundHeaders(details.requestHeaders) as Record<string, string> });
+  });
+
+  // Block any external-partition request aimed at app-internal origins.
+  sess.webRequest.onBeforeRequest((details, callback) => {
+    if (isInternalUrl(details.url)) {
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+
+  // Layer a minimal CSP when the upstream didn't send one.
+  sess.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: withInjectedCsp(details.responseHeaders ?? undefined) });
+  });
 }
