@@ -1,4 +1,5 @@
 import type { Stream } from "./api.js";
+import { logUi } from "./logger.js";
 
 export interface EditorNavigationTarget {
   path: string;
@@ -110,6 +111,8 @@ export class LspClient {
   private ensureOpen(): Promise<void> {
     if (this.clientId) return Promise.resolve();
     if (this.openPromise) return this.openPromise;
+    const t0 = performance.now();
+    logUi("debug", "lsp: ensureOpen start", { streamId: this.streamId, languageId: this.languageId });
     this.openPromise = new Promise<void>((resolve, reject) => {
       let opened = false;
       this.unsubscribeMessages = window.oxplowApi.onLspEvent((event) => {
@@ -121,6 +124,11 @@ export class LspClient {
       void window.oxplowApi.openLspClient(this.streamId, this.languageId).then((clientId) => {
         this.clientId = clientId;
         opened = true;
+        logUi("debug", "lsp: ensureOpen resolved", {
+          languageId: this.languageId,
+          clientId,
+          ms: Math.round(performance.now() - t0),
+        });
         this.emitStatus(null);
         for (const message of this.queued) this.send(message);
         this.queued = [];
@@ -131,6 +139,11 @@ export class LspClient {
         this.clientId = null;
         this.unsubscribeMessages?.();
         this.unsubscribeMessages = null;
+        logUi("debug", "lsp: ensureOpen rejected", {
+          languageId: this.languageId,
+          ms: Math.round(performance.now() - t0),
+          error: errorMessage(error),
+        });
         if (!opened) reject(new Error(`failed to open LSP for ${this.languageId}: ${errorMessage(error)}`));
         for (const pending of this.pending.values()) {
           pending.reject(new Error("lsp connection closed"));

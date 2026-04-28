@@ -410,7 +410,14 @@ export function App() {
     }).catch(() => {});
     if (existing && !existing.isLoading) return;
     try {
+      logUi("debug", "open file: readWorkspaceFile start", { streamId: stream.id, path });
       const file = await readWorkspaceFile(stream.id, path);
+      logUi("debug", "open file: readWorkspaceFile end", {
+        streamId: stream.id,
+        path,
+        size: file.content.length,
+        lineCount: file.content.split("\n").length,
+      });
       setFileSessions((prev) => ({
         ...prev,
         [stream.id]: setLoadedFileContent(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
