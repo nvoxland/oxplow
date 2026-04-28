@@ -55,6 +55,7 @@ notes, and the release tag flow.
 3. Read [Your first stream](first-stream.md) to send a prompt.
 
 Oxplow stores everything project-local under `.oxplow/` inside the
-project root: the SQLite database, worktrees for additional
-streams, and per-turn snapshots. There is no global state to
-configure.
+project root: the SQLite database, the wiki notes folder, the
+Claude Code plugin oxplow installs, and per-effort snapshots.
+Worktrees for non-primary streams live as siblings of the project
+root. There is no global state to configure.

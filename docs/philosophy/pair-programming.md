@@ -38,12 +38,12 @@ Each navigator job has a primitive in the product:
 
 | Navigator job | Oxplow primitive |
 |---|---|
-| Hold the scope | **Work queue** — the durable list of what's in this stream and what isn't |
-| Set the checkpoints | **Commit points** — the agent commits when it reaches the line you drew |
-| Pause for taste | **Wait points** — the agent stops until you release the gate |
-| Catch regressions | **Local History** — every turn snapshots the files it touched |
+| Hold the scope | **Work queue** — the durable list of what's in this thread and what isn't |
+| Capture rationale | **Wiki notes** — durable Q&A and decisions, with backlinks |
+| Pause for taste | **`await_user`** — the agent asks; the runtime suppresses every directive until you reply |
+| Catch regressions | **Local History** — every effort snapshots the files it touched |
 | Switch contexts cleanly | **Streams** — each agent has its own branch, worktree, and queue |
-| Talk without losing your place | **Threads** — query an agent without making it the writer |
+| Talk without losing your place | **Threads** — query an agent in a read-only thread without risking writes |
 
 You stay in the problem. The agent stays in the keys.
 

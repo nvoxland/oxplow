@@ -2,49 +2,55 @@
 
 Oxplow stores per-project state in `.oxplow/state.sqlite` and
 per-user state in your OS user-config directory. Most settings
-are toggles in the UI; a handful live in JSON files for advanced
-use.
+are toggles in the UI; a handful live in JSON files for
+advanced use.
 
 ## Where settings live
 
-- **Per-project** — `.oxplow/state.sqlite` (committed: no — this
-  is in your `.gitignore`).
+- **Per-project** — `.oxplow/state.sqlite`. Add `.oxplow/` to
+  `.gitignore`; oxplow does not commit project state.
 - **Per-user** — `~/Library/Application Support/oxplow/`
-  (macOS) or the platform equivalent. Includes window position,
-  recent projects, theme preference.
+  (macOS) or the platform equivalent. Window position, recent
+  projects, theme preference.
 
 There is no global config file you need to edit to get started.
 Sensible defaults; opinionated product.
 
 ## Settings worth knowing
 
-### Auto-commit mode
-
-Per-stream toggle. When on, the agent commits at every Stop
-boundary; when off, you manage commit points by hand. Default:
-on.
-
-Set from the stream's overflow menu in the rail.
-
 ### Writer thread
 
-Per-stream. Exactly one thread is the writer. Other threads are
-read-only. Switch the writer from the thread list in the Plan
-pane. Switching kicks any in-flight write attempt on the old
-writer back through the hook (which will fail it cleanly).
+Per-stream. Exactly one thread is the writer. Other threads
+are read-only. Switch the writer from the thread tab kebab.
+Switching kicks any in-flight write attempt on the old writer
+back through the hook (which fails it cleanly).
 
-### Stop-hook task audit
+### Stream and thread custom prompts
 
-Global. When on (default), every Stop fires a "verify your
-`in_progress` items are still in progress" nudge to the writer.
-You can disable it for streams where the audit is more friction
-than it's worth.
+Each stream and thread has its own settings page (open from
+the tab kebab → Settings) with a custom prompt field appended
+to the agent's system prompt at launch. Use it for
+stream-specific framing ("you're on the migration branch,
+priority is not breaking schema") or thread-specific framing
+("research only — never edit").
+
+### Agent kind
+
+Per-thread. Default is Claude Code. `copilot` is also
+supported but skips the oxplow plugin plumbing — no
+filing-enforcement, no Stop directives, no MCP tools.
+
+### tmux mode
+
+Per-thread. Default on. The agent process runs inside a tmux
+session so it survives oxplow restarts. Toggle from the agent
+tab kebab.
 
 ### Snapshot pruning
 
 Global. Snapshots from closed work items are pruned after a
 configurable retention window. Default: 30 days. Set to `0` to
-disable pruning entirely (your disk's problem after that).
+disable pruning entirely.
 
 ### LSP servers
 
@@ -64,7 +70,8 @@ Per-language. Oxplow auto-detects common servers
 
 ### Theme
 
-Light / dark / system. Set from the **View** menu.
+Dark only. Oxplow is dark-only on purpose — Monaco is pinned
+to `vs-dark` and the UI tokens are calibrated for it.
 
 ### Telemetry
 
@@ -73,8 +80,8 @@ Off. Always. There is no telemetry to configure.
 ## Settings the agent can change
 
 None. The MCP surface deliberately does not expose product
-settings — the agent operates on intent, files, and work items.
-Configuration is the human's job.
+settings — the agent operates on intent, files, work items,
+and notes. Configuration is the human's job.
 
 ## Resetting
 

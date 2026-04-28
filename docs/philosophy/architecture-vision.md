@@ -9,16 +9,24 @@ shipped today; most is not.
 - **Streams + worktrees.** One agent per branch, isolated checkout,
   no cross-stream writes. This is the foundation everything else
   rests on.
-- **Durable work queue.** Work items as rows with a real lifecycle,
-  ordered by `sort_index`, grouped by epic, persisted in SQLite.
-- **Commit and wait points.** Inline gates in the queue. Auto-commit
-  mode for low-friction loops; manual gates for when you need a
-  human in the loop.
-- **Local History.** Per-turn file snapshots, grouped into efforts
-  per work item, with a modal that lets you compare and restore.
+- **Threads inside streams.** Independent lines of work per stream
+  — a writer that ships, plus optional read-only research threads
+  with their own agents and tab sets.
+- **Durable work queue.** Work items as rows with a real lifecycle
+  (`ready` → `in_progress` → `done`), ordered by `sort_index`,
+  grouped by epic, persisted in SQLite. Filing-enforcement and
+  Stop-hook audits keep the queue honest.
+- **Local History.** Per-effort file snapshots, grouped under their
+  work item, with a page that lets you compare and restore.
+- **Project wiki.** First-class markdown notes under
+  `.oxplow/notes/`, with `[[wikilinks]]` to other notes, files,
+  and commits, plus cross-kind backlinks.
+- **Web-style UI.** Pages, tabs per thread, browser-style
+  back/forward, kebabs instead of right-click menus, drag-to-add-
+  context onto the agent terminal.
 - **MCP control plane.** Oxplow exposes its primitives (work items,
-  notes, snapshots, threads) as MCP tools so the agent can drive
-  them directly.
+  notes, threads, dispatch, LSP, subsystem docs) as MCP tools so
+  the agent can drive them directly.
 
 ## Near-term direction
 
@@ -32,10 +40,11 @@ shipped today; most is not.
   more than the agent does about the project. The agent should be
   able to ask: where is this defined, what tests cover this file,
   what does the type checker think.
-- **Stop-hook orchestration that actually plans.** Right now the
-  stop hook auto-progresses through the queue. The next step is
-  letting it propose the *next* item, not just consume the queue
-  in order.
+- **Smarter dispatch.** Today the user resumes queue work by
+  prompting or running `/work-next`; `read_work_options` returns
+  either an epic-as-unit or the next standalone cluster.
+  Eventually the runtime should propose the next item with
+  rationale, not just hand back the head of the queue.
 
 ## Medium-term direction
 
@@ -59,8 +68,8 @@ shipped today; most is not.
 - **Replacing the editor.** Monaco is the editor. The work happens
   around it.
 - **Replacing git.** Git is the source of truth. Streams are
-  branches. Commit points are commits. Local History is
-  *additive* — it doesn't fight the git model.
+  branches. Commits are user-driven and unchanged. Local History
+  is *additive* — it doesn't fight the git model.
 
 ## Honest about what's not built
 

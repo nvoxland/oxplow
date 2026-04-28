@@ -9,13 +9,14 @@
       <div class="ox-hero__left">
         <div class="ox-hero__brand">// oxplow</div>
         <h1 class="ox-hero__title">
-          The IDE for <em>agent-assisted</em> development.
+          The cockpit for <em>agent-assisted</em> development.
         </h1>
         <p class="ox-hero__sub">
           One human. Several agents. One codebase. Oxplow gives you
-          parallel streams, durable work queues, commit and wait points,
-          and a Local History timeline — so your agents do the typing
-          while you stay focused on the task.
+          parallel streams, durable work queues, a project wiki with
+          backlinks, and a Local History timeline — wired together as
+          a web of pages so your agents do the typing while you stay
+          focused on the task.
         </p>
         <div class="ox-hero__cta">
           <a href="why/" class="primary">Why Oxplow &nbsp;→</a>
@@ -26,10 +27,10 @@
 
       <div class="ox-hero__sample" aria-hidden="true">
         <div class="ox-hero__sample-header">work — main</div>
-        <div class="ox-hero__row"><span class="status run">RUN</span><span>refactor commit-point store</span></div>
-        <div class="ox-hero__row"><span class="status run">RUN</span><span>add notes pane drag-drop</span></div>
-        <div class="ox-hero__row"><span class="status wait">WAIT</span><span>migration 0014 — review needed</span></div>
-        <div class="ox-hero__row"><span class="status done">DONE</span><span>fix wait-point overflow</span></div>
+        <div class="ox-hero__row"><span class="status run">RUN</span><span>refactor effort attribution</span></div>
+        <div class="ox-hero__row"><span class="status run">RUN</span><span>add wiki backlinks panel</span></div>
+        <div class="ox-hero__row"><span class="status wait">WAIT</span><span>migration 0014 — blocked on review</span></div>
+        <div class="ox-hero__row"><span class="status done">DONE</span><span>fix rail HUD overflow</span></div>
         <div class="ox-hero__row"><span class="status done">DONE</span><span>release workflow lowercase artifacts</span></div>
       </div>
     </div>
@@ -43,24 +44,24 @@
         <p>Each stream owns a branch and an isolated checkout. Agents on different streams cannot clobber each other.</p>
       </div>
       <div class="ox-card">
-        <h3>Durable work queue</h3>
-        <p>Tasks with a real lifecycle — ready, in_progress, human_check, done — grouped by epic, ordered by drag.</p>
+        <h3>Threads inside streams</h3>
+        <p>One writer per stream that ships changes; optional read-only research threads with their own agents and tabs.</p>
       </div>
       <div class="ox-card">
-        <h3>Commit &amp; wait points</h3>
-        <p>Inline gates in the queue. Commit when the agent reaches a milestone; pause until you release the gate.</p>
+        <h3>Durable work queue</h3>
+        <p>Tasks with a real lifecycle — ready, in_progress, blocked, done — grouped by epic, enforced by hooks.</p>
+      </div>
+      <div class="ox-card">
+        <h3>Project wiki</h3>
+        <p>Markdown notes with <code>[[wikilinks]]</code> to other notes, files, and commits — and cross-kind backlinks everywhere.</p>
       </div>
       <div class="ox-card">
         <h3>Local History</h3>
-        <p>Every turn snapshots the files it touched. Browse efforts per work item, jump back to any end snapshot.</p>
+        <p>Every effort snapshots the files it touched. Browse efforts per work item, restore a single file without disturbing the rest.</p>
       </div>
       <div class="ox-card">
-        <h3>Editor + blame + diff</h3>
-        <p>Monaco at the core, with git decorations, blame overlay, and per-effort diff tabs built in.</p>
-      </div>
-      <div class="ox-card">
-        <h3>Agent control plane</h3>
-        <p>An MCP surface and Claude Code hook integration that auto-progresses the agent through your queue.</p>
+        <h3>Web-style UI</h3>
+        <p>Pages, tabs per thread, browser back/forward, drag-to-add-context onto the agent. The whole project is one navigable graph.</p>
       </div>
     </div>
   </section>

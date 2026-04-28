@@ -54,10 +54,9 @@ of context only one of which you can hold in your head, and a diff
 nobody dares to merge.
 
 Streams are oxplow's answer: each agent gets its own branch, its own
-worktree, its own work queue, its own commit and wait points. You
-move between them. They never see each other's writes. Review is
-per-stream, with Local History showing exactly what changed in each
-turn.
+worktree, its own work queue, its own threads. You move between them.
+They never see each other's writes. Review is per-stream, with Local
+History showing exactly what changed in each effort.
 
 ## The IDE for the next phase
 
@@ -66,9 +65,11 @@ tool for the world it was designed for. It's not the world we're
 in now.
 
 Oxplow is built for one human directing several agents across
-parallel branches of the same repo, with review, rollback, and
-durable intent as first-class primitives — not plugins bolted onto
-a single-player editor.
+parallel branches of the same repo, with review, rollback, durable
+intent, and a project wiki as first-class primitives — not plugins
+bolted onto a single-player editor. The UI is web-style: pages,
+tabs, links, backlinks. The agent and the human navigate the same
+graph.
 
 That's the bet. The rest of these docs are how it shows up in the
 product.

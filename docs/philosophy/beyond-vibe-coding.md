@@ -25,11 +25,11 @@ The agent fixes the thing you asked about and breaks the thing you
 didn't. Because the prompt doesn't mention the broken thing, the
 agent has no incentive to notice.
 
-**Oxplow primitive: Local History + commit points.** Every turn
-snapshots the files it touched. When something looks wrong, you
-diff the current state against the snapshot from before the agent
-started. Commit points let you mark "things were OK here" without
-having to remember to type `git commit`.
+**Oxplow primitive: Local History.** Every effort snapshots the
+files it touched, before and after. When something looks wrong,
+you diff the current state against the snapshot from before the
+agent started — and you can restore a single file without
+disturbing the rest of the working tree.
 
 ## Failure mode 3: lost context across sessions
 
@@ -38,10 +38,13 @@ why this approach was chosen over the alternative, or what was
 tried and rejected. The agent re-explores, sometimes re-introduces
 the rejected approach.
 
-**Oxplow primitive: durable work items + threads.** The work item
-is the persistent intent. Notes on it carry rationale across turns.
-A query thread can ask the writer thread anything without changing
-files, so context can be reconstructed without restarting work.
+**Oxplow primitive: durable work items + wiki notes + threads.**
+The work item is the persistent intent. Notes on it carry rationale
+across turns. The project wiki captures non-trivial Q&A
+automatically — design rationale, comparisons, walkthroughs — with
+backlinks so it stays discoverable. A read-only thread can ask the
+writer thread anything without changing files, so context can be
+reconstructed without restarting work.
 
 ## Failure mode 4: no review trail
 

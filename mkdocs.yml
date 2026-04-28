@@ -1,5 +1,5 @@
 site_name: Oxplow
-site_description: An IDE for directing coding agents across parallel branches of the same project. Streams, work queues, commit/wait points, and Local History — built around the way agent-assisted development actually works.
+site_description: A web-style cockpit for directing coding agents across parallel branches of the same project. Streams, threads, work queues, a project wiki with backlinks, and Local History — built around the way agent-assisted development actually works.
 site_author: Nathan Voxland
 site_url: https://nvoxland.github.io/oxplow/
 repo_name: nvoxland/oxplow
@@ -55,12 +55,11 @@ nav:
       - Concepts: getting-started/concepts.md
   - Guide:
       - Work queue: guide/work-queue.md
-      - Commit & wait points: guide/commit-and-wait-points.md
+      - Notes (the wiki): guide/notes.md
       - Local History: guide/local-history.md
-      - Editor: guide/editor.md
+      - Editor and pages: guide/editor.md
       - Terminal: guide/terminal.md
       - Agent control: guide/agent-control.md
-      - Notes: guide/notes.md
   - Reference:
       - MCP tools: reference/mcp-tools.md
       - Keybindings: reference/keybindings.md

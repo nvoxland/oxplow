@@ -1,92 +1,112 @@
 # Concepts
 
-Six ideas to hold in your head. Everything else in the product is
-built from these.
+A handful of ideas to hold in your head. Everything else in the
+product is built from these.
 
 ## Stream
 
-A **stream** is one branch + one worktree + one agent + one work
-queue. Streams are the unit of parallelism. You add a stream when
-you want a new piece of work that runs alongside whatever is
-already in flight, on its own branch, without colliding with the
-other streams' files.
+A **stream** is one branch + one worktree. Streams are the unit
+of parallelism — each stream's agent works in its own checkout,
+so no two agents ever compete for the same file on disk.
 
 There is exactly one **primary** stream — the one rooted at the
 project directory itself. Every other stream is a **worktree**
-stream with its own checkout under `.oxplow/worktrees/<slug>/`.
+stream with its own checkout next to the project root.
 
 ## Thread
 
-A **thread** is an agent conversation inside a stream. Each
-stream has at least one thread. Most streams have one. You can
-add more.
+A **thread** is an independent line of work inside a stream.
+Each stream has at least one thread, often more — a writer
+thread that ships changes, plus optional research / review
+threads that ask questions without modifying files.
 
 One thread per stream is the **writer**: it owns file edits.
-Every other thread is **read-only** — it can browse, search, run
-the agent, ask questions, but its writes are denied at the hook
-level. Use read-only threads when you want a research or
-review-style agent that won't modify files behind your back.
+Every other thread is **read-only** — its writes are denied at
+the hook level. Use read-only threads for research, code
+walkthroughs, or any agent task where you don't want files
+changing behind your back.
+
+Each thread carries its own:
+
+- agent terminal (a tmux pane that survives oxplow restarts)
+- set of open tabs and active tab
+- work queue view
+- live agent-status indicator
+
+Switching threads restores its tab set; the agent terminals stay
+alive in the background.
 
 ## Worktree isolation
 
-This one is enforced by the product, not just convention: two
-streams never share a working tree. Their checkouts are different
-directories. Their agents see different files. There is no way
-for stream A to silently overwrite a file stream B is editing,
-because they are not the same file on disk.
+Enforced by the product, not just convention: two streams never
+share a working tree. Their checkouts are different directories;
+their agents see different files. Stream A cannot silently
+overwrite a file stream B is editing — they aren't the same file
+on disk.
+
+## Page
+
+A **page** is anything addressable inside a tab — a file, a
+diff, a work item, a wiki note, a code-quality finding, a
+dashboard, a settings panel, the agent terminal. Pages share
+common chrome: title + status chips + collapsible **Backlinks**
+panel + browser-style back/forward navigation.
+
+The center of the window is a stack of page tabs. The rail HUD
+on the left lists the available pages and links into them.
 
 ## Work item
 
 A **work item** is a row in the queue with a real lifecycle:
 
 ```
-ready → in_progress → human_check → done
-                    ↘ blocked
-                    ↘ canceled
+ready → in_progress → done
+                    ↘ blocked / canceled / archived
 ```
 
-You file work items when you want a durable record of intent —
-the thing you want to ship, not the conversation about it. Work
-items survive across turns, sessions, and crashes.
+Work items are durable: they survive turns, sessions, and
+crashes. The agent files them before changing project files
+(enforced — see [Work queue](../guide/work-queue.md)) and
+closes them when acceptance criteria are met. You can reopen
+anything by flipping it back to `in_progress`.
 
-The agent files them too, via MCP. When the agent realizes it's
-about to change project files, it files a work item and tracks
-its progress against the row.
+## Wiki note
 
-## Commit point and wait point
+The project's **wiki** is a folder of markdown files under
+`.oxplow/notes/`, indexed in SQLite. Notes support
+`[[wikilinks]]` for cross-references — across notes, to repo
+files (`[[src/foo.ts]]`), and to git commits (`[[abc1234]]`).
 
-Inline markers in the work queue, ordered by `sort_index` (shared
-with work items, so they intermix):
-
-- **Commit point.** When the agent reaches it, oxplow runs `git
-  commit` automatically. Use these to mark "this much work
-  belongs together as one commit."
-- **Wait point.** When the agent reaches it, oxplow blocks the
-  agent until you release the gate. Use these to force a human
-  check before the agent moves on.
-
-Auto-commit mode is the alternative for low-friction loops: the
-agent commits on every Stop instead of at marked points.
+The agent captures non-trivial Q&A here automatically — codebase
+walkthroughs, design rationale, comparisons, recommendations —
+so the durable understanding survives past the chat reply.
 
 ## Effort and snapshot
 
-Every time the agent runs against a work item, that's one
+Every time the agent works on a work item, that's one
 **effort**. An effort accumulates **file snapshots** — one per
 file the agent touched, before and after. The Local History
-modal groups efforts under their work item and lets you compare
+page groups efforts under their work item and lets you compare
 or restore at any point.
 
 This is how rollback works: you don't reset the whole repo, you
 restore the files this effort touched.
 
+## Backlinks
+
+Notes, work items, files, and code-quality findings are linked
+both ways. Open a work item and the Backlinks panel shows every
+note that mentions it; open a note and you see every work item
+or finding that points back. The rail's recent-files and active
+items also surface as backlinks where relevant.
+
 ## How they fit together
 
 You start a **stream** on a branch. You give it a writer
 **thread**. You file **work items** describing what you want
-done, optionally interleaved with **commit points** and **wait
-points**. The agent works through the queue, producing
-**efforts** and **snapshots** as it goes. Anything you don't like
-gets pushed back via the work item's lifecycle, restored from
-Local History, or both.
+done; the agent works through them, capturing **efforts** and
+**snapshots** as it goes. Decisions and exploration land in
+**wiki notes**. You navigate the project as **pages** in a
+browser-like tab UI, with the rail HUD as your home base.
 
 Repeat for as many streams as you can supervise.
