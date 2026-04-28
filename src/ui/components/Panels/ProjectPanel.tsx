@@ -1079,10 +1079,17 @@ function PushPullDialog({
 
   const run = async () => {
     setRunning(true);
-    const result = kind === "push"
+    const { awaitDone } = kind === "push"
       ? await gitPush(streamId, { force, setUpstream })
       : await gitPull(streamId, { rebase });
+    const task = await awaitDone;
     setRunning(false);
+    const result = (task?.result as GitOpResult | undefined) ?? {
+      ok: task?.status === "done",
+      stdout: "",
+      stderr: task?.error ?? "",
+      exitCode: null,
+    };
     onComplete(result);
   };
 

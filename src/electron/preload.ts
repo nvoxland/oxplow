@@ -118,6 +118,7 @@ const api: DesktopApi = {
   reorderThreadQueue: (streamId, threadId, entries) => ipcRenderer.invoke("oxplow:reorderThreadQueue", streamId, threadId, entries),
   removeFollowup: (threadId, id) => ipcRenderer.invoke("oxplow:removeFollowup", threadId, id),
   listBackgroundTasks: () => ipcRenderer.invoke("oxplow:listBackgroundTasks"),
+  getBackgroundTask: (id) => ipcRenderer.invoke("oxplow:getBackgroundTask", id),
   listHookEvents: (streamId) => ipcRenderer.invoke("oxplow:listHookEvents", streamId),
   listAgentStatuses: (streamId) => ipcRenderer.invoke("oxplow:listAgentStatuses", streamId),
   listRecentlyFinished: (threadId, limit) => ipcRenderer.invoke("oxplow:listRecentlyFinished", threadId, limit),

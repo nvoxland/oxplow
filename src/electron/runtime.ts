@@ -1003,40 +1003,48 @@ export class ElectronRuntime {
     return deleteBranch(this.projectDir, branch, options?.force);
   }
 
-  async gitMergeInto(streamId: string, other: string): Promise<GitOpResult> {
+  /**
+   * Long-running git ops are kickoff-style: the IPC promise resolves
+   * immediately with a `taskId` once the BackgroundTaskStore row is
+   * registered, and the actual work runs in the background. The renderer
+   * subscribes by taskId to drive in-flight UI and reads `task.result`
+   * (a `GitOpResult`) once the task ends. This keeps the renderer
+   * unblocked while git churns and gives any surface — not just the
+   * caller — an authoritative pending signal.
+   */
+  gitMergeInto(streamId: string, other: string): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const target = stream.branch ?? "HEAD";
     const taskId = this.backgroundTaskStore.start({
       kind: "git",
       label: `Merging ${other} → ${target}…`,
     });
-    try {
-      const result = await gitMergeAsync(stream.worktree_path, other);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git merge failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git merge failed", () => gitMergeAsync(stream.worktree_path, other));
+    return Promise.resolve({ taskId });
   }
 
-  async gitRebaseOnto(streamId: string, onto: string): Promise<GitOpResult> {
+  gitRebaseOnto(streamId: string, onto: string): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const taskId = this.backgroundTaskStore.start({
       kind: "git",
       label: `Rebasing onto ${onto}…`,
     });
+    void this.runGitTask(taskId, "git rebase failed", () => gitRebaseAsync(stream.worktree_path, onto));
+    return Promise.resolve({ taskId });
+  }
+
+  private async runGitTask(
+    taskId: string,
+    fallbackError: string,
+    invoke: () => Promise<GitOpResult>,
+  ): Promise<void> {
     try {
-      const result = await gitRebaseAsync(stream.worktree_path, onto);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git rebase failed");
-      return result;
+      const result = await invoke();
+      if (result.ok) this.backgroundTaskStore.complete(taskId, result);
+      else this.backgroundTaskStore.fail(taskId, result.stderr || fallbackError, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.backgroundTaskStore.fail(taskId, message);
-      throw err;
     }
   }
 
@@ -1116,7 +1124,7 @@ export class ElectronRuntime {
     return appendToGitignore(stream.worktree_path, path);
   }
 
-  async gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): Promise<GitOpResult> {
+  gitPush(streamId: string, options?: Parameters<typeof gitPush>[1]): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const branch = options?.branch ?? stream.branch ?? "HEAD";
     const remote = options?.remote ?? "origin";
@@ -1124,19 +1132,11 @@ export class ElectronRuntime {
       kind: "git",
       label: `Pushing ${branch} to ${remote}…`,
     });
-    try {
-      const result = await gitPushAsync(stream.worktree_path, options);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git push failed", () => gitPushAsync(stream.worktree_path, options));
+    return Promise.resolve({ taskId });
   }
 
-  async gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): Promise<GitOpResult> {
+  gitPull(streamId: string, options?: Parameters<typeof gitPull>[1]): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const branch = options?.branch ?? stream.branch ?? "HEAD";
     const remote = options?.remote ?? "origin";
@@ -1144,35 +1144,19 @@ export class ElectronRuntime {
       kind: "git",
       label: `Pulling ${branch} from ${remote}…`,
     });
-    try {
-      const result = await gitPullAsync(stream.worktree_path, options);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git pull failed", () => gitPullAsync(stream.worktree_path, options));
+    return Promise.resolve({ taskId });
   }
 
-  async gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult> {
+  gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const remote = options?.remote ?? "origin";
     const taskId = this.backgroundTaskStore.start({
       kind: "git",
       label: `Fetching ${remote}…`,
     });
-    try {
-      const result = await gitFetchAsync(stream.worktree_path, options);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git fetch failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git fetch failed", () => gitFetchAsync(stream.worktree_path, options));
+    return Promise.resolve({ taskId });
   }
 
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): GitOpResult & { sha?: string } {
@@ -1195,40 +1179,30 @@ export class ElectronRuntime {
     return listRecentRemoteBranches(stream.worktree_path, limit);
   }
 
-  async gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+  gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const taskId = this.backgroundTaskStore.start({
       kind: "git",
       label: `Pushing HEAD to ${remote}/${branch}…`,
     });
-    try {
-      const result = await gitPushCurrentToAsync(stream.worktree_path, remote, branch);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git push failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git push failed", () => gitPushCurrentToAsync(stream.worktree_path, remote, branch));
+    return Promise.resolve({ taskId });
   }
 
-  async gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult> {
+  gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<{ taskId: string }> {
     const stream = this.resolveStream(streamId);
     const taskId = this.backgroundTaskStore.start({
       kind: "git",
       label: `Pulling ${remote}/${branch} into current…`,
     });
-    try {
-      const result = await gitPullRemoteIntoCurrent(stream.worktree_path, remote, branch);
-      if (result.ok) this.backgroundTaskStore.complete(taskId);
-      else this.backgroundTaskStore.fail(taskId, result.stderr || "git pull failed");
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.backgroundTaskStore.fail(taskId, message);
-      throw err;
-    }
+    void this.runGitTask(taskId, "git pull failed", () => gitPullRemoteIntoCurrent(stream.worktree_path, remote, branch));
+    return Promise.resolve({ taskId });
+  }
+
+  /** Lookup a single background task by id. Used by the renderer to read
+   *  `task.result` after awaiting a kickoff IPC. */
+  getBackgroundTask(id: string): import("./background-task-store.js").BackgroundTask | null {
+    return this.backgroundTaskStore.get(id);
   }
 
   listFileCommits(streamId: string, path: string, limit?: number): GitLogCommit[] {

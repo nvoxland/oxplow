@@ -198,8 +198,8 @@ export interface DesktopApi {
   listGitRefs(): Promise<GroupedGitRefs>;
   renameGitBranch(from: string, to: string): Promise<GitOpResult>;
   deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<GitOpResult>;
-  gitMergeInto(streamId: string, other: string): Promise<GitOpResult>;
-  gitRebaseOnto(streamId: string, onto: string): Promise<GitOpResult>;
+  gitMergeInto(streamId: string, other: string): Promise<{ taskId: string }>;
+  gitRebaseOnto(streamId: string, onto: string): Promise<{ taskId: string }>;
   getWorkspaceContext(): Promise<WorkspaceContext>;
   createStream(input:
     | { title: string; summary?: string; source: "existing"; ref: string }
@@ -293,14 +293,14 @@ export interface DesktopApi {
   gitRestorePath(streamId: string, path: string): Promise<GitOpResult>;
   gitAddPath(streamId: string, path: string): Promise<GitOpResult>;
   gitAppendToGitignore(streamId: string, path: string): Promise<GitOpResult>;
-  gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
-  gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<GitOpResult>;
-  gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<GitOpResult>;
+  gitPush(streamId: string, options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string }): Promise<{ taskId: string }>;
+  gitPull(streamId: string, options?: { rebase?: boolean; remote?: string; branch?: string }): Promise<{ taskId: string }>;
+  gitFetch(streamId: string, options?: { remote?: string; prune?: boolean; all?: boolean }): Promise<{ taskId: string }>;
   getAheadBehind(streamId: string, base: string, head?: string): Promise<{ ahead: number; behind: number }>;
   getCommitsAheadOf(streamId: string, base: string, head: string, limit?: number): Promise<GitLogCommit[]>;
   listRecentRemoteBranches(streamId: string, limit?: number): Promise<import("../git/git.js").RemoteBranchEntry[]>;
-  gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
-  gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<GitOpResult>;
+  gitPushCurrentTo(streamId: string, remote: string, branch: string): Promise<{ taskId: string }>;
+  gitPullRemoteIntoCurrent(streamId: string, remote: string, branch: string): Promise<{ taskId: string }>;
   gitCommitAll(streamId: string, message: string, options?: { includeUntracked?: boolean; paths?: string[] }): Promise<GitOpResult & { sha?: string }>;
   listFileCommits(streamId: string, path: string, limit?: number): Promise<GitLogCommit[]>;
   gitBlame(streamId: string, path: string): Promise<BlameLine[]>;
@@ -337,6 +337,7 @@ export interface DesktopApi {
    *  tasks (git ops, code-quality scans, LSP startup, notes resync).
    *  Subscribe to `background-task.changed` events and refetch. */
   listBackgroundTasks(): Promise<import("./background-task-store.js").BackgroundTask[]>;
+  getBackgroundTask(id: string): Promise<import("./background-task-store.js").BackgroundTask | null>;
   listHookEvents(streamId?: string): Promise<StoredEvent[]>;
   listAgentStatuses(streamId?: string): Promise<Array<{ streamId: string; threadId: string; status: AgentStatus }>>;
   listRecentlyFinished(threadId: string | null, limit: number): Promise<
