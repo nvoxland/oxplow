@@ -111,6 +111,86 @@ Files referenced: \`src/foo.ts\`, \`src/bar/baz.ts\`
    baseline pins to current HEAD without waiting for the watcher's
    200ms debounce.
 
+## Diagrams — use mermaid
+
+Notes render through \`MarkdownView\` with mermaid post-processing
+enabled, so any \`\`\`mermaid fenced block becomes an inline SVG in
+NoteTab. **Reach for a diagram whenever the relationship would be
+clearer drawn than described.** ASCII art is wasted effort here —
+write mermaid instead.
+
+Strong signals that a diagram earns its keep:
+
+- Entity hierarchies, table relationships, module dependencies
+  → \`graph TD\` or \`flowchart TD\`
+- State machines (statuses, lifecycles, transitions)
+  → \`stateDiagram-v2\`
+- Time-ordered request/response or event flows between components
+  → \`sequenceDiagram\`
+- Phase-by-phase evolution of a system over time
+  → \`timeline\`
+- Tabular state-vs-condition matrices that would be wide and ugly
+  inline → leave as a markdown table; don't force a diagram
+
+Keep diagrams small (≤ ~12 nodes); split into multiple diagrams under
+sub-headings if a single one gets crowded. Always pair the diagram
+with a prose sentence that says what to look at — readers skim
+captions, not boxes.
+
+### graph TD — hierarchy / relationship
+
+\`\`\`mermaid
+graph TD
+  Stream[streams] --> Thread[threads]
+  Thread --> WorkItem[work_items]
+  WorkItem --> Note[work_note]
+  WorkItem --> Effort[work_item_effort]
+  Effort --> EffortFile[work_item_effort_file]
+\`\`\`
+
+### stateDiagram-v2 — lifecycle
+
+\`\`\`mermaid
+stateDiagram-v2
+  [*] --> ready
+  ready --> in_progress
+  in_progress --> done
+  in_progress --> blocked
+  blocked --> in_progress
+  done --> in_progress: reopen (redo)
+  done --> archived
+  in_progress --> canceled
+  canceled --> archived
+\`\`\`
+
+### sequenceDiagram — cross-component flow
+
+\`\`\`mermaid
+sequenceDiagram
+  participant CC as Claude Code
+  participant Hook as PreToolUse hook
+  participant RT as runtime
+  CC->>Hook: tool_input { tool: "Edit", ... }
+  Hook->>RT: POST /hook/PreToolUse
+  RT-->>Hook: { permissionDecision: "deny", reason }
+  Hook-->>CC: deny response
+\`\`\`
+
+### timeline — phase-by-phase evolution
+
+\`\`\`mermaid
+timeline
+  title Hook transport evolution
+  Phase 1 : --settings + shell forwarder : daemon mode
+  Phase 2 : Claude Code plugin : http hooks : drop daemon
+  Phase 3 : SessionStart workaround : session-id from any hook
+  Phase 4 : handler logic accretes : Stop slimmed
+\`\`\`
+
+Use mermaid's own syntax docs if you need a less common diagram type
+(class, ER, gantt, pie, journey). The \`\`\`mermaid fence is the only
+gating requirement; everything inside is forwarded to mermaid as-is.
+
 ## Folding in Explore findings
 
 If this turn dispatched query subagents (\`oxplow__delegate_query\` →
