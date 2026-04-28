@@ -142,3 +142,10 @@ export function threadSettingsRef(threadId: string): TabRef {
 export function closedThreadsRef(): TabRef {
   return { id: "closed-threads", kind: "closed-threads", payload: null };
 }
+
+/** Async-op error detail page. Id is scoped to the error id so each
+ *  failure gets its own tab; closing it discards the view, not the
+ *  store entry. */
+export function opErrorRef(errorId: string): TabRef {
+  return { id: `op-error:${errorId}`, kind: "op-error", payload: { errorId } };
+}

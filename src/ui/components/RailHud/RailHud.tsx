@@ -2,11 +2,12 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStatus, BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, noteRef, planWorkRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
+import { fileRef, noteRef, opErrorRef, planWorkRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
+import type { OpError } from "../opErrorsStore.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -37,6 +38,12 @@ export interface RailHudProps {
   recentlyFinished?: FinishedEntry[];
   /** Working-tree uncommitted summary; section hidden when null or empty. */
   uncommitted?: UncommittedSummary | null;
+  /** Recent failed async operations. Section hidden when empty. */
+  opErrors?: readonly OpError[];
+  /** Dismiss a single op error from the in-memory store. */
+  onDismissOpError?(id: string): void;
+  /** Clear all recorded op errors. */
+  onClearOpErrors?(): void;
   /** Mark all currently-finished entries as seen (clears the section). */
   onClearFinished?(): void;
   /** Open a page (or focus if already open) in the active thread's tab area. */
@@ -65,6 +72,9 @@ export function RailHud({
   bookmarks,
   recentlyFinished,
   uncommitted,
+  opErrors,
+  onDismissOpError,
+  onClearOpErrors,
   onClearFinished,
   onOpenPage,
   onOpenSearch,
@@ -104,6 +114,15 @@ export function RailHud({
 
       {uncommitted && (uncommitted.added + uncommitted.modified + uncommitted.deleted) > 0 ? (
         <UncommittedSection summary={uncommitted} onOpenPage={onOpenPage} />
+      ) : null}
+
+      {opErrors && opErrors.length > 0 ? (
+        <OpErrorsSection
+          entries={opErrors}
+          onOpenPage={onOpenPage}
+          onDismiss={onDismissOpError}
+          onClear={onClearOpErrors}
+        />
       ) : null}
 
       {upNext.length > 0 ? (
@@ -386,6 +405,118 @@ function UncommittedSection({
           −{summary.deletions}
         </span>
       </button>
+    </>
+  );
+}
+
+function OpErrorsSection({
+  entries,
+  onOpenPage,
+  onDismiss,
+  onClear,
+}: {
+  entries: readonly OpError[];
+  onOpenPage(ref: TabRef): void;
+  onDismiss?(id: string): void;
+  onClear?(): void;
+}) {
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "12px 14px 4px",
+        }}
+      >
+        <span
+          style={{
+            flex: 1,
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--diff-del-fg, #f85149)",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          Errors
+        </span>
+        {onClear ? (
+          <button
+            type="button"
+            data-testid="rail-op-errors-clear"
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            title="Clear all errors"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontSize: 10,
+              padding: "0 4px",
+            }}
+          >
+            clear
+          </button>
+        ) : null}
+      </div>
+      <div data-testid="rail-op-errors" style={{ paddingBottom: 8 }}>
+        {entries.map((entry) => (
+          <div
+            key={entry.id}
+            style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 6 }}
+          >
+            <button
+              type="button"
+              data-testid={`rail-op-error-${entry.id}`}
+              title={entry.stderr || entry.message || entry.label}
+              onClick={() => onOpenPage(opErrorRef(entry.id))}
+              style={{ ...rowHoverStyle(), flex: 1 }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: entry.seen ? "transparent" : "var(--diff-del-fg, #f85149)",
+                  border: entry.seen ? "1px solid var(--diff-del-fg, #f85149)" : "none",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: entry.seen ? "var(--text-secondary)" : "var(--text-primary)",
+                }}
+              >
+                {entry.label}
+              </span>
+            </button>
+            {onDismiss ? (
+              <button
+                type="button"
+                data-testid={`rail-op-error-dismiss-${entry.id}`}
+                title="Dismiss"
+                onClick={(e) => { e.stopPropagation(); onDismiss(entry.id); }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  fontSize: 11,
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </>
   );
 }

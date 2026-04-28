@@ -9,6 +9,7 @@ import {
   type WikiNoteSummary,
 } from "../../api.js";
 import { MarkdownView } from "./MarkdownView.js";
+import { recordOpError } from "../opErrorsStore.js";
 
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
@@ -134,7 +135,10 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
       await writeWikiNoteBody(stream.id, currentSlug, draft);
       setBody(draft);
     } catch (error) {
-      window.alert(`Failed to save note: ${String(error)}`);
+      recordOpError({
+        label: `Save note "${currentSlug}"`,
+        message: String(error),
+      });
     }
   }, [stream.id, currentSlug, draft]);
 
@@ -148,7 +152,10 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
       setDraftInitialized(true);
       setEditing(true);
     } catch (error) {
-      window.alert(`Failed to create note: ${String(error)}`);
+      recordOpError({
+        label: `Create note "${currentSlug}"`,
+        message: String(error),
+      });
     }
   }, [stream.id, currentSlug]);
 
@@ -158,7 +165,10 @@ export function NoteTab({ stream, slug: initialSlug, onClosed, onOpenNoteInNewTa
       await deleteWikiNote(stream.id, currentSlug);
       onClosed();
     } catch (error) {
-      window.alert(`Failed to delete note: ${String(error)}`);
+      recordOpError({
+        label: `Delete note "${currentSlug}"`,
+        message: String(error),
+      });
     }
   }, [stream.id, currentSlug, onClosed]);
 

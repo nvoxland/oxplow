@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
   createWorkItem,
@@ -113,7 +113,9 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
+import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { closedThreadsRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { EditorPane } from "./components/EditorPane.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -225,6 +227,8 @@ export function App() {
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
   const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
+  const opErrorsStore = getOpErrorsStore();
+  const opErrors = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.oxplowDesktop?.isElectron;
@@ -2018,6 +2022,14 @@ export function App() {
           closable: true,
           render: () => <HookEventsPage streamId={stream?.id ?? null} />,
         });
+      } else if (ref.kind === "op-error") {
+        const errorId = (ref.payload as { errorId?: string } | null)?.errorId ?? "";
+        tabs.push({
+          id: ref.id,
+          label: "Op error",
+          closable: true,
+          render: () => <OpErrorPage errorId={errorId} />,
+        });
       } else if (ref.kind === "files") {
         tabs.push({
           id: ref.id,
@@ -2412,6 +2424,9 @@ export function App() {
           recentFiles={recentFileEntries}
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
+          opErrors={opErrors}
+          onDismissOpError={(id) => opErrorsStore.dismiss(id)}
+          onClearOpErrors={() => opErrorsStore.clear()}
           onClearFinished={() => { void clearRecentlyFinished(selectedThreadId); }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";

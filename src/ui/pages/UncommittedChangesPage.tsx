@@ -8,7 +8,8 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { indexRef } from "../tabs/pageRefs.js";
+import { indexRef, opErrorRef } from "../tabs/pageRefs.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 
 export interface UncommittedChangesPageProps {
   stream: Stream | null;
@@ -85,14 +86,21 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
     try {
       const result = await gitCommitAll(streamId, message.trim());
       if (!result.ok) {
-        window.alert(`Commit failed:\n${result.stderr || "git error"}`);
+        const errorId = recordOpError({
+          label: "Commit all changes",
+          command: `git commit -am "${message.trim()}"`,
+          stderr: result.stderr ?? "",
+          stdout: result.stdout ?? "",
+          exitCode: result.exitCode ?? null,
+        });
+        onOpenPage(opErrorRef(errorId));
       } else {
         await refresh();
       }
     } finally {
       setCommitting(false);
     }
-  }, [streamId, refresh]);
+  }, [streamId, refresh, onOpenPage]);
 
   const toggleDir = useCallback((path: string) => {
     setExpanded((prev) => {

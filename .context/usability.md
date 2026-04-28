@@ -52,6 +52,14 @@ Things I keep forgetting. Read this before adding any UI.
   the renderer; prefer `InlineConfirm` for destructive actions on a
   row/button and `showToast({ message, onUndo })` for fire-and-undo
   destructives that aren't tied to a specific row.
+- **Async-op failures don't `alert`.** Push a record into
+  `opErrorsStore` (`recordOpError({ label, command?, stderr?, stdout?,
+  exitCode?, message? })`) — the RailHud renders an Errors section
+  with red rows; clicking a row opens an `op-error` page tab with the
+  full output. For ops that already have a page focus when they fail
+  (e.g. `runConfirmed` in GitDashboardPage), call
+  `onOpenPage(opErrorRef(id))` after recording so the user lands on
+  the detail view directly.
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
   form on click. Use `type="button"` for every action button; use

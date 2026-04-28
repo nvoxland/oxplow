@@ -24,7 +24,8 @@ import {
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
@@ -202,7 +203,14 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       try {
         const result = await action();
         if (!result.ok) {
-          window.alert(`${label} failed:\n${result.stderr || "git error"}`);
+          const errorId = recordOpError({
+            label,
+            command,
+            stderr: result.stderr ?? "",
+            stdout: result.stdout ?? "",
+            exitCode: result.exitCode ?? null,
+          });
+          onOpenPage(opErrorRef(errorId));
         } else {
           await refresh();
         }
@@ -210,7 +218,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         setPendingAction(null);
       }
     },
-    [refresh],
+    [refresh, onOpenPage],
   );
 
   if (!streamId) {

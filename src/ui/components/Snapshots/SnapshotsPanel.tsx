@@ -16,6 +16,7 @@ import {
   type WorkItemPriority,
 } from "../../api.js";
 import { logUi } from "../../logger.js";
+import { recordOpError } from "../opErrorsStore.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import { InlineStatusPicker } from "../Plan/WorkGroupList.js";
@@ -238,7 +239,10 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
       await restoreFileFromSnapshot(stream.id, selectedId, path);
     } catch (err) {
       logUi("warn", "restore snapshot file failed", { error: String(err) });
-      window.alert(`Restore failed: ${String(err)}`);
+      recordOpError({
+        label: `Restore from snapshot: ${path}`,
+        message: String(err),
+      });
     }
   };
 
