@@ -2,6 +2,8 @@ import { useRef } from "react";
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
+import { useRouteDispatch } from "../../tabs/RouteLink.js";
+import { fileRef } from "../../tabs/pageRefs.js";
 
 /**
  * `requestMenu` opens a menu anchored at the kebab's bottom-right
@@ -112,120 +114,16 @@ export function TreeEntries({
         const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
         return (
           <div key={entry.path}>
-            <div
-              data-testid={`file-tree-entry-${entry.path}`}
-              data-kind={entry.kind}
-              data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
-              title={entry.path}
-              draggable={entry.kind === "file"}
-              onDragStart={entry.kind === "file"
-                ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
-                : undefined}
-              onClick={(e) => {
-                if (entry.kind === "directory") {
-                  void onToggleDirectory(entry.path);
-                } else if (entry.gitStatus === "deleted") {
-                  // Deleted files no longer exist on disk; opening would 404.
-                } else {
-                  onOpenFile(entry.path, { newTab: e.metaKey || e.ctrlKey });
-                }
-              }}
-              onAuxClick={(e) => {
-                if (entry.kind === "file" && entry.gitStatus !== "deleted" && e.button === 1) {
-                  e.preventDefault();
-                  onOpenFile(entry.path, { newTab: true });
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  if (entry.kind === "directory") void onToggleDirectory(entry.path);
-                  else if (entry.gitStatus !== "deleted") onOpenFile(entry.path);
-                }
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                width: "100%",
-                minWidth: "100%",
-                padding: "7px 8px",
-                border: "none",
-                borderRadius: 4,
-                background: selectedFilePath === entry.path ? "var(--accent-soft-bg)" : "transparent",
-                color: selectedFilePath === entry.path ? "var(--text-primary)" : "inherit",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                textAlign: "left",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 16,
-                  height: 16,
-                  color: "var(--muted)",
-                  flexShrink: 0,
-                  transition: "transform 120ms ease, color 120ms ease",
-                  transform: entry.kind === "directory" && expanded ? "rotate(90deg)" : "rotate(0deg)",
-                }}
-              >
-                {entry.kind === "directory" ? (
-                  // Chevron — rotated via transform so the open/closed states
-                  // share one glyph and animate smoothly.
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-                    <path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : null}
-              </span>
-              <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
-              <span
-                style={{
-                  flex: 1,
-                  whiteSpace: "nowrap",
-                  textDecoration: entry.gitStatus === "deleted" ? "line-through" : undefined,
-                  color:
-                    entry.gitStatus === "deleted"
-                      ? "var(--muted)"
-                      : insideGenerated
-                        ? "var(--muted)"
-                        : undefined,
-                  fontStyle: insideGenerated ? "italic" : undefined,
-                }}
-              >{entry.name}</span>
-              {markedSelf ? (
-                <span
-                  title="Marked as generated — excluded from fs-watch and snapshot tracking"
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 600,
-                    letterSpacing: 0.4,
-                    padding: "0 4px",
-                    border: "1px solid #e5a06a",
-                    color: "#e5a06a",
-                    borderRadius: 3,
-                    flexShrink: 0,
-                  }}
-                >
-                  GEN
-                </span>
-              ) : null}
-              {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
-              <KebabButton
-                onClick={(rect) => onOpenMenu({
-                  path: entry.path,
-                  kind: entry.kind,
-                  name: entry.name,
-                  x: rect.right,
-                  y: rect.bottom + 4,
-                })}
-              />
-            </div>
+            <TreeEntryRow
+              entry={entry}
+              expanded={expanded}
+              insideGenerated={insideGenerated}
+              markedSelf={markedSelf}
+              selected={selectedFilePath === entry.path}
+              onToggleDirectory={onToggleDirectory}
+              onOpenFile={onOpenFile}
+              onOpenMenu={onOpenMenu}
+            />
             {entry.kind === "directory" && expanded ? (
               <div style={{ paddingLeft: 18 }}>
                 {loadingDirs[entry.path] && children.length === 0 ? (
@@ -249,6 +147,154 @@ export function TreeEntries({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Tree row for a file or directory entry. File rows route their click
+ * through `useRouteDispatch` so plain-click does in-tab navigation
+ * inside a page (Files page → file tab) and modifier/middle/right-
+ * click open the file in a new tab. Outside a page (left rail), the
+ * dispatch falls back to `onOpenFile`. Directory rows just toggle.
+ */
+function TreeEntryRow({
+  entry,
+  expanded,
+  insideGenerated,
+  markedSelf,
+  selected,
+  onToggleDirectory,
+  onOpenFile,
+  onOpenMenu,
+}: {
+  entry: WorkspaceEntry;
+  expanded: boolean;
+  insideGenerated: boolean;
+  markedSelf: boolean;
+  selected: boolean;
+  onToggleDirectory(path: string): void;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  onOpenMenu(target: ContextMenuTarget | null): void;
+}) {
+  // Hook is called unconditionally; for directory rows the dispatch
+  // ref is unused. fileRef is cheap to construct.
+  const { handlers } = useRouteDispatch(fileRef(entry.path), {
+    onNavigate: (_ref, opts) => onOpenFile(entry.path, opts),
+  });
+  const isFile = entry.kind === "file";
+  const isOpenable = isFile && entry.gitStatus !== "deleted";
+  return (
+    <div
+      data-testid={`file-tree-entry-${entry.path}`}
+      data-kind={entry.kind}
+      data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
+      title={entry.path}
+      draggable={isFile}
+      onDragStart={isFile
+        ? (e) => setContextRefDrag(e, { kind: "file", path: entry.path })
+        : undefined}
+      onClick={(e) => {
+        if (entry.kind === "directory") {
+          void onToggleDirectory(entry.path);
+          return;
+        }
+        if (!isOpenable) return;
+        handlers.onClick(e);
+      }}
+      onAuxClick={(e) => {
+        if (isOpenable) handlers.onAuxClick(e);
+      }}
+      onContextMenu={(e) => {
+        if (isOpenable) handlers.onContextMenu(e);
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (entry.kind === "directory") void onToggleDirectory(entry.path);
+          else if (isOpenable) onOpenFile(entry.path);
+        }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        width: "100%",
+        minWidth: "100%",
+        padding: "7px 8px",
+        border: "none",
+        borderRadius: 4,
+        background: selected ? "var(--accent-soft-bg)" : "transparent",
+        color: selected ? "var(--text-primary)" : "inherit",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textAlign: "left",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 16,
+          height: 16,
+          color: "var(--muted)",
+          flexShrink: 0,
+          transition: "transform 120ms ease, color 120ms ease",
+          transform: entry.kind === "directory" && expanded ? "rotate(90deg)" : "rotate(0deg)",
+        }}
+      >
+        {entry.kind === "directory" ? (
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+            <path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : null}
+      </span>
+      <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
+      <span
+        style={{
+          flex: 1,
+          whiteSpace: "nowrap",
+          textDecoration: entry.gitStatus === "deleted" ? "line-through" : undefined,
+          color:
+            entry.gitStatus === "deleted"
+              ? "var(--muted)"
+              : insideGenerated
+                ? "var(--muted)"
+                : undefined,
+          fontStyle: insideGenerated ? "italic" : undefined,
+        }}
+      >{entry.name}</span>
+      {markedSelf ? (
+        <span
+          title="Marked as generated — excluded from fs-watch and snapshot tracking"
+          style={{
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: 0.4,
+            padding: "0 4px",
+            border: "1px solid #e5a06a",
+            color: "#e5a06a",
+            borderRadius: 3,
+            flexShrink: 0,
+          }}
+        >
+          GEN
+        </span>
+      ) : null}
+      {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
+      <KebabButton
+        onClick={(rect) => onOpenMenu({
+          path: entry.path,
+          kind: entry.kind,
+          name: entry.name,
+          x: rect.right,
+          y: rect.bottom + 4,
+        })}
+      />
     </div>
   );
 }
