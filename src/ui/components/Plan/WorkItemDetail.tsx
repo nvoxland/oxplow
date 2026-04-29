@@ -41,6 +41,10 @@ export interface WorkItemDetailChanges {
   parentId?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
+  /** Backlog grooming bucket. Pass `null` to clear, omit to keep. */
+  category?: string | null;
+  /** Backlog grooming tags (comma-separated; normalized server-side). */
+  tags?: string | null;
 }
 
 const STATUS_OPTIONS_BASE: WorkItemStatus[] = [
@@ -126,6 +130,32 @@ export function WorkItemDetail({
           const next = value.length === 0 ? null : value;
           if (next === item.acceptance_criteria) return;
           void onUpdateWorkItem(item.id, { acceptanceCriteria: next });
+        }}
+      />
+      <EditableField
+        key={`category-${item.id}-${item.updated_at}`}
+        label="Category"
+        value={item.category ?? ""}
+        placeholder="Backlog grouping bucket (e.g. UI / UX, Infra)"
+        multiline={false}
+        onCommit={(value) => {
+          const trimmed = value.trim();
+          const next = trimmed.length === 0 ? null : trimmed;
+          if (next === (item.category ?? null)) return;
+          void onUpdateWorkItem(item.id, { category: next });
+        }}
+      />
+      <EditableField
+        key={`tags-${item.id}-${item.updated_at}`}
+        label="Tags"
+        value={item.tags ?? ""}
+        placeholder="Comma-separated tags"
+        multiline={false}
+        onCommit={(value) => {
+          const trimmed = value.trim();
+          const next = trimmed.length === 0 ? null : trimmed;
+          if (next === (item.tags ?? null)) return;
+          void onUpdateWorkItem(item.id, { tags: next });
         }}
       />
     </div>

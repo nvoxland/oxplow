@@ -69,6 +69,12 @@ export interface WorkItem {
   note_count: number;
   /** Semantic origin — see `WorkItemAuthor`. Null for legacy rows. */
   author: WorkItemAuthor | null;
+  /** Free-text grooming bucket used by the Backlog page's group-by.
+   *  Persists across promote/demote; null when unset. */
+  category: string | null;
+  /** Comma-separated tags used by the Backlog page filter chips.
+   *  Persists across promote/demote; null when unset. */
+  tags: string | null;
 }
 
 export interface WorkNote {
@@ -187,6 +193,10 @@ interface CreateWorkItemInput {
   actorId: string;
   /** Optional semantic origin. See WorkItemAuthor. */
   author?: WorkItemAuthor | null;
+  /** Optional grooming category — see WorkItem.category. */
+  category?: string | null;
+  /** Optional comma-separated tags — see WorkItem.tags. */
+  tags?: string | null;
 }
 
 export interface FileEpicWithChildrenInput {
@@ -237,6 +247,10 @@ interface UpdateWorkItemInput {
   /** Optional author change. Used by the auto-file → explicit-adoption flow
    *  to flip 'agent-auto' → 'agent' in place. */
   author?: WorkItemAuthor | null;
+  /** Optional grooming category. Pass null to clear, omit to keep. */
+  category?: string | null;
+  /** Optional comma-separated tags. Pass null to clear, omit to keep. */
+  tags?: string | null;
   actorKind: WorkItemActorKind;
   actorId: string;
   /**
@@ -362,6 +376,8 @@ export class WorkItemStore {
     const createdBy = requireWorkItemActorKind(input.createdBy);
     const parentId = input.parentId ?? null;
     const author = input.author === undefined ? null : requireOptionalWorkItemAuthor(input.author);
+    const category = clampCategory(input.category);
+    const tags = clampTags(input.tags);
     const now = new Date().toISOString();
     const id = createId("wi");
 
@@ -383,6 +399,8 @@ export class WorkItemStore {
       deleted_at: null,
       note_count: 0,
       author,
+      category,
+      tags,
     };
 
     this.stateDb.transaction(() => {
@@ -410,11 +428,11 @@ export class WorkItemStore {
     this.stateDb.run(
       `INSERT INTO work_items (
         id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
-        sort_index, created_by, created_at, updated_at, completed_at, author
+        sort_index, created_by, created_at, updated_at, completed_at, author, category, tags
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?,
         (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE thread_id = ? AND ${parentClause}),
-        ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?
       )`,
       item.id,
       item.thread_id,
@@ -431,6 +449,8 @@ export class WorkItemStore {
       item.updated_at,
       item.completed_at,
       item.author,
+      item.category,
+      item.tags,
     );
     const stored = this.getItem(item.thread_id!, item.id);
     if (!stored) throw new Error("work item was not persisted");
@@ -474,6 +494,12 @@ export class WorkItemStore {
     const nextAuthor: WorkItem["author"] = input.author !== undefined
       ? (input.author === null ? null : requireOptionalWorkItemAuthor(input.author))
       : existing.author;
+    const nextCategory: WorkItem["category"] = input.category !== undefined
+      ? clampCategory(input.category)
+      : existing.category;
+    const nextTags: WorkItem["tags"] = input.tags !== undefined
+      ? clampTags(input.tags)
+      : existing.tags;
     const updated: WorkItem = {
       ...existing,
       parent_id: nextParentId,
@@ -489,6 +515,8 @@ export class WorkItemStore {
           ? null
           : existing.completed_at,
       author: nextAuthor,
+      category: nextCategory,
+      tags: nextTags,
     };
     if (nextParentId && nextParentId === input.itemId) {
       throw new Error("work item cannot be its own parent");
@@ -516,7 +544,7 @@ export class WorkItemStore {
       }
       this.stateDb.run(
         `UPDATE work_items
-         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, sort_index = ?, updated_at = ?, completed_at = ?, author = ?
+         SET parent_id = ?, title = ?, description = ?, acceptance_criteria = ?, status = ?, priority = ?, sort_index = ?, updated_at = ?, completed_at = ?, author = ?, category = ?, tags = ?
          WHERE thread_id = ? AND id = ?`,
         updated.parent_id,
         updated.title,
@@ -528,6 +556,8 @@ export class WorkItemStore {
         updated.updated_at,
         updated.completed_at,
         updated.author,
+        updated.category,
+        updated.tags,
         updated.thread_id,
         updated.id,
       );
@@ -632,6 +662,8 @@ export class WorkItemStore {
       deleted_at: null,
       note_count: 0,
       author: null,
+      category: null,
+      tags: null,
     });
 
     // All rows (epic + children) live in ONE transaction so a validation
@@ -1069,6 +1101,8 @@ export class WorkItemStore {
     acceptanceCriteria?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
+    category?: string | null;
+    tags?: string | null;
     createdBy: WorkItemActorKind;
     actorId: string;
   }): WorkItem {
@@ -1079,6 +1113,8 @@ export class WorkItemStore {
     const status = input.status ? requireWorkItemStatus(input.status) : "ready";
     const priority = input.priority ? requireWorkItemPriority(input.priority) : "medium";
     const createdBy = requireWorkItemActorKind(input.createdBy);
+    const category = clampCategory(input.category);
+    const tags = clampTags(input.tags);
     const now = new Date().toISOString();
     const id = createId("wi");
 
@@ -1086,11 +1122,11 @@ export class WorkItemStore {
       this.stateDb.run(
         `INSERT INTO work_items (
           id, thread_id, parent_id, kind, title, description, acceptance_criteria, status, priority,
-          sort_index, created_by, created_at, updated_at, completed_at
+          sort_index, created_by, created_at, updated_at, completed_at, category, tags
         ) VALUES (
           ?, NULL, NULL, ?, ?, ?, ?, ?, ?,
           (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM work_items WHERE thread_id IS NULL AND parent_id IS NULL),
-          ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?
         )`,
         id,
         kind,
@@ -1103,6 +1139,8 @@ export class WorkItemStore {
         now,
         now,
         status === "done" ? now : null,
+        category,
+        tags,
       );
       this.recordEvent({
         threadId: null,
@@ -1126,6 +1164,8 @@ export class WorkItemStore {
     acceptanceCriteria?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
+    category?: string | null;
+    tags?: string | null;
     actorKind: WorkItemActorKind;
     actorId: string;
   }): void {
@@ -1146,6 +1186,8 @@ export class WorkItemStore {
         else { fields.push("completed_at = NULL"); }
       }
       if (input.priority !== undefined) { fields.push("priority = ?"); values.push(requireWorkItemPriority(input.priority)); }
+      if (input.category !== undefined) { fields.push("category = ?"); values.push(clampCategory(input.category)); }
+      if (input.tags !== undefined) { fields.push("tags = ?"); values.push(clampTags(input.tags)); }
       if (fields.length === 0) return;
       fields.push("updated_at = ?"); values.push(now);
       values.push(input.itemId);
@@ -1455,6 +1497,8 @@ function toWorkItem(row: Record<string, unknown>): WorkItem {
     author: row.author == null || String(row.author) === "agent-auto"
       ? null
       : requireOptionalWorkItemAuthor(String(row.author)),
+    category: row.category == null ? null : String(row.category),
+    tags: row.tags == null ? null : String(row.tags),
   };
 }
 
@@ -1530,6 +1574,42 @@ function clampAcceptanceCriteria(raw: string | null | undefined): string | null 
     throw new Error(`work item acceptance criteria too long: max ${ACCEPTANCE_CRITERIA_MAX_LEN} chars`);
   }
   return trimmed;
+}
+
+const CATEGORY_MAX_LEN = 200;
+const TAGS_MAX_LEN = 500;
+
+function clampCategory(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > CATEGORY_MAX_LEN) {
+    throw new Error(`work item category too long: max ${CATEGORY_MAX_LEN} chars`);
+  }
+  return trimmed;
+}
+
+function clampTags(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  // Normalize: split on commas, trim each, drop empties, dedupe (case
+  // sensitive — the user's casing wins), rejoin with ", ".
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+  const seen = new Set<string>();
+  const uniq: string[] = [];
+  for (const p of parts) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    uniq.push(p);
+  }
+  const joined = uniq.join(", ");
+  if (joined.length > TAGS_MAX_LEN) {
+    throw new Error(`work item tags too long: max ${TAGS_MAX_LEN} chars`);
+  }
+  return joined;
 }
 
 function requireWorkItemKind(value: string): WorkItemKind {

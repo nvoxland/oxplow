@@ -1204,6 +1204,25 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 48,
+    name: "work_items.category and work_items.tags",
+    up: (db) => {
+      // Backlog grooming surface: free-text `category` bucket (user-
+      // defined; serves as the default group-by axis on the Backlog
+      // page) and a comma-separated `tags` field that doubles as
+      // filter chips. Both are nullable so existing rows migrate
+      // forward untouched. Although these columns are primarily
+      // grooming metadata for backlog rows (`thread_id IS NULL`),
+      // they live on every work_items row so a row keeps its
+      // category/tags when promoted into a thread or demoted back
+      // to the backlog without copying.
+      db.exec(`
+        ALTER TABLE work_items ADD COLUMN category TEXT;
+        ALTER TABLE work_items ADD COLUMN tags TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(driver: SqlDriver, logger?: Logger): void {

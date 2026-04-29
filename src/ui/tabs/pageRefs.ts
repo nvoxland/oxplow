@@ -38,7 +38,7 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "plan-work" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
 }
 
@@ -53,8 +53,13 @@ export function hookEventsRef(): TabRef {
  * (`gitDashboardRef`, `uncommittedChangesRef`) so call sites read as
  * intent rather than as stringly-typed `indexRef("…")`.
  */
+export function tasksRef(): TabRef {
+  return indexRef("tasks");
+}
+/** @deprecated Use `tasksRef()` instead. Kept as an alias for one
+ *  release so existing call sites and persisted refs keep working. */
 export function planWorkRef(): TabRef {
-  return indexRef("plan-work");
+  return tasksRef();
 }
 export function doneWorkRef(): TabRef {
   return indexRef("done-work");

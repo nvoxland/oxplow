@@ -138,6 +138,17 @@ continue to load under the narrowed enum.
 store (via COUNT subquery over `work_note`). It drives the note badge on
 list rows and is always 0 when no notes exist.
 
+`category` and `tags` (migration v48, nullable TEXT) — grooming
+metadata used by the Backlog page. `category` is a free-text bucket
+that drives the default group-by axis on the Backlog grooming surface
+(e.g. "UI / UX", "Infra", "Polish"); `tags` is a comma-separated
+list normalized on write (split, trim, dedupe, rejoin with `, `) that
+doubles as filter chips. Both columns live on every `work_items` row
+so a row keeps its grooming metadata when promoted from backlog into
+a thread or demoted back — there is no copy across tables. Caps:
+`category` 200 chars, `tags` 500 chars total. Pass `null` through
+`updateWorkItem` / `updateBacklogItem` to clear; omit to keep.
+
 ### `work_note` — `WorkItemStore.getWorkNotes()` / `listThreadNotes()` (`src/persistence/work-item-store.ts`)
 
 Structured notes, either item-scoped or thread-scoped. Each row has `id`,

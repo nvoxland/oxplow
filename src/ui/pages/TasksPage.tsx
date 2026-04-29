@@ -1,12 +1,13 @@
 import { useState, type ComponentProps } from "react";
 import { Page } from "../tabs/Page.js";
 import { PlanPane } from "../components/Plan/PlanPane.js";
+import { BacklogDrawer } from "../components/Plan/BacklogDrawer.js";
 import { Kebab } from "../components/Kebab.js";
 import { cardLinkButton } from "../components/Card.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
-export type PlanWorkPageProps =
+export type TasksPageProps =
   Omit<
     ComponentProps<typeof PlanPane>,
     | "hideAuto"
@@ -18,36 +19,38 @@ export type PlanWorkPageProps =
     | "hideArchiveToggle"
   > & {
     onOpenPage(ref: TabRef): void;
+    onMoveBacklogItemToThread(itemId: string, toThreadId: string): Promise<void>;
   };
 
 const PREVIEW_LIMIT = 5;
 
 /**
- * Planning surface for the active thread. Shows To Do + Blocked in
- * full, plus the last 5 Done items as previews. The
+ * Thread-local Tasks page (formerly "Plan work"). Shows To Do +
+ * Blocked in full plus the last 5 Done items as previews. The
  * In Progress section is intentionally absent — the rail HUD's
  * "Active item" + "Up next" already surface what the agent is doing
- * right now, so duplicating it here is noise.
+ * right now.
  *
- * Header links route to the dedicated Done Work / Backlog pages.
- * The "Hide auto" kebab carries forward the legacy
- * `plan-toggle-hide-auto` filter (suppresses agent-authored rows).
+ * The full list + detail split, BacklogDrawer, and inline editing
+ * land in follow-up children. This shell keeps the existing PlanPane
+ * behaviour while the page rename takes effect so the rest of the
+ * app can route to `tasksRef()` immediately.
  */
-export function PlanWorkPage({ onOpenPage, ...rest }: PlanWorkPageProps) {
+export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: TasksPageProps) {
   const [hideAuto, setHideAuto] = useState(false);
   const actions = (
     <Kebab
-      testId="plan-toggle-hide-auto"
+      testId="tasks-kebab"
       size={16}
       items={[
         {
-          id: "plan.hide-auto",
+          id: "tasks.hide-auto",
           label: hideAuto ? "Show auto-filed rows" : "Hide auto-filed rows",
           enabled: true,
           run: () => setHideAuto((v) => !v),
         },
         {
-          id: "plan.view-backlog",
+          id: "tasks.view-backlog",
           label: "View backlog →",
           enabled: true,
           run: () => onOpenPage(backlogRef()),
@@ -58,7 +61,7 @@ export function PlanWorkPage({ onOpenPage, ...rest }: PlanWorkPageProps) {
   const viewAllDone = (
     <button
       type="button"
-      data-testid="plan-work-view-done"
+      data-testid="tasks-view-done"
       onClick={(event) => { event.stopPropagation(); onOpenPage(doneWorkRef()); }}
       style={cardLinkButton}
     >
@@ -66,16 +69,24 @@ export function PlanWorkPage({ onOpenPage, ...rest }: PlanWorkPageProps) {
     </button>
   );
   return (
-    <Page testId="page-plan-work" title="Plan work" actions={actions}>
+    <Page testId="page-tasks" title="Tasks" actions={actions}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <PlanPane
-          {...rest}
-          hideAuto={hideAuto}
-          visibleSections={["toDo", "blocked", "done"]}
-          sectionItemLimit={{ done: PREVIEW_LIMIT }}
-          extraSectionLinks={{ done: viewAllDone }}
-          hideBacklogChip
-          hideArchiveToggle
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <PlanPane
+            {...rest}
+            hideAuto={hideAuto}
+            visibleSections={["toDo", "blocked", "done"]}
+            sectionItemLimit={{ done: PREVIEW_LIMIT }}
+            extraSectionLinks={{ done: viewAllDone }}
+            hideBacklogChip
+            hideArchiveToggle
+          />
+        </div>
+        <BacklogDrawer
+          backlog={rest.backlog}
+          activeThreadId={rest.activeThreadId}
+          onPromote={onMoveBacklogItemToThread}
+          onOpenBacklog={() => onOpenPage(backlogRef())}
         />
       </div>
     </Page>

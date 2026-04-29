@@ -64,6 +64,10 @@ export interface WorkItem {
    *  legacy rows (including pre-v29 `agent-auto` rows that the store
    *  maps to null on read). See `WorkItemAuthor` in the persistence store. */
   author: "user" | "agent" | null;
+  /** Backlog grouping bucket. Free text. Persists across promote/demote. */
+  category: string | null;
+  /** Backlog tags (comma-separated, normalized server-side). */
+  tags: string | null;
 }
 
 export interface WorkNote {
@@ -450,6 +454,8 @@ export async function updateWorkItem(
     parentId?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
+    category?: string | null;
+    tags?: string | null;
   },
 ): Promise<ThreadWorkState> {
   return desktopApi().updateWorkItem(streamId, threadId, itemId, changes);
@@ -492,6 +498,8 @@ export async function createBacklogItem(input: {
   acceptanceCriteria?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
+  category?: string | null;
+  tags?: string | null;
 }): Promise<BacklogState> {
   return desktopApi().createBacklogItem(input);
 }
@@ -504,6 +512,8 @@ export async function updateBacklogItem(
     acceptanceCriteria?: string | null;
     status?: WorkItemStatus;
     priority?: WorkItemPriority;
+    category?: string | null;
+    tags?: string | null;
   },
 ): Promise<BacklogState> {
   return desktopApi().updateBacklogItem(itemId, changes);

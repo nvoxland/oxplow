@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, noteRef, opErrorRef, planWorkRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
+import { fileRef, noteRef, opErrorRef, tasksRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -857,8 +857,8 @@ function FinishedSection({
         <button
           type="button"
           data-testid="rail-finished-heading"
-          onClick={() => onOpenPage(planWorkRef())}
-          title="Open Plan work"
+          onClick={() => onOpenPage(tasksRef())}
+          title="Open Tasks"
           style={{
             flex: 1,
             background: "transparent",

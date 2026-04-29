@@ -16,7 +16,7 @@ export type PageKind =
   | "note"
   | "work-item"
   | "finding"
-  | "plan-work"
+  | "tasks"
   | "done-work"
   | "backlog"
   | "archived"

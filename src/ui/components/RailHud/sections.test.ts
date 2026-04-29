@@ -21,6 +21,8 @@ function makeItem(partial: Partial<WorkItem> & { id: string; status: WorkItem["s
     completed_at: null,
     note_count: 0,
     author: "user",
+    category: null,
+    tags: null,
   };
   return { ...base, ...partial };
 }
@@ -146,8 +148,8 @@ describe("computePagesDirectory", () => {
   test("includes the four work pages in plan→done→backlog→archived order", () => {
     const entries = computePagesDirectory({ backlogReadyCount: 0 });
     const ids = entries.map((e) => e.id);
-    expect(ids.indexOf("plan-work")).toBeGreaterThanOrEqual(0);
-    expect(ids.indexOf("plan-work")).toBeLessThan(ids.indexOf("done-work"));
+    expect(ids.indexOf("tasks")).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf("tasks")).toBeLessThan(ids.indexOf("done-work"));
     expect(ids.indexOf("done-work")).toBeLessThan(ids.indexOf("backlog"));
     expect(ids.indexOf("backlog")).toBeLessThan(ids.indexOf("archived"));
   });

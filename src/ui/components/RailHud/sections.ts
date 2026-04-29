@@ -7,7 +7,7 @@ import {
   doneWorkRef,
   gitDashboardRef,
   indexRef,
-  planWorkRef,
+  tasksRef,
   uncommittedChangesRef,
 } from "../../tabs/pageRefs.js";
 
@@ -24,7 +24,7 @@ export interface PageDirectoryEntry {
  * for QuickOpen; the rail keeps a curated subset so it doesn't sprawl.
  */
 export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
-  "plan-work",
+  "tasks",
   "notes-index",
   "files",
   "git-dashboard",
@@ -39,7 +39,7 @@ export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
-    { id: "plan-work", label: "📋  Plan work", ref: planWorkRef() },
+    { id: "tasks", label: "📋  Tasks", ref: tasksRef() },
     { id: "done-work", label: "✓  Done work", ref: doneWorkRef() },
     {
       id: "backlog",

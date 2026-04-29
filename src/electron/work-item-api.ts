@@ -44,6 +44,10 @@ export interface CreateWorkItemInput {
   parentId?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
+  /** Optional grooming category — used by the Backlog page's group-by. */
+  category?: string | null;
+  /** Optional comma-separated tags — used by the Backlog page filter chips. */
+  tags?: string | null;
 }
 
 export interface UpdateWorkItemChanges {
@@ -53,6 +57,10 @@ export interface UpdateWorkItemChanges {
   parentId?: string | null;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
+  /** Pass `null` to clear, omit to keep. */
+  category?: string | null;
+  /** Pass `null` to clear, omit to keep. */
+  tags?: string | null;
 }
 
 export interface EffortDetail {
@@ -168,6 +176,8 @@ export function createWorkItemApi({
         acceptanceCriteria: input.acceptanceCriteria,
         status: input.status,
         priority: input.priority,
+        category: input.category,
+        tags: input.tags,
         createdBy: "user",
         actorId: "ui",
       });
@@ -185,6 +195,8 @@ export function createWorkItemApi({
         parentId: changes.parentId,
         status: changes.status,
         priority: changes.priority,
+        category: changes.category,
+        tags: changes.tags,
         actorKind: "user",
         actorId: "ui",
       });
@@ -225,6 +237,8 @@ export function createWorkItemApi({
         acceptanceCriteria: input.acceptanceCriteria,
         status: input.status,
         priority: input.priority,
+        category: input.category,
+        tags: input.tags,
         createdBy: "user",
         actorId: "ui",
       });
@@ -239,6 +253,8 @@ export function createWorkItemApi({
         acceptanceCriteria: changes.acceptanceCriteria,
         status: changes.status,
         priority: changes.priority,
+        category: changes.category,
+        tags: changes.tags,
         actorKind: "user",
         actorId: "ui",
       });

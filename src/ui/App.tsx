@@ -101,7 +101,7 @@ import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { NotesIndexPage } from "./pages/NotesIndexPage.js";
-import { PlanWorkPage } from "./pages/PlanWorkPage.js";
+import { TasksPage } from "./pages/TasksPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
@@ -855,9 +855,9 @@ export function App() {
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
-      const activeThreadId = threadStates[s.id]?.activeThreadId;
-      if (activeThreadId) out[s.id] = agentStatuses[activeThreadId] ?? "waiting";
-      else out[s.id] = "waiting";
+      const threads = threadStates[s.id]?.threads ?? [];
+      const anyWorking = threads.some((t) => agentStatuses[t.id] === "working");
+      out[s.id] = anyWorking ? "working" : "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -1454,7 +1454,7 @@ export function App() {
 
   const handleRequestEditWorkItem = (itemId: string) => {
     const token = Date.now();
-    handleOpenPage(indexRef("plan-work"));
+    handleOpenPage(indexRef("tasks"));
     setPlanEditRequest({ itemId, token });
     void recordUsage({
       kind: "work-item",
@@ -1654,7 +1654,7 @@ export function App() {
       case "hook-events":
       case "files":
       case "notes-index":
-      case "plan-work":
+      case "tasks":
       case "done-work":
       case "backlog":
       case "archived":
@@ -2116,7 +2116,7 @@ export function App() {
           ),
         });
       } else if (
-        ref.kind === "plan-work"
+        ref.kind === "tasks"
         || ref.kind === "done-work"
         || ref.kind === "backlog"
         || ref.kind === "archived"
@@ -2140,7 +2140,7 @@ export function App() {
             navOpen(newWorkItemRef(payload)),
         };
         const labelByKind: Record<string, string> = {
-          "plan-work": "Plan work",
+          "tasks": "Tasks",
           "done-work": "Done work",
           "backlog": "Backlog",
           "archived": "Archived",
@@ -2151,8 +2151,8 @@ export function App() {
           closable: true,
           render: () => {
             switch (ref.kind) {
-              case "plan-work":
-                return <PlanWorkPage {...sharedProps} onOpenPage={navOpen} />;
+              case "tasks":
+                return <TasksPage {...sharedProps} onOpenPage={navOpen} onMoveBacklogItemToThread={handleMoveBacklogItemToThread} />;
               case "done-work":
                 return <DoneWorkPage {...sharedProps} onOpenPage={navOpen} />;
               case "backlog":

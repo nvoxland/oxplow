@@ -12,7 +12,7 @@ export function deriveDefaultLabel(ref: TabRef): string {
       const path = (ref.payload as { path?: string } | null)?.path ?? "";
       return path.split("/").pop() ?? path ?? "File";
     }
-    case "plan-work": return "Plan work";
+    case "tasks": return "Tasks";
     case "done-work": return "Done work";
     case "backlog": return "Backlog";
     case "archived": return "Archived";
