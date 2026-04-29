@@ -1,6 +1,8 @@
-import { useState, type ComponentProps } from "react";
+import { type ComponentProps } from "react";
 import { Page } from "../tabs/Page.js";
 import { PlanPane } from "../components/Plan/PlanPane.js";
+import { TasksList } from "../components/Plan/TasksList.js";
+import { TaskDetailPane } from "../components/Plan/TaskDetailPane.js";
 import { BacklogDrawer } from "../components/Plan/BacklogDrawer.js";
 import { Kebab } from "../components/Kebab.js";
 import { cardLinkButton } from "../components/Card.js";
@@ -17,6 +19,8 @@ export type TasksPageProps =
     | "extraSectionLinks"
     | "hideBacklogChip"
     | "hideArchiveToggle"
+    | "onlyStatuses"
+    | "excludeStatuses"
   > & {
     onOpenPage(ref: TabRef): void;
     onMoveBacklogItemToThread(itemId: string, toThreadId: string): Promise<void>;
@@ -25,30 +29,29 @@ export type TasksPageProps =
 const PREVIEW_LIMIT = 5;
 
 /**
- * Thread-local Tasks page (formerly "Plan work"). Shows To Do +
- * Blocked in full plus the last 5 Done items as previews. The
- * In Progress section is intentionally absent — the rail HUD's
- * "Active item" + "Up next" already surface what the agent is doing
- * right now.
+ * Thread-local Tasks page (formerly "Plan work"). Composes three
+ * pieces:
  *
- * The full list + detail split, BacklogDrawer, and inline editing
- * land in follow-up children. This shell keeps the existing PlanPane
- * behaviour while the page rename takes effect so the rest of the
- * app can route to `tasksRef()` immediately.
+ * - **TasksList** (left): filter bar + filtered PlanPane. Owns the
+ *   filter state (search, status chips, priority chips, hide-auto,
+ *   show-closed) persisted to localStorage `tasks-filters`.
+ * - **TaskDetailPane** (right, fixed-width 280px): summary view
+ *   showing counts, oldest blocked, and recent completions. Always
+ *   visible; the rich row editor still opens through the PlanPane
+ *   modal flow.
+ * - **BacklogDrawer** (bottom, collapsible): the global backlog with
+ *   one-click Promote → into the active thread.
+ *
+ * The In Progress section in PlanPane is intentionally rendered (To Do
+ * + Blocked + Done preview) — the rail HUD's "Active item" + "Up
+ * next" surfaces a different view of the same data.
  */
 export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: TasksPageProps) {
-  const [hideAuto, setHideAuto] = useState(false);
   const actions = (
     <Kebab
       testId="tasks-kebab"
       size={16}
       items={[
-        {
-          id: "tasks.hide-auto",
-          label: hideAuto ? "Show auto-filed rows" : "Hide auto-filed rows",
-          enabled: true,
-          run: () => setHideAuto((v) => !v),
-        },
         {
           id: "tasks.view-backlog",
           label: "View backlog →",
@@ -71,16 +74,16 @@ export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: Ta
   return (
     <Page testId="page-tasks" title="Tasks" actions={actions}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <PlanPane
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+          <TasksList
             {...rest}
-            hideAuto={hideAuto}
             visibleSections={["toDo", "blocked", "done"]}
             sectionItemLimit={{ done: PREVIEW_LIMIT }}
             extraSectionLinks={{ done: viewAllDone }}
             hideBacklogChip
             hideArchiveToggle
           />
+          <TaskDetailPane threadWork={rest.threadWork} />
         </div>
         <BacklogDrawer
           backlog={rest.backlog}
