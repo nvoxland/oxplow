@@ -30,7 +30,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `src/ui/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
 | `src/ui/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
 | `src/ui/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
-| `src/ui/tabs/RouteLink.tsx` | Browser-style link button: left-click → in-tab navigate (or new tab when `pinnedSlot`), Cmd/Ctrl-click + middle-click + right-click → new tab. Falls back to caller-supplied `onNavigate` when used outside a `PageNavigationContext` (rail HUD, palette). |
+| `src/ui/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
 | `src/ui/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
 | `src/ui/tabs/appPageBacklinks.ts` | App-page backlinks providers — pure `(payload, ctx) → BacklinkEntry[]` functions for `git-dashboard`, `git-history`, `uncommitted-changes`, `git-commit`. `useBacklinks` dispatches to them when `target.kind` matches. Add a new app-page provider by registering it in `APP_PAGE_BACKLINKS` and extending `useBacklinks` to fetch any new data slice it needs. |
@@ -286,6 +286,47 @@ as everywhere else.
 The bookmark toggle and backlinks dropdown affordances on
 `PageNavBar` are scaffolded but currently inert; Phases 2 and 3 wire
 them.
+
+## Linking between tabs — single chokepoint rule
+
+**Any clickable row that targets another `TabRef` MUST go through
+`RouteLink` or `useRouteDispatch`.** Don't write raw
+`onClick={() => onOpenPage(...)}` / `onClick={() => onOpenFile(...)}`
+on rows: that path always opens a new tab and never gets right-click
+or modifier-click semantics.
+
+The pattern, depending on the row's markup:
+
+- Plain link (a button): use `<RouteLink ref={someRef(...)}>`.
+- Existing `<div>`-based row that needs to keep its other event
+  handlers (drag, double-click, kebab): call
+  `const { handlers } = useRouteDispatch(someRef(...), { onNavigate });`
+  and spread `onClick={handlers.onClick}`,
+  `onAuxClick={handlers.onAuxClick}`,
+  `onContextMenu={handlers.onContextMenu}` onto the row.
+
+The hook reads `useOptionalPageNavigation()` and **prefers the
+context** when it's present — that's how plain-click does in-tab
+navigation inside a page. The optional `onNavigate` prop is a
+**fallback** used only when no context exists (rail HUD, palette,
+non-page surfaces). Rail callers pass `onNavigate` so the same row
+keeps its "always-new-tab" behavior outside a page.
+
+Reference implementations:
+
+- `src/ui/components/LeftPanel/FileTree.tsx` — tree row dispatches
+  via `useRouteDispatch(fileRef(path), { onNavigate: (_, opts) => onOpenFile(path, opts) })`.
+- `src/ui/components/Notes/NotesPane.tsx` — `NoteRow` and `SearchRow`
+  use the hook with `noteRef(slug)` and a `() => onOpenNote(slug)`
+  fallback.
+- `src/ui/tabs/BacklinksList.tsx` — the older pattern (manual
+  `ctxNav.navigate` + per-event new-tab branches). Both forms are
+  acceptable; `useRouteDispatch` is preferred for new code.
+
+If you're adding a new index/list page and find yourself threading an
+`onOpenPage` / `onOpenFile` / `onOpenNote` callback all the way down
+to a row's `onClick`, **stop and use the hook instead**. The callback
+should only survive as the rail-side fallback.
 
 ## Per-thread active tab (today)
 

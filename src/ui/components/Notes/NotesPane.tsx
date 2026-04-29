@@ -17,6 +17,8 @@ import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { deleteWikiNote } from "../../api.js";
+import { useRouteDispatch } from "../../tabs/RouteLink.js";
+import { noteRef } from "../../tabs/pageRefs.js";
 
 type FreshnessStatus = WikiNoteSummary["freshness"];
 
@@ -322,7 +324,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     note={v.note}
                     selected={v.note.slug === selectedSlug}
                     rightLabel={formatRelative(v.last_at)}
-                    onSelect={() => onOpenNote(v.note.slug)}
+                    onOpenNote={onOpenNote}
                     onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
                   />
                 ))}
@@ -340,7 +342,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
                     note={n}
                     selected={n.slug === selectedSlug}
                     rightLabel={formatRelative(n.updated_at)}
-                    onSelect={() => onOpenNote(n.slug)}
+                    onOpenNote={onOpenNote}
                     onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
                   />
                 ))}
@@ -441,7 +443,7 @@ function SearchResults({
           hit={hit}
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
-          onSelect={() => onOpenNote(hit.slug)}
+          onOpenNote={onOpenNote}
           onOpenMenu={(rect) => onOpenMenu(rect, hit)}
         />
       ))}
@@ -453,20 +455,25 @@ function SearchRow({
   hit,
   summary,
   selected,
-  onSelect,
+  onOpenNote,
   onOpenMenu,
 }: {
   hit: WikiNoteSearchHit;
   summary: WikiNoteSummary | null;
   selected: boolean;
-  onSelect: () => void;
+  onOpenNote: (slug: string) => void;
   onOpenMenu: (rect: DOMRect) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
+  const { handlers } = useRouteDispatch(noteRef(hit.slug), {
+    onNavigate: () => onOpenNote(hit.slug),
+  });
   return (
     <div
-      onClick={onSelect}
-      onDoubleClick={onSelect}
+      onClick={handlers.onClick}
+      onAuxClick={handlers.onAuxClick}
+      onContextMenu={handlers.onContextMenu}
+      onDoubleClick={handlers.onClick}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
       title={hit.title}
@@ -521,19 +528,24 @@ function NoteRow({
   note,
   selected,
   rightLabel,
-  onSelect,
+  onOpenNote,
   onOpenMenu,
 }: {
   note: WikiNoteSummary;
   selected: boolean;
   rightLabel?: string;
-  onSelect: () => void;
+  onOpenNote: (slug: string) => void;
   onOpenMenu: (rect: DOMRect, note: WikiNoteSummary) => void;
 }) {
+  const { handlers } = useRouteDispatch(noteRef(note.slug), {
+    onNavigate: () => onOpenNote(note.slug),
+  });
   return (
     <div
-      onClick={onSelect}
-      onDoubleClick={onSelect}
+      onClick={handlers.onClick}
+      onAuxClick={handlers.onAuxClick}
+      onContextMenu={handlers.onContextMenu}
+      onDoubleClick={handlers.onClick}
       draggable
       onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: note.slug })}
       style={{

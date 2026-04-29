@@ -145,12 +145,14 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           canForward={effectiveNavBar.canForward}
           onBack={effectiveNavBar.onBack}
           onForward={effectiveNavBar.onForward}
+          title={effectiveTitle}
+          kind={kind}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           actions={effectiveNavBar.actions}
         />
       ) : null}
-      {showHeader ? (
+      {showHeader && !effectiveNavBar ? (
       <header
         data-testid="page-header"
         style={{
@@ -215,6 +217,43 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
         ) : null}
       </header>
+      ) : null}
+      {showHeader && effectiveNavBar && ((chips && chips.length > 0) || actions) ? (
+        <div
+          data-testid="page-chips"
+          style={{
+            padding: "6px 20px",
+            borderBottom: "1px solid var(--border-subtle)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexShrink: 0,
+            minHeight: 32,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, flexWrap: "wrap" }}>
+            {chips?.map((chip, i) => (
+              <span
+                key={i}
+                title={chip.title}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: chip.color ?? "var(--text-secondary)",
+                  background: chip.background ?? "transparent",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  border: chip.background ? "none" : "1px solid var(--border-subtle)",
+                }}
+              >
+                {chip.label}
+              </span>
+            ))}
+          </div>
+          {actions ? (
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
+          ) : null}
+        </div>
       ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
         {children}

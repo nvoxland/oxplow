@@ -7,6 +7,10 @@ export interface PageNavBarProps {
   canForward: boolean;
   onBack(): void;
   onForward(): void;
+  /** Page title rendered to the right of the back/forward arrows. */
+  title?: ReactNode;
+  /** Small kind chip rendered after the title ("note", "file", …). */
+  kind?: string;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
    *  page's bookmark in each scope (thread / stream / global). */
@@ -36,6 +40,8 @@ export function PageNavBar({
   canForward,
   onBack,
   onForward,
+  title,
+  kind,
   bookmark,
   backlinks,
   actions,
@@ -80,6 +86,54 @@ export function PageNavBar({
         →
       </button>
 
+      {title || kind ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 8,
+            flex: 1,
+            minWidth: 0,
+            paddingLeft: 6,
+          }}
+        >
+          {title ? (
+            <span
+              data-testid="page-nav-title"
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {title}
+            </span>
+          ) : null}
+          {kind ? (
+            <span
+              data-testid="page-nav-kind"
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+                background: "var(--surface-tab-inactive)",
+                padding: "2px 6px",
+                borderRadius: 4,
+                textTransform: "lowercase",
+                flexShrink: 0,
+              }}
+            >
+              {kind}
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <div style={{ flex: 1 }} />
+      )}
+
       {bookmark ? (
         <div style={{ position: "relative", display: "inline-flex" }}>
           <button
@@ -101,7 +155,7 @@ export function PageNavBar({
               style={{
                 position: "absolute",
                 top: "calc(100% + 4px)",
-                left: 0,
+                right: 0,
                 minWidth: 180,
                 background: "var(--surface-card)",
                 border: "1px solid var(--border-subtle)",
@@ -166,7 +220,7 @@ export function PageNavBar({
               style={{
                 position: "absolute",
                 top: "calc(100% + 4px)",
-                left: 0,
+                right: 0,
                 minWidth: 280,
                 maxWidth: 480,
                 maxHeight: 360,
@@ -184,8 +238,6 @@ export function PageNavBar({
           ) : null}
         </div>
       ) : null}
-
-      <div style={{ flex: 1 }} />
 
       {actions ? (
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
