@@ -1,5 +1,5 @@
 site_name: Oxplow
-site_description: A web-style cockpit for directing coding agents across parallel branches of the same project. Streams, threads, work queues, a project wiki with backlinks, and Local History — built around the way agent-assisted development actually works.
+site_description: Software Development Multiplied
 site_author: Nathan Voxland
 site_url: https://nvoxland.github.io/oxplow/
 repo_name: nvoxland/oxplow
@@ -38,6 +38,7 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
+    - navigation.expand
     - navigation.top
     - search.suggest
     - search.highlight
@@ -119,6 +120,9 @@ markdown_extensions:
 
 extra:
   generator: false
+  analytics:
+    provider: google
+    property: G-VXQLZ08XD8
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/nvoxland/oxplow
