@@ -235,7 +235,7 @@ export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpen
         ) : (
           <MarkdownView
             className="wiki-note-markdown"
-            body={draftInitialized ? draft : body}
+            body={stripLeadingH1(draftInitialized ? draft : body)}
             onNavigateInternal={onNavigateInternalNote}
             onOpenInNewTab={onOpenNoteInNewTab}
             onOpenFile={(path) => onOpenFile(path)}
@@ -253,6 +253,17 @@ export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpen
       )}
     </div>
   );
+}
+
+/**
+ * Drop a leading `# heading` line from the rendered note body. The
+ * page chrome already shows the note title in the nav bar, so showing
+ * it again as the first markdown row would duplicate the line the
+ * user just read above.
+ */
+function stripLeadingH1(body: string): string {
+  const match = body.match(/^\s*#\s+[^\n]*\n+/);
+  return match ? body.slice(match[0].length) : body;
 }
 
 function BacklinksFooter({
