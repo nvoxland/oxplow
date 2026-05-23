@@ -2,11 +2,12 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../editor-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
-import { desktopBridge, localBlame, readFileAtRef } from "../api.js";
+import { desktopBridge, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { type EditorNavigationTarget, type LspClient, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
+import { BLAME_WIDTH, useBlame } from "./useBlame.js";
 import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
@@ -71,10 +72,6 @@ export function EditorPane({
   } = useLspClients({ monacoRef, filePathRef, stream, openFiles, openFileOrder, setLspStatus });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
-  const [blame, setBlame] = useState<{ path: string; entries: LocalBlameEntry[] } | null>(null);
-  const [blameScrollTop, setBlameScrollTop] = useState(0);
-  const [blameLineHeight, setBlameLineHeight] = useState(19);
-  const prevDirtyRef = useRef(isDirty);
   const onRevealCommitRef = useRef(onRevealCommit);
   onRevealCommitRef.current = onRevealCommit;
   const onRevealtasksRef = useRef(onRevealTask);
@@ -90,6 +87,19 @@ export function EditorPane({
   // before the editor instance exists and the effect's early return makes
   // the pane stay blank until the next file change.
   const [monacoReady, setMonacoReady] = useState(false);
+
+  // Blame overlay (merged local+git attribution + gutter scroll sync +
+  // refresh-on-save) lives in useBlame; the overlay is rendered below.
+  const { blame, blameScrollTop, blameLineHeight, toggleBlame } = useBlame({
+    editorRef,
+    monacoRef,
+    monacoReady,
+    streamRef,
+    filePathRef,
+    filePath,
+    isDirty,
+    setLspStatus,
+  });
 
   onChangeRef.current = onChange;
   onNavigateRef.current = onNavigateToLocation;
@@ -309,36 +319,6 @@ export function EditorPane({
   }, [filePath, findRequest]);
 
   useEffect(() => {
-    if (blame && blame.path !== filePath) setBlame(null);
-  }, [filePath, blame]);
-
-  useEffect(() => {
-    const wasDirty = prevDirtyRef.current;
-    prevDirtyRef.current = isDirty;
-    if (!blame || blame.path !== filePath) return;
-    if (wasDirty && !isDirty) {
-      void refreshBlame(filePath);
-    }
-  }, [isDirty, filePath, blame]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    const monaco = monacoRef.current;
-    if (!editor || !monaco) return;
-    if (blame) {
-      editor.updateOptions({ lineNumbers: "off", lineDecorationsWidth: BLAME_WIDTH });
-      setBlameLineHeight(editor.getOption(monaco.editor.EditorOption.lineHeight));
-      setBlameScrollTop(editor.getScrollTop());
-      const d = editor.onDidScrollChange((e: any) => setBlameScrollTop(e.scrollTop));
-      return () => {
-        d.dispose();
-        editor.updateOptions({ lineNumbers: "on", lineDecorationsWidth: 10 });
-      };
-    }
-    return undefined;
-  }, [blame, monacoReady]);
-
-  useEffect(() => {
     if (!filePath) return;
     let cancelled = false;
     const sid = stream.id;
@@ -398,31 +378,6 @@ export function EditorPane({
       decoCount: decos.length,
       ms: Math.round(performance.now() - t0),
     });
-  }
-
-  async function refreshBlame(path: string) {
-    try {
-      const entries = await localBlame(streamRef.current.id, path);
-      if (filePathRef.current !== path) return;
-      if (entries.length === 0) {
-        setBlame(null);
-        setLspStatus("No blame available");
-        setTimeout(() => setLspStatus((s) => (s === "No blame available" ? null : s)), 2500);
-        return;
-      }
-      setBlame({ path, entries });
-    } catch (err) {
-      setLspStatus(`Blame failed: ${String(err)}`);
-    }
-  }
-
-  function toggleBlame() {
-    if (!filePath) return;
-    if (blame && blame.path === filePath) {
-      setBlame(null);
-      return;
-    }
-    void refreshBlame(filePath);
   }
 
   useEffect(() => {
@@ -775,7 +730,6 @@ function computeDiffDecorations(monaco: any, oldLines: string[], newLines: strin
   return decos;
 }
 
-const BLAME_WIDTH = 150;
 
 function BlameOverlay({
   entries,

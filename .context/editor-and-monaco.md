@@ -82,8 +82,19 @@ submenu flip-up logic; never re-implement that per-call site.
 
 ## Blame overlay
 
-When the user toggles `Annotate with Blame`, `EditorPane` fetches a
-merged per-line attribution via `localBlame(stream.id, filePath)` and
+The blame *state machine* — fetch, gutter scroll/line-height sync,
+clear-on-file-change, and refresh-on-save — lives in
+`apps/desktop/src/components/useBlame.ts` (a hook EditorPane mounts,
+returning `{ blame, blameScrollTop, blameLineHeight, toggleBlame }`).
+EditorPane renders the `BlameOverlay` from that state and wires the
+"Annotate with Blame" menu item to `toggleBlame`. (`useMonacoEditor` was
+intentionally NOT extracted: the editor-setup effect is the component's
+core and is tightly coupled to its menu / comment-layer / focus-push /
+LSP-provider wiring — a hook would need ~8 injected callbacks and read
+*less* cohesively than leaving it inline.)
+
+When the user toggles `Annotate with Blame`, the hook fetches a merged
+per-line attribution via `localBlame(stream.id, filePath)` and EditorPane
 renders an absolutely-positioned DOM overlay on the left gutter (the
 `BlameOverlay` sub-component). The merge is computed server-side in
 `crates/oxplow-git/src/blame.rs` (`computeLocalBlame`) — it walks closed
