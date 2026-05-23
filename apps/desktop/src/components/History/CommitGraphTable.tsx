@@ -267,6 +267,8 @@ function CommitRow({
       onClick={onClick}
       data-testid="commit-graph-row"
       data-sha={row.commit.sha}
+      data-ref-kind="git-commit"
+      data-ref-id={row.commit.sha}
       style={{
         display: "flex",
         alignItems: "center",
@@ -303,7 +305,7 @@ function CommitRow({
         />
       </svg>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, paddingRight: 8 }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", userSelect: "text" }}>
           {row.commit.subject}
         </span>
         {branchHeads.map((name) => (

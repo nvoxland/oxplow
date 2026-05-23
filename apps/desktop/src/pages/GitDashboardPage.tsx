@@ -347,7 +347,11 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
   return (
     <Page testId="page-git-dashboard" title={dashboardTitle}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
+      <div
+        style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}
+        data-ref-kind="git-dashboard"
+        data-ref-id="git-dashboard"
+      >
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}
 
