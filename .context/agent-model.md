@@ -572,11 +572,16 @@ intermediate `ready` step.
     (primary), the dashboard it lives in (chain), and any file the quote
     linked to (referenced) — the agent gets *what the highlighted thing
     is* in one call. Hydration runs through
-    `oxplow_app::ref_resolver::{resolve_ref, resolve_refs}` (currently
-    resolves `task` → title+status and `git-commit` → subject+diffstat;
-    other kinds return a bare `{kind,id}`). The IPC
+    `oxplow_app::ref_resolver::{resolve_ref, resolve_refs}`, which resolves
+    every canonical kind: `task` → title+status, `git-commit` →
+    subject+diffstat, `file` → size + head excerpt, `directory` → entry
+    count + names, `wiki` → title + lead, `finding` → kind + location;
+    unknown kinds return a bare `{kind,id}`. The IPC
     `list_comments_for_target` stays raw — the renderer already has the
-    page, so only the MCP surface pays the resolution cost.
+    page, so only the MCP surface pays the resolution cost. The same
+    resolver is the single source of truth for backlink labels:
+    `list_backlinks`/`list_outbound`'s `source_label` is just
+    `resolve_ref(...).title`.
 
 `buildLspMcpTools` (`crates/oxplow-mcp/src/lib.rs`) adds language-server
 queries (definition, references, hover) the agent can use without

@@ -65,11 +65,11 @@ pub async fn list_outbound(
     // For outbound, the "label" we want is for the *target*. We
     // keep the same struct shape, but populate `source_label` with
     // the target's label so the renderer can be kind-agnostic. When
-    // the target kind has no first-class label (files, directories,
-    // findings), leave `source_label` as None — the frontend falls
-    // back to `target_id`, which IS the meaningful display for
-    // those kinds. Folding in the source's label here would stamp
-    // the current page's own title on every file/dir/finding row.
+    // the target kind has no first-class label (files, directories),
+    // leave `source_label` as None — the frontend falls back to
+    // `target_id`, which IS the meaningful display for those kinds.
+    // Folding in the source's label here would stamp the current
+    // page's own title on every file/dir row.
     Ok(decorate_outbound_targets(&state, edges).await)
 }
 
@@ -107,41 +107,13 @@ async fn decorate_outbound_targets(state: &AppState, edges: Vec<PageRefEdge>) ->
     out
 }
 
-/// Best-effort label lookup by kind. Returns `None` when the row
-/// doesn't exist (deleted) or the kind doesn't carry a meaningful
-/// label (e.g. files use the path itself).
+/// Best-effort label lookup by kind. Delegates to the shared typed
+/// [`ref_resolver`] (the single source of truth for hydrating a
+/// `(kind,id)` ref) and keeps only its `title`. Returns `None` when the
+/// row doesn't exist (deleted) or the kind carries no first-class label
+/// (files/directories use the path itself).
 async fn source_label(state: &AppState, kind: &str, id: &str) -> Option<String> {
-    match kind {
-        "wiki" => state
-            .wiki_page_store
-            .get(id)
-            .await
-            .ok()
-            .flatten()
-            .map(|p| p.title),
-        "task" => {
-            use oxplow_domain::stores::TaskStore as _;
-            let tid = oxplow_domain::TaskId::try_from_str(id)?;
-            state
-                .task_store
-                .get(tid)
-                .await
-                .ok()
-                .flatten()
-                .map(|wi| wi.title)
-        }
-        "git-commit" => {
-            // The commit detail lookup is sync (libgit2) — wrap in
-            // spawn_blocking to keep us off the runtime thread.
-            let repo = state.layout.project_dir.clone();
-            let id = id.to_string();
-            tokio::task::spawn_blocking(move || {
-                oxplow_git::log::get_commit_detail(&repo, &id).map(|d| d.subject)
-            })
-            .await
-            .ok()
-            .flatten()
-        }
-        _ => None,
-    }
+    oxplow_app::ref_resolver::resolve_ref(state, kind, id)
+        .await
+        .title
 }

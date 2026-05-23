@@ -819,6 +819,37 @@ impl SqliteCodeQualityStore {
         .await
         .unwrap()
     }
+
+    /// Fetch a single finding by its integer id — the canonical
+    /// `finding:<id>` ref. Used by the typed ref-resolver to hydrate a
+    /// finding into a label (kind) + location for agent context.
+    pub async fn get_finding(&self, id: i64) -> Result<Option<CodeQualityFinding>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.query_row(
+                    "SELECT id, scan_id, path, start_line, end_line, kind, metric_value, extra_json
+                     FROM code_quality_finding WHERE id = ?1",
+                    params![id],
+                    |row| {
+                        Ok(CodeQualityFinding {
+                            id: row.get(0)?,
+                            scan_id: row.get(1)?,
+                            path: row.get(2)?,
+                            start_line: row.get(3)?,
+                            end_line: row.get(4)?,
+                            kind: row.get(5)?,
+                            metric_value: row.get(6)?,
+                            extra_json: row.get(7)?,
+                        })
+                    },
+                )
+                .optional()
+            })
+        })
+        .await
+        .unwrap()
+    }
 }
 
 // ---------------- File snapshots ----------------

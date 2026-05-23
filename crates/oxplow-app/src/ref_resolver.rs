@@ -59,13 +59,18 @@ impl RefSummary {
 const EXCERPT_LEN: usize = 280;
 
 /// Resolve a single `(kind,id)` reference into a [`RefSummary`].
-/// Currently hydrates `task` and `git-commit`; every other kind returns
-/// a bare summary (the canonical id is the meaningful display for files,
-/// directories, and findings). New kinds slot in as additional arms.
+/// Hydrates the canonical page kinds — `task`, `git-commit`, `file`,
+/// `directory`, `wiki`, `finding`; any other kind returns a bare summary
+/// (its canonical id is its own meaningful display). New kinds slot in as
+/// additional arms.
 pub async fn resolve_ref(services: &Services, kind: &str, id: &str) -> RefSummary {
     match kind {
         "task" => resolve_task(services, id).await,
         "git-commit" => resolve_commit(services, id).await,
+        "file" => resolve_file(services, id).await,
+        "directory" => resolve_directory(services, id).await,
+        "wiki" => resolve_wiki(services, id).await,
+        "finding" => resolve_finding(services, id).await,
         _ => RefSummary::bare(kind, id),
     }
 }
@@ -108,6 +113,105 @@ async fn resolve_commit(services: &Services, id: &str) -> RefSummary {
         summary.body_excerpt = excerpt(&detail.body);
     }
     summary
+}
+
+/// Bytes of a file head we read for the excerpt + line count. Bounded so
+/// resolving a file ref never reads an arbitrarily large blob into memory.
+const FILE_HEAD_BYTES: u64 = 8 * 1024;
+
+/// Names listed in a directory's `body_excerpt`, so the agent sees a few
+/// representative entries without us serializing a huge tree.
+const DIR_NAME_LIMIT: usize = 12;
+
+async fn resolve_file(services: &Services, id: &str) -> RefSummary {
+    let mut summary = RefSummary::bare("file", id);
+    let path = services.layout.project_dir.join(id);
+    let read = tokio::task::spawn_blocking(move || -> Option<(u64, String)> {
+        use std::io::Read as _;
+        let meta = std::fs::metadata(&path).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        let file = std::fs::File::open(&path).ok()?;
+        let mut buf = Vec::new();
+        file.take(FILE_HEAD_BYTES).read_to_end(&mut buf).ok()?;
+        Some((meta.len(), String::from_utf8_lossy(&buf).into_owned()))
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some((size, head)) = read {
+        // Title stays None: the path (id) is the file's own display.
+        summary.detail = Some(human_size(size));
+        summary.body_excerpt = excerpt(&head);
+    }
+    summary
+}
+
+async fn resolve_directory(services: &Services, id: &str) -> RefSummary {
+    let mut summary = RefSummary::bare("directory", id);
+    let path = services.layout.project_dir.join(id);
+    let listed = tokio::task::spawn_blocking(move || -> Option<(usize, Vec<String>)> {
+        let mut names: Vec<String> = Vec::new();
+        let mut count = 0usize;
+        for entry in std::fs::read_dir(&path).ok()? {
+            let Ok(entry) = entry else { continue };
+            count += 1;
+            if names.len() < DIR_NAME_LIMIT {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        Some((count, names))
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some((count, mut names)) = listed {
+        let plural = if count == 1 { "entry" } else { "entries" };
+        summary.detail = Some(format!("{count} {plural}"));
+        if !names.is_empty() {
+            names.sort();
+            summary.body_excerpt = Some(names.join(", "));
+        }
+    }
+    summary
+}
+
+async fn resolve_wiki(services: &Services, id: &str) -> RefSummary {
+    let mut summary = RefSummary::bare("wiki", id);
+    if let Ok(Some(page)) = services.wiki_page_store.get(id).await {
+        summary.title = Some(page.title);
+        // body_excerpt is already a stored lead; re-cap defensively so a
+        // long stored excerpt can't blow the agent's context budget.
+        summary.body_excerpt = excerpt(&page.body_excerpt);
+    }
+    summary
+}
+
+async fn resolve_finding(services: &Services, id: &str) -> RefSummary {
+    let mut summary = RefSummary::bare("finding", id);
+    let Ok(fid) = id.parse::<i64>() else {
+        return summary;
+    };
+    if let Ok(Some(f)) = services.code_quality_store.get_finding(fid).await {
+        summary.title = Some(f.kind);
+        summary.detail = Some(format!("{}:{}-{}", f.path, f.start_line, f.end_line));
+    }
+    summary
+}
+
+/// Format a byte count as a compact human size (`512 B`, `1.2 KB`, …).
+fn human_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let b = bytes as f64;
+    if b < KB {
+        format!("{bytes} B")
+    } else if b < MB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{:.1} MB", b / MB)
+    }
 }
 
 /// Snake-case status label matching the wire form (`in_progress`, …).
@@ -238,10 +342,112 @@ mod tests {
     async fn unknown_kind_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).unwrap();
-        let summary = resolve_ref(&services, "file", "src/app.rs").await;
-        assert_eq!(summary.kind, "file");
-        assert_eq!(summary.id, "src/app.rs");
+        let summary = resolve_ref(&services, "mystery", "whatever").await;
+        assert_eq!(summary.kind, "mystery");
+        assert_eq!(summary.id, "whatever");
         assert_eq!(summary.title, None);
+        assert_eq!(summary.detail, None);
+    }
+
+    #[tokio::test]
+    async fn resolves_file_size_and_head() {
+        let dir = git_repo_with_commit("init", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        // a.rs is `fn main() {}\n` (13 bytes) created by the fixture.
+        let summary = resolve_ref(&services, "file", "a.rs").await;
+        assert_eq!(summary.kind, "file");
+        // Path is its own display; no synthetic title.
+        assert_eq!(summary.title, None);
+        assert_eq!(summary.detail.as_deref(), Some("13 B"));
+        assert_eq!(summary.body_excerpt.as_deref(), Some("fn main() {}"));
+    }
+
+    #[tokio::test]
+    async fn missing_file_is_bare() {
+        let dir = git_repo_with_commit("init", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        let summary = resolve_ref(&services, "file", "does/not/exist.rs").await;
+        assert_eq!(summary.detail, None);
+        assert_eq!(summary.body_excerpt, None);
+    }
+
+    #[tokio::test]
+    async fn resolves_directory_entry_count_and_names() {
+        let dir = git_repo_with_commit("init", "");
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/x.rs"), "x").unwrap();
+        std::fs::write(dir.path().join("sub/y.rs"), "y").unwrap();
+        let services = Services::in_memory(dir.path()).unwrap();
+        let summary = resolve_ref(&services, "directory", "sub").await;
+        assert_eq!(summary.detail.as_deref(), Some("2 entries"));
+        let names = summary.body_excerpt.unwrap();
+        assert!(
+            names.contains("x.rs") && names.contains("y.rs"),
+            "got {names}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolves_wiki_title_and_lead() {
+        use oxplow_db::wiki_page_store::WikiPage;
+        let dir = git_repo_with_commit("init", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        let now = oxplow_domain::Timestamp::now();
+        services
+            .wiki_page_store
+            .upsert(&WikiPage {
+                slug: "architecture".into(),
+                title: "System Architecture".into(),
+                body_path: "architecture.md".into(),
+                body_excerpt: "The workspace isolation rule.".into(),
+                body_size_bytes: 30,
+                file_refs: vec![],
+                dir_refs: vec![],
+                related_notes: vec![],
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        let summary = resolve_ref(&services, "wiki", "architecture").await;
+        assert_eq!(summary.title.as_deref(), Some("System Architecture"));
+        assert_eq!(
+            summary.body_excerpt.as_deref(),
+            Some("The workspace isolation rule.")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolves_finding_kind_and_location() {
+        use oxplow_db::analytics_stores::CodeQualityFinding;
+        let dir = git_repo_with_commit("init", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        let scan = services
+            .code_quality_store
+            .create_scan("complexity", "all")
+            .await
+            .unwrap();
+        services
+            .code_quality_store
+            .append_finding(
+                scan,
+                CodeQualityFinding {
+                    id: 0,
+                    scan_id: scan,
+                    path: "src/app.rs".into(),
+                    start_line: 10,
+                    end_line: 42,
+                    kind: "high_complexity".into(),
+                    metric_value: 17.0,
+                    extra_json: None,
+                },
+            )
+            .await
+            .unwrap();
+        // The first finding gets id 1 (autoincrement).
+        let summary = resolve_ref(&services, "finding", "1").await;
+        assert_eq!(summary.title.as_deref(), Some("high_complexity"));
+        assert_eq!(summary.detail.as_deref(), Some("src/app.rs:10-42"));
     }
 
     #[tokio::test]
