@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
-import type { GitOpResult } from "../tauri-bridge/index.js";
+import { awaitGitOp, gitOpErrorMessage } from "../git-op.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { Slideover } from "./Slideover.js";
@@ -175,10 +175,8 @@ export function BranchPicker({
     setBusy(true);
     setError(null);
     try {
-      const { awaitDone } = await gitMergeInto(streamId, other);
-      const task = await awaitDone;
-      const result = task?.result as GitOpResult | undefined;
-      if (!result?.success) setError(((result?.stderr ?? task?.error) || result?.stdout || "merge failed").trim());
+      const result = await awaitGitOp(await gitMergeInto(streamId, other));
+      if (!result.success) setError(gitOpErrorMessage(result, "merge failed"));
       else { await refresh(); setOpen(false); }
     } catch (e) {
       setError(String(e));
@@ -192,10 +190,8 @@ export function BranchPicker({
     setBusy(true);
     setError(null);
     try {
-      const { awaitDone } = await gitRebaseOnto(streamId, onto);
-      const task = await awaitDone;
-      const result = task?.result as GitOpResult | undefined;
-      if (!result?.success) setError(((result?.stderr ?? task?.error) || result?.stdout || "rebase failed").trim());
+      const result = await awaitGitOp(await gitRebaseOnto(streamId, onto));
+      if (!result.success) setError(gitOpErrorMessage(result, "rebase failed"));
       else { await refresh(); setOpen(false); }
     } catch (e) {
       setError(String(e));

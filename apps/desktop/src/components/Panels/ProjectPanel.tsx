@@ -34,6 +34,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { requestCommentCompose } from "../../comment-compose-bus.js";
+import { awaitGitOp } from "../../git-op.js";
 import { composeForElement } from "../Comments/useDomAnnotations.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import { Slideover } from "../Slideover.js";
@@ -1109,17 +1110,12 @@ function PushPullDialog({
 
   const run = async () => {
     setRunning(true);
-    const { awaitDone } = kind === "push"
-      ? await gitPush(streamId, { force, setUpstream })
-      : await gitPull(streamId, { rebase });
-    const task = await awaitDone;
+    const result = await awaitGitOp(
+      kind === "push"
+        ? await gitPush(streamId, { force, setUpstream })
+        : await gitPull(streamId, { rebase }),
+    );
     setRunning(false);
-    const result = (task?.result as GitOpResult | undefined) ?? {
-      success: task?.status === "done",
-      stdout: "",
-      stderr: task?.error ?? "",
-      status: null,
-    };
     onComplete(result);
   };
 
