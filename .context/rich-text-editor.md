@@ -163,6 +163,18 @@ item.thread_id }`.
   anchor (from/to + textOffset + prefix/suffix + `approx`) via
   `setCommentAnchor` (no event → no loop); fuzzy matches get the dashed
   `--approx` highlight.
+- **Typed context on create.** When composing a comment,
+  `startCommentForSelection` captures `referencedRefs` from the live DOM
+  selection via `refsInRange` (`components/Comments/domAnchor.ts`) — any
+  rendered `<a>` inside the quote (e.g. an `InternalLink` wikilink)
+  becomes a canonical `(kind,id)` ref so the agent sees what the
+  highlighted prose links to. The backend additionally unions refs it can
+  parse out of the quote *text* at create time, so plain mentions are
+  covered too. `context_chain` stays empty: a wiki/task editor is its own
+  root, with no typed ancestors above it. The in-content `{from,to,…}`
+  anchor stays the surface coordinate fast-path (not migrated to the W3C
+  selector array — the resolver tolerates both, and the legacy shape is
+  what the re-anchor fast path reads).
 - **Live un-orphan.** The re-anchor effect also keys on a debounced
   `docVersion` bumped from `editor.on("update")`, so retyping a deleted
   quote re-attaches promptly instead of waiting for the blur/commit that

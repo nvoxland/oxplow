@@ -291,6 +291,11 @@ export const MonacoCommentLayer = forwardRef<
 
   const handleCreate = async (input: { body: string; intent: CommentIntent }) => {
     if (!pending) return;
+    // No explicit context_chain/referenced_refs: a file editor has no
+    // typed ancestors above the file itself, and the backend already
+    // unions any refs it can parse out of the quoted code (paths,
+    // `task:N`, …) into referenced_refs at create time — so we don't
+    // reimplement ref parsing here.
     await createComment({
       streamId,
       threadId,

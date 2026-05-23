@@ -19,6 +19,8 @@ import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
 import { partitionPageComments, stepComment } from "../Comments/pageCommentNav.js";
+import { refsInRange } from "../Comments/domAnchor.js";
+import type { RefNode } from "../Comments/contextNodes.js";
 import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
 import {
   clearCommentReveal,
@@ -71,6 +73,12 @@ interface PendingSelection {
   /// Enriched anchor_json (from/to + prefix/suffix/textOffset) captured
   /// from the same flattened text the resolver searches.
   anchorJson: string;
+  /// Canonical refs the selection's rendered links point at (e.g. an
+  /// internal `[[wikilink]]` Tiptap rendered as an `<a>`). Captured from
+  /// the live DOM selection at compose time so the agent sees typed
+  /// context for what the highlighted prose links to. The backend
+  /// additionally unions refs it can parse out of the quote text itself.
+  referencedRefs: RefNode[];
 }
 
 /**
@@ -342,17 +350,22 @@ export function RichTextField({
     if (empty) return;
     const captured = captureAnchor(from, to);
     if (!captured) return;
+    // Capture the refs any rendered links inside the selection point at
+    // (e.g. an internal [[wikilink]]) from the live DOM selection, before
+    // the composer steals focus and collapses it.
+    const domSel = window.getSelection();
+    const referencedRefs =
+      domSel && domSel.rangeCount > 0 ? refsInRange(domSel.getRangeAt(0)) : [];
     let rect: DOMRect;
     try {
       const c = editor.view.coordsAtPos(to);
       rect = new DOMRect(c.left, c.top, 0, c.bottom - c.top);
     } catch {
-      const domSel = window.getSelection();
       if (!domSel || domSel.rangeCount === 0) return;
       rect = domSel.getRangeAt(0).getBoundingClientRect();
     }
     setActiveComment(null);
-    setPendingSel({ quote: captured.quote, from, to, rect, anchorJson: captured.anchorJson });
+    setPendingSel({ quote: captured.quote, from, to, rect, anchorJson: captured.anchorJson, referencedRefs });
   };
 
   // Right-click menu. Always shown (the native webview menu is never
@@ -446,6 +459,7 @@ export function RichTextField({
       targetId: comments.targetId,
       quote: pendingSel.quote,
       selectorsJson: pendingSel.anchorJson,
+      referencedRefs: pendingSel.referencedRefs,
       intent: input.intent,
       author: comments.author ?? "user",
       body: input.body,
