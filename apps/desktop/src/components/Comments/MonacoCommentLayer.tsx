@@ -116,7 +116,7 @@ export const MonacoCommentLayer = forwardRef<
       let approx = false;
       let parsed: Record<string, unknown> = {};
       try {
-        parsed = JSON.parse(c.anchor_json) as Record<string, unknown>;
+        parsed = JSON.parse(c.selectors_json) as Record<string, unknown>;
         // Tier A: the stored range still spells the quote exactly.
         if (typeof parsed.startLine === "number") {
           const r = new monaco.Range(
@@ -160,10 +160,10 @@ export const MonacoCommentLayer = forwardRef<
         // location so the position hint + context self-heal (and old
         // comments upgrade in place). The equality guard keeps churn down.
         const aj = buildAnchorJson(model, text, range, approx);
-        if (c.orphaned || c.anchor_json !== aj) void setCommentAnchor(c.id, aj, false);
+        if (c.orphaned || c.selectors_json !== aj) void setCommentAnchor(c.id, aj, false);
         map.push({ decoId: "", commentId: c.id });
       } else if (!c.orphaned) {
-        void setCommentAnchor(c.id, c.anchor_json, true);
+        void setCommentAnchor(c.id, c.selectors_json, true);
       }
     }
 
@@ -297,7 +297,7 @@ export const MonacoCommentLayer = forwardRef<
       targetKind: "file",
       targetId: filePath,
       quote: pending.quote,
-      anchorJson: pending.anchorJson,
+      selectorsJson: pending.anchorJson,
       intent: input.intent,
       author: "user",
       body: input.body,

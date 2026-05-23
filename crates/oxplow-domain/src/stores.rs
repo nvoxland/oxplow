@@ -166,6 +166,9 @@ pub trait AgentTurnStore: Send + Sync {
 #[async_trait]
 pub trait CommentStore: Send + Sync {
     /// Create a comment anchored to `target` with its first message.
+    /// `context_chain` is the ancestor regions the selection sat inside
+    /// (innermost→outermost, excluding `target`); `referenced_refs` are
+    /// the canonical refs found inside the selection.
     #[allow(clippy::too_many_arguments)]
     async fn create(
         &self,
@@ -173,7 +176,9 @@ pub trait CommentStore: Send + Sync {
         thread: Option<&ThreadId>,
         target: &CommentTarget,
         quote: &str,
-        anchor_json: &str,
+        selectors_json: &str,
+        context_chain: &[CommentTarget],
+        referenced_refs: &[CommentTarget],
         intent: CommentIntent,
         author: &str,
         body: &str,
@@ -197,22 +202,22 @@ pub trait CommentStore: Send + Sync {
 
     async fn set_intent(&self, id: CommentId, intent: CommentIntent) -> Result<(), DomainError>;
     async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError>;
-    /// Persist a re-resolved anchor hint (and whether it's orphaned).
+    /// Persist a re-resolved selectors array (and whether it's orphaned).
     async fn set_anchor(
         &self,
         id: CommentId,
-        anchor_json: &str,
+        selectors_json: &str,
         orphaned: bool,
     ) -> Result<(), DomainError>;
     /// Re-attach an orphaned comment to a freshly-selected span: replace
-    /// both the `quote` and the `anchor_json` and clear `orphaned`. (The
-    /// old quote no longer matches, so unlike `set_anchor` this rewrites
-    /// the durable anchor text too.)
+    /// both the `quote` and the `selectors_json` and clear `orphaned`.
+    /// (The old quote no longer matches, so unlike `set_anchor` this
+    /// rewrites the durable anchor text too.)
     async fn relink(
         &self,
         id: CommentId,
         quote: &str,
-        anchor_json: &str,
+        selectors_json: &str,
     ) -> Result<(), DomainError>;
     async fn delete(&self, id: CommentId) -> Result<(), DomainError>;
 

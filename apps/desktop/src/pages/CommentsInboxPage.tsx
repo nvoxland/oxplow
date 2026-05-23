@@ -219,7 +219,7 @@ export function CommentsInboxPage({
                       {t.comment.orphaned && (
                         <span style={{ fontSize: "var(--text-xs)", color: "var(--freshness-stale)" }}>orphaned</span>
                       )}
-                      {!t.comment.orphaned && anchorIsApprox(t.comment.anchor_json) && (
+                      {!t.comment.orphaned && anchorIsApprox(t.comment.selectors_json) && (
                         <span
                           title="Re-attached approximately — the quoted text drifted, so this anchor may not be exact."
                           style={{ fontSize: "var(--text-xs)", color: "var(--freshness-stale)" }}

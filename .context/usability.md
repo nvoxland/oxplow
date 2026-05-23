@@ -140,6 +140,44 @@ Things I keep forgetting. Read this before adding any UI.
   predicate over an ancestor-descriptor chain (unit-tested without a DOM);
   add new exempt surfaces there.
 
+## Commenting on any surface
+
+Comments are not editor-only. Any page region can be commentable by
+declaring *what it is* and mounting the generic layer.
+
+- **`data-ref-kind` / `data-ref-id` mark a region as a typed "context
+  node."** The `(kind,id)` pair uses the same canonical vocabulary as
+  tab ids and the `page_ref` graph (`file` / `directory` / `wiki` /
+  `task` / `git-commit` / `finding`). Stamp them on the element that
+  *is* that thing (e.g. a task row carries `data-ref-kind="task"
+  data-ref-id="42"`). Nesting is meaningful: a file row inside a commit
+  card yields the chain `[file, git-commit, …]`, innermost first. Treat
+  these as a first-class seam like `data-testid` — spread
+  `contextNodeProps(kind, id)` from
+  `apps/desktop/src/components/Comments/contextNodes.tsx`.
+- **Selecting text on a context node shows a floating "Add comment"
+  button** (`SelectionCommentToolbar`), driven by `useDomAnnotations`.
+  It is additive and non-destructive (so a floating affordance is fine,
+  unlike destructive actions which stay on the kebab), dismisses on a new
+  selection or Escape, and reuses the **same** `shouldSuppressContextMenu`
+  carve-out so it never appears inside Monaco / Tiptap / inputs / the
+  terminal — those own their own comment UX.
+- **Mount `DomCommentLayer` once per commentable page** (see
+  `TasksPage.tsx`). It captures selections, paints existing comments back
+  onto their context node's text via the **CSS Custom Highlight API**
+  (no DOM mutation — critical for live React lists), and opens a thread
+  popover when a highlight is clicked. The quote is re-resolved against
+  the element's `textContent` each repaint (debounced to one per frame),
+  so reordering / virtualization just re-anchors. The Highlight API is
+  feature-detected; where it's absent the comment still works, just
+  without an inline highlight.
+- **Make the text selectable.** Rows are often `userSelect: none` for
+  clean drag — set `userSelect: "text"` on the specific label span you
+  want commentable (e.g. the task title) so a quote can be anchored
+  without re-enabling selection on the whole row.
+- `data-testid`s on the affordances: `selection-comment-button`,
+  `new-comment-popover`, `comment-popover-<id>`.
+
 ## Keyboard
 
 - **Shortcuts go through the menu.** Add new shortcuts to

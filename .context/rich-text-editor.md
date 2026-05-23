@@ -37,7 +37,13 @@ show the pencil — that's the consistent signal "this is for reading."
   immediate commit on blur. The editor's outer `<div>` wears
   `.oxplow-rt-field` (hover tint + pencil reveal) and the inner
   ProseMirror element wears `.oxplow-md .oxplow-rt-editor` so prose
-  inherits the same typography as `MarkdownView`.
+  inherits the same typography as `MarkdownView`. Passes
+  `immediatelyRender: false` to `useEditor` — the default (`true`)
+  renders the initial document during React's render phase, and the
+  `MermaidBlock` React NodeView flushes via `flushSync`, which trips
+  React's "flushSync was called from inside a lifecycle method"
+  warning. Deferring the first render to a post-commit effect silences
+  it; harmless here since there's no SSR.
 - **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
   name, `codeBlock`) with a React NodeView that paints rendered SVG
   via `renderMermaidInto` when the caret is outside, and a raw

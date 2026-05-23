@@ -131,6 +131,13 @@ export function RichTextField({
   );
 
   const editor = useEditor({
+    // Defer the first editor render out of React's render phase. With
+    // the default (true), the initial document — including the
+    // MermaidBlock React NodeView, which flushes via flushSync — renders
+    // synchronously during RichTextField's render, triggering React's
+    // "flushSync was called from inside a lifecycle method" warning. No
+    // SSR here, so deferring to a post-commit effect is invisible.
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         // Replaced by MermaidBlock (which `extend`s CodeBlock under the
@@ -242,7 +249,7 @@ export function RichTextField({
       let prefix: string | undefined;
       let suffix: string | undefined;
       try {
-        const parsed = JSON.parse(c.anchor_json) as {
+        const parsed = JSON.parse(c.selectors_json) as {
           from?: number;
           to?: number;
           prefix?: string;
@@ -262,9 +269,9 @@ export function RichTextField({
         // location so the hint + context self-heal (and old comments
         // upgrade in place); guard keeps DB churn down.
         const aj = buildAnchorJson(doc, range.from, range.to, range.approx);
-        if (c.orphaned || c.anchor_json !== aj) void setCommentAnchor(c.id, aj, false);
+        if (c.orphaned || c.selectors_json !== aj) void setCommentAnchor(c.id, aj, false);
       } else if (!c.orphaned) {
-        void setCommentAnchor(c.id, c.anchor_json, true);
+        void setCommentAnchor(c.id, c.selectors_json, true);
       }
     }
     editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));
@@ -438,7 +445,7 @@ export function RichTextField({
       targetKind: comments.targetKind,
       targetId: comments.targetId,
       quote: pendingSel.quote,
-      anchorJson: pendingSel.anchorJson,
+      selectorsJson: pendingSel.anchorJson,
       intent: input.intent,
       author: comments.author ?? "user",
       body: input.body,

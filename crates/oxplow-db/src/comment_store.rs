@@ -64,6 +64,18 @@ fn map_err(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
 }
 
+/// Parse a `[{ "kind", "id" }, …]` JSON column into refs. The columns
+/// carry `DEFAULT '[]'` so this is always valid JSON in practice; a
+/// malformed value degrades to an empty list rather than failing the
+/// whole row load (the refs are typed context, not load-bearing state).
+fn parse_refs(json: &str) -> Vec<CommentTarget> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+fn refs_to_json(refs: &[CommentTarget]) -> String {
+    serde_json::to_string(refs).unwrap_or_else(|_| "[]".to_string())
+}
+
 fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     let intent: String = row.get("intent")?;
     let status: String = row.get("status")?;
@@ -79,7 +91,9 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
         target_kind: row.get("target_kind")?,
         target_id: row.get("target_id")?,
         quote: row.get("quote")?,
-        anchor_json: row.get("anchor_json")?,
+        selectors_json: row.get("selectors_json")?,
+        context_chain: parse_refs(&row.get::<_, String>("context_chain_json")?),
+        referenced_refs: parse_refs(&row.get::<_, String>("referenced_refs_json")?),
         intent: str_to_intent(&intent).map_err(map_err)?,
         status: str_to_status(&status).map_err(map_err)?,
         orphaned: row.get::<_, i64>("orphaned")? != 0,
@@ -157,7 +171,9 @@ impl CommentStore for SqliteCommentStore {
         thread: Option<&ThreadId>,
         target: &CommentTarget,
         quote: &str,
-        anchor_json: &str,
+        selectors_json: &str,
+        context_chain: &[CommentTarget],
+        referenced_refs: &[CommentTarget],
         intent: CommentIntent,
         author: &str,
         body: &str,
@@ -167,25 +183,32 @@ impl CommentStore for SqliteCommentStore {
         let thread = thread.cloned();
         let target = target.clone();
         let quote = quote.to_string();
-        let anchor_json = anchor_json.to_string();
+        let selectors_json = selectors_json.to_string();
+        let context_chain = context_chain.to_vec();
+        let referenced_refs = referenced_refs.to_vec();
         let author = author.to_string();
         let body = body.to_string();
         tokio::task::spawn_blocking(move || -> Result<CommentThread, DomainError> {
             let now = Timestamp::now();
             let now_s = ts_to_string(now);
+            let context_chain_json = refs_to_json(&context_chain);
+            let referenced_refs_json = refs_to_json(&referenced_refs);
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO comment
-                       (stream_id, thread_id, target_kind, target_id, quote, anchor_json,
+                       (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
+                        context_chain_json, referenced_refs_json,
                         intent, status, orphaned, author, created_at, updated_at, last_activity_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open', 0, ?8, ?9, ?9, ?9)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
                     params![
                         stream.as_str(),
                         thread.as_ref().map(|t| t.as_str()),
                         target.kind,
                         target.id,
                         quote,
-                        anchor_json,
+                        selectors_json,
+                        context_chain_json,
+                        referenced_refs_json,
                         intent_to_str(intent),
                         author,
                         now_s,
@@ -204,7 +227,9 @@ impl CommentStore for SqliteCommentStore {
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
                     quote: quote.clone(),
-                    anchor_json: anchor_json.clone(),
+                    selectors_json: selectors_json.clone(),
+                    context_chain: context_chain.clone(),
+                    referenced_refs: referenced_refs.clone(),
                     intent,
                     status: CommentStatus::Open,
                     orphaned: false,
@@ -354,19 +379,19 @@ impl CommentStore for SqliteCommentStore {
     async fn set_anchor(
         &self,
         id: CommentId,
-        anchor_json: &str,
+        selectors_json: &str,
         orphaned: bool,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let anchor_json = anchor_json.to_string();
+        let selectors_json = selectors_json.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "UPDATE comment SET anchor_json = ?2, orphaned = ?3, updated_at = ?4
+                    "UPDATE comment SET selectors_json = ?2, orphaned = ?3, updated_at = ?4
                      WHERE id = ?1",
                     params![
                         id.value(),
-                        anchor_json,
+                        selectors_json,
                         orphaned as i64,
                         ts_to_string(Timestamp::now())
                     ],
@@ -382,21 +407,21 @@ impl CommentStore for SqliteCommentStore {
         &self,
         id: CommentId,
         quote: &str,
-        anchor_json: &str,
+        selectors_json: &str,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
         let quote = quote.to_string();
-        let anchor_json = anchor_json.to_string();
+        let selectors_json = selectors_json.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "UPDATE comment
-                     SET quote = ?2, anchor_json = ?3, orphaned = 0, updated_at = ?4
+                     SET quote = ?2, selectors_json = ?3, orphaned = 0, updated_at = ?4
                      WHERE id = ?1",
                     params![
                         id.value(),
                         quote,
-                        anchor_json,
+                        selectors_json,
                         ts_to_string(Timestamp::now())
                     ],
                 )?;
@@ -518,6 +543,8 @@ mod tests {
                 &target(),
                 "the selected words",
                 "{\"from\":1,\"to\":5}",
+                &[],
+                &[],
                 CommentIntent::Followup,
                 "user",
                 "what about this?",
@@ -538,6 +565,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_round_trips_context_chain_and_referenced_refs() {
+        let (db, stream, thread) = fixture().await;
+        let store = SqliteCommentStore::new(db);
+        let context_chain = vec![
+            CommentTarget {
+                kind: "git-commit".into(),
+                id: "abc1234".into(),
+            },
+            CommentTarget {
+                kind: "git-dashboard".into(),
+                id: "git-dashboard".into(),
+            },
+        ];
+        let referenced_refs = vec![CommentTarget {
+            kind: "file".into(),
+            id: "src/app.rs".into(),
+        }];
+        let created = store
+            .create(
+                &stream,
+                Some(&thread),
+                &CommentTarget {
+                    kind: "file".into(),
+                    id: "src/app.rs".into(),
+                },
+                "fn main",
+                "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]",
+                &context_chain,
+                &referenced_refs,
+                CommentIntent::Followup,
+                "user",
+                "why is this here?",
+            )
+            .await
+            .unwrap();
+        // The create return value carries the typed context…
+        assert_eq!(created.comment.context_chain, context_chain);
+        assert_eq!(created.comment.referenced_refs, referenced_refs);
+        // …and so does a fresh load from the DB (proves the JSON columns
+        // serialize + parse round-trip).
+        let loaded = store.get(created.comment.id).await.unwrap().unwrap();
+        assert_eq!(loaded.comment.context_chain, context_chain);
+        assert_eq!(loaded.comment.referenced_refs, referenced_refs);
+        assert_eq!(
+            loaded.comment.selectors_json,
+            "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]"
+        );
+    }
+
+    #[tokio::test]
     async fn resolved_at_set_on_resolve_cleared_on_reopen() {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(db);
@@ -548,6 +625,8 @@ mod tests {
                 &target(),
                 "words",
                 "{\"from\":1,\"to\":3}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "hmm",
@@ -590,6 +669,8 @@ mod tests {
                 &target(),
                 "old words",
                 "{\"from\":1,\"to\":9}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "note",
@@ -598,7 +679,7 @@ mod tests {
             .unwrap();
         // Mark it orphaned (quote vanished).
         store
-            .set_anchor(c.comment.id, c.comment.anchor_json.as_str(), true)
+            .set_anchor(c.comment.id, c.comment.selectors_json.as_str(), true)
             .await
             .unwrap();
         assert!(
@@ -617,7 +698,7 @@ mod tests {
             .unwrap();
         let after = store.get(c.comment.id).await.unwrap().unwrap().comment;
         assert_eq!(after.quote, "new words");
-        assert_eq!(after.anchor_json, "{\"from\":20,\"to\":29}");
+        assert_eq!(after.selectors_json, "{\"from\":20,\"to\":29}");
         assert!(!after.orphaned);
     }
 
@@ -632,6 +713,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Followup,
                 "user",
                 "first",
@@ -662,6 +745,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Followup,
                 "user",
                 "please look",
@@ -721,6 +806,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "just thinking out loud",
@@ -746,6 +833,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "a",
@@ -762,6 +851,8 @@ mod tests {
                 },
                 "q2",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Followup,
                 "user",
                 "b",
@@ -783,6 +874,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "a",
@@ -795,7 +888,7 @@ mod tests {
             .unwrap();
         let got = store.get(c.comment.id).await.unwrap().unwrap();
         assert!(got.comment.orphaned);
-        assert_eq!(got.comment.anchor_json, "{\"from\":9,\"to\":9}");
+        assert_eq!(got.comment.selectors_json, "{\"from\":9,\"to\":9}");
     }
 
     #[tokio::test]
@@ -809,6 +902,8 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "a",
@@ -838,6 +933,8 @@ mod tests {
                 &target(),
                 "keep",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "a",
@@ -851,6 +948,8 @@ mod tests {
                 &target(),
                 "old",
                 "{}",
+                &[],
+                &[],
                 CommentIntent::Note,
                 "user",
                 "b",

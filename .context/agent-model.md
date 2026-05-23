@@ -559,6 +559,24 @@ intermediate `ready` step.
   `comment_id` is an integer (comments use autoincrement ids). Store:
   `crates/oxplow-db/src/comment_store.rs`; mutations emit
   `CommentsChanged` on the bus.
+  - **`list_comments` returns hydrated typed context, not just the
+    quote.** Each row is an `EnrichedCommentThread { thread, primary,
+    context_chain, referenced }`. `thread` is the raw comment + message
+    history; `primary` is the comment's anchor target resolved to a
+    `RefSummary { kind, id, title?, detail?, body_excerpt? }`;
+    `context_chain` is the nesting of page regions the selection sat
+    inside (innermost→outermost — e.g. a file row highlighted under a
+    commit yields `[git-commit …]`); `referenced` are the canonical refs
+    found inside the selection itself (links + inline mentions). So a
+    follow-up on a commit row arrives with the commit subject + diffstat
+    (primary), the dashboard it lives in (chain), and any file the quote
+    linked to (referenced) — the agent gets *what the highlighted thing
+    is* in one call. Hydration runs through
+    `oxplow_app::ref_resolver::{resolve_ref, resolve_refs}` (currently
+    resolves `task` → title+status and `git-commit` → subject+diffstat;
+    other kinds return a bare `{kind,id}`). The IPC
+    `list_comments_for_target` stays raw — the renderer already has the
+    page, so only the MCP surface pays the resolution cost.
 
 `buildLspMcpTools` (`crates/oxplow-mcp/src/lib.rs`) adds language-server
 queries (definition, references, hover) the agent can use without

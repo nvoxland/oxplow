@@ -828,11 +828,12 @@ every message in the thread including the first. **Integer PK ids
 
 `comment` columns: `id, stream_id (NOT NULL, FK streams ON DELETE
 CASCADE), thread_id (nullable, FK threads ON DELETE SET NULL),
-target_kind, target_id, quote, anchor_json, intent ('note' |
-'followup'), status ('open' | 'resolved'), orphaned (0/1), author,
-created_at, updated_at, last_activity_at, resolved_at (nullable, V23)`.
-Indexes on `(stream_id, status, last_activity_at DESC)`, `(thread_id,
-last_activity_at DESC)`, `(target_kind, target_id)`.
+target_kind, target_id, quote, selectors_json, context_chain_json (V24),
+referenced_refs_json (V24), intent ('note' | 'followup'), status ('open'
+| 'resolved'), orphaned (0/1), author, created_at, updated_at,
+last_activity_at, resolved_at (nullable, V23)`. Indexes on `(stream_id,
+status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
+`(target_kind, target_id)`.
 
 - **`resolved_at`** is stamped by `set_status` on `→resolved` and
   cleared on `→open`. It exists because neither `updated_at` (bumped by
@@ -850,18 +851,32 @@ last_activity_at DESC)`, `(target_kind, target_id)`.
   MCP `list_comments` queries by thread or stream (never cross-stream).
 - **Anchoring is resilient, not positional.** `quote` (the selected
   text) is the durable anchor + the context handed to the agent;
-  `anchor_json` is an opaque, schemaless per-surface hint the renderer
-  re-validates on load and may rewrite through `set_anchor`. The
-  renderer enriches it with a W3C/Hypothesis-style selector — surrounding
-  `prefix`/`suffix` context, a `textOffset`, and an `approx` flag —
-  alongside the surface position (Monaco line/col, ProseMirror from/to).
-  The shared resolver (`apps/desktop/src/components/Comments/anchor.ts`,
-  `resolveAnchor`) tiers exact-quote (disambiguated by context +
-  proximity) then a bounded fuzzy fallback; a fuzzy re-attach sets
-  `approx` (shown as a dashed highlight + "approx" badge). Only when even
-  fuzzy fails is the comment `orphaned` — still listed, no highlight.
-  Rust never parses `anchor_json`, so enriching it needs no migration.
-- **Relinking.** `relink(id, quote, anchor_json)` (store) /
+  `selectors_json` (renamed from `anchor_json` in V24) is an opaque,
+  schemaless per-surface hint the renderer re-validates on load and may
+  rewrite through `set_anchor`. It holds a W3C-Web-Annotation selectors
+  array — a TextQuoteSelector (`exact` + surrounding `prefix`/`suffix`
+  context), a TextPositionSelector (`textOffset`), an `approx` flag, and
+  an optional per-surface coordinate selector (Monaco line/col,
+  ProseMirror from/to, terminal buffer coords). The shared resolver
+  (`apps/desktop/src/components/Comments/anchor.ts`, `resolveAnchor`)
+  tiers exact-quote (disambiguated by context + proximity) then a bounded
+  fuzzy fallback; a fuzzy re-attach sets `approx` (shown as a dashed
+  highlight + "approx" badge). Only when even fuzzy fails is the comment
+  `orphaned` — still listed, no highlight. Rust never parses
+  `selectors_json`, so enriching it needs no migration.
+- **Typed context (V24).** Beyond the quote, a comment carries the typed
+  context it was made in. `context_chain_json` is a JSON array of
+  `{kind,id}` refs — the nesting of page regions the selection sat inside
+  (innermost→outermost, excluding the primary target; e.g. a file row
+  under a commit yields `[{git-commit,sha}]`). `referenced_refs_json` is
+  the canonical refs found INSIDE the selection (rendered links + inline
+  mentions), so highlighting a filename tells the agent it is a file.
+  Both reuse the canonical `page_ref` `(kind,id)` vocabulary. Unlike
+  `selectors_json` these ARE parsed in Rust (into `Vec<CommentTarget>` on
+  `Comment`) because the backend ref-resolver hydrates them into typed
+  summaries for the agent. The store serializes/parses them; a malformed
+  value degrades to an empty list rather than failing the row load.
+- **Relinking.** `relink(id, quote, selectors_json)` (store) /
   `relink_comment` (IPC) is the escape hatch for a comment whose quote
   drifted past fuzzy tolerance: it rewrites BOTH the quote and the anchor
   and clears `orphaned`. Triggered from the editor's selection

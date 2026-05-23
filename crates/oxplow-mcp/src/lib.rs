@@ -17,13 +17,28 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
+use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{
     CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
 };
 use oxplow_domain::{
     CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId,
 };
+
+/// A comment thread plus the typed context it was anchored in, resolved
+/// for the agent. `primary` is the comment's target (the nearest region
+/// the selection sat in); `context_chain` is the ancestor regions
+/// (innermost→outermost); `referenced` are the canonical refs found
+/// inside the selection itself. Returned by `list_comments`.
+#[derive(Debug, Serialize)]
+struct EnrichedCommentThread {
+    thread: CommentThread,
+    primary: RefSummary,
+    context_chain: Vec<RefSummary>,
+    referenced: Vec<RefSummary>,
+}
 
 #[derive(Clone)]
 pub struct OxplowMcp {
@@ -696,7 +711,30 @@ impl OxplowMcp {
                 _ => true,
             })
             .collect();
-        json_result(&filtered)
+        // Hydrate the typed context the comment was anchored in so the
+        // agent sees *what the highlighted thing is* — the primary
+        // target, the nesting of regions it sat inside, and any refs
+        // inside the selection — in this one tool call.
+        let mut enriched = Vec::with_capacity(filtered.len());
+        for t in filtered {
+            let primary = ref_resolver::resolve_ref(
+                &self.services,
+                &t.comment.target_kind,
+                &t.comment.target_id,
+            )
+            .await;
+            let context_chain =
+                ref_resolver::resolve_refs(&self.services, &t.comment.context_chain).await;
+            let referenced =
+                ref_resolver::resolve_refs(&self.services, &t.comment.referenced_refs).await;
+            enriched.push(EnrichedCommentThread {
+                thread: t,
+                primary,
+                context_chain,
+                referenced,
+            });
+        }
+        json_result(&enriched)
     }
 
     #[tool(
@@ -2471,6 +2509,76 @@ mod tests {
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot();
+    }
+
+    #[tokio::test]
+    async fn list_comments_enriches_primary_and_context() {
+        use oxplow_domain::comment::{CommentIntent, CommentTarget};
+        let (_proj, services, server) = boot();
+        let stream = services.streams.list_streams().await.unwrap()[0].id.clone();
+
+        // A task to use as the primary target, and another as a context
+        // ancestor (e.g. an epic the row sat under).
+        let primary_task = services
+            .task_store
+            .insert(&make_task(None, "Primary item"))
+            .await
+            .unwrap();
+        let parent_task = services
+            .task_store
+            .insert(&make_task(None, "Parent epic"))
+            .await
+            .unwrap();
+
+        services
+            .comment_store
+            .create(
+                &stream,
+                None,
+                &CommentTarget {
+                    kind: "task".into(),
+                    id: primary_task.to_string(),
+                },
+                "the highlighted text",
+                "[]",
+                &[CommentTarget {
+                    kind: "task".into(),
+                    id: parent_task.to_string(),
+                }],
+                &[CommentTarget {
+                    kind: "file".into(),
+                    id: "src/app.rs".into(),
+                }],
+                CommentIntent::Followup,
+                "user",
+                "what about this?",
+            )
+            .await
+            .unwrap();
+
+        let r = server
+            .list_comments(Parameters(ListCommentsParams {
+                scope: "stream".into(),
+                id: stream.to_string(),
+                status: None,
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let row = &parsed.as_array().unwrap()[0];
+
+        // Primary target resolved to the task title.
+        assert_eq!(row["primary"]["kind"], "task");
+        assert_eq!(row["primary"]["title"], "Primary item");
+        // Context chain ancestor resolved.
+        assert_eq!(row["context_chain"][0]["title"], "Parent epic");
+        // Referenced file ref present but bare (no first-class label).
+        assert_eq!(row["referenced"][0]["kind"], "file");
+        assert_eq!(row["referenced"][0]["id"], "src/app.rs");
+        assert!(row["referenced"][0]["title"].is_null());
+        // The raw thread still travels under `thread`.
+        assert_eq!(row["thread"]["comment"]["quote"], "the highlighted text");
     }
 
     #[tokio::test]

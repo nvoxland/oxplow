@@ -497,6 +497,18 @@ straightforward 7-layer instance (`SqliteCommentStore`,
 agent via three MCP tools (`list_comments`, `respond_to_comment`,
 `resolve_comment`) — see [agent-model.md](./agent-model.md).
 
+`create_comment` takes a single `CreateCommentRequest` struct argument
+(not positional params) because the field count — `stream_id`,
+`thread_id`, `target_kind`/`target_id`, `quote`, `selectors_json` (the
+W3C selectors array, renamed from `anchor_json` in V24), `context_chain`
++ `referenced_refs` (`Vec<CommentTarget>` typed context), `intent`,
+`author`, `body` — exceeds tauri-specta's 10-argument cap on a
+`#[tauri::command]`. This mirrors the `CreateTaskRequest` pattern in
+`commands/tasks.rs`: when a command would take too many args, bundle them
+in a `#[derive(Serialize, Deserialize, Type)] #[serde(rename_all =
+"camelCase")]` request struct. `set_comment_anchor` / `relink_comment`
+take `selectors_json` (same rename).
+
 Every mutating command (and the MCP `respond_to_comment` /
 `resolve_comment`) emits `OxplowEvent::CommentsChanged { streamId,
 targetKind, targetId }`; the wire kind is `commentsChanged`, mirrored in

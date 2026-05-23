@@ -196,7 +196,7 @@ export const commands = {
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listTaskEvents: (itemId: number | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
-	createComment: (streamId: StreamId, threadId: string | null, targetKind: string, targetId: string, quote: string, anchorJson: string, intent: CommentIntent, author: string, body: string) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { streamId, threadId, targetKind, targetId, quote, anchorJson, intent, author, body })),
+	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
 	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
 	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
 	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
@@ -207,13 +207,13 @@ export const commands = {
 	 *  renderer re-locates — or fails to re-locate — the quote in current
 	 *  content. No event: this is a passive sync, not a user mutation.
 	 */
-	setCommentAnchor: (commentId: CommentId, anchorJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, anchorJson, orphaned })),
+	setCommentAnchor: (commentId: CommentId, selectorsJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, selectorsJson, orphaned })),
 	/**
 	 *  Re-attach an orphaned comment to a freshly-selected span: rewrite
 	 *  both quote + anchor and clear the orphan flag. A user mutation, so it
 	 *  emits a changed event (unlike the passive `set_comment_anchor`).
 	 */
-	relinkComment: (commentId: CommentId, quote: string, anchorJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, anchorJson })),
+	relinkComment: (commentId: CommentId, quote: string, selectorsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, selectorsJson })),
 	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
 	getWikiPage: (slug: string) => typedError<{
@@ -968,7 +968,15 @@ export type Comment = {
 	target_kind: string,
 	target_id: string,
 	quote: string,
-	anchor_json: string,
+	// W3C selectors array (opaque to the store; the renderer parses it).
+	selectors_json: string,
+	/**
+	 *  Ancestor regions the selection sat inside, innermost→outermost,
+	 *  EXCLUDING the primary target. Empty for a top-level selection.
+	 */
+	context_chain: CommentTarget[],
+	// Canonical refs found inside the selection (links + mentions).
+	referenced_refs: CommentTarget[],
 	intent: CommentIntent,
 	status: CommentStatus,
 	orphaned: boolean,
@@ -1014,6 +1022,22 @@ export type CommentMessageId = number;
 // Lifecycle of a comment thread.
 export type CommentStatus = "open" | "resolved";
 
+/**
+ *  A canonical cross-page reference: `kind` is the page-kind scheme
+ *  (`"wiki" | "file" | "directory" | "task" | "git-commit" | "finding"`,
+ *  extensible) and `id` is the canonical id for that kind — wiki slug,
+ *  worktree-relative path, task id as a string, commit sha, etc. This is
+ *  the same `(kind,id)` vocabulary the `page_ref` graph and tab ids use.
+ * 
+ *  Used as a comment's primary anchor target and, in `Vec` form, as the
+ *  `context_chain` (ancestor regions) and `referenced_refs` (refs inside
+ *  the selection).
+ */
+export type CommentTarget = {
+	kind: string,
+	id: string,
+};
+
 // A comment plus its full message thread, oldest-first.
 export type CommentThread = {
 	comment: Comment,
@@ -1045,6 +1069,27 @@ export type CommitRefLabel = {
 };
 
 export type CommitRefLabelKind = "branch" | "tag";
+
+/**
+ *  Bundled args for [`create_comment`]. A single struct keeps the
+ *  command under tauri-specta's argument-count cap and reads better
+ *  than a dozen positional params. `selectors` is the W3C selectors
+ *  array (opaque JSON); `context_chain` / `referenced_refs` are the
+ *  typed context (see [`Comment`]).
+ */
+export type CreateCommentRequest = {
+	streamId: StreamId,
+	threadId: ThreadId | null,
+	targetKind: string,
+	targetId: string,
+	quote: string,
+	selectorsJson: string,
+	contextChain: CommentTarget[],
+	referencedRefs: CommentTarget[],
+	intent: CommentIntent,
+	author: string,
+	body: string,
+};
 
 export type CreateTaskInput = {
 	title: string,

@@ -27,6 +27,7 @@ pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod page_ref_backfill;
 pub mod recovery;
+pub mod ref_resolver;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod task_service;

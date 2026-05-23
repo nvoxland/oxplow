@@ -847,6 +847,8 @@ function EpicInlineRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.id}`}
+      data-ref-kind="task"
+      data-ref-id={String(item.id)}
     >
       <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateTask(item.id, { status }); }} locked={locked} />
       <span
@@ -856,7 +858,9 @@ function EpicInlineRow({
       >
         {isExpanded ? "\u25BC" : "\u25B6"}
       </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "var(--weight-medium)" }}>
+      {/* Title is user-selectable so a comment can anchor to it (the
+          row is otherwise userSelect:none for clean drag). */}
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "var(--weight-medium)", userSelect: "text" }}>
         {item.title}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateTask(item.id, { priority }); }} />
@@ -1123,12 +1127,16 @@ function InlineItemRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.id}`}
+      data-ref-kind="task"
+      data-ref-id={String(item.id)}
     >
       <InlineStatusPicker
         status={item.status}
         onChange={(status) => { void onUpdateTask(item.id, { status }); }}
         locked={locked}
       />
+      {/* Title is user-selectable so a comment can anchor to it (the
+          row is otherwise userSelect:none for clean drag). */}
       <span
         style={{
           flex: 1,
@@ -1136,6 +1144,7 @@ function InlineItemRow({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+          userSelect: "text",
         }}
       >
         {item.title}

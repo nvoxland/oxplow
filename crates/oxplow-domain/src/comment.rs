@@ -8,10 +8,20 @@
 //!
 //! Anchoring is deliberately resilient rather than positional: `quote`
 //! (the selected text) is the durable anchor and the context handed to
-//! the agent; `anchor_json` is an opaque per-surface position *hint*
-//! that the renderer re-validates on load and may rewrite. When the
-//! quote can no longer be located the comment is marked `orphaned` —
-//! it still shows in the inbox, just without an inline highlight.
+//! the agent; `selectors_json` is a W3C-Web-Annotation selectors array
+//! (TextQuoteSelector + TextPositionSelector + an optional per-surface
+//! coordinate selector) that the renderer re-validates on load and may
+//! rewrite. When the quote can no longer be located the comment is
+//! marked `orphaned` — it still shows in the inbox, just without an
+//! inline highlight.
+//!
+//! Beyond the quote, a comment carries the *typed* context it was made
+//! in: `context_chain` is the nesting of page regions the selection sat
+//! inside (innermost→outermost, e.g. a file row under a commit), and
+//! `referenced_refs` are the canonical refs found inside the selection
+//! itself (links + inline mentions). Both reuse the [`CommentTarget`]
+//! `(kind,id)` shape — the same canonical `page_ref` vocabulary — so the
+//! agent can hydrate them into typed summaries when answering.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -37,9 +47,15 @@ pub enum CommentStatus {
     Resolved,
 }
 
-/// What a comment is anchored to. `kind` is `"wiki" | "file" | "task"`
-/// (extensible); `id` is the canonical id for that kind — wiki slug,
-/// worktree-relative file path, or task id as a string.
+/// A canonical cross-page reference: `kind` is the page-kind scheme
+/// (`"wiki" | "file" | "directory" | "task" | "git-commit" | "finding"`,
+/// extensible) and `id` is the canonical id for that kind — wiki slug,
+/// worktree-relative path, task id as a string, commit sha, etc. This is
+/// the same `(kind,id)` vocabulary the `page_ref` graph and tab ids use.
+///
+/// Used as a comment's primary anchor target and, in `Vec` form, as the
+/// `context_chain` (ancestor regions) and `referenced_refs` (refs inside
+/// the selection).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CommentTarget {
     pub kind: String,
@@ -60,7 +76,13 @@ pub struct Comment {
     pub target_kind: String,
     pub target_id: String,
     pub quote: String,
-    pub anchor_json: String,
+    /// W3C selectors array (opaque to the store; the renderer parses it).
+    pub selectors_json: String,
+    /// Ancestor regions the selection sat inside, innermost→outermost,
+    /// EXCLUDING the primary target. Empty for a top-level selection.
+    pub context_chain: Vec<CommentTarget>,
+    /// Canonical refs found inside the selection (links + mentions).
+    pub referenced_refs: Vec<CommentTarget>,
     pub intent: CommentIntent,
     pub status: CommentStatus,
     pub orphaned: bool,

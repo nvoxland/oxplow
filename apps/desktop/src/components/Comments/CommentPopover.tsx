@@ -75,7 +75,7 @@ export function CommentPopover({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const { comment, messages } = thread;
   const resolved = comment.status === "resolved";
-  const approx = !comment.orphaned && anchorIsApprox(comment.anchor_json);
+  const approx = !comment.orphaned && anchorIsApprox(comment.selectors_json);
 
   // Close on outside click.
   useEffect(() => {

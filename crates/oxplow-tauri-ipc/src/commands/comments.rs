@@ -8,6 +8,8 @@ use oxplow_domain::{
     Comment, CommentId, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
     StreamId, ThreadId,
 };
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -20,36 +22,50 @@ fn emit_changed(state: &tauri::State<'_, AppState>, comment: &Comment) {
     });
 }
 
+/// Bundled args for [`create_comment`]. A single struct keeps the
+/// command under tauri-specta's argument-count cap and reads better
+/// than a dozen positional params. `selectors` is the W3C selectors
+/// array (opaque JSON); `context_chain` / `referenced_refs` are the
+/// typed context (see [`Comment`]).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCommentRequest {
+    pub stream_id: StreamId,
+    pub thread_id: Option<ThreadId>,
+    pub target_kind: String,
+    pub target_id: String,
+    pub quote: String,
+    pub selectors_json: String,
+    pub context_chain: Vec<CommentTarget>,
+    pub referenced_refs: Vec<CommentTarget>,
+    pub intent: CommentIntent,
+    pub author: String,
+    pub body: String,
+}
+
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn create_comment(
     state: tauri::State<'_, AppState>,
-    stream_id: StreamId,
-    thread_id: Option<ThreadId>,
-    target_kind: String,
-    target_id: String,
-    quote: String,
-    anchor_json: String,
-    intent: CommentIntent,
-    author: String,
-    body: String,
+    req: CreateCommentRequest,
 ) -> Result<CommentThread, IpcError> {
     let target = CommentTarget {
-        kind: target_kind,
-        id: target_id,
+        kind: req.target_kind,
+        id: req.target_id,
     };
     let thread = state
         .comment_store
         .create(
-            &stream_id,
-            thread_id.as_ref(),
+            &req.stream_id,
+            req.thread_id.as_ref(),
             &target,
-            &quote,
-            &anchor_json,
-            intent,
-            &author,
-            &body,
+            &req.quote,
+            &req.selectors_json,
+            &req.context_chain,
+            &req.referenced_refs,
+            req.intent,
+            &req.author,
+            &req.body,
         )
         .await?;
     emit_changed(&state, &thread.comment);
@@ -133,12 +149,12 @@ pub async fn set_comment_status(
 pub async fn set_comment_anchor(
     state: tauri::State<'_, AppState>,
     comment_id: CommentId,
-    anchor_json: String,
+    selectors_json: String,
     orphaned: bool,
 ) -> Result<(), IpcError> {
     Ok(state
         .comment_store
-        .set_anchor(comment_id, &anchor_json, orphaned)
+        .set_anchor(comment_id, &selectors_json, orphaned)
         .await?)
 }
 
@@ -151,11 +167,11 @@ pub async fn relink_comment(
     state: tauri::State<'_, AppState>,
     comment_id: CommentId,
     quote: String,
-    anchor_json: String,
+    selectors_json: String,
 ) -> Result<(), IpcError> {
     state
         .comment_store
-        .relink(comment_id, &quote, &anchor_json)
+        .relink(comment_id, &quote, &selectors_json)
         .await?;
     if let Some(thread) = state.comment_store.get(comment_id).await? {
         emit_changed(&state, &thread.comment);

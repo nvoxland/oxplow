@@ -361,6 +361,22 @@
       .oxplow-comment-highlight--approx {
         border-bottom-style: dashed;
       }
+      /* Plain-DOM comment highlights painted via the CSS Custom Highlight
+         API (DomCommentLayer) — task rows, file list, git dashboard, etc.
+         No DOM is mutated; the browser paints these over live ranges.
+         ::highlight() can't draw a border, so we tint the background and
+         add a soft underline shadow to echo the editor treatment above. */
+      ::highlight(oxplow-comment) {
+        background-color: var(--comment-highlight-bg);
+        text-decoration: underline;
+        text-decoration-color: var(--comment-highlight);
+        text-decoration-thickness: 2px;
+      }
+      ::highlight(oxplow-comment-approx) {
+        background-color: var(--comment-highlight-bg);
+        text-decoration: underline dashed;
+        text-decoration-color: var(--comment-highlight);
+      }
       /* Wikilink / file: / dir: / gitcommit: anchors inside the editor
          are click-to-navigate (handled by RichTextField's wrapper),
          so they should advertise themselves as links rather than

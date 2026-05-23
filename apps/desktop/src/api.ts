@@ -1127,23 +1127,30 @@ export async function createComment(input: {
   targetKind: string;
   targetId: string;
   quote: string;
-  anchorJson: string;
+  /** W3C selectors array, serialized. */
+  selectorsJson: string;
+  /** Ancestor regions (innermost→outermost, excluding the target). */
+  contextChain?: { kind: string; id: string }[];
+  /** Canonical refs found inside the selection. */
+  referencedRefs?: { kind: string; id: string }[];
   intent: CommentIntent;
   author: string;
   body: string;
 }): Promise<CommentThread> {
   return unwrap(
-    await commands.createComment(
-      input.streamId,
-      input.threadId,
-      input.targetKind,
-      input.targetId,
-      input.quote,
-      input.anchorJson,
-      input.intent,
-      input.author,
-      input.body,
-    ),
+    await commands.createComment({
+      streamId: input.streamId,
+      threadId: input.threadId,
+      targetKind: input.targetKind,
+      targetId: input.targetId,
+      quote: input.quote,
+      selectorsJson: input.selectorsJson,
+      contextChain: input.contextChain ?? [],
+      referencedRefs: input.referencedRefs ?? [],
+      intent: input.intent,
+      author: input.author,
+      body: input.body,
+    }),
   );
 }
 
@@ -1176,10 +1183,10 @@ export async function setCommentStatus(commentId: number, status: CommentStatus)
 
 export async function setCommentAnchor(
   commentId: number,
-  anchorJson: string,
+  selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  unwrap(await commands.setCommentAnchor(commentId, anchorJson, orphaned));
+  unwrap(await commands.setCommentAnchor(commentId, selectorsJson, orphaned));
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
@@ -1187,9 +1194,9 @@ export async function setCommentAnchor(
 export async function relinkComment(
   commentId: number,
   quote: string,
-  anchorJson: string,
+  selectorsJson: string,
 ): Promise<void> {
-  unwrap(await commands.relinkComment(commentId, quote, anchorJson));
+  unwrap(await commands.relinkComment(commentId, quote, selectorsJson));
 }
 
 export async function deleteComment(commentId: number): Promise<void> {
