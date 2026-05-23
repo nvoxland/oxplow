@@ -36,6 +36,12 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
             transportMode="direct"
             worktreePath={stream.worktree_path}
             onOpenFile={onOpenFile}
+            comments={{
+              streamId: stream.id,
+              threadId: null,
+              targetKind: "terminal",
+              targetId: stream.id,
+            }}
           />
         </div>
       </div>

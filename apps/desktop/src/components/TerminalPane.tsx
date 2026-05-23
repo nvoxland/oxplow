@@ -11,6 +11,7 @@ import {
   wheelDeltaToScrollLines,
 } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
+import { TerminalCommentLayer } from "./Comments/TerminalCommentLayer.js";
 import {
   WORK_ITEM_DRAG_MIME_VALUE,
   decodeTaskDragRefs,
@@ -93,6 +94,7 @@ export function TerminalPane({
   onUserInterrupt,
   worktreePath,
   onOpenFile,
+  comments,
 }: {
   paneTarget: string;
   visible: boolean;
@@ -111,9 +113,16 @@ export function TerminalPane({
   /// `worktreePath` when the source was relative) plus optional
   /// line/column.
   onOpenFile?(absPath: string, line?: number, column?: number): void;
+  /// When set, the pane becomes comment-enabled: a selection on terminal
+  /// output can be commented, anchored to the buffer text and targeted at
+  /// this page ref. `threadId` is null for the shell terminal.
+  comments?: { streamId: string; threadId: string | null; targetKind: string; targetId: string };
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // Mirror of `termRef.current` as state so the comment layer mounts once
+  // the terminal is opened (and unmounts on dispose).
+  const [term, setTerm] = useState<Terminal | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
@@ -391,6 +400,7 @@ export function TerminalPane({
         return;
       }
       term.open(host);
+      setTerm(term);
       try { fit.fit(); } catch {}
       if (term.cols < 2 || term.rows < 2) {
         requestAnimationFrame(start);
@@ -527,6 +537,7 @@ export function TerminalPane({
       const sessionId = sessionIdRef.current;
       sessionIdRef.current = null;
       termRef.current = null;
+      setTerm(null);
       if (sessionId) {
         void desktopBridge().closeTerminalSession(sessionId);
       }
@@ -542,6 +553,15 @@ export function TerminalPane({
       onDrop={handleDrop}
     >
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: "100%" }} />
+      {comments && term ? (
+        <TerminalCommentLayer
+          term={term}
+          streamId={comments.streamId}
+          threadId={comments.threadId}
+          targetKind={comments.targetKind}
+          targetId={comments.targetId}
+        />
+      ) : null}
       {dragHovering ? (
         <div
           style={{

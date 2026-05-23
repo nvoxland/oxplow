@@ -377,6 +377,17 @@
         text-decoration: underline dashed;
         text-decoration-color: var(--comment-highlight);
       }
+      /* Terminal comment highlights (TerminalCommentLayer). xterm
+         decorations render an absolutely-positioned element over the
+         commented buffer cells; we tint it and underline the row. Pointer
+         events stay on so a click reopens the thread. */
+      .oxplow-terminal-comment {
+        background: var(--comment-highlight-bg);
+        border-bottom: 2px solid var(--comment-highlight);
+      }
+      .oxplow-terminal-comment--approx {
+        border-bottom-style: dashed;
+      }
       /* Wikilink / file: / dir: / gitcommit: anchors inside the editor
          are click-to-navigate (handled by RichTextField's wrapper),
          so they should advertise themselves as links rather than

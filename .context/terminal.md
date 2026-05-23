@@ -82,6 +82,40 @@ know HOME).
   match `text` is passed to `onOpenFile` directly, not derived from
   cell coordinates.
 
+## Commenting on terminal output
+
+`TerminalPane` accepts an optional `comments` prop (`{ streamId,
+threadId, targetKind, targetId }`); `AgentPage` passes
+`{ targetKind: "agent", targetId: thread.id }` and `TerminalPage` passes
+`{ targetKind: "terminal", targetId: stream.id, threadId: null }`. When
+set, `components/Comments/TerminalCommentLayer.tsx` mounts against the
+live `Terminal` (exposed via a `term` state set right after `term.open`).
+The terminal is in the editor/terminal carve-out, so the app-level
+`DomCommentLayer` ignores it — this layer is its dedicated comment
+surface, the xterm analog of `MonacoCommentLayer`.
+
+- **Anchoring is against the serialized buffer, not the DOM.** Only the
+  visible viewport is in the DOM, so `components/Comments/terminalAnchor.ts`
+  flattens every `buffer.active` line (`translateToString(true)`) into one
+  string + per-line char offsets. A selection's quote is the *serialized
+  slice* (from `getSelectionPosition()` buffer coords via `coordToOffset`),
+  NOT `term.getSelection()` — the latter de-wraps, which wouldn't match the
+  search text. `selectors_json` is the shared W3C array plus a
+  `TerminalBufferSelector` (the surface coordinate refinement). Re-anchor
+  runs the shared `resolveAnchor` over the serialized buffer, then maps the
+  offset back to `(line, col)`.
+- **Highlights are xterm decorations**, repainted on `onWriteParsed` /
+  `onScroll`. For each comment, `registerMarker(absoluteLine - cursorAbs)`
+  + `registerDecoration({ x, width })` overlays `.oxplow-terminal-comment`
+  on the line; a click reopens the thread. Placement is wrapped in
+  try/catch so a coordinate edge case degrades to "no highlight" rather
+  than disturbing the terminal.
+- **Orphaning is expected.** Scrollback wraps and evicts (5000-line cap),
+  so terminal anchors orphan far more readily than editor anchors —
+  acceptable; the comment still lists in the inbox and the agent still
+  answers it. No `set_comment_anchor` self-heal loop here (unlike the
+  editors): the buffer is too volatile to persist a re-resolved hint.
+
 ## Adding a new link kind
 
 Compose a separate xterm link provider rather than expanding
@@ -102,3 +136,6 @@ each scans the same line. Examples for the future:
   → call out the new host so future work doesn't assume one consumer.
 - Added a new `pane_target` (today: working / talking / shell) → note
   what the backend spawns for it.
+- Changed terminal comment anchoring (buffer serialization, the
+  `TerminalBufferSelector`, or the decoration painting) → update the
+  commenting section.

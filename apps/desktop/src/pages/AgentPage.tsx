@@ -50,6 +50,16 @@ export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }
             transportMode={transportMode}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
+            comments={
+              stream
+                ? {
+                    streamId: stream.id,
+                    threadId: thread.id,
+                    targetKind: "agent",
+                    targetId: thread.id,
+                  }
+                : undefined
+            }
             onUserInterrupt={() => {
               void recordUserInterrupt(thread.id, stream?.id ?? null);
             }}
