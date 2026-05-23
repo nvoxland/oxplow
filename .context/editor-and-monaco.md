@@ -225,7 +225,18 @@ process via `LspSessionManager` and bridges its stdio to a WebSocket).
 `EditorPane` registers Monaco providers (definition, hover, references)
 that proxy to the client; the work of mapping LSP positions ↔ Monaco
 positions and locations ↔ Monaco editor ranges happens in the editor
-component.
+component (`registerLspProviders`).
+
+The **client lifecycle** itself lives in
+`apps/desktop/src/components/useLspClients.ts` (a hook EditorPane mounts):
+the per-language `LspClient` cache + `ensureLspClient`, diagnostics →
+Monaco markers (`markerOwnerRef`), the `didOpen` / `didClose` / `didSave`
+document sync as files open/close/save, the install-suggestion state +
+`installSuggested` flow, and disposal on both stream-switch and unmount.
+EditorPane keeps the Monaco editor + provider registration and calls the
+hook's `ensureLspClient`; the shared status banner (`lspStatus`) stays in
+EditorPane because blame + go-to-definition also write to it, so the hook
+takes `setLspStatus` as a param.
 
 The set of languages eligible for LSP is determined by
 `isLspCandidateLanguage` (`apps/desktop/src/editor-language.ts`). The runtime

@@ -4,10 +4,9 @@ import type { OpenFileState } from "../editor-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
 import { desktopBridge, localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
-import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
-import { getSuggestedLspPackage } from "../lspSuggestions.js";
-import { installLspPackage } from "../api.js";
+import { type EditorNavigationTarget, type LspClient, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import { logUi } from "../logger.js";
+import { useLspClients } from "./useLspClients.js";
 import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
@@ -59,14 +58,17 @@ export function EditorPane({
   const onNavigateRef = useRef(onNavigateToLocation);
   const streamRef = useRef(stream);
   const filePathRef = useRef(filePath);
-  const lspClientsRef = useRef(new Map<string, LspClient>());
-  const trackedOpenDocsRef = useRef(new Map<string, string>());
-  const trackedSavedContentRef = useRef(new Map<string, string>());
-  const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
-  const markerOwnerRef = useRef(`oxplow-lsp-${stream.id}`);
+  // Shared editor status banner — written by LSP client status (below),
+  // blame errors, and go-to-definition. The LSP-client lifecycle itself
+  // (clients, diagnostics→markers, didOpen/Close/Save sync, install
+  // suggestion, disposal) lives in useLspClients.
   const [lspStatus, setLspStatus] = useState<string | null>(null);
-  const [lspInstallSuggestion, setLspInstallSuggestion] = useState<{ language: string; pkg: string } | null>(null);
-  const [lspInstalling, setLspInstalling] = useState(false);
+  const {
+    ensureLspClient,
+    lspInstallSuggestion,
+    lspInstalling,
+    installSuggested,
+  } = useLspClients({ monacoRef, filePathRef, stream, openFiles, openFileOrder, setLspStatus });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
   const [blame, setBlame] = useState<{ path: string; entries: LocalBlameEntry[] } | null>(null);
@@ -191,15 +193,10 @@ export function EditorPane({
     return () => {
       cancelled = true;
       changeDisposeRef.current?.dispose();
-      diagnosticsDisposersRef.current.forEach((dispose) => dispose());
-      diagnosticsDisposersRef.current = [];
       focusDisposersRef.current.forEach((d) => d.dispose());
       focusDisposersRef.current = [];
       if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
-      for (const client of lspClientsRef.current.values()) {
-        client.dispose();
-      }
-      lspClientsRef.current.clear();
+      // LSP client + diagnostics disposal is owned by useLspClients.
       editorRef.current?.dispose();
     };
   }, []);
@@ -310,79 +307,6 @@ export function EditorPane({
     if (!editor || !filePath || findRequest === 0) return;
     void editor.getAction("actions.find")?.run();
   }, [filePath, findRequest]);
-
-  useEffect(() => {
-    const monaco = monacoRef.current;
-    if (!monaco) return;
-    const t0 = performance.now();
-    logUi("debug", "editor: lsp-sync start", { fileCount: openFileOrder.length });
-    const nextOpenDocs = new Map<string, string>();
-    for (const path of openFileOrder) {
-      const openFile = openFiles[path];
-      if (!openFile || openFile.isLoading) continue;
-      const languageId = languageForPath(path);
-      if (!isLspCandidateLanguage(languageId)) continue;
-      const uri = streamFileUri(stream, path);
-      nextOpenDocs.set(path, languageId);
-      if (!trackedOpenDocsRef.current.has(path)) {
-        ensureLspClient(stream, languageId).notify("textDocument/didOpen", {
-          textDocument: {
-            uri,
-            languageId,
-            version: 1,
-            text: openFile.draftContent,
-          },
-        });
-      }
-      trackedSavedContentRef.current.set(path, openFile.savedContent);
-    }
-
-    for (const [path, languageId] of trackedOpenDocsRef.current) {
-      if (nextOpenDocs.has(path)) continue;
-      ensureLspClient(stream, languageId).notify("textDocument/didClose", {
-        textDocument: { uri: streamFileUri(stream, path) },
-      });
-      const model = monaco.editor.getModel(monaco.Uri.parse(streamFileUri(stream, path)));
-      if (model) {
-        monaco.editor.setModelMarkers(model, markerOwnerRef.current, []);
-      }
-      trackedSavedContentRef.current.delete(path);
-    }
-
-    trackedOpenDocsRef.current = nextOpenDocs;
-    logUi("debug", "editor: lsp-sync end", {
-      fileCount: openFileOrder.length,
-      tracked: trackedOpenDocsRef.current.size,
-      ms: Math.round(performance.now() - t0),
-    });
-  }, [openFileOrder, openFiles, stream]);
-
-  useEffect(() => {
-    for (const [path, languageId] of trackedOpenDocsRef.current) {
-      const openFile = openFiles[path];
-      const previousSaved = trackedSavedContentRef.current.get(path);
-      if (!openFile || previousSaved === undefined || previousSaved === openFile.savedContent) continue;
-      trackedSavedContentRef.current.set(path, openFile.savedContent);
-      if (openFile.savedContent !== openFile.draftContent) continue;
-      ensureLspClient(stream, languageId).notify("textDocument/didSave", {
-        textDocument: { uri: streamFileUri(stream, path) },
-        text: openFile.savedContent,
-      });
-    }
-  }, [openFiles, stream]);
-
-  useEffect(() => {
-    markerOwnerRef.current = `oxplow-lsp-${stream.id}`;
-    setLspStatus(null);
-    for (const client of lspClientsRef.current.values()) {
-      client.dispose();
-    }
-    lspClientsRef.current.clear();
-    trackedOpenDocsRef.current.clear();
-    trackedSavedContentRef.current.clear();
-    diagnosticsDisposersRef.current.forEach((dispose) => dispose());
-    diagnosticsDisposersRef.current = [];
-  }, [stream.id]);
 
   useEffect(() => {
     if (blame && blame.path !== filePath) setBlame(null);
@@ -538,41 +462,6 @@ export function EditorPane({
       return;
     }
     await onNavigateRef.current(target);
-  }
-
-  function ensureLspClient(currentStream: Stream, languageId: string): LspClient {
-    let client = lspClientsRef.current.get(languageId);
-    if (!client) {
-      client = new LspClient(currentStream.id, languageId);
-      diagnosticsDisposersRef.current.push(client.onDiagnostics((uri, diagnostics) => {
-        const monaco = monacoRef.current;
-        if (!monaco) return;
-        const model = monaco.editor.getModel(monaco.Uri.parse(uri));
-        if (!model) return;
-        monaco.editor.setModelMarkers(model, markerOwnerRef.current, diagnostics.map((diagnostic) => ({
-          severity: diagnosticSeverity(monaco, diagnostic.severity),
-          message: diagnostic.message,
-          source: diagnostic.source,
-          startLineNumber: diagnostic.range.start.line + 1,
-          startColumn: diagnostic.range.start.character + 1,
-          endLineNumber: diagnostic.range.end.line + 1,
-          endColumn: diagnostic.range.end.character + 1,
-        })));
-      }));
-      diagnosticsDisposersRef.current.push(client.onStatus((message) => {
-        const currentLanguage = languageForPath(filePathRef.current);
-        if (!isLspCandidateLanguage(currentLanguage) || currentLanguage !== languageId) return;
-        setLspStatus(message);
-        if (message && /LSP unavailable/i.test(message)) {
-          const pkg = getSuggestedLspPackage(languageId);
-          setLspInstallSuggestion(pkg ? { language: languageId, pkg } : null);
-        } else if (!message) {
-          setLspInstallSuggestion(null);
-        }
-      }));
-      lspClientsRef.current.set(languageId, client);
-    }
-    return client;
   }
 
   const contextMenuItems: MenuItem[] = [
@@ -742,27 +631,7 @@ export function EditorPane({
               <button
                 type="button"
                 disabled={lspInstalling}
-                onClick={async () => {
-                  if (!lspInstallSuggestion) return;
-                  const pkg = lspInstallSuggestion.pkg;
-                  const lang = lspInstallSuggestion.language;
-                  setLspInstalling(true);
-                  try {
-                    await installLspPackage(pkg);
-                    setLspStatus(`Installed ${pkg} — reopen file to start the server`);
-                    setLspInstallSuggestion(null);
-                    // Drop the cached client so the next open re-tries.
-                    const stale = lspClientsRef.current.get(lang);
-                    if (stale) {
-                      stale.dispose();
-                      lspClientsRef.current.delete(lang);
-                    }
-                  } catch (err) {
-                    setLspStatus(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
-                  } finally {
-                    setLspInstalling(false);
-                  }
-                }}
+                onClick={() => void installSuggested()}
                 style={lspInstallButtonStyle}
               >
                 {lspInstalling ? `Installing ${lspInstallSuggestion.pkg}…` : `Install ${lspInstallSuggestion.pkg}`}
@@ -1262,17 +1131,4 @@ function normalizeHoverContents(contents: unknown): { value: string }[] {
     }
     return [];
   });
-}
-
-function diagnosticSeverity(monaco: any, severity?: number): number {
-  switch (severity) {
-    case 1:
-      return monaco.MarkerSeverity.Error;
-    case 2:
-      return monaco.MarkerSeverity.Warning;
-    case 3:
-      return monaco.MarkerSeverity.Info;
-    default:
-      return monaco.MarkerSeverity.Hint;
-  }
 }
