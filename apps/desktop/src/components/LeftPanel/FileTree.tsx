@@ -254,6 +254,11 @@ function TreeEntryRow({
       data-testid={`file-tree-entry-${entry.path}`}
       data-kind={entry.kind}
       data-expanded={entry.kind === "directory" ? String(expanded) : undefined}
+      // Typed context node so the right-click "Comment" action (rows are
+      // draggable, so a drag-select can't start here) can anchor to this
+      // file/directory. entry.kind is already "file" | "directory".
+      data-ref-kind={entry.kind}
+      data-ref-id={entry.path}
       title={entry.path}
       draggable={isFile}
       onDragStart={isFile

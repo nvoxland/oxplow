@@ -33,11 +33,20 @@ import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
+import { requestCommentCompose } from "../../comment-compose-bus.js";
+import { composeForElement } from "../Comments/useDomAnnotations.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import { Slideover } from "../Slideover.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
+
+/// Escape a value for use inside a double-quoted attribute selector
+/// (`[data-ref-id="…"]`). Repo paths can carry `.` / `/` (fine quoted)
+/// but a stray `"` or `\` would break the selector.
+function cssEscapeAttr(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}
 
 interface Props {
   stream: Stream | null;
@@ -441,7 +450,7 @@ export function ProjectPanel({
       | "copy" | "copy-reference" | "find-usages" | "add-to-agent"
       | "git-show-history" | "git-rollback" | "git-compare" | "git-gitignore" | "git-add"
       | "mark-generated" | "unmark-generated"
-      | "diff-uncommitted" | "diff-branch" | "diff-origin",
+      | "diff-uncommitted" | "diff-branch" | "diff-origin" | "comment",
   ) {
     if (!contextMenu) return;
     try {
@@ -449,6 +458,19 @@ export function ProjectPanel({
         case "open":
           onOpenFile(contextMenu.path);
           break;
+        case "comment": {
+          // Rows are draggable, so a drag-select can't start here — anchor
+          // the comment to the row's name via its data-ref node instead.
+          const el = document.querySelector(
+            `[data-ref-kind="${contextMenu.kind}"][data-ref-id="${cssEscapeAttr(contextMenu.path)}"]`,
+          );
+          setContextMenu(null);
+          if (el) {
+            const req = composeForElement(el, contextMenu.name, el.getBoundingClientRect());
+            if (req) requestCommentCompose(req);
+          }
+          return;
+        }
         case "add-to-agent":
           insertIntoAgent(formatContextMention({ kind: "file", path: contextMenu.path }));
           setContextMenu(null);
@@ -668,6 +690,7 @@ export function ProjectPanel({
               },
         ]
         : []),
+      { id: "files.comment", label: "Comment…", enabled: true, run: () => handleContextAction("comment") },
       { id: "files.rename", label: "Rename…", enabled: true, run: () => handleContextAction("rename") },
       { id: "files.delete", label: "Delete…", enabled: true, run: () => handleContextAction("delete") },
     ]

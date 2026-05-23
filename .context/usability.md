@@ -187,6 +187,17 @@ declaring *what it is* and mounting the generic layer.
   clean drag — set `userSelect: "text"` on the specific label span you
   want commentable (e.g. the task title) so a quote can be anchored
   without re-enabling selection on the whole row.
+- **Draggable rows can't be drag-selected** (a mousedown starts the
+  drag), so a floating toolbar never appears on them. For those — task
+  rows (`TaskGroupList`) and file-tree rows (`LeftPanel/FileTree`) — add a
+  **"Comment…" item to the row's existing right-click menu** instead. Its
+  handler calls `composeForElement(el, label, rect)` (in
+  `useDomAnnotations.ts`) to build a `PendingComment` anchored to the
+  row's label within its `data-ref` element, then dispatches it via
+  `requestCommentCompose` (`comment-compose-bus.ts`). The single
+  app-level `DomCommentLayer` subscribes and opens its composer — so the
+  create/anchor/paint path stays in one place regardless of whether the
+  comment came from a selection or a menu.
 - `data-testid`s on the affordances: `selection-comment-button`,
   `new-comment-popover`, `comment-popover-<id>`.
 
