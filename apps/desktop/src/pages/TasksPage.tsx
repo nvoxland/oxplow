@@ -13,7 +13,6 @@ import {
   isReadOnlyScope,
 } from "../components/Plan/tasks-scope.js";
 import { cardLinkButton } from "../components/Card.js";
-import { DomCommentLayer } from "../components/Comments/DomCommentLayer.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
@@ -253,9 +252,6 @@ export function TasksPage({
           onOpenBacklog={() => onOpenPage(backlogRef())}
         />
       </div>
-      {currentStreamId ? (
-        <DomCommentLayer streamId={currentStreamId} threadId={rest.activeThreadId ?? null} />
-      ) : null}
     </Page>
   );
 }

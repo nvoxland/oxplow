@@ -217,6 +217,8 @@ function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
   return (
     <section
       ref={sectionRef}
+      data-ref-kind="git-commit"
+      data-ref-id={detail.sha}
       style={{
         ...card,
         position: "relative",
@@ -228,7 +230,7 @@ function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
         <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
           {date} · {author}
         </div>
-        <div>
+        <div style={{ userSelect: "text" }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{detail.subject}</div>
           {detail.body ? (
             <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: 11 }}>

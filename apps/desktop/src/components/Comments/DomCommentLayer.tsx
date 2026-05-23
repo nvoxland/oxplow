@@ -1,7 +1,10 @@
 //! Generic comment layer for plain-DOM pages.
 //!
-//! Mount once on a page whose regions declare `data-ref-*` context nodes
-//! (see `contextNodes.tsx`). It:
+//! Mounted ONCE at the app level (see `App.tsx`), not per page: it serves
+//! every plain-DOM surface whose regions declare `data-ref-*` context
+//! nodes (see `contextNodes.tsx`). A selection only becomes a comment
+//! when it lands inside such a region and outside the editor/terminal
+//! carve-out, so a single instance is safe everywhere. It:
 //!   - captures selections into comments (via `useDomAnnotations`);
 //!   - paints existing comments back onto their context-node element's
 //!     text using the CSS Custom Highlight API (no DOM mutation);

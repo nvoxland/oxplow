@@ -162,15 +162,23 @@ declaring *what it is* and mounting the generic layer.
   selection or Escape, and reuses the **same** `shouldSuppressContextMenu`
   carve-out so it never appears inside Monaco / Tiptap / inputs / the
   terminal — those own their own comment UX.
-- **Mount `DomCommentLayer` once per commentable page** (see
-  `TasksPage.tsx`). It captures selections, paints existing comments back
-  onto their context node's text via the **CSS Custom Highlight API**
-  (no DOM mutation — critical for live React lists), and opens a thread
-  popover when a highlight is clicked. The quote is re-resolved against
-  the element's `textContent` each repaint (debounced to one per frame),
-  so reordering / virtualization just re-anchors. The Highlight API is
-  feature-detected; where it's absent the comment still works, just
-  without an inline highlight.
+- **`DomCommentLayer` is mounted once, at the app level** (`App.tsx`,
+  beside the center tab outlet) — NOT per page. A selection only becomes
+  a comment when it lands inside a `data-ref-*` region and outside the
+  editor/terminal carve-out, so a single instance safely serves every
+  plain-DOM page; a page with no context nodes simply never captures.
+  Adding commenting to a new surface is therefore just "stamp
+  `data-ref-*` on the regions" — no per-page wiring. The layer captures
+  selections, paints existing comments back onto their context node's
+  text via the **CSS Custom Highlight API** (no DOM mutation — critical
+  for live React lists), and opens a thread popover when a highlight is
+  clicked. The quote is re-resolved against the element's `textContent`
+  each repaint (debounced to one per frame), so reordering /
+  virtualization just re-anchors. The Highlight API is feature-detected;
+  where it's absent the comment still works, just without an inline
+  highlight. Surfaces opted in so far: task rows (`TaskGroupList`), the
+  commit page (`GitCommitPage` meta → `git-commit`), and finding pages
+  (`FindingPage`: snippet `file` nested under the `finding` container).
 - **Make the text selectable.** Rows are often `userSelect: none` for
   clean drag — set `userSelect: "text"` on the specific label span you
   want commentable (e.g. the task title) so a quote can be anchored

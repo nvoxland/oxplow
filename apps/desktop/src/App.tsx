@@ -125,6 +125,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
+import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
 import { closedThreadsRef, commentsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, snapshotRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -3235,6 +3236,17 @@ export function App() {
               onReorder={handleReorderCenterTabs}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
+          {/* Generic comment layer for every plain-DOM page. Mounted once
+              here (not per page): captureSelection only fires inside a
+              data-ref-* region and skips editor/terminal surfaces, so a
+              single instance serves the tasks list, commit pages, finding
+              pages, etc. without per-page wiring. */}
+          {stream ? (
+            <DomCommentLayer
+              streamId={stream.id}
+              threadId={currentThreadState.activeThreadId ?? null}
+            />
+          ) : null}
         </div>
         </div>
         <div
