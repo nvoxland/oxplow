@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { subscribeCommentCompose } from "../../comment-compose-bus.js";
 import { describeChain, shouldSuppressContextMenu } from "../../context-menu.js";
 import { resolveQuoteOffset } from "./anchor.js";
 import {
@@ -103,6 +104,40 @@ export function captureSelection(): PendingComment | null {
   };
 }
 
+/// Build a [`PendingComment`] anchored to `quote` within `el`'s text —
+/// the right-click ("Comment") path for draggable rows that can't be
+/// drag-selected. `el` is the context node (its `(kind,id)` is the
+/// primary target); the quote is typically the row's label. Returns
+/// `null` when `el` carries no ref or the quote isn't in its text.
+export function composeForElement(
+  el: Element,
+  quote: string,
+  rect: DOMRect,
+): PendingComment | null {
+  const primary = refOfElement(el);
+  if (!primary) return null;
+  const text = el.textContent ?? "";
+  const start = resolveQuoteOffset(text, quote, 0) ?? text.indexOf(quote);
+  if (start < 0) return null;
+  const selectorsJson = buildSelectorsJson(text, start, start + quote.length);
+  const doc = el.ownerDocument;
+  let referencedRefs: RefNode[] = [];
+  if (doc) {
+    const range = doc.createRange();
+    range.selectNodeContents(el);
+    referencedRefs = refsInRange(range);
+  }
+  return {
+    targetKind: primary.kind,
+    targetId: primary.id,
+    quote,
+    selectorsJson,
+    contextChain: collectContextChain(el.parentElement),
+    referencedRefs,
+    rect,
+  };
+}
+
 export interface DomAnnotations {
   /// The captured selection awaiting a toolbar click, or `null`.
   pending: PendingComment | null;
@@ -138,6 +173,17 @@ export function useDomAnnotations(): DomAnnotations {
     document.addEventListener("mouseup", onMouseUp);
     return () => document.removeEventListener("mouseup", onMouseUp);
   }, []);
+
+  // Right-click "Comment" path (draggable rows): a menu item dispatches a
+  // ready-made PendingComment; open the composer for it directly.
+  useEffect(
+    () =>
+      subscribeCommentCompose((req) => {
+        setPending(req);
+        setComposing(true);
+      }),
+    [],
+  );
 
   const beginCompose = useCallback(() => setComposing(true), []);
   const cancel = useCallback(() => {

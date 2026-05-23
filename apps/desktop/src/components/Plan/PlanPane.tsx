@@ -19,6 +19,8 @@ import type { MenuItem } from "../../menu.js";
 import { runWithError } from "../../ui-error.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
+import { requestCommentCompose } from "../../comment-compose-bus.js";
+import { composeForElement } from "../Comments/useDomAnnotations.js";
 import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, TaskGroupList } from "./TaskGroupList.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
@@ -678,6 +680,10 @@ export function PlanPane({
                     status: item.status,
                   }));
                 },
+                onComment: (item) => {
+                  setContextMenu(null);
+                  openCommentForTask(item);
+                },
               })}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
@@ -813,6 +819,20 @@ const kbPickerStyle: CSSProperties = {
 };
 
 
+/// Open the comment composer anchored to a task row's title. Used by the
+/// row context menu's "Comment…" item — task rows are draggable, so a
+/// drag-select can't start on them; this is the right-click path. Finds
+/// the row's `data-ref` element and dispatches a pending comment to the
+/// app-level layer via the compose bus.
+function openCommentForTask(item: Task): void {
+  const el = document.querySelector(
+    `[data-ref-kind="task"][data-ref-id="${item.id}"]`,
+  );
+  if (!el) return;
+  const req = composeForElement(el, item.title, el.getBoundingClientRect());
+  if (req) requestCommentCompose(req);
+}
+
 function buildtasksMenu(
   item: Task,
   actions: {
@@ -821,6 +841,7 @@ function buildtasksMenu(
     onChangeStatus: (item: Task) => void;
     onChangePriority: (item: Task) => void;
     onAddToAgent: (item: Task) => void;
+    onComment: (item: Task) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -830,6 +851,12 @@ function buildtasksMenu(
       label: "Rename…",
       enabled: !locked,
       run: () => actions.onRename(item),
+    },
+    {
+      id: "tasks.comment",
+      label: "Comment…",
+      enabled: true,
+      run: () => actions.onComment(item),
     },
     {
       id: "tasks.status",
