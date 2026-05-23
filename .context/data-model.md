@@ -871,6 +871,12 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   under a commit yields `[{git-commit,sha}]`). `referenced_refs_json` is
   the canonical refs found INSIDE the selection (rendered links + inline
   mentions), so highlighting a filename tells the agent it is a file.
+  The store's `create` is the single source of truth for "what's
+  referenced": it unions the FE-supplied refs (DOM `<a>` links inside the
+  Range) with `oxplow_domain::refs::extract(quote)` over the durable
+  quote, deduped on `(kind,id)`. So inline mentions (`task:42`,
+  `src/x.rs`, `[[slug]]`) become typed refs even on surfaces that never
+  rendered them as links, and no frontend reimplements ref parsing.
   Both reuse the canonical `page_ref` `(kind,id)` vocabulary. Unlike
   `selectors_json` these ARE parsed in Rust (into `Vec<CommentTarget>` on
   `Comment`) because the backend ref-resolver hydrates them into typed

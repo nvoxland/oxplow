@@ -76,6 +76,59 @@ fn refs_to_json(refs: &[CommentTarget]) -> String {
     serde_json::to_string(refs).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Canonical `(kind,id)` refs mentioned *inside* `quote`, derived from
+/// the shared [`oxplow_domain::refs::extract`] so the kind/id vocabulary
+/// matches the `page_ref` graph and tab ids exactly. Inline mentions
+/// like `task:42`, `src/x.rs`, or `[[slug]]` become typed refs even
+/// when the surface never rendered them as links.
+fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
+    use crate::page_ref_projections::{
+        KIND_DIRECTORY, KIND_FILE, KIND_FINDING, KIND_GIT_COMMIT, KIND_TASK, KIND_WIKI,
+    };
+    let r = oxplow_domain::refs::extract(quote);
+    let mut out = Vec::new();
+    let mut push = |kind: &str, id: String| {
+        out.push(CommentTarget {
+            kind: kind.to_string(),
+            id,
+        })
+    };
+    for f in r.files {
+        push(KIND_FILE, f);
+    }
+    for d in r.dirs {
+        push(KIND_DIRECTORY, d);
+    }
+    for w in r.wikis {
+        push(KIND_WIKI, w);
+    }
+    for t in r.tasks {
+        push(KIND_TASK, t.to_string());
+    }
+    for f in r.findings {
+        push(KIND_FINDING, f);
+    }
+    for c in r.commits {
+        push(KIND_GIT_COMMIT, c);
+    }
+    out
+}
+
+/// Union the frontend-supplied `referenced_refs` (DOM links inside the
+/// selection) with the refs the backend extracts from `quote`,
+/// deduplicating on `(kind,id)` and preserving the provided refs first.
+/// Centralizing this in the create path means no surface ever has to
+/// reimplement ref parsing.
+fn union_referenced_refs(provided: &[CommentTarget], quote: &str) -> Vec<CommentTarget> {
+    let mut out = provided.to_vec();
+    for r in refs_from_quote(quote) {
+        if !out.iter().any(|e| e.kind == r.kind && e.id == r.id) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     let intent: String = row.get("intent")?;
     let status: String = row.get("status")?;
@@ -182,10 +235,13 @@ impl CommentStore for SqliteCommentStore {
         let stream = stream.clone();
         let thread = thread.cloned();
         let target = target.clone();
+        // Enrich the FE-captured refs with anything the durable quote
+        // mentions inline, so typed context survives even when a surface
+        // didn't render the mention as a link.
+        let referenced_refs = union_referenced_refs(referenced_refs, quote);
         let quote = quote.to_string();
         let selectors_json = selectors_json.to_string();
         let context_chain = context_chain.to_vec();
-        let referenced_refs = referenced_refs.to_vec();
         let author = author.to_string();
         let body = body.to_string();
         tokio::task::spawn_blocking(move || -> Result<CommentThread, DomainError> {
@@ -611,6 +667,91 @@ mod tests {
         assert_eq!(
             loaded.comment.selectors_json,
             "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_unions_refs_extracted_from_quote_into_referenced_refs() {
+        let (db, stream, thread) = fixture().await;
+        let store = SqliteCommentStore::new(db);
+        // The frontend captured one DOM-link ref; the quote *also* names
+        // `task:42` and `src/app.rs` inline (not rendered as links).
+        let provided = vec![CommentTarget {
+            kind: "wiki".into(),
+            id: "architecture".into(),
+        }];
+        let created = store
+            .create(
+                &stream,
+                Some(&thread),
+                &target(),
+                "see task:42 and src/app.rs for context",
+                "[]",
+                &[],
+                &provided,
+                CommentIntent::Followup,
+                "user",
+                "body",
+            )
+            .await
+            .unwrap();
+        let refs = &created.comment.referenced_refs;
+        // FE-provided ref is preserved…
+        assert!(
+            refs.iter()
+                .any(|r| r.kind == "wiki" && r.id == "architecture"),
+            "provided ref dropped: {refs:?}",
+        );
+        // …and the quote's inline mentions are unioned in as typed refs.
+        assert!(
+            refs.iter().any(|r| r.kind == "task" && r.id == "42"),
+            "task ref not extracted: {refs:?}",
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.kind == "file" && r.id == "src/app.rs"),
+            "file ref not extracted: {refs:?}",
+        );
+        // And it round-trips from the DB, not just the create return value.
+        let loaded = store.get(created.comment.id).await.unwrap().unwrap();
+        assert_eq!(&loaded.comment.referenced_refs, refs);
+    }
+
+    #[tokio::test]
+    async fn create_dedups_quote_refs_against_provided() {
+        let (db, stream, thread) = fixture().await;
+        let store = SqliteCommentStore::new(db);
+        // FE already supplied task:42; the quote names it again. It must
+        // appear exactly once.
+        let provided = vec![CommentTarget {
+            kind: "task".into(),
+            id: "42".into(),
+        }];
+        let created = store
+            .create(
+                &stream,
+                Some(&thread),
+                &target(),
+                "task:42 again",
+                "[]",
+                &[],
+                &provided,
+                CommentIntent::Note,
+                "user",
+                "body",
+            )
+            .await
+            .unwrap();
+        let n = created
+            .comment
+            .referenced_refs
+            .iter()
+            .filter(|r| r.kind == "task" && r.id == "42")
+            .count();
+        assert_eq!(
+            n, 1,
+            "task:42 duplicated: {:?}",
+            created.comment.referenced_refs
         );
     }
 
