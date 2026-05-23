@@ -82,7 +82,7 @@ pub struct EffortAtSnapshot {
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -268,10 +268,10 @@ impl SqliteTaskEffortStore {
         let Some(refs) = &self.page_refs else {
             return Ok(());
         };
-        let db = self.db.clone();
         type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
-        let (paths, summaries, impact_jsons): SliceRows = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        let (paths, summaries, impact_jsons): SliceRows = self
+            .db
+            .call(move |conn| {
                 // Pick the most-recent `change_kind` per path across
                 // every effort on this task. "Most recent" = the
                 // effort with the latest `started_at`. The window
@@ -317,9 +317,7 @@ impl SqliteTaskEffortStore {
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok((paths, summaries, impact_jsons))
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         let mut impacts: Vec<TaskImpact> = Vec::new();
         for j in &impact_jsons {
             match serde_json::from_str::<Vec<TaskImpact>>(j) {
@@ -338,17 +336,14 @@ impl SqliteTaskEffortStore {
     }
 
     async fn task_for_effort(&self, effort_id: &EffortId) -> Result<Option<TaskId>, DomainError> {
-        let db = self.db.clone();
         let id = effort_id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT task_id FROM task_effort WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], |r| r.get::<_, i64>(0))?;
                 Ok(rows.next().transpose()?.map(TaskId::new))
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
@@ -360,14 +355,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         thread: &ThreadId,
         start_snapshot_id: Option<i64>,
     ) -> Result<TaskEffort, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
         let now = Timestamp::now();
         let id = EffortId::new();
         let id_for_sql = id.clone();
         let thread_for_sql = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO task_effort
                        (id, task_id, thread_id, started_at, ended_at,
@@ -383,9 +377,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         Ok(TaskEffort {
             id,
             task_id: task,
@@ -404,15 +396,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         end_snapshot_id: Option<i64>,
         summary: Option<String>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_for_sql = id.clone();
         let summary_has_body = summary
             .as_deref()
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
         let now = ts_to_string(Timestamp::now());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE task_effort
                      SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
@@ -421,9 +412,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if summary_has_body && self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
@@ -433,9 +422,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_effort
                      WHERE task_id = ?1 AND ended_at IS NULL
@@ -444,15 +432,12 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
                 rows.next().transpose()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_effort WHERE task_id = ?1
                      ORDER BY started_at DESC LIMIT 1",
@@ -460,25 +445,20 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
                 rows.next().transpose()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_for_sql = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
                     params![id_for_sql.as_str(), summary],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
@@ -488,9 +468,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_effort WHERE task_id = ?1
                      ORDER BY started_at DESC",
@@ -498,30 +477,24 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 let rows = stmt.query_map(params![item.value()], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM task_effort WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], row_to_effort)?;
                 rows.next().transpose()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT effort_id, path, change_kind,
                             local_snapshot_id, closest_git_version, git_version_exact
@@ -553,13 +526,10 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let json = if impacts.is_empty() {
             None
@@ -569,17 +539,15 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     .map_err(|e| DomainError::Invalid(format!("impacts serialize failed: {e}")))?,
             )
         };
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
                     params![id_clone.as_str(), json],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
@@ -589,19 +557,17 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        let raw: Option<String> = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        let raw: Option<String> = self
+            .db
+            .call(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT impacts_json FROM task_effort WHERE id = ?1")?;
                 let mut rows =
                     stmt.query_map(params![id.as_str()], |r| r.get::<_, Option<String>>(0))?;
                 Ok(rows.next().transpose()?.flatten())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         match raw {
             Some(json) if !json.is_empty() => serde_json::from_str(&json)
                 .map_err(|e| DomainError::Invalid(format!("impacts deserialize failed: {e}"))),
@@ -616,14 +582,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         change: EffortFileChange,
         version: FileRefVersion<'_>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let path_clone = path.to_string();
         let local_snapshot_id = version.local_snapshot_id;
         let closest_git_version = version.closest_git_version.map(|s| s.to_string());
         let exact = if version.git_version_exact { 1 } else { 0 };
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO task_effort_file
                        (effort_id, path, change_kind,
@@ -640,9 +605,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
@@ -655,10 +618,9 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         &self,
         id: &EffortId,
     ) -> Result<Vec<String>, DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT DISTINCT fs.path
                      FROM task_effort e
@@ -675,26 +637,21 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let path_clone = path.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "DELETE FROM task_effort_file WHERE effort_id = ?1 AND path = ?2",
                     params![id_clone.as_str(), path_clone],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
@@ -708,11 +665,10 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         id: &EffortId,
         path: &str,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let path_clone = path.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT OR IGNORE INTO effort_acknowledged_path (effort_id, path) \
                      VALUES (?1, ?2)",
@@ -720,17 +676,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let path_clone = path.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "DELETE FROM effort_acknowledged_path \
                      WHERE effort_id = ?1 AND path = ?2",
@@ -738,16 +691,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT path FROM effort_acknowledged_path \
                      WHERE effort_id = ?1 ORDER BY path",
@@ -756,19 +706,16 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn paths_claimed_by_intervening_efforts(
         &self,
         id: &EffortId,
     ) -> Result<Vec<String>, DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     // Any OTHER effort whose snapshot window OVERLAPS
                     // self's window (10,30] — not just one that ends
@@ -797,9 +744,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_efforts_at_snapshots(
@@ -809,9 +754,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         if snapshot_ids.is_empty() {
             return Ok(vec![]);
         }
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 // Build a derived "wanted" set of snapshot ids via
                 // SELECT…UNION ALL so the join can compare each input
                 // snapshot against every effort interval.
@@ -848,9 +792,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

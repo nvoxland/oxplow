@@ -35,11 +35,10 @@ impl SqliteWikiPageThreadUpdateStore {
         slug: &str,
         at: Timestamp,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
         let slug = slug.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO wiki_page_thread_update (thread_id, slug, last_seen_at)
                      VALUES (?1, ?2, ?3)
@@ -49,9 +48,7 @@ impl SqliteWikiPageThreadUpdateStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Recent slugs `thread` touched, newest first.
@@ -60,10 +57,9 @@ impl SqliteWikiPageThreadUpdateStore {
         thread: &ThreadId,
         limit: usize,
     ) -> Result<Vec<WikiPageThreadUpdate>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT thread_id, slug, last_seen_at
                      FROM wiki_page_thread_update
@@ -95,15 +91,13 @@ impl SqliteWikiPageThreadUpdateStore {
                 }
                 Ok(out)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }

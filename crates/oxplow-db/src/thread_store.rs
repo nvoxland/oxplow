@@ -38,7 +38,7 @@ fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -96,10 +96,9 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
 #[async_trait]
 impl ThreadStore for SqliteThreadStore {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM threads \
                      WHERE stream_id = ?1 AND archived_at IS NULL \
@@ -108,16 +107,13 @@ impl ThreadStore for SqliteThreadStore {
                 let rows = stmt.query_map(params![stream.as_str()], row_to_thread)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM threads WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], row_to_thread)?;
                 match rows.next() {
@@ -125,16 +121,13 @@ impl ThreadStore for SqliteThreadStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn upsert(&self, thread: &Thread) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO threads (
                         id, stream_id, title, status, sort_index, pane_target,
@@ -170,29 +163,23 @@ impl ThreadStore for SqliteThreadStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute("DELETE FROM threads WHERE id = ?1", params![id.as_str()])?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn archive(&self, id: &ThreadId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
                 conn.execute(
                     "UPDATE threads SET archived_at = COALESCE(archived_at, ?2),
@@ -202,19 +189,16 @@ impl ThreadStore for SqliteThreadStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn selected_for_stream(
         &self,
         stream: &StreamId,
     ) -> Result<Option<ThreadId>, DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT selected_thread_id FROM thread_selection WHERE stream_id = ?1",
                 )?;
@@ -227,9 +211,7 @@ impl ThreadStore for SqliteThreadStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_selected_for_stream(
@@ -237,11 +219,10 @@ impl ThreadStore for SqliteThreadStore {
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
         let thread = thread.cloned();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO thread_selection (stream_id, selected_thread_id)
                      VALUES (?1, ?2)
@@ -250,9 +231,7 @@ impl ThreadStore for SqliteThreadStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

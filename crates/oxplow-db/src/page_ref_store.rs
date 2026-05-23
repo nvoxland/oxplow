@@ -108,50 +108,46 @@ impl SqlitePageRefStore {
         source_id: &str,
         edges: Vec<PageRefEdge>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = db
-                .conn()
-                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            tx.execute(
-                "DELETE FROM page_ref WHERE source_kind = ?1 AND source_id = ?2",
-                params![source_kind, source_id],
-            )
-            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            for edge in edges {
-                if edge.source_kind != source_kind || edge.source_id != source_id {
-                    continue;
-                }
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
                 tx.execute(
-                    "INSERT OR IGNORE INTO page_ref
+                    "DELETE FROM page_ref WHERE source_kind = ?1 AND source_id = ?2",
+                    params![source_kind, source_id],
+                )
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                for edge in edges {
+                    if edge.source_kind != source_kind || edge.source_id != source_id {
+                        continue;
+                    }
+                    tx.execute(
+                        "INSERT OR IGNORE INTO page_ref
                        (source_kind, source_id, target_kind, target_id, ref_type,
                         source_extra, local_snapshot_id, closest_git_version,
                         git_version_exact)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        edge.source_kind,
-                        edge.source_id,
-                        edge.target_kind,
-                        edge.target_id,
-                        edge.ref_type,
-                        edge.source_extra,
-                        edge.local_snapshot_id,
-                        edge.closest_git_version,
-                        if edge.git_version_exact { 1 } else { 0 },
-                    ],
-                )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            }
-            tx.commit()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
-        })
-        .await
-        .unwrap()
+                        params![
+                            edge.source_kind,
+                            edge.source_id,
+                            edge.target_kind,
+                            edge.target_id,
+                            edge.ref_type,
+                            edge.source_extra,
+                            edge.local_snapshot_id,
+                            edge.closest_git_version,
+                            if edge.git_version_exact { 1 } else { 0 },
+                        ],
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                }
+                tx.commit()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+            })
+            .await
     }
 
     /// Diff-merge: preserve version metadata on edges that already
@@ -176,120 +172,116 @@ impl SqlitePageRefStore {
         source_id: &str,
         edges: Vec<PageRefEdge>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = db
-                .conn()
-                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            // Read existing PKs + version data for this source. The
-            // unique key for an edge within a source is
-            // (target_kind, target_id, ref_type).
-            type Key = (String, String, String);
-            type Existing = std::collections::HashMap<Key, (Option<i64>, Option<String>, bool)>;
-            let existing: Existing = {
-                let mut stmt = tx
-                    .prepare(
-                        "SELECT target_kind, target_id, ref_type,
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                // Read existing PKs + version data for this source. The
+                // unique key for an edge within a source is
+                // (target_kind, target_id, ref_type).
+                type Key = (String, String, String);
+                type Existing = std::collections::HashMap<Key, (Option<i64>, Option<String>, bool)>;
+                let existing: Existing = {
+                    let mut stmt = tx
+                        .prepare(
+                            "SELECT target_kind, target_id, ref_type,
                                 local_snapshot_id, closest_git_version,
                                 git_version_exact
                          FROM page_ref
                          WHERE source_kind = ?1 AND source_id = ?2",
-                    )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                let rows = stmt
-                    .query_map(params![&source_kind, &source_id], |r| {
-                        let kind: String = r.get(0)?;
-                        let id: String = r.get(1)?;
-                        let rt: String = r.get(2)?;
-                        let local: Option<i64> = r.get(3)?;
-                        let git: Option<String> = r.get(4)?;
-                        let exact: i64 = r.get(5)?;
-                        Ok(((kind, id, rt), (local, git, exact != 0)))
-                    })
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                let mut map = std::collections::HashMap::new();
-                for row in rows {
-                    let (k, v) = row.map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                    map.insert(k, v);
-                }
-                map
-            };
-            // Build the new key set for the post-merge delete step.
-            let mut new_keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
-            for edge in &edges {
-                if edge.source_kind != source_kind || edge.source_id != source_id {
-                    continue;
-                }
-                new_keys.insert((
-                    edge.target_kind.clone(),
-                    edge.target_id.clone(),
-                    edge.ref_type.clone(),
-                ));
-            }
-            // Upsert each new edge. Match on PK; if existing,
-            // preserve version data; otherwise stamp with the
-            // caller-supplied version.
-            for edge in edges {
-                if edge.source_kind != source_kind || edge.source_id != source_id {
-                    continue;
-                }
-                let key = (
-                    edge.target_kind.clone(),
-                    edge.target_id.clone(),
-                    edge.ref_type.clone(),
-                );
-                let (local, git, exact) = match existing.get(&key) {
-                    Some(prev) => prev.clone(),
-                    None => (
-                        edge.local_snapshot_id,
-                        edge.closest_git_version.clone(),
-                        edge.git_version_exact,
-                    ),
+                        )
+                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    let rows = stmt
+                        .query_map(params![&source_kind, &source_id], |r| {
+                            let kind: String = r.get(0)?;
+                            let id: String = r.get(1)?;
+                            let rt: String = r.get(2)?;
+                            let local: Option<i64> = r.get(3)?;
+                            let git: Option<String> = r.get(4)?;
+                            let exact: i64 = r.get(5)?;
+                            Ok(((kind, id, rt), (local, git, exact != 0)))
+                        })
+                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    let mut map = std::collections::HashMap::new();
+                    for row in rows {
+                        let (k, v) = row.map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        map.insert(k, v);
+                    }
+                    map
                 };
-                tx.execute(
-                    "INSERT OR REPLACE INTO page_ref
+                // Build the new key set for the post-merge delete step.
+                let mut new_keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
+                for edge in &edges {
+                    if edge.source_kind != source_kind || edge.source_id != source_id {
+                        continue;
+                    }
+                    new_keys.insert((
+                        edge.target_kind.clone(),
+                        edge.target_id.clone(),
+                        edge.ref_type.clone(),
+                    ));
+                }
+                // Upsert each new edge. Match on PK; if existing,
+                // preserve version data; otherwise stamp with the
+                // caller-supplied version.
+                for edge in edges {
+                    if edge.source_kind != source_kind || edge.source_id != source_id {
+                        continue;
+                    }
+                    let key = (
+                        edge.target_kind.clone(),
+                        edge.target_id.clone(),
+                        edge.ref_type.clone(),
+                    );
+                    let (local, git, exact) = match existing.get(&key) {
+                        Some(prev) => prev.clone(),
+                        None => (
+                            edge.local_snapshot_id,
+                            edge.closest_git_version.clone(),
+                            edge.git_version_exact,
+                        ),
+                    };
+                    tx.execute(
+                        "INSERT OR REPLACE INTO page_ref
                        (source_kind, source_id, target_kind, target_id, ref_type,
                         source_extra, local_snapshot_id, closest_git_version,
                         git_version_exact)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        edge.source_kind,
-                        edge.source_id,
-                        edge.target_kind,
-                        edge.target_id,
-                        edge.ref_type,
-                        edge.source_extra,
-                        local,
-                        git,
-                        if exact { 1 } else { 0 },
-                    ],
-                )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            }
-            // Delete edges that existed but aren't in the new set.
-            for key in existing.keys() {
-                if new_keys.contains(key) {
-                    continue;
+                        params![
+                            edge.source_kind,
+                            edge.source_id,
+                            edge.target_kind,
+                            edge.target_id,
+                            edge.ref_type,
+                            edge.source_extra,
+                            local,
+                            git,
+                            if exact { 1 } else { 0 },
+                        ],
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
                 }
-                tx.execute(
-                    "DELETE FROM page_ref
+                // Delete edges that existed but aren't in the new set.
+                for key in existing.keys() {
+                    if new_keys.contains(key) {
+                        continue;
+                    }
+                    tx.execute(
+                        "DELETE FROM page_ref
                      WHERE source_kind = ?1 AND source_id = ?2
                        AND target_kind = ?3 AND target_id = ?4
                        AND ref_type = ?5",
-                    params![&source_kind, &source_id, &key.0, &key.1, &key.2],
-                )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            }
-            tx.commit()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
-        })
-        .await
-        .unwrap()
+                        params![&source_kind, &source_id, &key.0, &key.1, &key.2],
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                }
+                tx.commit()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+            })
+            .await
     }
 
     /// Insert or replace a single edge, stamping the caller-supplied
@@ -301,9 +293,8 @@ impl SqlitePageRefStore {
     /// not emit. The wiki sync preserves such edges as long as their
     /// path stays under a cited directory ref.
     pub async fn upsert_edge(&self, edge: PageRefEdge) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO page_ref
                        (source_kind, source_id, target_kind, target_id, ref_type,
@@ -324,9 +315,7 @@ impl SqlitePageRefStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Per-target freshness rows for the wiki page identified by
@@ -338,10 +327,9 @@ impl SqlitePageRefStore {
         &self,
         slug: &str,
     ) -> Result<Vec<(String, Option<i64>, Option<String>, bool, Option<i64>)>, DomainError> {
-        let db = self.db.clone();
         let slug = slug.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT pr.target_id,
                             pr.local_snapshot_id,
@@ -367,9 +355,7 @@ impl SqlitePageRefStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Every wiki page that has at least one **stale** file ref, with
@@ -384,9 +370,8 @@ impl SqlitePageRefStore {
     /// Returns `(slug, path)` pairs ordered by slug then path; the
     /// caller groups them per page.
     pub async fn list_stale_wiki_pages(&self) -> Result<Vec<(String, String)>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT pr.source_id, pr.target_id
                        FROM page_ref pr
@@ -409,9 +394,7 @@ impl SqlitePageRefStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Re-stamp the version data on a single edge to the supplied
@@ -434,14 +417,13 @@ impl SqlitePageRefStore {
         closest_git_version: Option<String>,
         git_version_exact: bool,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
         let target_kind = target_kind.to_string();
         let target_id = target_id.to_string();
         let ref_type = ref_type.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE page_ref
                         SET local_snapshot_id = ?6,
@@ -463,9 +445,7 @@ impl SqlitePageRefStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Like [`replace_source`] but restricted to a named slice
@@ -487,64 +467,61 @@ impl SqlitePageRefStore {
         if ref_types.is_empty() {
             return Ok(());
         }
-        let db = self.db.clone();
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = db
-                .conn()
-                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            let placeholders: Vec<String> =
-                (3..3 + ref_types.len()).map(|i| format!("?{i}")).collect();
-            let sql = format!(
-                "DELETE FROM page_ref
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let placeholders: Vec<String> =
+                    (3..3 + ref_types.len()).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "DELETE FROM page_ref
                  WHERE source_kind = ?1 AND source_id = ?2
                    AND ref_type IN ({})",
-                placeholders.join(",")
-            );
-            let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(2 + ref_types.len());
-            params_vec.push(&source_kind);
-            params_vec.push(&source_id);
-            for rt in &ref_types {
-                params_vec.push(rt);
-            }
-            tx.execute(&sql, &params_vec[..])
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            for edge in edges {
-                if edge.source_kind != source_kind || edge.source_id != source_id {
-                    continue;
+                    placeholders.join(",")
+                );
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> =
+                    Vec::with_capacity(2 + ref_types.len());
+                params_vec.push(&source_kind);
+                params_vec.push(&source_id);
+                for rt in &ref_types {
+                    params_vec.push(rt);
                 }
-                if !ref_types.contains(&edge.ref_type) {
-                    continue;
-                }
-                tx.execute(
-                    "INSERT OR IGNORE INTO page_ref
+                tx.execute(&sql, &params_vec[..])
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                for edge in edges {
+                    if edge.source_kind != source_kind || edge.source_id != source_id {
+                        continue;
+                    }
+                    if !ref_types.contains(&edge.ref_type) {
+                        continue;
+                    }
+                    tx.execute(
+                        "INSERT OR IGNORE INTO page_ref
                        (source_kind, source_id, target_kind, target_id, ref_type,
                         source_extra, local_snapshot_id, closest_git_version,
                         git_version_exact)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        edge.source_kind,
-                        edge.source_id,
-                        edge.target_kind,
-                        edge.target_id,
-                        edge.ref_type,
-                        edge.source_extra,
-                        edge.local_snapshot_id,
-                        edge.closest_git_version,
-                        if edge.git_version_exact { 1 } else { 0 },
-                    ],
-                )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            }
-            tx.commit()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
-        })
-        .await
-        .unwrap()
+                        params![
+                            edge.source_kind,
+                            edge.source_id,
+                            edge.target_kind,
+                            edge.target_id,
+                            edge.ref_type,
+                            edge.source_extra,
+                            edge.local_snapshot_id,
+                            edge.closest_git_version,
+                            if edge.git_version_exact { 1 } else { 0 },
+                        ],
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                }
+                tx.commit()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+            })
+            .await
     }
 
     /// Edges that point AT `(target_kind, target_id)` — i.e. the
@@ -556,12 +533,11 @@ impl SqlitePageRefStore {
         target_id: &str,
         limit: Option<i64>,
     ) -> Result<Vec<PageRefEdge>, DomainError> {
-        let db = self.db.clone();
         let target_kind = target_kind.to_string();
         let target_id = target_id.to_string();
         let limit = limit.unwrap_or(500);
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT source_kind, source_id, target_kind, target_id, ref_type,
                             source_extra, local_snapshot_id, closest_git_version,
@@ -574,9 +550,7 @@ impl SqlitePageRefStore {
                 let rows = stmt.query_map(params![target_kind, target_id, limit], row_to_edge)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Edges emitted FROM `(source_kind, source_id)` — the page's
@@ -587,12 +561,11 @@ impl SqlitePageRefStore {
         source_id: &str,
         limit: Option<i64>,
     ) -> Result<Vec<PageRefEdge>, DomainError> {
-        let db = self.db.clone();
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
         let limit = limit.unwrap_or(500);
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT source_kind, source_id, target_kind, target_id, ref_type,
                             source_extra, local_snapshot_id, closest_git_version,
@@ -605,9 +578,7 @@ impl SqlitePageRefStore {
                 let rows = stmt.query_map(params![source_kind, source_id, limit], row_to_edge)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

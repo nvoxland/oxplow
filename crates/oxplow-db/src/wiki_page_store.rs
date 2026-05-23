@@ -48,7 +48,7 @@ impl SqliteWikiPageStore {
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -93,23 +93,19 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
 
 impl SqliteWikiPageStore {
     pub async fn list(&self) -> Result<Vec<WikiPage>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM wiki_page ORDER BY updated_at DESC")?;
                 let rows = stmt.query_map([], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError> {
-        let db = self.db.clone();
         let slug = slug.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM wiki_page WHERE slug = ?1")?;
                 let mut rows = stmt.query_map(params![slug], row_to_note)?;
                 match rows.next() {
@@ -117,16 +113,13 @@ impl SqliteWikiPageStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let note = note.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let file_refs_json =
                     serde_json::to_string(&note.file_refs).unwrap_or_else(|_| "[]".to_string());
                 let related_notes_json =
@@ -172,23 +165,18 @@ impl SqliteWikiPageStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn delete(&self, slug: &str) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let slug = slug.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute("DELETE FROM wiki_page WHERE slug = ?1", params![slug])?;
                 conn.execute("DELETE FROM wiki_page_fts WHERE slug = ?1", params![slug])?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// FTS5-backed full-text search over the body excerpt + title.
@@ -197,10 +185,9 @@ impl SqliteWikiPageStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<WikiPageSearchHit>, DomainError> {
-        let db = self.db.clone();
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT n.slug, n.title, snippet(wiki_page_fts, 2, '<b>', '</b>', '…', 12) AS snippet,
                             n.updated_at
@@ -231,9 +218,7 @@ impl SqliteWikiPageStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Glob-by-title for the lighter search_wiki_pages MCP tool.
@@ -242,10 +227,9 @@ impl SqliteWikiPageStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<WikiPage>, DomainError> {
-        let db = self.db.clone();
         let pattern = format!("%{}%", query);
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM wiki_page WHERE title LIKE ?1 OR slug LIKE ?1 \
                      ORDER BY updated_at DESC LIMIT ?2",
@@ -253,9 +237,7 @@ impl SqliteWikiPageStore {
                 let rows = stmt.query_map(params![pattern, limit as i64], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

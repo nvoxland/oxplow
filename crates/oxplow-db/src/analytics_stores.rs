@@ -18,7 +18,7 @@ use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -96,34 +96,30 @@ impl PageVisitStore for SqlitePageVisitStore {
         duration_ms: Option<i64>,
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError> {
-        let db = self.db.clone();
         let page_kind = page_kind.to_string();
         let page_id = page_id.to_string();
         let label = label.map(|s| s.to_string());
         let thread_id = thread_id.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            let id = format!("pv-{}", uuid::Uuid::new_v4().simple());
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let id = format!("pv-{}", uuid::Uuid::new_v4().simple());
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO page_visit (id, page_kind, page_id, label, visited_at, duration_ms, thread_id)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![id, page_kind, page_id, label, ts_to_string(now), duration_ms, thread_id],
                 )?;
-                Ok(())
-            })?;
-            Ok(PageVisit {
-                id,
-                page_kind,
-                page_id,
-                label,
-                visited_at: now,
-                duration_ms,
-                thread_id,
+                Ok(PageVisit {
+                    id,
+                    page_kind,
+                    page_id,
+                    label,
+                    visited_at: now,
+                    duration_ms,
+                    thread_id,
+                })
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_recent(
@@ -131,10 +127,9 @@ impl PageVisitStore for SqlitePageVisitStore {
         limit: usize,
         thread_id: Option<&str>,
     ) -> Result<Vec<PageVisit>, DomainError> {
-        let db = self.db.clone();
         let thread_id = thread_id.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = if thread_id.is_some() {
                     conn.prepare(
                         "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
@@ -185,9 +180,7 @@ impl PageVisitStore for SqlitePageVisitStore {
                     rows
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_top(
@@ -195,10 +188,9 @@ impl PageVisitStore for SqlitePageVisitStore {
         limit: usize,
         thread_id: Option<&str>,
     ) -> Result<Vec<(String, String, i64)>, DomainError> {
-        let db = self.db.clone();
         let thread_id = thread_id.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let map_row = |row: &rusqlite::Row<'_>| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -232,32 +224,26 @@ impl PageVisitStore for SqlitePageVisitStore {
                     rows
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let page_kind = page_kind.to_string();
         let page_id = page_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "DELETE FROM page_visit WHERE page_kind = ?1 AND page_id = ?2",
                     params![page_kind, page_id],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 // Most-recent visit per page, ordered by visit count desc.
                 let mut stmt = conn.prepare(
                     "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
@@ -300,15 +286,12 @@ impl PageVisitStore for SqlitePageVisitStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT substr(visited_at, 1, 10) AS day, COUNT(*) AS visits
                      FROM page_visit
@@ -322,9 +305,7 @@ impl PageVisitStore for SqlitePageVisitStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
@@ -365,29 +346,25 @@ impl SqliteUsageStore {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<UsageEvent, DomainError> {
-        let db = self.db.clone();
         let kind = kind.to_string();
         let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
-        tokio::task::spawn_blocking(move || {
-            let id = format!("ue-{}", uuid::Uuid::new_v4().simple());
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let id = format!("ue-{}", uuid::Uuid::new_v4().simple());
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO usage_event (id, kind, payload_json, occurred_at)
                      VALUES (?1, ?2, ?3, ?4)",
                     params![id, kind, payload_json, ts_to_string(now)],
                 )?;
-                Ok(())
-            })?;
-            Ok(UsageEvent {
-                id,
-                kind,
-                payload_json,
-                occurred_at: now,
+                Ok(UsageEvent {
+                    id,
+                    kind,
+                    payload_json,
+                    occurred_at: now,
+                })
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Group recent events of a single `kind` by the per-row key
@@ -403,11 +380,10 @@ impl SqliteUsageStore {
         stream_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<UsageRollup>, DomainError> {
-        let db = self.db.clone();
         let kind = kind.to_string();
         let stream_id = stream_id.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 // COALESCE over the canonical key fields. Mirrors
                 // `commands::usage::extract_key` so a renderer
                 // listening to UsageRecorded events sees keys agreeing
@@ -467,15 +443,12 @@ impl SqliteUsageStore {
                 };
                 Ok(rows)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_recent(&self, limit: usize) -> Result<Vec<UsageEvent>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, kind, payload_json, occurred_at FROM usage_event
                      ORDER BY occurred_at DESC LIMIT ?1",
@@ -501,9 +474,7 @@ impl SqliteUsageStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
@@ -628,15 +599,14 @@ impl SqliteCodeQualityStore {
         tree_version_value: Option<&str>,
         file_filter: &str,
     ) -> Result<i64, DomainError> {
-        let db = self.db.clone();
         let tool = tool.to_string();
         let scope = scope.to_string();
         let kind = tree_version_kind.to_string();
         let value = tree_version_value.map(str::to_string);
         let filter = file_filter.to_string();
-        tokio::task::spawn_blocking(move || {
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO code_quality_scan
                        (tool, scope, status, started_at,
@@ -646,9 +616,7 @@ impl SqliteCodeQualityStore {
                 )?;
                 Ok(conn.last_insert_rowid())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn finish_scan(
@@ -657,25 +625,22 @@ impl SqliteCodeQualityStore {
         status: CodeQualityScanStatus,
         error: Option<String>,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let status_str = match status {
             CodeQualityScanStatus::Pending => "pending",
             CodeQualityScanStatus::Running => "running",
             CodeQualityScanStatus::Done => "done",
             CodeQualityScanStatus::Failed => "failed",
         };
-        tokio::task::spawn_blocking(move || {
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let now = Timestamp::now();
                 conn.execute(
                     "UPDATE code_quality_scan SET status = ?2, ended_at = ?3, error = ?4 WHERE id = ?1",
                     params![id, status_str, ts_to_string(now), error],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn append_finding(
@@ -683,10 +648,10 @@ impl SqliteCodeQualityStore {
         scan_id: i64,
         finding: CodeQualityFinding,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let finding_clone = finding.clone();
-        let finding_id: i64 = tokio::task::spawn_blocking(move || -> Result<i64, DomainError> {
-            db.with_conn(|conn| {
+        let finding_id: i64 = self
+            .db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO code_quality_finding
                        (scan_id, path, start_line, end_line, kind, metric_value, extra_json)
@@ -703,9 +668,7 @@ impl SqliteCodeQualityStore {
                 )?;
                 Ok(conn.last_insert_rowid())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if let Some(refs) = &self.page_refs {
             let edges = finding_edges(&finding_id.to_string(), &finding.path);
             refs.replace_source("finding", &finding_id.to_string(), edges)
@@ -718,23 +681,19 @@ impl SqliteCodeQualityStore {
     /// the page-ref backfill — each finding row owns one
     /// `(finding:<rowid>) -> (file:<path>)` edge.
     pub async fn list_all_findings_for_backfill(&self) -> Result<Vec<(i64, String)>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT id, path FROM code_quality_finding")?;
                 let rows =
                     stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_scans(&self, limit: usize) -> Result<Vec<CodeQualityScan>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, tool, scope, status, started_at, ended_at, error,
                             tree_version_kind, tree_version_value, file_filter
@@ -743,9 +702,7 @@ impl SqliteCodeQualityStore {
                 let rows = stmt.query_map(params![limit as i64], row_to_scan)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Find the most recent `done` scan for `(tool, treeVersion,
@@ -759,13 +716,12 @@ impl SqliteCodeQualityStore {
         tree_version_value: Option<&str>,
         file_filter: &str,
     ) -> Result<Option<CodeQualityScan>, DomainError> {
-        let db = self.db.clone();
         let tool = tool.to_string();
         let kind = tree_version_kind.to_string();
         let value = tree_version_value.map(str::to_string);
         let filter = file_filter.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, tool, scope, status, started_at, ended_at, error,
                             tree_version_kind, tree_version_value, file_filter
@@ -785,18 +741,15 @@ impl SqliteCodeQualityStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_findings(
         &self,
         scan_id: i64,
     ) -> Result<Vec<CodeQualityFinding>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, scan_id, path, start_line, end_line, kind, metric_value, extra_json
                      FROM code_quality_finding WHERE scan_id = ?1 ORDER BY id ASC",
@@ -815,18 +768,15 @@ impl SqliteCodeQualityStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Fetch a single finding by its integer id — the canonical
     /// `finding:<id>` ref. Used by the typed ref-resolver to hydrate a
     /// finding into a label (kind) + location for agent context.
     pub async fn get_finding(&self, id: i64) -> Result<Option<CodeQualityFinding>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.query_row(
                     "SELECT id, scan_id, path, start_line, end_line, kind, metric_value, extra_json
                      FROM code_quality_finding WHERE id = ?1",
@@ -846,9 +796,7 @@ impl SqliteCodeQualityStore {
                 )
                 .optional()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
@@ -987,45 +935,41 @@ impl SqliteSnapshotStore {
         if snaps.is_empty() {
             return Ok(Vec::new());
         }
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = db
-                .conn()
-                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
-            let tx = conn
-                .transaction()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            let mut ids = Vec::with_capacity(snaps.len());
-            {
-                let mut stmt = tx
-                    .prepare(
-                        "INSERT INTO file_snapshot
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let mut ids = Vec::with_capacity(snaps.len());
+                {
+                    let mut stmt = tx
+                        .prepare(
+                            "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at, oversize,
                             snapshot_id, mtime_ms)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                for snap in &snaps {
-                    stmt.execute(params![
-                        snap.stream_id.as_str(),
-                        snap.path,
-                        snap.blob_hash,
-                        snap.size_bytes,
-                        ts_to_string(snap.captured_at),
-                        if snap.oversize { 1 } else { 0 },
-                        snap.snapshot_id,
-                        snap.mtime_ms,
-                    ])
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                    ids.push(tx.last_insert_rowid());
+                        )
+                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    for snap in &snaps {
+                        stmt.execute(params![
+                            snap.stream_id.as_str(),
+                            snap.path,
+                            snap.blob_hash,
+                            snap.size_bytes,
+                            ts_to_string(snap.captured_at),
+                            if snap.oversize { 1 } else { 0 },
+                            snap.snapshot_id,
+                            snap.mtime_ms,
+                        ])
+                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        ids.push(tx.last_insert_rowid());
+                    }
                 }
-            }
-            tx.commit()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            Ok(ids)
-        })
-        .await
-        .unwrap()
+                tx.commit()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                Ok(ids)
+            })
+            .await
     }
 
     /// Insert a new `snapshot` row and return its id. Callers (e.g.
@@ -1033,19 +977,16 @@ impl SqliteSnapshotStore {
     /// they have dirty files to capture — empty requests reuse
     /// `latest_snapshot_id_for_stream`.
     pub async fn create_snapshot(&self, stream_id: StreamId) -> Result<i64, DomainError> {
-        let db = self.db.clone();
         let now = ts_to_string(Timestamp::now());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO snapshot (stream_id, created_at) VALUES (?1, ?2)",
                     params![stream_id.as_str(), now],
                 )?;
                 Ok(conn.last_insert_rowid())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Read the `git_commit` column for a snapshot, if recorded.
@@ -1053,9 +994,8 @@ impl SqliteSnapshotStore {
         &self,
         snapshot_id: i64,
     ) -> Result<Option<String>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.query_row(
                     "SELECT git_commit FROM snapshot WHERE id = ?1",
                     params![snapshot_id],
@@ -1064,9 +1004,7 @@ impl SqliteSnapshotStore {
                 .optional()
                 .map(|opt| opt.flatten())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Pin a snapshot to a git commit sha. Called by the capture
@@ -1077,44 +1015,40 @@ impl SqliteSnapshotStore {
         snapshot_id: i64,
         sha: String,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = db
-                .conn()
-                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
-            let tx = conn
-                .transaction()
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                tx.execute(
+                    "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
+                    params![sha, snapshot_id],
+                )
                 .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            tx.execute(
-                "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
-                params![sha, snapshot_id],
-            )
-            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            // Cascade: every file-ref row pointing at this snapshot
-            // now has an exact git pin. Flip both the version sha
-            // (in case capture-time wrote a different HEAD) and the
-            // exactness flag.
-            tx.execute(
-                "UPDATE task_effort_file
+                // Cascade: every file-ref row pointing at this snapshot
+                // now has an exact git pin. Flip both the version sha
+                // (in case capture-time wrote a different HEAD) and the
+                // exactness flag.
+                tx.execute(
+                    "UPDATE task_effort_file
                     SET closest_git_version = ?1,
                         git_version_exact   = 1
                   WHERE local_snapshot_id = ?2",
-                params![sha, snapshot_id],
-            )
-            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            tx.execute(
-                "UPDATE page_ref
+                    params![sha, snapshot_id],
+                )
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                tx.execute(
+                    "UPDATE page_ref
                     SET closest_git_version = ?1,
                         git_version_exact   = 1
                   WHERE local_snapshot_id = ?2",
-                params![sha, snapshot_id],
-            )
-            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-            tx.commit()
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
-        })
-        .await
-        .unwrap()
+                    params![sha, snapshot_id],
+                )
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                tx.commit()
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+            })
+            .await
     }
 
     /// Most recent `snapshot.id` for the stream. Returns `None` when
@@ -1123,9 +1057,8 @@ impl SqliteSnapshotStore {
         &self,
         stream_id: StreamId,
     ) -> Result<Option<i64>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let row: Option<i64> = conn
                     .query_row(
                         "SELECT id FROM snapshot WHERE stream_id = ?1
@@ -1136,9 +1069,7 @@ impl SqliteSnapshotStore {
                     .optional()?;
                 Ok(row)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Snapshot rows for a stream, newest first.
@@ -1147,10 +1078,9 @@ impl SqliteSnapshotStore {
         stream_id: &str,
         limit: usize,
     ) -> Result<Vec<Snapshot>, DomainError> {
-        let db = self.db.clone();
         let stream_id = stream_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
@@ -1183,9 +1113,7 @@ impl SqliteSnapshotStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Aggregate counts of created/modified/deleted files in a
@@ -1194,9 +1122,8 @@ impl SqliteSnapshotStore {
     /// The `idx_file_snapshot_stream_path` index covers the prior-row
     /// lookup so this stays cheap even with multi-million-row history.
     pub async fn stats_for_snapshot(&self, snapshot_id: i64) -> Result<SnapshotStats, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.query_row(
                     "SELECT
                        COALESCE(SUM(CASE WHEN fs.blob_hash IS NULL THEN 1 ELSE 0 END), 0) AS deleted,
@@ -1225,9 +1152,7 @@ impl SqliteSnapshotStore {
                     },
                 )
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// `SnapshotChangeEntry` rows for one snapshot. Pairs every
@@ -1239,9 +1164,8 @@ impl SqliteSnapshotStore {
         &self,
         snapshot_id: i64,
     ) -> Result<Vec<SnapshotChangeEntry>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT
                        f.id, f.path, f.blob_hash, f.oversize,
@@ -1282,9 +1206,7 @@ impl SqliteSnapshotStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Reconstruct the content tree as-of `snapshot_id`: `path ->
@@ -1295,9 +1217,8 @@ impl SqliteSnapshotStore {
     /// oversize rows (no blob hash) get a `size:mtime` identity so a
     /// change to a too-big file is still detected.
     pub async fn tree_at(&self, snapshot_id: i64) -> Result<BTreeMap<String, String>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let stream_id: Option<String> = conn
                     .query_row(
                         "SELECT stream_id FROM snapshot WHERE id = ?1",
@@ -1345,9 +1266,7 @@ impl SqliteSnapshotStore {
                 }
                 Ok(tree)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Content diff between two snapshots, via the shared
@@ -1377,9 +1296,8 @@ impl SqliteSnapshotStore {
         if snapshot_ids.is_empty() {
             return Ok(vec![]);
         }
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let placeholders: Vec<String> =
                     (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
                 let sql = format!(
@@ -1405,18 +1323,15 @@ impl SqliteSnapshotStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_files_for_snapshot(
         &self,
         snapshot_id: i64,
     ) -> Result<Vec<FileSnapshot>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize,
                             snapshot_id
@@ -1425,15 +1340,12 @@ impl SqliteSnapshotStore {
                 let rows = stmt.query_map(params![snapshot_id], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn get(&self, id: i64) -> Result<Option<FileSnapshot>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE id = ?1",
@@ -1441,9 +1353,7 @@ impl SqliteSnapshotStore {
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
                 rows.next().transpose()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_for_stream(
@@ -1451,10 +1361,9 @@ impl SqliteSnapshotStore {
         stream_id: &str,
         limit: usize,
     ) -> Result<Vec<FileSnapshot>, DomainError> {
-        let db = self.db.clone();
         let stream_id = stream_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE stream_id = ?1
@@ -1463,9 +1372,7 @@ impl SqliteSnapshotStore {
                 let rows = stmt.query_map(params![stream_id, limit as i64], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Most recent `(blob_hash, size_bytes, mtime_ms)` per path
@@ -1476,9 +1383,8 @@ impl SqliteSnapshotStore {
     pub async fn latest_stat_per_path(
         &self,
     ) -> Result<std::collections::HashMap<String, LatestStat>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms
                      FROM file_snapshot s
@@ -1508,9 +1414,7 @@ impl SqliteSnapshotStore {
                 }
                 Ok(out)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Distinct non-null `blob_hash` values referenced by any row.
@@ -1518,18 +1422,15 @@ impl SqliteSnapshotStore {
     pub async fn referenced_blob_hashes(
         &self,
     ) -> Result<std::collections::HashSet<String>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT DISTINCT blob_hash FROM file_snapshot WHERE blob_hash IS NOT NULL",
                 )?;
                 let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     /// Test-only: rewrite the oldest row for `path` to a given
@@ -1537,10 +1438,9 @@ impl SqliteSnapshotStore {
     /// outside a retention window without time-traveling the clock.
     #[doc(hidden)]
     pub async fn backdate_for_test(self: std::sync::Arc<Self>, path: &str, ts: Timestamp) {
-        let db = self.db.clone();
         let path = path.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| -> rusqlite::Result<()> {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE file_snapshot SET captured_at = ?1
                      WHERE id = (SELECT MIN(id) FROM file_snapshot WHERE path = ?2)",
@@ -1548,10 +1448,8 @@ impl SqliteSnapshotStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
-        .unwrap();
+            .await
+            .expect("backdate_for_test snapshot update");
     }
 
     /// Delete snapshot rows whose `captured_at` is older than
@@ -1559,10 +1457,9 @@ impl SqliteSnapshotStore {
     /// file keeps at least one history entry no matter how old).
     /// Returns the number of rows deleted.
     pub async fn prune_older_than(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
-        let db = self.db.clone();
         let cutoff_str = ts_to_string(cutoff);
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let n = conn.execute(
                     "DELETE FROM file_snapshot
                      WHERE captured_at < ?1
@@ -1573,16 +1470,13 @@ impl SqliteSnapshotStore {
                 )?;
                 Ok(n as u64)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_for_path(&self, path: &str) -> Result<Vec<FileSnapshot>, DomainError> {
-        let db = self.db.clone();
         let path = path.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
@@ -1590,9 +1484,7 @@ impl SqliteSnapshotStore {
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
@@ -1610,38 +1502,35 @@ mod tests {
             .map(|(s, p, h, o)| (*s, p.to_string(), h.map(|s| s.to_string()), *o))
             .collect();
         let db = db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                conn.execute(
-                    "INSERT INTO streams
+        db.call(move |conn| {
+            conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+            conn.execute(
+                "INSERT INTO streams
                        (id, kind, title, branch, branch_ref, branch_source,
                         worktree_path, created_at, updated_at)
                      VALUES ('s-1','primary','s','main','refs/heads/main','origin',
                              '/tmp','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
-                    [],
-                )?;
-                for sid in &snaps {
-                    conn.execute(
-                        "INSERT INTO snapshot (id, stream_id, created_at)
+                [],
+            )?;
+            for sid in &snaps {
+                conn.execute(
+                    "INSERT INTO snapshot (id, stream_id, created_at)
                          VALUES (?1, 's-1', '2026-01-01T00:00:00Z')",
-                        params![sid],
-                    )?;
-                }
-                for (sid, path, hash, oversize) in &rows {
-                    conn.execute(
-                        "INSERT INTO file_snapshot
+                    params![sid],
+                )?;
+            }
+            for (sid, path, hash, oversize) in &rows {
+                conn.execute(
+                    "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at,
                             oversize, snapshot_id, mtime_ms)
                          VALUES ('s-1', ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
-                        params![path, hash, *oversize as i32, sid],
-                    )?;
-                }
-                Ok(())
-            })
+                    params![path, hash, *oversize as i32, sid],
+                )?;
+            }
+            Ok(())
         })
         .await
-        .unwrap()
         .unwrap();
     }
 

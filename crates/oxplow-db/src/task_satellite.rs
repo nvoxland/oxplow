@@ -21,7 +21,7 @@ use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -94,17 +94,14 @@ impl SqliteTaskNoteStore {
 
     /// Iterate every note id + body for the boot-time backfill.
     pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT id, body FROM task_note")?;
                 let rows =
                     stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn project_note(&self, id: &str, body: &str) -> Result<(), DomainError> {
@@ -144,13 +141,13 @@ impl TaskNoteStore for SqliteTaskNoteStore {
         body: &str,
         author: &str,
     ) -> Result<TaskNote, DomainError> {
-        let db = self.db.clone();
         let body_owned = body.to_string();
         let author = author.to_string();
-        let note = tokio::task::spawn_blocking(move || -> Result<TaskNote, DomainError> {
-            let id = NoteId::new();
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        let note = self
+            .db
+            .call(move |conn| {
+                let id = NoteId::new();
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO task_note (id, task_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -162,19 +159,16 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                         ts_to_string(now)
                     ],
                 )?;
-                Ok(())
-            })?;
-            Ok(TaskNote {
-                id,
-                task_id: Some(item),
-                thread_id: None,
-                body: body_owned,
-                author,
-                created_at: now,
+                Ok(TaskNote {
+                    id,
+                    task_id: Some(item),
+                    thread_id: None,
+                    body: body_owned,
+                    author,
+                    created_at: now,
+                })
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         self.project_note(note.id.as_str(), &note.body).await?;
         Ok(note)
     }
@@ -185,14 +179,14 @@ impl TaskNoteStore for SqliteTaskNoteStore {
         body: &str,
         author: &str,
     ) -> Result<TaskNote, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
         let body_owned = body.to_string();
         let author = author.to_string();
-        let note = tokio::task::spawn_blocking(move || -> Result<TaskNote, DomainError> {
-            let id = NoteId::new();
-            let now = Timestamp::now();
-            db.with_conn(|conn| {
+        let note = self
+            .db
+            .call(move |conn| {
+                let id = NoteId::new();
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO task_note (id, thread_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -204,87 +198,72 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                         ts_to_string(now)
                     ],
                 )?;
-                Ok(())
-            })?;
-            Ok(TaskNote {
-                id,
-                task_id: None,
-                thread_id: Some(thread),
-                body: body_owned,
-                author,
-                created_at: now,
+                Ok(TaskNote {
+                    id,
+                    task_id: None,
+                    thread_id: Some(thread),
+                    body: body_owned,
+                    author,
+                    created_at: now,
+                })
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         self.project_note(note.id.as_str(), &note.body).await?;
         Ok(note)
     }
 
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_note WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![thread.as_str()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
         let body_clone = body.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE task_note SET body = ?2 WHERE id = ?1",
                     params![id_clone.as_str(), body_clone],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         self.project_note(id.as_str(), body).await?;
         Ok(())
     }
 
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id_clone = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "DELETE FROM task_note WHERE id = ?1",
                     params![id_clone.as_str()],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if let Some(refs) = &self.page_refs {
             refs.replace_source(KIND_TASK_NOTE, id.as_str(), vec![])
                 .await?;
@@ -313,17 +292,14 @@ impl SqliteTaskLinkStore {
     /// by the page-ref backfill so we can re-project each owning
     /// task's slice exactly once.
     pub async fn list_distinct_from_items(&self) -> Result<Vec<TaskId>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM task_link")?;
                 let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
                 rows.map(|r| r.map(TaskId::new))
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
@@ -338,18 +314,16 @@ impl SqliteTaskLinkStore {
         let Some(refs) = &self.page_refs else {
             return Ok(());
         };
-        let db = self.db.clone();
-        let links: Vec<TaskLink> = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        let links: Vec<TaskLink> = self
+            .db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![from_item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         let edges: Vec<_> = links.iter().map(link_edge).collect();
         refs.replace_source_for_ref_types(
             KIND_TASK,
@@ -390,11 +364,11 @@ impl TaskLinkStore for SqliteTaskLinkStore {
         to: TaskId,
         link_type: TaskLinkType,
     ) -> Result<TaskLink, DomainError> {
-        let db = self.db.clone();
         let thread_clone = thread.clone();
-        let link = tokio::task::spawn_blocking(move || -> Result<TaskLink, DomainError> {
-            let now = Timestamp::now();
-            let new_id = db.with_conn(|conn| {
+        let link = self
+            .db
+            .call(move |conn| {
+                let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -406,76 +380,60 @@ impl TaskLinkStore for SqliteTaskLinkStore {
                         ts_to_string(now),
                     ],
                 )?;
-                Ok(conn.last_insert_rowid())
-            })?;
-            Ok(TaskLink {
-                id: TaskLinkId::new(new_id),
-                thread_id: thread_clone,
-                from_item_id: from,
-                to_item_id: to,
-                link_type,
-                created_at: now,
+                let new_id = conn.last_insert_rowid();
+                Ok(TaskLink {
+                    id: TaskLinkId::new(new_id),
+                    thread_id: thread_clone,
+                    from_item_id: from,
+                    to_item_id: to,
+                    link_type,
+                    created_at: now,
+                })
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         self.project_outgoing_links(from).await?;
         Ok(link)
     }
 
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_link WHERE to_item_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        let from_item: Option<TaskId> = tokio::task::spawn_blocking({
-            let db = db.clone();
-            move || -> Result<Option<TaskId>, DomainError> {
-                db.with_conn(|conn| {
-                    let mut stmt =
-                        conn.prepare("SELECT from_item_id FROM task_link WHERE id = ?1")?;
-                    let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
-                    Ok(rows.next().transpose()?.map(TaskId::new))
-                })
-            }
-        })
-        .await
-        .unwrap()?;
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        let from_item: Option<TaskId> = self
+            .db
+            .call(move |conn| {
+                let mut stmt = conn.prepare("SELECT from_item_id FROM task_link WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
+                Ok(rows.next().transpose()?.map(TaskId::new))
+            })
+            .await?;
+        self.db
+            .call(move |conn| {
                 conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if let Some(from) = from_item {
             self.project_outgoing_links(from).await?;
         }
@@ -523,10 +481,9 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
 #[async_trait]
 impl TaskEventStore for SqliteTaskEventStore {
     async fn append(&self, event: &TaskEvent) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let event = event.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO task_event
                        (id, thread_id, item_id, event_type, actor_kind, actor_id, payload_json, created_at)
@@ -544,40 +501,32 @@ impl TaskEventStore for SqliteTaskEventStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEvent>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_event WHERE item_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_event)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_event WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![thread.as_str()], row_to_event)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

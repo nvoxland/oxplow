@@ -55,9 +55,14 @@ impl Database {
             c.pragma_update(None, "foreign_keys", "ON")?;
             Ok(())
         });
-        let pool = Pool::builder().max_size(1).build(manager).unwrap();
-        let mut conn = pool.get().unwrap();
-        embedded::migrations::runner().run(&mut *conn).unwrap();
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .expect("in-memory sqlite pool builds");
+        let mut conn = pool.get().expect("in-memory sqlite connection");
+        embedded::migrations::runner()
+            .run(&mut *conn)
+            .expect("in-memory migrations run");
         Self {
             pool: Arc::new(pool),
         }
@@ -117,6 +122,27 @@ impl Database {
         tokio::task::spawn_blocking(move || db.with_conn(f))
             .await
             .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
+    }
+
+    /// Like [`Self::call`] but hands the closure a `&mut Connection`, for
+    /// the few stores that need a `rusqlite::Transaction` (which borrows
+    /// the connection mutably). The closure returns a `DomainError`
+    /// directly — transaction methods already map their own SQL errors —
+    /// rather than the `rusqlite::Result` `call` expects.
+    pub(crate) async fn call_mut<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: FnOnce(&mut Connection) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = db
+                .conn()
+                .map_err(|e| oxplow_domain::DomainError::Invalid(format!("pool: {e}")))?;
+            f(&mut conn)
+        })
+        .await
+        .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
     }
 }
 

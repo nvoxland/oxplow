@@ -14,7 +14,7 @@ use crate::database::Database;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -68,10 +68,9 @@ impl SqliteAgentTurnStore {
 #[async_trait]
 impl AgentTurnStore for SqliteAgentTurnStore {
     async fn open(&self, turn: &AgentTurn) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let turn = turn.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO agent_turn (id, thread_id, task_id, prompt, answer, session_id, started_at, ended_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -92,17 +91,14 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn close(&self, id: &AgentTurnId, answer: Option<String>) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
         let now = ts_to_string(Timestamp::now());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
                      WHERE id = ?1 AND ended_at IS NULL",
@@ -110,30 +106,24 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM agent_turn WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], row_to_turn)?;
                 rows.next().transpose()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM agent_turn WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC",
@@ -141,15 +131,12 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 let rows = stmt.query_map(params![thread.as_str()], row_to_turn)?;
                 rows.collect()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_all_open(&self) -> Result<Vec<AgentTurn>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM agent_turn WHERE ended_at IS NULL
                      ORDER BY started_at DESC",
@@ -157,9 +144,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 let rows = stmt.query_map([], row_to_turn)?;
                 rows.collect()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_thread(
@@ -167,10 +152,9 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         thread: &ThreadId,
         limit: usize,
     ) -> Result<Vec<AgentTurn>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM agent_turn WHERE thread_id = ?1
                      ORDER BY started_at DESC LIMIT ?2",
@@ -178,9 +162,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 let rows = stmt.query_map(params![thread.as_str(), limit as i64], row_to_turn)?;
                 rows.collect()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

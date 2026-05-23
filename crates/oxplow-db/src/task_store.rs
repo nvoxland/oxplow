@@ -113,7 +113,7 @@ fn str_to_author(s: &str) -> Result<TaskAuthor, DomainError> {
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -180,23 +180,19 @@ const SELECT_BASE: &str =
 
 impl SqliteTaskStore {
     pub async fn list_all_for_backfill(&self) -> Result<Vec<Task>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let sql = format!("{} ORDER BY t.created_at ASC", SELECT_BASE);
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map([], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     pub async fn list_recently_done(&self, limit: usize) -> Result<Vec<Task>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let sql = format!(
                     "{} WHERE t.status = 'done' AND t.deleted_at IS NULL \
                        AND t.completed_at IS NOT NULL \
@@ -207,19 +203,16 @@ impl SqliteTaskStore {
                 let rows = stmt.query_map(params![limit as i64], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let sql = format!(
                     "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
@@ -229,15 +222,12 @@ impl TaskStore for SqliteTaskStore {
                 let rows = stmt.query_map(params![thread.as_str()], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_backlog(&self) -> Result<Vec<Task>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let sql = format!(
                     "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
@@ -247,15 +237,12 @@ impl TaskStore for SqliteTaskStore {
                 let rows = stmt.query_map([], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
                 let mut stmt = conn.prepare(&sql)?;
                 let mut rows = stmt.query_map(params![id.value()], row_to_task)?;
@@ -264,18 +251,16 @@ impl TaskStore for SqliteTaskStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn insert(&self, item: &Task) -> Result<TaskId, DomainError> {
-        let db = self.db.clone();
         let item = item.clone();
         let owned = item.clone();
-        let new_id: TaskId = tokio::task::spawn_blocking(move || -> Result<TaskId, DomainError> {
-            let item = owned;
-            db.with_conn(|conn| {
+        let new_id: TaskId = self
+            .db
+            .call(move |conn| {
+                let item = owned;
                 conn.execute(
                     "INSERT INTO task (
                         thread_id, parent_id, title, description,
@@ -301,9 +286,7 @@ impl TaskStore for SqliteTaskStore {
                 let id = conn.last_insert_rowid();
                 Ok(TaskId::new(id))
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if let Some(refs) = &self.page_refs {
             let mut placed = item.clone();
             placed.id = new_id;
@@ -320,11 +303,11 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let item = item.clone();
         let edges_item = item.clone();
-        let rows_affected: usize = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        let rows_affected: usize = self
+            .db
+            .call(move |conn| {
                 let rows = conn.execute(
                     "UPDATE task SET
                         thread_id = ?2,
@@ -356,9 +339,7 @@ impl TaskStore for SqliteTaskStore {
                 )?;
                 Ok(rows)
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if rows_affected == 0 {
             return Err(DomainError::NotFound);
         }
@@ -376,19 +357,16 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let now = ts_to_string(Timestamp::now());
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE task SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
                     params![id.value(), now],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()?;
+            .await?;
         if let Some(refs) = &self.page_refs {
             refs.replace_source_for_ref_types(
                 KIND_TASK,

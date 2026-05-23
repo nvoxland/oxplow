@@ -36,7 +36,7 @@ fn str_to_kind(s: &str) -> Result<StreamKind, DomainError> {
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }

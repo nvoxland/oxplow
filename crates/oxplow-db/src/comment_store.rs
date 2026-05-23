@@ -16,7 +16,7 @@ use crate::database::Database;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
-        .unwrap()
+        .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
 }
@@ -231,7 +231,6 @@ impl CommentStore for SqliteCommentStore {
         author: &str,
         body: &str,
     ) -> Result<CommentThread, DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
         let thread = thread.cloned();
         let target = target.clone();
@@ -244,12 +243,12 @@ impl CommentStore for SqliteCommentStore {
         let context_chain = context_chain.to_vec();
         let author = author.to_string();
         let body = body.to_string();
-        tokio::task::spawn_blocking(move || -> Result<CommentThread, DomainError> {
-            let now = Timestamp::now();
-            let now_s = ts_to_string(now);
-            let context_chain_json = refs_to_json(&context_chain);
-            let referenced_refs_json = refs_to_json(&referenced_refs);
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let now = Timestamp::now();
+                let now_s = ts_to_string(now);
+                let context_chain_json = refs_to_json(&context_chain);
+                let referenced_refs_json = refs_to_json(&referenced_refs);
                 conn.execute(
                     "INSERT INTO comment
                        (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
@@ -298,9 +297,7 @@ impl CommentStore for SqliteCommentStore {
                 let messages = load_messages(conn, comment_id)?;
                 Ok(CommentThread { comment, messages })
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn add_message(
@@ -309,13 +306,12 @@ impl CommentStore for SqliteCommentStore {
         author: &str,
         body: &str,
     ) -> Result<CommentMessage, DomainError> {
-        let db = self.db.clone();
         let author = author.to_string();
         let body = body.to_string();
-        tokio::task::spawn_blocking(move || -> Result<CommentMessage, DomainError> {
-            let now = Timestamp::now();
-            let now_s = ts_to_string(now);
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let now = Timestamp::now();
+                let now_s = ts_to_string(now);
                 conn.execute(
                     "INSERT INTO comment_message (comment_id, author, body, created_at)
                      VALUES (?1, ?2, ?3, ?4)",
@@ -334,67 +330,52 @@ impl CommentStore for SqliteCommentStore {
                     created_at: now,
                 })
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get(&self, id: CommentId) -> Result<Option<CommentThread>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 Ok(list_threads(conn, "id = ?1", &[&id.value()])?
                     .into_iter()
                     .next())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_target(
         &self,
         target: &CommentTarget,
     ) -> Result<Vec<CommentThread>, DomainError> {
-        let db = self.db.clone();
         let target = target.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 list_threads(
                     conn,
                     "target_kind = ?1 AND target_id = ?2",
                     &[&target.kind, &target.id],
                 )
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| list_threads(conn, "stream_id = ?1", &[&stream.as_str()]))
-        })
-        .await
-        .unwrap()
+        self.db
+            .call(move |conn| list_threads(conn, "stream_id = ?1", &[&stream.as_str()]))
+            .await
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError> {
-        let db = self.db.clone();
         let thread = thread.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| list_threads(conn, "thread_id = ?1", &[&thread.as_str()]))
-        })
-        .await
-        .unwrap()
+        self.db
+            .call(move |conn| list_threads(conn, "thread_id = ?1", &[&thread.as_str()]))
+            .await
     }
 
     async fn set_intent(&self, id: CommentId, intent: CommentIntent) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE comment SET intent = ?2, updated_at = ?3 WHERE id = ?1",
                     params![
@@ -405,15 +386,12 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 // Stamp resolved_at on →resolved, clear it on →open, so
                 // the dashboard can bucket resolved comments by date.
                 let now = ts_to_string(Timestamp::now());
@@ -427,9 +405,7 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_anchor(
@@ -438,10 +414,9 @@ impl CommentStore for SqliteCommentStore {
         selectors_json: &str,
         orphaned: bool,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let selectors_json = selectors_json.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE comment SET selectors_json = ?2, orphaned = ?3, updated_at = ?4
                      WHERE id = ?1",
@@ -454,9 +429,7 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn relink(
@@ -465,11 +438,10 @@ impl CommentStore for SqliteCommentStore {
         quote: &str,
         selectors_json: &str,
     ) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let quote = quote.to_string();
         let selectors_json = selectors_json.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE comment
                      SET quote = ?2, selectors_json = ?3, orphaned = 0, updated_at = ?4
@@ -483,34 +455,28 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn delete(&self, id: CommentId) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 // comment_message rows cascade via FK.
                 conn.execute("DELETE FROM comment WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn cleanup(&self, retention_days: i64) -> Result<u64, DomainError> {
         if retention_days <= 0 {
             return Ok(0);
         }
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            let cutoff = ts_to_string(Timestamp::from_unix_ms(
-                Timestamp::now().unix_ms() - retention_days * 86_400_000,
-            ));
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
+                let cutoff = ts_to_string(Timestamp::from_unix_ms(
+                    Timestamp::now().unix_ms() - retention_days * 86_400_000,
+                ));
                 let n = conn.execute(
                     "DELETE FROM comment
                      WHERE (status = 'resolved' OR orphaned = 1)
@@ -519,9 +485,7 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 Ok(n as u64)
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 
