@@ -703,8 +703,17 @@ export function App() {
       mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
       logUi("info", "opened file", { streamId: stream.id, path: file.path });
     } catch (e) {
-      setError(String(e));
-      logUi("error", "failed to open file", { streamId: stream.id, path, error: String(e) });
+      const msg = String(e);
+      // A simply-missing file (e.g. a stale terminal link) is benign — show a
+      // friendly message and log at warn, not a scary error with a raw OS code.
+      const notFound = /no such file|not found|os error 2/i.test(msg);
+      if (notFound) {
+        setError(`File not found: ${path}`);
+        logUi("warn", "open file: target does not exist", { streamId: stream.id, path });
+      } else {
+        setError(msg);
+        logUi("error", "failed to open file", { streamId: stream.id, path, error: msg });
+      }
       mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
     }
   }
