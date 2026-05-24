@@ -122,6 +122,7 @@ pub const MANIFEST: &[Capability] = &[
     both("remove_followup"),
     both("list_backlinks"),
     both("list_outbound"),
+    both("search"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
     both_named(

@@ -22,6 +22,7 @@ pub mod file_ref_version;
 pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;
+pub mod indexer;
 pub mod lsp_clients;
 pub mod lsp_installer;
 pub mod lsp_sessions;
@@ -68,9 +69,10 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqliteCommentStore, SqlitePageRefStore,
-    SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
-    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
-    SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
+    SqliteTaskEffortStore, SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore,
+    SqliteTaskStore, SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore,
+    SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -331,6 +333,9 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
+    /// Unified site-wide search index (FTS5/BM25). Written by the
+    /// `Indexer` (`indexer.rs`); read by the `search` IPC/MCP surface.
+    pub search_store: Arc<SqliteSearchStore>,
     /// Per-stream snapshot capture registry. Holds one service per
     /// active stream (each watching its own worktree) and is the
     /// stream-aware replacement for the singleton above. Callers that
@@ -411,6 +416,7 @@ impl Services {
             SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime =
             Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
         let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
@@ -524,6 +530,7 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
+            search_store,
             hook_event_store,
             agent_status_store,
             agent_turn_store,
@@ -584,6 +591,7 @@ impl Services {
             SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime =
             Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
         let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
@@ -669,6 +677,7 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
+            search_store,
             snapshot_captures,
             hook_event_store,
             agent_status_store,

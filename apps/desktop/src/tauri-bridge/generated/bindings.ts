@@ -192,6 +192,14 @@ export const commands = {
 	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
+	/**
+	 *  Site-wide BM25 search across tasks, comments, notes, wiki pages, and
+	 *  per-stream file contents. `stream_id` scopes file/stream-bound hits to one
+	 *  worktree (project-global hits like wiki always included); `None` searches
+	 *  everything. `kinds` optionally restricts to a subset
+	 *  (`task|comment|note|wiki|file`). Results are ranked best-first.
+	 */
+	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
@@ -1609,6 +1617,19 @@ export type RepoConflictState = {
 	operation: GitOperationKind | null,
 	// Number of paths reported as unmerged by `git status --porcelain`.
 	conflicted_count: number,
+};
+
+/**
+ *  One ranked search result. `stream_id` is `None` for project-global
+ *  entities (wiki pages); `score` is the BM25 score (lower = better match).
+ */
+export type SearchHit = {
+	kind: string,
+	ref_id: string,
+	stream_id: string | null,
+	title: string,
+	snippet: string,
+	score: number,
 };
 
 export type SelectThreadRequest = {

@@ -11,6 +11,7 @@ mod database;
 pub mod effort_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
+pub mod search_store;
 mod stream_store;
 pub mod task_satellite;
 pub mod task_store;
@@ -31,6 +32,7 @@ pub use effort_store::{
     TaskEffort, TaskEffortStore,
 };
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
+pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use stream_store::SqliteStreamStore;
 pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::SqliteTaskStore;

@@ -911,6 +911,29 @@ Change fan-out: the IPC/MCP layers emit `OxplowEvent::CommentsChanged
 { stream_id, target_kind, target_id }` after every mutation; the
 renderer refetches the affected page's comments + the Comments inbox.
 
+### `search_entry` + `search_fts` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`, migration `V25__search_index.sql`)
+
+The unified site-wide search index (FTS5/BM25). `search_fts` is a standalone
+FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
+`(title, body)` for every searchable entity; `search_entry` maps
+`(kind, ref_id, stream_id)` → the FTS rowid so a single entity can be updated
+or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''))`
+enforces identity, treating global rows' `NULL` stream as `''`).
+
+- `kind` ∈ `task | comment | note | wiki | file`; `ref_id` is the task id,
+  comment id, note id, wiki slug, or repo-relative path.
+- `stream_id` is `NULL` for project-global rows (wiki) and the owning stream
+  otherwise. Search filters `stream_id = ?  OR stream_id IS NULL`; BM25 weights
+  title above body (`bm25(search_fts, 5.0, 1.0)`).
+- The store is a **derived cache**, never a source of truth. It is written
+  exclusively by the `Indexer` service (`crates/oxplow-app/src/indexer.rs`),
+  which backfills at boot and then subscribes to the event bus
+  (`TasksChanged` / `WorkNotesChanged` / `CommentsChanged` / `WikiPagesChanged`
+  / `FileSnapshot*`). `purge_stream` is called when a stream is archived/deleted.
+- `sanitize_query` turns arbitrary user input into a safe MATCH expression
+  (each token double-quoted + `*` prefix), so junk input can't throw FTS5
+  syntax errors. Exposed as the `search` IPC command + MCP tool.
+
 ## The `sort_index` queue
 
 `tasks.sort_index` orders work in a single numeric space scoped

@@ -451,8 +451,11 @@ mutations stay on Bash); **snapshots / local history**
 `Services::run_code_quality_scan`); **comments + lifecycle**
 (`create_comment`, `set_comment_intent`, `rename_thread`,
 `close_thread`, `reopen_thread`, `select_thread`, `promote_thread`,
-`switch_stream`, `rename_stream`). Still `AgentTodo` (see the backlog):
-composed snapshot DTOs, git mutations/extra reads, `checkout_stream_branch`.
+`switch_stream`, `rename_stream`); and **site-wide search** (`search` —
+BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
+fed by the `Indexer` service; optional `stream_id` scopes file hits).
+Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
+mutations/extra reads, `checkout_stream_branch`.
 
 The default `kind` for `create_task` is `"task"` — omit it
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was

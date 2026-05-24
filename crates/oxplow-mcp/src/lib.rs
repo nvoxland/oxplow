@@ -435,6 +435,19 @@ pub struct SnapshotStreamParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiteSearchParams {
+    /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
+    pub query: String,
+    /// Scope file/stream-bound hits to one worktree (project-global hits like
+    /// wiki are always included). Omit to search every stream.
+    pub stream_id: Option<String>,
+    /// Restrict to a subset of kinds: `task | comment | note | wiki | file`.
+    pub kinds: Option<Vec<String>>,
+    /// Max hits to return (default 50).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotIdParams {
     /// A `snapshot` or `file_snapshot` row id (integer).
     pub snapshot_id: i64,
@@ -576,6 +589,33 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&list)
+    }
+
+    #[tool(
+        description = "Site-wide BM25 search across tasks, comments, notes, wiki pages, and \
+                       per-stream file contents. Tokens match as stemmed prefixes. `stream_id` \
+                       scopes file/stream-bound hits to one worktree (wiki etc. always included); \
+                       omit it to search everything. `kinds` optionally restricts to \
+                       task|comment|note|wiki|file. Returns hits ranked best-first."
+    )]
+    async fn search(
+        &self,
+        params: Parameters<SiteSearchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("search", params.0.stream_id.as_deref())?;
+        let kinds = params.0.kinds.unwrap_or_default();
+        let hits = self
+            .services
+            .search_store
+            .search(
+                &params.0.query,
+                params.0.stream_id.as_deref(),
+                &kinds,
+                params.0.limit.unwrap_or(50) as usize,
+            )
+            .await
+            .map_err(internal)?;
+        json_result(&hits)
     }
 
     // ---------- git (read) ----------

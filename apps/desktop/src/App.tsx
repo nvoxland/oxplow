@@ -142,6 +142,7 @@ import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { DISK } from "./file-version.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
+import { SearchPalette } from "./components/SearchPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi } from "./logger.js";
@@ -1374,6 +1375,7 @@ export function App() {
   // The ref is populated in a useEffect after handleOpenPage is defined.
   const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const commandState = useMemo(
     () => ({
       hasStream: !!stream,
@@ -1525,6 +1527,24 @@ export function App() {
     // stopPropagation or call preventDefault on its own Cmd+K handling.
     window.addEventListener("keydown", handlePaletteShortcut, { capture: true });
     return () => window.removeEventListener("keydown", handlePaletteShortcut, { capture: true } as EventListenerOptions);
+  }, []);
+
+  useEffect(() => {
+    // Site-wide search overlay: Cmd/Ctrl+Shift+F. Capture-phase +
+    // stopImmediatePropagation for the same reason as the Cmd+K palette —
+    // so Monaco's own find-in-files binding doesn't eat the event first.
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "f") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setSearchOpen((prev) => !prev);
+    }
+    window.addEventListener("keydown", handleSearchShortcut, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", handleSearchShortcut, {
+        capture: true,
+      } as EventListenerOptions);
   }, []);
 
   useEffect(() => {
@@ -3321,6 +3341,31 @@ export function App() {
       {daemonUnavailable ? <DaemonDownDialog /> : null}
       {paletteOpen ? (
         <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
+      ) : null}
+      {searchOpen ? (
+        <SearchPalette
+          streamId={stream?.id ?? null}
+          onClose={() => setSearchOpen(false)}
+          onOpen={(hit) => {
+            switch (hit.kind) {
+              case "task": {
+                const id = Number(hit.ref_id);
+                if (Number.isFinite(id)) handleOpenPage(taskRef(id));
+                break;
+              }
+              case "wiki":
+                handleOpenPage(wikiPageRef(hit.ref_id));
+                break;
+              case "file":
+                void handleOpenFile(hit.ref_id);
+                break;
+              case "comment":
+                handleOpenPage(commentsRef());
+                break;
+              // notes have no standalone page — surfaced in results only.
+            }
+          }}
+        />
       ) : null}
       <UndoToastStack />
     </div>

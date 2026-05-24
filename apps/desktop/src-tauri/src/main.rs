@@ -593,6 +593,17 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         });
     }
 
+    // Search indexer: backfill the unified FTS index from current state,
+    // then keep it fresh off the event bus (tasks/comments/notes/wiki +
+    // per-stream file snapshots). One detached background task.
+    {
+        let indexer = oxplow_app::indexer::Indexer::new(state.clone());
+        let rx = state.events.subscribe();
+        boot_runtime.spawn(async move {
+            indexer.run(rx).await;
+        });
+    }
+
     // Boot the in-process control plane (axum server hosting the
     // plugin's HTTP hook receiver + the streamable-HTTP MCP transport).
     // The handle's URLs + token feed the per-spawn plugin writer in

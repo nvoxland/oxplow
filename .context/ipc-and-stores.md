@@ -518,6 +518,23 @@ Comments inbox. `set_comment_anchor` is the one mutation that does **not**
 emit — it's a passive re-anchor sync the renderer runs on load, not a
 user action.
 
+## Search index (read model + indexer)
+
+The `search` command/tool is a read over `SqliteSearchStore`
+(`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
+per-domain store. It is **fed**, not written by its callers: the `Indexer`
+service (`crates/oxplow-app/src/indexer.rs`) is a single background task that
+backfills at boot and then *subscribes to the EventBus* — `TasksChanged`,
+`WorkNotesChanged`, `CommentsChanged`, `WikiPagesChanged`, and
+`FileSnapshotCreated` / `FileSnapshotsBatchCreated` — and upserts/removes the
+affected rows. This is the inverse of the usual "command writes store + emits
+event" flow: the search index is a derived projection that *consumes* the same
+events the UI does, so no command needs a special "also reindex" step. It's
+spawned in `apps/desktop/src-tauri/src/main.rs` alongside the commit indexer.
+Stream archive/delete calls `search_store.purge_stream` so a removed worktree's
+file rows don't linger. Exposed identically on IPC (`search`) and MCP
+(`search`) — see the parity manifest (`crates/oxplow-surface-parity`).
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas, including

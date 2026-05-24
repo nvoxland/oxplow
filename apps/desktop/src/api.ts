@@ -8,7 +8,10 @@ import type {
   CommentThread,
   LaunchInfo,
   RecentProjectView,
+  SearchHit,
 } from "./tauri-bridge/generated/bindings.js";
+
+export type { SearchHit };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors arrive as IpcError objects with
@@ -414,6 +417,18 @@ export interface WorkspaceWatchEvent {
 
 export async function listStreams(): Promise<Stream[]> {
   return unwrap(await commands.listStreams());
+}
+
+/// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
+/// worktree (project-global hits like wiki always included); `null` searches
+/// everything. `kinds` optionally restricts to task|comment|note|wiki|file.
+export async function searchSite(
+  query: string,
+  streamId: string | null,
+  kinds: string[] | null = null,
+  limit = 50,
+): Promise<SearchHit[]> {
+  return unwrap(await commands.search(query, streamId, kinds, limit));
 }
 
 export async function listThreads(streamId: string): Promise<Thread[]> {
