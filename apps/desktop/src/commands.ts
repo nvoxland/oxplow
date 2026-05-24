@@ -29,7 +29,8 @@ export type CommandId =
   | "native.copy"
   | "native.paste"
   | "native.selectAll"
-  | "native.separator";
+  | "native.separator.1"
+  | "native.separator.2";
 
 // `plan` is the historical id of the Tasks menu group (label "Tasks");
 // the id is internal-only and kept stable so `plan.newTask` and its
@@ -45,6 +46,7 @@ export interface MenuCommandSnapshot {
   label: string;
   shortcut?: string;
   enabled: boolean;
+  separator?: boolean;
   checked?: boolean;
 }
 
@@ -113,12 +115,12 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         // (see `crates/oxplow-tauri-ipc/src/commands/menu.rs`).
         { id: "native.undo", label: "Undo", enabled: true },
         { id: "native.redo", label: "Redo", enabled: true },
-        { id: "native.separator", label: "", enabled: true },
+        { id: "native.separator.1", label: "", separator: true, enabled: true },
         { id: "native.cut", label: "Cut", enabled: true },
         { id: "native.copy", label: "Copy", enabled: true },
         { id: "native.paste", label: "Paste", enabled: true },
         { id: "native.selectAll", label: "Select All", enabled: true },
-        { id: "native.separator", label: "", enabled: true },
+        { id: "native.separator.2", label: "", separator: true, enabled: true },
         { id: "edit.find", label: "Find", shortcut: "Ctrl/Cmd+F", enabled: state.hasSelectedFile },
       ],
     },
@@ -191,7 +193,8 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "native.copy": noop,
     "native.paste": noop,
     "native.selectAll": noop,
-    "native.separator": noop,
+    "native.separator.1": noop,
+    "native.separator.2": noop,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({
     ...group,

@@ -110,7 +110,13 @@ fn build_submenu(
                 "copy" => PredefinedMenuItem::copy(app, Some(&item.label))?,
                 "paste" => PredefinedMenuItem::paste(app, Some(&item.label))?,
                 "selectAll" => PredefinedMenuItem::select_all(app, Some(&item.label))?,
-                "separator" => PredefinedMenuItem::separator(app)?,
+                role if role == "separator"
+                    || role
+                        .strip_prefix("separator.")
+                        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+                {
+                    PredefinedMenuItem::separator(app)?
+                }
                 _ => {
                     tracing::warn!(role, "unknown native menu role; skipping");
                     continue;
