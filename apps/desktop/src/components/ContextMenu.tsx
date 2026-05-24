@@ -81,6 +81,9 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
   return (
     <div style={{ ...menuStyle, position: "relative", minWidth }}>
       {items.map((item) => {
+        if (item.separator) {
+          return <div key={item.id} style={separatorStyle} />;
+        }
         const hasSubmenu = !!item.submenu && item.submenu.length > 0;
         return (
           <div
@@ -207,4 +210,11 @@ const shortcutStyle: CSSProperties = {
   color: "var(--muted)",
   fontSize: 11,
   flexShrink: 0,
+};
+
+const separatorStyle: CSSProperties = {
+  height: 1,
+  margin: "4px 6px",
+  background: "var(--border)",
+  pointerEvents: "none",
 };

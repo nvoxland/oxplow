@@ -2,6 +2,7 @@ export interface MenuItem {
   id: string;
   label: string;
   enabled: boolean;
+  separator?: boolean;
   checked?: boolean;
   shortcut?: string;
   submenu?: MenuItem[];
