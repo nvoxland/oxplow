@@ -71,6 +71,9 @@ pub type SessionKey = String;
 struct SessionEntry {
     pane_target: String,
     pane_id: PaneId,
+    /// OS pid of the spawned child (the shell, for the `shell` pane).
+    /// Used to read the live cwd for terminal file-link resolution.
+    pid: Option<u32>,
     forwarder: JoinHandle<()>,
     /// Replay buffer of recent PTY output. Bounded by `MAX_RING_BYTES`
     /// — the oldest chunks get evicted when the buffer would exceed
@@ -254,6 +257,7 @@ impl TerminalSessionRegistry {
     ) -> Result<String, TerminalSessionError> {
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();
+        let pid = handle.pid;
         let session_id = format!("term-{}", uuid::Uuid::new_v4().simple());
 
         // Force a tmux repaint so freshly-attached clients see the
@@ -311,6 +315,7 @@ impl TerminalSessionRegistry {
             SessionEntry {
                 pane_target,
                 pane_id,
+                pid,
                 forwarder,
                 ring,
                 key: key.clone(),
@@ -318,6 +323,20 @@ impl TerminalSessionRegistry {
         );
         self.by_key.lock().await.insert(key, session_id.clone());
         Ok(session_id)
+    }
+
+    /// Best-effort live working directory of a session's child process.
+    /// Meaningful for the direct `shell` pane (the child IS the shell, so
+    /// this tracks `cd`); for tmux-backed panes the child is the tmux client,
+    /// so it reflects the worktree root, not the active pane's shell.
+    /// Returns `None` on any failure (no pid, process gone, unsupported
+    /// platform) — callers fall back to the worktree root.
+    pub async fn session_cwd(&self, session_id: &str) -> Option<std::path::PathBuf> {
+        let pid = { self.inner.lock().await.get(session_id)?.pid? };
+        tokio::task::spawn_blocking(move || read_process_cwd(pid))
+            .await
+            .ok()
+            .flatten()
     }
 
     /// Dispatch one renderer-issued JSON message.
@@ -438,6 +457,39 @@ fn parse_window_target(pane_target: &str) -> Option<WindowTarget> {
     }
     let session = oxplow_tmux::Session(session.to_string());
     Some(WindowTarget::from_parts(&session, window))
+}
+
+/// Read a process's current working directory by pid. Linux reads the
+/// `/proc/<pid>/cwd` symlink; macOS shells out to `lsof` (no extra crate, and
+/// `lsof` ships with the OS). Returns `None` on any failure. Runs blocking, so
+/// callers invoke it via `spawn_blocking`.
+fn read_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // `-Fn` is machine-readable: each field on its own line, prefixed by a
+        // type char. The cwd fd (`-d cwd`) yields one `n<path>` line.
+        let output = std::process::Command::new("lsof")
+            .args(["-a", "-d", "cwd", "-p", &pid.to_string(), "-Fn"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix('n'))
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
 }
 
 #[cfg(test)]

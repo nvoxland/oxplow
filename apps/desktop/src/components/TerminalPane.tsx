@@ -71,6 +71,28 @@ function resolveAgainstWorktree(path: string, worktree: string | undefined): str
   return `${trimmed}/${rel}`;
 }
 
+/// Resolve a clicked terminal path to an absolute path for the editor.
+/// Absolute paths pass through; `~/` is dropped (frontend doesn't know HOME).
+/// A relative path is resolved against the session's *live* cwd — so a path
+/// printed after `cd`ing into a subdir opens correctly — falling back to the
+/// worktree root when the cwd can't be determined (tmux pane, dead session,
+/// unsupported platform).
+async function resolveClickedPath(
+  text: string,
+  sessionId: string | null,
+  worktree: string | undefined,
+): Promise<string | null> {
+  if (!text) return null;
+  if (text.startsWith("/")) return text;
+  if (text.startsWith("~/")) return null;
+  let base = worktree;
+  if (sessionId) {
+    const cwd = await desktopBridge().terminalSessionCwd(sessionId);
+    if (cwd) base = cwd;
+  }
+  return resolveAgainstWorktree(text, base);
+}
+
 async function readClipboard(): Promise<string> {
   const api = desktopBridge() as { clipboardReadText?: () => Promise<string> };
   if (api?.clipboardReadText) {
@@ -251,9 +273,11 @@ export function TerminalPane({
       onActivate: (match: FilePathLinkActivation) => {
         const open = onOpenFileRef.current;
         if (!open) return;
-        const abs = resolveAgainstWorktree(match.text, worktreePathRef.current);
-        if (!abs) return;
-        open(abs, match.line, match.column);
+        void resolveClickedPath(match.text, sessionIdRef.current, worktreePathRef.current).then(
+          (abs) => {
+            if (abs) open(abs, match.line, match.column);
+          },
+        );
       },
     });
     term.attachCustomKeyEventHandler((event) => {

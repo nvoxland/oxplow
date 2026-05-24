@@ -68,11 +68,20 @@ know HOME).
 
 ## Path resolution and caveats
 
-- Relative paths resolve against **`stream.worktree_path`**, not the
-  pty's actual cwd. The frontend doesn't track the pty's current
-  directory; if the user `cd`s into a subfolder and prints a path
-  relative to that, the link will mis-resolve. Acceptable v1
-  limitation.
+- Relative paths resolve against the session's **live cwd**, falling
+  back to `stream.worktree_path`. On click, `resolveClickedPath`
+  (`TerminalPane.tsx`) calls the `terminal_session_cwd` IPC, which reads
+  the child process's cwd by pid (the pty exposes `PaneHandle.pid`; the
+  `TerminalSessionRegistry` stashes it; `read_process_cwd` reads
+  `/proc/<pid>/cwd` on Linux / `lsof -d cwd` on macOS — no extra crate).
+  This makes a path printed after `cd`ing into a subfolder open
+  correctly. **Caveat:** only the direct `shell` pane benefits — its
+  child *is* the shell, so the pid's cwd tracks `cd`. For tmux-backed
+  panes the pid is the tmux client, so the read returns `None`/the root
+  and we fall back to the worktree (agent panes don't `cd` anyway).
+- A missing target is benign: `handleOpenFile` (App.tsx) shows a
+  friendly "File not found: <path>" at `warn`, not an error with the
+  raw OS code — so a stale link doesn't look like a crash.
 - Absolute paths outside the worktree open as-is — the App.tsx
   callback strips the worktree prefix when present and otherwise
   forwards the absolute path; oxplow's `readWorkspaceFile` will

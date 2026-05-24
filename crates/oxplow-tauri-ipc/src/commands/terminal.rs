@@ -266,6 +266,24 @@ pub async fn close_terminal_session(
     Ok(())
 }
 
+/// Best-effort live working directory of a session's child process, as an
+/// absolute path. `None` when it can't be determined (tmux-backed pane, dead
+/// session, unsupported platform). The renderer uses it to resolve relative
+/// terminal file-path links against the shell's real cwd, falling back to the
+/// worktree root.
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_session_cwd(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<String>, IpcError> {
+    Ok(state
+        .terminal_sessions
+        .session_cwd(&session_id)
+        .await
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// Permanently kill the PTY behind `session_id`. Used when a thread
 /// is closed or the user explicitly terminates the agent.
 #[tauri::command]

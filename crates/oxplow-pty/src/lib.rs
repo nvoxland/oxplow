@@ -144,6 +144,9 @@ impl PtyManager {
 pub struct PaneHandle {
     pub id: PaneId,
     pub events: broadcast::Receiver<PaneEvent>,
+    /// OS process id of the spawned child, when the platform reported
+    /// one. Used to read the live cwd (terminal file-link resolution).
+    pub pid: Option<u32>,
 }
 
 /// Internal command messages sent to the owner task.
@@ -419,7 +422,7 @@ async fn spawn_one(
         },
     );
 
-    Ok(PaneHandle { id, events })
+    Ok(PaneHandle { id, events, pid })
 }
 
 #[cfg(test)]

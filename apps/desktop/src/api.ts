@@ -172,6 +172,15 @@ function buildBridge() {
     sendTerminalMessage: async (sessionId: string, message: string): Promise<void> => {
       unwrap(await commands.sendTerminalMessage(sessionId, message));
     },
+    /// Best-effort live cwd of the session's child (the shell, for the Terminal
+    /// page). null when undeterminable; callers fall back to the worktree root.
+    terminalSessionCwd: async (sessionId: string): Promise<string | null> => {
+      try {
+        return unwrap(await commands.terminalSessionCwd(sessionId));
+      } catch {
+        return null;
+      }
+    },
     onTerminalEvent: (
       handler: (event: { sessionId: string; message: string }) => void,
     ): (() => void) => {
