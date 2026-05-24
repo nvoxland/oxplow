@@ -148,3 +148,14 @@ codegen-units = 1
 lto = true
 opt-level = 3
 strip = true
+
+# Dev builds are link/debuginfo-bound, not CPU-bound (a touched-crate
+# rebuild is ~all emit + link). Full debuginfo (`debug = 2`) is the bulk of
+# that cost and of the multi-GB `target/debug`. `line-tables-only` keeps
+# file/line in backtraces and panics while cutting the heavy variable/type
+# debuginfo; dependencies don't need any (we don't step into them).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
