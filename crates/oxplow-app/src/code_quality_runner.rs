@@ -38,6 +38,12 @@ pub enum CodeQualityError {
     /// snapshot stub).
     #[error("tree source failed: {0}")]
     TreeSource(String),
+    /// A scan-row store operation failed.
+    #[error("scan store failed: {0}")]
+    Store(String),
+    /// The requested analysis tool isn't `"metrics"` or `"duplication"`.
+    #[error("unknown code quality tool: {0}")]
+    UnknownTool(String),
 }
 
 impl From<TreeError> for CodeQualityError {
@@ -380,6 +386,107 @@ fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQ
         });
     }
     out
+}
+
+impl crate::Services {
+    /// Run a fresh `"metrics"` or `"duplication"` scan over the project
+    /// working tree, persist its findings, and return the scan id. Owns the
+    /// full lifecycle — create scan row, emit `CodeQualityScanned` phase
+    /// events, dispatch to the matching runner, append findings, finish the
+    /// row — so the Tauri IPC command and the MCP tool share one
+    /// implementation. `scope` is a free-form label (typically `"workspace"`
+    /// or `"diff"`); `files` optionally narrows the scan to a path subset.
+    pub async fn run_code_quality_scan(
+        &self,
+        tool: String,
+        scope: String,
+        files: Option<Vec<String>>,
+    ) -> Result<i64, CodeQualityError> {
+        use crate::{CodeQualityScanPhase, OxplowEvent};
+        use oxplow_db::CodeQualityScanStatus;
+
+        let project = self.layout.project_dir.clone();
+        let opts = RunOptions {
+            files: files.unwrap_or_default(),
+            timeout: None,
+            dup_options: None,
+        };
+        let scan_id = self
+            .code_quality_store
+            .create_scan(&tool, &scope)
+            .await
+            .map_err(|e| CodeQualityError::Store(e.to_string()))?;
+        let emit = |phase: CodeQualityScanPhase| {
+            self.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: tool.clone(),
+                scope: scope.clone(),
+                phase,
+            });
+        };
+        emit(CodeQualityScanPhase::Started);
+
+        let workspace_filter = {
+            let cfg = self.config.read();
+            cfg.as_ref()
+                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+                .unwrap_or_default()
+        };
+        let findings_result = match tool.as_str() {
+            "metrics" => run_metrics_scan(&project, opts, workspace_filter).await,
+            "duplication" => run_duplication_scan(&project, opts, workspace_filter).await,
+            other => {
+                let _ = self
+                    .code_quality_store
+                    .finish_scan(
+                        scan_id,
+                        CodeQualityScanStatus::Failed,
+                        Some(format!("unknown tool: {other}")),
+                    )
+                    .await;
+                emit(CodeQualityScanPhase::Failed);
+                return Err(CodeQualityError::UnknownTool(other.to_string()));
+            }
+        };
+
+        match findings_result {
+            Ok(findings) => {
+                for f in findings {
+                    self.code_quality_store
+                        .append_finding(
+                            scan_id,
+                            oxplow_db::CodeQualityFinding {
+                                id: 0,
+                                scan_id,
+                                path: f.path,
+                                start_line: f.start_line as i32,
+                                end_line: f.end_line as i32,
+                                kind: f.kind,
+                                metric_value: f.metric_value,
+                                extra_json: f.extra_json,
+                            },
+                        )
+                        .await
+                        .map_err(|e| CodeQualityError::Store(e.to_string()))?;
+                }
+                self.code_quality_store
+                    .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
+                    .await
+                    .map_err(|e| CodeQualityError::Store(e.to_string()))?;
+                emit(CodeQualityScanPhase::Completed);
+                Ok(scan_id)
+            }
+            Err(e) => {
+                let _ = self
+                    .code_quality_store
+                    .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
+                    .await;
+                emit(CodeQualityScanPhase::Failed);
+                Err(e)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

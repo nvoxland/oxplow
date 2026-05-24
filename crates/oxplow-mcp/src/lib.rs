@@ -388,6 +388,131 @@ pub struct LspDiagnosticsParams {
     pub uri: String,
 }
 
+/// Optional stream selector shared by the stream-scoped git read tools.
+/// Omit `stream_id` to target the current/primary worktree.
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct GitStreamParams {
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GitLogParams {
+    pub stream_id: Option<String>,
+    /// Max commits to return.
+    pub limit: Option<u32>,
+    /// Include all branches (`--all`) rather than just the current branch.
+    #[serde(default)]
+    pub all: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GitPathParams {
+    pub stream_id: Option<String>,
+    /// Repo-relative file path.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GitDiffParams {
+    pub stream_id: Option<String>,
+    /// Base ref to diff the branch against (e.g. `main`).
+    pub base_ref: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GitReadAtRefParams {
+    /// Git ref (branch, tag, or sha) to read the file at.
+    pub git_ref: String,
+    /// Repo-relative file path.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SnapshotStreamParams {
+    pub stream_id: String,
+    /// Max snapshots to return (default 200).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SnapshotIdParams {
+    /// A `snapshot` or `file_snapshot` row id (integer).
+    pub snapshot_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunCodeQualityScanParams {
+    /// Analysis kind: `"metrics"` (per-function complexity/length/params) or
+    /// `"duplication"` (duplicate-block detection).
+    pub tool: String,
+    /// Free-form scope label (typically `"workspace"` or `"diff"`).
+    pub scope: String,
+    /// Optional subset of repo-relative paths; omit to scan the whole repo.
+    pub files: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeQualityScanIdParams {
+    /// Scan id returned by `run_code_quality_scan` / `list_code_quality_scans`.
+    pub scan_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeQualityListParams {
+    /// Max scans to return (default 20).
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CreateCommentMcpParams {
+    pub stream_id: String,
+    /// Optional thread to attribute the comment to.
+    pub thread_id: Option<String>,
+    /// Page-kind scheme of the target: `wiki | file | directory | task | \
+    /// git-commit | finding`.
+    pub target_kind: String,
+    /// Canonical id for that kind (wiki slug, repo-relative path, task id, …).
+    pub target_id: String,
+    pub body: String,
+    /// Optional quoted span the comment is about (empty = whole-target note).
+    pub quote: Option<String>,
+    /// `note` (default) or `followup`.
+    pub intent: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SetCommentIntentParams {
+    /// Integer comment id from `list_comments`.
+    pub comment_id: i64,
+    /// `note` or `followup`.
+    pub intent: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RenameThreadMcpParams {
+    pub thread_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SelectThreadMcpParams {
+    pub stream_id: String,
+    /// Thread to select, or omit/null to clear the selection.
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchStreamParams {
+    /// Stream to make current, or omit/null to clear.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RenameStreamParams {
+    pub stream_id: String,
+    pub title: String,
+}
+
 #[tool_router]
 impl OxplowMcp {
     pub fn new(services: Arc<Services>) -> Self {
@@ -406,6 +531,14 @@ impl OxplowMcp {
         self.services
             .events
             .emit(OxplowEvent::TasksChanged { thread_id });
+    }
+
+    /// Emit `ThreadsChanged` so the renderer (separate process) refetches a
+    /// stream's threads after an agent-driven lifecycle change.
+    fn emit_threads_changed(&self, stream_id: oxplow_domain::StreamId) {
+        self.services
+            .events
+            .emit(OxplowEvent::ThreadsChanged { stream_id });
     }
 
     /// Renderer is a separate process; emit so it refetches the page's
@@ -443,6 +576,491 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&list)
+    }
+
+    // ---------- git (read) ----------
+    //
+    // Thin mirrors of the IPC git read commands over `services.git`, so the
+    // agent inspects the worktree through the same path the UI does (consistent
+    // results, snapshot/event hooks) instead of shelling out to raw `git`.
+    // `stream_id` is optional — omit to target the current/primary worktree.
+    // Mutations (commit/push/merge/…) intentionally stay on the Bash tool.
+
+    #[tool(
+        description = "Git working-tree status: per-file change scopes for the \
+                          worktree (omit stream_id for the current worktree)."
+    )]
+    async fn git_status(
+        &self,
+        params: Parameters<GitStreamParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("git_status", params.0.stream_id.as_deref())?;
+        let scopes = self
+            .services
+            .git
+            .change_scopes(params.0.stream_id.as_deref())
+            .await;
+        json_result(&scopes)
+    }
+
+    #[tool(
+        description = "Git commit log for the worktree. `all` spans every branch; \
+                          `limit` caps the count."
+    )]
+    async fn git_log(&self, params: Parameters<GitLogParams>) -> Result<CallToolResult, McpError> {
+        check_optional_stream("git_log", params.0.stream_id.as_deref())?;
+        let opts = oxplow_git::GitLogOptions {
+            limit: params.0.limit.map(|n| n as usize),
+            all: params.0.all,
+        };
+        let log = self
+            .services
+            .git
+            .git_log(params.0.stream_id.as_deref(), opts)
+            .await;
+        json_result(&log)
+    }
+
+    #[tool(description = "Git blame for a file: per-line commit attribution.")]
+    async fn git_blame(
+        &self,
+        params: Parameters<GitPathParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("git_blame", params.0.stream_id.as_deref())?;
+        let lines = self
+            .services
+            .git
+            .blame(params.0.stream_id.as_deref(), params.0.path)
+            .await;
+        json_result(&lines)
+    }
+
+    #[tool(
+        description = "Git branch diff: per-file and per-function changes on the \
+                          worktree branch relative to `base_ref` (e.g. `main`)."
+    )]
+    async fn git_diff(
+        &self,
+        params: Parameters<GitDiffParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("git_diff", params.0.stream_id.as_deref())?;
+        let changes = self
+            .services
+            .git
+            .branch_changes(params.0.stream_id.as_deref(), params.0.base_ref)
+            .await;
+        json_result(&changes)
+    }
+
+    #[tool(
+        description = "Read a file's contents at a git ref (branch, tag, or sha). \
+                          Returns null when the path doesn't exist at that ref."
+    )]
+    async fn read_file_at_ref(
+        &self,
+        params: Parameters<GitReadAtRefParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let content = self
+            .services
+            .git
+            .read_file_at_ref(params.0.git_ref, params.0.path)
+            .await;
+        json_result(&content)
+    }
+
+    #[tool(description = "List the project's git branches (local + remote).")]
+    async fn list_branches(&self) -> Result<CallToolResult, McpError> {
+        let branches = self.services.git.list_branches_project().await;
+        json_result(&branches)
+    }
+
+    // ---------- snapshots / local history (read + restore) ----------
+    //
+    // Thin mirrors of the IPC snapshot reads over `services.snapshot_store` /
+    // `blobs`, so the agent can inspect and restore its own change history.
+    // (Unlike the UI reads, these don't strip `generated` paths — the agent
+    // sees the raw capture history.) The composed dashboard DTOs
+    // (`get_snapshot_summary`, `get_snapshot_pair_diff`) stay IPC-only; their
+    // logic lives in the command layer, so the agent composes equivalents from
+    // `get_snapshot` + `read_snapshot_file_content`.
+
+    #[tool(description = "List snapshot rows for a stream (one per capture batch), newest first.")]
+    async fn list_snapshots_for_stream(
+        &self,
+        params: Parameters<SnapshotStreamParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "list_snapshots_for_stream",
+            "stream_id",
+            &params.0.stream_id,
+            ID_STREAM,
+        )?;
+        let rows = self
+            .services
+            .snapshot_store
+            .list_snapshots_for_stream(&params.0.stream_id, params.0.limit.unwrap_or(200) as usize)
+            .await
+            .map_err(internal)?;
+        json_result(&rows)
+    }
+
+    #[tool(description = "List every file_snapshot row captured under one snapshot id.")]
+    async fn list_files_for_snapshot(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let rows = self
+            .services
+            .snapshot_store
+            .list_files_for_snapshot(params.0.snapshot_id)
+            .await
+            .map_err(internal)?;
+        json_result(&rows)
+    }
+
+    #[tool(description = "Get a single file_snapshot row by id (null if absent).")]
+    async fn get_snapshot(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let row = self
+            .services
+            .snapshot_store
+            .get(params.0.snapshot_id)
+            .await
+            .map_err(internal)?;
+        json_result(&row)
+    }
+
+    #[tool(description = "Created/modified/deleted counts for a snapshot.")]
+    async fn get_snapshot_stats(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let stats = self
+            .services
+            .snapshot_store
+            .stats_for_snapshot(params.0.snapshot_id)
+            .await
+            .map_err(internal)?;
+        json_result(&stats)
+    }
+
+    #[tool(description = "Per-file change entries for one snapshot (git-log-like shape).")]
+    async fn list_snapshot_change_entries(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let rows = self
+            .services
+            .snapshot_store
+            .list_changes_for_snapshot(params.0.snapshot_id)
+            .await
+            .map_err(internal)?;
+        json_result(&rows)
+    }
+
+    #[tool(
+        description = "Read a file_snapshot's blob content as a (UTF-8 lossy) string. \
+                          Null when the row, blob, or content is absent."
+    )]
+    async fn read_snapshot_file_content(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let content = match self
+            .services
+            .snapshot_store
+            .get(params.0.snapshot_id)
+            .await
+            .map_err(internal)?
+            .and_then(|snap| snap.blob_hash)
+        {
+            Some(hash) => match self.services.blobs.read(&hash) {
+                Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+                Err(_) => None,
+            },
+            None => None,
+        };
+        json_result(&content)
+    }
+
+    #[tool(
+        description = "Restore a file's contents from a snapshot, writing the blob back \
+                          to its workspace path. Errors if the row or blob is gone."
+    )]
+    async fn restore_file_from_snapshot(
+        &self,
+        params: Parameters<SnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let snap = self
+            .services
+            .snapshot_store
+            .get(params.0.snapshot_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| McpError::invalid_params("snapshot row not found", None))?;
+        let hash = snap.blob_hash.clone().ok_or_else(|| {
+            McpError::invalid_params("snapshot has no blob (oversize or pre-blob-store)", None)
+        })?;
+        let bytes = self.services.blobs.read(&hash).map_err(internal)?;
+        let target = self.services.layout.project_dir.join(&snap.path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(internal)?;
+        }
+        std::fs::write(&target, &bytes).map_err(internal)?;
+        json_result(&serde_json::json!({ "restored": snap.path }))
+    }
+
+    // ---------- code quality ----------
+    //
+    // Run a scan and read its findings, so the agent can close the loop on its
+    // own changes. `run_code_quality_scan` shares the IPC command's
+    // orchestration via `Services::run_code_quality_scan`.
+
+    #[tool(
+        description = "Run a code-quality scan and persist findings; returns the scan id. \
+                          `tool` is \"metrics\" or \"duplication\"; `scope` is a free-form \
+                          label (e.g. \"workspace\"); `files` optionally narrows the scan."
+    )]
+    async fn run_code_quality_scan(
+        &self,
+        params: Parameters<RunCodeQualityScanParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let scan_id = self
+            .services
+            .run_code_quality_scan(p.tool, p.scope, p.files)
+            .await
+            .map_err(|e| match e {
+                oxplow_app::code_quality_runner::CodeQualityError::UnknownTool(_) => {
+                    McpError::invalid_params(e.to_string(), None)
+                }
+                other => internal(other),
+            })?;
+        json_result(&serde_json::json!({ "scan_id": scan_id }))
+    }
+
+    #[tool(description = "List recent code-quality scans (newest first).")]
+    async fn list_code_quality_scans(
+        &self,
+        params: Parameters<CodeQualityListParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let scans = self
+            .services
+            .code_quality_store
+            .list_scans(params.0.limit.unwrap_or(20) as usize)
+            .await
+            .map_err(internal)?;
+        json_result(&scans)
+    }
+
+    #[tool(description = "List the findings produced by a code-quality scan.")]
+    async fn list_code_quality_findings(
+        &self,
+        params: Parameters<CodeQualityScanIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let findings = self
+            .services
+            .code_quality_store
+            .list_findings(params.0.scan_id)
+            .await
+            .map_err(internal)?;
+        json_result(&findings)
+    }
+
+    // ---------- comments + stream/thread lifecycle ----------
+    //
+    // Originate comments and manage thread/stream lifecycle, matching the UI's
+    // affordances over the same services. Each mutation emits the same event
+    // the IPC command does, so the (separate-process) renderer refetches.
+    // Stream-branch checkout stays on Bash (subprocess logic lives in the IPC
+    // command layer, and the agent's worktree shell can `git checkout`).
+
+    #[tool(
+        description = "Create a comment anchored to a target (wiki/file/task/…). Omit `quote` \
+                          for a whole-target note. `intent` is `note` (default) or `followup`."
+    )]
+    async fn create_comment(
+        &self,
+        params: Parameters<CreateCommentMcpParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        expect_id_kind("create_comment", "stream_id", &p.stream_id, ID_STREAM)?;
+        if let Some(tid) = &p.thread_id {
+            expect_id_kind("create_comment", "thread_id", tid, ID_THREAD)?;
+        }
+        let intent = parse_comment_intent("create_comment", p.intent.as_deref().unwrap_or("note"))?;
+        let stream_id = StreamId::from(p.stream_id);
+        let thread_id = p.thread_id.map(ThreadId::from);
+        let target = oxplow_domain::CommentTarget {
+            kind: p.target_kind,
+            id: p.target_id,
+        };
+        let thread = self
+            .services
+            .comment_store
+            .create(
+                &stream_id,
+                thread_id.as_ref(),
+                &target,
+                p.quote.as_deref().unwrap_or(""),
+                "",
+                &[],
+                &[],
+                intent,
+                "agent",
+                &p.body,
+            )
+            .await
+            .map_err(internal)?;
+        self.emit_comments_changed(&thread.comment);
+        json_result(&thread)
+    }
+
+    #[tool(
+        description = "Set a comment's intent: `note` (agent leaves it alone) or `followup` \
+                          (agent should act on it)."
+    )]
+    async fn set_comment_intent(
+        &self,
+        params: Parameters<SetCommentIntentParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let intent = parse_comment_intent("set_comment_intent", &params.0.intent)?;
+        let id = CommentId::new(params.0.comment_id);
+        self.services
+            .comment_store
+            .set_intent(id, intent)
+            .await
+            .map_err(internal)?;
+        let thread = self
+            .services
+            .comment_store
+            .get(id)
+            .await
+            .map_err(internal)?;
+        if let Some(t) = &thread {
+            self.emit_comments_changed(&t.comment);
+        }
+        json_result(&thread)
+    }
+
+    #[tool(description = "Rename a thread.")]
+    async fn rename_thread(
+        &self,
+        params: Parameters<RenameThreadMcpParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind("rename_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
+        let id = ThreadId::from(params.0.thread_id);
+        let thread = self
+            .services
+            .threads
+            .rename(&id, params.0.title)
+            .await
+            .map_err(internal)?;
+        self.emit_threads_changed(thread.stream_id.clone());
+        json_result(&thread)
+    }
+
+    #[tool(description = "Promote a thread to the top of its stream's working queue.")]
+    async fn promote_thread(
+        &self,
+        params: Parameters<ThreadIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "promote_thread",
+            "thread_id",
+            &params.0.thread_id,
+            ID_THREAD,
+        )?;
+        let id = ThreadId::from(params.0.thread_id);
+        let thread = self.services.threads.promote(&id).await.map_err(internal)?;
+        self.emit_threads_changed(thread.stream_id.clone());
+        json_result(&thread)
+    }
+
+    #[tool(description = "Close a thread (soft — reopenable).")]
+    async fn close_thread(
+        &self,
+        params: Parameters<ThreadIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind("close_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
+        let id = ThreadId::from(params.0.thread_id);
+        let thread = self.services.threads.close(&id).await.map_err(internal)?;
+        self.emit_threads_changed(thread.stream_id.clone());
+        json_result(&thread)
+    }
+
+    #[tool(description = "Reopen a closed thread.")]
+    async fn reopen_thread(
+        &self,
+        params: Parameters<ThreadIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind("reopen_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
+        let id = ThreadId::from(params.0.thread_id);
+        let thread = self.services.threads.reopen(&id).await.map_err(internal)?;
+        self.emit_threads_changed(thread.stream_id.clone());
+        json_result(&thread)
+    }
+
+    #[tool(description = "Select (focus) a thread on a stream, or clear the selection.")]
+    async fn select_thread(
+        &self,
+        params: Parameters<SelectThreadMcpParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind("select_thread", "stream_id", &params.0.stream_id, ID_STREAM)?;
+        if let Some(tid) = &params.0.thread_id {
+            expect_id_kind("select_thread", "thread_id", tid, ID_THREAD)?;
+        }
+        let stream_id = StreamId::from(params.0.stream_id);
+        let thread_id = params.0.thread_id.map(ThreadId::from);
+        self.services
+            .threads
+            .select(&stream_id, thread_id.as_ref())
+            .await
+            .map_err(internal)?;
+        self.services
+            .events
+            .emit(OxplowEvent::SelectedThreadChanged {
+                stream_id,
+                thread_id,
+            });
+        json_result(&serde_json::json!({ "ok": true }))
+    }
+
+    #[tool(description = "Set the current/active stream (or omit stream_id to clear it).")]
+    async fn switch_stream(
+        &self,
+        params: Parameters<SwitchStreamParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("switch_stream", params.0.stream_id.as_deref())?;
+        let id = params.0.stream_id.map(StreamId::from);
+        self.services
+            .streams
+            .set_current(id.as_ref())
+            .await
+            .map_err(internal)?;
+        self.services
+            .events
+            .emit(OxplowEvent::CurrentStreamChanged { stream_id: id });
+        json_result(&serde_json::json!({ "ok": true }))
+    }
+
+    #[tool(description = "Rename a stream.")]
+    async fn rename_stream(
+        &self,
+        params: Parameters<RenameStreamParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind("rename_stream", "stream_id", &params.0.stream_id, ID_STREAM)?;
+        let id = StreamId::from(params.0.stream_id);
+        let stream = self
+            .services
+            .streams
+            .rename(&id, params.0.title)
+            .await
+            .map_err(internal)?;
+        self.services.events.emit(OxplowEvent::StreamsChanged);
+        json_result(&stream)
     }
 
     // ---------- threads ----------
@@ -2254,8 +2872,43 @@ impl ServerHandler for OxplowMcp {
     }
 }
 
+/// Names of every tool registered on the MCP surface.
+///
+/// Used by the cross-surface parity test in `oxplow-surface-parity` to
+/// enforce that the agent (MCP) and UI (Tauri IPC) adapters stay in sync.
+/// `tool_router()` is generated by `#[tool_router]` and takes no `self`,
+/// so this needs no `Services` instance, no async runtime, and no I/O.
+pub fn registered_tool_names() -> Vec<String> {
+    OxplowMcp::tool_router()
+        .list_all()
+        .into_iter()
+        .map(|t| t.name.into_owned())
+        .collect()
+}
+
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// Validate an optional `stream_id`: enforce the `s-` prefix when present,
+/// and accept `None` (resolves to the current/primary worktree downstream).
+fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpError> {
+    match stream_id {
+        Some(id) => expect_id_kind(tool, "stream_id", id, ID_STREAM),
+        None => Ok(()),
+    }
+}
+
+/// Parse a `note`/`followup` string into a `CommentIntent`.
+fn parse_comment_intent(tool: &str, value: &str) -> Result<oxplow_domain::CommentIntent, McpError> {
+    match value.to_ascii_lowercase().as_str() {
+        "note" => Ok(oxplow_domain::CommentIntent::Note),
+        "followup" => Ok(oxplow_domain::CommentIntent::Followup),
+        other => Err(McpError::invalid_params(
+            format!("{tool}: `intent` expects `note` or `followup`, got `{other}`"),
+            None,
+        )),
+    }
 }
 
 /// A wiki file ref is stale when its path has been snapshotted more

@@ -416,6 +416,44 @@ namespace on top, the agent calls `mcp__oxplow__create_task` —
 not the legacy `mcp__oxplow__oxplow__create_task`. The long form
 still resolves on `tools/call` for back-compat.
 
+### Surface parity with the IPC adapter
+
+The MCP tool surface (agent) and the Tauri IPC command surface (UI,
+`crates/oxplow-tauri-ipc/`) are two thin adapters over the same
+`oxplow_app::Services`. They drifted silently — many user-meaningful
+ops lived on IPC but not MCP. The `oxplow-surface-parity` crate
+(`crates/oxplow-surface-parity/`) now guards this: a checked-in
+`MANIFEST` classifies every op as `Both` / `UiOnly` / `AgentOnly` /
+`AgentTodo` (the last = "should be on both, MCP tool not built yet"),
+and `tests/parity.rs` enumerates the *actual* registered names on each
+surface (MCP via `oxplow_mcp::registered_tool_names()`, IPC via a
+capturing `tauri_specta::LanguageExt` over `specta_builder()`) and
+fails if anything is unclassified, dangling, or a `Both` row is missing
+a side. Names may diverge per surface (e.g. IPC `add_comment_message` ↔
+MCP `respond_to_comment`), so each row carries both names.
+
+**Consequence for new work:** adding a `#[tool]` (or a
+`#[tauri::command]`) requires a `MANIFEST` row or the parity test
+fails. To close an `AgentTodo` gap, build the tool and flip the row to
+`Both` with `mcp: Some("…")` — the test's "every tool is classified"
+check catches you if you forget. Run `cargo test -p
+oxplow-surface-parity -- --nocapture` to see the current gap backlog.
+
+Domains mirrored onto MCP so far (beyond the original task/wiki/comment
+surface): **git reads** (`git_status`, `git_log`, `git_blame`,
+`git_diff`, `read_file_at_ref`, `list_branches` — `stream_id` optional;
+mutations stay on Bash); **snapshots / local history**
+(`list_snapshots_for_stream`, `list_files_for_snapshot`, `get_snapshot`,
+`get_snapshot_stats`, `list_snapshot_change_entries`,
+`read_snapshot_file_content`, `restore_file_from_snapshot`);
+**code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
+`list_code_quality_findings` — the scan orchestration is shared via
+`Services::run_code_quality_scan`); **comments + lifecycle**
+(`create_comment`, `set_comment_intent`, `rename_thread`,
+`close_thread`, `reopen_thread`, `select_thread`, `promote_thread`,
+`switch_stream`, `rename_stream`). Still `AgentTodo` (see the backlog):
+composed snapshot DTOs, git mutations/extra reads, `checkout_stream_branch`.
+
 The default `kind` for `create_task` is `"task"` — omit it
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
 removed end-to-end — `create_task` no longer accepts one and a task

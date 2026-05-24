@@ -1,0 +1,178 @@
+//! Enforces that the Tauri IPC surface (UI) and the MCP surface (agent) stay
+//! in sync with the manifest in `oxplow_surface_parity`. See that crate's
+//! module docs for the four exposures and the `AgentTodo → Both` ratchet.
+
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::path::Path;
+
+use oxplow_surface_parity::{manifest_shape_errors, Exposure, MANIFEST};
+
+/// A throwaway `tauri_specta` export target that, instead of writing a file,
+/// captures the registered command names off the builder configuration. This
+/// is the only way to read the (otherwise private) command list out of a
+/// `tauri_specta::Builder` without booting Tauri.
+struct NameSink(RefCell<Vec<String>>);
+
+impl tauri_specta::LanguageExt for &NameSink {
+    type Error = std::io::Error;
+
+    fn export(
+        self,
+        cfg: &tauri_specta::BuilderConfiguration,
+        _path: &Path,
+    ) -> Result<(), std::io::Error> {
+        *self.0.borrow_mut() = cfg.commands.iter().map(|f| f.name().to_string()).collect();
+        Ok(())
+    }
+}
+
+/// The IPC command names actually registered via `collect_commands!`.
+fn ipc_command_names() -> BTreeSet<String> {
+    let sink = NameSink(RefCell::new(Vec::new()));
+    oxplow_tauri_ipc::specta_builder()
+        // The path is ignored by NameSink::export — nothing is written.
+        .export(&sink, Path::new("parity-name-sink-unused"))
+        .expect("NameSink export is infallible");
+    sink.0.into_inner().into_iter().collect()
+}
+
+/// The MCP tool names actually registered via `#[tool]`.
+fn mcp_tool_names() -> BTreeSet<String> {
+    oxplow_mcp::registered_tool_names().into_iter().collect()
+}
+
+#[test]
+fn surface_parity() {
+    // The manifest must be internally well-formed before comparing surfaces.
+    let shape = manifest_shape_errors();
+    assert!(
+        shape.is_empty(),
+        "manifest shape errors:\n{}",
+        shape.join("\n")
+    );
+
+    let ipc = ipc_command_names();
+    let mcp = mcp_tool_names();
+
+    let ipc_in_manifest: BTreeSet<&str> = MANIFEST.iter().filter_map(|c| c.ipc).collect();
+    let mcp_in_manifest: BTreeSet<&str> = MANIFEST.iter().filter_map(|c| c.mcp).collect();
+
+    let mut problems: Vec<String> = Vec::new();
+
+    // (a) Every actually-registered op has a manifest row, and no row names a
+    //     command/tool that no longer exists.
+    let unclassified_ipc: Vec<&str> = ipc
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !ipc_in_manifest.contains(n))
+        .collect();
+    if !unclassified_ipc.is_empty() {
+        problems.push(format!(
+            "IPC commands with no manifest row — classify each in MANIFEST \
+             (Both/UiOnly/AgentTodo): {unclassified_ipc:?}"
+        ));
+    }
+    let unclassified_mcp: Vec<&str> = mcp
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !mcp_in_manifest.contains(n))
+        .collect();
+    if !unclassified_mcp.is_empty() {
+        problems.push(format!(
+            "MCP tools with no manifest row — classify each in MANIFEST \
+             (Both/AgentOnly, or flip an AgentTodo row): {unclassified_mcp:?}"
+        ));
+    }
+    let dangling_ipc: Vec<&str> = ipc_in_manifest
+        .iter()
+        .copied()
+        .filter(|n| !ipc.contains(*n))
+        .collect();
+    if !dangling_ipc.is_empty() {
+        problems.push(format!(
+            "manifest names IPC commands that aren't registered (rename/remove the row): {dangling_ipc:?}"
+        ));
+    }
+    let dangling_mcp: Vec<&str> = mcp_in_manifest
+        .iter()
+        .copied()
+        .filter(|n| !mcp.contains(*n))
+        .collect();
+    if !dangling_mcp.is_empty() {
+        problems.push(format!(
+            "manifest names MCP tools that aren't registered (rename/remove the row): {dangling_mcp:?}"
+        ));
+    }
+
+    // (b) Both rows present on both surfaces; (c) UiOnly/AgentOnly don't leak.
+    for c in MANIFEST {
+        match c.exposure {
+            Exposure::Both => {
+                let (i, m) = (c.ipc.unwrap(), c.mcp.unwrap());
+                if !ipc.contains(i) {
+                    problems.push(format!("Both `{}` missing IPC command `{i}`", c.capability));
+                }
+                if !mcp.contains(m) {
+                    problems.push(format!("Both `{}` missing MCP tool `{m}`", c.capability));
+                }
+            }
+            Exposure::UiOnly => {
+                // A leak is a tool that shares this command's name AND isn't
+                // already claimed by another row's `mcp` — the latter guards
+                // legitimate cross-surface name collisions (e.g. IPC
+                // `delete_wiki_page` deletes a page; the MCP tool of the same
+                // name deletes a note and is claimed by the `note.delete` row).
+                let i = c.ipc.unwrap();
+                if mcp.contains(i) && !mcp_in_manifest.contains(i) {
+                    problems.push(format!(
+                        "UiOnly `{}` leaked onto MCP as `{i}` — reclassify as Both",
+                        c.capability
+                    ));
+                }
+            }
+            Exposure::AgentOnly => {
+                let m = c.mcp.unwrap();
+                if ipc.contains(m) && !ipc_in_manifest.contains(m) {
+                    problems.push(format!(
+                        "AgentOnly `{}` leaked onto IPC as `{m}` — reclassify as Both",
+                        c.capability
+                    ));
+                }
+            }
+            Exposure::AgentTodo => {
+                let i = c.ipc.unwrap();
+                if !ipc.contains(i) {
+                    problems.push(format!(
+                        "AgentTodo `{}` names IPC command `{i}` that isn't registered",
+                        c.capability
+                    ));
+                }
+            }
+        }
+    }
+
+    // (d) Print the tracked gap backlog (visible under `--nocapture` / CI logs).
+    let mut backlog: Vec<&str> = MANIFEST
+        .iter()
+        .filter(|c| c.exposure == Exposure::AgentTodo)
+        .filter_map(|c| c.ipc)
+        .collect();
+    backlog.sort_unstable();
+    println!(
+        "\n=== MCP parity backlog: {} AgentTodo gaps ===",
+        backlog.len()
+    );
+    for name in &backlog {
+        println!("  {name}");
+    }
+    println!("=== end MCP parity backlog ===\n");
+
+    assert!(
+        problems.is_empty(),
+        "surface parity violations ({} actual IPC / {} actual MCP):\n{}",
+        ipc.len(),
+        mcp.len(),
+        problems.join("\n")
+    );
+}

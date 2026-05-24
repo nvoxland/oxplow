@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use oxplow_app::code_quality_runner::{
-    run_duplication_scan, run_duplication_scan_scoped, run_metrics_scan, RunOptions,
-};
+use oxplow_app::code_quality_runner::run_duplication_scan_scoped;
 use oxplow_app::{BackgroundTaskKind, CodeQualityScanPhase, OxplowEvent, StartInput};
 use oxplow_code_deps::{
     diff_edges, extract_imports, zone_for_resolved_edge, zone_for_unresolved_edge, ImportEdge,
@@ -53,98 +51,14 @@ pub async fn run_code_quality_scan(
     scope: String,
     files: Option<Vec<String>>,
 ) -> Result<i64, IpcError> {
-    let project = state.layout.project_dir.clone();
-    let opts = RunOptions {
-        files: files.unwrap_or_default(),
-        timeout: None,
-        dup_options: None,
-    };
-    let scan_id = state.code_quality_store.create_scan(&tool, &scope).await?;
-    state.events.emit(OxplowEvent::CodeQualityScanned {
-        stream_id: None,
-        scan_id,
-        tool: tool.clone(),
-        scope: scope.clone(),
-        phase: CodeQualityScanPhase::Started,
-    });
-    let workspace_filter = {
-        let cfg = state.config.read();
-        cfg.as_ref()
-            .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
-            .unwrap_or_default()
-    };
-    let findings_result = match tool.as_str() {
-        "metrics" => run_metrics_scan(&project, opts, workspace_filter.clone()).await,
-        "duplication" => run_duplication_scan(&project, opts, workspace_filter.clone()).await,
-        other => {
-            state
-                .code_quality_store
-                .finish_scan(
-                    scan_id,
-                    CodeQualityScanStatus::Failed,
-                    Some(format!("unknown tool: {other}")),
-                )
-                .await?;
-            state.events.emit(OxplowEvent::CodeQualityScanned {
-                stream_id: None,
-                scan_id,
-                tool: tool.clone(),
-                scope: scope.clone(),
-                phase: CodeQualityScanPhase::Failed,
-            });
-            return Err(IpcError::invalid(format!(
-                "unknown code quality tool: {other}"
-            )));
-        }
-    };
-    match findings_result {
-        Ok(findings) => {
-            for f in findings {
-                state
-                    .code_quality_store
-                    .append_finding(
-                        scan_id,
-                        oxplow_db::CodeQualityFinding {
-                            id: 0,
-                            scan_id,
-                            path: f.path,
-                            start_line: f.start_line as i32,
-                            end_line: f.end_line as i32,
-                            kind: f.kind,
-                            metric_value: f.metric_value,
-                            extra_json: f.extra_json,
-                        },
-                    )
-                    .await?;
-            }
-            state
-                .code_quality_store
-                .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
-                .await?;
-            state.events.emit(OxplowEvent::CodeQualityScanned {
-                stream_id: None,
-                scan_id,
-                tool: tool.clone(),
-                scope: scope.clone(),
-                phase: CodeQualityScanPhase::Completed,
-            });
-        }
-        Err(e) => {
-            state
-                .code_quality_store
-                .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
-                .await?;
-            state.events.emit(OxplowEvent::CodeQualityScanned {
-                stream_id: None,
-                scan_id,
-                tool: tool.clone(),
-                scope: scope.clone(),
-                phase: CodeQualityScanPhase::Failed,
-            });
-            return Err(IpcError::internal(e.to_string()));
-        }
-    }
-    Ok(scan_id)
+    use oxplow_app::code_quality_runner::CodeQualityError;
+    state
+        .run_code_quality_scan(tool, scope, files)
+        .await
+        .map_err(|e| match e {
+            CodeQualityError::UnknownTool(_) => IpcError::invalid(e.to_string()),
+            other => IpcError::internal(other.to_string()),
+        })
 }
 
 /// File filter the renderer can request: `all` (whole corpus) or an

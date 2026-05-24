@@ -10,6 +10,7 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-git = { workspace = true }
 rmcp = { workspace = true }
 schemars = "1"
 tokio = { workspace = true }

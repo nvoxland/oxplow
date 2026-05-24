@@ -1,0 +1,18 @@
+[package]
+name = "oxplow-surface-parity"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# Dev-only crate: nothing in the workspace depends on it. Its sole job is
+# the cross-surface parity test (`tests/parity.rs`). The MANIFEST in
+# `src/lib.rs` is pure data and carries no dependencies; the enumeration of
+# the two real adapter surfaces happens in the test, hence the dev-deps.
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+oxplow-tauri-ipc = { workspace = true }
+oxplow-mcp = { workspace = true }
+tauri-specta = { workspace = true }

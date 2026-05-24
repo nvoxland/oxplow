@@ -22,6 +22,7 @@ members = [
     "crates/oxplow-code-dup",
     "crates/oxplow-code-deps",
     "crates/oxplow-tree-source",
+    "crates/oxplow-surface-parity",
 ]
 
 [workspace.package]
