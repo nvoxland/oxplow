@@ -31,7 +31,7 @@ function installFakeWindow(): Map<string, Set<Listener>> {
   return listeners;
 }
 
-const { installUiLogging, uninstallUiLogging } = await import("./logger.js");
+const { installUiLogging, uninstallUiLogging, evaluateStall } = await import("./logger.js");
 
 afterEach(() => {
   // Reset module singleton state, then restore the real globals.
@@ -72,4 +72,27 @@ test("re-install is idempotent (no duplicate listeners)", () => {
 test("uninstall before install is a safe no-op", () => {
   installFakeWindow();
   expect(() => uninstallUiLogging()).not.toThrow();
+});
+
+test("evaluateStall: a normal tick (elapsed ≈ expected) is not a stall", () => {
+  const r = evaluateStall({ actualElapsedMs: 1010, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  expect(r.stalled).toBe(false);
+  expect(r.blockedMs).toBe(10);
+});
+
+test("evaluateStall: a long drift while visible is a stall, blockedMs = drift", () => {
+  const r = evaluateStall({ actualElapsedMs: 2840, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  expect(r.stalled).toBe(true);
+  expect(r.blockedMs).toBe(1840);
+});
+
+test("evaluateStall: drift below the threshold is not a stall", () => {
+  const r = evaluateStall({ actualElapsedMs: 1900, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  expect(r.stalled).toBe(false);
+});
+
+test("evaluateStall: a hidden window never counts as a stall (timer throttling)", () => {
+  const r = evaluateStall({ actualElapsedMs: 60_000, expectedMs: 1000, thresholdMs: 1000, wasHidden: true });
+  expect(r.stalled).toBe(false);
+  expect(r.blockedMs).toBe(59_000);
 });

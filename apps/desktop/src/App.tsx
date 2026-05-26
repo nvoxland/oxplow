@@ -145,7 +145,7 @@ import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { SearchPalette } from "./components/SearchPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
-import { logUi } from "./logger.js";
+import { logUi, setUiLogContext } from "./logger.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
 // when this is exceeded, the oldest-touched tab without unsaved changes is
@@ -1621,6 +1621,17 @@ export function App() {
     return ids;
   }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
+
+  // Feed the stall watchdog (logger.ts) the coarse "what's on screen"
+  // context so a `main thread stalled` WARN names the active page + the
+  // open file, not just a duration.
+  useEffect(() => {
+    setUiLogContext({
+      streamId: stream?.id ?? null,
+      centerActive: effectiveCenterActive,
+      filePath: selectedFilePath ?? null,
+    });
+  }, [stream?.id, effectiveCenterActive, selectedFilePath]);
 
   // Central page-visit recorder. Fires whenever the resolved active
   // tab changes — covers new-tab opens (any handler), switching to an
