@@ -21,6 +21,23 @@ impl From<TerminalSessionError> for IpcError {
     }
 }
 
+/// Build the PTY session key for a shell terminal, or `None` for a
+/// non-shell `pane_target`.
+///
+/// `pane_target` is either the bare `"shell"` (the default Terminal-page
+/// terminal — kept verbatim so it reattaches the existing persistent
+/// shell after this upgrade) or `"shell:<id>"` for an additional
+/// terminal. The full `pane_target` rides inside the key so each terminal
+/// id resolves to its own PTY; the bare-shell case reproduces the legacy
+/// `{stream}|shell|{mode}` key exactly.
+fn shell_session_key(stream_id: &str, pane_target: &str, transport_mode: &str) -> Option<String> {
+    if pane_target == "shell" || pane_target.starts_with("shell:") {
+        Some(format!("{stream_id}|{pane_target}|{transport_mode}"))
+    } else {
+        None
+    }
+}
+
 /// Open a renderer-attached terminal session.
 ///
 /// Two transports, mirroring the main-branch design:
@@ -43,15 +60,18 @@ pub async fn open_terminal_session(
     // The "shell" pane is a plain interactive terminal (the Terminal
     // page), not the agent: spawn the user's $SHELL rooted at the
     // worktree dir with no agent command, plugin, or system prompt.
-    if pane_target == "shell" {
+    // `shell:<id>` is an additional terminal in the same page — each id
+    // gets its own PTY.
+    if pane_target == "shell" || pane_target.starts_with("shell:") {
         let stream = match state.streams.current().await? {
             Some(s) => s,
             None => state.streams.ensure_primary().await?,
         };
         let cols = cols.max(20);
         let rows = rows.max(5);
-        // One persistent shell per stream; re-attach resumes it.
-        let session_key = format!("{}|shell|{}", stream.id.0, transport_mode);
+        // One persistent shell per (stream, terminal id); re-attach resumes it.
+        let session_key = shell_session_key(&stream.id.0, &pane_target, &transport_mode)
+            .expect("pane_target was verified to be a shell target above");
         let cwd = std::path::PathBuf::from(&stream.worktree_path);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let result = state
@@ -294,4 +314,39 @@ pub async fn terminate_terminal_session(
 ) -> Result<(), IpcError> {
     let _ = state.terminal_sessions.close(&session_id).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_session_key;
+
+    #[test]
+    fn bare_shell_keeps_legacy_key() {
+        // The default Terminal-page terminal must reattach the existing
+        // persistent shell after the upgrade, so its key is unchanged
+        // from the old `{stream}|shell|{mode}` form.
+        assert_eq!(
+            shell_session_key("s-1", "shell", "direct").as_deref(),
+            Some("s-1|shell|direct"),
+        );
+    }
+
+    #[test]
+    fn additional_shell_gets_its_own_key() {
+        assert_eq!(
+            shell_session_key("s-1", "shell:t2", "direct").as_deref(),
+            Some("s-1|shell:t2|direct"),
+        );
+        // Distinct from the default terminal's key.
+        assert_ne!(
+            shell_session_key("s-1", "shell:t2", "direct"),
+            shell_session_key("s-1", "shell", "direct"),
+        );
+    }
+
+    #[test]
+    fn non_shell_target_is_none() {
+        assert_eq!(shell_session_key("s-1", "working", "direct"), None);
+        assert_eq!(shell_session_key("s-1", "talking", "tmux"), None);
+    }
 }

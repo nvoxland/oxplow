@@ -169,6 +169,16 @@ function buildBridge() {
         // Idempotent close.
       }
     },
+    /// Permanently kill the PTY behind `sessionId` (vs `closeTerminalSession`,
+    /// which only detaches and leaves the shell running). Used when a
+    /// terminal tab is explicitly closed.
+    terminateTerminalSession: async (sessionId: string): Promise<void> => {
+      try {
+        unwrap(await commands.terminateTerminalSession(sessionId));
+      } catch {
+        // Idempotent terminate.
+      }
+    },
     sendTerminalMessage: async (sessionId: string, message: string): Promise<void> => {
       unwrap(await commands.sendTerminalMessage(sessionId, message));
     },

@@ -339,6 +339,17 @@ declaring *what it is* and mounting the generic layer.
     reachable via the kebab → `menu-item-thread.promote` /
     `menu-item-thread.complete` — keyboard-first users should never
     have to hover to promote a thread)
+  - `terminal-tab-strip` on the Terminal page's left initials strip;
+    `terminal-tab-<id>` on each terminal's glyph button (click to
+    activate). Hovering the strip slides out an overlay
+    (`terminal-tab-overlay`) with full titles; per-row actions live on a
+    kebab `⋯` (`terminal-tab-kebab-<id>`) — modeled on the Navigator,
+    not right-click — with `menu-item-terminal.rename` (opens the inline
+    `terminal-tab-rename-input-<id>`; double-clicking the overlay title
+    also renames) and `menu-item-terminal.close` (kills the shell;
+    disabled when only one terminal remains). `terminal-tab-new` on the
+    strip's "+" button and `terminal-tab-new-overlay` on the overlay's
+    "+ New terminal" button
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
 ## Feedback

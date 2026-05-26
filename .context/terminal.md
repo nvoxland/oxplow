@@ -13,12 +13,22 @@ consumer. It's mounted by two page renderers:
 - `apps/desktop/src/pages/AgentPage.tsx` — the agent tab, `paneTarget`
   `"working"` / `"talking"`. The backend spawns the agent CLI.
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
-  entry + `indexRef("terminal")`), `paneTarget` `"shell"`. The backend
-  (`commands/terminal.rs`) early-branches on `"shell"` to spawn the
-  user's `$SHELL -l` (fallback `/bin/sh`) rooted at
-  `stream.worktree_path` — no agent command, plugin, or system prompt.
-  One persistent shell per stream (session key `<stream>|shell|<mode>`).
-  No `onUserInterrupt`: Escape is an ordinary shell keystroke here.
+  entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
+  one `TerminalPane` per terminal, stacked and toggled `display:none`
+  (keep-warm), with a vertical initials strip
+  (`components/Terminal/TerminalTabStrip.tsx`) on the left to select
+  between them. The strip mirrors the far-left `Navigator`: a thin
+  always-visible glyph column, and on hover an overlay slides out with
+  full titles + a per-row kebab `⋯` menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
+  (default) terminal and `shell:<id>` for the rest. The backend
+  (`commands/terminal.rs`) early-branches on `pane_target == "shell" ||
+  starts_with("shell:")` to spawn the user's `$SHELL -l` (fallback
+  `/bin/sh`) rooted at `stream.worktree_path` — no agent command,
+  plugin, or system prompt. One persistent shell per (stream, terminal
+  id) (session key `<stream>|<pane_target>|<mode>`, so the bare-`shell`
+  default reproduces the old `<stream>|shell|<mode>` key and reattaches
+  its existing PTY). No `onUserInterrupt`: Escape is an ordinary shell
+  keystroke here. See "Multiple terminals" below.
 
 Both go through the same component; only the `paneTarget` (and thus the
 server-side spawn) differs.
@@ -35,6 +45,45 @@ The component owns:
 - Drag-drop "Add to agent context" support (see
   `.context/usability.md` for the convention).
 - The file-path link provider (see below).
+
+## Multiple terminals (Terminal page)
+
+`TerminalPage` owns a per-stream list of terminals and renders one
+`TerminalPane` per entry. The pure list logic lives in
+`apps/desktop/src/components/Terminal/terminalTabs.ts` (unit-tested):
+`addTerminal` (auto-numbers "Terminal N", collision-safe), `closeTerminal`
+(picks a neighbor as the new active; re-seeds a default when the last one
+closes), `renameTerminal`, `normalizeTerminalList`, plus
+`paneTargetFor(id)` / `commentTargetFor(streamId, id)`.
+
+The strip (`TerminalTabStrip.tsx`) follows the `Navigator` hover-expand
+pattern: clicking a glyph activates; rename and close are kebab `⋯` menu
+items in the hover overlay (rename opens an inline input in the overlay
+row; close is disabled when only one terminal remains). Close is **not**
+an inline `InlineConfirm` `×` anymore — it matches the stream/thread nav.
+
+- **The first terminal uses the sentinel id `DEFAULT_TERMINAL_ID`
+  (`"default"`)** → bare `"shell"` pane target + `stream.id` comment
+  target. This is the back-compat hinge: the pre-multi-terminal single
+  shell and any comments anchored to it keep working with zero migration.
+  Additional terminals get random ids → `shell:<id>` pane target +
+  `<streamId>:<id>` comment target.
+- **Persistence** mirrors `App.tsx`'s `oxplow.layout.v1.*` blobs:
+  `oxplow.layout.v1.terminalTabs` is `Record<streamId, {id,title}[]>`,
+  `oxplow.layout.v1.terminalActive` is `Record<streamId, terminalId>`.
+  The backend session registry is in-memory, so after an app restart the
+  list (titles/order/active) is restored but the shells re-spawn fresh.
+- **Each pane is keyed `${stream.id}:${id}`** so a stream switch remounts
+  it against the right stream's worktree.
+- **Close kills, switch detaches.** `TerminalPane` gains a
+  `terminateOnUnmount?` prop: when set, unmount calls
+  `terminateTerminalSession` (kill PTY) instead of `closeTerminalSession`
+  (detach). The page only sets it on a terminal that the user explicitly
+  closed, via a two-phase `closingIds` set: the pane first re-renders
+  with `terminateOnUnmount` true, then the effect removes it from the
+  list so the resulting unmount kills the shell. Stream switches and
+  closing the whole Terminal page tab unmount with the flag false →
+  detach, so those shells survive and reattach.
 
 ## File-path link provider
 
@@ -96,7 +145,10 @@ know HOME).
 `TerminalPane` accepts an optional `comments` prop (`{ streamId,
 threadId, targetKind, targetId }`); `AgentPage` passes
 `{ targetKind: "agent", targetId: thread.id }` and `TerminalPage` passes
-`{ targetKind: "terminal", targetId: stream.id, threadId: null }`. When
+`{ targetKind: "terminal", targetId: commentTargetFor(stream.id, id),
+threadId: null }` — i.e. `stream.id` for the default terminal (preserving
+pre-multi-terminal comments) and `<streamId>:<id>` for the rest, so each
+terminal's buffer comments stay isolated. When
 set, `components/Comments/TerminalCommentLayer.tsx` mounts against the
 live `Terminal` (exposed via a `term` state set right after `term.open`).
 The terminal is in the editor/terminal carve-out, so the app-level
@@ -143,8 +195,10 @@ each scans the same line. Examples for the future:
   pty's live cwd) → update the resolution section.
 - Added a new TerminalPane mount site (today: AgentPage + TerminalPage)
   → call out the new host so future work doesn't assume one consumer.
-- Added a new `pane_target` (today: working / talking / shell) → note
-  what the backend spawns for it.
+- Added a new `pane_target` (today: working / talking / shell /
+  `shell:<id>`) → note what the backend spawns for it.
+- Changed how the Terminal page manages its terminal list, persistence,
+  or the kill-vs-detach close path → update "Multiple terminals".
 - Changed terminal comment anchoring (buffer serialization, the
   `TerminalBufferSelector`, or the decoration painting) → update the
   commenting section.

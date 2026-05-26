@@ -117,6 +117,7 @@ export function TerminalPane({
   worktreePath,
   onOpenFile,
   comments,
+  terminateOnUnmount,
 }: {
   paneTarget: string;
   visible: boolean;
@@ -139,6 +140,11 @@ export function TerminalPane({
   /// output can be commented, anchored to the buffer text and targeted at
   /// this page ref. `threadId` is null for the shell terminal.
   comments?: { streamId: string; threadId: string | null; targetKind: string; targetId: string };
+  /// When set, unmounting kills the PTY (`terminateTerminalSession`)
+  /// instead of merely detaching (`closeTerminalSession`). The Terminal
+  /// page sets this so removing a terminal tab terminates its shell;
+  /// tab-switches keep the default detach so the shell survives.
+  terminateOnUnmount?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -156,6 +162,10 @@ export function TerminalPane({
   const onOpenFileRef = useRef<typeof onOpenFile>(onOpenFile);
   worktreePathRef.current = worktreePath;
   onOpenFileRef.current = onOpenFile;
+  // Mirror so the session-open effect's cleanup (which captures values at
+  // mount, deps `[paneTarget, transportMode]`) sees the latest flag.
+  const terminateOnUnmountRef = useRef<boolean>(!!terminateOnUnmount);
+  terminateOnUnmountRef.current = !!terminateOnUnmount;
 
   function setInteractionMode(next: "live" | "history") {
     modeRef.current = next;
@@ -563,7 +573,11 @@ export function TerminalPane({
       termRef.current = null;
       setTerm(null);
       if (sessionId) {
-        void desktopBridge().closeTerminalSession(sessionId);
+        if (terminateOnUnmountRef.current) {
+          void desktopBridge().terminateTerminalSession(sessionId);
+        } else {
+          void desktopBridge().closeTerminalSession(sessionId);
+        }
       }
       term.dispose();
     };

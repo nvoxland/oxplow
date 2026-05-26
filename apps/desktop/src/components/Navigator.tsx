@@ -5,6 +5,7 @@ import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 import { Slideover } from "./Slideover.js";
+import { titleInitials } from "../initials.js";
 
 interface NavigatorProps {
   streams: Stream[];
@@ -229,7 +230,7 @@ export function Navigator({
               return (
                 <StripRow
                   key={`s-${row.stream.id}`}
-                  letter={firstLetter(row.stream.title)}
+                  letter={titleInitials(row.stream.title)}
                   isStream
                   isFirstStream={row.stream.id === orderedStreams[0]?.id}
                   isWriter={false}
@@ -244,7 +245,7 @@ export function Navigator({
             return (
               <StripRow
                 key={`t-${row.thread.id}`}
-                letter={firstLetter(row.thread.title)}
+                letter={titleInitials(row.thread.title)}
                 isStream={false}
                 isWriter={row.isWriter}
                 selected={isSelected}
@@ -323,7 +324,7 @@ export function Navigator({
                 return (
                   <OverlayRow
                     key={`o-s-${row.stream.id}`}
-                    letter={firstLetter(row.stream.title)}
+                    letter={titleInitials(row.stream.title)}
                     label={row.stream.title}
                     isStream
                     isFirstStream={row.stream.id === orderedStreams[0]?.id}
@@ -392,7 +393,7 @@ export function Navigator({
               return (
                 <OverlayRow
                   key={`o-t-${row.thread.id}`}
-                  letter={firstLetter(row.thread.title)}
+                  letter={titleInitials(row.thread.title)}
                   label={row.thread.title}
                   isStream={false}
                   isWriter={row.isWriter}
@@ -891,22 +892,6 @@ function InlineNewThread({
       />
     </form>
   );
-}
-
-function firstLetter(s: string): string {
-  const trimmed = s.trim();
-  if (!trimmed) return "?";
-  // Two-letter glyph: prefer the initials of the first two
-  // whitespace-separated words ("Git Dashboard" → "GD"); fall back to
-  // the first two characters of a single word ("oxplow" → "Ox").
-  const parts = trimmed.split(/\s+/);
-  if (parts.length >= 2 && parts[1].length > 0) {
-    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
-  }
-  if (trimmed.length >= 2) {
-    return (trimmed.charAt(0).toUpperCase() + trimmed.charAt(1).toLowerCase());
-  }
-  return trimmed.charAt(0).toUpperCase();
 }
 
 // Glyph sizing. The two-letter glyph runs a touch above body text
