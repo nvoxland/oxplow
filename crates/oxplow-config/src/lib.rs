@@ -75,6 +75,13 @@ pub struct CollectionConfig {
     /// Report format: `cobertura` | `lcov` | `jacoco-xml`.
     #[serde(rename = "coverageFormat")]
     pub coverage_format: Option<String>,
+    /// Repo-relative path the test tooling writes its machine-readable
+    /// test report to (for the individual-tests tree). JUnit XML.
+    #[serde(rename = "testReportPath")]
+    pub test_report_path: Option<String>,
+    /// Test-report format: `junit`.
+    #[serde(rename = "testReportFormat")]
+    pub test_report_format: Option<String>,
     /// Extra command substrings that count as a test run, on top of the
     /// built-in defaults (pytest, cargo test, jest, …).
     #[serde(rename = "testRunPatterns")]
@@ -164,6 +171,10 @@ struct RawCollectionBlock {
     coverage_report_path: Option<String>,
     #[serde(rename = "coverageFormat", default)]
     coverage_format: Option<String>,
+    #[serde(rename = "testReportPath", default)]
+    test_report_path: Option<String>,
+    #[serde(rename = "testReportFormat", default)]
+    test_report_format: Option<String>,
     #[serde(rename = "testRunPatterns", default)]
     test_run_patterns: Option<Vec<String>>,
 }
@@ -349,6 +360,8 @@ pub fn write_project_config(
     if c.test_command.is_some()
         || c.coverage_report_path.is_some()
         || c.coverage_format.is_some()
+        || c.test_report_path.is_some()
+        || c.test_report_format.is_some()
         || !c.test_run_patterns.is_empty()
     {
         let mut col = serde_yaml::Mapping::new();
@@ -360,6 +373,12 @@ pub fn write_project_config(
         }
         if let Some(v) = &c.coverage_format {
             col.insert("coverageFormat".into(), v.clone().into());
+        }
+        if let Some(v) = &c.test_report_path {
+            col.insert("testReportPath".into(), v.clone().into());
+        }
+        if let Some(v) = &c.test_report_format {
+            col.insert("testReportFormat".into(), v.clone().into());
         }
         if !c.test_run_patterns.is_empty() {
             col.insert(
@@ -525,6 +544,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 /// `oxplow_coverage::CoverageFormat::from_name`; duplicated here so the
 /// config crate stays dependency-light.
 const KNOWN_COVERAGE_FORMATS: &[&str] = &["cobertura", "lcov", "jacoco", "jacoco-xml"];
+const KNOWN_TEST_REPORT_FORMATS: &[&str] = &["junit"];
 
 fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConfig, ConfigError> {
     let Some(raw) = raw else {
@@ -536,6 +556,17 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
             if !KNOWN_COVERAGE_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
                 return Err(ConfigError::Invalid(format!(
                     "collection.coverageFormat must be one of cobertura | lcov | jacoco-xml (got \"{fmt}\")"
+                )));
+            }
+            Some(fmt)
+        }
+        None => None,
+    };
+    let test_report_format = match opt_trimmed(raw.test_report_format) {
+        Some(fmt) => {
+            if !KNOWN_TEST_REPORT_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "collection.testReportFormat must be `junit` (got \"{fmt}\")"
                 )));
             }
             Some(fmt)
@@ -562,6 +593,8 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
         test_command: opt_trimmed(raw.test_command),
         coverage_report_path: opt_trimmed(raw.coverage_report_path),
         coverage_format,
+        test_report_path: opt_trimmed(raw.test_report_path),
+        test_report_format,
         test_run_patterns,
     })
 }
@@ -806,6 +839,8 @@ collection:
   testCommand: cargo test
   coverageReportPath: target/coverage/lcov.info
   coverageFormat: lcov
+  testReportPath: target/nextest/junit.xml
+  testReportFormat: junit
   testRunPatterns:
     - cargo nextest
 "#,
@@ -818,7 +853,24 @@ collection:
             Some("target/coverage/lcov.info")
         );
         assert_eq!(cfg.collection.coverage_format.as_deref(), Some("lcov"));
+        assert_eq!(
+            cfg.collection.test_report_path.as_deref(),
+            Some("target/nextest/junit.xml")
+        );
+        assert_eq!(cfg.collection.test_report_format.as_deref(), Some("junit"));
         assert_eq!(cfg.collection.test_run_patterns, vec!["cargo nextest"]);
+    }
+
+    #[test]
+    fn rejects_unknown_test_report_format() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "collection:\n  testReportFormat: tap\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("testReportFormat")));
     }
 
     #[test]
@@ -841,6 +893,8 @@ collection:
                 test_command: Some("pytest".into()),
                 coverage_report_path: Some("coverage.xml".into()),
                 coverage_format: Some("cobertura".into()),
+                test_report_path: Some("junit.xml".into()),
+                test_report_format: Some("junit".into()),
                 test_run_patterns: vec!["tox".into()],
             },
             ..default_config("test".into())

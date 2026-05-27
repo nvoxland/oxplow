@@ -13,7 +13,7 @@ automatic; your job is small and is about making sure the data exists,
 ## The one rule
 
 When you finish work on a task, **run the project's tests before you
-`complete_task`**, so a fresh coverage report exists for oxplow to
+`complete_task`**, so fresh test + coverage reports exist for oxplow to
 attribute to the effort. The test command is recorded in the
 `collection:` block of `oxplow.yaml` (`testCommand`).
 
@@ -22,12 +22,13 @@ attribute to the effort. The test command is recorded in the
 - **Test runs are observed automatically.** When you run the tests via
   Bash, oxplow's PostToolUse hook records a `test-run` observation
   against the open effort (command + exit code). You don't report it.
-- **Coverage is parsed by oxplow, not you.** If `collection.coverageReportPath`
-  is configured, oxplow reads + parses that report (cobertura / lcov /
-  jacoco-xml) after a detected test run and stores a `diff-coverage`
-  observation over the effort's changed lines. **Never read the report
-  and type the numbers** — that would make the figure `asserted` and
-  untrustworthy. Let oxplow do it (`observed`).
+- **Individual tests + coverage are parsed by oxplow, not you.** If
+  `collection.testReportPath` (JUnit) is configured, oxplow parses it
+  into the per-test tree; if `collection.coverageReportPath` is
+  configured (cobertura / lcov / jacoco-xml), oxplow parses it into
+  diff coverage over the effort's changed lines. **Never read either
+  report and type the numbers/test names** — that would make them
+  `asserted` and untrustworthy. Let oxplow do it (`observed`).
 
 ## When the data is missing
 

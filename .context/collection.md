@@ -34,13 +34,16 @@ section for the column.
   effort's snapshot bracket). Full schema in
   [data-model.md](./data-model.md).
 - **`oxplow-coverage` parser** (`crates/oxplow-coverage/`). Deterministic
-  parsing of **cobertura**, **lcov**, and **jacoco-xml** into a uniform
-  per-file `{ instrumented, covered }` line-set map. This is the *one place
-  coverage numbers originate*. Paths are report-relative; the caller maps
-  them to repo-relative paths.
+  report parsing: **cobertura**, **lcov**, and **jacoco-xml** into a uniform
+  per-file `{ instrumented, covered }` line-set map (`parse`), plus **JUnit**
+  XML into a `TestReport { suites → cases }` tree (`parse_junit`). This is the
+  *one place test/coverage numbers originate*. Paths/classnames are verbatim
+  from the report; the caller maps paths to repo-relative and the UI builds
+  the test tree from `classname`+`name`.
 - **Collection profile** (`collection:` block in `oxplow.yaml`, parsed by
   `crates/oxplow-config/src/lib.rs`): `testCommand`, `coverageReportPath`,
-  `coverageFormat`, `testRunPatterns`. All optional — an unconfigured
+  `coverageFormat`, `testReportPath`, `testReportFormat` (`junit`),
+  `testRunPatterns`. All optional — an unconfigured
   project collects nothing extra. `coverageFormat` is validated against the
   parser's known set. Edits to the block are hot-reloaded by the config
   watcher (`ConfigWatcher`, see `git-integration.md`), so `/oxplow:configure`
@@ -67,6 +70,12 @@ hook + MCP wiring):
   report (e.g. `cargo test` when coverage comes from a separate `cargo cov`)
   leaves a report from a prior effort, and attributing it here would be
   misleading (`CoverageIngest::StaleReport`).
+  **Individual tests:** when `testReportPath`/`testReportFormat` (JUnit) is
+  configured and the report is fresh (same mtime guard), the ride-along
+  parses it via `oxplow_coverage::parse_junit` and embeds the suite/case
+  tree + pass/fail/skip counts in the same `test-run` observation payload
+  (`suites`). The UI builds a tech-natural tree by splitting each case's
+  `classname` on `::`/`.`.
 - **Active (MCP)** — `ingest_coverage` is a thin explicit entry point (same
   deterministic parse path) for on-demand or non-standard-location reports.
   It passes `skip_if_stale = false`, so it ingests regardless of mtime — the

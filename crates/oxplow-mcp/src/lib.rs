@@ -1409,6 +1409,7 @@ impl OxplowMcp {
                 params.0.total,
                 "asserted",
                 "agent",
+                None,
             )
             .await
             .map_err(internal)?;

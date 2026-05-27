@@ -6,9 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-# Cobertura + JaCoCo are XML; lcov is plain text (no parser dep).
+# Cobertura + JaCoCo + JUnit are XML; lcov is plain text (no parser dep).
 quick-xml = { workspace = true }
 thiserror = { workspace = true }
+# Test-report types derive Serialize so the runtime can embed the parsed
+# suite/case tree directly in an observation payload.
+serde = { workspace = true }
 
 [lints]
 workspace = true

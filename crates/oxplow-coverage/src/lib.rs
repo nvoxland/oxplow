@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoverageFormat {
@@ -212,6 +213,145 @@ fn parse_lcov(content: &str) -> CoverageReport {
     report
 }
 
+// ---------------- JUnit test reports ----------------
+
+/// Outcome of a single test case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TestStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TestCase {
+    /// JUnit `classname` — the grouping path (Rust module path, pytest
+    /// file·class, jest describe path). The UI builds its tree by
+    /// splitting this on `::` / `.`.
+    pub classname: String,
+    pub name: String,
+    pub status: TestStatus,
+    #[serde(rename = "timeMs", skip_serializing_if = "Option::is_none")]
+    pub time_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TestSuite {
+    pub name: String,
+    pub cases: Vec<TestCase>,
+}
+
+/// A parsed JUnit report: suites → cases. Tech-agnostic — every framework
+/// that emits JUnit XML (pytest, jest, go-junit-report, cargo-nextest, …)
+/// lands here, so individual test results stay `observed`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct TestReport {
+    pub suites: Vec<TestSuite>,
+}
+
+fn junit_case(e: &BytesStart) -> Result<TestCase, CoverageParseError> {
+    Ok(TestCase {
+        classname: attr_str(e, b"classname")?.unwrap_or_default(),
+        name: attr_str(e, b"name")?.unwrap_or_default(),
+        status: TestStatus::Passed,
+        time_ms: attr_str(e, b"time")?
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .map(|secs| (secs * 1000.0).round() as u64),
+    })
+}
+
+/// Append a finished case to the current suite, lazily creating an
+/// anonymous suite for reports with loose `<testcase>`s (the suite is
+/// flushed into the report on `</testsuite>` or at EOF).
+fn junit_push(suite: &mut Option<TestSuite>, c: TestCase) {
+    suite
+        .get_or_insert_with(|| TestSuite {
+            name: String::new(),
+            cases: Vec::new(),
+        })
+        .cases
+        .push(c);
+}
+
+/// Parse JUnit XML into a uniform suite/case tree. Tolerant of both the
+/// single-`<testsuite>` root and the `<testsuites>` wrapper. A
+/// `<failure>` / `<error>` child marks a case Failed; `<skipped>` marks
+/// it Skipped; otherwise Passed.
+pub fn parse_junit(content: &str) -> Result<TestReport, CoverageParseError> {
+    let mut reader = Reader::from_str(content);
+    let mut report = TestReport::default();
+    let mut suite: Option<TestSuite> = None;
+    let mut case: Option<TestCase> = None;
+    loop {
+        match reader
+            .read_event()
+            .map_err(|e| CoverageParseError::Xml(e.to_string()))?
+        {
+            Event::Start(e) => match e.name().as_ref() {
+                b"testsuite" => {
+                    if let Some(s) = suite.take() {
+                        report.suites.push(s);
+                    }
+                    suite = Some(TestSuite {
+                        name: attr_str(&e, b"name")?.unwrap_or_default(),
+                        cases: Vec::new(),
+                    });
+                }
+                b"testcase" => case = Some(junit_case(&e)?),
+                b"failure" | b"error" => {
+                    if let Some(c) = case.as_mut() {
+                        c.status = TestStatus::Failed;
+                    }
+                }
+                b"skipped" => {
+                    if let Some(c) = case.as_mut() {
+                        if c.status == TestStatus::Passed {
+                            c.status = TestStatus::Skipped;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Event::Empty(e) => match e.name().as_ref() {
+                b"testcase" => junit_push(&mut suite, junit_case(&e)?),
+                b"failure" | b"error" => {
+                    if let Some(c) = case.as_mut() {
+                        c.status = TestStatus::Failed;
+                    }
+                }
+                b"skipped" => {
+                    if let Some(c) = case.as_mut() {
+                        if c.status == TestStatus::Passed {
+                            c.status = TestStatus::Skipped;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Event::End(e) => match e.name().as_ref() {
+                b"testcase" => {
+                    if let Some(c) = case.take() {
+                        junit_push(&mut suite, c);
+                    }
+                }
+                b"testsuite" => {
+                    if let Some(s) = suite.take() {
+                        report.suites.push(s);
+                    }
+                }
+                _ => {}
+            },
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if let Some(s) = suite.take() {
+        report.suites.push(s);
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +457,53 @@ mod tests {
     #[test]
     fn malformed_xml_is_an_error_not_a_panic() {
         assert!(parse(CoverageFormat::Cobertura, "<coverage><class").is_err());
+    }
+
+    #[test]
+    fn parses_junit_suites_and_statuses() {
+        // nextest-shaped: testsuites wrapper, classname carries the module
+        // path, mixed passed / failed / skipped.
+        let xml = r#"<?xml version="1.0"?>
+<testsuites>
+  <testsuite name="oxplow-app" tests="3" failures="1" skipped="1" time="0.42">
+    <testcase classname="oxplow_app::collection" name="detect_test_run" time="0.001"/>
+    <testcase classname="oxplow_app::collection" name="ingest_coverage" time="0.05">
+      <failure message="assert failed">left != right</failure>
+    </testcase>
+    <testcase classname="oxplow_app::collection" name="flaky">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>"#;
+        let report = parse_junit(xml).unwrap();
+        assert_eq!(report.suites.len(), 1);
+        let s = &report.suites[0];
+        assert_eq!(s.name, "oxplow-app");
+        assert_eq!(s.cases.len(), 3);
+        assert_eq!(s.cases[0].status, TestStatus::Passed);
+        assert_eq!(s.cases[0].time_ms, Some(1));
+        assert_eq!(s.cases[0].classname, "oxplow_app::collection");
+        assert_eq!(s.cases[1].status, TestStatus::Failed);
+        assert_eq!(s.cases[2].status, TestStatus::Skipped);
+    }
+
+    #[test]
+    fn parses_junit_single_testsuite_root() {
+        // pytest-shaped: bare <testsuite> root, no wrapper.
+        let xml = r#"<testsuite name="pytest" tests="1">
+  <testcase classname="tests.test_foo.TestBar" name="test_baz" time="0.01"/>
+</testsuite>"#;
+        let report = parse_junit(xml).unwrap();
+        assert_eq!(report.suites.len(), 1);
+        assert_eq!(
+            report.suites[0].cases[0].classname,
+            "tests.test_foo.TestBar"
+        );
+        assert_eq!(report.suites[0].cases[0].status, TestStatus::Passed);
+    }
+
+    #[test]
+    fn malformed_junit_is_an_error_not_a_panic() {
+        assert!(parse_junit("<testsuites><testcase").is_err());
     }
 }

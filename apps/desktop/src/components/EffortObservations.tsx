@@ -15,13 +15,29 @@ interface DiffCoveragePayload {
   files: { path: string; uncoveredChangedLines: number[] }[];
 }
 
+type TestStatus = "passed" | "failed" | "skipped";
+
+interface JUnitCase {
+  classname: string;
+  name: string;
+  status: TestStatus;
+  timeMs?: number;
+}
+interface JUnitSuite {
+  name: string;
+  cases: JUnitCase[];
+}
+
 interface TestRunPayload {
   command: string;
   exitCode?: number;
   passed?: number;
   failed?: number;
   total?: number;
+  skipped?: number;
   durationMs?: number;
+  /** Parsed JUnit tree (present when oxplow parsed a test report). */
+  suites?: JUnitSuite[];
 }
 
 const TESTS_VISIBLE = 6;
@@ -220,6 +236,160 @@ function CoverageSummary({
   );
 }
 
+interface TreeNode {
+  label: string;
+  path: string;
+  children: TreeNode[];
+  leaves: { name: string; status: TestStatus; timeMs?: number }[];
+  counts: { passed: number; failed: number; skipped: number };
+}
+
+/** Build a tree per suite by splitting each case's `classname` on `::`/`.`
+ *  — the Rust module path / pytest file·class / jest describe path. */
+function buildTestTree(suites: JUnitSuite[]): TreeNode[] {
+  interface Mut {
+    label: string;
+    path: string;
+    childMap: Map<string, Mut>;
+    leaves: { name: string; status: TestStatus; timeMs?: number }[];
+  }
+  const mut = (label: string, path: string): Mut => ({ label, path, childMap: new Map(), leaves: [] });
+  const finalize = (m: Mut): TreeNode => {
+    const children = [...m.childMap.values()].map(finalize);
+    const counts = { passed: 0, failed: 0, skipped: 0 };
+    for (const leaf of m.leaves) counts[leaf.status]++;
+    for (const c of children) {
+      counts.passed += c.counts.passed;
+      counts.failed += c.counts.failed;
+      counts.skipped += c.counts.skipped;
+    }
+    return { label: m.label, path: m.path, children, leaves: m.leaves, counts };
+  };
+  return suites.map((suite) => {
+    const suiteName = suite.name || "(tests)";
+    const root = mut(suiteName, suiteName);
+    for (const c of suite.cases) {
+      // The grouping path differs by tech: nextest puts the module path in
+      // `name` (classname = crate); pytest/jest put it in `classname`. Use
+      // both, split on `::`/`.`, drop a leading segment that just repeats
+      // the suite, and collapse consecutive dupes — the last segment is the
+      // test, the rest is the natural module / describe tree.
+      let segs = [...c.classname.split(/::|\./), ...c.name.split(/::|\./)]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .filter((s, i, a) => i === 0 || s !== a[i - 1]);
+      if (segs.length > 1 && segs[0] === suiteName) segs = segs.slice(1);
+      const leafName = segs.pop() ?? c.name;
+      let node = root;
+      let path = root.path;
+      for (const seg of segs) {
+        path += `/${seg}`;
+        let child = node.childMap.get(seg);
+        if (!child) {
+          child = mut(seg, path);
+          node.childMap.set(seg, child);
+        }
+        node = child;
+      }
+      node.leaves.push({ name: leafName, status: c.status, timeMs: c.timeMs });
+    }
+    return finalize(root);
+  });
+}
+
+function statusColor(status: TestStatus): string {
+  return status === "passed"
+    ? "var(--freshness-fresh)"
+    : status === "failed"
+      ? "var(--freshness-very-stale)"
+      : "var(--text-muted)";
+}
+function statusGlyph(status: TestStatus): string {
+  return status === "passed" ? "✓" : status === "failed" ? "✗" : "⊘";
+}
+
+/** Compact "12✓ 1✗ 2⊘" rollup, omitting zeros. */
+function CountsSummary({ counts }: { counts: TreeNode["counts"] }) {
+  const parts: Array<[number, TestStatus]> = [
+    [counts.passed, "passed"],
+    [counts.failed, "failed"],
+    [counts.skipped, "skipped"],
+  ];
+  return (
+    <span style={{ display: "inline-flex", gap: 6, fontSize: "var(--text-xs)" }}>
+      {parts
+        .filter(([n]) => n > 0)
+        .map(([n, s]) => (
+          <span key={s} style={{ color: statusColor(s) }}>
+            {n}
+            {statusGlyph(s)}
+          </span>
+        ))}
+    </span>
+  );
+}
+
+function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
+  // Auto-expand branches that contain a failure so failures are visible;
+  // all-passing branches start collapsed.
+  const [open, setOpen] = useState(node.counts.failed > 0);
+  return (
+    <div>
+      <button
+        type="button"
+        data-testid={`test-node-${node.path}`}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          textAlign: "left",
+          background: "transparent",
+          border: "none",
+          padding: "1px 0",
+          paddingLeft: depth * 12,
+          cursor: "pointer",
+          color: "var(--text-secondary)",
+          fontSize: "var(--text-xs)",
+        }}
+      >
+        <span style={{ width: 10, color: "var(--text-muted)" }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontFamily: "var(--font-mono)", flex: "0 1 auto" }}>{node.label}</span>
+        <CountsSummary counts={node.counts} />
+      </button>
+      {open ? (
+        <div>
+          {node.children.map((c) => (
+            <TestTreeNode key={c.path} node={c} depth={depth + 1} />
+          ))}
+          {node.leaves.map((leaf) => (
+            <div
+              key={leaf.name}
+              data-testid={`test-case-${leaf.name}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                paddingLeft: (depth + 1) * 12 + 16,
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              <span style={{ color: statusColor(leaf.status) }}>{statusGlyph(leaf.status)}</span>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{leaf.name}</span>
+              {leaf.timeMs !== undefined && leaf.timeMs > 0 ? (
+                <span className="oxplow-tabular" style={{ color: "var(--text-muted)" }}>
+                  {(leaf.timeMs / 1000).toFixed(2)}s
+                </span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TestRunRow({ obs }: { obs: EffortObservation }) {
   const run = parsePayload<TestRunPayload>(obs.payload_json);
   if (!run) return null;
@@ -234,41 +404,52 @@ function TestRunRow({ obs }: { obs: EffortObservation }) {
   // ellipsize to one line; the full text is on the title.
   const oneLine = run.command.replace(/\s+/g, " ").trim();
   const duration = run.durationMs !== undefined ? `${(run.durationMs / 1000).toFixed(1)}s` : null;
+  const tree =
+    run.suites && run.suites.some((s) => s.cases.length > 0) ? buildTestTree(run.suites) : null;
   return (
-    <div data-testid="test-run-row" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)" }}>
-      <span
-        title={ok === null ? "exit code unknown" : ok ? "passed" : "failed"}
-        style={{
-          flex: "0 0 auto",
-          color: ok === null ? "var(--text-muted)" : ok ? "var(--freshness-fresh)" : "var(--freshness-very-stale)",
-        }}
-      >
-        {ok === null ? "•" : ok ? "✓" : "✗"}
-      </span>
-      <code
-        title={run.command}
-        style={{
-          flex: "1 1 auto",
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontFamily: "var(--font-mono)",
-          fontSize: "var(--text-xs)",
-          color: "var(--text-primary)",
-        }}
-      >
-        {oneLine}
-      </code>
-      {counts ? <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>{counts}</span> : null}
-      {duration ? (
-        <span className="oxplow-tabular" style={{ flex: "0 0 auto", color: "var(--text-muted)" }}>
-          {duration}
+    <div data-testid="test-run-row" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)" }}>
+        <span
+          title={ok === null ? "exit code unknown" : ok ? "passed" : "failed"}
+          style={{
+            flex: "0 0 auto",
+            color: ok === null ? "var(--text-muted)" : ok ? "var(--freshness-fresh)" : "var(--freshness-very-stale)",
+          }}
+        >
+          {ok === null ? "•" : ok ? "✓" : "✗"}
         </span>
+        <code
+          title={run.command}
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-xs)",
+            color: "var(--text-primary)",
+          }}
+        >
+          {oneLine}
+        </code>
+        {counts ? <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>{counts}</span> : null}
+        {duration ? (
+          <span className="oxplow-tabular" style={{ flex: "0 0 auto", color: "var(--text-muted)" }}>
+            {duration}
+          </span>
+        ) : null}
+        <span style={{ flex: "0 0 auto" }}>
+          <ProvenanceTag provenance={obs.provenance} />
+        </span>
+      </div>
+      {tree ? (
+        <div style={{ display: "flex", flexDirection: "column", paddingLeft: 16 }}>
+          {tree.map((n) => (
+            <TestTreeNode key={n.path} node={n} depth={0} />
+          ))}
+        </div>
       ) : null}
-      <span style={{ flex: "0 0 auto" }}>
-        <ProvenanceTag provenance={obs.provenance} />
-      </span>
     </div>
   );
 }

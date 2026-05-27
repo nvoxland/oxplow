@@ -1,8 +1,10 @@
 [alias]
-# `cargo cov` runs the workspace test suite under instrumentation and
-# writes an lcov report to a stable path. oxplow's collection subsystem
-# (see .context/collection.md + the `collection:` block in oxplow.yaml)
-# reads this report after a detected test run to attribute diff coverage
-# to the open effort. Requires cargo-llvm-cov (`cargo install
-# cargo-llvm-cov`); CI already uses it.
-cov = "llvm-cov --workspace --lcov --output-path target/coverage/lcov.info"
+# `cargo cov` runs the workspace test suite under instrumentation via
+# nextest, emitting BOTH reports oxplow's collection subsystem reads
+# (see .context/collection.md + the `collection:` block in oxplow.yaml):
+#   * lcov coverage  → target/coverage/lcov.info  (diff coverage)
+#   * JUnit results  → target/nextest/default/junit.xml  (per-test tree,
+#                       via the [profile.default.junit] in .config/nextest.toml)
+# Requires cargo-llvm-cov + cargo-nextest (`cargo install cargo-llvm-cov
+# cargo-nextest`); CI already uses llvm-cov.
+cov = "llvm-cov nextest --workspace --lcov --output-path target/coverage/lcov.info"

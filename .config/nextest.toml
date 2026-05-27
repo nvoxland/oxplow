@@ -1,0 +1,7 @@
+# cargo-nextest config. The JUnit profile makes `cargo nextest run`
+# (and `cargo llvm-cov nextest`) emit a machine-readable test report at
+# `target/nextest/<profile>/junit.xml`, which oxplow's collection
+# subsystem parses into the per-test tree (see .context/collection.md +
+# the `collection:` block in oxplow.yaml).
+[profile.default.junit]
+path = "junit.xml"

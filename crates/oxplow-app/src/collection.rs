@@ -189,6 +189,7 @@ impl CollectionService {
         total: Option<i64>,
         provenance: &str,
         source: &str,
+        report: Option<&oxplow_coverage::TestReport>,
     ) -> Result<Option<i64>, DomainError> {
         let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
             return Ok(None);
@@ -204,6 +205,29 @@ impl CollectionService {
         if let Some(d) = duration_ms {
             payload.insert("durationMs".into(), json!(d));
         }
+        // When oxplow parsed a JUnit report, embed the suite/case tree and
+        // derive the counts from it (overriding any caller-supplied ones).
+        let (passed, failed, total, skipped) = match report {
+            Some(r) => {
+                use oxplow_coverage::TestStatus::*;
+                let (mut p, mut f, mut s) = (0i64, 0i64, 0i64);
+                for suite in &r.suites {
+                    for case in &suite.cases {
+                        match case.status {
+                            Passed => p += 1,
+                            Failed => f += 1,
+                            Skipped => s += 1,
+                        }
+                    }
+                }
+                payload.insert(
+                    "suites".into(),
+                    serde_json::to_value(&r.suites).unwrap_or(serde_json::Value::Null),
+                );
+                (Some(p), Some(f), Some(p + f + s), Some(s))
+            }
+            None => (passed, failed, total, None),
+        };
         if let Some(p) = passed {
             payload.insert("passed".into(), json!(p));
         }
@@ -212,6 +236,9 @@ impl CollectionService {
         }
         if let Some(t) = total {
             payload.insert("total".into(), json!(t));
+        }
+        if let Some(s) = skipped {
+            payload.insert("skipped".into(), json!(s));
         }
         let id = self
             .observations
@@ -358,6 +385,12 @@ impl CollectionService {
         if !detect_test_run(&bash.command, &cfg.test_run_patterns) {
             return Ok(());
         }
+        // Parse a fresh JUnit report (the individual-tests tree), if
+        // configured. Resolve the effort first for the staleness floor.
+        let report = match self.efforts.find_open_for_thread(thread).await? {
+            Some(effort) => self.fresh_test_report(&effort, &cfg),
+            None => None,
+        };
         self.record_test_run(
             thread,
             &bash.command,
@@ -368,6 +401,7 @@ impl CollectionService {
             None,
             "observed",
             "post-tool-bash",
+            report.as_ref(),
         )
         .await?;
         // Coverage ride-along (only if a report is configured).
@@ -375,6 +409,32 @@ impl CollectionService {
             let _ = self.ingest_coverage(thread, None, None, true).await?;
         }
         Ok(())
+    }
+
+    /// Parse the configured JUnit test report if it exists and is fresh
+    /// (mtime newer than the effort start — same stale-guard as coverage).
+    /// Returns `None` when unconfigured, stale, unreadable, or empty.
+    fn fresh_test_report(
+        &self,
+        effort: &TaskEffort,
+        cfg: &oxplow_config::CollectionConfig,
+    ) -> Option<oxplow_coverage::TestReport> {
+        let path = cfg.test_report_path.as_ref()?;
+        let fmt = cfg.test_report_format.as_deref()?;
+        if !fmt.eq_ignore_ascii_case("junit") {
+            return None;
+        }
+        let abs = self.project_dir.join(path);
+        if report_is_stale(&abs, effort.started_at) {
+            return None;
+        }
+        let content = std::fs::read_to_string(&abs).ok()?;
+        let report = oxplow_coverage::parse_junit(&content).ok()?;
+        // Empty report → fall back to the command-line row.
+        if report.suites.iter().all(|s| s.cases.is_empty()) {
+            return None;
+        }
+        Some(report)
     }
 
     /// Observations for an effort, newest-first. Pass `kind` to filter.
@@ -754,6 +814,7 @@ mod tests {
                     Some(5),
                     "observed",
                     "post-tool-bash",
+                    None,
                 )
                 .await
                 .unwrap();
@@ -770,6 +831,49 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("cargo test"));
+        }
+
+        #[tokio::test]
+        async fn record_test_run_embeds_junit_tree_and_derives_counts() {
+            let h = build(None).await;
+            let junit = oxplow_coverage::parse_junit(
+                r#"<testsuites><testsuite name="oxplow-app">
+                  <testcase classname="oxplow_app::collection" name="a"/>
+                  <testcase classname="oxplow_app::collection" name="b"><failure/></testcase>
+                  <testcase classname="oxplow_app::collection" name="c"><skipped/></testcase>
+                </testsuite></testsuites>"#,
+            )
+            .unwrap();
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo nextest run",
+                    Some(1),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    Some(&junit),
+                )
+                .await
+                .unwrap();
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("test-run"))
+                .await
+                .unwrap();
+            let payload: serde_json::Value =
+                serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
+            // Counts derived from the tree (1 pass, 1 fail, 1 skip).
+            assert_eq!(payload["passed"], 1);
+            assert_eq!(payload["failed"], 1);
+            assert_eq!(payload["skipped"], 1);
+            assert_eq!(payload["total"], 3);
+            // The suite/case tree is embedded for the UI.
+            assert_eq!(payload["suites"][0]["name"], "oxplow-app");
+            assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
         }
 
         #[tokio::test]

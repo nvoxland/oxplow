@@ -990,6 +990,13 @@ export type CollectionConfig = {
 	// Report format: `cobertura` | `lcov` | `jacoco-xml`.
 	coverageFormat: string | null,
 	/**
+	 *  Repo-relative path the test tooling writes its machine-readable
+	 *  test report to (for the individual-tests tree). JUnit XML.
+	 */
+	testReportPath: string | null,
+	// Test-report format: `junit`.
+	testReportFormat: string | null,
+	/**
 	 *  Extra command substrings that count as a test run, on top of the
 	 *  built-in defaults (pytest, cargo test, jest, …).
 	 */

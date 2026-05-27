@@ -1,12 +1,12 @@
 ---
-description: Set up oxplow collection — wire the project's test tooling to emit a standard-format coverage report and record the profile in oxplow.yaml.
+description: Set up oxplow collection — wire the project's test tooling to emit standard-format coverage + test reports and record the profile in oxplow.yaml.
 ---
 
-Set up oxplow's **collection** so it can track which tests ran and the
-diff coverage on each effort's changed lines. See the
-`oxplow-collection` skill for the standing rules. File this as a task
-first (the normal filing rule applies — you'll be editing project
-files), then do two things:
+Set up oxplow's **collection** so it can track which tests ran (the
+individual tests, as a tree) and the diff coverage on each effort's
+changed lines. See the `oxplow-collection` skill for the standing
+rules. File this as a task first (the normal filing rule applies —
+you'll be editing project files), then do three things:
 
 ## 1. Instrument the test tooling to always emit a coverage report
 
@@ -31,22 +31,45 @@ Representative wiring:
 Make the **smallest** change that makes coverage automatic, and leave
 the diff for the user to review — these are committed project files.
 
-## 2. Record the profile in oxplow.yaml
+## 2. Instrument the test tooling to emit a JUnit report
+
+To show the **individual tests that ran** (grouped into a tree), make
+the test run also emit a **JUnit XML** report at a stable path — the
+cross-language format oxplow parses. Representative wiring:
+
+- **Python (pytest)** — add `--junit-xml=target/test-report.xml` to
+  `addopts`.
+- **JS/TS (jest)** — add the `jest-junit` reporter to a fixed path;
+  vitest has `--reporter=junit --outputFile`.
+- **Go** — pipe through `go-junit-report > target/test-report.xml`.
+- **Rust** — `cargo test` can't emit JUnit; use **cargo-nextest** with
+  a `[profile.<name>.junit] path = "junit.xml"` in `.config/nextest.toml`
+  (lands at `target/nextest/<profile>/junit.xml`), and run
+  `cargo nextest run`.
+
+Use the same `classname` grouping the tool emits — oxplow builds the
+tree by splitting it on `::` / `.`.
+
+## 3. Record the profile in oxplow.yaml
 
 Add (or update) a `collection:` block describing what you wired up:
 
 ```yaml
 collection:
   testCommand: "<the command that runs the tests>"
-  coverageReportPath: "<repo-relative path the report lands at>"
-  coverageFormat: cobertura   # | lcov | jacoco-xml
+  coverageReportPath: "<repo-relative path the coverage report lands at>"
+  coverageFormat: cobertura      # | lcov | jacoco-xml
+  testReportPath: "<repo-relative path the JUnit report lands at>"
+  testReportFormat: junit
   # Optional — extra command substrings that count as a test run, on
   # top of the built-in defaults (pytest, cargo test, jest, go test, …):
   testRunPatterns: []
 ```
 
-Once this is set, oxplow collects **automatically**: it records each
-test run it sees via the Bash hook, and parses the report after a run
-to attribute diff coverage to the open effort. You never parse or
-report coverage numbers yourself — oxplow does, so the numbers stay
-trustworthy (`observed`, not `asserted`).
+Every field is optional — wire coverage, test results, or both. Once
+set, oxplow collects **automatically**: it records each test run it
+sees via the Bash hook, parses the JUnit report into the individual-
+test tree, and parses the coverage report into diff coverage over the
+effort's changed lines. You never parse or report any of these numbers
+yourself — oxplow does, so they stay trustworthy (`observed`, not
+`asserted`).

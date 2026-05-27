@@ -9,9 +9,12 @@ collection:
   testCommand: cargo cov
   coverageReportPath: target/coverage/lcov.info
   coverageFormat: lcov
-  # `cargo cov` / `cargo llvm-cov` aren't built-in detector patterns
-  # (the defaults cover `cargo test`/`nextest`); list them so a coverage
-  # run is recognized as a test run by the PostToolUse hook.
+  # `cargo cov` runs nextest under llvm-cov, so one command emits both the
+  # lcov coverage report AND the JUnit per-test report.
+  testReportPath: target/nextest/default/junit.xml
+  testReportFormat: junit
+  # `cargo cov` / `cargo llvm-cov` aren't built-in detector patterns;
+  # list them so a coverage run is recognized as a test run by the hook.
   testRunPatterns:
   - cargo cov
   - llvm-cov
