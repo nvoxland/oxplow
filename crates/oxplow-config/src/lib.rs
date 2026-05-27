@@ -57,35 +57,56 @@ pub struct LspServerConfig {
     pub args: Vec<String>,
 }
 
+/// One test/coverage report the project's test run emits. `format`
+/// selects the parser: `lcov` | `cobertura` | `jacoco-xml` are coverage
+/// reports; `junit` is a test-result report (the per-test tree).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ReportConfig {
+    pub path: String,
+    pub format: String,
+}
+
 /// Per-project collection profile (the `collection:` block). Written by
 /// `/oxplow:configure` and read by the collection subsystem
-/// (`.context/collection.md`): the passive Bash-hook test detector reads
-/// `test_run_patterns`, and the coverage ride-along reads
-/// `coverage_report_path` + `coverage_format`. All fields optional — an
-/// unconfigured project simply collects nothing extra.
+/// (`.context/collection.md`): the Bash-hook detector reads
+/// `test_run_patterns`, and the ride-along parses every `reports` entry
+/// fresher than the effort start. A repo with several test stacks lists
+/// each stack's report(s) here. All fields optional — an unconfigured
+/// project collects nothing extra.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
 pub struct CollectionConfig {
     /// Command that runs the project's tests (informational; surfaced to
-    /// the agent so it knows how to produce coverage).
+    /// the agent so it knows how to produce the reports).
     #[serde(rename = "testCommand")]
     pub test_command: Option<String>,
-    /// Repo-relative path the test tooling writes its coverage report to.
-    #[serde(rename = "coverageReportPath")]
-    pub coverage_report_path: Option<String>,
-    /// Report format: `cobertura` | `lcov` | `jacoco-xml`.
-    #[serde(rename = "coverageFormat")]
-    pub coverage_format: Option<String>,
-    /// Repo-relative path the test tooling writes its machine-readable
-    /// test report to (for the individual-tests tree). JUnit XML.
-    #[serde(rename = "testReportPath")]
-    pub test_report_path: Option<String>,
-    /// Test-report format: `junit`.
-    #[serde(rename = "testReportFormat")]
-    pub test_report_format: Option<String>,
+    /// Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
+    /// and/or test results (junit). oxplow parses each that is fresher
+    /// than the effort start, so several stacks coexist.
+    pub reports: Vec<ReportConfig>,
     /// Extra command substrings that count as a test run, on top of the
     /// built-in defaults (pytest, cargo test, jest, …).
     #[serde(rename = "testRunPatterns")]
     pub test_run_patterns: Vec<String>,
+}
+
+impl CollectionConfig {
+    /// Coverage reports (lcov / cobertura / jacoco-xml).
+    pub fn coverage_reports(&self) -> impl Iterator<Item = &ReportConfig> {
+        self.reports
+            .iter()
+            .filter(|r| !is_test_report_format(&r.format))
+    }
+    /// Test-result reports (junit).
+    pub fn test_reports(&self) -> impl Iterator<Item = &ReportConfig> {
+        self.reports
+            .iter()
+            .filter(|r| is_test_report_format(&r.format))
+    }
+}
+
+/// `junit` is a test-result format; everything else known is coverage.
+pub fn is_test_report_format(format: &str) -> bool {
+    format.eq_ignore_ascii_case("junit")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -164,9 +185,20 @@ struct RawConfig {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawReport {
+    path: String,
+    format: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawCollectionBlock {
     #[serde(rename = "testCommand", default)]
     test_command: Option<String>,
+    #[serde(default)]
+    reports: Option<Vec<RawReport>>,
+    // Back-compat: the pre-`reports` singular fields. Folded into
+    // `reports` on load so existing oxplow.yaml files keep working.
     #[serde(rename = "coverageReportPath", default)]
     coverage_report_path: Option<String>,
     #[serde(rename = "coverageFormat", default)]
@@ -357,28 +389,23 @@ pub fn write_project_config(
     }
 
     let c = &config.collection;
-    if c.test_command.is_some()
-        || c.coverage_report_path.is_some()
-        || c.coverage_format.is_some()
-        || c.test_report_path.is_some()
-        || c.test_report_format.is_some()
-        || !c.test_run_patterns.is_empty()
-    {
+    if c.test_command.is_some() || !c.reports.is_empty() || !c.test_run_patterns.is_empty() {
         let mut col = serde_yaml::Mapping::new();
         if let Some(v) = &c.test_command {
             col.insert("testCommand".into(), v.clone().into());
         }
-        if let Some(v) = &c.coverage_report_path {
-            col.insert("coverageReportPath".into(), v.clone().into());
-        }
-        if let Some(v) = &c.coverage_format {
-            col.insert("coverageFormat".into(), v.clone().into());
-        }
-        if let Some(v) = &c.test_report_path {
-            col.insert("testReportPath".into(), v.clone().into());
-        }
-        if let Some(v) = &c.test_report_format {
-            col.insert("testReportFormat".into(), v.clone().into());
+        if !c.reports.is_empty() {
+            let reports: Vec<_> = c
+                .reports
+                .iter()
+                .map(|r| {
+                    let mut m = serde_yaml::Mapping::new();
+                    m.insert("path".into(), r.path.clone().into());
+                    m.insert("format".into(), r.format.clone().into());
+                    serde_yaml::Value::Mapping(m)
+                })
+                .collect();
+            col.insert("reports".into(), serde_yaml::Value::Sequence(reports));
         }
         if !c.test_run_patterns.is_empty() {
             col.insert(
@@ -540,39 +567,55 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     })
 }
 
-/// Known coverage report formats. Kept in sync with
-/// `oxplow_coverage::CoverageFormat::from_name`; duplicated here so the
-/// config crate stays dependency-light.
-const KNOWN_COVERAGE_FORMATS: &[&str] = &["cobertura", "lcov", "jacoco", "jacoco-xml"];
-const KNOWN_TEST_REPORT_FORMATS: &[&str] = &["junit"];
+/// Every report format oxplow can parse (coverage + test). Kept in sync
+/// with `oxplow_coverage`; duplicated here so the config crate stays
+/// dependency-light.
+const KNOWN_REPORT_FORMATS: &[&str] = &["cobertura", "lcov", "jacoco", "jacoco-xml", "junit"];
+
+fn validate_report_format(field: &str, fmt: &str) -> Result<(), ConfigError> {
+    if !KNOWN_REPORT_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
+        return Err(ConfigError::Invalid(format!(
+            "collection.{field} must be one of cobertura | lcov | jacoco-xml | junit (got \"{fmt}\")"
+        )));
+    }
+    Ok(())
+}
 
 fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConfig, ConfigError> {
     let Some(raw) = raw else {
         return Ok(CollectionConfig::default());
     };
     let opt_trimmed = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let coverage_format = match opt_trimmed(raw.coverage_format) {
-        Some(fmt) => {
-            if !KNOWN_COVERAGE_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
-                return Err(ConfigError::Invalid(format!(
-                    "collection.coverageFormat must be one of cobertura | lcov | jacoco-xml (got \"{fmt}\")"
-                )));
-            }
-            Some(fmt)
+
+    let mut reports = Vec::new();
+    // The `reports` list (canonical).
+    for (i, r) in raw.reports.into_iter().flatten().enumerate() {
+        let path = r.path.trim().to_string();
+        let format = r.format.trim().to_string();
+        if path.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "collection.reports[{i}].path must be a non-empty string"
+            )));
         }
-        None => None,
-    };
-    let test_report_format = match opt_trimmed(raw.test_report_format) {
-        Some(fmt) => {
-            if !KNOWN_TEST_REPORT_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
-                return Err(ConfigError::Invalid(format!(
-                    "collection.testReportFormat must be `junit` (got \"{fmt}\")"
-                )));
-            }
-            Some(fmt)
-        }
-        None => None,
-    };
+        validate_report_format(&format!("reports[{i}].format"), &format)?;
+        reports.push(ReportConfig { path, format });
+    }
+    // Back-compat: fold the old singular fields into `reports`.
+    if let (Some(path), Some(format)) = (
+        opt_trimmed(raw.coverage_report_path),
+        opt_trimmed(raw.coverage_format),
+    ) {
+        validate_report_format("coverageFormat", &format)?;
+        reports.push(ReportConfig { path, format });
+    }
+    if let (Some(path), Some(format)) = (
+        opt_trimmed(raw.test_report_path),
+        opt_trimmed(raw.test_report_format),
+    ) {
+        validate_report_format("testReportFormat", &format)?;
+        reports.push(ReportConfig { path, format });
+    }
+
     let test_run_patterns = match raw.test_run_patterns {
         Some(list) => {
             let mut out = Vec::with_capacity(list.len());
@@ -591,10 +634,7 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
     };
     Ok(CollectionConfig {
         test_command: opt_trimmed(raw.test_command),
-        coverage_report_path: opt_trimmed(raw.coverage_report_path),
-        coverage_format,
-        test_report_path: opt_trimmed(raw.test_report_path),
-        test_report_format,
+        reports,
         test_run_patterns,
     })
 }
@@ -836,53 +876,53 @@ lsp:
             dir.path().join(OXPLOW_CONFIG_FILE),
             r#"
 collection:
-  testCommand: cargo test
-  coverageReportPath: target/coverage/lcov.info
-  coverageFormat: lcov
-  testReportPath: target/nextest/junit.xml
-  testReportFormat: junit
+  testCommand: cargo cov
+  reports:
+    - { path: target/coverage/lcov.info, format: lcov }
+    - { path: target/nextest/default/junit.xml, format: junit }
+    - { path: apps/desktop/test-report.xml, format: junit }
   testRunPatterns:
-    - cargo nextest
+    - cargo cov
+    - bun test
 "#,
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection.test_command.as_deref(), Some("cargo test"));
+        assert_eq!(cfg.collection.test_command.as_deref(), Some("cargo cov"));
+        assert_eq!(cfg.collection.reports.len(), 3);
+        assert_eq!(cfg.collection.coverage_reports().count(), 1);
+        assert_eq!(cfg.collection.test_reports().count(), 2);
+        assert_eq!(cfg.collection.reports[0].format, "lcov");
         assert_eq!(
-            cfg.collection.coverage_report_path.as_deref(),
-            Some("target/coverage/lcov.info")
+            cfg.collection.test_run_patterns,
+            vec!["cargo cov", "bun test"]
         );
-        assert_eq!(cfg.collection.coverage_format.as_deref(), Some("lcov"));
-        assert_eq!(
-            cfg.collection.test_report_path.as_deref(),
-            Some("target/nextest/junit.xml")
-        );
-        assert_eq!(cfg.collection.test_report_format.as_deref(), Some("junit"));
-        assert_eq!(cfg.collection.test_run_patterns, vec!["cargo nextest"]);
     }
 
     #[test]
-    fn rejects_unknown_test_report_format() {
+    fn back_compat_singular_fields_fold_into_reports() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  testReportFormat: tap\n",
+            "collection:\n  coverageReportPath: cov.info\n  coverageFormat: lcov\n  testReportPath: j.xml\n  testReportFormat: junit\n",
         )
         .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("testReportFormat")));
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.collection.reports.len(), 2);
+        assert_eq!(cfg.collection.coverage_reports().count(), 1);
+        assert_eq!(cfg.collection.test_reports().next().unwrap().path, "j.xml");
     }
 
     #[test]
-    fn rejects_unknown_coverage_format() {
+    fn rejects_unknown_report_format() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  coverageFormat: clover\n",
+            "collection:\n  reports:\n    - { path: x.tap, format: tap }\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("coverageFormat")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("format")));
     }
 
     #[test]
@@ -891,10 +931,16 @@ collection:
         let cfg = OxplowConfig {
             collection: CollectionConfig {
                 test_command: Some("pytest".into()),
-                coverage_report_path: Some("coverage.xml".into()),
-                coverage_format: Some("cobertura".into()),
-                test_report_path: Some("junit.xml".into()),
-                test_report_format: Some("junit".into()),
+                reports: vec![
+                    ReportConfig {
+                        path: "coverage.xml".into(),
+                        format: "cobertura".into(),
+                    },
+                    ReportConfig {
+                        path: "junit.xml".into(),
+                        format: "junit".into(),
+                    },
+                ],
                 test_run_patterns: vec!["tox".into()],
             },
             ..default_config("test".into())

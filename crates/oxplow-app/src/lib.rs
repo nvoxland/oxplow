@@ -862,13 +862,13 @@ mod tests {
         // Boot config has no collection profile.
         assert!(config_service::read_config(&services.config)
             .collection
-            .coverage_report_path
-            .is_none());
+            .reports
+            .is_empty());
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
         std::fs::write(
             project.path().join(oxplow_config::OXPLOW_CONFIG_FILE),
-            "collection:\n  coverageReportPath: target/coverage/lcov.info\n  coverageFormat: lcov\n",
+            "collection:\n  reports:\n    - { path: target/coverage/lcov.info, format: lcov }\n",
         )
         .unwrap();
 
@@ -876,10 +876,10 @@ mod tests {
 
         let cfg = config_service::read_config(&services.config);
         assert_eq!(
-            cfg.collection.coverage_report_path.as_deref(),
-            Some("target/coverage/lcov.info"),
+            cfg.collection.reports.len(),
+            1,
             "in-memory config should reflect the on-disk edit after reload"
         );
-        assert_eq!(cfg.collection.coverage_format.as_deref(), Some("lcov"));
+        assert_eq!(cfg.collection.reports[0].path, "target/coverage/lcov.info");
     }
 }

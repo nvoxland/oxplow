@@ -259,9 +259,8 @@ impl CollectionService {
         Ok(Some(id))
     }
 
-    /// Ingest a coverage report and store a `diff-coverage` observation
-    /// over the open effort's changed lines. oxplow parses the report
-    /// itself, so the result is `observed`.
+    /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
+    /// override path/format, or the first configured coverage report.
     pub async fn ingest_coverage(
         &self,
         thread: &ThreadId,
@@ -276,10 +275,12 @@ impl CollectionService {
             return Ok(CoverageIngest::NoOpenEffort);
         };
         let cfg = self.collection_cfg();
-        let report_path = report_path_override.or(cfg.coverage_report_path);
-        let format_str = format_override.or(cfg.coverage_format);
-        let (Some(report_path), Some(format_str)) = (report_path, format_str) else {
-            return Ok(CoverageIngest::NotConfigured);
+        let (report_path, format_str) = match (report_path_override, format_override) {
+            (Some(p), Some(f)) => (p, f),
+            _ => match cfg.coverage_reports().next() {
+                Some(r) => (r.path.clone(), r.format.clone()),
+                None => return Ok(CoverageIngest::NotConfigured),
+            },
         };
         let Some(format) = CoverageFormat::from_name(&format_str) else {
             return Ok(CoverageIngest::ParseError(format!(
@@ -290,12 +291,8 @@ impl CollectionService {
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return Ok(CoverageIngest::ReportMissing(report_path));
         };
-        // Ride-along guard: a report whose mtime predates this effort is
-        // from an earlier run the just-detected test command didn't
-        // regenerate (e.g. `cargo test` when coverage comes from
-        // `cargo cov`). Attributing it to this effort would be stale, so
-        // skip. An explicit `ingest_coverage` (skip_if_stale = false)
-        // bypasses this — the caller asked for it.
+        // Stale guard for the ride-along (skip_if_stale); the explicit
+        // MCP path passes false — the caller asked for it.
         if skip_if_stale && report_is_stale(&abs, effort.started_at) {
             return Ok(CoverageIngest::StaleReport(report_path));
         }
@@ -303,10 +300,22 @@ impl CollectionService {
             Ok(r) => r,
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
+        self.store_diff_coverage(thread, &effort, &stream_id, &report)
+            .await
+    }
+
+    /// Compute diff coverage from a (possibly merged) report and store a
+    /// `diff-coverage` observation over the effort's changed lines.
+    async fn store_diff_coverage(
+        &self,
+        thread: &ThreadId,
+        effort: &TaskEffort,
+        stream_id: &str,
+        report: &oxplow_coverage::CoverageReport,
+    ) -> Result<CoverageIngest, DomainError> {
         let Some(start) = effort.start_snapshot_id else {
             return Ok(CoverageIngest::NoBaseline);
         };
-
         // Changed lines per file = end-side diff of the effort's start
         // snapshot vs the current working tree (the effort is typically
         // still open when tests run, so there's no end snapshot yet).
@@ -350,7 +359,7 @@ impl CollectionService {
         let id = self
             .observations
             .record(NewEffortObservation {
-                stream_id,
+                stream_id: stream_id.to_string(),
                 effort_id: effort.id.as_str().to_string(),
                 kind: "diff-coverage".into(),
                 provenance: "observed".into(),
@@ -362,7 +371,7 @@ impl CollectionService {
                 git_version_exact: version.git_version_exact,
             })
             .await?;
-        self.emit(thread, &effort);
+        self.emit(thread, effort);
         Ok(CoverageIngest::Stored {
             observation_id: id,
             summary_pct,
@@ -385,12 +394,13 @@ impl CollectionService {
         if !detect_test_run(&bash.command, &cfg.test_run_patterns) {
             return Ok(());
         }
-        // Parse a fresh JUnit report (the individual-tests tree), if
-        // configured. Resolve the effort first for the staleness floor.
-        let report = match self.efforts.find_open_for_thread(thread).await? {
-            Some(effort) => self.fresh_test_report(&effort, &cfg),
-            None => None,
+        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+            return Ok(());
         };
+        // Merge every JUnit report fresher than the effort start into one
+        // per-test tree (each test stack regenerates its own report; the
+        // freshness guard excludes stale ones from prior efforts/runs).
+        let report = self.merge_fresh_test_reports(&effort, &cfg);
         self.record_test_run(
             thread,
             &bash.command,
@@ -404,37 +414,74 @@ impl CollectionService {
             report.as_ref(),
         )
         .await?;
-        // Coverage ride-along (only if a report is configured).
-        if cfg.coverage_report_path.is_some() && cfg.coverage_format.is_some() {
-            let _ = self.ingest_coverage(thread, None, None, true).await?;
+        // Coverage ride-along: merge every fresh coverage report → one
+        // diff-coverage observation.
+        if let Some(merged) = self.merge_fresh_coverage(&effort, &cfg) {
+            if let Some(stream_id) = self.stream_id_for(thread).await? {
+                let _ = self
+                    .store_diff_coverage(thread, &effort, &stream_id, &merged)
+                    .await?;
+            }
         }
         Ok(())
     }
 
-    /// Parse the configured JUnit test report if it exists and is fresh
-    /// (mtime newer than the effort start — same stale-guard as coverage).
-    /// Returns `None` when unconfigured, stale, unreadable, or empty.
-    fn fresh_test_report(
+    /// Merge every configured JUnit report that exists and is fresher than
+    /// the effort start into one tree. `None` when nothing fresh/non-empty.
+    fn merge_fresh_test_reports(
         &self,
         effort: &TaskEffort,
         cfg: &oxplow_config::CollectionConfig,
     ) -> Option<oxplow_coverage::TestReport> {
-        let path = cfg.test_report_path.as_ref()?;
-        let fmt = cfg.test_report_format.as_deref()?;
-        if !fmt.eq_ignore_ascii_case("junit") {
+        let mut merged = oxplow_coverage::TestReport::default();
+        for r in cfg.test_reports() {
+            let abs = self.project_dir.join(&r.path);
+            if report_is_stale(&abs, effort.started_at) {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&abs) else {
+                continue;
+            };
+            if let Ok(parsed) = oxplow_coverage::parse_junit(&content) {
+                merged.suites.extend(parsed.suites);
+            }
+        }
+        if merged.suites.iter().all(|s| s.cases.is_empty()) {
             return None;
         }
-        let abs = self.project_dir.join(path);
-        if report_is_stale(&abs, effort.started_at) {
-            return None;
+        Some(merged)
+    }
+
+    /// Merge every configured coverage report that exists and is fresher
+    /// than the effort start into one file→coverage map. `None` when none.
+    fn merge_fresh_coverage(
+        &self,
+        effort: &TaskEffort,
+        cfg: &oxplow_config::CollectionConfig,
+    ) -> Option<oxplow_coverage::CoverageReport> {
+        let mut merged = oxplow_coverage::CoverageReport::default();
+        let mut any = false;
+        for r in cfg.coverage_reports() {
+            let Some(format) = CoverageFormat::from_name(&r.format) else {
+                continue;
+            };
+            let abs = self.project_dir.join(&r.path);
+            if report_is_stale(&abs, effort.started_at) {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&abs) else {
+                continue;
+            };
+            if let Ok(parsed) = oxplow_coverage::parse(format, &content) {
+                for (path, fc) in parsed.files {
+                    let entry = merged.files.entry(path).or_default();
+                    entry.instrumented.extend(fc.instrumented);
+                    entry.covered.extend(fc.covered);
+                }
+                any = true;
+            }
         }
-        let content = std::fs::read_to_string(&abs).ok()?;
-        let report = oxplow_coverage::parse_junit(&content).ok()?;
-        // Empty report → fall back to the command-line row.
-        if report.suites.iter().all(|s| s.cases.is_empty()) {
-            return None;
-        }
-        Some(report)
+        any.then_some(merged)
     }
 
     /// Observations for an effort, newest-first. Pass `kind` to filter.
@@ -613,7 +660,7 @@ mod tests {
             thread: ThreadId,
             effort_id: String,
             efforts: Arc<SqliteTaskEffortStore>,
-            _tmp: tempfile::TempDir,
+            tmp: tempfile::TempDir,
         }
 
         /// Build the fixture. `report_xml` Some → write it + configure the
@@ -724,8 +771,10 @@ mod tests {
             let mut cfg = oxplow_config::load_project_config(&project_dir).unwrap();
             if let Some(xml) = report_xml {
                 std::fs::write(project_dir.join("coverage.xml"), xml).unwrap();
-                cfg.collection.coverage_report_path = Some("coverage.xml".into());
-                cfg.collection.coverage_format = Some("cobertura".into());
+                cfg.collection.reports.push(oxplow_config::ReportConfig {
+                    path: "coverage.xml".into(),
+                    format: "cobertura".into(),
+                });
             }
 
             let service = CollectionService::new(
@@ -743,7 +792,7 @@ mod tests {
                 thread: thread.id,
                 effort_id: effort.id.as_str().to_string(),
                 efforts,
-                _tmp: tmp,
+                tmp,
             }
         }
 
@@ -922,6 +971,56 @@ mod tests {
                     .await
                     .unwrap(),
                 CoverageIngest::NoChangedCoverage
+            );
+        }
+
+        #[tokio::test]
+        async fn merge_fresh_test_reports_unions_suites_from_multiple_stacks() {
+            let h = build(None).await;
+            // Two JUnit reports from different stacks, both written now.
+            std::fs::write(
+                h.tmp.path().join("rust.xml"),
+                r#"<testsuites><testsuite name="rust-crate"><testcase classname="c" name="t1"/></testsuite></testsuites>"#,
+            )
+            .unwrap();
+            std::fs::write(
+                h.tmp.path().join("front.xml"),
+                r#"<testsuites><testsuite name="frontend"><testcase classname="d" name="t2"/></testsuite></testsuites>"#,
+            )
+            .unwrap();
+            // Synthetic effort started at the epoch → both files are fresh
+            // (deterministic, no wall-clock/fs-granularity dependence).
+            let effort = TaskEffort {
+                id: EffortId::from("ef-x"),
+                task_id: TaskId::placeholder(),
+                thread_id: ThreadId::from("b-1"),
+                started_at: Timestamp::from_unix_ms(0),
+                ended_at: None,
+                start_snapshot_id: None,
+                end_snapshot_id: None,
+                summary: None,
+            };
+            let cfg = oxplow_config::CollectionConfig {
+                reports: vec![
+                    oxplow_config::ReportConfig {
+                        path: "rust.xml".into(),
+                        format: "junit".into(),
+                    },
+                    oxplow_config::ReportConfig {
+                        path: "front.xml".into(),
+                        format: "junit".into(),
+                    },
+                ],
+                ..Default::default()
+            };
+            let merged = h
+                .service
+                .merge_fresh_test_reports(&effort, &cfg)
+                .expect("both fresh reports merged");
+            let names: Vec<&str> = merged.suites.iter().map(|s| s.name.as_str()).collect();
+            assert!(
+                names.contains(&"rust-crate") && names.contains(&"frontend"),
+                "merged suites from both stacks; got {names:?}"
             );
         }
     }

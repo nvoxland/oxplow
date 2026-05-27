@@ -27,3 +27,6 @@ apps/desktop/dist/
 MIGRATION_REVIEW2.md
 MIGRATION_REVIEW3.md
 MIGRATION_TRACKING.md
+
+# Collection: bun JUnit test report (parsed in-place, not committed)
+apps/desktop/test-report.xml

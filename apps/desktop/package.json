@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && bun test",
+    "test:junit": "bun test --reporter=junit --reporter-outfile=test-report.xml",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -22,19 +22,19 @@ attribute to the effort. The test command is recorded in the
 - **Test runs are observed automatically.** When you run the tests via
   Bash, oxplow's PostToolUse hook records a `test-run` observation
   against the open effort (command + exit code). You don't report it.
-- **Individual tests + coverage are parsed by oxplow, not you.** If
-  `collection.testReportPath` (JUnit) is configured, oxplow parses it
-  into the per-test tree; if `collection.coverageReportPath` is
-  configured (cobertura / lcov / jacoco-xml), oxplow parses it into
-  diff coverage over the effort's changed lines. **Never read either
+- **Individual tests + coverage are parsed by oxplow, not you.** Each
+  entry in `collection.reports` (JUnit → per-test tree; lcov / cobertura
+  / jacoco-xml → diff coverage over the effort's changed lines) is parsed
+  by oxplow when it's fresher than the effort start — so in a polyglot
+  repo each stack's report lights up on its own run. **Never read a
   report and type the numbers/test names** — that would make them
   `asserted` and untrustworthy. Let oxplow do it (`observed`).
 
 ## When the data is missing
 
-- **Tooling isn't emitting a report** at `coverageReportPath` (or no
-  `collection:` block exists yet) → run `/oxplow:configure` to wire the
-  test tool to emit a standard-format report and record the profile.
+- **A stack isn't emitting a report** (its path isn't in
+  `collection.reports`, or no `collection:` block exists yet) → run
+  `/oxplow:configure`, which wires **every** test stack in the repo.
 - **Report is at a non-standard location for this run** → call
   `mcp__oxplow__ingest_coverage` with the path/format to ingest it
   explicitly (it goes through the same deterministic parse path).

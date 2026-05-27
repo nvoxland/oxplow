@@ -1,75 +1,73 @@
 ---
-description: Set up oxplow collection — wire the project's test tooling to emit standard-format coverage + test reports and record the profile in oxplow.yaml.
+description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and record them in oxplow.yaml.
 ---
 
 Set up oxplow's **collection** so it can track which tests ran (the
 individual tests, as a tree) and the diff coverage on each effort's
 changed lines. See the `oxplow-collection` skill for the standing
 rules. File this as a task first (the normal filing rule applies —
-you'll be editing project files), then do three things:
+you'll be editing project files), then:
 
-## 1. Instrument the test tooling to always emit a coverage report
+## 0. Inventory EVERY test stack in the repo
 
-Inspect the project's build/test configuration and make a coverage
-report a **default of the normal test run**, written to a stable
-repo-relative path in a standard format. oxplow parses three formats
-deterministically — pick whichever the tooling emits naturally:
-`cobertura` (XML), `lcov` (`.info`), or `jacoco-xml`.
+A repo often has more than one — e.g. a Rust workspace **and** a
+JS/TS frontend, or a backend + a separate e2e suite. Find them all
+(look for `Cargo.toml`, `package.json`, `pyproject.toml`/`pytest.ini`,
+`go.mod`, `pom.xml`/`build.gradle`, etc.). You will wire **each** one
+to emit reports and list **all** their reports in the profile —
+oxplow merges whatever's freshest per effort, so every stack lights
+up.
 
-Representative wiring:
+## 1. Make each stack emit a coverage report
 
-- **Rust** — `cargo llvm-cov --lcov --output-path target/coverage/lcov.info`
-  (add a cargo alias / CI step). Format `lcov`.
-- **Python (pytest)** — add `--cov --cov-report=xml:coverage.xml` to
-  `addopts` in `pyproject.toml` / `pytest.ini` / `setup.cfg`. Format
-  `cobertura`.
-- **JS/TS (jest / vitest)** — enable the `cobertura` or `lcov` coverage
-  reporter to a fixed `coverage/` path.
-- **Java / Kotlin** — add the JaCoCo plugin + an XML report goal to
-  `pom.xml` / `build.gradle`. Format `jacoco-xml`.
+For every stack, make a coverage report a **default of its normal test
+run**, at a stable repo-relative path in a standard format oxplow
+parses: `cobertura` (XML), `lcov` (`.info`), or `jacoco-xml`.
 
-Make the **smallest** change that makes coverage automatic, and leave
-the diff for the user to review — these are committed project files.
+- **Rust** — `cargo llvm-cov --lcov --output-path target/coverage/lcov.info`. Format `lcov`.
+- **Python (pytest)** — `--cov --cov-report=xml:coverage.xml` in `addopts`. Format `cobertura`.
+- **JS/TS (jest / vitest / bun)** — enable the `cobertura`/`lcov` coverage reporter to a fixed path.
+- **Java / Kotlin** — JaCoCo plugin + XML report goal in `pom.xml`/`build.gradle`. Format `jacoco-xml`.
 
-## 2. Instrument the test tooling to emit a JUnit report
+## 2. Make each stack emit a JUnit report
 
-To show the **individual tests that ran** (grouped into a tree), make
-the test run also emit a **JUnit XML** report at a stable path — the
-cross-language format oxplow parses. Representative wiring:
+To show the **individual tests** (as a tree), make each stack's test
+run also emit **JUnit XML** at a stable path:
 
-- **Python (pytest)** — add `--junit-xml=target/test-report.xml` to
-  `addopts`.
-- **JS/TS (jest)** — add the `jest-junit` reporter to a fixed path;
-  vitest has `--reporter=junit --outputFile`.
-- **Go** — pipe through `go-junit-report > target/test-report.xml`.
-- **Rust** — `cargo test` can't emit JUnit; use **cargo-nextest** with
-  a `[profile.<name>.junit] path = "junit.xml"` in `.config/nextest.toml`
-  (lands at `target/nextest/<profile>/junit.xml`), and run
-  `cargo nextest run`.
+- **Python (pytest)** — `--junit-xml=target/test-report.xml` in `addopts`.
+- **JS/TS** — jest: `jest-junit` reporter; vitest: `--reporter=junit --outputFile`; bun: `--reporter=junit --reporter-outfile=…`.
+- **Go** — `go-junit-report > target/test-report.xml`.
+- **Rust** — `cargo test` can't emit JUnit; use **cargo-nextest** with `[profile.<name>.junit] path = "junit.xml"` in `.config/nextest.toml` (lands at `target/nextest/<profile>/junit.xml`).
 
-Use the same `classname` grouping the tool emits — oxplow builds the
-tree by splitting it on `::` / `.`.
+Keep the tool's natural `classname` — oxplow builds the tree by
+splitting `classname`+`name` on `::` / `.`.
 
-## 3. Record the profile in oxplow.yaml
+Make the **smallest** change that makes each report automatic, and
+leave the diffs for the user to review — these are committed files.
 
-Add (or update) a `collection:` block describing what you wired up:
+## 3. Record every report in oxplow.yaml
+
+List **all** reports across **all** stacks under `collection.reports`:
 
 ```yaml
 collection:
-  testCommand: "<the command that runs the tests>"
-  coverageReportPath: "<repo-relative path the coverage report lands at>"
-  coverageFormat: cobertura      # | lcov | jacoco-xml
-  testReportPath: "<repo-relative path the JUnit report lands at>"
-  testReportFormat: junit
-  # Optional — extra command substrings that count as a test run, on
-  # top of the built-in defaults (pytest, cargo test, jest, go test, …):
-  testRunPatterns: []
+  testCommand: "<command that runs the tests>"   # informational
+  reports:
+    # Rust
+    - { path: target/coverage/lcov.info, format: lcov }
+    - { path: target/nextest/default/junit.xml, format: junit }
+    # Frontend
+    - { path: apps/desktop/coverage/cobertura-coverage.xml, format: cobertura }
+    - { path: apps/desktop/test-report.xml, format: junit }
+  # Extra command substrings that count as a test run, on top of the
+  # built-in defaults (pytest, cargo test, jest, go test, …):
+  testRunPatterns: [bun test]
 ```
 
-Every field is optional — wire coverage, test results, or both. Once
-set, oxplow collects **automatically**: it records each test run it
-sees via the Bash hook, parses the JUnit report into the individual-
-test tree, and parses the coverage report into diff coverage over the
-effort's changed lines. You never parse or report any of these numbers
-yourself — oxplow does, so they stay trustworthy (`observed`, not
-`asserted`).
+`format` ∈ `lcov` | `cobertura` | `jacoco-xml` (coverage) | `junit`
+(test results). Once set, oxplow collects **automatically**: on each
+test run it sees, it parses every report **fresher than the effort
+start** (so a frontend run uses the frontend reports, a Rust run the
+Rust reports), merging JUnit into the per-test tree and coverage into
+diff coverage. You never parse or report any of these numbers yourself
+— oxplow does, so they stay trustworthy (`observed`, not `asserted`).

@@ -41,13 +41,17 @@ section for the column.
   from the report; the caller maps paths to repo-relative and the UI builds
   the test tree from `classname`+`name`.
 - **Collection profile** (`collection:` block in `oxplow.yaml`, parsed by
-  `crates/oxplow-config/src/lib.rs`): `testCommand`, `coverageReportPath`,
-  `coverageFormat`, `testReportPath`, `testReportFormat` (`junit`),
-  `testRunPatterns`. All optional — an unconfigured
-  project collects nothing extra. `coverageFormat` is validated against the
-  parser's known set. Edits to the block are hot-reloaded by the config
-  watcher (`ConfigWatcher`, see `git-integration.md`), so `/oxplow:configure`
-  takes effect without an app restart.
+  `crates/oxplow-config/src/lib.rs`): `testCommand`, `reports: [{ path,
+  format }]` (format ∈ `lcov`/`cobertura`/`jacoco-xml` = coverage, `junit`
+  = test results), `testRunPatterns`. The `reports` list is what makes a
+  **polyglot repo** work — list every stack's report(s); the ride-along
+  parses each that's fresher than the effort start, so each stack lights up
+  on its own run. (The pre-`reports` singular fields
+  `coverageReportPath`/`coverageFormat`/`testReportPath`/`testReportFormat`
+  are still read for back-compat and folded into `reports`.) All optional.
+  Edits hot-reload via the config watcher (`ConfigWatcher`, see
+  `git-integration.md`), so `/oxplow:configure` takes effect without a
+  restart.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
   `crates/oxplow-plugin/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
@@ -62,20 +66,18 @@ hook + MCP wiring):
 
 - **Passive** — the PostToolUse Bash hook detects a test run (built-in
   patterns + the profile's `testRunPatterns`) and records a `test-run`
-  observation against the open effort; if a `coverageReportPath` is
-  configured it reads + parses that report and records a `diff-coverage`
-  observation over the effort's changed lines. Both `observed`, no agent
-  step. **Staleness guard:** the ride-along only ingests when the report's
-  mtime is newer than the effort's start — a run that didn't regenerate the
-  report (e.g. `cargo test` when coverage comes from a separate `cargo cov`)
-  leaves a report from a prior effort, and attributing it here would be
-  misleading (`CoverageIngest::StaleReport`).
-  **Individual tests:** when `testReportPath`/`testReportFormat` (JUnit) is
-  configured and the report is fresh (same mtime guard), the ride-along
-  parses it via `oxplow_coverage::parse_junit` and embeds the suite/case
-  tree + pass/fail/skip counts in the same `test-run` observation payload
-  (`suites`). The UI builds a tech-natural tree by splitting each case's
-  `classname` on `::`/`.`.
+  observation against the open effort. It then walks **every** entry in
+  `collection.reports` and ingests the ones fresher than the effort start
+  (`merge_fresh_test_reports` / `merge_fresh_coverage` in `collection.rs`):
+  JUnit reports merge into one suite/case tree embedded in the `test-run`
+  payload (`suites`); coverage reports merge into one `diff-coverage`
+  observation over the effort's changed lines. All `observed`, no agent
+  step. **Staleness is the router:** a run only regenerates its own stack's
+  report(s), so the mtime guard (`report_is_stale`, floor = effort start)
+  naturally excludes the other stacks' stale reports — a `bun test` run
+  picks up the frontend reports, a `cargo cov` run the Rust ones, and both
+  accrue within one effort. The UI builds a tech-natural tree by splitting
+  each case's `classname`+`name` on `::`/`.`.
 - **Active (MCP)** — `ingest_coverage` is a thin explicit entry point (same
   deterministic parse path) for on-demand or non-standard-location reports.
   It passes `skip_if_stale = false`, so it ingests regardless of mtime — the

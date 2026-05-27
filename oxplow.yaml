@@ -5,16 +5,24 @@ generatedDirs:
 - site
 - target
 - oxplow.iml
+- apps/desktop/test-report.xml
 collection:
-  testCommand: cargo cov
-  coverageReportPath: target/coverage/lcov.info
-  coverageFormat: lcov
-  # `cargo cov` runs nextest under llvm-cov, so one command emits both the
-  # lcov coverage report AND the JUnit per-test report.
-  testReportPath: target/nextest/default/junit.xml
-  testReportFormat: junit
-  # `cargo cov` / `cargo llvm-cov` aren't built-in detector patterns;
-  # list them so a coverage run is recognized as a test run by the hook.
+  # `bun run test:collect` runs both stacks and emits all three reports:
+  # `cargo cov` (= llvm-cov nextest) writes the Rust lcov + JUnit, then the
+  # frontend `test:junit` script writes the bun JUnit.
+  testCommand: bun run test:collect
+  reports:
+  # Rust (cargo cov)
+  - { path: target/coverage/lcov.info, format: lcov }
+  - { path: target/nextest/default/junit.xml, format: junit }
+  # Frontend (bun run --cwd apps/desktop test:junit)
+  - { path: apps/desktop/test-report.xml, format: junit }
+  # Distinctive substrings so the hook recognizes a test run regardless of
+  # which stack/command was invoked (built-ins already cover `bun test`).
   testRunPatterns:
   - cargo cov
   - llvm-cov
+  - nextest
+  - bun test
+  - test:collect
+  - test:junit

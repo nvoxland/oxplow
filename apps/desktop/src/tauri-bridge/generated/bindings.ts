@@ -986,28 +986,24 @@ export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
 /**
  *  Per-project collection profile (the `collection:` block). Written by
  *  `/oxplow:configure` and read by the collection subsystem
- *  (`.context/collection.md`): the passive Bash-hook test detector reads
- *  `test_run_patterns`, and the coverage ride-along reads
- *  `coverage_report_path` + `coverage_format`. All fields optional — an
- *  unconfigured project simply collects nothing extra.
+ *  (`.context/collection.md`): the Bash-hook detector reads
+ *  `test_run_patterns`, and the ride-along parses every `reports` entry
+ *  fresher than the effort start. A repo with several test stacks lists
+ *  each stack's report(s) here. All fields optional — an unconfigured
+ *  project collects nothing extra.
  */
 export type CollectionConfig = {
 	/**
 	 *  Command that runs the project's tests (informational; surfaced to
-	 *  the agent so it knows how to produce coverage).
+	 *  the agent so it knows how to produce the reports).
 	 */
 	testCommand: string | null,
-	// Repo-relative path the test tooling writes its coverage report to.
-	coverageReportPath: string | null,
-	// Report format: `cobertura` | `lcov` | `jacoco-xml`.
-	coverageFormat: string | null,
 	/**
-	 *  Repo-relative path the test tooling writes its machine-readable
-	 *  test report to (for the individual-tests tree). JUnit XML.
+	 *  Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
+	 *  and/or test results (junit). oxplow parses each that is fresher
+	 *  than the effort start, so several stacks coexist.
 	 */
-	testReportPath: string | null,
-	// Test-report format: `junit`.
-	testReportFormat: string | null,
+	reports: ReportConfig[],
 	/**
 	 *  Extra command substrings that count as a test run, on top of the
 	 *  built-in defaults (pytest, cargo test, jest, …).
@@ -1715,6 +1711,16 @@ export type RepoConflictState = {
 	operation: GitOperationKind | null,
 	// Number of paths reported as unmerged by `git status --porcelain`.
 	conflicted_count: number,
+};
+
+/**
+ *  One test/coverage report the project's test run emits. `format`
+ *  selects the parser: `lcov` | `cobertura` | `jacoco-xml` are coverage
+ *  reports; `junit` is a test-result report (the per-test tree).
+ */
+export type ReportConfig = {
+	path: string,
+	format: string,
 };
 
 /**
