@@ -716,6 +716,22 @@ so backlinks/freshness work without parser changes. The
 skill; the `/note` slash command at `.claude/commands/note.md`
 triggers the same flow on demand.
 
+## Collection command & skill
+
+The `/oxplow:configure` command (asset `crates/oxplow-plugin/assets/configure.md`)
+sets up the **collection** subsystem (see `.context/collection.md`): it has
+the agent instrument the project's test tooling to emit a standard-format
+coverage report at a stable path, then records the `collection:` profile in
+`oxplow.yaml`. The standing `oxplow-collection` skill
+(`crates/oxplow-plugin/assets/oxplow-collection.SKILL.md`) loads when a task
+closes and on `/oxplow:configure`; it tells the agent to run the tests
+before completing (so a report exists) and — critically — to **never parse
+or report coverage numbers itself**, because oxplow parses the report
+deterministically (`observed`). Both are wired in `write_plugin`
+(`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
+detector, coverage ride-along, the `ingest_coverage` / `record_test_run` /
+`list_effort_observations` MCP tools) is documented in `.context/collection.md`.
+
 ## Write guard
 
 Non-writer threads share the writer's worktree (same checkout, separate

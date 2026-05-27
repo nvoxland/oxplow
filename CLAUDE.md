@@ -69,6 +69,7 @@ open questions.
 | `RichTextField`, Tiptap surface, MermaidBlock + InternalLink extensions, mermaidRender helper | `.context/rich-text-editor.md` |
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
+| Effort-scoped collection (test-run + diff-coverage observations, the coverage parser, the `collection:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |
 | Blog posts, user docs, release notes, README copy — anything reader-facing | `.context/writing-tone.md` |

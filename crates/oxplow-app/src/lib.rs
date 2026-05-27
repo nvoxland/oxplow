@@ -14,8 +14,10 @@ pub mod agent_status_derive;
 pub mod background_task;
 pub mod blob_store;
 pub mod code_quality_runner;
+pub mod collection;
 pub mod commit_indexer;
 pub mod config_service;
+pub mod config_watch;
 pub mod diagnostics;
 pub mod events;
 pub mod file_ref_version;
@@ -68,11 +70,11 @@ use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqliteCommentStore, SqlitePageRefStore,
-    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteTaskEffortStore, SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore,
-    SqliteTaskStore, SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore,
-    SqliteWikiPageThreadUpdateStore,
+    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqliteCommentStore,
+    SqliteEffortObservationStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
+    SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore, SqliteTaskEventStore,
+    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore, SqliteThreadStore, SqliteUsageStore,
+    SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -352,6 +354,10 @@ pub struct Services {
     /// for code that wants to bypass the trait surfaces.
     pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
     pub effort_store: Arc<SqliteTaskEffortStore>,
+    /// Effort-scoped collection observations (test runs + diff coverage).
+    pub observation_store: Arc<SqliteEffortObservationStore>,
+    /// Collection engine (passive Bash-hook detection + coverage ingest).
+    pub collection: collection::CollectionService,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
     /// `source_kind` slice mirrors its outbound refs into this store
@@ -425,6 +431,7 @@ impl Services {
         let effort_store = Arc::new(
             SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
+        let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -507,6 +514,16 @@ impl Services {
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone());
+        let collection = collection::CollectionService::new(
+            observation_store.clone(),
+            effort_store.clone(),
+            thread_store.clone(),
+            snapshot_store.clone(),
+            blobs.clone(),
+            config_arc.clone(),
+            layout.project_dir.clone(),
+            event_bus.clone(),
+        );
 
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
@@ -536,6 +553,8 @@ impl Services {
             agent_turn_store,
             thread_runtime,
             effort_store,
+            observation_store,
+            collection,
             wiki_page_thread_updates,
             page_ref_store,
             comment_store,
@@ -600,6 +619,7 @@ impl Services {
         let effort_store = Arc::new(
             SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
+        let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams =
@@ -659,6 +679,16 @@ impl Services {
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone());
+        let collection = collection::CollectionService::new(
+            observation_store.clone(),
+            effort_store.clone(),
+            thread_store.clone(),
+            snapshot_store.clone(),
+            blobs.clone(),
+            config_arc.clone(),
+            layout.project_dir.clone(),
+            event_bus.clone(),
+        );
         Ok(Self {
             config: config_arc,
             db,
@@ -684,6 +714,8 @@ impl Services {
             agent_turn_store,
             thread_runtime,
             effort_store,
+            observation_store,
+            collection,
             wiki_page_thread_updates,
             page_ref_store,
             comment_store,
@@ -707,6 +739,26 @@ impl Services {
             git,
             finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
+    }
+
+    /// Reload `oxplow.yaml` from disk into the in-memory config, re-apply
+    /// derived state (the snapshot workspace filter, mirroring
+    /// `set_generated`), and emit `ConfigChanged`. Called by the config
+    /// fs-watcher when the file changes out-of-band — e.g. the agent
+    /// running `/oxplow:configure` writes a `collection:` block — so the
+    /// edit goes live without a process restart. A full reload from disk
+    /// is safe: the in-memory config is always exactly the file's content
+    /// plus defaults (the same thing boot computes).
+    pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
+        let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
+        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(&fresh.generated);
+        {
+            let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
+            *guard = fresh;
+        }
+        self.snapshot_captures.set_workspace_filter(filter);
+        self.events.emit(OxplowEvent::ConfigChanged);
+        Ok(())
     }
 }
 
@@ -788,5 +840,46 @@ mod tests {
         assert!(services.layout.state_dir.exists());
         // Writing to db should be fine; the file path will not exist.
         assert!(!services.layout.state_db_path.exists());
+    }
+
+    fn init_git(dir: &std::path::Path) {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reload_config_from_disk_picks_up_external_edits() {
+        let project = tempdir().unwrap();
+        init_git(project.path());
+        let services = Services::in_memory(project.path()).unwrap();
+        // Boot config has no collection profile.
+        assert!(config_service::read_config(&services.config)
+            .collection
+            .coverage_report_path
+            .is_none());
+
+        // Simulate `/oxplow:configure` writing the file out-of-band.
+        std::fs::write(
+            project.path().join(oxplow_config::OXPLOW_CONFIG_FILE),
+            "collection:\n  coverageReportPath: target/coverage/lcov.info\n  coverageFormat: lcov\n",
+        )
+        .unwrap();
+
+        services.reload_config_from_disk().unwrap();
+
+        let cfg = config_service::read_config(&services.config);
+        assert_eq!(
+            cfg.collection.coverage_report_path.as_deref(),
+            Some("target/coverage/lcov.info"),
+            "in-memory config should reflect the on-disk edit after reload"
+        );
+        assert_eq!(cfg.collection.coverage_format.as_deref(), Some("lcov"));
     }
 }

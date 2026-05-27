@@ -524,6 +524,19 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         });
     }
 
+    // Config watcher: hot-reload `oxplow.yaml` on out-of-band edits
+    // (e.g. the agent running `/oxplow:configure`, which Writes a
+    // `collection:` block) so config changes go live without a restart.
+    // Held alive for the life of the process.
+    {
+        let cfg_services = state.clone();
+        boot_runtime.spawn(async move {
+            if let Some(watcher) = oxplow_app::config_watch::ConfigWatcher::spawn(cfg_services) {
+                Box::leak(Box::new(watcher));
+            }
+        });
+    }
+
     // Lightweight self-diagnostics: once a minute, log RSS + open
     // fds + stream count so a long-running process leaves a trail
     // we can correlate against system-wide weirdness. See

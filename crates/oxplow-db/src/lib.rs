@@ -9,6 +9,7 @@ pub mod analytics_stores;
 pub mod comment_store;
 mod database;
 pub mod effort_store;
+pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod search_store;
@@ -30,6 +31,9 @@ pub use database::{Database, DbInitError};
 pub use effort_store::{
     EffortAtSnapshot, EffortFile, EffortFileChange, FileRefVersion, SqliteTaskEffortStore,
     TaskEffort, TaskEffortStore,
+};
+pub use observation_store::{
+    EffortObservation, NewEffortObservation, SqliteEffortObservationStore,
 };
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};

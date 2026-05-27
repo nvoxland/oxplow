@@ -1,0 +1,8 @@
+[alias]
+# `cargo cov` runs the workspace test suite under instrumentation and
+# writes an lcov report to a stable path. oxplow's collection subsystem
+# (see .context/collection.md + the `collection:` block in oxplow.yaml)
+# reads this report after a detected test run to attribute diff coverage
+# to the open effort. Requires cargo-llvm-cov (`cargo install
+# cargo-llvm-cov`); CI already uses it.
+cov = "llvm-cov --workspace --lcov --output-path target/coverage/lcov.info"

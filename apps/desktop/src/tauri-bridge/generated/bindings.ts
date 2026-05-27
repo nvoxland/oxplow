@@ -513,6 +513,12 @@ export const commands = {
 	 *  `SnapshotDetailPage`.
 	 */
 	listChangedPathsForEffort: (effortId: EffortId) => typedError<string[], IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
+	/**
+	 *  Collection observations (test-run / diff-coverage) for an effort,
+	 *  newest-first. Optional `kind` filter. Drives the effort-review
+	 *  coverage badge + tests-run list on `TaskPage`.
+	 */
+	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
@@ -966,6 +972,31 @@ export type CodeQualityScan = {
 export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
 
 /**
+ *  Per-project collection profile (the `collection:` block). Written by
+ *  `/oxplow:configure` and read by the collection subsystem
+ *  (`.context/collection.md`): the passive Bash-hook test detector reads
+ *  `test_run_patterns`, and the coverage ride-along reads
+ *  `coverage_report_path` + `coverage_format`. All fields optional — an
+ *  unconfigured project simply collects nothing extra.
+ */
+export type CollectionConfig = {
+	/**
+	 *  Command that runs the project's tests (informational; surfaced to
+	 *  the agent so it knows how to produce coverage).
+	 */
+	testCommand: string | null,
+	// Repo-relative path the test tooling writes its coverage report to.
+	coverageReportPath: string | null,
+	// Report format: `cobertura` | `lcov` | `jacoco-xml`.
+	coverageFormat: string | null,
+	/**
+	 *  Extra command substrings that count as a test run, on top of the
+	 *  built-in defaults (pytest, cargo test, jest, …).
+	 */
+	testRunPatterns: string[],
+};
+
+/**
  *  The thread anchor + metadata. The conversation lives in
  *  [`CommentMessage`] rows keyed by `id`.
  */
@@ -1172,6 +1203,28 @@ export type EffortFile = {
 export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
+
+// One persisted observation row.
+export type EffortObservation = {
+	id: number,
+	stream_id: string,
+	effort_id: string,
+	// Well-known kind: `test-run` | `diff-coverage` (open-ended).
+	kind: string,
+	// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
+	provenance: string,
+	// Free-form origin tag, e.g. `post-tool-bash` / `agent`.
+	source: string,
+	// Headline numeric (e.g. coverage %); kind-specific, nullable.
+	metric_value: number | null,
+	// Kind-specific structured payload (parsed by the UI, opaque to Rust).
+	payload_json: string | null,
+	// Freshness pin — the snapshot this was captured against.
+	local_snapshot_id: number | null,
+	closest_git_version: string | null,
+	git_version_exact: boolean,
+	created_at: Timestamp,
+};
 
 export type EnsureAgentPaneRequest = {
 	stream_id: StreamId,
@@ -1549,6 +1602,8 @@ export type OxplowConfig = {
 	 *  block into every agent prompt.
 	 */
 	injectSessionContext: boolean,
+	// Per-project collection profile (test + coverage instrumentation).
+	collection: CollectionConfig,
 };
 
 export type PageVisit = {

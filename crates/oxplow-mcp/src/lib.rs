@@ -94,6 +94,37 @@ pub struct UpsertTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IngestCoverageParams {
+    pub thread_id: String,
+    /// Repo-relative path to the coverage report. Omit to use the
+    /// project's configured `collection.coverageReportPath`.
+    pub report_path: Option<String>,
+    /// `cobertura` | `lcov` | `jacoco-xml`. Omit to use the configured
+    /// `collection.coverageFormat`.
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordTestRunParams {
+    pub thread_id: String,
+    pub command: String,
+    pub passed: Option<i64>,
+    pub failed: Option<i64>,
+    pub total: Option<i64>,
+    pub duration_ms: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListEffortObservationsParams {
+    /// Effort id to read directly. Omit to use the open effort on
+    /// `thread_id`.
+    pub effort_id: Option<String>,
+    pub thread_id: Option<String>,
+    /// Optional kind filter: `test-run` | `diff-coverage`.
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddThreadNoteParams {
     pub thread_id: String,
     pub body: String,
@@ -1315,6 +1346,123 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&notes)
+    }
+
+    // ---------- collection (test runs + diff coverage) ----------
+
+    #[tool(
+        description = "Ingest a coverage report into the thread's open effort as diff coverage \
+            over the lines that effort changed. oxplow parses the report deterministically \
+            (cobertura / lcov / jacoco-xml) — you only point at it, you NEVER report coverage \
+            numbers yourself (that keeps the result trustworthy/`observed`). `report_path` and \
+            `format` default to the project's `collection` profile in oxplow.yaml. Returns a \
+            status: stored (with summaryPct over changed lines) or a reason nothing landed \
+            (no_open_effort / not_configured / report_missing / no_baseline / no_changed_coverage)."
+    )]
+    async fn ingest_coverage(
+        &self,
+        params: Parameters<IngestCoverageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "ingest_coverage",
+            "thread_id",
+            &params.0.thread_id,
+            ID_THREAD,
+        )?;
+        let tid = ThreadId::from(params.0.thread_id);
+        let outcome = self
+            .services
+            .collection
+            .ingest_coverage(&tid, params.0.report_path, params.0.format, false)
+            .await
+            .map_err(internal)?;
+        json_result(&ingest_outcome_json(&outcome))
+    }
+
+    #[tool(
+        description = "Record a test run against the thread's open effort with pass/fail counts \
+            the Bash-hook exit code can't capture. Marked `asserted` (agent-reported). oxplow \
+            already records `observed` test runs automatically from the Bash hook — use this \
+            only when you want to attach structured pass/fail/total counts."
+    )]
+    async fn record_test_run(
+        &self,
+        params: Parameters<RecordTestRunParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "record_test_run",
+            "thread_id",
+            &params.0.thread_id,
+            ID_THREAD,
+        )?;
+        let tid = ThreadId::from(params.0.thread_id);
+        let id = self
+            .services
+            .collection
+            .record_test_run(
+                &tid,
+                &params.0.command,
+                None,
+                params.0.duration_ms,
+                params.0.passed,
+                params.0.failed,
+                params.0.total,
+                "asserted",
+                "agent",
+            )
+            .await
+            .map_err(internal)?;
+        json_result(&serde_json::json!({
+            "recorded": id.is_some(),
+            "observationId": id,
+        }))
+    }
+
+    #[tool(
+        description = "List collection observations (test-run / diff-coverage) for an effort. \
+            Pass `effort_id` to read it directly, or `thread_id` to use that thread's open \
+            effort. Optional `kind` filter."
+    )]
+    async fn list_effort_observations(
+        &self,
+        params: Parameters<ListEffortObservationsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_db::TaskEffortStore as _;
+        let effort_id = match (params.0.effort_id, params.0.thread_id) {
+            (Some(e), _) => e,
+            (None, Some(t)) => {
+                expect_id_kind("list_effort_observations", "thread_id", &t, ID_THREAD)?;
+                let tid = ThreadId::from(t);
+                match self
+                    .services
+                    .effort_store
+                    .find_open_for_thread(&tid)
+                    .await
+                    .map_err(internal)?
+                {
+                    Some(effort) => effort.id.as_str().to_string(),
+                    None => {
+                        return Err(McpError::invalid_params(
+                            "no open effort on that thread",
+                            None,
+                        ))
+                    }
+                }
+            }
+            (None, None) => {
+                return Err(McpError::invalid_params(
+                    "provide effort_id or thread_id",
+                    None,
+                ))
+            }
+        };
+        let rows = self
+            .services
+            .collection
+            .list_for_effort(&effort_id, params.0.kind.as_deref())
+            .await
+            .map_err(internal)?;
+        json_result(&rows)
     }
 
     // ---------- comments ----------
@@ -2928,6 +3076,35 @@ pub fn registered_tool_names() -> Vec<String> {
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// Map a coverage-ingest outcome to a JSON status the agent can act on.
+fn ingest_outcome_json(outcome: &oxplow_app::collection::CoverageIngest) -> serde_json::Value {
+    use oxplow_app::collection::CoverageIngest as C;
+    match outcome {
+        C::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
+        C::NotConfigured => serde_json::json!({
+            "status": "not_configured",
+            "hint": "set collection.coverageReportPath + coverageFormat in oxplow.yaml (run /oxplow:configure)",
+        }),
+        C::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
+        C::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
+        C::ParseError(err) => serde_json::json!({ "status": "parse_error", "error": err }),
+        C::NoBaseline => serde_json::json!({ "status": "no_baseline" }),
+        C::NoChangedCoverage => serde_json::json!({ "status": "no_changed_coverage" }),
+        C::Stored {
+            observation_id,
+            summary_pct,
+            changed_lines,
+            covered_lines,
+        } => serde_json::json!({
+            "status": "stored",
+            "observationId": observation_id,
+            "summaryPct": summary_pct,
+            "changedLines": changed_lines,
+            "coveredLines": covered_lines,
+        }),
+    }
 }
 
 /// Validate an optional `stream_id`: enforce the `s-` prefix when present,

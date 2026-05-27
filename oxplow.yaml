@@ -5,3 +5,13 @@ generatedDirs:
 - site
 - target
 - oxplow.iml
+collection:
+  testCommand: cargo cov
+  coverageReportPath: target/coverage/lcov.info
+  coverageFormat: lcov
+  # `cargo cov` / `cargo llvm-cov` aren't built-in detector patterns
+  # (the defaults cover `cargo test`/`nextest`); list them so a coverage
+  # run is recognized as a test run by the PostToolUse hook.
+  testRunPatterns:
+  - cargo cov
+  - llvm-cov

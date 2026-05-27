@@ -156,6 +156,7 @@ mod tests {
             generated: vec![],
             snapshot_max_file_bytes: 1_000_000,
             inject_session_context: true,
+            collection: Default::default(),
         }
     }
 

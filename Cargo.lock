@@ -2837,6 +2837,7 @@ dependencies = [
  "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-config",
+ "oxplow-coverage",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-fs-watch",
@@ -2942,6 +2943,14 @@ dependencies = [
  "tower",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "oxplow-coverage"
+version = "0.5.0"
+dependencies = [
+ "quick-xml",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use oxplow_db::{EffortAtSnapshot, EffortFile, TaskEffort, TaskEffortStore as _};
+use oxplow_db::{
+    EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort, TaskEffortStore as _,
+};
 use oxplow_domain::{EffortId, TaskId};
 use oxplow_fs_watch::WorkspaceFilter;
 
@@ -72,4 +74,20 @@ pub async fn list_changed_paths_for_effort(
         .into_iter()
         .filter(|p| !filter.ignore(Path::new(p)))
         .collect())
+}
+
+/// Collection observations (test-run / diff-coverage) for an effort,
+/// newest-first. Optional `kind` filter. Drives the effort-review
+/// coverage badge + tests-run list on `TaskPage`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_effort_observations(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+    kind: Option<String>,
+) -> Result<Vec<EffortObservation>, IpcError> {
+    Ok(state
+        .observation_store
+        .list_for_effort(effort_id.as_str(), kind.as_deref())
+        .await?)
 }

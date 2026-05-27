@@ -79,8 +79,10 @@ pub struct PluginPaths {
     pub subagent_skill: PathBuf,
     pub wiki_capture_skill: PathBuf,
     pub mermaid_skill: PathBuf,
+    pub collection_skill: PathBuf,
     pub work_next_command: PathBuf,
     pub review_comments_command: PathBuf,
+    pub configure_command: PathBuf,
 }
 
 /// Materialize the plugin directory. `hook_base_url` and
@@ -107,6 +109,7 @@ pub fn write_plugin(
     fs::create_dir_all(skills_dir.join("oxplow-subagent-work-protocol"))?;
     fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
     fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     let manifest_body = json!({
@@ -153,6 +156,12 @@ pub fn write_plugin(
         include_str!("../assets/oxplow-mermaid.SKILL.md"),
     )?;
 
+    let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
+    fs::write(
+        &collection_skill,
+        include_str!("../assets/oxplow-collection.SKILL.md"),
+    )?;
+
     let work_next_command = commands_dir.join("work-next.md");
     fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
 
@@ -161,6 +170,9 @@ pub fn write_plugin(
         &review_comments_command,
         include_str!("../assets/review-comments.md"),
     )?;
+
+    let configure_command = commands_dir.join("configure.md");
+    fs::write(&configure_command, include_str!("../assets/configure.md"))?;
 
     Ok(PluginPaths {
         plugin_dir,
@@ -172,8 +184,10 @@ pub fn write_plugin(
         subagent_skill,
         wiki_capture_skill,
         mermaid_skill,
+        collection_skill,
         work_next_command,
         review_comments_command,
+        configure_command,
     })
 }
 
@@ -254,8 +268,10 @@ mod tests {
         assert!(paths.subagent_skill.exists());
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
+        assert!(paths.collection_skill.exists());
         assert!(paths.work_next_command.exists());
         assert!(paths.review_comments_command.exists());
+        assert!(paths.configure_command.exists());
         assert!(paths.agent_guide.exists());
     }
 

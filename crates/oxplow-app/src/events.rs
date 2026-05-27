@@ -156,6 +156,17 @@ pub enum OxplowEvent {
         effort_id: Option<String>,
         thread_id: Option<ThreadId>,
     },
+    /// Effort-scoped collection observations changed for `effort_id`
+    /// (a test-run or diff-coverage row landed). The renderer refetches
+    /// the effort's observation list. See `.context/collection.md`.
+    EffortObservationsChanged {
+        thread_id: ThreadId,
+        effort_id: String,
+    },
+    /// `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
+    /// running `/oxplow:configure`). The in-memory config has been swapped;
+    /// the renderer refetches `get_config`.
+    ConfigChanged,
     /// A code-quality scan transitioned states (started / completed /
     /// failed). The renderer refreshes scan + finding lists on receipt.
     CodeQualityScanned {

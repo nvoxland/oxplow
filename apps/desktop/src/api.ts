@@ -1627,6 +1627,19 @@ export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
   });
 }
 
+export type { EffortObservation } from "./tauri-bridge/index.js";
+
+/** Collection observations (test-run / diff-coverage) for an effort,
+ *  newest-first. Optional `kind` filter. */
+export async function listEffortObservations(
+  effortId: string,
+  kind?: string,
+): Promise<import("./tauri-bridge/index.js").EffortObservation[]> {
+  return unwrap(
+    await commands.listEffortObservations(effortId, kind ?? null),
+  ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
+}
+
 export async function listFileSnapshots(
   streamId: string,
   limit?: number,

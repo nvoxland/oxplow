@@ -782,6 +782,45 @@ complete / fail; `CodeQualityPanel` (`apps/desktop/src/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
+### `effort_observation` — `SqliteEffortObservationStore` (`crates/oxplow-db/src/observation_store.rs`, migration `V26__effort_observation.sql`)
+
+Structured, agent-or-tool-reported facts attached to a `task_effort` — the
+foundation of the **collection** subsystem (see `.context/collection.md`).
+Modeled on `code_quality_finding` (kind + `metric_value` + payload) plus the
+`page_ref` freshness-pin columns. The slice ships two `kind`s: `test-run`
+(which tests ran) and `diff-coverage` (coverage over the effort's changed
+lines).
+
+Columns: `id, stream_id (NOT NULL, FK streams ON DELETE CASCADE), effort_id
+(NOT NULL, FK task_effort ON DELETE CASCADE), kind, provenance, source,
+metric_value (REAL, nullable), payload_json (TEXT), local_snapshot_id,
+closest_git_version, git_version_exact, created_at`. Indexes on
+`(effort_id, kind, created_at DESC)` and `(stream_id)`.
+
+- **`provenance` is the spine** (`CHECK IN ('observed','asserted')`):
+  `observed` = oxplow saw it directly (the PostToolUse Bash hook, or oxplow
+  parsing a coverage report itself); `asserted` = the agent reported it via
+  MCP and we can't independently verify it. The UI marks asserted facts so a
+  reviewer never mistakes a typed number for a measured one.
+- **`effort_id` is NOT NULL + CASCADE** (a deliberate tightening of the
+  original plan's nullable column): an observation only has meaning inside
+  its effort's start/end snapshot bracket — `diff-coverage` intersects
+  against the effort's changed lines — so it dies with the effort. The
+  passive hook skips recording when there's no open effort rather than
+  inserting a dangling row.
+- **Freshness pin** (`local_snapshot_id` / `closest_git_version` /
+  `git_version_exact`) mirrors `task_effort_file` / `page_ref` (see V20);
+  filled at capture time by the same `oxplow_app::file_ref_version` resolver
+  so the UI can flag a coverage badge as stale once HEAD moves past the pin.
+- **`payload_json`** is kind-specific and parsed only in TS / by the agent
+  (opaque to Rust, so enriching it needs no migration): `test-run` carries
+  `{ command, exitCode?, passed?, failed?, total?, durationMs? }`;
+  `diff-coverage` carries `{ summaryPct, changedLines, coveredLines, files:
+  [{ path, uncoveredChangedLines }] }`.
+- **Retention** is store-driven like `CodeQualityStore`: each `record()`
+  prunes to keep-last-N (10) per `(effort_id, kind)` in the same
+  transaction.
+
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit

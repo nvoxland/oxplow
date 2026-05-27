@@ -169,6 +169,14 @@ pub trait TaskEffortStore: Send + Sync {
     /// touched-files into the lifecycle row instead of creating a
     /// duplicate.
     async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError>;
+    /// Open effort (`ended_at IS NULL`) for `thread`, if any. The
+    /// orchestrator keeps at most one item `in_progress` per thread, so
+    /// this is the effort that hook-driven collection (test runs,
+    /// coverage) attributes against. Newest open effort wins.
+    async fn find_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Option<TaskEffort>, DomainError>;
     /// Most-recent effort for `task` regardless of state, or `None`
     /// when the task has never had one. Used by `record_effort` to
     /// reattach files to a just-closed lifecycle effort.
@@ -430,6 +438,24 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      ORDER BY started_at DESC LIMIT 1",
                 )?;
                 let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+                rows.next().transpose()
+            })
+            .await
+    }
+
+    async fn find_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Option<TaskEffort>, DomainError> {
+        let thread = thread.clone();
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                     WHERE thread_id = ?1 AND ended_at IS NULL
+                     ORDER BY started_at DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query_map(params![thread.as_str()], row_to_effort)?;
                 rows.next().transpose()
             })
             .await

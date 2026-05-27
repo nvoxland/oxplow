@@ -215,6 +215,7 @@ mod tests {
             "page_ref",
             "comment",
             "comment_message",
+            "effort_observation",
         ];
         let expected_absent = ["hook_event", "agent_status"];
         let mut stmt = conn

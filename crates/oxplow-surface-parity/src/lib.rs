@@ -116,6 +116,7 @@ pub const MANIFEST: &[Capability] = &[
     both("reorder_tasks"),
     both("add_thread_note"),
     both("list_thread_notes"),
+    both("list_effort_observations"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),
@@ -176,6 +177,9 @@ pub const MANIFEST: &[Capability] = &[
     agent("resync_wiki_page"),
     agent("record_wiki_page_update"),
     agent("find_wiki_pages_for_wiki_page"),
+    // ---- collection (effort-scoped observations) ----
+    agent("ingest_coverage"),
+    agent("record_test_run"),
     agent("lsp_definition"),
     agent("lsp_hover"),
     agent("lsp_references"),
@@ -368,6 +372,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("send_terminal_message"),
     ui("close_terminal_session"),
     ui("terminate_terminal_session"),
+    ui("terminal_session_cwd"),
     // ---- ui-only: menu ----
     ui("set_native_menu"),
     // ---- ui-only: launcher / multi-window ----

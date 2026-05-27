@@ -20,6 +20,7 @@ oxplow-lsp = { workspace = true }
 oxplow-lsp-installer = { workspace = true }
 oxplow-code-metrics = { workspace = true }
 oxplow-code-dup = { workspace = true }
+oxplow-coverage = { workspace = true }
 oxplow-tree-source = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

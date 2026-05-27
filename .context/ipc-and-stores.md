@@ -427,6 +427,28 @@ When adding a third CLI tool, you only touch the subprocess module
 (new `runFoo` + parser) and the `CodeQualityTool` union — the
 store, runtime, IPC, and UI are tool-agnostic.
 
+## Collection observations
+
+The collection subsystem (`.context/collection.md`) follows the same
+7-layer shape with a couple of slice patterns worth calling out:
+
+- **One read IPC, one event.** `list_effort_observations(effortId,
+  kind?)` (`crates/oxplow-tauri-ipc/src/commands/effort.rs`, over
+  `Services.observation_store`) is `Both` in the surface-parity manifest
+  — same name on IPC and MCP. Mutations are agent-only (MCP
+  `ingest_coverage` / `record_test_run`) since the UI never writes
+  observations. The renderer refetches on `EffortObservationsChanged
+  { threadId, effortId }` — wire kind `effortObservationsChanged`
+  (mirrored in `apps/desktop/src/tauri-bridge/index.ts`'s
+  `OxplowEventKind`; mind the camelcase trap above). `TaskPage` →
+  `EffortObservations` subscribes and refetches per effort.
+- **The engine lives in `oxplow-app`, not a store.** `CollectionService`
+  (`crates/oxplow-app/src/collection.rs`) owns the orchestration
+  (effort resolution, coverage parse via `oxplow-coverage`, changed-line
+  diff, freshness pin) and is called from both the MCP tools and the
+  control-plane PostToolUse hook. The store
+  (`SqliteEffortObservationStore`) stays a thin typed read/write surface.
+
 ## Multi-owner stores: the `page_ref` slice pattern
 
 Most stores have a single writer per row. The unified

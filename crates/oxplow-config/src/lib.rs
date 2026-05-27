@@ -57,6 +57,30 @@ pub struct LspServerConfig {
     pub args: Vec<String>,
 }
 
+/// Per-project collection profile (the `collection:` block). Written by
+/// `/oxplow:configure` and read by the collection subsystem
+/// (`.context/collection.md`): the passive Bash-hook test detector reads
+/// `test_run_patterns`, and the coverage ride-along reads
+/// `coverage_report_path` + `coverage_format`. All fields optional — an
+/// unconfigured project simply collects nothing extra.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+pub struct CollectionConfig {
+    /// Command that runs the project's tests (informational; surfaced to
+    /// the agent so it knows how to produce coverage).
+    #[serde(rename = "testCommand")]
+    pub test_command: Option<String>,
+    /// Repo-relative path the test tooling writes its coverage report to.
+    #[serde(rename = "coverageReportPath")]
+    pub coverage_report_path: Option<String>,
+    /// Report format: `cobertura` | `lcov` | `jacoco-xml`.
+    #[serde(rename = "coverageFormat")]
+    pub coverage_format: Option<String>,
+    /// Extra command substrings that count as a test run, on top of the
+    /// built-in defaults (pytest, cargo test, jest, …).
+    #[serde(rename = "testRunPatterns")]
+    pub test_run_patterns: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
     pub agent: AgentKind,
@@ -90,6 +114,8 @@ pub struct OxplowConfig {
     /// block into every agent prompt.
     #[serde(rename = "injectSessionContext")]
     pub inject_session_context: bool,
+    /// Per-project collection profile (test + coverage instrumentation).
+    pub collection: CollectionConfig,
 }
 
 #[derive(Debug, Error)]
@@ -125,6 +151,21 @@ struct RawConfig {
     snapshot_max_file_bytes: Option<f64>,
     #[serde(rename = "injectSessionContext", default)]
     inject_session_context: Option<bool>,
+    #[serde(default)]
+    collection: Option<RawCollectionBlock>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCollectionBlock {
+    #[serde(rename = "testCommand", default)]
+    test_command: Option<String>,
+    #[serde(rename = "coverageReportPath", default)]
+    coverage_report_path: Option<String>,
+    #[serde(rename = "coverageFormat", default)]
+    coverage_format: Option<String>,
+    #[serde(rename = "testRunPatterns", default)]
+    test_run_patterns: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -217,6 +258,7 @@ pub fn write_project_config(
         "snapshotMaxFileBytes",
         "injectSessionContext",
         "lsp",
+        "collection",
     ];
 
     let existing_extras: serde_yaml::Mapping = if path.exists() {
@@ -303,6 +345,31 @@ pub fn write_project_config(
         doc.insert("lsp".into(), serde_yaml::Value::Mapping(lsp));
     }
 
+    let c = &config.collection;
+    if c.test_command.is_some()
+        || c.coverage_report_path.is_some()
+        || c.coverage_format.is_some()
+        || !c.test_run_patterns.is_empty()
+    {
+        let mut col = serde_yaml::Mapping::new();
+        if let Some(v) = &c.test_command {
+            col.insert("testCommand".into(), v.clone().into());
+        }
+        if let Some(v) = &c.coverage_report_path {
+            col.insert("coverageReportPath".into(), v.clone().into());
+        }
+        if let Some(v) = &c.coverage_format {
+            col.insert("coverageFormat".into(), v.clone().into());
+        }
+        if !c.test_run_patterns.is_empty() {
+            col.insert(
+                "testRunPatterns".into(),
+                serde_yaml::to_value(&c.test_run_patterns).expect("patterns serialize"),
+            );
+        }
+        doc.insert("collection".into(), serde_yaml::Value::Mapping(col));
+    }
+
     // Carry forward any unknown top-level keys the user (or a
     // sibling tool) added to oxplow.yaml.
     for (k, v) in existing_extras {
@@ -324,6 +391,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         generated: Vec::new(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
+        collection: CollectionConfig::default(),
     }
 }
 
@@ -398,6 +466,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         .inject_session_context
         .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
 
+    let collection = validate_collection(raw.collection)?;
+
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
             let mut out = Vec::with_capacity(servers.len());
@@ -447,6 +517,52 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         generated,
         snapshot_max_file_bytes,
         inject_session_context,
+        collection,
+    })
+}
+
+/// Known coverage report formats. Kept in sync with
+/// `oxplow_coverage::CoverageFormat::from_name`; duplicated here so the
+/// config crate stays dependency-light.
+const KNOWN_COVERAGE_FORMATS: &[&str] = &["cobertura", "lcov", "jacoco", "jacoco-xml"];
+
+fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConfig, ConfigError> {
+    let Some(raw) = raw else {
+        return Ok(CollectionConfig::default());
+    };
+    let opt_trimmed = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let coverage_format = match opt_trimmed(raw.coverage_format) {
+        Some(fmt) => {
+            if !KNOWN_COVERAGE_FORMATS.contains(&fmt.to_ascii_lowercase().as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "collection.coverageFormat must be one of cobertura | lcov | jacoco-xml (got \"{fmt}\")"
+                )));
+            }
+            Some(fmt)
+        }
+        None => None,
+    };
+    let test_run_patterns = match raw.test_run_patterns {
+        Some(list) => {
+            let mut out = Vec::with_capacity(list.len());
+            for (i, p) in list.into_iter().enumerate() {
+                let trimmed = p.trim().to_string();
+                if trimmed.is_empty() {
+                    return Err(ConfigError::Invalid(format!(
+                        "collection.testRunPatterns[{i}] must be a non-empty string"
+                    )));
+                }
+                out.push(trimmed);
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+    Ok(CollectionConfig {
+        test_command: opt_trimmed(raw.test_command),
+        coverage_report_path: opt_trimmed(raw.coverage_report_path),
+        coverage_format,
+        test_run_patterns,
     })
 }
 
@@ -671,6 +787,69 @@ lsp:
         write_project_config(dir.path(), &cfg).unwrap();
         let loaded = load_project_config(dir.path()).unwrap();
         assert!(!loaded.inject_session_context);
+    }
+
+    #[test]
+    fn collection_defaults_empty_when_absent() {
+        let dir = tempdir().unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.collection, CollectionConfig::default());
+    }
+
+    #[test]
+    fn parses_collection_block() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            r#"
+collection:
+  testCommand: cargo test
+  coverageReportPath: target/coverage/lcov.info
+  coverageFormat: lcov
+  testRunPatterns:
+    - cargo nextest
+"#,
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.collection.test_command.as_deref(), Some("cargo test"));
+        assert_eq!(
+            cfg.collection.coverage_report_path.as_deref(),
+            Some("target/coverage/lcov.info")
+        );
+        assert_eq!(cfg.collection.coverage_format.as_deref(), Some("lcov"));
+        assert_eq!(cfg.collection.test_run_patterns, vec!["cargo nextest"]);
+    }
+
+    #[test]
+    fn rejects_unknown_coverage_format() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "collection:\n  coverageFormat: clover\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("coverageFormat")));
+    }
+
+    #[test]
+    fn collection_round_trips_through_write() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            collection: CollectionConfig {
+                test_command: Some("pytest".into()),
+                coverage_report_path: Some("coverage.xml".into()),
+                coverage_format: Some("cobertura".into()),
+                test_run_patterns: vec!["tox".into()],
+            },
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        assert!(raw.contains("collection:"), "got:\n{raw}");
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.collection, cfg.collection);
     }
 
     /// Third-party keys that aren't part of oxplow's schema should

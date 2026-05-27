@@ -129,6 +129,22 @@ Every write is treated identically — agent and user edits both
 re-baseline freshness — so the watcher is the single sync path for
 `wiki_page` metadata. See `data-model.md` → `wiki_page`.
 
+### 5. Config watcher
+
+`crates/oxplow-app/src/config_watch.rs` — `ConfigWatcher`. A
+non-recursive `FsWatcher` on `projectDir`, spawned once at boot from
+`main.rs` (held via `Box::leak` for the process). On a debounced event
+whose basename is `oxplow.yaml`, it calls
+`Services::reload_config_from_disk`, which re-runs
+`load_project_config`, swaps the in-memory `Arc<RwLock<OxplowConfig>>`,
+re-applies the snapshot `WorkspaceFilter` (mirroring `set_generated`),
+and emits `OxplowEvent::ConfigChanged`. Exists because config is
+otherwise read only once at boot — without it, an out-of-band edit
+(notably the agent running `/oxplow:configure`, which Writes a
+`collection:` block) wouldn't take effect until restart. The IPC
+setters (`set_generated`, `set_agent_prompt_append`) still mutate the
+in-memory config directly; this watcher covers every other edit path.
+
 ### Orphan detection (boot + runtime)
 
 `WorkspaceWatchRegistry::spawn` checks `worktree_path.exists()` before

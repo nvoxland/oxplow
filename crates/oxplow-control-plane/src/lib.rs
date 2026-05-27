@@ -352,6 +352,18 @@ async fn handle_hook(
         {
             attribute_wiki_page_edit(&ctx, thread_id, body).await;
 
+            // Collection: detect a test-run Bash command, record it
+            // (observed), and ride along to coverage if configured.
+            // Best-effort — never fail the hook on a collection error.
+            if let Err(err) = ctx
+                .services
+                .collection
+                .on_post_tool_use(thread_id, &envelope_for_resume.payload_json)
+                .await
+            {
+                warn!(?err, "collection post-tool-use failed");
+            }
+
             // ExitPlanMode just settled — if the thread was promoted
             // (or demoted) while sitting on the plan-mode approval
             // prompt, no UserPromptSubmit fires between the user

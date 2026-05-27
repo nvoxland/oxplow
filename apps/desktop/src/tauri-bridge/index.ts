@@ -38,6 +38,8 @@ export type OxplowEventKind =
   | "usageRecorded"
   | "fileSnapshotCreated"
   | "codeQualityScanned"
+  | "effortObservationsChanged"
+  | "configChanged"
   | "workspaceContextChanged"
   | "workspaceChanged"
   | "gitRefsChanged"
