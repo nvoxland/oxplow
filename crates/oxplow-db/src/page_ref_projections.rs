@@ -500,6 +500,7 @@ mod tests {
             parent_id: None,
             title: title.into(),
             description: description.into(),
+            description_variants: oxplow_domain::ProseVariants::default(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,

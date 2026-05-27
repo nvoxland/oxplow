@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::ids::{TaskId, TaskLinkId, ThreadId};
+use crate::prose::ProseVariants;
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -67,7 +68,16 @@ pub struct Task {
     pub thread_id: Option<ThreadId>,
     pub parent_id: Option<TaskId>,
     pub title: String,
+    /// Developer-audience description — the canonical prose, also the
+    /// fallback for every other audience.
     pub description: String,
+    /// All three audience variants of the description. `developer`
+    /// always mirrors [`Task::description`] (the canonical text); the
+    /// store fills this on read from the `description_variants` JSON
+    /// column and persists only the optional executive/caveman halves.
+    /// See [`crate::prose`].
+    #[serde(default)]
+    pub description_variants: ProseVariants,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub sort_index: i64,
@@ -180,6 +190,7 @@ mod tests {
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
+            description_variants: ProseVariants::developer_only(String::new()),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,

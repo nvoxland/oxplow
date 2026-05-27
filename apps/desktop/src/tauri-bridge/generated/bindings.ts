@@ -162,7 +162,19 @@ export const commands = {
 	thread_id: ThreadId | null,
 	parent_id: TaskId | null,
 	title: string,
+	/**
+	 *  Developer-audience description — the canonical prose, also the
+	 *  fallback for every other audience.
+	 */
 	description: string,
+	/**
+	 *  All three audience variants of the description. `developer`
+	 *  always mirrors [`Task::description`] (the canonical text); the
+	 *  store fills this on read from the `description_variants` JSON
+	 *  column and persists only the optional executive/caveman halves.
+	 *  See [`crate::prose`].
+	 */
+	description_variants?: ProseVariants,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -1147,7 +1159,12 @@ export type CreateCommentRequest = {
 
 export type CreateTaskInput = {
 	title: string,
+	// Developer-audience description (canonical text).
 	description: string | null,
+	// Optional executive-summary rewrite of `description`.
+	description_executive: string | null,
+	// Optional terse "caveman" rewrite of `description`.
+	description_caveman: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
@@ -1635,6 +1652,17 @@ export type PageVisitDay = {
 
 export type PaneKindArg = "working" | "talking";
 
+/**
+ *  The three audience variants of one prose body. `developer` is
+ *  always present (it is the canonical text); the other two are
+ *  optional and fall back to `developer` when absent.
+ */
+export type ProseVariants = {
+	developer: string,
+	executive?: string | null,
+	caveman?: string | null,
+};
+
 // A recent-projects row plus a freshness flag for the UI.
 export type RecentProjectView = {
 	path: string,
@@ -1876,7 +1904,19 @@ export type Task = {
 	thread_id: ThreadId | null,
 	parent_id: TaskId | null,
 	title: string,
+	/**
+	 *  Developer-audience description — the canonical prose, also the
+	 *  fallback for every other audience.
+	 */
 	description: string,
+	/**
+	 *  All three audience variants of the description. `developer`
+	 *  always mirrors [`Task::description`] (the canonical text); the
+	 *  store fills this on read from the `description_variants` JSON
+	 *  column and persists only the optional executive/caveman halves.
+	 *  See [`crate::prose`].
+	 */
+	description_variants?: ProseVariants,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -2048,11 +2088,16 @@ export type UiLogEntry = {
 
 /**
  *  Partial-patch for `update_task`. Each `Option` follows
- *  "missing -> keep, present -> replace" semantics.
+ *  "missing -> keep, present -> replace" semantics. The audience
+ *  variants follow the same rule and are independent of `description`
+ *  (the agent re-authors all three together; a developer-only edit
+ *  leaves any prior executive/caveman text in place).
  */
 export type UpdateTaskChanges = {
 	title: string | null,
 	description: string | null,
+	description_executive: string | null,
+	description_caveman: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,

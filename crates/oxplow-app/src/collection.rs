@@ -676,6 +676,7 @@ mod tests {
                     parent_id: None,
                     title: "x".into(),
                     description: String::new(),
+                    description_variants: oxplow_domain::ProseVariants::default(),
                     status: TaskStatus::InProgress,
                     priority: TaskPriority::Medium,
                     sort_index: 0,

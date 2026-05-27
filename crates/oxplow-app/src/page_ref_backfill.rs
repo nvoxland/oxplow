@@ -235,6 +235,7 @@ mod tests {
                 parent_id: None,
                 title: "fix".into(),
                 description: "see [[src/app.rs]]".into(),
+                description_variants: oxplow_domain::ProseVariants::default(),
                 status: TaskStatus::Ready,
                 priority: TaskPriority::Medium,
                 sort_index: 0,

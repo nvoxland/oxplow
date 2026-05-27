@@ -290,6 +290,8 @@ mod tests {
                 CreateTaskInput {
                     title: "Fix the flaky test".into(),
                     description: Some("It fails on CI only.\nSecond line.".into()),
+                    description_executive: None,
+                    description_caveman: None,
                     parent_id: None,
                     status: Some(oxplow_domain::task::TaskStatus::InProgress),
                     priority: None,

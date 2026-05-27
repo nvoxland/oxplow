@@ -204,6 +204,23 @@ listener; migration v29 cancels any such still-in_progress rows, and
 the read path maps the legacy string to `null` so older terminal rows
 continue to load under the narrowed enum.
 
+`description_variants` (migration V27, nullable TEXT) — the optional
+**executive** and **caveman** audience rewrites of `description`, stored
+as a JSON blob `{"executive":"…","caveman":"…"}` (developer text never
+lives here — `description` stays canonical). Modeled on `impacts_json`.
+The store rebuilds a `ProseVariants` (`crates/oxplow-domain/src/prose.rs`)
+on read via `from_developer_and_json(description, description_variants)`,
+which fills `developer` from the column and degrades every audience to
+developer when a variant is absent or the blob is NULL/malformed — so
+legacy rows need no backfill. Writes persist `ProseVariants::optional_json()`
+(NULL when both variants are absent). The agent authors all three inline
+via the `description_executive` / `description_caveman` params on
+`create_task` / `update_task` / `file_epic_with_children`
+(`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). `ProseAudience`
++ `ProseVariants` are exported to the frontend through tauri-specta. The
+same V27 migration also adds (stubbed for later phases)
+`task_effort.summary_variants` and `comment.section_anchor`.
+
 `note_count` is a computed column added to every `Task` returned by the
 store (via COUNT subquery over `task_note`). It drives the note badge on
 list rows and is always 0 when no notes exist.

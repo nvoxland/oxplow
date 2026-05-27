@@ -217,6 +217,16 @@ pub struct CreateTaskMcpParams {
     /// as a `## Acceptance criteria` subsection. There is no separate
     /// AC field — the description is the single source of truth.
     pub description: Option<String>,
+    /// Optional executive-summary rewrite of `description` (shorter,
+    /// overview-level). Keep its heading skeleton aligned with the
+    /// developer text so section-anchored comments resolve across
+    /// audience variants.
+    pub description_executive: Option<String>,
+    /// Optional terse "caveman"-style rewrite of `description` (drop
+    /// filler, sentence fragments, keep technical terms / paths / code
+    /// verbatim). Keep its heading skeleton aligned with the developer
+    /// text.
+    pub description_caveman: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<String>,
     pub parent_id: Option<String>,
@@ -238,6 +248,12 @@ pub struct UpdateTaskMcpParams {
     pub id: String,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// Optional executive-summary rewrite of `description`. Present →
+    /// replace, missing → keep the existing variant.
+    pub description_executive: Option<String>,
+    /// Optional terse "caveman"-style rewrite of `description`.
+    /// Present → replace, missing → keep.
+    pub description_caveman: Option<String>,
     /// Reparent (or detach with empty string).
     pub parent_id: Option<String>,
     pub status: Option<String>,
@@ -329,6 +345,10 @@ pub struct FileEpicWithChildrenParams {
     pub thread_id: Option<String>,
     pub epic_title: String,
     pub epic_description: Option<String>,
+    /// Optional executive-summary rewrite of `epic_description`.
+    pub epic_description_executive: Option<String>,
+    /// Optional terse "caveman"-style rewrite of `epic_description`.
+    pub epic_description_caveman: Option<String>,
     pub children: Vec<EpicChildSpec>,
 }
 
@@ -336,6 +356,10 @@ pub struct FileEpicWithChildrenParams {
 pub struct EpicChildSpec {
     pub title: String,
     pub description: Option<String>,
+    /// Optional executive-summary rewrite of `description`.
+    pub description_executive: Option<String>,
+    /// Optional terse "caveman"-style rewrite of `description`.
+    pub description_caveman: Option<String>,
     pub kind: Option<String>,
 }
 
@@ -1968,6 +1992,8 @@ impl OxplowMcp {
                 CreateTaskInput {
                     title: p.title,
                     description: p.description,
+                    description_executive: p.description_executive,
+                    description_caveman: p.description_caveman,
                     parent_id: parent_task_id,
                     status,
                     priority,
@@ -2051,6 +2077,8 @@ impl OxplowMcp {
                 UpdateTaskChanges {
                     title: p.title,
                     description: p.description,
+                    description_executive: p.description_executive,
+                    description_caveman: p.description_caveman,
                     parent_id,
                     status,
                     priority,
@@ -2448,6 +2476,8 @@ impl OxplowMcp {
                 CreateTaskInput {
                     title: p.epic_title,
                     description: p.epic_description,
+                    description_executive: p.epic_description_executive,
+                    description_caveman: p.epic_description_caveman,
                     author: Some(oxplow_domain::TaskAuthor::Agent),
                     ..Default::default()
                 },
@@ -2464,6 +2494,8 @@ impl OxplowMcp {
                     CreateTaskInput {
                         title: child.title,
                         description: child.description,
+                        description_executive: child.description_executive,
+                        description_caveman: child.description_caveman,
                         parent_id: Some(epic.id),
                         author: Some(oxplow_domain::TaskAuthor::Agent),
                         ..Default::default()
@@ -3364,6 +3396,7 @@ mod tests {
             parent_id: None,
             title: title.into(),
             description: String::new(),
+            description_variants: oxplow_domain::ProseVariants::default(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -3827,6 +3860,8 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: None,
+                description_executive: None,
+                description_caveman: None,
                 kind: None,
                 priority: None,
                 status: None,
@@ -3852,6 +3887,8 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: None,
+                description_executive: None,
+                description_caveman: None,
                 kind: None,
                 priority: None,
                 status: None,

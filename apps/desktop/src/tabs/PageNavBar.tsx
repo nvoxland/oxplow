@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { BookmarkScope } from "./bookmarks.js";
+import { ProseAudienceSelector } from "../components/ProseAudience/ProseAudienceSelector.js";
+import type { ProseAudience } from "./proseAudience.js";
 
 export interface PageNavBarProps {
   canBack: boolean;
@@ -68,6 +70,14 @@ export interface PageNavBarProps {
    *  + orphaned list) for comment-bearing pages. Rendered before the
    *  backlinks dropdown. */
   comments?: ReactNode;
+  /** Optional prose-audience selector — present only on pages whose
+   *  body carries developer/executive/caveman variants (wiki, task,
+   *  effort). Rendered just before the comment navigator. */
+  audience?: {
+    value: ProseAudience;
+    onChange(a: ProseAudience): void;
+    available?: Record<ProseAudience, boolean>;
+  };
   /** Optional kebab actions slot at the right edge. */
   actions?: ReactNode;
 }
@@ -91,6 +101,7 @@ export function PageNavBar({
   outbound,
   snapshots,
   comments,
+  audience,
   actions,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
@@ -430,6 +441,14 @@ export function PageNavBar({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {audience ? (
+        <ProseAudienceSelector
+          value={audience.value}
+          onChange={audience.onChange}
+          available={audience.available}
+        />
       ) : null}
 
       {comments ?? null}

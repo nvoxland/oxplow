@@ -129,6 +129,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let parent_id: Option<i64> = row.get("parent_id")?;
     let title: String = row.get("title")?;
     let description: String = row.get("description")?;
+    let description_variants: Option<String> = row.get("description_variants")?;
     let status: String = row.get("status")?;
     let priority: String = row.get("priority")?;
     let sort_index: i64 = row.get("sort_index")?;
@@ -154,6 +155,10 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         thread_id: thread_id.map(ThreadId::from),
         parent_id: parent_id.map(TaskId::new),
         title,
+        description_variants: oxplow_domain::ProseVariants::from_developer_and_json(
+            description.clone(),
+            description_variants.as_deref(),
+        ),
         description,
         status: str_to_status(&status).map_err(map_err)?,
         priority: str_to_priority(&priority).map_err(map_err)?,
@@ -263,15 +268,16 @@ impl TaskStore for SqliteTaskStore {
                 let item = owned;
                 conn.execute(
                     "INSERT INTO task (
-                        thread_id, parent_id, title, description,
+                        thread_id, parent_id, title, description, description_variants,
                         status, priority, sort_index, created_by, created_at, updated_at,
                         completed_at, deleted_at, author
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         item.thread_id.as_ref().map(|t| t.as_str()),
                         item.parent_id.map(|p| p.value()),
                         item.title,
                         item.description,
+                        item.description_variants.optional_json(),
                         status_to_str(item.status),
                         priority_to_str(item.priority),
                         item.sort_index,
@@ -320,7 +326,8 @@ impl TaskStore for SqliteTaskStore {
                         updated_at = ?9,
                         completed_at = ?10,
                         deleted_at = ?11,
-                        author = ?12
+                        author = ?12,
+                        description_variants = ?13
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![
                         item.id.value(),
@@ -335,6 +342,7 @@ impl TaskStore for SqliteTaskStore {
                         item.completed_at.map(ts_to_string),
                         item.deleted_at.map(ts_to_string),
                         item.author.map(author_to_str),
+                        item.description_variants.optional_json(),
                     ],
                 )?;
                 Ok(rows)
@@ -442,6 +450,7 @@ mod tests {
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
+            description_variants: oxplow_domain::ProseVariants::developer_only(String::new()),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -463,6 +472,59 @@ mod tests {
         let got = store.get(id).await.unwrap().unwrap();
         assert_eq!(got.id, id);
         assert_eq!(got.title, it.title);
+    }
+
+    #[tokio::test]
+    async fn description_variants_round_trip_and_fall_back() {
+        use oxplow_domain::{ProseAudience, ProseVariants};
+        let (store, tid) = fixture().await;
+
+        // A task with all three variants persists and reads back intact.
+        let mut it = item(Some(tid.clone()));
+        it.description = "the detailed developer text".into();
+        it.description_variants = ProseVariants {
+            developer: it.description.clone(),
+            executive: Some("the gist".into()),
+            caveman: Some("text good. ship.".into()),
+        };
+        let id = store.insert(&it).await.unwrap();
+        let got = store.get(id).await.unwrap().unwrap();
+        assert_eq!(got.description, "the detailed developer text");
+        assert_eq!(
+            got.description_variants.get(ProseAudience::Executive),
+            "the gist"
+        );
+        assert_eq!(
+            got.description_variants.get(ProseAudience::Caveman),
+            "text good. ship."
+        );
+        // developer mirror is rebuilt from the canonical column
+        assert_eq!(
+            got.description_variants.get(ProseAudience::Developer),
+            "the detailed developer text"
+        );
+
+        // A developer-only task (legacy shape) leaves the column NULL and
+        // every audience falls back to developer.
+        let mut plain = item(Some(tid));
+        plain.description = "just developer".into();
+        plain.description_variants = ProseVariants::developer_only(plain.description.clone());
+        let plain_id = store.insert(&plain).await.unwrap();
+        let got_plain = store.get(plain_id).await.unwrap().unwrap();
+        assert_eq!(
+            got_plain.description_variants.get(ProseAudience::Executive),
+            "just developer"
+        );
+
+        // Updating the variants persists the new values.
+        let mut latest = got_plain;
+        latest.description_variants.executive = Some("now summarized".into());
+        store.update(&latest).await.unwrap();
+        let after = store.get(plain_id).await.unwrap().unwrap();
+        assert_eq!(
+            after.description_variants.get(ProseAudience::Executive),
+            "now summarized"
+        );
     }
 
     #[tokio::test]
