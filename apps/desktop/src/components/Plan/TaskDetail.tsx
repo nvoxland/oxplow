@@ -10,6 +10,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import type { ProseAudience } from "../../tabs/proseAudience.js";
 import { selectVariantBody } from "../ProseAudience/selectVariant.js";
+import { VariantCommentSections } from "../ProseAudience/VariantCommentSections.js";
 
 /** Muted "switch to Developer to edit" banner shown above read-only
  *  non-developer prose variants. */
@@ -135,6 +136,13 @@ export function TaskDetail({
         <div data-testid={`task-description-${audience}`} style={{ paddingRight: 22 }}>
           <VariantReadOnlyBanner audience={audience} />
           <MarkdownView body={shownDescription} maxHeight={undefined} />
+          {comments ? (
+            <VariantCommentSections
+              targetKind={comments.targetKind}
+              targetId={comments.targetId}
+              body={shownDescription}
+            />
+          ) : null}
         </div>
       )}
     </div>

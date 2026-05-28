@@ -1182,6 +1182,10 @@ export async function createComment(input: {
   quote: string;
   /** W3C selectors array, serialized. */
   selectorsJson: string;
+  /** Heading-slug of the section the quote sits in (variant-bearing
+   *  prose surfaces only); lets the comment re-display under the
+   *  matching heading of another audience variant. */
+  sectionAnchor?: string | null;
   /** Ancestor regions (innermost→outermost, excluding the target). */
   contextChain?: { kind: string; id: string }[];
   /** Canonical refs found inside the selection. */
@@ -1198,6 +1202,7 @@ export async function createComment(input: {
       targetId: input.targetId,
       quote: input.quote,
       selectorsJson: input.selectorsJson,
+      sectionAnchor: input.sectionAnchor ?? null,
       contextChain: input.contextChain ?? [],
       referencedRefs: input.referencedRefs ?? [],
       intent: input.intent,

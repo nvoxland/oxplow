@@ -1047,6 +1047,15 @@ export type Comment = {
 	// W3C selectors array (opaque to the store; the renderer parses it).
 	selectors_json: string,
 	/**
+	 *  Heading slug of the section the selection sat inside, when the
+	 *  target has audience variants (wiki/task). Lets the comment
+	 *  re-display under the matching heading of whichever prose variant
+	 *  is being viewed, since the precise `quote` only resolves against
+	 *  the variant it was authored on. `None` for non-variant targets or
+	 *  selections outside any heading. See [`crate::prose::heading_slug`].
+	 */
+	section_anchor?: string | null,
+	/**
 	 *  Ancestor regions the selection sat inside, innermost→outermost,
 	 *  EXCLUDING the primary target. Empty for a top-level selection.
 	 */
@@ -1160,6 +1169,11 @@ export type CreateCommentRequest = {
 	targetId: string,
 	quote: string,
 	selectorsJson: string,
+	/**
+	 *  Heading slug of the section the quote sits in (variant-bearing
+	 *  targets only); `None` otherwise.
+	 */
+	sectionAnchor: string | null,
 	contextChain: CommentTarget[],
 	referencedRefs: CommentTarget[],
 	intent: CommentIntent,

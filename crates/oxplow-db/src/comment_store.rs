@@ -145,6 +145,7 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
         target_id: row.get("target_id")?,
         quote: row.get("quote")?,
         selectors_json: row.get("selectors_json")?,
+        section_anchor: row.get("section_anchor")?,
         context_chain: parse_refs(&row.get::<_, String>("context_chain_json")?),
         referenced_refs: parse_refs(&row.get::<_, String>("referenced_refs_json")?),
         intent: str_to_intent(&intent).map_err(map_err)?,
@@ -225,6 +226,7 @@ impl CommentStore for SqliteCommentStore {
         target: &CommentTarget,
         quote: &str,
         selectors_json: &str,
+        section_anchor: Option<&str>,
         context_chain: &[CommentTarget],
         referenced_refs: &[CommentTarget],
         intent: CommentIntent,
@@ -240,6 +242,7 @@ impl CommentStore for SqliteCommentStore {
         let referenced_refs = union_referenced_refs(referenced_refs, quote);
         let quote = quote.to_string();
         let selectors_json = selectors_json.to_string();
+        let section_anchor = section_anchor.map(|s| s.to_string());
         let context_chain = context_chain.to_vec();
         let author = author.to_string();
         let body = body.to_string();
@@ -252,9 +255,9 @@ impl CommentStore for SqliteCommentStore {
                 conn.execute(
                     "INSERT INTO comment
                        (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
-                        context_chain_json, referenced_refs_json,
+                        section_anchor, context_chain_json, referenced_refs_json,
                         intent, status, orphaned, author, created_at, updated_at, last_activity_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', 0, ?11, ?12, ?12, ?12)",
                     params![
                         stream.as_str(),
                         thread.as_ref().map(|t| t.as_str()),
@@ -262,6 +265,7 @@ impl CommentStore for SqliteCommentStore {
                         target.id,
                         quote,
                         selectors_json,
+                        section_anchor,
                         context_chain_json,
                         referenced_refs_json,
                         intent_to_str(intent),
@@ -283,6 +287,7 @@ impl CommentStore for SqliteCommentStore {
                     target_id: target.id.clone(),
                     quote: quote.clone(),
                     selectors_json: selectors_json.clone(),
+                    section_anchor: section_anchor.clone(),
                     context_chain: context_chain.clone(),
                     referenced_refs: referenced_refs.clone(),
                     intent,
@@ -563,6 +568,7 @@ mod tests {
                 &target(),
                 "the selected words",
                 "{\"from\":1,\"to\":5}",
+                Some("storage-model"),
                 &[],
                 &[],
                 CommentIntent::Followup,
@@ -576,12 +582,15 @@ mod tests {
         assert_eq!(created.comment.intent, CommentIntent::Followup);
         assert_eq!(created.comment.status, CommentStatus::Open);
         assert!(!created.comment.orphaned);
+        assert_eq!(created.comment.section_anchor.as_deref(), Some("storage-model"));
         assert_eq!(created.messages.len(), 1);
         assert_eq!(created.messages[0].body, "what about this?");
 
         let listed = store.list_for_target(&target()).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].comment.id, created.comment.id);
+        // The section anchor survives the read path.
+        assert_eq!(listed[0].comment.section_anchor.as_deref(), Some("storage-model"));
     }
 
     #[tokio::test]
@@ -612,6 +621,7 @@ mod tests {
                 },
                 "fn main",
                 "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]",
+                None,
                 &context_chain,
                 &referenced_refs,
                 CommentIntent::Followup,
@@ -651,6 +661,7 @@ mod tests {
                 &target(),
                 "see task:42 and src/app.rs for context",
                 "[]",
+                None,
                 &[],
                 &provided,
                 CommentIntent::Followup,
@@ -698,6 +709,7 @@ mod tests {
                 &target(),
                 "task:42 again",
                 "[]",
+                None,
                 &[],
                 &provided,
                 CommentIntent::Note,
@@ -730,6 +742,7 @@ mod tests {
                 &target(),
                 "words",
                 "{\"from\":1,\"to\":3}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -774,6 +787,7 @@ mod tests {
                 &target(),
                 "old words",
                 "{\"from\":1,\"to\":9}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -818,6 +832,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Followup,
@@ -850,6 +865,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Followup,
@@ -911,6 +927,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -938,6 +955,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -956,6 +974,7 @@ mod tests {
                 },
                 "q2",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Followup,
@@ -979,6 +998,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -1007,6 +1027,7 @@ mod tests {
                 &target(),
                 "q",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -1038,6 +1059,7 @@ mod tests {
                 &target(),
                 "keep",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,
@@ -1053,6 +1075,7 @@ mod tests {
                 &target(),
                 "old",
                 "{}",
+                None,
                 &[],
                 &[],
                 CommentIntent::Note,

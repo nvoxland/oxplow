@@ -78,6 +78,14 @@ pub struct Comment {
     pub quote: String,
     /// W3C selectors array (opaque to the store; the renderer parses it).
     pub selectors_json: String,
+    /// Heading slug of the section the selection sat inside, when the
+    /// target has audience variants (wiki/task). Lets the comment
+    /// re-display under the matching heading of whichever prose variant
+    /// is being viewed, since the precise `quote` only resolves against
+    /// the variant it was authored on. `None` for non-variant targets or
+    /// selections outside any heading. See [`crate::prose::heading_slug`].
+    #[serde(default)]
+    pub section_anchor: Option<String>,
     /// Ancestor regions the selection sat inside, innermost→outermost,
     /// EXCLUDING the primary target. Empty for a top-level selection.
     pub context_chain: Vec<CommentTarget>,

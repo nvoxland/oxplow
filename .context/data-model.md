@@ -218,9 +218,9 @@ via the `description_executive` / `description_caveman` params on
 `create_task` / `update_task` / `file_epic_with_children`
 (`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). `ProseAudience`
 + `ProseVariants` are exported to the frontend through tauri-specta. The
-same V27 migration also adds `task_effort.summary_variants` (wired — see
-below) and `comment.section_anchor` (stubbed for the comment-anchoring
-phase).
+same V27 migration also adds `task_effort.summary_variants` and
+`comment.section_anchor` (both wired — see below and the `comment`
+section).
 
 `note_count` is a computed column added to every `Task` returned by the
 store (via COUNT subquery over `task_note`). It drives the note badge on
@@ -933,6 +933,21 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   highlight + "approx" badge). Only when even fuzzy fails is the comment
   `orphaned` — still listed, no highlight. Rust never parses
   `selectors_json`, so enriching it needs no migration.
+- **Cross-variant section anchor (V27).** `section_anchor` (nullable
+  TEXT) holds the heading slug of the section the selection sat inside,
+  for prose targets that carry audience variants (wiki bodies, task
+  descriptions). The `quote` only resolves against the variant it was
+  authored on, so when a reader views a *different* variant the comment
+  re-displays under the matching heading instead. Captured FE-side at
+  create time (`sectionAnchorForQuote(body, quote)` over the developer
+  body; slug rule mirrors `oxplow_domain::prose::heading_slug` and the
+  frontend `sectionSlug`), passed through `create_comment` (MCP + IPC).
+  Display: `resolveCommentSection` picks quote-mode (exact match in the
+  shown body) → section-mode (anchor among the shown body's headings) →
+  orphaned; `VariantCommentSections` renders the section-grouped list in
+  the read-only variant views. Resolution is display-only — only the
+  developer surface persists `orphaned`/re-anchors. `None` for
+  non-variant targets or selections outside any heading.
 - **Typed context (V24).** Beyond the quote, a comment carries the typed
   context it was made in. `context_chain_json` is a JSON array of
   `{kind,id}` refs — the nesting of page regions the selection sat inside

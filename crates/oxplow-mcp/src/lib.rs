@@ -549,6 +549,10 @@ pub struct CreateCommentMcpParams {
     pub body: String,
     /// Optional quoted span the comment is about (empty = whole-target note).
     pub quote: Option<String>,
+    /// Optional heading slug of the section the quote sits in, for
+    /// variant-bearing targets (wiki/task) — lets the comment re-display
+    /// under the matching heading of any audience variant.
+    pub section_anchor: Option<String>,
     /// `note` (default) or `followup`.
     pub intent: Option<String>,
 }
@@ -1006,6 +1010,7 @@ impl OxplowMcp {
                 &target,
                 p.quote.as_deref().unwrap_or(""),
                 "",
+                p.section_anchor.as_deref(),
                 &[],
                 &[],
                 intent,
@@ -3479,6 +3484,7 @@ mod tests {
                 },
                 "the highlighted text",
                 "[]",
+                None,
                 &[CommentTarget {
                     kind: "task".into(),
                     id: parent_task.to_string(),

@@ -16,6 +16,7 @@ import {
   type CommentRange,
 } from "./CommentDecorations.js";
 import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
+import { sectionAnchorForQuote } from "../ProseAudience/sectionSlug.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
 import { partitionPageComments, stepComment } from "../Comments/pageCommentNav.js";
@@ -459,6 +460,10 @@ export function RichTextField({
       targetId: comments.targetId,
       quote: pendingSel.quote,
       selectorsJson: pendingSel.anchorJson,
+      // The editable surface is always the developer body, so the
+      // section anchor is derived from its heading skeleton — it then
+      // re-displays under the matching heading in exec/caveman views.
+      sectionAnchor: sectionAnchorForQuote(value, pendingSel.quote),
       referencedRefs: pendingSel.referencedRefs,
       intent: input.intent,
       author: comments.author ?? "user",

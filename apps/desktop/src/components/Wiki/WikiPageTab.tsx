@@ -12,6 +12,7 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 import type { WikiPageController } from "./useWikiPageController.js";
 import type { ProseAudience } from "../../tabs/proseAudience.js";
+import { VariantCommentSections } from "../ProseAudience/VariantCommentSections.js";
 
 type FreshnessStatus = WikiPageSummary["freshness"];
 
@@ -139,6 +140,7 @@ export function WikiPageTab({
               onOpenCommit={onOpenCommit}
               onOpenExternalUrl={onOpenExternalUrl}
             />
+            <VariantCommentSections targetKind="wiki" targetId={slug} body={variantBody} />
           </div>
         ) : (
           <RichTextField
