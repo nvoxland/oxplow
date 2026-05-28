@@ -514,6 +514,35 @@ pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {
     project_dir.join(".oxplow").join("wiki")
 }
 
+/// Audience-variant sibling-file suffixes for a wiki page body. The
+/// developer body is the bare `<slug>.md`; the executive/caveman
+/// rewrites live beside it as `<slug>.executive.md` /
+/// `<slug>.caveman.md`. Order mirrors `ProseAudience`.
+pub const WIKI_VARIANT_SUFFIXES: [&str; 2] = ["executive", "caveman"];
+
+/// Resolve a wiki file's stem (the part before `.md`) to its base page
+/// slug and, when it's a variant sibling, the audience it encodes:
+///
+/// - `"task-model"`           → `("task-model", None)`
+/// - `"task-model.executive"` → `("task-model", Some("executive"))`
+/// - `"task-model.caveman"`   → `("task-model", Some("caveman"))`
+///
+/// This is what keeps the fs-watcher from spawning a phantom
+/// `task-model.executive` page: variant files route to their base slug,
+/// and the `wiki_page` row + FTS stay keyed on the developer body only.
+pub fn wiki_slug_and_variant(stem: &str) -> (&str, Option<&'static str>) {
+    for suffix in WIKI_VARIANT_SUFFIXES {
+        if let Some(base) = stem
+            .strip_suffix(suffix)
+            .and_then(|s| s.strip_suffix('.'))
+            .filter(|base| !base.is_empty())
+        {
+            return (base, Some(suffix));
+        }
+    }
+    (stem, None)
+}
+
 /// One-time on-disk rename. Earlier versions of oxplow stored wiki
 /// pages at `<project>/.oxplow/notes/<slug>.md`; the rename to
 /// `wiki` (matching the schema + UI nomenclature) requires moving
@@ -705,6 +734,26 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wiki_slug_and_variant_routes_siblings_to_base() {
+        assert_eq!(wiki_slug_and_variant("task-model"), ("task-model", None));
+        assert_eq!(
+            wiki_slug_and_variant("task-model.executive"),
+            ("task-model", Some("executive"))
+        );
+        assert_eq!(
+            wiki_slug_and_variant("task-model.caveman"),
+            ("task-model", Some("caveman"))
+        );
+        // A dotted base that isn't a known variant suffix stays whole.
+        assert_eq!(
+            wiki_slug_and_variant("release.notes"),
+            ("release.notes", None)
+        );
+        // A leading-dot stem with no base is not a variant.
+        assert_eq!(wiki_slug_and_variant(".executive"), (".executive", None));
+    }
 
     #[test]
     fn strip_version_drops_disk_and_explicit_pins_from_wikilinks() {

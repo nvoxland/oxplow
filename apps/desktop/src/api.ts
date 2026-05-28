@@ -1145,6 +1145,20 @@ export async function writeWikiPageBody(_streamId: string, slug: string, body: s
   unwrap(await commands.writeWikiPageBody(slug, body));
 }
 
+/** All three audience variants of a wiki body. Developer is the
+ *  canonical `<slug>.md`; executive/caveman are sibling files
+ *  (`null` when absent). */
+export async function listWikiPageVariants(
+  _streamId: string,
+  slug: string,
+): Promise<{ developer: string; executive: string | null; caveman: string | null }> {
+  return unwrap(await commands.listWikiPageVariants(slug)) as {
+    developer: string;
+    executive: string | null;
+    caveman: string | null;
+  };
+}
+
 export async function deleteWikiPage(_streamId: string, slug: string): Promise<void> {
   unwrap(await commands.deleteWikiPage(slug));
 }

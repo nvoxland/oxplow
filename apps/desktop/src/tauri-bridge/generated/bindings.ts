@@ -254,6 +254,20 @@ export const commands = {
 	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
+	/**
+	 *  Read one audience variant of a wiki body. Returns `""` when the
+	 *  sibling file doesn't exist — callers fall back to the developer body.
+	 */
+	readWikiPageBodyVariant: (slug: string, audience: ProseAudience) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body_variant", { slug, audience })),
+	// Write one audience variant of a wiki body to its sibling file.
+	writeWikiPageBodyVariant: (slug: string, audience: ProseAudience, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body_variant", { slug, audience, body })),
+	/**
+	 *  Read all three audience variants of a wiki body at once. Developer
+	 *  is the canonical body (empty string when the page has none yet);
+	 *  executive/caveman are `None` when their sibling file is absent or
+	 *  empty, so the frontend falls back to developer.
+	 */
+	listWikiPageVariants: (slug: string) => typedError<ProseVariants, IpcError>(__TAURI_INVOKE("list_wiki_page_variants", { slug })),
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
 	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
@@ -1647,6 +1661,9 @@ export type PageVisitDay = {
 };
 
 export type PaneKindArg = "working" | "talking";
+
+// Which audience variant of a prose body to read or display.
+export type ProseAudience = "developer" | "executive" | "caveman";
 
 /**
  *  The three audience variants of one prose body. `developer` is

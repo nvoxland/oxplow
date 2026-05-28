@@ -70,9 +70,14 @@ impl WikiPagesWatcher {
                         if evt.path.extension().and_then(|s| s.to_str()) != Some("md") {
                             continue;
                         }
-                        let Some(slug) = evt.path.file_stem().and_then(|s| s.to_str()) else {
+                        let Some(stem) = evt.path.file_stem().and_then(|s| s.to_str()) else {
                             continue;
                         };
+                        // An audience-variant sibling (`<slug>.executive.md`
+                        // / `<slug>.caveman.md`) must NOT spawn a phantom
+                        // page — route the re-sync to its base slug so the
+                        // developer body's metadata/FTS stay canonical.
+                        let (slug, _variant) = wiki_pages::wiki_slug_and_variant(stem);
                         // Pin the snapshot the wiki -> file edges
                         // for this re-sync should be tagged against.
                         // Without a snapshot service (tests) the
@@ -177,5 +182,59 @@ mod tests {
         .expect("WikiPagesChanged event within 3s");
 
         assert_eq!(evt, "hello-world");
+    }
+
+    /// Touching an audience-variant sibling (`<slug>.executive.md`)
+    /// routes the re-sync to the BASE slug — the watcher must not emit
+    /// (or sync) a phantom `<slug>.executive` page.
+    #[tokio::test]
+    async fn watcher_routes_variant_sibling_to_base_slug() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().to_path_buf();
+        let wiki_dir = crate::wiki_pages::wiki_pages_dir(&project);
+        std::fs::create_dir_all(&wiki_dir).unwrap();
+        // Developer body must exist so the base-slug re-sync upserts a
+        // row instead of deleting one.
+        std::fs::write(wiki_dir.join("task-model.md"), "# Task model\nbody\n").unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
+        let page_refs = Arc::new(oxplow_db::SqlitePageRefStore::new(db));
+        let events = EventBus::new();
+        let mut rx = events.subscribe();
+
+        let _watcher =
+            WikiPagesWatcher::spawn(project.clone(), store.clone(), page_refs, events, None)
+                .await
+                .expect("watcher to spawn");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        std::fs::write(
+            wiki_dir.join("task-model.executive.md"),
+            "# Task model\nthe gist\n",
+        )
+        .unwrap();
+
+        let evt = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match rx.recv().await {
+                    Ok(OxplowEvent::WikiPagesChanged { slug }) => return slug,
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        panic!("event bus closed before WikiPagesChanged");
+                    }
+                }
+            }
+        })
+        .await
+        .expect("WikiPagesChanged event within 3s");
+
+        assert_eq!(evt, "task-model", "variant edit must route to base slug");
+        // No phantom page was created for the variant stem.
+        assert!(
+            store.get("task-model.executive").await.unwrap().is_none(),
+            "variant sibling must not spawn a phantom page row"
+        );
     }
 }

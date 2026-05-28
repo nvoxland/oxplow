@@ -107,10 +107,10 @@ function WikiPageBody({
   const controller = useWikiPageController(stream, slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
   const { audience, setAudience } = useProseAudience(nav?.pageKey ?? null);
-  // Wiki executive/caveman bodies land in a later phase (sibling files);
-  // until then the page is developer-only and the other audiences fall
-  // back to the developer body (selector shows them muted).
-  const variants: ProseVariants = { developer: controller.body };
+  // Executive/caveman live as sibling files (`<slug>.executive.md` /
+  // `<slug>.caveman.md`); the controller reads all three. Missing
+  // variants fall back to the developer body (selector shows them muted).
+  const variants: ProseVariants = controller.variants;
   const shownBody = selectVariantBody(variants, audience);
   const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
   const [staleCount, setStaleCount] = useState<number | null>(null);

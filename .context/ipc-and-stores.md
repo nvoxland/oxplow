@@ -56,6 +56,19 @@ main-process handlers, and the UI api wrappers. Every other persisted
 feature in this codebase follows the same shape — duplicate it for new
 work.
 
+**Audience variants.** Alongside `read_wiki_page_body` /
+`write_wiki_page_body` (the developer `<slug>.md`), three commands in
+`crates/oxplow-tauri-ipc/src/commands/wiki.rs` handle the prose-variant
+sibling files: `read_wiki_page_body_variant(slug, audience)` /
+`write_wiki_page_body_variant(slug, audience, body)` (a `ProseAudience`
+maps to `<slug>.md` / `<slug>.executive.md` / `<slug>.caveman.md`) and
+`list_wiki_page_variants(slug) -> ProseVariants` (reads all three at
+once; executive/caveman are `None` when absent). The fs-watcher routes
+sibling edits back to the base slug via
+`oxplow_app::wiki_pages::wiki_slug_and_variant`, so they never spawn a
+phantom page. The page-level audience selector reads variants through
+these; see `.context/pages-and-tabs.md`.
+
 ## Event bus
 
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated

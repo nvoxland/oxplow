@@ -689,10 +689,12 @@ on `Page` / `PageNavBar` / `PageNavBarConfig`; the page wrapper reads
 the shown body with `selectVariantBody` (developer fallback). The
 developer view stays the editable surface; executive/caveman render
 read-only with a muted "switch to Developer to edit" banner (edits
-always target the canonical developer text). WikiPage is wired today;
-wiki executive/caveman bodies arrive with the sibling-file phase, so
-the page is developer-only until then (other audiences show muted +
-fall back).
+always target the canonical developer text). Wired surfaces: WikiPage
+(developer `<slug>.md` + sibling `<slug>.executive.md` /
+`<slug>.caveman.md`, read via `list_wiki_page_variants`) and TaskPage
+(task description + each effort summary, where the variants come from
+the `*_variants` JSON columns). A variant that has no body falls back
+to developer and shows muted in the selector.
 
 ## Known follow-ups + invariants
 

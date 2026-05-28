@@ -2,17 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteWikiPage,
   listWikiPages,
+  listWikiPageVariants,
   readWikiPageBody,
   subscribeWikiPageEvents,
   writeWikiPageBody,
   type Stream,
   type WikiPageSummary,
 } from "../../api.js";
+import type { ProseVariants } from "../ProseAudience/selectVariant.js";
 import { recordOpError } from "../opErrorsStore.js";
 
 export interface WikiPageController {
   summary: WikiPageSummary | null;
   body: string;
+  /** All three audience variants. `developer` mirrors `body`;
+   *  executive/caveman fall back to it (resolved by the caller). */
+  variants: ProseVariants;
   draft: string;
   setDraft(value: string): void;
   draftInitialized: boolean;
@@ -31,6 +36,7 @@ export interface WikiPageController {
 export function useWikiPageController(stream: Stream, slug: string, onClosed: () => void): WikiPageController {
   const [summary, setSummary] = useState<WikiPageSummary | null>(null);
   const [body, setBody] = useState<string>("");
+  const [variants, setVariants] = useState<ProseVariants>({ developer: "" });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -49,12 +55,21 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
       setBody(text);
       setNotFound(false);
       setLoadError(null);
+      try {
+        const v = await listWikiPageVariants(stream.id, slug);
+        // Keep developer in lockstep with `body`; the sibling files
+        // supply executive/caveman.
+        setVariants({ developer: text, executive: v.executive, caveman: v.caveman });
+      } catch {
+        setVariants({ developer: text });
+      }
     } catch (error) {
       const message = String(error);
       if (/(wiki page|note) not found/i.test(message)) {
         setNotFound(true);
         setLoadError(null);
         setBody("");
+        setVariants({ developer: "" });
       } else {
         setLoadError(message);
         setNotFound(false);
@@ -147,6 +162,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
   return {
     summary,
     body,
+    variants,
     draft,
     setDraft,
     draftInitialized,
