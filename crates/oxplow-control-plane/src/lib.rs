@@ -355,14 +355,18 @@ async fn handle_hook(
             // Collection: detect a test-run Bash command, record it
             // (observed), and ride along to coverage if configured.
             // Best-effort — never fail the hook on a collection error.
-            if let Err(err) = ctx
+            let collection_nudge = match ctx
                 .services
                 .collection
                 .on_post_tool_use(thread_id, &envelope_for_resume.payload_json)
                 .await
             {
-                warn!(?err, "collection post-tool-use failed");
-            }
+                Ok(nudge) => nudge,
+                Err(err) => {
+                    warn!(?err, "collection post-tool-use failed");
+                    None
+                }
+            };
 
             // ExitPlanMode just settled — if the thread was promoted
             // (or demoted) while sitting on the plan-mode approval
@@ -395,6 +399,23 @@ async fn handle_hook(
                     )
                         .into_response();
                 }
+            }
+
+            // A report-less test run was detected — surface the
+            // collection nudge to the agent via additionalContext.
+            // (ExitPlanMode is never a test-run Bash command, so this
+            // never races the role-change banner above.)
+            if let Some(nudge) = collection_nudge {
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "PostToolUse",
+                            "additionalContext": nudge,
+                        }
+                    })),
+                )
+                    .into_response();
             }
         }
     }

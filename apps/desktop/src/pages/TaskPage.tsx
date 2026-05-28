@@ -12,7 +12,6 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 import { ActivityTimeline, TaskDetail, TaskDetailRail } from "../components/Plan/TaskDetail.js";
-import { EffortObservations } from "../components/EffortObservations.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -242,7 +241,6 @@ export function TaskPage({
             audience={audience}
           />
         </section>
-        <EffortObservations efforts={efforts} onOpenFile={onOpenFile} />
       </div>
     </Page>
   );

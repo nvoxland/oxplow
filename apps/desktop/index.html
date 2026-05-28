@@ -259,6 +259,19 @@
       .oxplow-md h4 { font-size: var(--text-lg);  margin: 1.2em 0 0.35em; }
       .oxplow-md h5 { font-size: var(--text-md);  margin: 1.0em 0 0.3em; }
       .oxplow-md h6 { font-size: var(--text-sm);  margin: 1.0em 0 0.3em; color: var(--text-secondary); }
+
+      /* App-chrome H4 subsection headers (OUTSIDE markdown) — e.g. the
+         "Modified files" / "Coverage & tests" headers inside an effort
+         panel. One automatic, consistent rule so call sites don't
+         hand-set size / weight / color / spacing. Markdown headings keep
+         their more-specific .oxplow-md rules. */
+      h4 {
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: var(--weight-semibold);
+        color: var(--text-secondary);
+        margin: 8px 0 0;
+      }
       .oxplow-md > :first-child { margin-top: 0; }
 
       .oxplow-md p,

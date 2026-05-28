@@ -115,6 +115,17 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
+**Closing a task → run `bun run test:collect`, not bare `cargo test` /
+`bun test`.** `test:collect` (`cargo cov && bun run --cwd apps/desktop
+test:junit`) is the configured `collection.testCommand` — it's the only
+test run that emits the JUnit + lcov reports oxplow parses into the
+effort's "Coverage & tests" panel. Bare `cargo test` / `bun test` /
+`bun run test` are fine for fast iteration, but they emit **no reports**,
+so the effort's test-run row shows only the command and no coverage. The
+Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
+install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
+See `.context/collection.md`.
+
 ## Rust formatting & lints
 
 CI runs `cargo fmt --all -- --check` AND `cargo clippy --workspace

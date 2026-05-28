@@ -84,6 +84,29 @@ hook + MCP wiring):
   caller explicitly asked for it. `record_test_run` is the one `asserted`
   writer, for richer pass/fail counts the exit code alone can't give.
 
+## Report-less-run nudge (PostToolUse)
+
+When the PostToolUse hook detects a test run but no configured report
+was refreshed by it (the agent ran `bun test` instead of the
+report-emitting `bun run test:collect`, for example), `on_post_tool_use`
+returns a one-shot nudge surfaced to the agent via
+`hookSpecificOutput.additionalContext`. The nudge names the project's
+own `collection.testCommand` when set, points at the configured `reports`
+paths if a profile exists without a `testCommand`, or routes to
+`/oxplow:configure` when no profile is present at all.
+
+**Tool-agnostic design:** the hook never encodes tool→command knowledge.
+It keys only on (1) "was this a test run?" (substring match against
+built-in patterns + `testRunPatterns`) and (2) "did a configured report
+get refreshed?" (mtime vs effort start). The tool-specific command it
+names comes entirely from the project's config, so it works for any
+test tool, current or future.
+
+**Anti-nag:** the nudge fires at most once per effort. `CollectionService`
+tracks nudged effort ids in an in-memory `HashSet` (not persisted — the
+nudge is ephemeral guidance, not durable state). The dedup clears if the
+daemon restarts, so the first run of a new session can nudge again.
+
 ## Adding a new observation kind
 
 1. Pick a `kind` string and a `payload_json` shape (parsed in TS / by the

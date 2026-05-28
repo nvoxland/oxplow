@@ -731,6 +731,10 @@ deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
 detector, coverage ride-along, the `ingest_coverage` / `record_test_run` /
 `list_effort_observations` MCP tools) is documented in `.context/collection.md`.
+When the PostToolUse hook detects a test run but no configured report was
+refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext`
+steering the agent to the report-emitting command. See the "Report-less-run
+nudge" section in `.context/collection.md`.
 
 ## Write guard
 

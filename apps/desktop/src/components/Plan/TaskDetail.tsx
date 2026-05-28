@@ -14,6 +14,7 @@ import { VariantCommentSections } from "../ProseAudience/VariantCommentSections.
 import { FileTree } from "../FileTree/FileTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
+import { EffortObservationsBlock } from "../EffortObservations.js";
 
 /** Muted "switch to Developer to edit" banner shown above read-only
  *  non-developer prose variants. */
@@ -593,12 +594,29 @@ function ActivityEffortSection({
   return (
     <section
       data-testid={active ? "tasks-effort-in-progress" : `tasks-effort-${detail.effort.id}`}
-      style={{ display: "flex", flexDirection: "column", gap: 10 }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--surface-card)",
+      }}
     >
-      <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "8px 14px",
+          background: "var(--surface-rail, var(--surface-app))",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
         <h3 style={{
           margin: 0,
-          fontSize: "var(--text-base)",
+          fontSize: "var(--text-sm)",
           fontWeight: "var(--weight-semibold)",
           color: active ? "var(--accent)" : "var(--text-primary)",
         }}>
@@ -622,10 +640,11 @@ function ActivityEffortSection({
             }}
             title="Open Local History at this effort's end snapshot"
           >
-            View snapshot →
+            View snapshot
           </button>
         ) : null}
       </header>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px" }}>
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
         <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
           {audience !== "developer" ? <VariantReadOnlyBanner audience={audience} /> : null}
@@ -646,14 +665,7 @@ function ActivityEffortSection({
       ) : null}
       {detail.changed_paths.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <h4 style={{
-            margin: 0,
-            fontSize: "var(--text-sm)",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--text-secondary)",
-          }}>
-            Modified files
-          </h4>
+          <h4>Modified files</h4>
           <FileTree
             items={detail.changed_paths.map((path) => ({ path, data: path }))}
             testId={`tasks-effort-files-${detail.effort.id}`}
@@ -689,6 +701,8 @@ function ActivityEffortSection({
           />
         </div>
       ) : null}
+        <EffortObservationsBlock effortId={detail.effort.id} onOpenFile={onOpenFile} />
+      </div>
     </section>
   );
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import {
-  type EffortDetail,
   type EffortObservation,
   listEffortObservations,
   subscribeOxplowEvents,
@@ -494,31 +493,28 @@ function TestsRun({ runs }: { runs: EffortObservation[] }) {
 }
 
 /**
- * Effort-review surface for the collection subsystem: per effort, a
- * red/green coverage bar over the changed lines, a ranked "most untested
- * changes" list, and the test runs that fed it. Renders nothing until at
- * least one observation exists (collection is opt-in via
- * `/oxplow:configure`), so untracked tasks stay uncluttered.
+ * Coverage + tests for a SINGLE effort, rendered inside that effort's
+ * Activity section: a red/green coverage bar over the changed lines, a
+ * ranked "most untested changes" list, and the test runs that fed it.
+ * Renders nothing until the effort has at least one observation
+ * (collection is opt-in via `/oxplow:configure`), so untracked efforts
+ * stay uncluttered. When it does render, the tests portion always says
+ * something — the run tree, or an explicit "No tests run."
  */
-export function EffortObservations({
-  efforts,
+export function EffortObservationsBlock({
+  effortId,
   onOpenFile,
 }: {
-  efforts: EffortDetail[];
+  effortId: string;
   onOpenFile?: (path: string) => void;
 }) {
-  const [byEffort, setByEffort] = useState<Map<string, EffortObservation[]>>(new Map());
-  const effortIds = efforts.map((e) => e.effort.id).join(",");
+  const [obs, setObs] = useState<EffortObservation[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      void Promise.all(
-        efforts.map(
-          async (e) => [e.effort.id, await listEffortObservations(e.effort.id)] as const,
-        ),
-      ).then((pairs) => {
-        if (!cancelled) setByEffort(new Map(pairs));
+      void listEffortObservations(effortId).then((rows) => {
+        if (!cancelled) setObs(rows);
       });
     };
     load();
@@ -530,53 +526,31 @@ export function EffortObservations({
       cancelled = true;
       unsub();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effortIds]);
+  }, [effortId]);
 
-  const rendered = efforts
-    .map((e, i) => ({ effort: e, index: i, obs: byEffort.get(e.effort.id) ?? [] }))
-    .filter((row) => row.obs.length > 0);
+  if (obs.length === 0) return null;
 
-  if (rendered.length === 0) return null;
+  const coverage = obs.find((o) => o.kind === "diff-coverage");
+  const runs = obs.filter((o) => o.kind === "test-run");
+  const mutedStyle: React.CSSProperties = {
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
+  };
 
   return (
-    <section data-testid="effort-observations">
-      <h2 className="task-activity-heading">Coverage &amp; Tests</h2>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {rendered.map(({ effort, index, obs }) => {
-          const coverage = obs.find((o) => o.kind === "diff-coverage");
-          const runs = obs.filter((o) => o.kind === "test-run");
-          return (
-            <div
-              key={effort.effort.id}
-              data-testid={`effort-observations-${effort.effort.id}`}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                padding: "12px 14px",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 6,
-              }}
-            >
-              {rendered.length > 1 ? (
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                  Effort {index + 1}
-                </span>
-              ) : null}
-              {coverage ? (
-                <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
-              ) : (
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                  No coverage recorded for this effort yet — run the configured coverage command.
-                </span>
-              )}
-              <TestsRun runs={runs} />
-            </div>
-          );
-        })}
-      </div>
-    </section>
+    <div
+      data-testid={`effort-observations-${effortId}`}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <h4>Coverage &amp; tests</h4>
+      {coverage ? (
+        <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
+      ) : (
+        <span style={mutedStyle}>
+          No coverage recorded for this effort — run the configured coverage command.
+        </span>
+      )}
+      {runs.length > 0 ? <TestsRun runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
+    </div>
   );
 }

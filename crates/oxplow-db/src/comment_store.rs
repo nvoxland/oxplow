@@ -582,7 +582,10 @@ mod tests {
         assert_eq!(created.comment.intent, CommentIntent::Followup);
         assert_eq!(created.comment.status, CommentStatus::Open);
         assert!(!created.comment.orphaned);
-        assert_eq!(created.comment.section_anchor.as_deref(), Some("storage-model"));
+        assert_eq!(
+            created.comment.section_anchor.as_deref(),
+            Some("storage-model")
+        );
         assert_eq!(created.messages.len(), 1);
         assert_eq!(created.messages[0].body, "what about this?");
 
@@ -590,7 +593,10 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].comment.id, created.comment.id);
         // The section anchor survives the read path.
-        assert_eq!(listed[0].comment.section_anchor.as_deref(), Some("storage-model"));
+        assert_eq!(
+            listed[0].comment.section_anchor.as_deref(),
+            Some("storage-model")
+        );
     }
 
     #[tokio::test]
