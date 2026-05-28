@@ -305,12 +305,12 @@ const toolbarStyle: CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "4px 0",
-  fontSize: 11,
+  fontSize: "var(--text-sm)",
 };
 
 const toolbarButtonStyle: CSSProperties = {
-  fontSize: 11,
-  padding: "2px 6px",
+  fontSize: "var(--text-sm)",
+  padding: "3px 8px",
   borderRadius: 3,
   border: "1px solid var(--border-subtle)",
   background: "var(--surface-card)",
@@ -320,8 +320,8 @@ const toolbarButtonStyle: CSSProperties = {
 
 const searchInputStyle: CSSProperties = {
   flex: 1,
-  fontSize: 11,
-  padding: "2px 6px",
+  fontSize: "var(--text-sm)",
+  padding: "3px 8px",
   borderRadius: 3,
   border: "1px solid var(--border-subtle)",
   background: "var(--surface-app)",
@@ -329,7 +329,7 @@ const searchInputStyle: CSSProperties = {
 };
 
 const matchCountStyle: CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   color: "var(--text-secondary)",
   whiteSpace: "nowrap",
 };
@@ -343,26 +343,26 @@ const treeStyle: CSSProperties = {
 const rowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  minHeight: 18,
+  minHeight: 22,
 };
 
 const dirRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 4,
-  fontSize: 11,
+  fontSize: "var(--text-sm)",
   color: "var(--text-secondary)",
   background: "transparent",
   border: "none",
   cursor: "pointer",
   textAlign: "left",
-  padding: "1px 4px",
+  padding: "2px 4px",
 };
 
 const chevronStyle: CSSProperties = {
-  width: 10,
+  width: 12,
   display: "inline-block",
-  fontSize: 9,
+  fontSize: "var(--text-sm)",
   color: "var(--text-secondary)",
 };
 
@@ -371,7 +371,7 @@ const dirNameStyle: CSSProperties = {
 };
 
 const dirCountStyle: CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   color: "var(--text-muted)",
   marginLeft: 4,
 };

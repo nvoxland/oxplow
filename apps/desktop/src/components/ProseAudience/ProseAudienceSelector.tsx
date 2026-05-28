@@ -1,15 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import { PROSE_AUDIENCES, type ProseAudience } from "../../tabs/proseAudience.js";
 
 const LABELS: Record<ProseAudience, string> = {
   developer: "Developer",
   executive: "Executive",
   caveman: "Caveman",
-};
-
-const GLYPHS: Record<ProseAudience, string> = {
-  developer: "D",
-  executive: "E",
-  caveman: "C",
 };
 
 export interface ProseAudienceSelectorProps {
@@ -22,84 +17,130 @@ export interface ProseAudienceSelectorProps {
 }
 
 /**
- * Page-level segmented control that picks which audience variant of a
- * prose body is shown — Developer / Executive / Caveman. Discrete
- * values, so it's a `radiogroup` of buttons (←/→ to move, Enter/Space
- * to commit), not a continuous slider. Dumb + props-driven; the page
- * wrapper wires it to the per-page `useProseAudience` store.
+ * Page-level dropdown that picks which audience variant of a prose body
+ * is shown — Developer / Executive / Caveman. A trigger button shows the
+ * current audience; clicking opens a popover list. Dumb + props-driven;
+ * the page wrapper wires it to the per-page `useProseAudience` store.
  */
 export function ProseAudienceSelector({ value, onChange, available }: ProseAudienceSelectorProps) {
-  const move = (dir: 1 | -1) => {
-    const i = PROSE_AUDIENCES.indexOf(value);
-    const next = PROSE_AUDIENCES[(i + dir + PROSE_AUDIENCES.length) % PROSE_AUDIENCES.length];
-    onChange(next);
-  };
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (popoverRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
 
   return (
-    <div
-      data-testid="prose-audience-selector"
-      role="radiogroup"
-      aria-label="Prose audience"
-      onKeyDown={(e) => {
-        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-          e.preventDefault();
-          move(1);
-        } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-          e.preventDefault();
-          move(-1);
-        }
-      }}
-      style={{
-        display: "inline-flex",
-        alignItems: "stretch",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 4,
-        overflow: "hidden",
-        flexShrink: 0,
-      }}
-    >
-      {PROSE_AUDIENCES.map((audience, i) => {
-        const active = audience === value;
-        const hasVariant = available ? available[audience] : true;
-        return (
-          <button
-            key={audience}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            data-testid={`prose-audience-option-${audience}`}
-            data-active={active ? "" : undefined}
-            tabIndex={active ? 0 : -1}
-            onClick={() => onChange(audience)}
-            title={
-              hasVariant
-                ? LABELS[audience]
-                : `No ${LABELS[audience].toLowerCase()} variant — showing developer`
-            }
-            style={{
-              border: "none",
-              borderLeft: i === 0 ? "none" : "1px solid var(--border-subtle)",
-              background: active ? "var(--surface-tab-active, var(--surface-rail))" : "transparent",
-              color: active
-                ? "var(--accent-fg, var(--text-primary))"
-                : hasVariant
-                  ? "var(--text-secondary)"
-                  : "var(--text-disabled, var(--text-secondary))",
-              opacity: hasVariant || active ? 1 : 0.45,
-              fontWeight: active ? 600 : 400,
-              fontSize: "var(--text-xs)",
-              padding: "3px 10px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span aria-hidden style={{ marginRight: 4, fontVariantNumeric: "tabular-nums" }}>
-              {GLYPHS[audience]}
-            </span>
-            {LABELS[audience]}
-          </button>
-        );
-      })}
+    <div data-testid="prose-audience-selector" style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="prose-audience-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Prose audience"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          border: "1px solid var(--border-subtle)",
+          background: "var(--surface-card)",
+          color: "var(--text-primary)",
+          padding: "4px 10px",
+          borderRadius: 4,
+          fontSize: "var(--text-xs)",
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {LABELS[value]}
+        <span aria-hidden style={{ color: "var(--text-secondary)" }}>
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open ? (
+        <div
+          ref={popoverRef}
+          data-testid="prose-audience-popover"
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            minWidth: 160,
+            background: "var(--surface-card)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+            padding: 4,
+            zIndex: 10,
+            fontSize: "var(--text-xs)",
+          }}
+        >
+          {PROSE_AUDIENCES.map((audience) => {
+            const active = audience === value;
+            const hasVariant = available ? available[audience] : true;
+            return (
+              <button
+                key={audience}
+                type="button"
+                role="option"
+                aria-selected={active}
+                data-testid={`prose-audience-option-${audience}`}
+                data-active={active ? "" : undefined}
+                onClick={() => {
+                  setOpen(false);
+                  if (!active) onChange(audience);
+                }}
+                title={hasVariant ? LABELS[audience] : `No ${LABELS[audience].toLowerCase()} variant — showing developer`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "4px 8px",
+                  background: active ? "var(--surface-tab-active, var(--surface-rail))" : "transparent",
+                  border: "none",
+                  borderRadius: 4,
+                  color: active
+                    ? "var(--accent-fg, var(--text-primary))"
+                    : hasVariant
+                      ? "var(--text-primary)"
+                      : "var(--text-disabled, var(--text-secondary))",
+                  opacity: hasVariant || active ? 1 : 0.55,
+                  fontWeight: active ? 600 : 400,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span style={{ display: "inline-block", width: 12 }}>{active ? "✓" : ""}</span>
+                {LABELS[audience]}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

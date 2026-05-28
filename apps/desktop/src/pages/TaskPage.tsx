@@ -31,6 +31,7 @@ export interface TaskPageProps {
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
   onShowInHistory?(snapshotId: string): void;
+  onOpenDiff?(spec: import("../components/Diff/DiffPane.js").DiffSpec): void;
 }
 
 /**
@@ -48,6 +49,7 @@ export function TaskPage({
   onOpenPage,
   onOpenFile,
   onShowInHistory,
+  onOpenDiff,
 }: TaskPageProps) {
   const [fetchedItem, setFetchedItem] = useState<Task | null>(null);
   const item = items.find((i) => i.id === itemId) ?? fetchedItem;
@@ -236,6 +238,7 @@ export function TaskPage({
             formatTimestamp={(iso) => new Date(iso).toLocaleString()}
             onOpenFile={onOpenFile}
             onShowInHistory={onShowInHistory}
+            onOpenDiff={onOpenDiff}
             audience={audience}
           />
         </section>

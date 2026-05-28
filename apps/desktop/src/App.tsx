@@ -2955,6 +2955,7 @@ export function App() {
                 const id = Number(snapshotId);
                 if (Number.isFinite(id)) navOpen(snapshotRef(id));
               }}
+              onOpenDiff={navOpenDiff}
             />
           ),
         });

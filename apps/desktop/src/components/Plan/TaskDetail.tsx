@@ -11,6 +11,9 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import type { ProseAudience } from "../../tabs/proseAudience.js";
 import { selectVariantBody } from "../ProseAudience/selectVariant.js";
 import { VariantCommentSections } from "../ProseAudience/VariantCommentSections.js";
+import { FileTree } from "../FileTree/FileTree.js";
+import type { DiffSpec } from "../Diff/DiffPane.js";
+import { DISK, snapshotVersion } from "../../file-version.js";
 
 /** Muted "switch to Developer to edit" banner shown above read-only
  *  non-developer prose variants. */
@@ -489,12 +492,16 @@ export function ActivityTimeline({
   formatTimestamp,
   onOpenFile,
   onShowInHistory,
+  onOpenDiff,
   audience = "developer",
 }: {
   efforts: EffortDetail[];
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
+  /** Open a diff tab. Modified-file rows use this to show the file's
+   *  diff across the effort's snapshot bracket. */
+  onOpenDiff?(spec: DiffSpec): void;
   /** Audience variant for each effort's summary prose. */
   audience?: ProseAudience;
 }) {
@@ -526,6 +533,7 @@ export function ActivityTimeline({
           formatTimestamp={formatTimestamp}
           onOpenFile={onOpenFile}
           onShowInHistory={onShowInHistory}
+          onOpenDiff={onOpenDiff}
           audience={audience}
         />
       ))}
@@ -548,6 +556,7 @@ function ActivityEffortSection({
   formatTimestamp,
   onOpenFile,
   onShowInHistory,
+  onOpenDiff,
   audience = "developer",
 }: {
   detail: EffortDetail;
@@ -555,12 +564,27 @@ function ActivityEffortSection({
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
+  onOpenDiff?(spec: DiffSpec): void;
   audience?: ProseAudience;
 }) {
   const ctxNav = useOptionalPageNavigation();
   const openFile = (path: string) => {
     if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
     else void onOpenFile?.(path);
+  };
+  // Open the file's diff across this effort's snapshot bracket
+  // (start → end; falls back to the working tree when a pin is missing
+  // — e.g. an active effort with no end snapshot yet).
+  const openDiff = (path: string) => {
+    if (!onOpenDiff) return;
+    const left = detail.effort.start_snapshot_id;
+    const right = detail.effort.end_snapshot_id;
+    onOpenDiff({
+      path,
+      leftVersion: left ? snapshotVersion(left) : DISK,
+      rightVersion: right ? snapshotVersion(right) : DISK,
+      baseLabel: "effort changes",
+    });
   };
   const endSnapshotId = detail.effort.end_snapshot_id;
   const subheader = active
@@ -571,7 +595,7 @@ function ActivityEffortSection({
       data-testid={active ? "tasks-effort-in-progress" : `tasks-effort-${detail.effort.id}`}
       style={{ display: "flex", flexDirection: "column", gap: 10 }}
     >
-      <header>
+      <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <h3 style={{
           margin: 0,
           fontSize: "var(--text-base)",
@@ -580,6 +604,27 @@ function ActivityEffortSection({
         }}>
           {subheader}
         </h3>
+        {!active && onShowInHistory && endSnapshotId ? (
+          <button
+            type="button"
+            data-testid={`tasks-show-in-history-${detail.effort.id}`}
+            onClick={() => onShowInHistory(endSnapshotId)}
+            style={{
+              flexShrink: 0,
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: "var(--accent)",
+              cursor: "pointer",
+              font: "inherit",
+              fontSize: "var(--text-xs)",
+              textDecoration: "underline",
+            }}
+            title="Open Local History at this effort's end snapshot"
+          >
+            View snapshot →
+          </button>
+        ) : null}
       </header>
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
         <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
@@ -589,7 +634,6 @@ function ActivityEffortSection({
               detail.effort.summary_variants ?? { developer: detail.effort.summary },
               audience,
             )}
-            maxHeight={320}
           />
         </div>
       ) : !active ? (
@@ -601,84 +645,48 @@ function ActivityEffortSection({
         </div>
       ) : null}
       {detail.changed_paths.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h4 style={{
             margin: 0,
-            fontSize: "var(--text-xs)",
+            fontSize: "var(--text-sm)",
             fontWeight: "var(--weight-semibold)",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
             color: "var(--text-secondary)",
           }}>
             Modified files
           </h4>
-          <ul style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}>
-          {detail.changed_paths.map((path) => (
-            <li key={path} style={{ fontSize: 12 }}>
-              {onOpenFile ? (
+          <FileTree
+            items={detail.changed_paths.map((path) => ({ path, data: path }))}
+            testId={`tasks-effort-files-${detail.effort.id}`}
+            renderItem={(item) => {
+              const name = item.path.split("/").pop() ?? item.path;
+              const canDiff = !!onOpenDiff;
+              return (
                 <button
                   type="button"
-                  onClick={() => openFile(path)}
+                  data-testid={`tasks-effort-file-${item.path}`}
+                  onClick={() => (canDiff ? openDiff(item.path) : void openFile(item.path))}
+                  title={canDiff ? `Open diff: ${item.path}` : `Open ${item.path}`}
                   style={{
                     background: "transparent",
                     border: "none",
-                    padding: 0,
-                    color: "var(--accent)",
+                    padding: "1px 0",
+                    color: "var(--text-primary)",
                     cursor: "pointer",
                     textAlign: "left",
                     font: "inherit",
                     fontFamily: "var(--font-mono)",
-                    textDecoration: "underline",
+                    fontSize: "var(--text-sm)",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     maxWidth: "100%",
                   }}
                 >
-                  {path}
+                  {name}
                 </button>
-              ) : (
-                <span style={{
-                  fontFamily: "var(--font-mono)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  display: "inline-block",
-                  maxWidth: "100%",
-                }}>{path}</span>
-              )}
-            </li>
-          ))}
-          </ul>
-        </div>
-      ) : null}
-      {!active && onShowInHistory && endSnapshotId ? (
-        <div>
-          <button
-            type="button"
-            data-testid={`tasks-show-in-history-${detail.effort.id}`}
-            onClick={() => onShowInHistory(endSnapshotId)}
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: 0,
-              color: "var(--accent)",
-              cursor: "pointer",
-              font: "inherit",
-              fontSize: 12,
-              textDecoration: "underline",
+              );
             }}
-            title="Open Local History at this effort's end snapshot"
-          >
-            View snapshot →
-          </button>
+          />
         </div>
       ) : null}
     </section>
