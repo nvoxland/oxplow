@@ -356,7 +356,12 @@ export interface TaskEffort {
   ended_at: string | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
+  /** Developer-audience summary (canonical text). */
   summary: string | null;
+  /** Audience variants of the summary (developer mirrors `summary`;
+   *  executive/caveman fall back to it). Mirrors the backend
+   *  `ProseVariants`. */
+  summary_variants?: { developer: string; executive?: string | null; caveman?: string | null };
 }
 
 export interface EffortDetail {

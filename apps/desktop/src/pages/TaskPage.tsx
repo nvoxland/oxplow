@@ -16,6 +16,10 @@ import { EffortObservations } from "../components/EffortObservations.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { useProseAudience } from "../tabs/useProseAudience.js";
+import { availableVariants, type ProseVariants } from "../components/ProseAudience/selectVariant.js";
+import type { ProseAudience } from "../tabs/proseAudience.js";
 
 export interface TaskPageProps {
   stream: Stream | null;
@@ -47,6 +51,8 @@ export function TaskPage({
 }: TaskPageProps) {
   const [fetchedItem, setFetchedItem] = useState<Task | null>(null);
   const item = items.find((i) => i.id === itemId) ?? fetchedItem;
+  const nav = useOptionalPageNavigation();
+  const { audience, setAudience } = useProseAudience(nav?.pageKey ?? null);
   const refForGraph = taskRef(itemId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -169,6 +175,21 @@ export function TaskPage({
     );
   }
 
+  // Availability spans the description AND every effort summary, since
+  // one page-level selector governs all the page's prose.
+  const descVariants: ProseVariants = item.description_variants ?? { developer: item.description };
+  const available = availableVariants(descVariants);
+  for (const e of efforts) {
+    const sv = e.effort.summary_variants;
+    if (sv?.executive) available.executive = true;
+    if (sv?.caveman) available.caveman = true;
+  }
+  const audienceConfig: { value: ProseAudience; onChange: (a: ProseAudience) => void; available: Record<ProseAudience, boolean> } = {
+    value: audience,
+    onChange: setAudience,
+    available,
+  };
+
   const rail = (
     <TaskDetailRail
       item={item}
@@ -188,6 +209,7 @@ export function TaskPage({
       backlinks={backlinks}
       outbound={outbound}
       commentsNav={stream ? <CommentNavigator targetKind="task" targetId={String(item.id)} /> : undefined}
+      audience={audienceConfig}
       layout="details"
       rightRail={rail}
     >
@@ -195,6 +217,7 @@ export function TaskPage({
         <TaskDetail
           item={item}
           onUpdateTask={handleUpdate}
+          audience={audience}
           comments={
             stream
               ? {
@@ -213,6 +236,7 @@ export function TaskPage({
             formatTimestamp={(iso) => new Date(iso).toLocaleString()}
             onOpenFile={onOpenFile}
             onShowInHistory={onShowInHistory}
+            audience={audience}
           />
         </section>
         <EffortObservations efforts={efforts} onOpenFile={onOpenFile} />

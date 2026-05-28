@@ -1949,7 +1949,18 @@ export type TaskEffort = {
 	ended_at: Timestamp | null,
 	start_snapshot_id: number | null,
 	end_snapshot_id: number | null,
+	/**
+	 *  Developer-audience summary — the canonical text and the
+	 *  fallback for every other audience.
+	 */
 	summary: string | null,
+	/**
+	 *  All three audience variants of the summary. `developer` mirrors
+	 *  [`TaskEffort::summary`]; the store fills this on read from the
+	 *  `summary_variants` JSON column and persists only the optional
+	 *  executive/caveman halves. See [`oxplow_domain::prose`].
+	 */
+	summary_variants?: ProseVariants,
 };
 
 // Audit-log entry for state changes on a task.

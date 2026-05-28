@@ -218,8 +218,9 @@ via the `description_executive` / `description_caveman` params on
 `create_task` / `update_task` / `file_epic_with_children`
 (`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). `ProseAudience`
 + `ProseVariants` are exported to the frontend through tauri-specta. The
-same V27 migration also adds (stubbed for later phases)
-`task_effort.summary_variants` and `comment.section_anchor`.
+same V27 migration also adds `task_effort.summary_variants` (wired — see
+below) and `comment.section_anchor` (stubbed for the comment-anchoring
+phase).
 
 `note_count` is a computed column added to every `Task` returned by the
 store (via COUNT subquery over `task_note`). It drives the note badge on
@@ -283,6 +284,18 @@ Auto-managed by the runtime on `task.changed` status transitions:
   subject to a 5-minute minimum gap between snapshots — if the latest
   snapshot is fresher than that gap, the close path skips flushing a
   new row (the effort's `end_snapshot_id` is left null in that case).
+
+`summary_variants` (V27 — nullable TEXT) holds the optional
+executive/caveman audience rewrites of `summary`, same JSON shape and
+`ProseVariants` handling as `task.description_variants`. `summary` stays
+the canonical developer text; `row_to_effort` rebuilds a `ProseVariants`
+on read with developer fallback. The agent authors the variants via the
+`summary_executive` / `summary_caveman` params on `complete_task`, which
+land them through `TaskEffortStore::set_summary_variants` on the effort
+that just received the developer `summary` (preserving the
+write-once-on-completion shape). The frontend swaps the rendered
+description (TaskDetail) and effort summary (ActivityTimeline) by the
+page-level audience selector.
 
 Re-opening a task (done → in_progress) produces a second effort. At most one open effort per task at a time.
 

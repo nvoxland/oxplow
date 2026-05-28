@@ -8,6 +8,19 @@ import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
 import { inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
+import type { ProseAudience } from "../../tabs/proseAudience.js";
+import { selectVariantBody } from "../ProseAudience/selectVariant.js";
+
+/** Muted "switch to Developer to edit" banner shown above read-only
+ *  non-developer prose variants. */
+function VariantReadOnlyBanner({ audience }: { audience: ProseAudience }) {
+  return (
+    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: 8, fontStyle: "italic" }}>
+      {audience === "executive" ? "Executive summary" : "Caveman version"} — read-only. Switch to
+      Developer to edit.
+    </div>
+  );
+}
 
 /**
  * One entry in the tasks Activity timeline. Each effort
@@ -78,11 +91,19 @@ export function TaskDetail({
   item,
   onUpdateTask,
   comments,
+  audience = "developer",
 }: {
   item: Task;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   comments?: RichTextCommentConfig;
+  /** Which audience variant of the description to show. Developer
+   *  (default) is editable; executive/caveman render read-only (edits
+   *  always target the canonical developer text). */
+  audience?: ProseAudience;
 }) {
+  const isDeveloper = audience === "developer";
+  const variants = item.description_variants ?? { developer: item.description };
+  const shownDescription = selectVariantBody(variants, audience);
   return (
     <div
       className="task-detail-body"
@@ -98,17 +119,24 @@ export function TaskDetail({
           void onUpdateTask(item.id, { title: trimmed });
         }}
       />
-      <RichTextField
-        key={`desc-${item.id}`}
-        value={item.description}
-        placeholder="Add a description… include a ## Acceptance criteria section if helpful."
-        style={{ paddingLeft: 0, paddingRight: 22 }}
-        comments={comments}
-        onCommit={(value) => {
-          if (value === item.description) return;
-          void onUpdateTask(item.id, { description: value });
-        }}
-      />
+      {isDeveloper ? (
+        <RichTextField
+          key={`desc-${item.id}`}
+          value={item.description}
+          placeholder="Add a description… include a ## Acceptance criteria section if helpful."
+          style={{ paddingLeft: 0, paddingRight: 22 }}
+          comments={comments}
+          onCommit={(value) => {
+            if (value === item.description) return;
+            void onUpdateTask(item.id, { description: value });
+          }}
+        />
+      ) : (
+        <div data-testid={`task-description-${audience}`} style={{ paddingRight: 22 }}>
+          <VariantReadOnlyBanner audience={audience} />
+          <MarkdownView body={shownDescription} maxHeight={undefined} />
+        </div>
+      )}
     </div>
   );
 }
@@ -453,11 +481,14 @@ export function ActivityTimeline({
   formatTimestamp,
   onOpenFile,
   onShowInHistory,
+  audience = "developer",
 }: {
   efforts: EffortDetail[];
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
+  /** Audience variant for each effort's summary prose. */
+  audience?: ProseAudience;
 }) {
   const rows = buildActivityTimeline(efforts);
   if (rows.length === 0) {
@@ -487,6 +518,7 @@ export function ActivityTimeline({
           formatTimestamp={formatTimestamp}
           onOpenFile={onOpenFile}
           onShowInHistory={onShowInHistory}
+          audience={audience}
         />
       ))}
     </div>
@@ -508,12 +540,14 @@ function ActivityEffortSection({
   formatTimestamp,
   onOpenFile,
   onShowInHistory,
+  audience = "developer",
 }: {
   detail: EffortDetail;
   active: boolean;
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
+  audience?: ProseAudience;
 }) {
   const ctxNav = useOptionalPageNavigation();
   const openFile = (path: string) => {
@@ -541,7 +575,14 @@ function ActivityEffortSection({
       </header>
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
         <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
-          <MarkdownView body={detail.effort.summary} maxHeight={320} />
+          {audience !== "developer" ? <VariantReadOnlyBanner audience={audience} /> : null}
+          <MarkdownView
+            body={selectVariantBody(
+              detail.effort.summary_variants ?? { developer: detail.effort.summary },
+              audience,
+            )}
+            maxHeight={320}
+          />
         </div>
       ) : !active ? (
         <div

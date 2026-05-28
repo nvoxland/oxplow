@@ -282,8 +282,13 @@ pub struct McpTaskImpact {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CompleteTaskParams {
     pub id: String,
-    /// Summary note appended to the task before marking done.
+    /// Summary note appended to the task before marking done
+    /// (developer audience — the canonical text).
     pub summary: String,
+    /// Optional executive-summary rewrite of `summary`.
+    pub summary_executive: Option<String>,
+    /// Optional terse "caveman"-style rewrite of `summary`.
+    pub summary_caveman: Option<String>,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-
     /// attribution effort row Local History reads from.
@@ -2211,6 +2216,35 @@ impl OxplowMcp {
                         &tid,
                         oxplow_domain::EffortId::from(r.effort_id.clone()),
                     );
+                }
+                // Persist the executive/caveman summary variants onto
+                // the effort that record_effort just wrote the summary
+                // to (the developer text). The variant blob stays NULL
+                // unless the agent authored a rewrite.
+                if summary_has_body
+                    && (p.summary_executive.is_some() || p.summary_caveman.is_some())
+                {
+                    use oxplow_db::TaskEffortStore as _;
+                    if let Ok(Some(effort)) = self
+                        .services
+                        .effort_store
+                        .most_recent_for_task(item.id)
+                        .await
+                    {
+                        let variants = oxplow_domain::ProseVariants {
+                            developer: p.summary.clone(),
+                            executive: p.summary_executive.clone(),
+                            caveman: p.summary_caveman.clone(),
+                        };
+                        if let Err(err) = self
+                            .services
+                            .effort_store
+                            .set_summary_variants(&effort.id, &variants)
+                            .await
+                        {
+                            tracing::warn!(?err, "complete_task: summary variant persist failed");
+                        }
+                    }
                 }
             }
         }

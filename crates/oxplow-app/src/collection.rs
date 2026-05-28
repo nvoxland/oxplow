@@ -999,6 +999,7 @@ mod tests {
                 start_snapshot_id: None,
                 end_snapshot_id: None,
                 summary: None,
+                summary_variants: oxplow_domain::ProseVariants::default(),
             };
             let cfg = oxplow_config::CollectionConfig {
                 reports: vec![

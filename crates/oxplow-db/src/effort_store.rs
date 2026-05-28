@@ -12,7 +12,9 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
+use oxplow_domain::{
+    DomainError, EffortId, ProseVariants, TaskId, TaskImpact, ThreadId, Timestamp,
+};
 
 use crate::database::Database;
 use crate::page_ref_projections::{
@@ -38,7 +40,15 @@ pub struct TaskEffort {
     pub ended_at: Option<Timestamp>,
     pub start_snapshot_id: Option<i64>,
     pub end_snapshot_id: Option<i64>,
+    /// Developer-audience summary — the canonical text and the
+    /// fallback for every other audience.
     pub summary: Option<String>,
+    /// All three audience variants of the summary. `developer` mirrors
+    /// [`TaskEffort::summary`]; the store fills this on read from the
+    /// `summary_variants` JSON column and persists only the optional
+    /// executive/caveman halves. See [`oxplow_domain::prose`].
+    #[serde(default)]
+    pub summary_variants: ProseVariants,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -122,6 +132,7 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
     let start_snapshot_id: Option<i64> = row.get("start_snapshot_id")?;
     let end_snapshot_id: Option<i64> = row.get("end_snapshot_id")?;
     let summary: Option<String> = row.get("summary")?;
+    let summary_variants_json: Option<String> = row.get("summary_variants")?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -136,6 +147,10 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
             .map_err(map_err)?,
         start_snapshot_id,
         end_snapshot_id,
+        summary_variants: ProseVariants::from_developer_and_json(
+            summary.clone().unwrap_or_default(),
+            summary_variants_json.as_deref(),
+        ),
         summary,
     })
 }
@@ -185,6 +200,15 @@ pub trait TaskEffortStore: Send + Sync {
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
+    /// Persist the executive/caveman audience variants of the summary
+    /// (the developer text stays in the `summary` column). Passing
+    /// variants with no executive/caveman clears the column. The
+    /// developer half of `variants` is ignored — `summary` is canonical.
+    async fn set_summary_variants(
+        &self,
+        id: &EffortId,
+        variants: &ProseVariants,
+    ) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError>;
     async fn record_file(
@@ -395,6 +419,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             start_snapshot_id,
             end_snapshot_id: None,
             summary: None,
+            summary_variants: ProseVariants::default(),
         })
     }
 
@@ -491,6 +516,24 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             }
         }
         Ok(())
+    }
+
+    async fn set_summary_variants(
+        &self,
+        id: &EffortId,
+        variants: &ProseVariants,
+    ) -> Result<(), DomainError> {
+        let id_for_sql = id.clone();
+        let json = variants.optional_json();
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE task_effort SET summary_variants = ?2 WHERE id = ?1",
+                    params![id_for_sql.as_str(), json],
+                )?;
+                Ok(())
+            })
+            .await
     }
 
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError> {
@@ -975,6 +1018,48 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert!(list[0].ended_at.is_some());
         assert_eq!(list[0].summary.as_deref(), Some("done"));
+    }
+
+    #[tokio::test]
+    async fn summary_variants_round_trip_and_fall_back() {
+        use oxplow_domain::ProseAudience;
+        let (store, tid, t) = fixture().await;
+        let eff = store.start(tid, &t, None).await.unwrap();
+        // Developer summary lands via finish; the exec/caveman halves
+        // via the dedicated variant writer (the complete_task path).
+        store
+            .finish(&eff.id, None, Some("the detailed summary".into()))
+            .await
+            .unwrap();
+        store
+            .set_summary_variants(
+                &eff.id,
+                &ProseVariants {
+                    developer: "the detailed summary".into(),
+                    executive: Some("the gist".into()),
+                    caveman: Some("did thing. good.".into()),
+                },
+            )
+            .await
+            .unwrap();
+        let got = store.list_for_item(tid).await.unwrap();
+        let v = &got[0].summary_variants;
+        assert_eq!(v.get(ProseAudience::Developer), "the detailed summary");
+        assert_eq!(v.get(ProseAudience::Executive), "the gist");
+        assert_eq!(v.get(ProseAudience::Caveman), "did thing. good.");
+
+        // An effort with only a developer summary leaves the column NULL
+        // and every audience falls back to developer.
+        let eff2 = store.start(tid, &t, None).await.unwrap();
+        store
+            .finish(&eff2.id, None, Some("plain only".into()))
+            .await
+            .unwrap();
+        let got2 = store.get_effort(&eff2.id).await.unwrap().unwrap();
+        assert_eq!(
+            got2.summary_variants.get(ProseAudience::Executive),
+            "plain only"
+        );
     }
 
     #[tokio::test]
