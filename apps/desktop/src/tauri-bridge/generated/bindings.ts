@@ -565,7 +565,7 @@ export const commands = {
 	 *  Versioned file read. Dispatches on `version`:
 	 *  - `Disk` → `read_workspace_file` (working tree, possibly dirty).
 	 *  - `Ref { ref }` → `read_file_at_ref` (committed blob).
-	 *  - `Snapshot { id }` → not yet implemented.
+	 *  - `Snapshot { id }` → `snapshot_store.blob_hash_for_path` + blob read.
 	 * 
 	 *  Returns `Ok(None)` if the path doesn't exist at that version.
 	 *  Callers MUST pass an explicit version — there is no implicit
