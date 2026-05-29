@@ -24,7 +24,8 @@ use oxplow_domain::stores::{
     CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
 };
 use oxplow_domain::{
-    CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId,
+    prose::ProseAudience, CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType,
+    TaskPriority, TaskStatus, ThreadId,
 };
 
 /// A comment thread plus the typed context it was anchored in, resolved
@@ -56,6 +57,20 @@ pub struct StreamIdParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ThreadIdParams {
     pub thread_id: String,
+}
+
+/// Slim task row returned by `list_ready_work`. Carries only the fields
+/// an agent needs to scan and pick work. Description is the caveman
+/// variant when present, falling back to developer.
+#[derive(Debug, Serialize)]
+struct TaskListRow {
+    id: String,
+    parent_id: Option<String>,
+    title: String,
+    description: String,
+    status: TaskStatus,
+    priority: TaskPriority,
+    sort_index: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1204,7 +1219,9 @@ impl OxplowMcp {
         json_result(&list)
     }
 
-    #[tool(description = "List tasks on a thread.")]
+    #[tool(
+        description = "List ready tasks on a thread. Returns a slim representation with the caveman description variant (falls back to developer). Use get_task for the full record."
+    )]
     async fn list_ready_work(
         &self,
         params: Parameters<ThreadIdParams>,
@@ -1219,10 +1236,25 @@ impl OxplowMcp {
         let list = self
             .services
             .task_store
-            .list_for_thread(&thread_id)
+            .list_ready_for_thread(&thread_id)
             .await
             .map_err(internal)?;
-        json_result(&list)
+        let rows: Vec<TaskListRow> = list
+            .into_iter()
+            .map(|t| TaskListRow {
+                id: t.id.to_string(),
+                parent_id: t.parent_id.map(|id| id.to_string()),
+                title: t.title,
+                description: t
+                    .description_variants
+                    .get(ProseAudience::Caveman)
+                    .to_string(),
+                status: t.status,
+                priority: t.priority,
+                sort_index: t.sort_index,
+            })
+            .collect();
+        json_result(&rows)
     }
 
     #[tool(

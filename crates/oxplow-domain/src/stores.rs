@@ -58,6 +58,7 @@ pub trait ThreadStore: Send + Sync {
 #[async_trait]
 pub trait TaskStore: Send + Sync {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
+    async fn list_ready_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
     async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
     /// Insert a new task; assigns and returns the autoincrement id.

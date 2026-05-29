@@ -1148,7 +1148,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .contains(&EffortId::from("ef-fresh"));
-            assert!(!nudged, "nudge should not have fired when a report was produced");
+            assert!(
+                !nudged,
+                "nudge should not have fired when a report was produced"
+            );
         }
 
         #[tokio::test]
