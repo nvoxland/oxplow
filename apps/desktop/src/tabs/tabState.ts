@@ -46,7 +46,8 @@ export type PageKind =
   | "thread-settings"
   | "closed-threads"
   | "op-error"
-  | "external-url";
+  | "external-url"
+  | "effort-coverage";
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

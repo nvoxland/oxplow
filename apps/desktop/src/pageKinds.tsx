@@ -87,6 +87,9 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "uncommitted-changes":
       return GitBranch;
 
+    case "effort-coverage":
+      return Activity;
+
     // Snapshot detail page — Local History dashboard drill-in.
     // (Same `Layers` icon previously used only for backlink rows.)
     case "snapshot":

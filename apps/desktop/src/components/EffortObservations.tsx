@@ -5,6 +5,8 @@ import {
   listEffortObservations,
   subscribeOxplowEvents,
 } from "../api.js";
+import { effortCoverageRef } from "../tabs/pageRefs.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 
 /** Parsed `diff-coverage` payload (see collection.md / observation_store). */
 interface DiffCoveragePayload {
@@ -418,37 +420,49 @@ function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
   }));
 }
 
-function TestsRun({ runs }: { runs: EffortObservation[] }) {
+/** Aggregate totals across a merged tree. */
+function sumCounts(tree: TreeNode[]): { passed: number; failed: number; skipped: number } {
+  return tree.reduce(
+    (acc, n) => ({
+      passed: acc.passed + n.counts.passed,
+      failed: acc.failed + n.counts.failed,
+      skipped: acc.skipped + n.counts.skipped,
+    }),
+    { passed: 0, failed: 0, skipped: 0 },
+  );
+}
+
+/** Compact summary: pass/fail totals + top-5 groups + Details link. */
+function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservation[] }) {
   if (runs.length === 0) return null;
+  const ctxNav = useOptionalPageNavigation();
 
   const merged = mergeTestRuns(runs);
   const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
+  const totals = tree ? sumCounts(tree) : null;
 
-  // Aggregate counts from the merged (deduplicated) tree.
-  const totals = tree
-    ? tree.reduce(
-        (acc, n) => ({
-          passed: acc.passed + n.counts.passed,
-          failed: acc.failed + n.counts.failed,
-          skipped: acc.skipped + n.counts.skipped,
-        }),
-        { passed: 0, failed: 0, skipped: 0 },
-      )
-    : null;
-  const total = totals ? totals.passed + totals.failed + totals.skipped : null;
+  // Fall back to raw counts from the last run when no suite data exists.
+  const lastRunPayload = parsePayload<TestRunPayload>(runs[runs.length - 1].payload_json);
+  const fallbackPassed = !totals && lastRunPayload?.total !== undefined ? (lastRunPayload.passed ?? 0) : null;
+  const fallbackFailed = !totals && lastRunPayload?.failed !== undefined ? lastRunPayload.failed : null;
 
-  // Fall back to the last run's raw counts when no parsed suite data exists.
-  const lastRun = parsePayload<TestRunPayload>(runs[runs.length - 1].payload_json);
-  const fallbackCounts =
-    !totals && lastRun?.total !== undefined
-      ? `${lastRun.passed ?? 0}/${lastRun.total} passed`
-      : null;
+  // Top 5 suites by total case count, descending.
+  const top5 = tree
+    ? [...tree]
+        .sort((a, b) => {
+          const ta = a.counts.passed + a.counts.failed + a.counts.skipped;
+          const tb = b.counts.passed + b.counts.failed + b.counts.skipped;
+          return tb - ta;
+        })
+        .slice(0, 5)
+    : [];
 
   const lastObs = runs[runs.length - 1];
 
   return (
-    <div data-testid="tests-run" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div data-testid="tests-run" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Header row: label + pass/fail + provenance + details link */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span
           style={{
             fontSize: "var(--text-xs)",
@@ -459,24 +473,133 @@ function TestsRun({ runs }: { runs: EffortObservation[] }) {
         >
           Tests run
         </span>
-        {totals && total ? (
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-            {totals.passed}/{total} passed
-          </span>
-        ) : fallbackCounts ? (
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-            {fallbackCounts}
-          </span>
+        {totals ? (
+          <>
+            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
+              {totals.passed} passed
+            </span>
+            {totals.failed > 0 ? (
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
+                {totals.failed} failed
+              </span>
+            ) : null}
+          </>
+        ) : fallbackPassed !== null ? (
+          <>
+            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
+              {fallbackPassed} passed
+            </span>
+            {fallbackFailed ? (
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
+                {fallbackFailed} failed
+              </span>
+            ) : null}
+          </>
         ) : null}
         <ProvenanceTag provenance={lastObs.provenance} />
+        {ctxNav ? (
+          <button
+            type="button"
+            onClick={() => ctxNav.navigate(effortCoverageRef(effortId))}
+            style={{
+              marginLeft: "auto",
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: "var(--text-xs)",
+              color: "var(--accent)",
+            }}
+          >
+            Details →
+          </button>
+        ) : null}
       </div>
-      {tree ? (
-        <div style={{ display: "flex", flexDirection: "column", paddingLeft: 8 }}>
-          {tree.map((n) => (
-            <TestTreeNode key={n.path} node={n} depth={0} />
+      {/* Top 5 suites */}
+      {top5.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 4 }}>
+          {top5.map((n) => (
+            <div
+              key={n.path}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}
+            >
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {n.label}
+              </span>
+              <CountsSummary counts={n.counts} />
+            </div>
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Full merged test tree + coverage — used by the effort-coverage detail page.
+ * Expects already-loaded observations; the page handles the data-fetch lifecycle.
+ */
+export function FullCoverageView({
+  effortId,
+  obs,
+  onOpenFile,
+}: {
+  effortId: string;
+  obs: EffortObservation[];
+  onOpenFile?: (path: string) => void;
+}) {
+  const coverage = obs.find((o) => o.kind === "diff-coverage");
+  const runs = obs.filter((o) => o.kind === "test-run");
+
+  const merged = mergeTestRuns(runs);
+  const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
+  const totals = tree ? sumCounts(tree) : null;
+  const lastObs = runs.length > 0 ? runs[runs.length - 1] : null;
+
+  const mutedStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-muted)" };
+
+  return (
+    <div
+      data-testid={`effort-coverage-full-${effortId}`}
+      style={{ display: "flex", flexDirection: "column", gap: 16 }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h4>Coverage</h4>
+        {coverage ? (
+          <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
+        ) : (
+          <span style={mutedStyle}>No coverage recorded for this effort.</span>
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h4 style={{ margin: 0 }}>Tests</h4>
+          {totals ? (
+            <>
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
+                {totals.passed} passed
+              </span>
+              {totals.failed > 0 ? (
+                <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
+                  {totals.failed} failed
+                </span>
+              ) : null}
+            </>
+          ) : null}
+          {lastObs ? <ProvenanceTag provenance={lastObs.provenance} /> : null}
+        </div>
+        {tree ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {tree.map((n) => (
+              <TestTreeNode key={n.path} node={n} depth={0} />
+            ))}
+          </div>
+        ) : runs.length > 0 ? (
+          <span style={mutedStyle}>No parsed test report — exit-code only.</span>
+        ) : (
+          <span style={mutedStyle}>No tests run.</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -539,7 +662,7 @@ export function EffortObservationsBlock({
           No coverage recorded for this effort — run the configured coverage command.
         </span>
       )}
-      {runs.length > 0 ? <TestsRun runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
+      {runs.length > 0 ? <TestsRun effortId={effortId} runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
     </div>
   );
 }

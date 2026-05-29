@@ -117,6 +117,7 @@ import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
+import { EffortCoveragePage } from "./pages/EffortCoveragePage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
@@ -2003,6 +2004,7 @@ export function App() {
       case "new-task":
       case "closed-threads":
       case "external-url":
+      case "effort-coverage":
       case "op-error": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
@@ -2972,6 +2974,19 @@ export function App() {
               threadWork={selectedThreadWork}
               onOpenPage={navOpen}
               onOpenFileAtLine={(p) => { navOpenFile(p); }}
+            />
+          ),
+        });
+      } else if (ref.kind === "effort-coverage") {
+        const effortId = (ref.payload as { effortId?: string } | null)?.effortId ?? "";
+        tabs.push({
+          id: ref.id,
+          label: "Coverage & tests",
+          closable: true,
+          render: () => (
+            <EffortCoveragePage
+              effortId={effortId}
+              onOpenFile={(p) => navOpenFile(p)}
             />
           ),
         });
