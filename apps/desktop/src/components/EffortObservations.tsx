@@ -39,7 +39,6 @@ interface TestRunPayload {
   suites?: JUnitSuite[];
 }
 
-const TESTS_VISIBLE = 6;
 
 function parsePayload<T>(json: string | null): T | null {
   if (!json) return null;
@@ -389,104 +388,94 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-function TestRunRow({ obs }: { obs: EffortObservation }) {
-  const run = parsePayload<TestRunPayload>(obs.payload_json);
-  if (!run) return null;
-  const ok = run.exitCode === undefined ? null : run.exitCode === 0;
-  const counts =
-    run.total !== undefined
-      ? `${run.passed ?? 0}/${run.total} passed`
-      : run.failed
-        ? `${run.failed} failed`
-        : null;
-  // Commands can be long / multi-line (heredocs). Collapse whitespace and
-  // ellipsize to one line; the full text is on the title.
-  const oneLine = run.command.replace(/\s+/g, " ").trim();
-  const duration = run.durationMs !== undefined ? `${(run.durationMs / 1000).toFixed(1)}s` : null;
-  const tree =
-    run.suites && run.suites.some((s) => s.cases.length > 0) ? buildTestTree(run.suites) : null;
+/** Merge all test-run observations into one suite list, last-write-wins per
+ *  test case (keyed by `classname::name`). Observations are processed in
+ *  storage order (oldest first), so later runs update the status of a case
+ *  that ran earlier. Suites that never appeared together are unioned. */
+function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
+  const suiteOrder: string[] = [];
+  const suiteMap = new Map<string, Map<string, JUnitCase>>();
+
+  for (const obs of runs) {
+    const run = parsePayload<TestRunPayload>(obs.payload_json);
+    if (!run?.suites) continue;
+    for (const suite of run.suites) {
+      const sname = suite.name || "(tests)";
+      if (!suiteMap.has(sname)) {
+        suiteMap.set(sname, new Map());
+        suiteOrder.push(sname);
+      }
+      const cases = suiteMap.get(sname)!;
+      for (const c of suite.cases) {
+        cases.set(`${c.classname}::${c.name}`, c);
+      }
+    }
+  }
+
+  return suiteOrder.map((sname) => ({
+    name: sname,
+    cases: [...suiteMap.get(sname)!.values()],
+  }));
+}
+
+function TestsRun({ runs }: { runs: EffortObservation[] }) {
+  if (runs.length === 0) return null;
+
+  const merged = mergeTestRuns(runs);
+  const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
+
+  // Aggregate counts from the merged (deduplicated) tree.
+  const totals = tree
+    ? tree.reduce(
+        (acc, n) => ({
+          passed: acc.passed + n.counts.passed,
+          failed: acc.failed + n.counts.failed,
+          skipped: acc.skipped + n.counts.skipped,
+        }),
+        { passed: 0, failed: 0, skipped: 0 },
+      )
+    : null;
+  const total = totals ? totals.passed + totals.failed + totals.skipped : null;
+
+  // Fall back to the last run's raw counts when no parsed suite data exists.
+  const lastRun = parsePayload<TestRunPayload>(runs[runs.length - 1].payload_json);
+  const fallbackCounts =
+    !totals && lastRun?.total !== undefined
+      ? `${lastRun.passed ?? 0}/${lastRun.total} passed`
+      : null;
+
+  const lastObs = runs[runs.length - 1];
+
   return (
-    <div data-testid="test-run-row" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)" }}>
+    <div data-testid="tests-run" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span
-          title={ok === null ? "exit code unknown" : ok ? "passed" : "failed"}
           style={{
-            flex: "0 0 auto",
-            color: ok === null ? "var(--text-muted)" : ok ? "var(--freshness-fresh)" : "var(--freshness-very-stale)",
-          }}
-        >
-          {ok === null ? "•" : ok ? "✓" : "✗"}
-        </span>
-        <code
-          title={run.command}
-          style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontFamily: "var(--font-mono)",
             fontSize: "var(--text-xs)",
-            color: "var(--text-primary)",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
           }}
         >
-          {oneLine}
-        </code>
-        {counts ? <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>{counts}</span> : null}
-        {duration ? (
-          <span className="oxplow-tabular" style={{ flex: "0 0 auto", color: "var(--text-muted)" }}>
-            {duration}
+          Tests run
+        </span>
+        {totals && total ? (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            {totals.passed}/{total} passed
+          </span>
+        ) : fallbackCounts ? (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            {fallbackCounts}
           </span>
         ) : null}
-        <span style={{ flex: "0 0 auto" }}>
-          <ProvenanceTag provenance={obs.provenance} />
-        </span>
+        <ProvenanceTag provenance={lastObs.provenance} />
       </div>
       {tree ? (
-        <div style={{ display: "flex", flexDirection: "column", paddingLeft: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", paddingLeft: 8 }}>
           {tree.map((n) => (
             <TestTreeNode key={n.path} node={n} depth={0} />
           ))}
         </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TestsRun({ runs }: { runs: EffortObservation[] }) {
-  const [expanded, setExpanded] = useState(false);
-  if (runs.length === 0) return null;
-  const passed = runs.filter((r) => parsePayload<TestRunPayload>(r.payload_json)?.exitCode === 0).length;
-  const shown = expanded ? runs : runs.slice(0, TESTS_VISIBLE);
-  const hidden = runs.length - shown.length;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        Tests run ({runs.length}
-        {runs.some((r) => parsePayload<TestRunPayload>(r.payload_json)?.exitCode !== undefined)
-          ? ` · ${passed} passing`
-          : ""}
-        )
-      </span>
-      {shown.map((r) => (
-        <TestRunRow key={r.id} obs={r} />
-      ))}
-      {hidden > 0 ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          style={{
-            alignSelf: "flex-start",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            fontSize: "var(--text-xs)",
-            color: "var(--accent)",
-          }}
-        >
-          + {hidden} earlier run{hidden === 1 ? "" : "s"}
-        </button>
       ) : null}
     </div>
   );
