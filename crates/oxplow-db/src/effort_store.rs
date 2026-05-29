@@ -46,7 +46,7 @@ pub struct TaskEffort {
     /// All three audience variants of the summary. `developer` mirrors
     /// [`TaskEffort::summary`]; the store fills this on read from the
     /// `summary_variants` JSON column and persists only the optional
-    /// executive/caveman halves. See [`oxplow_domain::prose`].
+    /// executive/terse halves. See [`oxplow_domain::prose`].
     #[serde(default)]
     pub summary_variants: ProseVariants,
 }
@@ -200,9 +200,9 @@ pub trait TaskEffortStore: Send + Sync {
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
-    /// Persist the executive/caveman audience variants of the summary
+    /// Persist the executive/terse audience variants of the summary
     /// (the developer text stays in the `summary` column). Passing
-    /// variants with no executive/caveman clears the column. The
+    /// variants with no executive/terse clears the column. The
     /// developer half of `variants` is ignored — `summary` is canonical.
     async fn set_summary_variants(
         &self,
@@ -1025,7 +1025,7 @@ mod tests {
         use oxplow_domain::ProseAudience;
         let (store, tid, t) = fixture().await;
         let eff = store.start(tid, &t, None).await.unwrap();
-        // Developer summary lands via finish; the exec/caveman halves
+        // Developer summary lands via finish; the exec/terse halves
         // via the dedicated variant writer (the complete_task path).
         store
             .finish(&eff.id, None, Some("the detailed summary".into()))
@@ -1037,7 +1037,7 @@ mod tests {
                 &ProseVariants {
                     developer: "the detailed summary".into(),
                     executive: Some("the gist".into()),
-                    caveman: Some("did thing. good.".into()),
+                    terse: Some("did thing. good.".into()),
                 },
             )
             .await
@@ -1046,7 +1046,7 @@ mod tests {
         let v = &got[0].summary_variants;
         assert_eq!(v.get(ProseAudience::Developer), "the detailed summary");
         assert_eq!(v.get(ProseAudience::Executive), "the gist");
-        assert_eq!(v.get(ProseAudience::Caveman), "did thing. good.");
+        assert_eq!(v.get(ProseAudience::Terse), "did thing. good.");
 
         // An effort with only a developer summary leaves the column NULL
         // and every audience falls back to developer.

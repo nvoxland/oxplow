@@ -515,17 +515,17 @@ pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {
 }
 
 /// Audience-variant sibling-file suffixes for a wiki page body. The
-/// developer body is the bare `<slug>.md`; the executive/caveman
+/// developer body is the bare `<slug>.md`; the executive/terse
 /// rewrites live beside it as `<slug>.executive.md` /
-/// `<slug>.caveman.md`. Order mirrors `ProseAudience`.
-pub const WIKI_VARIANT_SUFFIXES: [&str; 2] = ["executive", "caveman"];
+/// `<slug>.terse.md`. Order mirrors `ProseAudience`.
+pub const WIKI_VARIANT_SUFFIXES: [&str; 2] = ["executive", "terse"];
 
 /// Resolve a wiki file's stem (the part before `.md`) to its base page
 /// slug and, when it's a variant sibling, the audience it encodes:
 ///
 /// - `"task-model"`           → `("task-model", None)`
 /// - `"task-model.executive"` → `("task-model", Some("executive"))`
-/// - `"task-model.caveman"`   → `("task-model", Some("caveman"))`
+/// - `"task-model.terse"`   → `("task-model", Some("terse"))`
 ///
 /// This is what keeps the fs-watcher from spawning a phantom
 /// `task-model.executive` page: variant files route to their base slug,
@@ -743,8 +743,8 @@ mod tests {
             ("task-model", Some("executive"))
         );
         assert_eq!(
-            wiki_slug_and_variant("task-model.caveman"),
-            ("task-model", Some("caveman"))
+            wiki_slug_and_variant("task-model.terse"),
+            ("task-model", Some("terse"))
         );
         // A dotted base that isn't a known variant suffix stays whole.
         assert_eq!(

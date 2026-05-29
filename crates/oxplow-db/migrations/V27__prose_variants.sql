@@ -1,7 +1,7 @@
 -- Audience variants for agent-authored prose (developer / executive /
--- caveman). The canonical developer text stays in its existing column;
+-- terse). The canonical developer text stays in its existing column;
 -- these nullable JSON blobs hold only the optional non-developer
--- variants, e.g. {"executive":"...","caveman":"..."}. NULL means
+-- variants, e.g. {"executive":"...","terse":"..."}. NULL means
 -- developer-only — every reader degrades to the developer text, so no
 -- backfill is required. See crates/oxplow-domain/src/prose.rs.
 --

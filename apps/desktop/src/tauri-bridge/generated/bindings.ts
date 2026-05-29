@@ -171,7 +171,7 @@ export const commands = {
 	 *  All three audience variants of the description. `developer`
 	 *  always mirrors [`Task::description`] (the canonical text); the
 	 *  store fills this on read from the `description_variants` JSON
-	 *  column and persists only the optional executive/caveman halves.
+	 *  column and persists only the optional executive/terse halves.
 	 *  See [`crate::prose`].
 	 */
 	description_variants?: ProseVariants,
@@ -264,7 +264,7 @@ export const commands = {
 	/**
 	 *  Read all three audience variants of a wiki body at once. Developer
 	 *  is the canonical body (empty string when the page has none yet);
-	 *  executive/caveman are `None` when their sibling file is absent or
+	 *  executive/terse are `None` when their sibling file is absent or
 	 *  empty, so the frontend falls back to developer.
 	 */
 	listWikiPageVariants: (slug: string) => typedError<ProseVariants, IpcError>(__TAURI_INVOKE("list_wiki_page_variants", { slug })),
@@ -1187,8 +1187,8 @@ export type CreateTaskInput = {
 	description: string | null,
 	// Optional executive-summary rewrite of `description`.
 	description_executive: string | null,
-	// Optional terse "caveman" rewrite of `description`.
-	description_caveman: string | null,
+	// Optional terse "terse" rewrite of `description`.
+	description_terse: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
@@ -1677,7 +1677,7 @@ export type PageVisitDay = {
 export type PaneKindArg = "working" | "talking";
 
 // Which audience variant of a prose body to read or display.
-export type ProseAudience = "developer" | "executive" | "caveman";
+export type ProseAudience = "developer" | "executive" | "terse";
 
 /**
  *  The three audience variants of one prose body. `developer` is
@@ -1687,7 +1687,7 @@ export type ProseAudience = "developer" | "executive" | "caveman";
 export type ProseVariants = {
 	developer: string,
 	executive?: string | null,
-	caveman?: string | null,
+	terse?: string | null,
 };
 
 // A recent-projects row plus a freshness flag for the UI.
@@ -1950,7 +1950,7 @@ export type Task = {
 	 *  All three audience variants of the description. `developer`
 	 *  always mirrors [`Task::description`] (the canonical text); the
 	 *  store fills this on read from the `description_variants` JSON
-	 *  column and persists only the optional executive/caveman halves.
+	 *  column and persists only the optional executive/terse halves.
 	 *  See [`crate::prose`].
 	 */
 	description_variants?: ProseVariants,
@@ -1989,7 +1989,7 @@ export type TaskEffort = {
 	 *  All three audience variants of the summary. `developer` mirrors
 	 *  [`TaskEffort::summary`]; the store fills this on read from the
 	 *  `summary_variants` JSON column and persists only the optional
-	 *  executive/caveman halves. See [`oxplow_domain::prose`].
+	 *  executive/terse halves. See [`oxplow_domain::prose`].
 	 */
 	summary_variants?: ProseVariants,
 };
@@ -2139,13 +2139,13 @@ export type UiLogEntry = {
  *  "missing -> keep, present -> replace" semantics. The audience
  *  variants follow the same rule and are independent of `description`
  *  (the agent re-authors all three together; a developer-only edit
- *  leaves any prior executive/caveman text in place).
+ *  leaves any prior executive/terse text in place).
  */
 export type UpdateTaskChanges = {
 	title: string | null,
 	description: string | null,
 	description_executive: string | null,
-	description_caveman: string | null,
+	description_terse: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,

@@ -16,7 +16,7 @@ export interface WikiPageController {
   summary: WikiPageSummary | null;
   body: string;
   /** All three audience variants. `developer` mirrors `body`;
-   *  executive/caveman fall back to it (resolved by the caller). */
+   *  executive/terse fall back to it (resolved by the caller). */
   variants: ProseVariants;
   draft: string;
   setDraft(value: string): void;
@@ -58,8 +58,8 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
       try {
         const v = await listWikiPageVariants(stream.id, slug);
         // Keep developer in lockstep with `body`; the sibling files
-        // supply executive/caveman.
-        setVariants({ developer: text, executive: v.executive, caveman: v.caveman });
+        // supply executive/terse.
+        setVariants({ developer: text, executive: v.executive, terse: v.terse });
       } catch {
         setVariants({ developer: text });
       }

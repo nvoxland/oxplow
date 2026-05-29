@@ -6,7 +6,7 @@ import type { BookmarkScope } from "./bookmarks.js";
 import type { ProseAudience } from "./proseAudience.js";
 
 /** Prose-audience selector wiring shared by PageProps and the nav-bar
- *  config. Set by pages whose body has developer/executive/caveman
+ *  config. Set by pages whose body has developer/executive/terse
  *  variants (wiki, task, effort). */
 export interface PageAudienceConfig {
   value: ProseAudience;

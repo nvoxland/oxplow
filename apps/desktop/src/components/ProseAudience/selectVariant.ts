@@ -6,23 +6,23 @@ import type { ProseAudience } from "../../tabs/proseAudience.js";
 export interface ProseVariants {
   developer: string;
   executive?: string | null;
-  caveman?: string | null;
+  terse?: string | null;
 }
 
 /** The body for `audience`, falling back to developer when the requested
  *  variant is absent or empty — the same rule as `ProseVariants::get`. */
 export function selectVariantBody(variants: ProseVariants, audience: ProseAudience): string {
-  const chosen = audience === "executive" ? variants.executive : audience === "caveman" ? variants.caveman : variants.developer;
+  const chosen = audience === "executive" ? variants.executive : audience === "terse" ? variants.terse : variants.developer;
   return chosen != null && chosen !== "" ? chosen : variants.developer;
 }
 
 /** Which audiences have a non-empty stored variant. Developer is always
- *  available; executive/caveman only when present. Drives the muted
+ *  available; executive/terse only when present. Drives the muted
  *  styling on the selector for variants the agent hasn't authored yet. */
 export function availableVariants(variants: ProseVariants): Record<ProseAudience, boolean> {
   return {
     developer: true,
     executive: variants.executive != null && variants.executive !== "",
-    caveman: variants.caveman != null && variants.caveman !== "",
+    terse: variants.terse != null && variants.terse !== "",
   };
 }

@@ -21,7 +21,7 @@ import { EffortObservationsBlock } from "../EffortObservations.js";
 function VariantReadOnlyBanner({ audience }: { audience: ProseAudience }) {
   return (
     <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: 8, fontStyle: "italic" }}>
-      {audience === "executive" ? "Executive summary" : "Caveman version"} — read-only. Switch to
+      {audience === "executive" ? "Executive summary" : "Terse version"} — read-only. Switch to
       Developer to edit.
     </div>
   );
@@ -102,7 +102,7 @@ export function TaskDetail({
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   comments?: RichTextCommentConfig;
   /** Which audience variant of the description to show. Developer
-   *  (default) is editable; executive/caveman render read-only (edits
+   *  (default) is editable; executive/terse render read-only (edits
    *  always target the canonical developer text). */
   audience?: ProseAudience;
 }) {

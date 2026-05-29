@@ -71,7 +71,7 @@ export interface PageNavBarProps {
    *  backlinks dropdown. */
   comments?: ReactNode;
   /** Optional prose-audience selector — present only on pages whose
-   *  body carries developer/executive/caveman variants (wiki, task,
+   *  body carries developer/executive/terse variants (wiki, task,
    *  effort). Rendered just before the comment navigator. */
   audience?: {
     value: ProseAudience;

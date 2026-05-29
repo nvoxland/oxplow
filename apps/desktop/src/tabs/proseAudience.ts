@@ -1,20 +1,20 @@
 // Per-page prose-audience selection. Agent-authored prose for the
 // "big three" entities (wiki bodies, task descriptions, effort
-// summaries) carries three variants — developer / executive / caveman
+// summaries) carries three variants — developer / executive / terse
 // (see crates/oxplow-domain/src/prose.rs). The page-level top-nav
 // selector writes the choice here; the body renderer reads it. Scope is
 // per-page (per-tab), keyed by `${threadId}::${tabId}` — the same
 // pageKey PageNavigationContext exposes — so a wiki can be read in
-// caveman while a task stays developer. Mirrors the bookmarks store:
+// terse while a task stays developer. Mirrors the bookmarks store:
 // pure factory over an injected Storage, single localStorage blob.
 
-export type ProseAudience = "developer" | "executive" | "caveman";
+export type ProseAudience = "developer" | "executive" | "terse";
 
-export const PROSE_AUDIENCES: ProseAudience[] = ["developer", "executive", "caveman"];
+export const PROSE_AUDIENCES: ProseAudience[] = ["developer", "executive", "terse"];
 export const DEFAULT_PROSE_AUDIENCE: ProseAudience = "developer";
 
 export function isProseAudience(v: unknown): v is ProseAudience {
-  return v === "developer" || v === "executive" || v === "caveman";
+  return v === "developer" || v === "executive" || v === "terse";
 }
 
 export interface ProseAudienceApi {

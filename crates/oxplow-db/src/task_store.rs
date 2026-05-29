@@ -506,7 +506,7 @@ mod tests {
         it.description_variants = ProseVariants {
             developer: it.description.clone(),
             executive: Some("the gist".into()),
-            caveman: Some("text good. ship.".into()),
+            terse: Some("text good. ship.".into()),
         };
         let id = store.insert(&it).await.unwrap();
         let got = store.get(id).await.unwrap().unwrap();
@@ -516,7 +516,7 @@ mod tests {
             "the gist"
         );
         assert_eq!(
-            got.description_variants.get(ProseAudience::Caveman),
+            got.description_variants.get(ProseAudience::Terse),
             "text good. ship."
         );
         // developer mirror is rebuilt from the canonical column

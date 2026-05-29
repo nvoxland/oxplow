@@ -183,7 +183,7 @@ export function TaskPage({
   for (const e of efforts) {
     const sv = e.effort.summary_variants;
     if (sv?.executive) available.executive = true;
-    if (sv?.caveman) available.caveman = true;
+    if (sv?.terse) available.terse = true;
   }
   const audienceConfig: { value: ProseAudience; onChange: (a: ProseAudience) => void; available: Record<ProseAudience, boolean> } = {
     value: audience,

@@ -205,8 +205,8 @@ the read path maps the legacy string to `null` so older terminal rows
 continue to load under the narrowed enum.
 
 `description_variants` (migration V27, nullable TEXT) — the optional
-**executive** and **caveman** audience rewrites of `description`, stored
-as a JSON blob `{"executive":"…","caveman":"…"}` (developer text never
+**executive** and **terse** audience rewrites of `description`, stored
+as a JSON blob `{"executive":"…","terse":"…"}` (developer text never
 lives here — `description` stays canonical). Modeled on `impacts_json`.
 The store rebuilds a `ProseVariants` (`crates/oxplow-domain/src/prose.rs`)
 on read via `from_developer_and_json(description, description_variants)`,
@@ -214,7 +214,7 @@ which fills `developer` from the column and degrades every audience to
 developer when a variant is absent or the blob is NULL/malformed — so
 legacy rows need no backfill. Writes persist `ProseVariants::optional_json()`
 (NULL when both variants are absent). The agent authors all three inline
-via the `description_executive` / `description_caveman` params on
+via the `description_executive` / `description_terse` params on
 `create_task` / `update_task` / `file_epic_with_children`
 (`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). `ProseAudience`
 + `ProseVariants` are exported to the frontend through tauri-specta. The
@@ -286,11 +286,11 @@ Auto-managed by the runtime on `task.changed` status transitions:
   new row (the effort's `end_snapshot_id` is left null in that case).
 
 `summary_variants` (V27 — nullable TEXT) holds the optional
-executive/caveman audience rewrites of `summary`, same JSON shape and
+executive/terse audience rewrites of `summary`, same JSON shape and
 `ProseVariants` handling as `task.description_variants`. `summary` stays
 the canonical developer text; `row_to_effort` rebuilds a `ProseVariants`
 on read with developer fallback. The agent authors the variants via the
-`summary_executive` / `summary_caveman` params on `complete_task`, which
+`summary_executive` / `summary_terse` params on `complete_task`, which
 land them through `TaskEffortStore::set_summary_variants` on the effort
 that just received the developer `summary` (preserving the
 write-once-on-completion shape). The frontend swaps the rendered

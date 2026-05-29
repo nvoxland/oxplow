@@ -74,7 +74,7 @@ impl WikiPagesWatcher {
                             continue;
                         };
                         // An audience-variant sibling (`<slug>.executive.md`
-                        // / `<slug>.caveman.md`) must NOT spawn a phantom
+                        // / `<slug>.terse.md`) must NOT spawn a phantom
                         // page — route the re-sync to its base slug so the
                         // developer body's metadata/FTS stay canonical.
                         let (slug, _variant) = wiki_pages::wiki_slug_and_variant(stem);

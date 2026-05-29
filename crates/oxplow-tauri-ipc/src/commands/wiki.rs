@@ -76,8 +76,8 @@ fn wiki_page_body_path(state: &tauri::State<'_, AppState>, slug: &str) -> std::p
 }
 
 /// On-disk filename for an audience variant of a wiki body. Developer
-/// is the canonical `<slug>.md`; executive/caveman are sibling files
-/// `<slug>.executive.md` / `<slug>.caveman.md` (see
+/// is the canonical `<slug>.md`; executive/terse are sibling files
+/// `<slug>.executive.md` / `<slug>.terse.md` (see
 /// `oxplow_app::wiki_pages::wiki_slug_and_variant`, which routes those
 /// siblings back to the base slug in the fs-watcher).
 fn wiki_page_variant_path(
@@ -88,7 +88,7 @@ fn wiki_page_variant_path(
     let name = match audience {
         ProseAudience::Developer => format!("{slug}.md"),
         ProseAudience::Executive => format!("{slug}.executive.md"),
-        ProseAudience::Caveman => format!("{slug}.caveman.md"),
+        ProseAudience::Terse => format!("{slug}.terse.md"),
     };
     state
         .layout
@@ -169,7 +169,7 @@ pub async fn write_wiki_page_body_variant(
 
 /// Read all three audience variants of a wiki body at once. Developer
 /// is the canonical body (empty string when the page has none yet);
-/// executive/caveman are `None` when their sibling file is absent or
+/// executive/terse are `None` when their sibling file is absent or
 /// empty, so the frontend falls back to developer.
 #[tauri::command]
 #[specta::specta]
@@ -179,14 +179,14 @@ pub async fn list_wiki_page_variants(
 ) -> Result<ProseVariants, IpcError> {
     let developer_path = wiki_page_variant_path(&state, &slug, ProseAudience::Developer);
     let executive_path = wiki_page_variant_path(&state, &slug, ProseAudience::Executive);
-    let caveman_path = wiki_page_variant_path(&state, &slug, ProseAudience::Caveman);
+    let terse_path = wiki_page_variant_path(&state, &slug, ProseAudience::Terse);
     tokio::task::spawn_blocking(move || {
         let read_opt =
             |p: &std::path::Path| std::fs::read_to_string(p).ok().filter(|s| !s.is_empty());
         ProseVariants {
             developer: std::fs::read_to_string(&developer_path).unwrap_or_default(),
             executive: read_opt(&executive_path),
-            caveman: read_opt(&caveman_path),
+            terse: read_opt(&terse_path),
         }
     })
     .await

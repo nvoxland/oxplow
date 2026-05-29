@@ -78,8 +78,8 @@ pub struct CreateTaskInput {
     pub description: Option<String>,
     /// Optional executive-summary rewrite of `description`.
     pub description_executive: Option<String>,
-    /// Optional terse "caveman" rewrite of `description`.
-    pub description_caveman: Option<String>,
+    /// Optional terse "terse" rewrite of `description`.
+    pub description_terse: Option<String>,
     pub parent_id: Option<TaskId>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -90,13 +90,13 @@ pub struct CreateTaskInput {
 /// "missing -> keep, present -> replace" semantics. The audience
 /// variants follow the same rule and are independent of `description`
 /// (the agent re-authors all three together; a developer-only edit
-/// leaves any prior executive/caveman text in place).
+/// leaves any prior executive/terse text in place).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct UpdateTaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
     pub description_executive: Option<String>,
-    pub description_caveman: Option<String>,
+    pub description_terse: Option<String>,
     pub parent_id: Option<Option<TaskId>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -219,7 +219,7 @@ impl TaskService {
             description_variants: oxplow_domain::ProseVariants {
                 developer,
                 executive: input.description_executive,
-                caveman: input.description_caveman,
+                terse: input.description_terse,
             },
             status: input.status.unwrap_or(TaskStatus::Ready),
             priority: input.priority.unwrap_or(TaskPriority::Medium),
@@ -264,8 +264,8 @@ impl TaskService {
         if let Some(e) = changes.description_executive {
             item.description_variants.executive = Some(e);
         }
-        if let Some(c) = changes.description_caveman {
-            item.description_variants.caveman = Some(c);
+        if let Some(c) = changes.description_terse {
+            item.description_variants.terse = Some(c);
         }
         if let Some(p) = changes.parent_id {
             item.parent_id = p;
@@ -1329,7 +1329,7 @@ mod tests {
                     title: "x".into(),
                     description: Some("developer detail".into()),
                     description_executive: Some("the gist".into()),
-                    description_caveman: Some("ship.".into()),
+                    description_terse: Some("ship.".into()),
                     ..Default::default()
                 },
             )
@@ -1339,9 +1339,9 @@ mod tests {
             it.description_variants.get(ProseAudience::Executive),
             "the gist"
         );
-        assert_eq!(it.description_variants.get(ProseAudience::Caveman), "ship.");
+        assert_eq!(it.description_variants.get(ProseAudience::Terse), "ship.");
 
-        // Updating only the executive variant keeps developer + caveman.
+        // Updating only the executive variant keeps developer + terse.
         let updated = svc
             .update(
                 it.id,
@@ -1358,7 +1358,7 @@ mod tests {
             "tighter gist"
         );
         assert_eq!(
-            updated.description_variants.get(ProseAudience::Caveman),
+            updated.description_variants.get(ProseAudience::Terse),
             "ship."
         );
     }

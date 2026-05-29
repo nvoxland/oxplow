@@ -107,8 +107,8 @@ function WikiPageBody({
   const controller = useWikiPageController(stream, slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
   const { audience, setAudience } = useProseAudience(nav?.pageKey ?? null);
-  // Executive/caveman live as sibling files (`<slug>.executive.md` /
-  // `<slug>.caveman.md`); the controller reads all three. Missing
+  // Executive/terse live as sibling files (`<slug>.executive.md` /
+  // `<slug>.terse.md`); the controller reads all three. Missing
   // variants fall back to the developer body (selector shows them muted).
   const variants: ProseVariants = controller.variants;
   const shownBody = selectVariantBody(variants, audience);

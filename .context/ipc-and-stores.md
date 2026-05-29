@@ -61,9 +61,9 @@ work.
 `crates/oxplow-tauri-ipc/src/commands/wiki.rs` handle the prose-variant
 sibling files: `read_wiki_page_body_variant(slug, audience)` /
 `write_wiki_page_body_variant(slug, audience, body)` (a `ProseAudience`
-maps to `<slug>.md` / `<slug>.executive.md` / `<slug>.caveman.md`) and
+maps to `<slug>.md` / `<slug>.executive.md` / `<slug>.terse.md`) and
 `list_wiki_page_variants(slug) -> ProseVariants` (reads all three at
-once; executive/caveman are `None` when absent). The fs-watcher routes
+once; executive/terse are `None` when absent). The fs-watcher routes
 sibling edits back to the base slug via
 `oxplow_app::wiki_pages::wiki_slug_and_variant`, so they never spawn a
 phantom page. The page-level audience selector reads variants through

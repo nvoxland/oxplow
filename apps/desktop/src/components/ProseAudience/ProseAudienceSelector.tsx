@@ -4,7 +4,7 @@ import { PROSE_AUDIENCES, type ProseAudience } from "../../tabs/proseAudience.js
 const LABELS: Record<ProseAudience, string> = {
   developer: "Developer",
   executive: "Executive",
-  caveman: "Caveman",
+  terse: "Terse",
 };
 
 export interface ProseAudienceSelectorProps {
@@ -18,7 +18,7 @@ export interface ProseAudienceSelectorProps {
 
 /**
  * Page-level dropdown that picks which audience variant of a prose body
- * is shown — Developer / Executive / Caveman. A trigger button shows the
+ * is shown — Developer / Executive / Terse. A trigger button shows the
  * current audience; clicking opens a popover list. Dumb + props-driven;
  * the page wrapper wires it to the per-page `useProseAudience` store.
  */

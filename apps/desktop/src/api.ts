@@ -359,9 +359,9 @@ export interface TaskEffort {
   /** Developer-audience summary (canonical text). */
   summary: string | null;
   /** Audience variants of the summary (developer mirrors `summary`;
-   *  executive/caveman fall back to it). Mirrors the backend
+   *  executive/terse fall back to it). Mirrors the backend
    *  `ProseVariants`. */
-  summary_variants?: { developer: string; executive?: string | null; caveman?: string | null };
+  summary_variants?: { developer: string; executive?: string | null; terse?: string | null };
 }
 
 export interface EffortDetail {
@@ -1146,16 +1146,16 @@ export async function writeWikiPageBody(_streamId: string, slug: string, body: s
 }
 
 /** All three audience variants of a wiki body. Developer is the
- *  canonical `<slug>.md`; executive/caveman are sibling files
+ *  canonical `<slug>.md`; executive/terse are sibling files
  *  (`null` when absent). */
 export async function listWikiPageVariants(
   _streamId: string,
   slug: string,
-): Promise<{ developer: string; executive: string | null; caveman: string | null }> {
+): Promise<{ developer: string; executive: string | null; terse: string | null }> {
   return unwrap(await commands.listWikiPageVariants(slug)) as {
     developer: string;
     executive: string | null;
-    caveman: string | null;
+    terse: string | null;
   };
 }
 

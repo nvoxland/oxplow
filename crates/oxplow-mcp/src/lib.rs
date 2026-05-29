@@ -69,7 +69,7 @@ struct ListTasksParams {
 }
 
 /// Slim task row returned by `list_tasks`. Carries only the fields an
-/// agent needs to scan and pick work. Description is the caveman variant
+/// agent needs to scan and pick work. Description is the terse variant
 /// when present (falling back to developer), truncated to 500 chars.
 #[derive(Debug, Serialize)]
 struct TaskListRow {
@@ -83,7 +83,7 @@ struct TaskListRow {
 }
 
 fn task_list_row(t: Task) -> TaskListRow {
-    let raw = t.description_variants.get(ProseAudience::Caveman);
+    let raw = t.description_variants.get(ProseAudience::Terse);
     let description = if raw.len() > 500 {
         format!("{}…", &raw[..raw.floor_char_boundary(500)])
     } else {
@@ -264,11 +264,11 @@ pub struct CreateTaskMcpParams {
     /// developer text so section-anchored comments resolve across
     /// audience variants.
     pub description_executive: Option<String>,
-    /// Optional terse "caveman"-style rewrite of `description` (drop
+    /// Terse rewrite of `description` (drop
     /// filler, sentence fragments, keep technical terms / paths / code
     /// verbatim). Keep its heading skeleton aligned with the developer
     /// text.
-    pub description_caveman: Option<String>,
+    pub description_terse: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<String>,
     pub parent_id: Option<String>,
@@ -293,9 +293,9 @@ pub struct UpdateTaskMcpParams {
     /// Optional executive-summary rewrite of `description`. Present →
     /// replace, missing → keep the existing variant.
     pub description_executive: Option<String>,
-    /// Optional terse "caveman"-style rewrite of `description`.
+    /// Terse rewrite of `description`.
     /// Present → replace, missing → keep.
-    pub description_caveman: Option<String>,
+    pub description_terse: Option<String>,
     /// Reparent (or detach with empty string).
     pub parent_id: Option<String>,
     pub status: Option<String>,
@@ -329,8 +329,8 @@ pub struct CompleteTaskParams {
     pub summary: String,
     /// Optional executive-summary rewrite of `summary`.
     pub summary_executive: Option<String>,
-    /// Optional terse "caveman"-style rewrite of `summary`.
-    pub summary_caveman: Option<String>,
+    /// Terse rewrite of `summary`.
+    pub summary_terse: Option<String>,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-
     /// attribution effort row Local History reads from.
@@ -394,8 +394,8 @@ pub struct FileEpicWithChildrenParams {
     pub epic_description: Option<String>,
     /// Optional executive-summary rewrite of `epic_description`.
     pub epic_description_executive: Option<String>,
-    /// Optional terse "caveman"-style rewrite of `epic_description`.
-    pub epic_description_caveman: Option<String>,
+    /// Terse rewrite of `epic_description`.
+    pub epic_description_terse: Option<String>,
     pub children: Vec<EpicChildSpec>,
 }
 
@@ -405,8 +405,8 @@ pub struct EpicChildSpec {
     pub description: Option<String>,
     /// Optional executive-summary rewrite of `description`.
     pub description_executive: Option<String>,
-    /// Optional terse "caveman"-style rewrite of `description`.
-    pub description_caveman: Option<String>,
+    /// Terse rewrite of `description`.
+    pub description_terse: Option<String>,
     pub kind: Option<String>,
 }
 
@@ -1239,7 +1239,7 @@ impl OxplowMcp {
         description = "List tasks filtered by status. Pass status = \"backlog\" for thread-detached \
                        backlog items (no thread_id needed). Any other status (\"ready\", \
                        \"in_progress\", \"blocked\", \"done\", \"canceled\", \"archived\") requires \
-                       thread_id. Returns a slim representation — caveman description variant when \
+                       thread_id. Returns a slim representation — terse description variant when \
                        present (falls back to developer), truncated to 500 chars. Use get_task for \
                        the full record."
     )]
@@ -2048,7 +2048,7 @@ impl OxplowMcp {
                     title: p.title,
                     description: p.description,
                     description_executive: p.description_executive,
-                    description_caveman: p.description_caveman,
+                    description_terse: p.description_terse,
                     parent_id: parent_task_id,
                     status,
                     priority,
@@ -2133,7 +2133,7 @@ impl OxplowMcp {
                     title: p.title,
                     description: p.description,
                     description_executive: p.description_executive,
-                    description_caveman: p.description_caveman,
+                    description_terse: p.description_terse,
                     parent_id,
                     status,
                     priority,
@@ -2267,12 +2267,11 @@ impl OxplowMcp {
                         oxplow_domain::EffortId::from(r.effort_id.clone()),
                     );
                 }
-                // Persist the executive/caveman summary variants onto
+                // Persist the executive/terse summary variants onto
                 // the effort that record_effort just wrote the summary
                 // to (the developer text). The variant blob stays NULL
                 // unless the agent authored a rewrite.
-                if summary_has_body
-                    && (p.summary_executive.is_some() || p.summary_caveman.is_some())
+                if summary_has_body && (p.summary_executive.is_some() || p.summary_terse.is_some())
                 {
                     use oxplow_db::TaskEffortStore as _;
                     if let Ok(Some(effort)) = self
@@ -2284,7 +2283,7 @@ impl OxplowMcp {
                         let variants = oxplow_domain::ProseVariants {
                             developer: p.summary.clone(),
                             executive: p.summary_executive.clone(),
-                            caveman: p.summary_caveman.clone(),
+                            terse: p.summary_terse.clone(),
                         };
                         if let Err(err) = self
                             .services
@@ -2561,7 +2560,7 @@ impl OxplowMcp {
                     title: p.epic_title,
                     description: p.epic_description,
                     description_executive: p.epic_description_executive,
-                    description_caveman: p.epic_description_caveman,
+                    description_terse: p.epic_description_terse,
                     author: Some(oxplow_domain::TaskAuthor::Agent),
                     ..Default::default()
                 },
@@ -2579,7 +2578,7 @@ impl OxplowMcp {
                         title: child.title,
                         description: child.description,
                         description_executive: child.description_executive,
-                        description_caveman: child.description_caveman,
+                        description_terse: child.description_terse,
                         parent_id: Some(epic.id),
                         author: Some(oxplow_domain::TaskAuthor::Agent),
                         ..Default::default()
@@ -3976,7 +3975,7 @@ mod tests {
                 title: "x".into(),
                 description: None,
                 description_executive: None,
-                description_caveman: None,
+                description_terse: None,
                 kind: None,
                 priority: None,
                 status: None,
@@ -4003,7 +4002,7 @@ mod tests {
                 title: "x".into(),
                 description: None,
                 description_executive: None,
-                description_caveman: None,
+                description_terse: None,
                 kind: None,
                 priority: None,
                 status: None,

@@ -462,7 +462,7 @@ export function RichTextField({
       selectorsJson: pendingSel.anchorJson,
       // The editable surface is always the developer body, so the
       // section anchor is derived from its heading skeleton — it then
-      // re-displays under the matching heading in exec/caveman views.
+      // re-displays under the matching heading in exec/terse views.
       sectionAnchor: sectionAnchorForQuote(value, pendingSel.quote),
       referencedRefs: pendingSel.referencedRefs,
       intent: input.intent,

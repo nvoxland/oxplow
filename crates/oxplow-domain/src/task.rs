@@ -74,7 +74,7 @@ pub struct Task {
     /// All three audience variants of the description. `developer`
     /// always mirrors [`Task::description`] (the canonical text); the
     /// store fills this on read from the `description_variants` JSON
-    /// column and persists only the optional executive/caveman halves.
+    /// column and persists only the optional executive/terse halves.
     /// See [`crate::prose`].
     #[serde(default)]
     pub description_variants: ProseVariants,

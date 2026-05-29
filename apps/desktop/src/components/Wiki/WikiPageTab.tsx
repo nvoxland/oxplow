@@ -34,7 +34,7 @@ interface Props {
   controller: WikiPageController;
   /** Which audience variant to show. `developer` (default) renders the
    *  editable RichTextField bound to the canonical body; `executive` /
-   *  `caveman` render `shownBody` read-only (edits always target
+   *  `terse` render `shownBody` read-only (edits always target
    *  developer). */
   audience?: ProseAudience;
   /** The body resolved for `audience` (developer fallback applied by the
@@ -127,7 +127,7 @@ export function WikiPageTab({
                 fontStyle: "italic",
               }}
             >
-              {audience === "executive" ? "Executive summary" : "Caveman version"} — read-only.
+              {audience === "executive" ? "Executive summary" : "Terse version"} — read-only.
               Switch to Developer to edit.
             </div>
             <MarkdownView

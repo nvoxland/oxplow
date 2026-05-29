@@ -24,9 +24,9 @@ describe("proseAudience store", () => {
 
   test("per-page scoping — two keys are independent", () => {
     const s = createProseAudienceStore(memStorage());
-    s.set("t-1::wiki", "caveman");
+    s.set("t-1::wiki", "terse");
     s.set("t-1::task", "executive");
-    expect(s.get("t-1::wiki")).toBe("caveman");
+    expect(s.get("t-1::wiki")).toBe("terse");
     expect(s.get("t-1::task")).toBe("executive");
   });
 
@@ -55,7 +55,7 @@ describe("proseAudience store", () => {
 
   test("clear drops only the named key", () => {
     const s = createProseAudienceStore(memStorage());
-    s.set("a", "caveman");
+    s.set("a", "terse");
     s.set("b", "executive");
     s.clear("a");
     expect(s.get("a")).toBe("developer");
@@ -68,7 +68,7 @@ describe("proseAudience store", () => {
     const off = s.subscribe(() => {
       n++;
     });
-    s.set("p", "caveman");
+    s.set("p", "terse");
     s.clear("p");
     expect(n).toBe(2);
     off();
@@ -78,12 +78,12 @@ describe("proseAudience store", () => {
 
   test("set is a no-op when value is unchanged (no spurious notify)", () => {
     const s = createProseAudienceStore(memStorage());
-    s.set("p", "caveman");
+    s.set("p", "terse");
     let n = 0;
     const off = s.subscribe(() => {
       n++;
     });
-    s.set("p", "caveman");
+    s.set("p", "terse");
     expect(n).toBe(0);
     off();
   });

@@ -674,7 +674,7 @@ Snapshots are the only path for cross-restart fidelity.
 ### Per-page prose audience (`useProseAudience`)
 
 Variant-bearing pages (wiki / task / effort — bodies carrying
-developer / executive / caveman prose, see
+developer / executive / terse prose, see
 `crates/oxplow-domain/src/prose.rs`) render an **audience selector**
 dropdown in the nav bar. The selection is **per-page**,
 keyed by the same `pageKey` (`${threadId}::${tabId}`), and lives in a
@@ -687,11 +687,11 @@ alongside the snapshot. The nav-bar selector
 on `Page` / `PageNavBar` / `PageNavBarConfig`; the page wrapper reads
 `useProseAudience(pageKey)`, sets `<Page audience={…}>`, and resolves
 the shown body with `selectVariantBody` (developer fallback). The
-developer view stays the editable surface; executive/caveman render
+developer view stays the editable surface; executive/terse render
 read-only with a muted "switch to Developer to edit" banner (edits
 always target the canonical developer text). Wired surfaces: WikiPage
 (developer `<slug>.md` + sibling `<slug>.executive.md` /
-`<slug>.caveman.md`, read via `list_wiki_page_variants`) and TaskPage
+`<slug>.terse.md`, read via `list_wiki_page_variants`) and TaskPage
 (task description + each effort summary, where the variants come from
 the `*_variants` JSON columns). A variant that has no body falls back
 to developer and shows muted in the selector.

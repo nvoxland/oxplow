@@ -8,13 +8,13 @@
 //!   already writes. This stays the canonical source of truth in its
 //!   existing column/file; the other two are purely additive.
 //! - [`ProseAudience::Executive`] — a shorter executive-summary rewrite.
-//! - [`ProseAudience::Caveman`] — a terse, fragment-style rewrite
+//! - [`ProseAudience::Terse`] — a terse, fragment-style rewrite
 //!   (drop filler words, sentence fragments, keep technical terms /
 //!   paths / code verbatim).
 //!
 //! The agent writes all three inline at author time; there is no
 //! backend LLM. Storage keeps `developer` in its existing slot and
-//! the optional `executive`/`caveman` pair in a single nullable JSON
+//! the optional `executive`/`terse` pair in a single nullable JSON
 //! blob (`optional_json`), so existing rows degrade to developer-only
 //! with no backfill.
 
@@ -28,7 +28,7 @@ pub enum ProseAudience {
     #[default]
     Developer,
     Executive,
-    Caveman,
+    Terse,
 }
 
 /// The three audience variants of one prose body. `developer` is
@@ -44,28 +44,28 @@ pub struct ProseVariants {
     #[serde(default)]
     pub executive: Option<String>,
     #[serde(default)]
-    pub caveman: Option<String>,
+    pub terse: Option<String>,
 }
 
 /// The non-developer variants as they are stored in a JSON column.
 /// Developer text never lives here — it stays in its canonical
 /// column/file — so `optional_json` round-trips only `executive` and
-/// `caveman`.
+/// `terse`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct StoredVariants {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     executive: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    caveman: Option<String>,
+    terse: Option<String>,
 }
 
 impl ProseVariants {
-    /// A developer-only body (no executive/caveman variants).
+    /// A developer-only body (no executive/terse variants).
     pub fn developer_only(developer: impl Into<String>) -> Self {
         Self {
             developer: developer.into(),
             executive: None,
-            caveman: None,
+            terse: None,
         }
     }
 
@@ -83,7 +83,7 @@ impl ProseVariants {
         Self {
             developer: developer.into(),
             executive: stored.executive,
-            caveman: stored.caveman,
+            terse: stored.terse,
         }
     }
 
@@ -93,7 +93,7 @@ impl ProseVariants {
         let chosen = match audience {
             ProseAudience::Developer => return &self.developer,
             ProseAudience::Executive => self.executive.as_deref(),
-            ProseAudience::Caveman => self.caveman.as_deref(),
+            ProseAudience::Terse => self.terse.as_deref(),
         };
         match chosen {
             Some(s) if !s.is_empty() => s,
@@ -105,12 +105,12 @@ impl ProseVariants {
     /// `*_variants` JSON column, or `None` when both are absent (so
     /// the column stays NULL rather than holding `{}`).
     pub fn optional_json(&self) -> Option<String> {
-        if self.executive.is_none() && self.caveman.is_none() {
+        if self.executive.is_none() && self.terse.is_none() {
             return None;
         }
         let stored = StoredVariants {
             executive: self.executive.clone(),
-            caveman: self.caveman.clone(),
+            terse: self.terse.clone(),
         };
         serde_json::to_string(&stored).ok()
     }
@@ -155,8 +155,8 @@ mod tests {
 
     #[test]
     fn audience_round_trips_as_snake_case() {
-        let json = serde_json::to_string(&ProseAudience::Caveman).unwrap();
-        assert_eq!(json, "\"caveman\"");
+        let json = serde_json::to_string(&ProseAudience::Terse).unwrap();
+        assert_eq!(json, "\"terse\"");
         let back: ProseAudience = serde_json::from_str("\"executive\"").unwrap();
         assert_eq!(back, ProseAudience::Executive);
     }
@@ -171,11 +171,11 @@ mod tests {
         let v = ProseVariants {
             developer: "dev".into(),
             executive: Some("exec".into()),
-            caveman: Some("ugh".into()),
+            terse: Some("ugh".into()),
         };
         assert_eq!(v.get(ProseAudience::Developer), "dev");
         assert_eq!(v.get(ProseAudience::Executive), "exec");
-        assert_eq!(v.get(ProseAudience::Caveman), "ugh");
+        assert_eq!(v.get(ProseAudience::Terse), "ugh");
     }
 
     #[test]
@@ -183,10 +183,10 @@ mod tests {
         let v = ProseVariants {
             developer: "dev".into(),
             executive: None,
-            caveman: Some(String::new()),
+            terse: Some(String::new()),
         };
         assert_eq!(v.get(ProseAudience::Executive), "dev");
-        assert_eq!(v.get(ProseAudience::Caveman), "dev");
+        assert_eq!(v.get(ProseAudience::Terse), "dev");
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         let v = ProseVariants {
             developer: "dev".into(),
             executive: Some("exec".into()),
-            caveman: None,
+            terse: None,
         };
         let json = v.optional_json().expect("some json");
         assert!(

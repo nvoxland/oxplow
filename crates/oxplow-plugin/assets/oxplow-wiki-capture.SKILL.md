@@ -158,9 +158,9 @@ two optional audience rewrites as sibling files in the same dir:
 
 - `<slug>.executive.md` — a shorter executive-summary rewrite (the
   important overviews, less detail/length).
-- `<slug>.caveman.md` — a terse, fragment-style rewrite: drop filler
+- `<slug>.terse.md` — a terse, fragment-style rewrite: drop filler
   words, use sentence fragments, keep technical terms / paths / code
-  verbatim. (Think JuliusBrussee/caveman "full" mode.)
+  verbatim. (Think JuliusBrussee/terse "full" mode.)
 
 Write them with the same **Write** tool, beside the developer file.
 They are read-only in the UI (the page-level audience selector swaps
@@ -170,7 +170,7 @@ which one renders; the developer body stays the editable source).
 to a section by its heading slug, so a comment written on one variant
 re-displays under the matching heading of another only when the same
 `##`/`###` headings exist in each. Same headings, same order — just
-less prose under each in the executive/caveman versions.
+less prose under each in the executive/terse versions.
 
 Don't call `record_wiki_page_update` or declare impacts for the sibling
 files — only the developer body drives the `wiki_page` row, and the
