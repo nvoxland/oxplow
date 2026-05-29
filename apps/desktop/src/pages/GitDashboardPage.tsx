@@ -680,7 +680,8 @@ function StreamsCard({
                     onClick={() => setExpanded(isOpen ? null : row.stream.id)}
                     style={{
                       ...linkButton,
-                      width: 14,
+                      width: 16,
+                      fontSize: 16,
                       color: "var(--text-muted)",
                     }}
                     aria-label={isOpen ? "Hide pairwise diff" : "Show pairwise diff"}

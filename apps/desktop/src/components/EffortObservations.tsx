@@ -352,7 +352,7 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
           fontSize: "var(--text-xs)",
         }}
       >
-        <span style={{ width: 10, color: "var(--text-muted)" }}>{open ? "▾" : "▸"}</span>
+        <span style={{ width: 16, fontSize: 16, lineHeight: 1, color: "var(--text-muted)" }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontFamily: "var(--font-mono)", flex: "0 1 auto" }}>{node.label}</span>
         <CountsSummary counts={node.counts} />
       </button>

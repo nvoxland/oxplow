@@ -360,9 +360,9 @@ const dirRowStyle: CSSProperties = {
 };
 
 const chevronStyle: CSSProperties = {
-  width: 12,
+  width: 16,
   display: "inline-block",
-  fontSize: "var(--text-sm)",
+  fontSize: 16,
   color: "var(--text-secondary)",
 };
 

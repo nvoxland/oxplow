@@ -386,8 +386,8 @@ function ActiveItemSection({
               color: "var(--text-secondary)",
               cursor: "pointer",
               padding: "0 2px",
-              fontSize: 10,
-              width: 14,
+              fontSize: 14,
+              width: 16,
             }}
           >
             {expanded ? "▾" : "▸"}
