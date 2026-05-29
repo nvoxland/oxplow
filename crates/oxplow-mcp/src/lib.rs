@@ -84,8 +84,9 @@ struct TaskListRow {
 
 fn task_list_row(t: Task) -> TaskListRow {
     let raw = t.description_variants.get(ProseAudience::Terse);
-    let description = if raw.len() > 500 {
-        format!("{}…", &raw[..raw.floor_char_boundary(500)])
+    let description = if raw.chars().count() > 500 {
+        let truncated: String = raw.chars().take(500).collect();
+        format!("{}…", truncated)
     } else {
         raw.to_string()
     };
