@@ -107,7 +107,7 @@ pub const MANIFEST: &[Capability] = &[
     both("ping"),
     both("app_version"),
     both("list_streams"),
-    both("list_backlog"),
+    ui("list_backlog"),
     both("get_task"),
     both("create_task"),
     both("update_task"),
@@ -129,7 +129,7 @@ pub const MANIFEST: &[Capability] = &[
     both_named(
         "task.list_for_thread",
         "list_tasks_for_thread",
-        "list_ready_work",
+        "list_tasks",
     ),
     both_named("note.delete", "delete_work_note", "delete_wiki_page"),
     both_named(

@@ -13,7 +13,7 @@ use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget
 use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
-use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, TaskNote};
+use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, TaskNote, TaskStatus};
 use crate::thread::Thread;
 use crate::DomainError;
 
@@ -58,7 +58,11 @@ pub trait ThreadStore: Send + Sync {
 #[async_trait]
 pub trait TaskStore: Send + Sync {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
-    async fn list_ready_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
+    async fn list_by_status_for_thread(
+        &self,
+        thread: &ThreadId,
+        status: TaskStatus,
+    ) -> Result<Vec<Task>, DomainError>;
     async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
     /// Insert a new task; assigns and returns the autoincrement id.

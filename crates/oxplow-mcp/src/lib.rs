@@ -59,9 +59,18 @@ pub struct ThreadIdParams {
     pub thread_id: String,
 }
 
-/// Slim task row returned by `list_ready_work`. Carries only the fields
-/// an agent needs to scan and pick work. Description is the caveman
-/// variant when present, falling back to developer.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ListTasksParams {
+    /// Task status to filter by — one of "ready", "in_progress", "blocked",
+    /// "done", "canceled", "archived", or "backlog" (thread-detached tasks).
+    status: String,
+    /// Required for all status values except "backlog".
+    thread_id: Option<String>,
+}
+
+/// Slim task row returned by `list_tasks`. Carries only the fields an
+/// agent needs to scan and pick work. Description is the caveman variant
+/// when present (falling back to developer), truncated to 500 chars.
 #[derive(Debug, Serialize)]
 struct TaskListRow {
     id: String,
@@ -71,6 +80,24 @@ struct TaskListRow {
     status: TaskStatus,
     priority: TaskPriority,
     sort_index: i64,
+}
+
+fn task_list_row(t: Task) -> TaskListRow {
+    let raw = t.description_variants.get(ProseAudience::Caveman);
+    let description = if raw.len() > 500 {
+        format!("{}…", &raw[..raw.floor_char_boundary(500)])
+    } else {
+        raw.to_string()
+    };
+    TaskListRow {
+        id: t.id.to_string(),
+        parent_id: t.parent_id.map(|id| id.to_string()),
+        title: t.title,
+        description,
+        status: t.status,
+        priority: t.priority,
+        sort_index: t.sort_index,
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1208,52 +1235,38 @@ impl OxplowMcp {
 
     // ---------- tasks ----------
 
-    #[tool(description = "List all tasks on the project-wide backlog.")]
-    async fn list_backlog(&self) -> Result<CallToolResult, McpError> {
-        let list = self
-            .services
-            .task_store
-            .list_backlog()
-            .await
-            .map_err(internal)?;
-        json_result(&list)
-    }
-
     #[tool(
-        description = "List ready tasks on a thread. Returns a slim representation with the caveman description variant (falls back to developer). Use get_task for the full record."
+        description = "List tasks filtered by status. Pass status = \"backlog\" for thread-detached \
+                       backlog items (no thread_id needed). Any other status (\"ready\", \
+                       \"in_progress\", \"blocked\", \"done\", \"canceled\", \"archived\") requires \
+                       thread_id. Returns a slim representation — caveman description variant when \
+                       present (falls back to developer), truncated to 500 chars. Use get_task for \
+                       the full record."
     )]
-    async fn list_ready_work(
+    async fn list_tasks(
         &self,
-        params: Parameters<ThreadIdParams>,
+        params: Parameters<ListTasksParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_ready_work",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let thread_id = ThreadId::from(params.0.thread_id);
-        let list = self
-            .services
-            .task_store
-            .list_ready_for_thread(&thread_id)
-            .await
-            .map_err(internal)?;
-        let rows: Vec<TaskListRow> = list
-            .into_iter()
-            .map(|t| TaskListRow {
-                id: t.id.to_string(),
-                parent_id: t.parent_id.map(|id| id.to_string()),
-                title: t.title,
-                description: t
-                    .description_variants
-                    .get(ProseAudience::Caveman)
-                    .to_string(),
-                status: t.status,
-                priority: t.priority,
-                sort_index: t.sort_index,
-            })
-            .collect();
+        let ListTasksParams { status, thread_id } = params.0;
+        let list = if status == "backlog" {
+            self.services
+                .task_store
+                .list_backlog()
+                .await
+                .map_err(internal)?
+        } else {
+            let task_status = str_to_task_status(&status)?;
+            let tid = thread_id.ok_or_else(|| {
+                McpError::invalid_params("thread_id is required for non-backlog status", None)
+            })?;
+            expect_id_kind("list_tasks", "thread_id", &tid, ID_THREAD)?;
+            self.services
+                .task_store
+                .list_by_status_for_thread(&ThreadId::from(tid), task_status)
+                .await
+                .map_err(internal)?
+        };
+        let rows: Vec<TaskListRow> = list.into_iter().map(task_list_row).collect();
         json_result(&rows)
     }
 
@@ -3288,6 +3301,24 @@ pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
     label: "follow-up id (fu-…)",
 };
 
+fn str_to_task_status(s: &str) -> Result<TaskStatus, McpError> {
+    match s {
+        "ready" => Ok(TaskStatus::Ready),
+        "in_progress" => Ok(TaskStatus::InProgress),
+        "blocked" => Ok(TaskStatus::Blocked),
+        "done" => Ok(TaskStatus::Done),
+        "canceled" => Ok(TaskStatus::Canceled),
+        "archived" => Ok(TaskStatus::Archived),
+        other => Err(McpError::invalid_params(
+            format!(
+                "unknown status \"{other}\"; valid values: ready, in_progress, blocked, done, \
+                 canceled, archived, backlog"
+            ),
+            None,
+        )),
+    }
+}
+
 fn expect_id_kind(
     tool: &str,
     param: &str,
@@ -3598,7 +3629,13 @@ mod tests {
         let backlog_item = make_task(None, "do the thing");
         let id = services.task_store.insert(&backlog_item).await.unwrap();
 
-        let r = server.list_backlog().await.unwrap();
+        let r = server
+            .list_tasks(Parameters(ListTasksParams {
+                status: "backlog".to_string(),
+                thread_id: None,
+            }))
+            .await
+            .unwrap();
         let body = text_payload(r);
         assert!(
             body.contains(&id.to_string()),
@@ -3632,8 +3669,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Soft-deleted: list_backlog should no longer include it.
-        let r = server.list_backlog().await.unwrap();
+        // Soft-deleted: list_tasks(backlog) should no longer include it.
+        let r = server
+            .list_tasks(Parameters(ListTasksParams {
+                status: "backlog".to_string(),
+                thread_id: None,
+            }))
+            .await
+            .unwrap();
         let body = text_payload(r);
         assert!(
             !body.contains(&format!("\"id\":{}", id.value())),

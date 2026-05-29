@@ -230,17 +230,22 @@ impl TaskStore for SqliteTaskStore {
             .await
     }
 
-    async fn list_ready_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
+    async fn list_by_status_for_thread(
+        &self,
+        thread: &ThreadId,
+        status: TaskStatus,
+    ) -> Result<Vec<Task>, DomainError> {
         let thread = thread.clone();
+        let status_str = status_to_str(status);
         self.db
             .call(move |conn| {
                 let sql = format!(
-                    "{} WHERE t.thread_id = ?1 AND t.status = 'ready' AND t.deleted_at IS NULL \
+                    "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
                     SELECT_BASE
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.as_str()], row_to_task)?;
+                let rows = stmt.query_map(params![thread.as_str(), status_str], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
