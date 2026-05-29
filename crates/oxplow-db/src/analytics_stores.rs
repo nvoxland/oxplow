@@ -1486,6 +1486,47 @@ impl SqliteSnapshotStore {
             })
             .await
     }
+
+    /// Return the blob hash for `path` as it existed at `snapshot_id`:
+    /// the most-recent `file_snapshot` row for that path whose
+    /// `snapshot_id <= given`. Returns `Ok(None)` when the file was
+    /// absent, deleted, or oversize (no readable blob) at that point.
+    pub async fn blob_hash_for_path(
+        &self,
+        snapshot_id: i64,
+        path: &str,
+    ) -> Result<Option<String>, DomainError> {
+        let path = path.to_string();
+        self.db
+            .call(move |conn| {
+                let stream_id: Option<String> = conn
+                    .query_row(
+                        "SELECT stream_id FROM snapshot WHERE id = ?1",
+                        params![snapshot_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let Some(stream_id) = stream_id else {
+                    return Ok(None);
+                };
+                // Latest file_snapshot for this path at or before snapshot_id.
+                // A NULL blob_hash with oversize=0 is a deletion row — return None.
+                conn.query_row(
+                    "SELECT blob_hash, oversize FROM file_snapshot
+                     WHERE stream_id = ?1
+                       AND path = ?2
+                       AND snapshot_id IS NOT NULL
+                       AND snapshot_id <= ?3
+                     ORDER BY snapshot_id DESC, id DESC
+                     LIMIT 1",
+                    params![stream_id, path, snapshot_id],
+                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i32>(1)?)),
+                )
+                .optional()
+                .map(|opt| opt.and_then(|(hash, oversize)| if oversize != 0 { None } else { hash }))
+            })
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -1532,6 +1573,70 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn blob_hash_for_path_returns_latest_at_or_before_snapshot() {
+        let db = Database::in_memory();
+        let store = SqliteSnapshotStore::new(db.clone());
+        // snap 1: a.txt=hA, b.txt=hB
+        // snap 2: a.txt=hA2 (modified), b.txt deleted (NULL hash, oversize=0)
+        // snap 3: c.txt=hC (new)
+        seed_snapshots(
+            &db,
+            &[
+                (1, "a.txt", Some("hA"), false),
+                (1, "b.txt", Some("hB"), false),
+                (2, "a.txt", Some("hA2"), false),
+                (2, "b.txt", None, false), // deletion row
+                (3, "c.txt", Some("hC"), false),
+            ],
+        )
+        .await;
+
+        // At snap 1: a.txt has hA, b.txt has hB, c.txt absent
+        assert_eq!(
+            store.blob_hash_for_path(1, "a.txt").await.unwrap(),
+            Some("hA".into())
+        );
+        assert_eq!(
+            store.blob_hash_for_path(1, "b.txt").await.unwrap(),
+            Some("hB".into())
+        );
+        assert_eq!(store.blob_hash_for_path(1, "c.txt").await.unwrap(), None);
+
+        // At snap 2: a.txt updated, b.txt deleted, c.txt still absent
+        assert_eq!(
+            store.blob_hash_for_path(2, "a.txt").await.unwrap(),
+            Some("hA2".into())
+        );
+        assert_eq!(store.blob_hash_for_path(2, "b.txt").await.unwrap(), None);
+        assert_eq!(store.blob_hash_for_path(2, "c.txt").await.unwrap(), None);
+
+        // At snap 3: c.txt now present, a.txt still hA2 from snap 2
+        assert_eq!(
+            store.blob_hash_for_path(3, "a.txt").await.unwrap(),
+            Some("hA2".into())
+        );
+        assert_eq!(
+            store.blob_hash_for_path(3, "c.txt").await.unwrap(),
+            Some("hC".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn blob_hash_for_path_returns_none_for_oversize() {
+        let db = Database::in_memory();
+        let store = SqliteSnapshotStore::new(db.clone());
+        seed_snapshots(&db, &[(1, "big.bin", None, true)]).await;
+        assert_eq!(store.blob_hash_for_path(1, "big.bin").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn blob_hash_for_path_returns_none_for_unknown_snapshot() {
+        let db = Database::in_memory();
+        let store = SqliteSnapshotStore::new(db);
+        assert_eq!(store.blob_hash_for_path(999, "a.txt").await.unwrap(), None);
     }
 
     #[tokio::test]

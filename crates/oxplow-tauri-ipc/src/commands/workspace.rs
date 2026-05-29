@@ -9,7 +9,7 @@ use crate::state::AppState;
 /// Versioned file read. Dispatches on `version`:
 /// - `Disk` → `read_workspace_file` (working tree, possibly dirty).
 /// - `Ref { ref }` → `read_file_at_ref` (committed blob).
-/// - `Snapshot { id }` → not yet implemented.
+/// - `Snapshot { id }` → `snapshot_store.blob_hash_for_path` + blob read.
 ///
 /// Returns `Ok(None)` if the path doesn't exist at that version.
 /// Callers MUST pass an explicit version — there is no implicit
@@ -43,9 +43,27 @@ pub async fn read_file(
             }
         },
         TreeVersion::Ref { r#ref } => Ok(state.git.read_file_at_ref(r#ref, relative_path).await),
-        TreeVersion::Snapshot { .. } => Err(IpcError::invalid(
-            "snapshot tree version is not yet implemented",
-        )),
+        TreeVersion::Snapshot { id } => {
+            let snapshot_id: i64 = id
+                .parse()
+                .map_err(|_| IpcError::invalid(format!("invalid snapshot id: {id}")))?;
+            let Some(hash) = state
+                .snapshot_store
+                .blob_hash_for_path(snapshot_id, &relative_path)
+                .await
+                .map_err(|e| IpcError::internal(e.to_string()))?
+            else {
+                return Ok(None);
+            };
+            let blobs = state.blobs.clone();
+            let bytes = tokio::task::spawn_blocking(move || blobs.read(&hash))
+                .await
+                .map_err(|e| IpcError::internal(e.to_string()))?;
+            match bytes {
+                Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
+                Err(_) => Ok(None),
+            }
+        }
     }
 }
 
