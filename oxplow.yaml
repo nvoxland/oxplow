@@ -11,6 +11,7 @@ collection:
   # `cargo cov` (= llvm-cov nextest) writes the Rust lcov + JUnit, then the
   # frontend `test:junit` script writes the bun JUnit.
   testCommand: bun run test:collect
+  agentHint: "Run tests with `bun run test:collect` — not bare `cargo test`, `bun test`, or `bun run test`. Only `test:collect` emits the lcov + JUnit reports that oxplow parses into the effort's coverage panel. Run it before closing any task that changes logic."
   reports:
   # Rust (cargo cov)
   - { path: target/coverage/lcov.info, format: lcov }

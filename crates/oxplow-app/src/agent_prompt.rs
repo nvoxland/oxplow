@@ -136,6 +136,16 @@ pub fn assemble_system_prompt(
         out.push_str(&config.agent_prompt_append);
         out.push('\n');
     }
+    if let Some(hint) = config
+        .collection
+        .agent_hint
+        .as_deref()
+        .filter(|h| !h.is_empty())
+    {
+        out.push_str("\n# Collection\n");
+        out.push_str(hint);
+        out.push('\n');
+    }
     out.trim_end().to_string()
 }
 
@@ -216,6 +226,23 @@ mod tests {
         assert!(prompt.contains("<session-context>"));
         assert!(prompt.contains("Use TDD"));
         assert!(prompt.contains("be precise"));
+    }
+
+    #[test]
+    fn collection_agent_hint_appended_when_set() {
+        let dir = tempdir().unwrap();
+        let mut cfg = config();
+        cfg.collection.agent_hint = Some("Run tests with bun run test:collect".into());
+        let prompt = assemble_system_prompt(dir.path(), &cfg, &stream(), Some(&thread()));
+        assert!(prompt.contains("# Collection\n"));
+        assert!(prompt.contains("bun run test:collect"));
+    }
+
+    #[test]
+    fn collection_agent_hint_absent_when_unset() {
+        let dir = tempdir().unwrap();
+        let prompt = assemble_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        assert!(!prompt.contains("# Collection"));
     }
 
     #[test]

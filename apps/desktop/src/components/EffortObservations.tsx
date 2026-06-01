@@ -23,6 +23,8 @@ interface JUnitCase {
   name: string;
   status: TestStatus;
   timeMs?: number;
+  /** Set by mergeTestRuns when this case had status "failed" in any earlier run. */
+  everFailed?: boolean;
 }
 interface JUnitSuite {
   name: string;
@@ -56,31 +58,6 @@ function coverageColor(pct: number): string {
   if (pct >= 80) return "var(--freshness-fresh)";
   if (pct >= 50) return "var(--freshness-stale)";
   return "var(--freshness-very-stale)";
-}
-
-function ProvenanceTag({ provenance }: { provenance: string }) {
-  // Provenance is the spine: an agent-`asserted` number must never read
-  // as a measured one. `observed` is the trusted, quiet default.
-  const asserted = provenance === "asserted";
-  return (
-    <span
-      title={
-        asserted
-          ? "Reported by the agent — not independently measured"
-          : "Measured directly by oxplow"
-      }
-      style={{
-        fontSize: "var(--text-xs)",
-        padding: "1px 6px",
-        borderRadius: 4,
-        whiteSpace: "nowrap",
-        color: asserted ? "var(--freshness-stale)" : "var(--text-muted)",
-        border: `1px solid ${asserted ? "var(--freshness-stale)" : "var(--border-subtle)"}`,
-      }}
-    >
-      {asserted ? "agent-asserted" : "measured"}
-    </span>
-  );
 }
 
 /** Segmented covered/uncovered bar for the changed lines of an effort. */
@@ -223,7 +200,6 @@ function CoverageSummary({
         <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
           of changed lines covered · {cov.coveredLines}/{cov.changedLines}
         </span>
-        <ProvenanceTag provenance={obs.provenance} />
         {pin ? (
           <span className="oxplow-tabular" style={{ color: "var(--text-muted)" }}>
             {pin}
@@ -240,7 +216,7 @@ interface TreeNode {
   label: string;
   path: string;
   children: TreeNode[];
-  leaves: { name: string; status: TestStatus; timeMs?: number }[];
+  leaves: { name: string; status: TestStatus; timeMs?: number; everFailed?: boolean }[];
   counts: { passed: number; failed: number; skipped: number };
 }
 
@@ -291,7 +267,7 @@ function buildTestTree(suites: JUnitSuite[]): TreeNode[] {
         }
         node = child;
       }
-      node.leaves.push({ name: leafName, status: c.status, timeMs: c.timeMs });
+      node.leaves.push({ name: leafName, status: c.status, timeMs: c.timeMs, everFailed: c.everFailed });
     }
     return finalize(root);
   });
@@ -363,27 +339,36 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
           {node.children.map((c) => (
             <TestTreeNode key={c.path} node={c} depth={depth + 1} />
           ))}
-          {node.leaves.map((leaf) => (
-            <div
-              key={leaf.name}
-              data-testid={`test-case-${leaf.name}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                paddingLeft: (depth + 1) * 12 + 16,
-                fontSize: "var(--text-xs)",
-              }}
-            >
-              <span style={{ color: statusColor(leaf.status) }}>{statusGlyph(leaf.status)}</span>
-              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{leaf.name}</span>
-              {leaf.timeMs !== undefined && leaf.timeMs > 0 ? (
-                <span className="oxplow-tabular" style={{ color: "var(--text-muted)" }}>
-                  {(leaf.timeMs / 1000).toFixed(2)}s
+          {node.leaves.map((leaf) => {
+            const onceFailed = leaf.everFailed && leaf.status !== "failed";
+            return (
+              <div
+                key={leaf.name}
+                data-testid={`test-case-${leaf.name}`}
+                title={onceFailed ? "Was failing during this effort" : undefined}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  paddingLeft: (depth + 1) * 12 + 16,
+                  fontSize: "var(--text-xs)",
+                }}
+              >
+                <span style={{ color: statusColor(leaf.status) }}>{statusGlyph(leaf.status)}</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: onceFailed ? "var(--freshness-stale)" : "var(--text-primary)" }}>
+                  {leaf.name}
                 </span>
-              ) : null}
-            </div>
-          ))}
+                {onceFailed ? (
+                  <span style={{ color: "var(--freshness-stale)", fontSize: "var(--text-xs)" }}>↩</span>
+                ) : null}
+                {leaf.timeMs !== undefined && leaf.timeMs > 0 ? (
+                  <span className="oxplow-tabular" style={{ color: "var(--text-muted)" }}>
+                    {(leaf.timeMs / 1000).toFixed(2)}s
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -393,10 +378,13 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
 /** Merge all test-run observations into one suite list, last-write-wins per
  *  test case (keyed by `classname::name`). Observations are processed in
  *  storage order (oldest first), so later runs update the status of a case
- *  that ran earlier. Suites that never appeared together are unioned. */
+ *  that ran earlier. Suites that never appeared together are unioned.
+ *  Cases that had status "failed" in any run carry everFailed=true even if
+ *  the final status is passing. */
 function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
   const suiteOrder: string[] = [];
   const suiteMap = new Map<string, Map<string, JUnitCase>>();
+  const everFailedKeys = new Set<string>();
 
   for (const obs of runs) {
     const run = parsePayload<TestRunPayload>(obs.payload_json);
@@ -409,6 +397,8 @@ function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
       }
       const cases = suiteMap.get(sname)!;
       for (const c of suite.cases) {
+        const key = `${sname}::${c.classname}::${c.name}`;
+        if (c.status === "failed") everFailedKeys.add(key);
         cases.set(`${c.classname}::${c.name}`, c);
       }
     }
@@ -416,7 +406,10 @@ function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
 
   return suiteOrder.map((sname) => ({
     name: sname,
-    cases: [...suiteMap.get(sname)!.values()],
+    cases: [...suiteMap.get(sname)!.values()].map((c) => ({
+      ...c,
+      everFailed: everFailedKeys.has(`${sname}::${c.classname}::${c.name}`),
+    })),
   }));
 }
 
@@ -447,21 +440,33 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
   const fallbackFailed = !totals && lastRunPayload?.failed !== undefined ? lastRunPayload.failed : null;
 
   // Top 5 suites by total case count, descending.
-  const top5 = tree
-    ? [...tree]
-        .sort((a, b) => {
-          const ta = a.counts.passed + a.counts.failed + a.counts.skipped;
-          const tb = b.counts.passed + b.counts.failed + b.counts.skipped;
-          return tb - ta;
-        })
-        .slice(0, 5)
+  const sorted = tree
+    ? [...tree].sort((a, b) => {
+        const ta = a.counts.passed + a.counts.failed + a.counts.skipped;
+        const tb = b.counts.passed + b.counts.failed + b.counts.skipped;
+        return tb - ta;
+      })
     : [];
+  const top5 = sorted.slice(0, 5);
+  const overflow = sorted.length - top5.length;
 
-  const lastObs = runs[runs.length - 1];
+  const navToDetail = ctxNav ? () => ctxNav.navigate(effortCoverageRef(effortId)) : undefined;
+  const suiteRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: "var(--text-xs)",
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    padding: "1px 0",
+    cursor: navToDetail ? "pointer" : "default",
+  };
 
   return (
     <div data-testid="tests-run" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* Header row: label + pass/fail + provenance + details link */}
+      {/* Header row: label + pass/fail + details link */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span
           style={{
@@ -496,11 +501,10 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
             ) : null}
           </>
         ) : null}
-        <ProvenanceTag provenance={lastObs.provenance} />
-        {ctxNav ? (
+        {navToDetail ? (
           <button
             type="button"
-            onClick={() => ctxNav.navigate(effortCoverageRef(effortId))}
+            onClick={navToDetail}
             style={{
               marginLeft: "auto",
               background: "transparent",
@@ -515,20 +519,22 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
           </button>
         ) : null}
       </div>
-      {/* Top 5 suites */}
+      {/* Top 5 suites — each row navigates to the detail page */}
       {top5.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 4 }}>
           {top5.map((n) => (
-            <div
-              key={n.path}
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}
-            >
+            <button key={n.path} type="button" onClick={navToDetail} style={suiteRowStyle}>
               <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {n.label}
               </span>
               <CountsSummary counts={n.counts} />
-            </div>
+            </button>
           ))}
+          {overflow > 0 ? (
+            <button type="button" onClick={navToDetail} style={{ ...suiteRowStyle, color: "var(--text-muted)", paddingLeft: 0 }}>
+              {overflow} more…
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -554,8 +560,6 @@ export function FullCoverageView({
   const merged = mergeTestRuns(runs);
   const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
   const totals = tree ? sumCounts(tree) : null;
-  const lastObs = runs.length > 0 ? runs[runs.length - 1] : null;
-
   const mutedStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-muted)" };
 
   return (
@@ -586,7 +590,6 @@ export function FullCoverageView({
               ) : null}
             </>
           ) : null}
-          {lastObs ? <ProvenanceTag provenance={lastObs.provenance} /> : null}
         </div>
         {tree ? (
           <div style={{ display: "flex", flexDirection: "column" }}>

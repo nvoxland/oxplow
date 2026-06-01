@@ -216,7 +216,17 @@ legacy rows need no backfill. Writes persist `ProseVariants::optional_json()`
 (NULL when both variants are absent). The agent authors all three inline
 via the `description_executive` / `description_terse` params on
 `create_task` / `update_task` / `file_epic_with_children`
-(`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). `ProseAudience`
+(`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). On the
+**authoring** tools — `create_task`, `complete_task`,
+`file_epic_with_children` (+ `EpicChildSpec`) — the developer body and
+both variant params are **required `String`s** (not `Option`), so
+JsonSchema marks them required and the model can't ship a developer-only
+body that makes the audience switcher a silent no-op. The MCP boundary
+runs each variant through `variant_opt` (empty/whitespace → `None`) so a
+blank rewrite still degrades cleanly to `None`/developer rather than
+persisting a variant equal to its own fallback. `update_task` keeps its
+variant params `Option` — there `missing → keep existing` semantics must
+survive a partial-patch edit. `ProseAudience`
 + `ProseVariants` are exported to the frontend through tauri-specta. The
 same V27 migration also adds `task_effort.summary_variants` and
 `comment.section_anchor` (both wired — see below and the `comment`
@@ -290,7 +300,7 @@ executive/terse audience rewrites of `summary`, same JSON shape and
 `ProseVariants` handling as `task.description_variants`. `summary` stays
 the canonical developer text; `row_to_effort` rebuilds a `ProseVariants`
 on read with developer fallback. The agent authors the variants via the
-`summary_executive` / `summary_terse` params on `complete_task`, which
+required `summary_executive` / `summary_terse` params on `complete_task`, which
 land them through `TaskEffortStore::set_summary_variants` on the effort
 that just received the developer `summary` (preserving the
 write-once-on-completion shape). The frontend swaps the rendered
@@ -628,6 +638,21 @@ this is how the agent records "I verified a fact against
 Refs left in the body but in NEITHER list keep their existing pin —
 that's how "this content relies on a stale source" stays accurate.
 Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
+
+**Required audience-variant siblings.** Wiki bodies are file-based, so
+unlike tasks/efforts the three audience versions aren't MCP params —
+they're sibling files: `<slug>.md` (developer, canonical),
+`<slug>.executive.md`, and `<slug>.terse.md` (suffixes in
+`WIKI_VARIANT_SUFFIXES`). `record_wiki_page_update` enforces all three
+exist and are non-empty before recording an edit: after reading the
+developer body it calls `wiki_pages::missing_variant_siblings(project_dir,
+slug)` (whitespace-only counts as missing) and rejects the call with the
+list of absent variants if any are missing. This is the wiki analogue of
+the required variant params on the task/effort authoring tools — it stops
+a page being registered with only the developer text, which would make
+the page-level audience switcher a silent no-op. The fs-watcher auto-sync
+(`sync_all`) does **not** enforce this; only the explicit agent-driven
+`record_wiki_page_update` call is the gate.
 
 **User-facing Freshness view.** The
 `list_wiki_freshness(slug)` IPC

@@ -87,6 +87,12 @@ pub struct CollectionConfig {
     /// built-in defaults (pytest, cargo test, jest, …).
     #[serde(rename = "testRunPatterns")]
     pub test_run_patterns: Vec<String>,
+    /// Free-form hint injected verbatim into every agent system prompt.
+    /// Use it to tell the agent which test command to run, what coverage
+    /// threshold to meet, etc. — anything project-specific the agent
+    /// should know about the collection setup.
+    #[serde(rename = "agentHint")]
+    pub agent_hint: Option<String>,
 }
 
 impl CollectionConfig {
@@ -209,6 +215,8 @@ struct RawCollectionBlock {
     test_report_format: Option<String>,
     #[serde(rename = "testRunPatterns", default)]
     test_run_patterns: Option<Vec<String>>,
+    #[serde(rename = "agentHint", default)]
+    agent_hint: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -389,7 +397,11 @@ pub fn write_project_config(
     }
 
     let c = &config.collection;
-    if c.test_command.is_some() || !c.reports.is_empty() || !c.test_run_patterns.is_empty() {
+    if c.test_command.is_some()
+        || !c.reports.is_empty()
+        || !c.test_run_patterns.is_empty()
+        || c.agent_hint.is_some()
+    {
         let mut col = serde_yaml::Mapping::new();
         if let Some(v) = &c.test_command {
             col.insert("testCommand".into(), v.clone().into());
@@ -412,6 +424,9 @@ pub fn write_project_config(
                 "testRunPatterns".into(),
                 serde_yaml::to_value(&c.test_run_patterns).expect("patterns serialize"),
             );
+        }
+        if let Some(v) = &c.agent_hint {
+            col.insert("agentHint".into(), v.clone().into());
         }
         doc.insert("collection".into(), serde_yaml::Value::Mapping(col));
     }
@@ -636,6 +651,7 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
         test_command: opt_trimmed(raw.test_command),
         reports,
         test_run_patterns,
+        agent_hint: opt_trimmed(raw.agent_hint),
     })
 }
 
@@ -877,6 +893,7 @@ lsp:
             r#"
 collection:
   testCommand: cargo cov
+  agentHint: "Run tests with cargo cov"
   reports:
     - { path: target/coverage/lcov.info, format: lcov }
     - { path: target/nextest/default/junit.xml, format: junit }
@@ -889,6 +906,10 @@ collection:
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.collection.test_command.as_deref(), Some("cargo cov"));
+        assert_eq!(
+            cfg.collection.agent_hint.as_deref(),
+            Some("Run tests with cargo cov")
+        );
         assert_eq!(cfg.collection.reports.len(), 3);
         assert_eq!(cfg.collection.coverage_reports().count(), 1);
         assert_eq!(cfg.collection.test_reports().count(), 2);
@@ -942,6 +963,7 @@ collection:
                     },
                 ],
                 test_run_patterns: vec!["tox".into()],
+                agent_hint: Some("Run pytest, not bare python -m pytest".into()),
             },
             ..default_config("test".into())
         };

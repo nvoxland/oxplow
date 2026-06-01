@@ -1023,6 +1023,13 @@ export type CollectionConfig = {
 	 *  built-in defaults (pytest, cargo test, jest, …).
 	 */
 	testRunPatterns: string[],
+	/**
+	 *  Free-form hint injected verbatim into every agent system prompt.
+	 *  Use it to tell the agent which test command to run, what coverage
+	 *  threshold to meet, etc. — anything project-specific the agent
+	 *  should know about the collection setup.
+	 */
+	agentHint: string | null,
 };
 
 /**
