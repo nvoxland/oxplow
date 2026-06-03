@@ -101,11 +101,12 @@ export interface PageProps {
    *  to true. */
   showHeader?: boolean;
   /** Body layout. `"full"` (default) renders edge-to-edge — today's
-   *  behavior. `"details"` renders a two-column grid: a reading-width
-   *  center column (capped at 760px) plus a sticky right rail
-   *  (`rightRail`). Below ~960px body-container width the rail
-   *  unmounts and the center column reflows. Purely responsive — no
-   *  user-controlled toggle. */
+   *  behavior. `"details"` renders a two-column grid: a bounded
+   *  reading-width center column (`.oxplow-reading-column`, 78ch,
+   *  centered) plus a sticky right rail (`rightRail`). The center
+   *  column owns the width so children just fill it. Below ~960px
+   *  body-container width the rail unmounts and the center column
+   *  reflows. Purely responsive — no user-controlled toggle. */
   layout?: "full" | "details";
   /** Right-rail content for `layout="details"`. Ignored otherwise. */
   rightRail?: ReactNode;
@@ -404,10 +405,13 @@ function DetailsBody({ children, rightRail }: { children: ReactNode; rightRail?:
     >
       <div
         data-testid="page-details-center"
-        style={{
-          width: "100%",
-          minWidth: 0,
-        }}
+        // `oxplow-reading-column` (index.html) owns the reading-width cap
+        // + centering and cancels child self-width, so the title, body,
+        // and activity all live within one bounded, centered column
+        // instead of each managing its own width. `minWidth: 0` keeps the
+        // grid item from overflowing the track.
+        className="oxplow-reading-column"
+        style={{ minWidth: 0 }}
       >
         {children}
       </div>

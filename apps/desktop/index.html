@@ -471,6 +471,28 @@
          so we don't double-cap. */
       .oxplow-rt-editor.oxplow-md { max-width: none; margin: 0; }
 
+      /* A bounded reading area. Any layout that wants a centered,
+         fixed-measure reading column applies this class to the
+         container; everything inside then just fills it and does NOT
+         manage its own width. Prose / rich-text leaves (.oxplow-md,
+         .oxplow-rt-field) self-cap at 78ch when they're the top-level
+         reading surface (unbounded contexts — comments, rail, chat);
+         inside a reading column the container already owns the measure,
+         so cancel the leaf self-cap so the title, description, and
+         activity share one left edge and width instead of looking
+         scattered. The "details" page layout (DetailsBody in Page.tsx)
+         is the first adopter. */
+      .oxplow-reading-column {
+        width: 100%;
+        max-width: 78ch;
+        margin-inline: auto;
+      }
+      .oxplow-reading-column .oxplow-md,
+      .oxplow-reading-column .oxplow-rt-field {
+        max-width: none;
+        margin: 0;
+      }
+
       /* Task detail page: section subheadings (Acceptance criteria,
          etc.). Lighter weight than .oxplow-md h3 so the page reads as
          one document rather than a stack of nested forms. */

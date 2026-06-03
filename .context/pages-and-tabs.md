@@ -111,13 +111,22 @@ same for both layouts — only the body region differs.
   padding. Dashboards, lists, history tables, the agent terminal,
   file/diff editors, and anything that wants every available pixel
   stay full.
-- **`"details"`** — two-column CSS grid: a full-width center column
-  plus a `320px` sticky right rail (`position: sticky; top: 0`). Outer
-  padding `24px`, gap `24px`. The center fills its grid track — no
-  reading-width cap and no auto-margin — because the surrounding tab
-  area already constrains width; re-centering inside it just left
-  empty gutters. The page provides rail content via the `rightRail`
-  prop; the layout owns padding and sticky positioning.
+- **`"details"`** — two-column CSS grid: a **bounded reading-width
+  center column** plus a `320px` sticky right rail (`position: sticky;
+  top: 0`). Outer padding `24px`, gap `24px`. The center column carries
+  the `.oxplow-reading-column` class (defined in `index.html`), which
+  owns the measure: `max-width: 78ch; margin-inline: auto`. The layout
+  owns the width so **children just fill it and don't manage their own**
+  — that class also cancels the per-leaf self-cap on `.oxplow-md` /
+  `.oxplow-rt-field` (which otherwise self-center at `78ch` for
+  unbounded contexts), so the title, description, and activity share one
+  left edge and width instead of looking scattered (title flush-left,
+  body floating centered). The page provides rail content via the
+  `rightRail` prop; the layout owns padding and sticky positioning.
+
+  Reuse `.oxplow-reading-column` for any future bounded reading area —
+  it's the single primitive that expresses "a fixed-measure column that
+  everything inside lives within."
 
 The rail is **purely responsive — no user toggle**. A `ResizeObserver`
 on the body container watches its width; below `960px` the rail is
