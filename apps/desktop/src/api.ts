@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
 import type { OxplowEvent } from "./api-types.js";
+import { normalizeSnapshotId } from "./effort-snapshot.js";
 import type {
   CommentIntent,
   CommentMessage,
@@ -1614,10 +1615,19 @@ export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
     }),
   );
   const filesById = new Map(filesByEffort);
-  return rows.map((effort) => {
-    const files = filesById.get(effort.id) ?? [];
+  return rows.map((rawEffort) => {
+    const files = filesById.get(rawEffort.id) ?? [];
     const counts = { created: 0, updated: 0, deleted: 0 };
     for (const f of files) counts[f.change]++;
+    // The binding types snapshot ids as numbers; normalize to the
+    // app's string contract so they survive the trip into
+    // `TreeVersion` (Rust expects a string `id`) — a raw number
+    // surfaces as an opaque "ipc error" when opening an effort diff.
+    const effort: TaskEffort = {
+      ...rawEffort,
+      start_snapshot_id: normalizeSnapshotId(rawEffort.start_snapshot_id),
+      end_snapshot_id: normalizeSnapshotId(rawEffort.end_snapshot_id),
+    };
     return {
       effort,
       start_snapshot: null,
