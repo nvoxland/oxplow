@@ -514,57 +514,6 @@ pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {
     project_dir.join(".oxplow").join("wiki")
 }
 
-/// Audience-variant sibling-file suffixes for a wiki page body. The
-/// developer body is the bare `<slug>.md`; the executive/terse
-/// rewrites live beside it as `<slug>.executive.md` /
-/// `<slug>.terse.md`. Order mirrors `ProseAudience`.
-pub const WIKI_VARIANT_SUFFIXES: [&str; 2] = ["executive", "terse"];
-
-/// Repo-relative filenames of the audience-variant siblings a wiki page
-/// is required to carry but that are absent or empty on disk. The
-/// developer body (`<slug>.md`) is the canonical text; the executive and
-/// terse rewrites must live beside it as `<slug>.executive.md` /
-/// `<slug>.terse.md`. A whitespace-only file counts as missing — it
-/// would just degrade to the developer text, defeating the audience
-/// switcher. Returns the names in `WIKI_VARIANT_SUFFIXES` order; an
-/// empty result means all variants are present and non-empty.
-pub fn missing_variant_siblings(project_dir: &Path, slug: &str) -> Vec<String> {
-    let dir = wiki_pages_dir(project_dir);
-    WIKI_VARIANT_SUFFIXES
-        .iter()
-        .filter_map(|suffix| {
-            let name = format!("{slug}.{suffix}.md");
-            let present = fs::read_to_string(dir.join(&name))
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-            (!present).then_some(name)
-        })
-        .collect()
-}
-
-/// Resolve a wiki file's stem (the part before `.md`) to its base page
-/// slug and, when it's a variant sibling, the audience it encodes:
-///
-/// - `"task-model"`           → `("task-model", None)`
-/// - `"task-model.executive"` → `("task-model", Some("executive"))`
-/// - `"task-model.terse"`   → `("task-model", Some("terse"))`
-///
-/// This is what keeps the fs-watcher from spawning a phantom
-/// `task-model.executive` page: variant files route to their base slug,
-/// and the `wiki_page` row + FTS stay keyed on the developer body only.
-pub fn wiki_slug_and_variant(stem: &str) -> (&str, Option<&'static str>) {
-    for suffix in WIKI_VARIANT_SUFFIXES {
-        if let Some(base) = stem
-            .strip_suffix(suffix)
-            .and_then(|s| s.strip_suffix('.'))
-            .filter(|base| !base.is_empty())
-        {
-            return (base, Some(suffix));
-        }
-    }
-    (stem, None)
-}
-
 /// One-time on-disk rename. Earlier versions of oxplow stored wiki
 /// pages at `<project>/.oxplow/notes/<slug>.md`; the rename to
 /// `wiki` (matching the schema + UI nomenclature) requires moving
@@ -756,60 +705,6 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wiki_slug_and_variant_routes_siblings_to_base() {
-        assert_eq!(wiki_slug_and_variant("task-model"), ("task-model", None));
-        assert_eq!(
-            wiki_slug_and_variant("task-model.executive"),
-            ("task-model", Some("executive"))
-        );
-        assert_eq!(
-            wiki_slug_and_variant("task-model.terse"),
-            ("task-model", Some("terse"))
-        );
-        // A dotted base that isn't a known variant suffix stays whole.
-        assert_eq!(
-            wiki_slug_and_variant("release.notes"),
-            ("release.notes", None)
-        );
-        // A leading-dot stem with no base is not a variant.
-        assert_eq!(wiki_slug_and_variant(".executive"), (".executive", None));
-    }
-
-    #[test]
-    fn missing_variant_siblings_lists_absent_and_empty_rewrites() {
-        let dir = tempfile::tempdir().unwrap();
-        let wiki = wiki_pages_dir(dir.path());
-        std::fs::create_dir_all(&wiki).unwrap();
-        std::fs::write(wiki.join("intro.md"), "developer body").unwrap();
-
-        // Neither variant authored → both reported missing.
-        assert_eq!(
-            missing_variant_siblings(dir.path(), "intro"),
-            vec![
-                "intro.executive.md".to_string(),
-                "intro.terse.md".to_string()
-            ]
-        );
-
-        // An empty/whitespace variant still counts as missing (it would
-        // just fall back to the developer text) — executive stays in the
-        // list even though the file now exists.
-        std::fs::write(wiki.join("intro.executive.md"), "   \n").unwrap();
-        assert_eq!(
-            missing_variant_siblings(dir.path(), "intro"),
-            vec![
-                "intro.executive.md".to_string(),
-                "intro.terse.md".to_string()
-            ]
-        );
-
-        // Both authored with real content → nothing missing.
-        std::fs::write(wiki.join("intro.executive.md"), "exec rewrite").unwrap();
-        std::fs::write(wiki.join("intro.terse.md"), "terse rewrite").unwrap();
-        assert!(missing_variant_siblings(dir.path(), "intro").is_empty());
-    }
 
     #[test]
     fn strip_version_drops_disk_and_explicit_pins_from_wikilinks() {

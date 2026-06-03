@@ -3,16 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
-import type { ProseAudience } from "./proseAudience.js";
-
-/** Prose-audience selector wiring shared by PageProps and the nav-bar
- *  config. Set by pages whose body has developer/executive/terse
- *  variants (wiki, task, effort). */
-export interface PageAudienceConfig {
-  value: ProseAudience;
-  onChange(a: ProseAudience): void;
-  available?: Record<ProseAudience, boolean>;
-}
 
 export interface PageNavBarConfig {
   canBack: boolean;
@@ -52,9 +42,6 @@ export interface PageNavBarConfig {
   /** Optional comment navigator node (count + prev/next + orphaned
    *  list) for comment-bearing pages. */
   comments?: ReactNode;
-  /** Optional prose-audience selector — present only on variant-bearing
-   *  pages (wiki/task/effort). */
-  audience?: PageAudienceConfig;
   actions?: ReactNode;
 }
 
@@ -100,10 +87,6 @@ export interface PageProps {
    *  Backlinks. Comment-bearing pages (file/wiki/task) pass a
    *  `<CommentNavigator targetKind targetId />`. */
   commentsNav?: ReactNode;
-  /** Optional prose-audience selector for variant-bearing pages
-   *  (wiki/task/effort). Rendered in the nav bar before the comment
-   *  navigator; absent on pages without prose variants. */
-  audience?: PageAudienceConfig;
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
    *  block) suppresses the legacy footer panel. */
@@ -140,7 +123,7 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, audience, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -205,7 +188,6 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
         outbound: baseNavBar.outbound ?? outbound,
         snapshots: baseNavBar.snapshots ?? snapshots,
         comments: baseNavBar.comments ?? commentsNav,
-        audience: baseNavBar.audience ?? audience,
       }
     : undefined;
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
@@ -236,7 +218,6 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           outbound={effectiveNavBar.outbound}
           snapshots={effectiveNavBar.snapshots}
           comments={effectiveNavBar.comments}
-          audience={effectiveNavBar.audience}
           actions={effectiveNavBar.actions}
         />
       ) : null}

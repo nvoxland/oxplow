@@ -259,7 +259,6 @@ mod tests {
             parent_id: parent.map(TaskId::new),
             title: format!("t{id}"),
             description: String::new(),
-            description_variants: oxplow_domain::ProseVariants::default(),
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,

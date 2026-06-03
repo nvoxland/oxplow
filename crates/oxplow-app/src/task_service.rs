@@ -74,12 +74,8 @@ pub enum ReadWorkOptionsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct CreateTaskInput {
     pub title: String,
-    /// Developer-audience description (canonical text).
+    /// The task's prose body (canonical markdown).
     pub description: Option<String>,
-    /// Optional executive-summary rewrite of `description`.
-    pub description_executive: Option<String>,
-    /// Optional terse "terse" rewrite of `description`.
-    pub description_terse: Option<String>,
     pub parent_id: Option<TaskId>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -87,16 +83,11 @@ pub struct CreateTaskInput {
 }
 
 /// Partial-patch for `update_task`. Each `Option` follows
-/// "missing -> keep, present -> replace" semantics. The audience
-/// variants follow the same rule and are independent of `description`
-/// (the agent re-authors all three together; a developer-only edit
-/// leaves any prior executive/terse text in place).
+/// "missing -> keep, present -> replace" semantics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct UpdateTaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub description_executive: Option<String>,
-    pub description_terse: Option<String>,
     pub parent_id: Option<Option<TaskId>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -208,19 +199,13 @@ impl TaskService {
     ) -> Result<Task, TaskServiceError> {
         let next_sort = self.next_sort_index(thread.as_ref()).await?;
         let now = Timestamp::now();
-        let developer = input.description.unwrap_or_default();
         let mut item = Task {
             // id assigned by store.insert
             id: TaskId::placeholder(),
             thread_id: thread,
             parent_id: input.parent_id,
             title: input.title,
-            description: developer.clone(),
-            description_variants: oxplow_domain::ProseVariants {
-                developer,
-                executive: input.description_executive,
-                terse: input.description_terse,
-            },
+            description: input.description.unwrap_or_default(),
             status: input.status.unwrap_or(TaskStatus::Ready),
             priority: input.priority.unwrap_or(TaskPriority::Medium),
             sort_index: next_sort,
@@ -258,14 +243,7 @@ impl TaskService {
             item.title = t;
         }
         if let Some(d) = changes.description {
-            item.description = d.clone();
-            item.description_variants.developer = d;
-        }
-        if let Some(e) = changes.description_executive {
-            item.description_variants.executive = Some(e);
-        }
-        if let Some(c) = changes.description_terse {
-            item.description_variants.terse = Some(c);
+            item.description = d;
         }
         if let Some(p) = changes.parent_id {
             item.parent_id = p;
@@ -1319,51 +1297,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_and_update_persist_description_variants() {
-        use oxplow_domain::ProseAudience;
-        let (svc, tid) = fixture().await;
-        let it = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "x".into(),
-                    description: Some("developer detail".into()),
-                    description_executive: Some("the gist".into()),
-                    description_terse: Some("ship.".into()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            it.description_variants.get(ProseAudience::Executive),
-            "the gist"
-        );
-        assert_eq!(it.description_variants.get(ProseAudience::Terse), "ship.");
-
-        // Updating only the executive variant keeps developer + terse.
-        let updated = svc
-            .update(
-                it.id,
-                UpdateTaskChanges {
-                    description_executive: Some("tighter gist".into()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(updated.description, "developer detail");
-        assert_eq!(
-            updated.description_variants.get(ProseAudience::Executive),
-            "tighter gist"
-        );
-        assert_eq!(
-            updated.description_variants.get(ProseAudience::Terse),
-            "ship."
-        );
-    }
-
-    #[tokio::test]
     async fn transition_to_done_sets_completed_at() {
         let (svc, tid) = fixture().await;
         let it = svc
@@ -1470,7 +1403,6 @@ mod tests {
             parent_id: None,
             title: id.to_string(),
             description: String::new(),
-            description_variants: oxplow_domain::ProseVariants::default(),
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -1504,7 +1436,6 @@ mod tests {
             parent_id: None,
             title: id.to_string(),
             description: String::new(),
-            description_variants: oxplow_domain::ProseVariants::default(),
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,

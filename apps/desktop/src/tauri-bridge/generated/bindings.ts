@@ -162,19 +162,8 @@ export const commands = {
 	thread_id: ThreadId | null,
 	parent_id: TaskId | null,
 	title: string,
-	/**
-	 *  Developer-audience description — the canonical prose, also the
-	 *  fallback for every other audience.
-	 */
+	// The task's prose body — the canonical markdown detail.
 	description: string,
-	/**
-	 *  All three audience variants of the description. `developer`
-	 *  always mirrors [`Task::description`] (the canonical text); the
-	 *  store fills this on read from the `description_variants` JSON
-	 *  column and persists only the optional executive/terse halves.
-	 *  See [`crate::prose`].
-	 */
-	description_variants?: ProseVariants,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -254,20 +243,6 @@ export const commands = {
 	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
-	/**
-	 *  Read one audience variant of a wiki body. Returns `""` when the
-	 *  sibling file doesn't exist — callers fall back to the developer body.
-	 */
-	readWikiPageBodyVariant: (slug: string, audience: ProseAudience) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body_variant", { slug, audience })),
-	// Write one audience variant of a wiki body to its sibling file.
-	writeWikiPageBodyVariant: (slug: string, audience: ProseAudience, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body_variant", { slug, audience, body })),
-	/**
-	 *  Read all three audience variants of a wiki body at once. Developer
-	 *  is the canonical body (empty string when the page has none yet);
-	 *  executive/terse are `None` when their sibling file is absent or
-	 *  empty, so the frontend falls back to developer.
-	 */
-	listWikiPageVariants: (slug: string) => typedError<ProseVariants, IpcError>(__TAURI_INVOKE("list_wiki_page_variants", { slug })),
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
 	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
@@ -1054,15 +1029,6 @@ export type Comment = {
 	// W3C selectors array (opaque to the store; the renderer parses it).
 	selectors_json: string,
 	/**
-	 *  Heading slug of the section the selection sat inside, when the
-	 *  target has audience variants (wiki/task). Lets the comment
-	 *  re-display under the matching heading of whichever prose variant
-	 *  is being viewed, since the precise `quote` only resolves against
-	 *  the variant it was authored on. `None` for non-variant targets or
-	 *  selections outside any heading. See [`crate::prose::heading_slug`].
-	 */
-	section_anchor?: string | null,
-	/**
 	 *  Ancestor regions the selection sat inside, innermost→outermost,
 	 *  EXCLUDING the primary target. Empty for a top-level selection.
 	 */
@@ -1176,11 +1142,6 @@ export type CreateCommentRequest = {
 	targetId: string,
 	quote: string,
 	selectorsJson: string,
-	/**
-	 *  Heading slug of the section the quote sits in (variant-bearing
-	 *  targets only); `None` otherwise.
-	 */
-	sectionAnchor: string | null,
 	contextChain: CommentTarget[],
 	referencedRefs: CommentTarget[],
 	intent: CommentIntent,
@@ -1190,12 +1151,8 @@ export type CreateCommentRequest = {
 
 export type CreateTaskInput = {
 	title: string,
-	// Developer-audience description (canonical text).
+	// The task's prose body (canonical markdown).
 	description: string | null,
-	// Optional executive-summary rewrite of `description`.
-	description_executive: string | null,
-	// Optional terse "terse" rewrite of `description`.
-	description_terse: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
@@ -1683,20 +1640,6 @@ export type PageVisitDay = {
 
 export type PaneKindArg = "working" | "talking";
 
-// Which audience variant of a prose body to read or display.
-export type ProseAudience = "developer" | "executive" | "terse";
-
-/**
- *  The three audience variants of one prose body. `developer` is
- *  always present (it is the canonical text); the other two are
- *  optional and fall back to `developer` when absent.
- */
-export type ProseVariants = {
-	developer: string,
-	executive?: string | null,
-	terse?: string | null,
-};
-
 // A recent-projects row plus a freshness flag for the UI.
 export type RecentProjectView = {
 	path: string,
@@ -1948,19 +1891,8 @@ export type Task = {
 	thread_id: ThreadId | null,
 	parent_id: TaskId | null,
 	title: string,
-	/**
-	 *  Developer-audience description — the canonical prose, also the
-	 *  fallback for every other audience.
-	 */
+	// The task's prose body — the canonical markdown detail.
 	description: string,
-	/**
-	 *  All three audience variants of the description. `developer`
-	 *  always mirrors [`Task::description`] (the canonical text); the
-	 *  store fills this on read from the `description_variants` JSON
-	 *  column and persists only the optional executive/terse halves.
-	 *  See [`crate::prose`].
-	 */
-	description_variants?: ProseVariants,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -1987,18 +1919,8 @@ export type TaskEffort = {
 	ended_at: Timestamp | null,
 	start_snapshot_id: number | null,
 	end_snapshot_id: number | null,
-	/**
-	 *  Developer-audience summary — the canonical text and the
-	 *  fallback for every other audience.
-	 */
+	// The effort's summary prose — the canonical text.
 	summary: string | null,
-	/**
-	 *  All three audience variants of the summary. `developer` mirrors
-	 *  [`TaskEffort::summary`]; the store fills this on read from the
-	 *  `summary_variants` JSON column and persists only the optional
-	 *  executive/terse halves. See [`oxplow_domain::prose`].
-	 */
-	summary_variants?: ProseVariants,
 };
 
 // Audit-log entry for state changes on a task.
@@ -2143,16 +2065,11 @@ export type UiLogEntry = {
 
 /**
  *  Partial-patch for `update_task`. Each `Option` follows
- *  "missing -> keep, present -> replace" semantics. The audience
- *  variants follow the same rule and are independent of `description`
- *  (the agent re-authors all three together; a developer-only edit
- *  leaves any prior executive/terse text in place).
+ *  "missing -> keep, present -> replace" semantics.
  */
 export type UpdateTaskChanges = {
 	title: string | null,
 	description: string | null,
-	description_executive: string | null,
-	description_terse: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,

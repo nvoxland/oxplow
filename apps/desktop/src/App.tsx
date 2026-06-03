@@ -91,7 +91,6 @@ import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
 import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
-import { getProseAudienceStore } from "./tabs/useProseAudience.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -2302,12 +2301,10 @@ export function App() {
       return rest;
     });
     setCenterActive((current) => (current === id ? "agent" : current));
-    // GC the per-page snapshot + prose-audience row so closed tabs
-    // don't leak forever.
+    // GC the per-page snapshot so closed tabs don't leak forever.
     if (selectedThreadId) {
       const pageKey = `${selectedThreadId}::${id}`;
       clearPageSnapshot(pageKey);
-      getProseAudienceStore().clear(pageKey);
     }
   }, [selectedThreadId, setCenterActive, stream]);
 

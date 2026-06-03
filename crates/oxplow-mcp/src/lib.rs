@@ -24,8 +24,8 @@ use oxplow_domain::stores::{
     CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
 };
 use oxplow_domain::{
-    prose::ProseAudience, CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType,
-    TaskPriority, TaskStatus, ThreadId,
+    CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
+    TaskStatus, ThreadId,
 };
 
 /// A comment thread plus the typed context it was anchored in, resolved
@@ -69,8 +69,8 @@ struct ListTasksParams {
 }
 
 /// Slim task row returned by `list_tasks`. Carries only the fields an
-/// agent needs to scan and pick work. Description is the terse variant
-/// when present (falling back to developer), truncated to 500 chars.
+/// agent needs to scan and pick work. Description is truncated to 500
+/// chars.
 #[derive(Debug, Serialize)]
 struct TaskListRow {
     id: String,
@@ -83,7 +83,7 @@ struct TaskListRow {
 }
 
 fn task_list_row(t: Task) -> TaskListRow {
-    let raw = t.description_variants.get(ProseAudience::Terse);
+    let raw = t.description.as_str();
     let description = if raw.chars().count() > 500 {
         let truncated: String = raw.chars().take(500).collect();
         format!("{}…", truncated)
@@ -255,25 +255,12 @@ pub struct CreateTaskMcpParams {
     #[serde(default)]
     pub backlog: bool,
     pub title: String,
-    /// Markdown body — the canonical developer-audience text. Required:
-    /// write the full detail here. If acceptance criteria would help
-    /// reviewers (or future-you) know when this task is done, write them
-    /// inline as a `## Acceptance criteria` subsection. There is no
-    /// separate AC field — the description is the single source of truth.
+    /// Markdown body — the task's prose. Required: write the full
+    /// detail here. If acceptance criteria would help reviewers (or
+    /// future-you) know when this task is done, write them inline as a
+    /// `## Acceptance criteria` subsection. There is no separate AC
+    /// field — the description is the single source of truth.
     pub description: String,
-    /// Required executive-summary rewrite of `description` (shorter,
-    /// overview-level — what a non-implementer needs to grasp the change
-    /// at a glance). Keep its heading skeleton aligned with the developer
-    /// text so section-anchored comments resolve across audience
-    /// variants. The audience switcher falls back to the developer text
-    /// when this is empty, so always author a genuinely distinct rewrite.
-    pub description_executive: String,
-    /// Required terse rewrite of `description` (drop filler words, use
-    /// sentence fragments, keep technical terms / paths / code verbatim).
-    /// Keep its heading skeleton aligned with the developer text. The
-    /// audience switcher falls back to the developer text when this is
-    /// empty, so always author a genuinely distinct rewrite.
-    pub description_terse: String,
     pub kind: Option<String>,
     pub priority: Option<String>,
     pub parent_id: Option<String>,
@@ -295,12 +282,6 @@ pub struct UpdateTaskMcpParams {
     pub id: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    /// Optional executive-summary rewrite of `description`. Present →
-    /// replace, missing → keep the existing variant.
-    pub description_executive: Option<String>,
-    /// Terse rewrite of `description`.
-    /// Present → replace, missing → keep.
-    pub description_terse: Option<String>,
     /// Reparent (or detach with empty string).
     pub parent_id: Option<String>,
     pub status: Option<String>,
@@ -332,14 +313,6 @@ pub struct CompleteTaskParams {
     /// Summary note appended to the task before marking done
     /// (developer audience — the canonical text).
     pub summary: String,
-    /// Required executive-summary rewrite of `summary` (shorter,
-    /// overview-level). Falls back to the developer text when empty, so
-    /// author a genuinely distinct rewrite.
-    pub summary_executive: String,
-    /// Required terse rewrite of `summary` (drop filler, sentence
-    /// fragments, keep technical terms / paths / code verbatim). Falls
-    /// back to the developer text when empty, so author a distinct rewrite.
-    pub summary_terse: String,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-
     /// attribution effort row Local History reads from.
@@ -400,28 +373,16 @@ pub struct GetThreadContextParams {
 pub struct FileEpicWithChildrenParams {
     pub thread_id: Option<String>,
     pub epic_title: String,
-    /// Canonical developer-audience body for the epic (required).
+    /// The epic's prose body (required).
     pub epic_description: String,
-    /// Required executive-summary rewrite of `epic_description` (falls
-    /// back to the developer text when empty — author a distinct rewrite).
-    pub epic_description_executive: String,
-    /// Required terse rewrite of `epic_description` (falls back to the
-    /// developer text when empty — author a distinct rewrite).
-    pub epic_description_terse: String,
     pub children: Vec<EpicChildSpec>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EpicChildSpec {
     pub title: String,
-    /// Canonical developer-audience body for the child (required).
+    /// The child task's prose body (required).
     pub description: String,
-    /// Required executive-summary rewrite of `description` (falls back to
-    /// the developer text when empty — author a distinct rewrite).
-    pub description_executive: String,
-    /// Required terse rewrite of `description` (falls back to the
-    /// developer text when empty — author a distinct rewrite).
-    pub description_terse: String,
     pub kind: Option<String>,
 }
 
@@ -606,10 +567,6 @@ pub struct CreateCommentMcpParams {
     pub body: String,
     /// Optional quoted span the comment is about (empty = whole-target note).
     pub quote: Option<String>,
-    /// Optional heading slug of the section the quote sits in, for
-    /// variant-bearing targets (wiki/task) — lets the comment re-display
-    /// under the matching heading of any audience variant.
-    pub section_anchor: Option<String>,
     /// `note` (default) or `followup`.
     pub intent: Option<String>,
 }
@@ -1067,7 +1024,6 @@ impl OxplowMcp {
                 &target,
                 p.quote.as_deref().unwrap_or(""),
                 "",
-                p.section_anchor.as_deref(),
                 &[],
                 &[],
                 intent,
@@ -1254,9 +1210,8 @@ impl OxplowMcp {
         description = "List tasks filtered by status. Pass status = \"backlog\" for thread-detached \
                        backlog items (no thread_id needed). Any other status (\"ready\", \
                        \"in_progress\", \"blocked\", \"done\", \"canceled\", \"archived\") requires \
-                       thread_id. Returns a slim representation — terse description variant when \
-                       present (falls back to developer), truncated to 500 chars. Use get_task for \
-                       the full record."
+                       thread_id. Returns a slim representation — description truncated to 500 \
+                       chars. Use get_task for the full record."
     )]
     async fn list_tasks(
         &self,
@@ -2061,9 +2016,7 @@ impl OxplowMcp {
                 thread.clone(),
                 CreateTaskInput {
                     title: p.title,
-                    description: variant_opt(p.description),
-                    description_executive: variant_opt(p.description_executive),
-                    description_terse: variant_opt(p.description_terse),
+                    description: Some(p.description),
                     parent_id: parent_task_id,
                     status,
                     priority,
@@ -2147,8 +2100,6 @@ impl OxplowMcp {
                 UpdateTaskChanges {
                     title: p.title,
                     description: p.description,
-                    description_executive: p.description_executive,
-                    description_terse: p.description_terse,
                     parent_id,
                     status,
                     priority,
@@ -2281,36 +2232,6 @@ impl OxplowMcp {
                         &tid,
                         oxplow_domain::EffortId::from(r.effort_id.clone()),
                     );
-                }
-                // Persist the executive/terse summary variants onto
-                // the effort that record_effort just wrote the summary
-                // to (the developer text). The variant params are
-                // required, but an empty rewrite still degrades to the
-                // developer text — keep the blob NULL in that case.
-                let summary_executive = variant_opt(p.summary_executive.clone());
-                let summary_terse = variant_opt(p.summary_terse.clone());
-                if summary_has_body && (summary_executive.is_some() || summary_terse.is_some()) {
-                    use oxplow_db::TaskEffortStore as _;
-                    if let Ok(Some(effort)) = self
-                        .services
-                        .effort_store
-                        .most_recent_for_task(item.id)
-                        .await
-                    {
-                        let variants = oxplow_domain::ProseVariants {
-                            developer: p.summary.clone(),
-                            executive: summary_executive,
-                            terse: summary_terse,
-                        };
-                        if let Err(err) = self
-                            .services
-                            .effort_store
-                            .set_summary_variants(&effort.id, &variants)
-                            .await
-                        {
-                            tracing::warn!(?err, "complete_task: summary variant persist failed");
-                        }
-                    }
                 }
             }
         }
@@ -2575,9 +2496,7 @@ impl OxplowMcp {
                 thread.clone(),
                 CreateTaskInput {
                     title: p.epic_title,
-                    description: variant_opt(p.epic_description),
-                    description_executive: variant_opt(p.epic_description_executive),
-                    description_terse: variant_opt(p.epic_description_terse),
+                    description: Some(p.epic_description),
                     author: Some(oxplow_domain::TaskAuthor::Agent),
                     ..Default::default()
                 },
@@ -2593,9 +2512,7 @@ impl OxplowMcp {
                     thread.clone(),
                     CreateTaskInput {
                         title: child.title,
-                        description: variant_opt(child.description),
-                        description_executive: variant_opt(child.description_executive),
-                        description_terse: variant_opt(child.description_terse),
+                        description: Some(child.description),
                         parent_id: Some(epic.id),
                         author: Some(oxplow_domain::TaskAuthor::Agent),
                         ..Default::default()
@@ -2916,14 +2833,7 @@ impl OxplowMcp {
 
     #[tool(description = "Record a wiki page edit's freshness bookkeeping. \
                        Call this AFTER editing a `.oxplow/wiki/<slug>.md` \
-                       file. REQUIRES all three audience versions on disk: \
-                       the developer body `<slug>.md` plus the sibling \
-                       rewrites `<slug>.executive.md` (shorter executive \
-                       summary) and `<slug>.terse.md` (terse, fragment- \
-                       style) — each non-empty and genuinely distinct. The \
-                       call is rejected until all three exist, so the \
-                       audience switcher never silently falls back to the \
-                       developer text. \
+                       file. \
                        Both `verified_refs` and `removed_refs` are \
                        REQUIRED: pass `[]` if nothing applies, but be \
                        explicit so the freshness signal stays honest. \
@@ -2990,30 +2900,6 @@ impl OxplowMcp {
             .join(format!("{slug}.md"));
         let body = std::fs::read_to_string(&body_path)
             .map_err(|e| internal(format!("read {slug}.md: {e}")))?;
-        // Enforce that all three audience versions exist before the edit
-        // is recorded: the developer body (`<slug>.md`, just read) plus
-        // the executive/terse sibling rewrites. A missing or empty
-        // variant degrades to the developer text, making the audience
-        // switcher a silent no-op — so block recording until all three
-        // are authored.
-        let missing_variants = oxplow_app::wiki_pages::missing_variant_siblings(
-            &self.services.layout.project_dir,
-            &slug,
-        );
-        if !missing_variants.is_empty() {
-            return Err(McpError::invalid_params(
-                format!(
-                    "wiki page `{slug}` is missing required audience-variant siblings: {}. \
-                     Author all three versions before recording the update — \
-                     `{slug}.md` (developer, canonical), `{slug}.executive.md` \
-                     (shorter executive-summary rewrite), and `{slug}.terse.md` \
-                     (terse, fragment-style rewrite) — each with genuinely distinct, \
-                     non-empty content.",
-                    missing_variants.join(", ")
-                ),
-                None,
-            ));
-        }
         let parsed = oxplow_app::wiki_pages::parse_refs(&body);
         let body_files: std::collections::HashSet<&str> =
             parsed.file_refs.iter().map(|s| s.as_str()).collect();
@@ -3148,20 +3034,6 @@ fn parse_priority(s: &str) -> Result<oxplow_domain::TaskPriority, McpError> {
             ))
         }
     })
-}
-
-/// Normalize a required-but-possibly-empty prose-variant string to the
-/// `Option<String>` the domain layer stores. The audience-variant
-/// params are required at the tool-call layer (so the model always
-/// authors all three), but an empty/whitespace body still degrades to
-/// the developer text — keep the stored blob NULL in that case rather
-/// than persisting a variant equal to its own fallback.
-fn variant_opt(s: String) -> Option<String> {
-    if s.trim().is_empty() {
-        None
-    } else {
-        Some(s)
-    }
 }
 
 /// Resolve the per-(stream, language) LspProxy. Helper sitting
@@ -3560,7 +3432,6 @@ mod tests {
             parent_id: None,
             title: title.into(),
             description: String::new(),
-            description_variants: oxplow_domain::ProseVariants::default(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -3609,7 +3480,6 @@ mod tests {
                 },
                 "the highlighted text",
                 "[]",
-                None,
                 &[CommentTarget {
                     kind: "task".into(),
                     id: parent_task.to_string(),
@@ -3833,56 +3703,11 @@ mod tests {
         );
     }
 
-    /// Helper to write a wiki body plus its required executive/terse
-    /// variant siblings (record_wiki_page_update now rejects a page that
-    /// lacks them).
+    /// Helper to write a wiki body to disk.
     async fn seed_wiki(project: &std::path::Path, slug: &str, body: &str) {
         let wiki_dir = project.join(".oxplow").join("wiki");
         std::fs::create_dir_all(&wiki_dir).unwrap();
         std::fs::write(wiki_dir.join(format!("{slug}.md")), body).unwrap();
-        std::fs::write(
-            wiki_dir.join(format!("{slug}.executive.md")),
-            format!("exec: {body}"),
-        )
-        .unwrap();
-        std::fs::write(
-            wiki_dir.join(format!("{slug}.terse.md")),
-            format!("terse: {body}"),
-        )
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn record_wiki_page_update_requires_variant_siblings() {
-        let (proj, _svc, server) = boot();
-        // Seed only the developer body — no executive/terse siblings.
-        let wiki_dir = proj.path().join(".oxplow").join("wiki");
-        std::fs::create_dir_all(&wiki_dir).unwrap();
-        std::fs::write(wiki_dir.join("intro.md"), "developer body").unwrap();
-
-        let err = server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect_err("missing variant siblings should error");
-        let msg = format!("{err:?}");
-        assert!(msg.contains("intro.executive.md"), "names executive: {msg}");
-        assert!(msg.contains("intro.terse.md"), "names terse: {msg}");
-
-        // Author both siblings → the call now succeeds.
-        std::fs::write(wiki_dir.join("intro.executive.md"), "exec rewrite").unwrap();
-        std::fs::write(wiki_dir.join("intro.terse.md"), "terse rewrite").unwrap();
-        server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect("all three versions present → recorded");
     }
 
     #[tokio::test]
@@ -4082,8 +3907,6 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: "dev".into(),
-                description_executive: "exec".into(),
-                description_terse: "terse".into(),
                 kind: None,
                 priority: None,
                 status: None,
@@ -4109,8 +3932,6 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: "dev".into(),
-                description_executive: "exec".into(),
-                description_terse: "terse".into(),
                 kind: None,
                 priority: None,
                 status: None,
@@ -4151,88 +3972,41 @@ mod tests {
     }
 
     #[test]
-    fn create_task_params_require_all_three_prose_versions() {
-        // The developer base plus the executive/terse rewrites are all
-        // required at the tool-call layer: a payload missing any of the
-        // three fails to deserialize, so the model can't silently ship a
-        // developer-only task that makes the audience switcher a no-op.
-        let full = || {
-            serde_json::json!({
-                "title": "t",
-                "description": "developer body",
-                "description_executive": "exec rewrite",
-                "description_terse": "terse rewrite",
-            })
-        };
-        serde_json::from_value::<CreateTaskMcpParams>(full()).expect("full payload parses");
-        for missing in ["description", "description_executive", "description_terse"] {
-            let mut obj = full();
-            obj.as_object_mut().unwrap().remove(missing);
-            assert!(
-                serde_json::from_value::<CreateTaskMcpParams>(obj).is_err(),
-                "missing `{missing}` should fail to deserialize (required)"
-            );
-        }
+    fn create_task_params_require_description() {
+        // `description` is the single required prose field; the
+        // audience-variant params are gone, so an extra `*_executive`
+        // key is simply ignored rather than required.
+        serde_json::from_value::<CreateTaskMcpParams>(serde_json::json!({
+            "title": "t",
+            "description": "developer body",
+        }))
+        .expect("title + description parses");
+        let mut obj = serde_json::json!({ "title": "t", "description": "body" });
+        obj.as_object_mut().unwrap().remove("description");
+        assert!(
+            serde_json::from_value::<CreateTaskMcpParams>(obj).is_err(),
+            "missing `description` should fail to deserialize (required)"
+        );
     }
 
     #[test]
-    fn complete_task_params_require_summary_variants() {
-        let full = || {
-            serde_json::json!({
-                "id": "t-1",
-                "summary": "developer summary",
-                "summary_executive": "exec",
-                "summary_terse": "terse",
-            })
-        };
-        serde_json::from_value::<CompleteTaskParams>(full()).expect("full payload parses");
-        for missing in ["summary_executive", "summary_terse"] {
-            let mut obj = full();
-            obj.as_object_mut().unwrap().remove(missing);
-            assert!(
-                serde_json::from_value::<CompleteTaskParams>(obj).is_err(),
-                "missing `{missing}` should fail to deserialize (required)"
-            );
-        }
-    }
-
-    #[test]
-    fn file_epic_params_require_all_three_prose_versions() {
-        let full = || {
-            serde_json::json!({
-                "epic_title": "E",
-                "epic_description": "dev",
-                "epic_description_executive": "exec",
-                "epic_description_terse": "terse",
-                "children": [{
-                    "title": "C",
-                    "description": "dev",
-                    "description_executive": "exec",
-                    "description_terse": "terse",
-                }],
-            })
-        };
-        serde_json::from_value::<FileEpicWithChildrenParams>(full()).expect("full payload parses");
-        for missing in [
-            "epic_description",
-            "epic_description_executive",
-            "epic_description_terse",
-        ] {
-            let mut obj = full();
-            obj.as_object_mut().unwrap().remove(missing);
-            assert!(
-                serde_json::from_value::<FileEpicWithChildrenParams>(obj).is_err(),
-                "missing epic field `{missing}` should fail to deserialize (required)"
-            );
-        }
-        for missing in ["description", "description_executive", "description_terse"] {
-            let mut obj = full();
-            obj["children"][0].as_object_mut().unwrap().remove(missing);
-            assert!(
-                serde_json::from_value::<FileEpicWithChildrenParams>(obj).is_err(),
-                "missing child field `{missing}` should fail to deserialize (required)"
-            );
-        }
+    fn file_epic_params_require_descriptions() {
+        serde_json::from_value::<FileEpicWithChildrenParams>(serde_json::json!({
+            "epic_title": "E",
+            "epic_description": "dev",
+            "children": [{ "title": "C", "description": "dev" }],
+        }))
+        .expect("epic + child descriptions parse");
+        let mut obj = serde_json::json!({
+            "epic_title": "E",
+            "epic_description": "dev",
+            "children": [{ "title": "C", "description": "dev" }],
+        });
+        obj.as_object_mut().unwrap().remove("epic_description");
+        assert!(
+            serde_json::from_value::<FileEpicWithChildrenParams>(obj).is_err(),
+            "missing `epic_description` should fail to deserialize (required)"
+        );
     }
 
     #[tokio::test]

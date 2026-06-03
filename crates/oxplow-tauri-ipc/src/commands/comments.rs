@@ -36,9 +36,6 @@ pub struct CreateCommentRequest {
     pub target_id: String,
     pub quote: String,
     pub selectors_json: String,
-    /// Heading slug of the section the quote sits in (variant-bearing
-    /// targets only); `None` otherwise.
-    pub section_anchor: Option<String>,
     pub context_chain: Vec<CommentTarget>,
     pub referenced_refs: Vec<CommentTarget>,
     pub intent: CommentIntent,
@@ -64,7 +61,6 @@ pub async fn create_comment(
             &target,
             &req.quote,
             &req.selectors_json,
-            req.section_anchor.as_deref(),
             &req.context_chain,
             &req.referenced_refs,
             req.intent,

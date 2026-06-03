@@ -9,7 +9,6 @@ pub mod comment;
 pub mod error;
 pub mod hook;
 pub mod ids;
-pub mod prose;
 pub mod refs;
 pub mod stores;
 pub mod stream;
@@ -27,7 +26,6 @@ pub use ids::{
     AgentTurnId, CommentId, CommentMessageId, EffortId, HookEventId, NoteId, StreamId, TaskId,
     TaskLinkId, ThreadId,
 };
-pub use prose::{heading_slug, ProseAudience, ProseVariants};
 pub use stream::{Stream, StreamKind};
 pub use task::{
     Task, TaskActorKind, TaskAuthor, TaskEvent, TaskImpact, TaskLink, TaskLinkType, TaskNote,

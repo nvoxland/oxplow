@@ -356,12 +356,8 @@ export interface TaskEffort {
   ended_at: string | null;
   start_snapshot_id: string | null;
   end_snapshot_id: string | null;
-  /** Developer-audience summary (canonical text). */
+  /** The effort's summary prose (canonical text). */
   summary: string | null;
-  /** Audience variants of the summary (developer mirrors `summary`;
-   *  executive/terse fall back to it). Mirrors the backend
-   *  `ProseVariants`. */
-  summary_variants?: { developer: string; executive?: string | null; terse?: string | null };
 }
 
 export interface EffortDetail {
@@ -1145,20 +1141,6 @@ export async function writeWikiPageBody(_streamId: string, slug: string, body: s
   unwrap(await commands.writeWikiPageBody(slug, body));
 }
 
-/** All three audience variants of a wiki body. Developer is the
- *  canonical `<slug>.md`; executive/terse are sibling files
- *  (`null` when absent). */
-export async function listWikiPageVariants(
-  _streamId: string,
-  slug: string,
-): Promise<{ developer: string; executive: string | null; terse: string | null }> {
-  return unwrap(await commands.listWikiPageVariants(slug)) as {
-    developer: string;
-    executive: string | null;
-    terse: string | null;
-  };
-}
-
 export async function deleteWikiPage(_streamId: string, slug: string): Promise<void> {
   unwrap(await commands.deleteWikiPage(slug));
 }
@@ -1182,10 +1164,6 @@ export async function createComment(input: {
   quote: string;
   /** W3C selectors array, serialized. */
   selectorsJson: string;
-  /** Heading-slug of the section the quote sits in (variant-bearing
-   *  prose surfaces only); lets the comment re-display under the
-   *  matching heading of another audience variant. */
-  sectionAnchor?: string | null;
   /** Ancestor regions (innermost→outermost, excluding the target). */
   contextChain?: { kind: string; id: string }[];
   /** Canonical refs found inside the selection. */
@@ -1202,7 +1180,6 @@ export async function createComment(input: {
       targetId: input.targetId,
       quote: input.quote,
       selectorsJson: input.selectorsJson,
-      sectionAnchor: input.sectionAnchor ?? null,
       contextChain: input.contextChain ?? [],
       referencedRefs: input.referencedRefs ?? [],
       intent: input.intent,

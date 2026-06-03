@@ -11,8 +11,6 @@ import { wikiFreshnessRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { useProseAudience } from "../tabs/useProseAudience.js";
-import { availableVariants, selectVariantBody, type ProseVariants } from "../components/ProseAudience/selectVariant.js";
 
 export interface WikiPageProps {
   stream: Stream | null;
@@ -106,12 +104,6 @@ function WikiPageBody({
 }) {
   const controller = useWikiPageController(stream, slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
-  const { audience, setAudience } = useProseAudience(nav?.pageKey ?? null);
-  // Executive/terse live as sibling files (`<slug>.executive.md` /
-  // `<slug>.terse.md`); the controller reads all three. Missing
-  // variants fall back to the developer body (selector shows them muted).
-  const variants: ProseVariants = controller.variants;
-  const shownBody = selectVariantBody(variants, audience);
   const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
   const [staleCount, setStaleCount] = useState<number | null>(null);
   useEffect(() => {
@@ -169,11 +161,6 @@ function WikiPageBody({
       backlinks={backlinks}
       outbound={outbound}
       commentsNav={<CommentNavigator targetKind="wiki" targetId={slug} />}
-      audience={{
-        value: audience,
-        onChange: setAudience,
-        available: availableVariants(variants),
-      }}
       layout="details"
       rightRail={rail}
     >
@@ -181,8 +168,6 @@ function WikiPageBody({
         stream={stream}
         slug={slug}
         controller={controller}
-        audience={audience}
-        shownBody={shownBody}
         onScrollHostMounted={setScrollHost}
         onNavigateInternalWikiPage={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenWikiPage(nextSlug)}
         onOpenWikiPageInNewTab={onOpenWikiPage}

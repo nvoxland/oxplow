@@ -204,33 +204,11 @@ listener; migration v29 cancels any such still-in_progress rows, and
 the read path maps the legacy string to `null` so older terminal rows
 continue to load under the narrowed enum.
 
-`description_variants` (migration V27, nullable TEXT) — the optional
-**executive** and **terse** audience rewrites of `description`, stored
-as a JSON blob `{"executive":"…","terse":"…"}` (developer text never
-lives here — `description` stays canonical). Modeled on `impacts_json`.
-The store rebuilds a `ProseVariants` (`crates/oxplow-domain/src/prose.rs`)
-on read via `from_developer_and_json(description, description_variants)`,
-which fills `developer` from the column and degrades every audience to
-developer when a variant is absent or the blob is NULL/malformed — so
-legacy rows need no backfill. Writes persist `ProseVariants::optional_json()`
-(NULL when both variants are absent). The agent authors all three inline
-via the `description_executive` / `description_terse` params on
-`create_task` / `update_task` / `file_epic_with_children`
-(`CreateTaskInput` / `UpdateTaskChanges` in `oxplow-app`). On the
-**authoring** tools — `create_task`, `complete_task`,
-`file_epic_with_children` (+ `EpicChildSpec`) — the developer body and
-both variant params are **required `String`s** (not `Option`), so
-JsonSchema marks them required and the model can't ship a developer-only
-body that makes the audience switcher a silent no-op. The MCP boundary
-runs each variant through `variant_opt` (empty/whitespace → `None`) so a
-blank rewrite still degrades cleanly to `None`/developer rather than
-persisting a variant equal to its own fallback. `update_task` keeps its
-variant params `Option` — there `missing → keep existing` semantics must
-survive a partial-patch edit. `ProseAudience`
-+ `ProseVariants` are exported to the frontend through tauri-specta. The
-same V27 migration also adds `task_effort.summary_variants` and
-`comment.section_anchor` (both wired — see below and the `comment`
-section).
+The `description` column is the task's single canonical prose body.
+(An earlier developer/executive/terse audience-variant feature added a
+`description_variants` column in V27; it was removed in V29 along with
+`task_effort.summary_variants` and `comment.section_anchor` — see the
+V29 migration. Tasks/efforts/wiki pages now carry one body each.)
 
 `note_count` is a computed column added to every `Task` returned by the
 store (via COUNT subquery over `task_note`). It drives the note badge on
@@ -295,17 +273,9 @@ Auto-managed by the runtime on `task.changed` status transitions:
   snapshot is fresher than that gap, the close path skips flushing a
   new row (the effort's `end_snapshot_id` is left null in that case).
 
-`summary_variants` (V27 — nullable TEXT) holds the optional
-executive/terse audience rewrites of `summary`, same JSON shape and
-`ProseVariants` handling as `task.description_variants`. `summary` stays
-the canonical developer text; `row_to_effort` rebuilds a `ProseVariants`
-on read with developer fallback. The agent authors the variants via the
-required `summary_executive` / `summary_terse` params on `complete_task`, which
-land them through `TaskEffortStore::set_summary_variants` on the effort
-that just received the developer `summary` (preserving the
-write-once-on-completion shape). The frontend swaps the rendered
-description (TaskDetail) and effort summary (ActivityTimeline) by the
-page-level audience selector.
+`summary` is the effort's single canonical prose body, written once on
+completion via `complete_task`. (A `summary_variants` column existed
+V27–V28 for the audience-variant feature; dropped in V29.)
 
 Re-opening a task (done → in_progress) produces a second effort. At most one open effort per task at a time.
 
@@ -639,21 +609,6 @@ Refs left in the body but in NEITHER list keep their existing pin —
 that's how "this content relies on a stale source" stays accurate.
 Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
 
-**Required audience-variant siblings.** Wiki bodies are file-based, so
-unlike tasks/efforts the three audience versions aren't MCP params —
-they're sibling files: `<slug>.md` (developer, canonical),
-`<slug>.executive.md`, and `<slug>.terse.md` (suffixes in
-`WIKI_VARIANT_SUFFIXES`). `record_wiki_page_update` enforces all three
-exist and are non-empty before recording an edit: after reading the
-developer body it calls `wiki_pages::missing_variant_siblings(project_dir,
-slug)` (whitespace-only counts as missing) and rejects the call with the
-list of absent variants if any are missing. This is the wiki analogue of
-the required variant params on the task/effort authoring tools — it stops
-a page being registered with only the developer text, which would make
-the page-level audience switcher a silent no-op. The fs-watcher auto-sync
-(`sync_all`) does **not** enforce this; only the explicit agent-driven
-`record_wiki_page_update` call is the gate.
-
 **User-facing Freshness view.** The
 `list_wiki_freshness(slug)` IPC
 (`crates/oxplow-tauri-ipc/src/commands/wiki_freshness.rs`) joins
@@ -958,21 +913,6 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   highlight + "approx" badge). Only when even fuzzy fails is the comment
   `orphaned` — still listed, no highlight. Rust never parses
   `selectors_json`, so enriching it needs no migration.
-- **Cross-variant section anchor (V27).** `section_anchor` (nullable
-  TEXT) holds the heading slug of the section the selection sat inside,
-  for prose targets that carry audience variants (wiki bodies, task
-  descriptions). The `quote` only resolves against the variant it was
-  authored on, so when a reader views a *different* variant the comment
-  re-displays under the matching heading instead. Captured FE-side at
-  create time (`sectionAnchorForQuote(body, quote)` over the developer
-  body; slug rule mirrors `oxplow_domain::prose::heading_slug` and the
-  frontend `sectionSlug`), passed through `create_comment` (MCP + IPC).
-  Display: `resolveCommentSection` picks quote-mode (exact match in the
-  shown body) → section-mode (anchor among the shown body's headings) →
-  orphaned; `VariantCommentSections` renders the section-grouped list in
-  the read-only variant views. Resolution is display-only — only the
-  developer surface persists `orphaned`/re-anchors. `None` for
-  non-variant targets or selections outside any heading.
 - **Typed context (V24).** Beyond the quote, a comment carries the typed
   context it was made in. `context_chain_json` is a JSON array of
   `{kind,id}` refs — the nesting of page regions the selection sat inside

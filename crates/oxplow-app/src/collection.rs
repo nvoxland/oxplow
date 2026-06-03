@@ -809,7 +809,6 @@ mod tests {
                     parent_id: None,
                     title: "x".into(),
                     description: String::new(),
-                    description_variants: oxplow_domain::ProseVariants::default(),
                     status: TaskStatus::InProgress,
                     priority: TaskPriority::Medium,
                     sort_index: 0,
@@ -1132,7 +1131,6 @@ mod tests {
                 start_snapshot_id: None,
                 end_snapshot_id: None,
                 summary: None,
-                summary_variants: oxplow_domain::ProseVariants::default(),
             };
             let report = h.service.merge_fresh_test_reports(&effort, &cfg);
             assert!(
@@ -1241,7 +1239,6 @@ mod tests {
                 start_snapshot_id: None,
                 end_snapshot_id: None,
                 summary: None,
-                summary_variants: oxplow_domain::ProseVariants::default(),
             };
             let cfg = oxplow_config::CollectionConfig {
                 reports: vec![

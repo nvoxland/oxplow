@@ -378,7 +378,6 @@ mod tests {
                 },
                 "quoted sprocket text",
                 "{}",
-                None,
                 &[],
                 &[],
                 CommentIntent::Note,

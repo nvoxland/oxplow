@@ -227,7 +227,7 @@ function buildTestTree(suites: JUnitSuite[]): TreeNode[] {
     label: string;
     path: string;
     childMap: Map<string, Mut>;
-    leaves: { name: string; status: TestStatus; timeMs?: number }[];
+    leaves: { name: string; status: TestStatus; timeMs?: number; everFailed?: boolean }[];
   }
   const mut = (label: string, path: string): Mut => ({ label, path, childMap: new Map(), leaves: [] });
   const finalize = (m: Mut): TreeNode => {

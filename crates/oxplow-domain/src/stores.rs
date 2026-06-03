@@ -182,7 +182,6 @@ pub trait CommentStore: Send + Sync {
         target: &CommentTarget,
         quote: &str,
         selectors_json: &str,
-        section_anchor: Option<&str>,
         context_chain: &[CommentTarget],
         referenced_refs: &[CommentTarget],
         intent: CommentIntent,

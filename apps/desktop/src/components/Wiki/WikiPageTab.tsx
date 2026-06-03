@@ -11,8 +11,6 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 import type { WikiPageController } from "./useWikiPageController.js";
-import type { ProseAudience } from "../../tabs/proseAudience.js";
-import { VariantCommentSections } from "../ProseAudience/VariantCommentSections.js";
 
 type FreshnessStatus = WikiPageSummary["freshness"];
 
@@ -32,14 +30,6 @@ interface Props {
   stream: Stream;
   slug: string;
   controller: WikiPageController;
-  /** Which audience variant to show. `developer` (default) renders the
-   *  editable RichTextField bound to the canonical body; `executive` /
-   *  `terse` render `shownBody` read-only (edits always target
-   *  developer). */
-  audience?: ProseAudience;
-  /** The body resolved for `audience` (developer fallback applied by the
-   *  caller). Only consulted for the non-developer read-only view. */
-  shownBody?: string;
   /** Published on mount so the parent can render rail content (TOC) that
    *  needs to read scroll position from the same container. */
   onScrollHostMounted?: (el: HTMLElement | null) => void;
@@ -55,8 +45,6 @@ export function WikiPageTab({
   stream,
   slug,
   controller,
-  audience = "developer",
-  shownBody,
   onScrollHostMounted,
   onNavigateInternalWikiPage,
   onOpenWikiPageInNewTab,
@@ -66,8 +54,6 @@ export function WikiPageTab({
   onOpenExternalUrl,
 }: Props) {
   const { summary, body, setDraft, notFound, loadError } = controller;
-  const isDeveloper = audience === "developer";
-  const variantBody = shownBody ?? body;
   // Pre-process `[[ ]]` wikilinks into standard markdown links before
   // handing the body to Tiptap; post-process back to `[[ ]]` form on
   // commit so the on-disk file keeps its authored shape.
@@ -117,31 +103,6 @@ export function WikiPageTab({
           </div>
         ) : loadError ? (
           <div style={{ color: "var(--severity-critical)" }}>Failed to load wiki page: {loadError}</div>
-        ) : !isDeveloper ? (
-          <div data-testid={`wiki-variant-${audience}`}>
-            <div
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--text-muted)",
-                marginBottom: 10,
-                fontStyle: "italic",
-              }}
-            >
-              {audience === "executive" ? "Executive summary" : "Terse version"} — read-only.
-              Switch to Developer to edit.
-            </div>
-            <MarkdownView
-              body={preprocessWikilinks(variantBody)}
-              renderMermaid
-              onNavigateInternal={onNavigateInternalWikiPage}
-              onOpenInNewTab={onOpenWikiPageInNewTab}
-              onOpenFile={onOpenFile}
-              onOpenDirectory={onOpenDirectory}
-              onOpenCommit={onOpenCommit}
-              onOpenExternalUrl={onOpenExternalUrl}
-            />
-            <VariantCommentSections targetKind="wiki" targetId={slug} body={variantBody} />
-          </div>
         ) : (
           <RichTextField
             key={`wiki-${slug}`}

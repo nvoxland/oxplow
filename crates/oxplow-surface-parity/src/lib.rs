@@ -276,9 +276,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("delete_wiki_page"),
     ui("read_wiki_page_body"),
     ui("write_wiki_page_body"),
-    ui("read_wiki_page_body_variant"),
-    ui("write_wiki_page_body_variant"),
-    ui("list_wiki_page_variants"),
     // ---- ui-only: wiki freshness ----
     ui("list_wiki_freshness"),
     ui("mark_wiki_ref_verified"),
