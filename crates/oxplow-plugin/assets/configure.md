@@ -90,12 +90,13 @@ collection:
       formats: [clover]     # format name(s) this plugin claims
       runtime: jaq          # jaq (jq) | starlark | exec
       input: xml            # host pre-parse: text | json | xml | lcov | lines
-      entry: |              # jq program: parsed input (.) -> output shape
-        { files: ... }
+      entryFile: oxplow/plugins/clover.jq   # the script file (a jq program here)
 ```
 
-Prefer `jaq` (jq) — the host pre-parses the container (`input`) so the
-script just reshapes JSON. Use `starlark` for logic jq can't express,
-or `exec` (external program, raw report on stdin → JSON on stdout) as
+The script goes in its own file (`entryFile`, project-relative), not
+inline in the yaml. Prefer `jaq` (jq) — the host pre-parses the
+container (`input`) so the script just reshapes JSON. Use `starlark`
+for logic jq can't express, or `exec` (`entryFile` is the executable;
+raw report on stdin → JSON on stdout) as
 a last resort. The full host-helper API + output schemas are in
 `.context/collection.md`.

@@ -91,9 +91,11 @@ pub struct PluginConfig {
     // No `skip_serializing_if`: specta's unified-mode TS export forbids it.
     #[serde(default)]
     pub input: Option<String>,
-    /// Script body (jaq/starlark) or program (exec). Required for all three.
-    #[serde(default)]
-    pub entry: Option<String>,
+    /// Project-relative path to the script file: the jaq/Starlark program, or
+    /// the program to spawn for `exec`. Scripts live in their own files, not
+    /// inline in `oxplow.yaml`. Required for all three runtimes.
+    #[serde(rename = "entryFile", default)]
+    pub entry_file: Option<String>,
     /// Extra arguments for the `exec` runtime.
     #[serde(default)]
     pub args: Vec<String>,
@@ -244,8 +246,8 @@ struct RawPlugin {
     runtime: String,
     #[serde(default)]
     input: Option<String>,
-    #[serde(default)]
-    entry: Option<String>,
+    #[serde(rename = "entryFile", default)]
+    entry_file: Option<String>,
     #[serde(default)]
     args: Vec<String>,
 }
@@ -501,8 +503,8 @@ pub fn write_project_config(
                     if let Some(input) = &p.input {
                         m.insert("input".into(), input.clone().into());
                     }
-                    if let Some(entry) = &p.entry {
-                        m.insert("entry".into(), entry.clone().into());
+                    if let Some(entry_file) = &p.entry_file {
+                        m.insert("entryFile".into(), entry_file.clone().into());
                     }
                     if !p.args.is_empty() {
                         m.insert(
@@ -739,13 +741,22 @@ fn validate_plugins(raw: Option<Vec<RawPlugin>>) -> Result<Vec<PluginConfig>, Co
             }
             _ => None,
         };
-        let entry = p
-            .entry
+        let entry_file = p
+            .entry_file
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        if entry.is_none() {
+        let entry_file = match entry_file {
+            Some(f) => f,
+            None => {
+                return Err(ConfigError::Invalid(format!(
+                    "collection.plugins[{i}].entryFile is required (the script file path)"
+                )))
+            }
+        };
+        if Path::new(&entry_file).is_absolute() || entry_file.split('/').any(|c| c == "..") {
             return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].entry is required for runtime \"{runtime}\""
+                "collection.plugins[{i}].entryFile must be a project-relative path \
+                 without `..` (got \"{entry_file}\")"
             )));
         }
         let args = p.args.into_iter().map(|a| a.trim().to_string()).collect();
@@ -755,7 +766,7 @@ fn validate_plugins(raw: Option<Vec<RawPlugin>>) -> Result<Vec<PluginConfig>, Co
             formats,
             runtime,
             input,
-            entry,
+            entry_file: Some(entry_file),
             args,
         });
     }
@@ -1133,7 +1144,7 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entry: \".\"\n",
+            "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: oxplow/plugins/clover.jq\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -1143,7 +1154,19 @@ collection:
         assert_eq!(p.kind, "coverage");
         assert_eq!(p.formats, vec!["clover"]);
         assert_eq!(p.runtime, "jaq");
-        assert_eq!(p.entry.as_deref(), Some("."));
+        assert_eq!(p.entry_file.as_deref(), Some("oxplow/plugins/clover.jq"));
+    }
+
+    #[test]
+    fn rejects_plugin_entry_file_escaping_project() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "collection:\n  plugins:\n    - name: x\n      kind: coverage\n      formats: [x]\n      runtime: jaq\n      entryFile: ../../etc/passwd\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("entryFile")));
     }
 
     #[test]
@@ -1151,7 +1174,7 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  plugins:\n    - name: x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entry: \".\"\n",
+            "collection:\n  plugins:\n    - name: x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entryFile: p.jq\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1159,7 +1182,7 @@ collection:
     }
 
     #[test]
-    fn rejects_plugin_missing_entry() {
+    fn rejects_plugin_missing_entry_file() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
@@ -1167,7 +1190,7 @@ collection:
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("entry")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("entryFile")));
     }
 
     #[test]
@@ -1194,7 +1217,7 @@ collection:
                     formats: vec!["clover".into()],
                     runtime: "jaq".into(),
                     input: Some("xml".into()),
-                    entry: Some(".".into()),
+                    entry_file: Some("oxplow/plugins/clover.jq".into()),
                     args: vec![],
                 }],
             },

@@ -145,16 +145,17 @@ collection:
       formats: [clover]     # format name(s) this plugin claims
       runtime: jaq          # jaq (jq) | starlark | exec
       input: xml            # host pre-parse: text | json | xml | lcov | lines
-      entry: |              # jq program: parsed input (.) -> output shape
-        { files: ... }
+      entryFile: oxplow/plugins/clover.jq   # the script file (jq program here)
 ```
 
-The host pre-parses the report for you (per `input`), so the script
-only reshapes JSON. `jaq` (jq) is the simplest for XML/JSON; `starlark`
-covers logic jq can't express; `exec` runs an external program (raw
-report on stdin, JSON on stdout) as a last resort. jaq and starlark
-run in-process and sandboxed, so their output is trusted as measured;
-`exec` can do I/O, so its output is flagged lower-trust in the UI.
+The script lives in its own file (`entryFile`, a project-relative path),
+not inline in the yaml. The host reads it and pre-parses the report for
+you (per `input`), so the script only reshapes JSON. `jaq` (jq) is the
+simplest for XML/JSON; `starlark` covers logic jq can't express; `exec`
+runs an external program — `entryFile` is the executable — (raw report on
+stdin, JSON on stdout) as a last resort. jaq and starlark run in-process
+and sandboxed, so their output is trusted as measured; `exec` can do
+I/O, so its output is flagged lower-trust in the UI.
 
 The full authoring reference — host helpers, the exact output schemas,
 a worked example — lives in `.context/collection.md` in the oxplow

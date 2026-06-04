@@ -180,8 +180,10 @@ easier fit.)
 
 ### Authoring a parser plugin
 
-Add it to `oxplow.yaml` — no recompile. Example: a Clover (XML) coverage parser
-in jaq, claiming the `clover` format that a `reports[]` entry then references:
+Register it in `oxplow.yaml` — no recompile. The **script lives in its own
+file** (`entryFile`, project-relative; absolute paths and `..` are rejected),
+not inline in the yaml. Example: a Clover (XML) coverage parser in jaq,
+claiming the `clover` format that a `reports[]` entry then references:
 
 ```yaml
 collection:
@@ -193,20 +195,26 @@ collection:
       formats: [clover]       # format name(s) this plugin claims
       runtime: jaq            # jaq | starlark | exec
       input: xml              # text | json | xml | lcov | lines (jaq/starlark only)
-      entry: |                # jaq program: input value (.) → output schema
-        { files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
-            ({}; . + { ($f.attrs.path): {
-                instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber) ],
-                covered:      [ $f | .. | select((.tag?=="line") and ((.attrs.count//"0")|tonumber)>0) | (.attrs.num|tonumber) ] } }) }
+      entryFile: oxplow/plugins/clover.jq
 ```
 
-For `starlark`, set `runtime: starlark` and write `def transform(input): …
-return {…}` (the host appends the `json.encode(transform(...))` call; the
-`json` stdlib **and** the `parse_xml`/`parse_json`/`lcov_records`/`lines`/
-`regex_find`/`xpath` host builtins are available, so a Starlark plugin can
-self-parse raw `input: text`). For `exec`, set `runtime: exec`, `entry: <program>`,
-optional `args: [...]`; it gets raw report bytes on stdin and must print the
-kind's JSON to stdout.
+```jq
+# oxplow/plugins/clover.jq — input value (.) → coverage output schema
+{ files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
+    ({}; . + { ($f.attrs.path): {
+        instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber?) ],
+        covered:      [ $f | .. | select((.tag?=="line") and ((.attrs.count//"0")|tonumber? // 0)>0) | (.attrs.num|tonumber?) ] } }) }
+```
+
+`entryFile` resolves relative to the project root; the host reads it (the
+script still does no I/O, so determinism holds). For `starlark`, point
+`entryFile` at a `.star` file defining `def transform(input): … return {…}`
+(the host appends the `json.encode(transform(...))` call; the `json` stdlib
+**and** the `parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`
+host builtins are available, so a Starlark plugin can self-parse raw
+`input: text`). For `exec`, `entryFile` is the program to spawn (executable,
+with a shebang); optional `args: [...]`; it gets raw report bytes on stdin and
+must print the kind's JSON to stdout.
 
 The first-party parsers in `src/plugins/*.jq` are the canonical templates. New
 formats are verified by a golden test that the plugin reproduces the reference

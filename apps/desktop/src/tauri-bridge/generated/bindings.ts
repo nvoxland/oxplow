@@ -1668,8 +1668,12 @@ export type PluginConfig = {
 	 *  the in-process tiers (jaq/starlark); `exec` always gets raw content.
 	 */
 	input?: string | null,
-	// Script body (jaq/starlark) or program (exec). Required for all three.
-	entry?: string | null,
+	/**
+	 *  Project-relative path to the script file: the jaq/Starlark program, or
+	 *  the program to spawn for `exec`. Scripts live in their own files, not
+	 *  inline in `oxplow.yaml`. Required for all three runtimes.
+	 */
+	entryFile?: string | null,
 	// Extra arguments for the `exec` runtime.
 	args?: string[],
 };

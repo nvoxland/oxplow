@@ -189,11 +189,12 @@ impl CollectionService {
     fn registry(&self, cfg: &oxplow_config::CollectionConfig) -> CollectorRegistry {
         let mut reg = CollectorRegistry::with_builtins();
         for p in &cfg.plugins {
-            match plugin_to_collector(p) {
-                Some(c) => reg.register(c),
-                None => tracing::warn!(
+            match plugin_to_collector(p, &self.project_dir) {
+                Ok(c) => reg.register(c),
+                Err(e) => tracing::warn!(
                     plugin = %p.name,
-                    "collection plugin skipped (invalid runtime/kind/input)"
+                    error = %e,
+                    "collection plugin skipped"
                 ),
             }
         }
@@ -712,14 +713,19 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
     changed
 }
 
-/// Convert a project plugin config into an executable collector. Returns
-/// `None` for an unrecognized kind/runtime/input (config validation should
-/// prevent this; defensive).
-fn plugin_to_collector(p: &oxplow_config::PluginConfig) -> Option<Collector> {
+/// Convert a project plugin config into an executable collector, reading its
+/// script from `entryFile` (project-relative; config validation already
+/// rejects absolute / `..` paths). Host-side file I/O — the script itself
+/// still does none, so determinism holds. `Err` carries a reason for the
+/// skip-and-warn path.
+fn plugin_to_collector(
+    p: &oxplow_config::PluginConfig,
+    project_dir: &std::path::Path,
+) -> Result<Collector, String> {
     let kind = match p.kind.as_str() {
         "coverage" => CollectorKind::Coverage,
         "test" => CollectorKind::Test,
-        _ => return None,
+        other => return Err(format!("unknown kind \"{other}\"")),
     };
     let input = match p.input.as_deref().unwrap_or("text") {
         "text" => CollectorInput::Text,
@@ -727,18 +733,31 @@ fn plugin_to_collector(p: &oxplow_config::PluginConfig) -> Option<Collector> {
         "xml" => CollectorInput::Xml,
         "lcov" => CollectorInput::Lcov,
         "lines" => CollectorInput::Lines,
-        _ => return None,
+        other => return Err(format!("unknown input \"{other}\"")),
     };
-    let entry = p.entry.clone()?;
-    Some(match p.runtime.as_str() {
-        "jaq" => Collector::jaq(p.name.clone(), kind, p.formats.clone(), input, entry),
-        "starlark" => Collector::starlark(p.name.clone(), kind, p.formats.clone(), input, entry),
+    let entry_file = p
+        .entry_file
+        .as_deref()
+        .ok_or_else(|| "missing entryFile".to_string())?;
+    let abs = project_dir.join(entry_file);
+    Ok(match p.runtime.as_str() {
+        "jaq" | "starlark" => {
+            // The host reads the script file; the script never touches the fs.
+            let script = std::fs::read_to_string(&abs)
+                .map_err(|e| format!("read entryFile \"{entry_file}\": {e}"))?;
+            if p.runtime == "jaq" {
+                Collector::jaq(p.name.clone(), kind, p.formats.clone(), input, script)
+            } else {
+                Collector::starlark(p.name.clone(), kind, p.formats.clone(), input, script)
+            }
+        }
         "exec" => {
-            let mut argv = vec![entry];
+            // entryFile is the program to spawn (must be executable).
+            let mut argv = vec![abs.to_string_lossy().into_owned()];
             argv.extend(p.args.iter().cloned());
             Collector::exec(p.name.clone(), kind, p.formats.clone(), argv)
         }
-        _ => return None,
+        other => return Err(format!("unknown runtime \"{other}\"")),
     })
 }
 
@@ -796,20 +815,26 @@ mod tests {
 
     #[test]
     fn project_plugin_config_converts_registers_and_runs() {
-        // The generic mechanism: a project-defined plugin (config only, zero
-        // Rust) registers a new format and parses through the registry.
+        // The generic mechanism: a project-defined plugin (config + a script
+        // file, zero Rust) registers a new format and parses through the
+        // registry. The script lives in a file (entryFile), not the yaml.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("oxplow/plugins")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/plugins/clover.jq"),
+            r#"{ files: { (.attrs.file): { instrumented: [1], covered: [1] } } }"#,
+        )
+        .unwrap();
         let p = oxplow_config::PluginConfig {
-            name: "clover".into(),
+            name: "acme.clover".into(),
             kind: "coverage".into(),
             formats: vec!["clover".into()],
             runtime: "jaq".into(),
             input: Some("xml".into()),
-            entry: Some(
-                r#"{ files: { (.attrs.file): { instrumented: [1], covered: [1] } } }"#.into(),
-            ),
+            entry_file: Some("oxplow/plugins/clover.jq".into()),
             args: vec![],
         };
-        let collector = plugin_to_collector(&p).expect("config converts to collector");
+        let collector = plugin_to_collector(&p, dir.path()).expect("config converts to collector");
         assert_eq!(collector.kind(), CollectorKind::Coverage);
         let mut reg = CollectorRegistry::with_builtins();
         reg.register(collector);
@@ -821,6 +846,21 @@ mod tests {
         assert!(reg.resolve("cobertura").is_some());
         // An unknown format resolves to None — merge_* warns and skips it.
         assert!(reg.resolve("nope").is_none());
+    }
+
+    #[test]
+    fn project_plugin_with_missing_entry_file_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = oxplow_config::PluginConfig {
+            name: "acme.clover".into(),
+            kind: "coverage".into(),
+            formats: vec!["clover".into()],
+            runtime: "jaq".into(),
+            input: Some("xml".into()),
+            entry_file: Some("oxplow/plugins/missing.jq".into()),
+            args: vec![],
+        };
+        assert!(plugin_to_collector(&p, dir.path()).is_err());
     }
 
     #[test]
