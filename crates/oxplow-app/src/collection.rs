@@ -440,6 +440,13 @@ impl CollectionService {
         // per-test tree (each test stack regenerates its own report; the
         // freshness guard excludes stale ones from prior efforts/runs).
         let report = self.merge_fresh_test_reports(&effort, &cfg, &registry);
+        // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
+        // in-process collectors, "plugin-exec:<name>" when a lower-trust exec
+        // plugin produced the suites (mirrors the coverage path).
+        let (report, source) = match report {
+            Some((r, source)) => (Some(r), source),
+            None => (None, "post-tool-bash".to_string()),
+        };
         self.record_test_run(
             thread,
             &bash.command,
@@ -449,7 +456,7 @@ impl CollectionService {
             None,
             None,
             "observed",
-            "post-tool-bash",
+            &source,
             report.as_ref(),
         )
         .await?;
@@ -496,8 +503,9 @@ impl CollectionService {
         effort: &TaskEffort,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
-    ) -> Option<oxplow_coverage::TestReport> {
+    ) -> Option<(oxplow_coverage::TestReport, String)> {
         let mut merged = oxplow_coverage::TestReport::default();
+        let mut exec_names: Vec<String> = Vec::new();
         for r in &cfg.reports {
             let Some(collector) = registry.resolve(&r.format) else {
                 tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
@@ -514,7 +522,12 @@ impl CollectionService {
                 continue;
             };
             match collector.run(&content) {
-                Ok(CollectorOutput::Test(parsed)) => merged.suites.extend(parsed.suites),
+                Ok(CollectorOutput::Test(parsed)) => {
+                    merged.suites.extend(parsed.suites);
+                    if collector.runtime() == CollectorRuntime::Exec {
+                        exec_names.push(collector.name().to_string());
+                    }
+                }
                 Ok(_) => {}
                 Err(e) => {
                     tracing::warn!(format = %r.format, error = %e, "test report parse failed")
@@ -524,7 +537,12 @@ impl CollectionService {
         if merged.suites.iter().all(|s| s.cases.is_empty()) {
             return None;
         }
-        Some(merged)
+        let source = if exec_names.is_empty() {
+            "post-tool-bash".to_string()
+        } else {
+            format!("plugin-exec:{}", exec_names.join(","))
+        };
+        Some((merged, source))
     }
 
     /// Merge every configured coverage report that exists and is fresher
@@ -1433,7 +1451,7 @@ mod tests {
                 ..Default::default()
             };
             let registry = h.service.registry(&cfg);
-            let merged = h
+            let (merged, source) = h
                 .service
                 .merge_fresh_test_reports(&effort, &cfg, &registry)
                 .expect("both fresh reports merged");
@@ -1442,6 +1460,8 @@ mod tests {
                 names.contains(&"rust-crate") && names.contains(&"frontend"),
                 "merged suites from both stacks; got {names:?}"
             );
+            // Both stacks use the in-process junit collector → not exec-tagged.
+            assert_eq!(source, "post-tool-bash");
         }
     }
 }
