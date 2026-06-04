@@ -799,6 +799,37 @@ mod tests {
     }
 
     #[test]
+    fn builtin_plugins_skip_bad_fields_without_failing_the_report() {
+        let reg = CollectorRegistry::with_builtins();
+        // A non-numeric line number is skipped; the valid lines still land
+        // (the old Rust parsers were field-tolerant — keep that).
+        let cobertura = r#"<coverage><packages><package><classes>
+          <class filename="src/a.rs"><lines>
+            <line number="1" hits="1"/>
+            <line number="oops" hits="1"/>
+            <line number="2" hits="0"/>
+          </lines></class>
+        </classes></package></packages></coverage>"#;
+        let out = reg.run("cobertura", cobertura).expect("plugin still runs");
+        let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
+        assert_eq!(
+            f.instrumented.iter().copied().collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(f.covered.iter().copied().collect::<Vec<_>>(), vec![1]);
+
+        // lcov: a garbage DA line is skipped, the rest survive.
+        let lcov = "SF:src/a.rs\nDA:1,3\nDA:junk\nDA:2,0\nend_of_record\n";
+        let out = reg.run("lcov", lcov).expect("plugin still runs");
+        let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
+        assert_eq!(
+            f.instrumented.iter().copied().collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(f.covered.iter().copied().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
     fn builtin_plugins_surface_malformed_input_as_error() {
         let reg = CollectorRegistry::with_builtins();
         assert!(reg.run("cobertura", "<coverage><class").is_err());
