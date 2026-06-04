@@ -119,12 +119,66 @@ pub fn run_jaq(program: &str, input: &Value) -> Result<Value, CollectError> {
     serde_json::from_str(&first.to_string()).map_err(|e| CollectError::Shape(e.to_string()))
 }
 
+/// Native Starlark builtins exposing the layer-1 container-parse helpers, so a
+/// Starlark plugin can parse raw text itself (e.g. `input: text` + bespoke
+/// logic) instead of relying only on the host pre-parse. Each returns a real
+/// Starlark value — starlark implements `AllocValue` for `serde_json::Value`,
+/// so `heap.alloc(...)` does the conversion. (jaq can't call host functions,
+/// which is why the bundled parsers pre-parse via `CollectorInput` instead.)
+#[starlark::starlark_module]
+fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
+    fn parse_xml<'v>(
+        content: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::parse_xml(content).map_err(helper_anyhow)?))
+    }
+    fn parse_json<'v>(
+        content: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::parse_json(content).map_err(helper_anyhow)?))
+    }
+    fn lcov_records<'v>(
+        content: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::lcov_records(content)))
+    }
+    fn lines<'v>(
+        content: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::lines(content)))
+    }
+    fn regex_find<'v>(
+        pattern: &str,
+        text: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::regex_find(pattern, text).map_err(helper_anyhow)?))
+    }
+    fn xpath<'v>(
+        content: &str,
+        expr: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        Ok(heap.alloc(crate::helpers::xpath(content, expr).map_err(helper_anyhow)?))
+    }
+}
+
+fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
+    anyhow::anyhow!(e.to_string())
+}
+
 /// Run a Starlark plugin against `input`. The plugin must define
 /// `def transform(input): … return <object>`; the host appends a call that
 /// JSON-encodes the result, so the return value crosses back as JSON. The
-/// `json` stdlib extension is available to the script.
+/// `json` stdlib extension and the container-parse helpers
+/// (`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`) are
+/// available to the script.
 pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> {
-    use starlark::environment::{Globals, LibraryExtension, Module};
+    use starlark::environment::{GlobalsBuilder, LibraryExtension, Module};
     use starlark::eval::Evaluator;
     use starlark::syntax::{AstModule, Dialect};
 
@@ -139,7 +193,9 @@ pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> 
 
     let ast = AstModule::parse("plugin.star", source, &Dialect::Standard)
         .map_err(|e| CollectError::Runtime(format!("starlark parse: {e}")))?;
-    let globals = Globals::extended_by(&[LibraryExtension::Json]);
+    let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
+        .with(collect_helpers)
+        .build();
 
     Module::with_temp_heap(|module| {
         let mut eval = Evaluator::new(&module);
@@ -354,6 +410,53 @@ def transform(input):
         assert_eq!(report.suites[0].cases.len(), 2);
         assert_eq!(report.suites[0].cases[1].name, "t2");
         assert_eq!(report.suites[0].cases[0].status, TestStatus::Passed);
+    }
+
+    #[test]
+    fn starlark_can_self_parse_via_host_helpers() {
+        // input is raw text; the script calls the parse_xml host builtin.
+        let input = json!("<cov file=\"src/a.rs\"/>");
+        let script = r#"
+def transform(input):
+    doc = parse_xml(input)
+    path = doc["attrs"]["file"]
+    return {"files": {path: {"instrumented": [1, 2], "covered": [1]}}}
+"#;
+        let out = run_starlark(script, &input).expect("starlark runs");
+        let typed = value_to_output(CollectorKind::Coverage, out).expect("typed");
+        let cov = typed.as_coverage().expect("coverage");
+        let f = cov.files.get("src/a.rs").expect("file");
+        assert_eq!(f.instrumented.len(), 2);
+        assert!(f.covered.contains(&1));
+    }
+
+    #[test]
+    fn starlark_helpers_cover_lines_and_regex() {
+        let input = json!("1,3\n2,0\n");
+        // lines + regex_find host builtins, mapped into coverage.
+        let script = r#"
+def transform(input):
+    instrumented = []
+    covered = []
+    for row in regex_find(r"(\d+),(\d+)", input):
+        n = int(row[1])
+        instrumented.append(n)
+        if int(row[2]) > 0:
+            covered.append(n)
+    return {"files": {"f": {"instrumented": instrumented, "covered": covered}}}
+"#;
+        let out = run_starlark(script, &input).expect("starlark runs");
+        let cov = value_to_output(CollectorKind::Coverage, out)
+            .expect("typed")
+            .as_coverage()
+            .expect("coverage")
+            .clone();
+        let f = cov.files.get("f").expect("file");
+        assert_eq!(
+            f.instrumented.iter().copied().collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(f.covered.iter().copied().collect::<Vec<_>>(), vec![1]);
     }
 
     #[test]

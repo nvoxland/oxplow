@@ -12,6 +12,8 @@ oxplow-coverage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# Error type for native Starlark helper builtins (#[starlark_module] fns).
+anyhow = { workspace = true }
 # Container-parse helpers exposed to plugins (layer 1): XML/JSON/text → JSON.
 quick-xml = { workspace = true }
 regex = { workspace = true }

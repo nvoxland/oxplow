@@ -3658,6 +3658,7 @@ dependencies = [
 name = "oxplow-collect-plugin"
 version = "0.5.0"
 dependencies = [
+ "anyhow",
  "jaq-core",
  "jaq-json",
  "jaq-std",

@@ -159,11 +159,20 @@ I/O, so it's tagged lower-trust). In-process tiers run under a `SandboxBudget`
 (wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
 a hang.
 
-**Container `input` kinds** (host helpers; all yield a JSON value): `text` (raw
-string), `json`, `xml` (explicit ordered tree `{tag, attrs, text?, children}`),
-`lcov` (array of records, each key→array), `lines` (array of strings). Also
-available to scripts: `regex`, `xpath`. `exec` always receives raw content on
-stdin (ignores `input`).
+**Container `input` kinds** — how the host pre-parses the report before the
+transform (all yield a JSON value): `text` (raw string), `json`, `xml`
+(explicit ordered tree `{tag, attrs, text?, children}`), `lcov` (array of
+records, each key→array), `lines` (array of strings). `exec` always receives
+raw content on stdin (ignores `input`).
+
+**Starlark host builtins.** Beyond the pre-parsed `input`, a Starlark plugin
+can call the layer-1 helpers directly as globals —
+`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath` — so it can
+self-parse raw text (set `input: text` and parse inside `transform`). These are
+Starlark-only: **jaq can't call host functions**, which is why the bundled jaq
+parsers pre-parse via `input` instead. (Standard Starlark forbids recursion +
+`while`, so deep tree-walks are still awkward there — for XML, jaq remains the
+easier fit.)
 
 **Output schemas** the transform must produce:
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
@@ -193,7 +202,9 @@ collection:
 
 For `starlark`, set `runtime: starlark` and write `def transform(input): …
 return {…}` (the host appends the `json.encode(transform(...))` call; the
-`json` stdlib is available). For `exec`, set `runtime: exec`, `entry: <program>`,
+`json` stdlib **and** the `parse_xml`/`parse_json`/`lcov_records`/`lines`/
+`regex_find`/`xpath` host builtins are available, so a Starlark plugin can
+self-parse raw `input: text`). For `exec`, set `runtime: exec`, `entry: <program>`,
 optional `args: [...]`; it gets raw report bytes on stdin and must print the
 kind's JSON to stdout.
 
