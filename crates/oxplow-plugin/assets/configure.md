@@ -65,9 +65,37 @@ collection:
 ```
 
 `format` ∈ `lcov` | `cobertura` | `jacoco-xml` (coverage) | `junit`
-(test results). Once set, oxplow collects **automatically**: on each
+(test results), **plus any format a project plugin registers** (next
+step). Once set, oxplow collects **automatically**: on each
 test run it sees, it parses every report **fresher than the effort
 start** (so a frontend run uses the frontend reports, a Rust run the
 Rust reports), merging JUnit into the per-test tree and coverage into
 diff coverage. You never parse or report any of these numbers yourself
 — oxplow does, so they stay trustworthy (`observed`, not `asserted`).
+
+## 4. (Advanced) A stack whose report oxplow can't parse
+
+If a stack only emits a format that isn't one of the built-ins, don't
+fall back to asserting numbers — register a **plugin** instead, under
+`collection.plugins`. A plugin maps the report into oxplow's
+coverage/test shape and runs in-process (no recompile):
+
+```yaml
+collection:
+  reports:
+    - { path: target/clover.xml, format: clover }
+  plugins:
+    - name: clover
+      kind: coverage        # coverage | test
+      formats: [clover]     # format name(s) this plugin claims
+      runtime: jaq          # jaq (jq) | starlark | exec
+      input: xml            # host pre-parse: text | json | xml | lcov | lines
+      entry: |              # jq program: parsed input (.) -> output shape
+        { files: ... }
+```
+
+Prefer `jaq` (jq) — the host pre-parses the container (`input`) so the
+script just reshapes JSON. Use `starlark` for logic jq can't express,
+or `exec` (external program, raw report on stdin → JSON on stdout) as
+a last resort. The full host-helper API + output schemas are in
+`.context/collection.md`.

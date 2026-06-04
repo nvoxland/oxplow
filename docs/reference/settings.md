@@ -105,6 +105,61 @@ its name to the list. Read-side filtering applies on every
 read, so paths added after they were already captured drop
 out of the UI immediately — no rescan, no purge.
 
+### Collection (tests & coverage)
+
+The `collection` block tells oxplow how to attach test results and
+diff coverage to each effort. Point it at the report files your test
+run already emits; oxplow parses each one fresher than the effort
+start, so a polyglot repo lights up per stack. Run
+`/oxplow:configure` to wire this up automatically.
+
+```yaml
+# oxplow.yaml
+collection:
+  testCommand: bun run test:collect    # informational; surfaced to the agent
+  reports:
+    - { path: target/coverage/lcov.info, format: lcov }
+    - { path: target/nextest/default/junit.xml, format: junit }
+    - { path: apps/desktop/test-report.xml, format: junit }
+  testRunPatterns: [bun test]          # extra substrings that count as a test run
+```
+
+Built-in formats are `lcov`, `cobertura`, `jacoco-xml` (coverage) and
+`junit` (the per-test tree). Coverage numbers come only from oxplow
+parsing the report, never from the agent, so they stay trustworthy.
+
+#### Adding a format with a plugin
+
+For a format oxplow doesn't parse out of the box, add a
+`collection.plugins` entry — no recompile, no change to oxplow. A
+plugin is a small script that maps a report into oxplow's
+coverage/test shape:
+
+```yaml
+collection:
+  reports:
+    - { path: target/clover.xml, format: clover }
+  plugins:
+    - name: clover
+      kind: coverage        # coverage | test
+      formats: [clover]     # format name(s) this plugin claims
+      runtime: jaq          # jaq (jq) | starlark | exec
+      input: xml            # host pre-parse: text | json | xml | lcov | lines
+      entry: |              # jq program: parsed input (.) -> output shape
+        { files: ... }
+```
+
+The host pre-parses the report for you (per `input`), so the script
+only reshapes JSON. `jaq` (jq) is the simplest for XML/JSON; `starlark`
+covers logic jq can't express; `exec` runs an external program (raw
+report on stdin, JSON on stdout) as a last resort. jaq and starlark
+run in-process and sandboxed, so their output is trusted as measured;
+`exec` can do I/O, so its output is flagged lower-trust in the UI.
+
+The full authoring reference — host helpers, the exact output schemas,
+a worked example — lives in `.context/collection.md` in the oxplow
+source.
+
 ### LSP servers
 
 Auto-managed. Oxplow's bundled LSP installer fetches Mason
