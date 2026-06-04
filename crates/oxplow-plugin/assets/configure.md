@@ -85,7 +85,7 @@ collection:
   reports:
     - { path: target/clover.xml, format: clover }
   plugins:
-    - name: clover
+    - name: acme.clover   # namespaced; oxplow. is reserved
       kind: coverage        # coverage | test
       formats: [clover]     # format name(s) this plugin claims
       runtime: jaq          # jaq (jq) | starlark | exec

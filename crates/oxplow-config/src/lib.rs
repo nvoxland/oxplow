@@ -701,6 +701,18 @@ fn validate_plugins(raw: Option<Vec<RawPlugin>>) -> Result<Vec<PluginConfig>, Co
                 "collection.plugins[{i}].name must be a non-empty string"
             )));
         }
+        // Names are namespaced `<vendor>.<id>`; `oxplow.` is reserved for the
+        // first-party built-ins so a project can't impersonate them.
+        if name.starts_with("oxplow.") {
+            return Err(ConfigError::Invalid(format!(
+                "collection.plugins[{i}].name \"{name}\" uses the reserved \"oxplow.\" namespace"
+            )));
+        }
+        if !name.contains('.') {
+            return Err(ConfigError::Invalid(format!(
+                "collection.plugins[{i}].name \"{name}\" must be namespaced as \"<vendor>.<id>\" (e.g. acme.clover)"
+            )));
+        }
         let kind = p.kind.trim().to_ascii_lowercase();
         if !PLUGIN_KINDS.contains(&kind.as_str()) {
             return Err(ConfigError::Invalid(format!(
@@ -1144,13 +1156,13 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: oxplow/plugins/clover.jq\n",
+            "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: acme.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: oxplow/plugins/clover.jq\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.collection.plugins.len(), 1);
         let p = &cfg.collection.plugins[0];
-        assert_eq!(p.name, "clover");
+        assert_eq!(p.name, "acme.clover");
         assert_eq!(p.kind, "coverage");
         assert_eq!(p.formats, vec!["clover"]);
         assert_eq!(p.runtime, "jaq");
@@ -1162,7 +1174,7 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  plugins:\n    - name: x\n      kind: coverage\n      formats: [x]\n      runtime: jaq\n      entryFile: ../../etc/passwd\n",
+            "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: jaq\n      entryFile: ../../etc/passwd\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1170,11 +1182,35 @@ collection:
     }
 
     #[test]
+    fn rejects_plugin_in_reserved_oxplow_namespace() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "collection:\n  plugins:\n    - name: oxplow.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.")));
+    }
+
+    #[test]
+    fn rejects_plugin_without_namespace_prefix() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "collection:\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("namespaced")));
+    }
+
+    #[test]
     fn rejects_plugin_with_unknown_runtime() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  plugins:\n    - name: x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entryFile: p.jq\n",
+            "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entryFile: p.jq\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1186,7 +1222,7 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "collection:\n  plugins:\n    - name: x\n      kind: test\n      formats: [x]\n      runtime: starlark\n",
+            "collection:\n  plugins:\n    - name: acme.x\n      kind: test\n      formats: [x]\n      runtime: starlark\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1212,7 +1248,7 @@ collection:
                 test_run_patterns: vec!["tox".into()],
                 agent_hint: Some("Run pytest, not bare python -m pytest".into()),
                 plugins: vec![PluginConfig {
-                    name: "clover".into(),
+                    name: "acme.clover".into(),
                     kind: "coverage".into(),
                     formats: vec!["clover".into()],
                     runtime: "jaq".into(),

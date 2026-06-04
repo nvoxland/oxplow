@@ -396,34 +396,36 @@ impl CollectorRegistry {
         Self::default()
     }
 
-    /// A registry pre-loaded with the first-party builtin-rust collectors
-    /// (cobertura / lcov / jacoco coverage + junit tests), preserving today's
-    /// behavior and format names (`jacoco` aliases `jacoco-xml`).
+    /// A registry pre-loaded with the first-party collectors, named under the
+    /// reserved `oxplow.` namespace (`oxplow.cobertura` / `oxplow.lcov` /
+    /// `oxplow.jacoco` coverage + `oxplow.junit` tests). Format names stay bare
+    /// (`jacoco` aliases `jacoco-xml`); project plugins use their own
+    /// `<vendor>.` name prefix.
     pub fn with_builtins() -> Self {
         let mut reg = Self::new();
         reg.register(Collector::jaq(
-            "builtin-cobertura",
+            "oxplow.cobertura",
             CollectorKind::Coverage,
             ["cobertura"],
             CollectorInput::Xml,
             include_str!("plugins/cobertura.jq"),
         ));
         reg.register(Collector::jaq(
-            "builtin-lcov",
+            "oxplow.lcov",
             CollectorKind::Coverage,
             ["lcov"],
             CollectorInput::Lcov,
             include_str!("plugins/lcov.jq"),
         ));
         reg.register(Collector::jaq(
-            "builtin-jacoco",
+            "oxplow.jacoco",
             CollectorKind::Coverage,
             ["jacoco", "jacoco-xml"],
             CollectorInput::Xml,
             include_str!("plugins/jacoco.jq"),
         ));
         reg.register(Collector::jaq(
-            "builtin-junit",
+            "oxplow.junit",
             CollectorKind::Test,
             ["junit"],
             CollectorInput::Xml,
