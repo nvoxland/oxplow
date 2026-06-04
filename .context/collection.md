@@ -33,21 +33,29 @@ section for the column.
   CASCADE-deleted with its effort (an observation is meaningless outside its
   effort's snapshot bracket). Full schema in
   [data-model.md](./data-model.md).
-- **`oxplow-coverage` parser** (`crates/oxplow-coverage/`). Deterministic
-  report parsing: **cobertura**, **lcov**, and **jacoco-xml** into a uniform
-  per-file `{ instrumented, covered }` line-set map (`parse`), plus **JUnit**
-  XML into a `TestReport { suites → cases }` tree (`parse_junit`). This is the
-  *one place test/coverage numbers originate*. Paths/classnames are verbatim
-  from the report; the caller maps paths to repo-relative and the UI builds
-  the test tree from `classname`+`name`.
+- **Pluggable parsers — `oxplow-collect-plugin`** (`crates/oxplow-collect-plugin/`).
+  Report parsing is **not baked in**: a `CollectorRegistry` maps a `format`
+  string → a *collector* that turns report text into a **typed output** for its
+  kind (coverage = per-file `{ instrumented, covered }` line-sets; test =
+  `TestReport { suites → cases }`). The typed shapes live in `oxplow-coverage`,
+  which is now just a pure-types crate (+ legacy Rust parsers kept only as the
+  golden-test oracle). The four first-party parsers (cobertura, lcov, jacoco,
+  junit) ship as **bundled jaq plugins** (`src/plugins/*.jq`) registered by
+  `CollectorRegistry::with_builtins()` — same behavior as before, just no longer
+  a closed `match`. Projects add formats via `collection.plugins` (below) with
+  no change to oxplow. See **Pluggable parsers** below for the model + how to
+  author one. Paths/classnames are verbatim from the report; the caller maps
+  paths to repo-relative and the UI builds the test tree from `classname`+`name`.
 - **Collection profile** (`collection:` block in `oxplow.yaml`, parsed by
   `crates/oxplow-config/src/lib.rs`): `testCommand`, `reports: [{ path,
-  format }]` (format ∈ `lcov`/`cobertura`/`jacoco-xml` = coverage, `junit`
-  = test results), `testRunPatterns`. The `reports` list is what makes a
-  **polyglot repo** work — list every stack's report(s); the ride-along
-  parses each that's fresher than the effort start, so each stack lights up
-  on its own run. (The pre-`reports` singular fields
-  `coverageReportPath`/`coverageFormat`/`testReportPath`/`testReportFormat`
+  format }]`, `testRunPatterns`, and `plugins: [...]` (project-defined
+  parsers — see below). `format` is no longer gate-kept against a hardcoded
+  list; it's resolved against the collector registry at collection time, so a
+  plugin-provided format works and an unknown one is a *warning*, not a config
+  error. The `reports` list is what makes a **polyglot repo** work — list every
+  stack's report(s); the ride-along parses each that's fresher than the effort
+  start, so each stack lights up on its own run. (The pre-`reports` singular
+  fields `coverageReportPath`/`coverageFormat`/`testReportPath`/`testReportFormat`
   are still read for back-compat and folded into `reports`.) All optional.
   Edits hot-reload via the config watcher (`ConfigWatcher`, see
   `git-integration.md`), so `/oxplow:configure` takes effect without a
@@ -79,10 +87,18 @@ hook + MCP wiring):
   accrue within one effort. The UI builds a tech-natural tree by splitting
   each case's `classname`+`name` on `::`/`.`.
 - **Active (MCP)** — `ingest_coverage` is a thin explicit entry point (same
-  deterministic parse path) for on-demand or non-standard-location reports.
+  registry parse path) for on-demand or non-standard-location reports.
   It passes `skip_if_stale = false`, so it ingests regardless of mtime — the
   caller explicitly asked for it. `record_test_run` is the one `asserted`
   writer, for richer pass/fail counts the exit code alone can't give.
+
+Both paths resolve `format` → collector via the registry and **classify by the
+collector's kind** (coverage vs test), not a `== "junit"` heuristic. An
+unknown format is `tracing::warn!`-logged and skipped (not silently dropped).
+Trust tier rides in `source`: in-process tiers (jaq/Starlark) are deterministic
+and do no I/O → `observed` / `coverage-report`; the external-exec escape hatch
+can do I/O, so its output is tagged `plugin-exec:<name>` so the UI can mark it
+lower-trust. The `provenance` column stays `observed` vs `asserted`.
 
 ## Report-less-run nudge (PostToolUse)
 
@@ -118,3 +134,69 @@ daemon restarts, so the first run of a new session can nudge again.
 Prefer `observed` over `asserted` wherever oxplow can compute or parse the
 fact itself — that's the difference between an understanding surface and a
 dashboard of numbers nobody trusts.
+
+## Pluggable parsers (collector plugins)
+
+Report parsing is a **two-layer** design so a new format is config + a small
+script, never a Rust change (`crates/oxplow-collect-plugin/`):
+
+1. **Container parse (host-owned).** The host reads the report file(s) and, per
+   the collector's declared `input`, normalizes the bytes into a generic JSON
+   value via shipped helpers. Scripts never touch the filesystem — that's what
+   keeps an in-process parse deterministic and `observed`-eligible.
+2. **Field mapping (plugin-owned).** A *collector* maps that value into its
+   kind's typed output. There is **never a formless observation** — every
+   collector declares a `kind` (`coverage` | `test`) with a fixed output
+   schema. The genericity is in this uniform definition mechanism over typed
+   kinds, so a future kind (perf, structure-map, …) is a new `CollectorKind`
+   plus plugins that target it — not a new subsystem.
+
+**Transform tiers** (trust/preference order): `jaq` (jq, pure Rust — primary,
+JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
+forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
+better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
+I/O, so it's tagged lower-trust). In-process tiers run under a `SandboxBudget`
+(wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
+a hang.
+
+**Container `input` kinds** (host helpers; all yield a JSON value): `text` (raw
+string), `json`, `xml` (explicit ordered tree `{tag, attrs, text?, children}`),
+`lcov` (array of records, each key→array), `lines` (array of strings). Also
+available to scripts: `regex`, `xpath`. `exec` always receives raw content on
+stdin (ignores `input`).
+
+**Output schemas** the transform must produce:
+- coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
+- test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
+
+### Authoring a parser plugin
+
+Add it to `oxplow.yaml` — no recompile. Example: a Clover (XML) coverage parser
+in jaq, claiming the `clover` format that a `reports[]` entry then references:
+
+```yaml
+collection:
+  reports:
+    - { path: target/clover.xml, format: clover }
+  plugins:
+    - name: clover
+      kind: coverage          # coverage | test
+      formats: [clover]       # format name(s) this plugin claims
+      runtime: jaq            # jaq | starlark | exec
+      input: xml              # text | json | xml | lcov | lines (jaq/starlark only)
+      entry: |                # jaq program: input value (.) → output schema
+        { files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
+            ({}; . + { ($f.attrs.path): {
+                instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber) ],
+                covered:      [ $f | .. | select((.tag?=="line") and ((.attrs.count//"0")|tonumber)>0) | (.attrs.num|tonumber) ] } }) }
+```
+
+For `starlark`, set `runtime: starlark` and write `def transform(input): …
+return {…}` (the host appends the `json.encode(transform(...))` call; the
+`json` stdlib is available). For `exec`, set `runtime: exec`, `entry: <program>`,
+optional `args: [...]`; it gets raw report bytes on stdin and must print the
+kind's JSON to stdout.
+
+The first-party parsers in `src/plugins/*.jq` are the canonical templates. New
+formats are verified by a golden test that the plugin reproduces the reference
+parser's output (`crates/oxplow-collect-plugin/src/lib.rs` tests).

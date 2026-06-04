@@ -41,3 +41,16 @@ attribute to the effort. The test command is recorded in the
 
 Do not file a follow-up to "add coverage later" — either it's
 configured and automatic, or you run `/oxplow:configure` now.
+
+## A report format oxplow doesn't parse yet
+
+Parsers are **pluggable** — the built-ins (cobertura, lcov, jacoco,
+junit) are jaq plugins, and you can add a new format with **no recompile**
+by writing a `collection.plugins` entry in `oxplow.yaml`: a `jaq`
+(JSON→JSON, primary), `starlark`, or `exec` transform that maps the
+report into oxplow's coverage/test schema. The host pre-parses the
+container for you (`input: xml | json | lcov | lines | text`). See the
+**Pluggable parsers** + **Authoring a parser plugin** sections in
+`.context/collection.md` for the host-helper API, output schemas, and a
+worked example. Coverage stays `observed` because the in-process tiers
+can't do I/O.

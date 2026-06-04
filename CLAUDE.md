@@ -100,6 +100,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (write guard + filing enforcement),
   `oxplow-tmux`, `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
+  `oxplow-coverage` (pure report-parse data types),
+  `oxplow-collect-plugin` (pluggable collector registry + host
+  parse helpers + jaq/Starlark/exec transform runtimes),
   `oxplow-app` (Services orchestration), `oxplow-tauri-ipc`
   (`#[tauri::command]` adapters + `tauri-specta` exports).
 - Old top-level `src/` (the Electron/Node backend) is gone; nothing

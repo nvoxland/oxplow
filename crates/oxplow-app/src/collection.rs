@@ -20,8 +20,10 @@ use std::sync::{Arc, RwLock};
 use serde_json::json;
 use similar::{ChangeTag, TextDiff};
 
+use oxplow_collect_plugin::{
+    Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRegistry, CollectorRuntime,
+};
 use oxplow_config::OxplowConfig;
-use oxplow_coverage::CoverageFormat;
 use oxplow_db::observation_store::{NewEffortObservation, SqliteEffortObservationStore};
 use oxplow_db::{
     SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffort, TaskEffortStore,
@@ -180,6 +182,24 @@ impl CollectionService {
             .unwrap_or_default()
     }
 
+    /// Build the collector registry for this project: the first-party
+    /// builtins plus any project-defined plugins from `collection.plugins`.
+    /// Cheap to rebuild (jaq/starlark programs compile lazily at run time),
+    /// so we construct it per ride-along — picking up hot-reloaded config.
+    fn registry(&self, cfg: &oxplow_config::CollectionConfig) -> CollectorRegistry {
+        let mut reg = CollectorRegistry::with_builtins();
+        for p in &cfg.plugins {
+            match plugin_to_collector(p) {
+                Some(c) => reg.register(c),
+                None => tracing::warn!(
+                    plugin = %p.name,
+                    "collection plugin skipped (invalid runtime/kind/input)"
+                ),
+            }
+        }
+        reg
+    }
+
     /// Record a `test-run` observation against the thread's open effort.
     /// Returns `Ok(None)` when no effort is open (nothing to attribute).
     #[allow(clippy::too_many_arguments)]
@@ -280,18 +300,25 @@ impl CollectionService {
             return Ok(CoverageIngest::NoOpenEffort);
         };
         let cfg = self.collection_cfg();
+        let registry = self.registry(&cfg);
         let (report_path, format_str) = match (report_path_override, format_override) {
             (Some(p), Some(f)) => (p, f),
-            _ => match cfg.coverage_reports().next() {
+            _ => match first_coverage_report(&cfg, &registry) {
                 Some(r) => (r.path.clone(), r.format.clone()),
                 None => return Ok(CoverageIngest::NotConfigured),
             },
         };
-        let Some(format) = CoverageFormat::from_name(&format_str) else {
+        let Some(collector) = registry.resolve(&format_str) else {
             return Ok(CoverageIngest::ParseError(format!(
-                "unknown coverage format \"{format_str}\""
+                "no collector registered for format \"{format_str}\""
             )));
         };
+        if collector.kind() != CollectorKind::Coverage {
+            return Ok(CoverageIngest::ParseError(format!(
+                "format \"{format_str}\" is not a coverage format"
+            )));
+        }
+        let source = coverage_source(collector);
         let abs = self.project_dir.join(&report_path);
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return Ok(CoverageIngest::ReportMissing(report_path));
@@ -301,11 +328,16 @@ impl CollectionService {
         if skip_if_stale && report_is_stale(&abs, effort.started_at) {
             return Ok(CoverageIngest::StaleReport(report_path));
         }
-        let report = match oxplow_coverage::parse(format, &content) {
-            Ok(r) => r,
+        let report = match collector.run(&content) {
+            Ok(CollectorOutput::Coverage(r)) => r,
+            Ok(_) => {
+                return Ok(CoverageIngest::ParseError(
+                    "collector did not produce coverage output".into(),
+                ))
+            }
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
-        self.store_diff_coverage(thread, &effort, &stream_id, &report)
+        self.store_diff_coverage(thread, &effort, &stream_id, &report, &source)
             .await
     }
 
@@ -317,6 +349,7 @@ impl CollectionService {
         effort: &TaskEffort,
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
+        source: &str,
     ) -> Result<CoverageIngest, DomainError> {
         let Some(start) = effort.start_snapshot_id else {
             return Ok(CoverageIngest::NoBaseline);
@@ -368,7 +401,7 @@ impl CollectionService {
                 effort_id: effort.id.as_str().to_string(),
                 kind: "diff-coverage".into(),
                 provenance: "observed".into(),
-                source: "coverage-report".into(),
+                source: source.to_string(),
                 metric_value: Some(summary_pct),
                 payload_json: Some(payload.to_string()),
                 local_snapshot_id: Some(version.local_snapshot_id),
@@ -402,10 +435,11 @@ impl CollectionService {
         let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
             return Ok(None);
         };
-        // Merge every JUnit report fresher than the effort start into one
+        let registry = self.registry(&cfg);
+        // Merge every test report fresher than the effort start into one
         // per-test tree (each test stack regenerates its own report; the
         // freshness guard excludes stale ones from prior efforts/runs).
-        let report = self.merge_fresh_test_reports(&effort, &cfg);
+        let report = self.merge_fresh_test_reports(&effort, &cfg, &registry);
         self.record_test_run(
             thread,
             &bash.command,
@@ -421,11 +455,11 @@ impl CollectionService {
         .await?;
         // Coverage ride-along: merge every fresh coverage report → one
         // diff-coverage observation.
-        let coverage = self.merge_fresh_coverage(&effort, &cfg);
-        if let Some(merged) = &coverage {
+        let coverage = self.merge_fresh_coverage(&effort, &cfg, &registry);
+        if let Some((merged, source)) = &coverage {
             if let Some(stream_id) = self.stream_id_for(thread).await? {
                 let _ = self
-                    .store_diff_coverage(thread, &effort, &stream_id, merged)
+                    .store_diff_coverage(thread, &effort, &stream_id, merged, source)
                     .await?;
             }
         }
@@ -454,15 +488,24 @@ impl CollectionService {
         }
     }
 
-    /// Merge every configured JUnit report that exists and is fresher than
-    /// the effort start into one tree. `None` when nothing fresh/non-empty.
+    /// Merge every configured test report that exists and is fresher than
+    /// the effort start into one tree, via each format's collector. `None`
+    /// when nothing fresh/non-empty.
     fn merge_fresh_test_reports(
         &self,
         effort: &TaskEffort,
         cfg: &oxplow_config::CollectionConfig,
+        registry: &CollectorRegistry,
     ) -> Option<oxplow_coverage::TestReport> {
         let mut merged = oxplow_coverage::TestReport::default();
-        for r in cfg.test_reports() {
+        for r in &cfg.reports {
+            let Some(collector) = registry.resolve(&r.format) else {
+                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
+                continue;
+            };
+            if collector.kind() != CollectorKind::Test {
+                continue;
+            }
             let abs = self.project_dir.join(&r.path);
             if report_is_stale(&abs, effort.started_at) {
                 continue;
@@ -470,8 +513,12 @@ impl CollectionService {
             let Ok(content) = std::fs::read_to_string(&abs) else {
                 continue;
             };
-            if let Ok(parsed) = oxplow_coverage::parse_junit(&content) {
-                merged.suites.extend(parsed.suites);
+            match collector.run(&content) {
+                Ok(CollectorOutput::Test(parsed)) => merged.suites.extend(parsed.suites),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(format = %r.format, error = %e, "test report parse failed")
+                }
             }
         }
         if merged.suites.iter().all(|s| s.cases.is_empty()) {
@@ -481,18 +528,27 @@ impl CollectionService {
     }
 
     /// Merge every configured coverage report that exists and is fresher
-    /// than the effort start into one file→coverage map. `None` when none.
+    /// than the effort start into one file→coverage map, via each format's
+    /// collector. Returns the merged report plus a `source` label (lower-trust
+    /// `plugin-exec:*` when any contributing collector was an external
+    /// process). `None` when none contributed.
     fn merge_fresh_coverage(
         &self,
         effort: &TaskEffort,
         cfg: &oxplow_config::CollectionConfig,
-    ) -> Option<oxplow_coverage::CoverageReport> {
+        registry: &CollectorRegistry,
+    ) -> Option<(oxplow_coverage::CoverageReport, String)> {
         let mut merged = oxplow_coverage::CoverageReport::default();
+        let mut exec_names: Vec<String> = Vec::new();
         let mut any = false;
-        for r in cfg.coverage_reports() {
-            let Some(format) = CoverageFormat::from_name(&r.format) else {
+        for r in &cfg.reports {
+            let Some(collector) = registry.resolve(&r.format) else {
+                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
                 continue;
             };
+            if collector.kind() != CollectorKind::Coverage {
+                continue;
+            }
             let abs = self.project_dir.join(&r.path);
             if report_is_stale(&abs, effort.started_at) {
                 continue;
@@ -500,16 +556,33 @@ impl CollectionService {
             let Ok(content) = std::fs::read_to_string(&abs) else {
                 continue;
             };
-            if let Ok(parsed) = oxplow_coverage::parse(format, &content) {
-                for (path, fc) in parsed.files {
-                    let entry = merged.files.entry(path).or_default();
-                    entry.instrumented.extend(fc.instrumented);
-                    entry.covered.extend(fc.covered);
+            match collector.run(&content) {
+                Ok(CollectorOutput::Coverage(parsed)) => {
+                    for (path, fc) in parsed.files {
+                        let entry = merged.files.entry(path).or_default();
+                        entry.instrumented.extend(fc.instrumented);
+                        entry.covered.extend(fc.covered);
+                    }
+                    if collector.runtime() == CollectorRuntime::Exec {
+                        exec_names.push(collector.name().to_string());
+                    }
+                    any = true;
                 }
-                any = true;
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(format = %r.format, error = %e, "coverage report parse failed")
+                }
             }
         }
-        any.then_some(merged)
+        if !any {
+            return None;
+        }
+        let source = if exec_names.is_empty() {
+            "coverage-report".to_string()
+        } else {
+            format!("plugin-exec:{}", exec_names.join(","))
+        };
+        Some((merged, source))
     }
 
     /// Observations for an effort, newest-first. Pass `kind` to filter.
@@ -621,6 +694,60 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
     changed
 }
 
+/// Convert a project plugin config into an executable collector. Returns
+/// `None` for an unrecognized kind/runtime/input (config validation should
+/// prevent this; defensive).
+fn plugin_to_collector(p: &oxplow_config::PluginConfig) -> Option<Collector> {
+    let kind = match p.kind.as_str() {
+        "coverage" => CollectorKind::Coverage,
+        "test" => CollectorKind::Test,
+        _ => return None,
+    };
+    let input = match p.input.as_deref().unwrap_or("text") {
+        "text" => CollectorInput::Text,
+        "json" => CollectorInput::Json,
+        "xml" => CollectorInput::Xml,
+        "lcov" => CollectorInput::Lcov,
+        "lines" => CollectorInput::Lines,
+        _ => return None,
+    };
+    let entry = p.entry.clone()?;
+    Some(match p.runtime.as_str() {
+        "jaq" => Collector::jaq(p.name.clone(), kind, p.formats.clone(), input, entry),
+        "starlark" => Collector::starlark(p.name.clone(), kind, p.formats.clone(), input, entry),
+        "exec" => {
+            let mut argv = vec![entry];
+            argv.extend(p.args.iter().cloned());
+            Collector::exec(p.name.clone(), kind, p.formats.clone(), argv)
+        }
+        _ => return None,
+    })
+}
+
+/// The first configured report whose format resolves to a coverage collector
+/// (the default target of an `ingest_coverage` call without overrides).
+fn first_coverage_report<'a>(
+    cfg: &'a oxplow_config::CollectionConfig,
+    registry: &CollectorRegistry,
+) -> Option<&'a oxplow_config::ReportConfig> {
+    cfg.reports.iter().find(|r| {
+        registry
+            .resolve(&r.format)
+            .is_some_and(|c| c.kind() == CollectorKind::Coverage)
+    })
+}
+
+/// Trust label for a coverage collector's output: in-process tiers are
+/// `observed` from a `coverage-report`; the external-exec escape hatch is
+/// flagged `plugin-exec:<name>` so the UI can mark it lower-trust.
+fn coverage_source(collector: &Collector) -> String {
+    if collector.runtime() == CollectorRuntime::Exec {
+        format!("plugin-exec:{}", collector.name())
+    } else {
+        "coverage-report".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,6 +774,49 @@ mod tests {
         let msg = report_nudge_message(&cfg, "pytest -q tests/");
         assert!(msg.contains("/oxplow:configure"), "{msg}");
         assert!(msg.contains("pytest -q tests/"), "{msg}");
+    }
+
+    #[test]
+    fn project_plugin_config_converts_registers_and_runs() {
+        // The generic mechanism: a project-defined plugin (config only, zero
+        // Rust) registers a new format and parses through the registry.
+        let p = oxplow_config::PluginConfig {
+            name: "clover".into(),
+            kind: "coverage".into(),
+            formats: vec!["clover".into()],
+            runtime: "jaq".into(),
+            input: Some("xml".into()),
+            entry: Some(
+                r#"{ files: { (.attrs.file): { instrumented: [1], covered: [1] } } }"#.into(),
+            ),
+            args: vec![],
+        };
+        let collector = plugin_to_collector(&p).expect("config converts to collector");
+        assert_eq!(collector.kind(), CollectorKind::Coverage);
+        let mut reg = CollectorRegistry::with_builtins();
+        reg.register(collector);
+        let out = reg
+            .run("clover", r#"<cov file="src/a.rs"/>"#)
+            .expect("plugin runs");
+        assert!(out.as_coverage().unwrap().files.contains_key("src/a.rs"));
+        // Builtins still resolve alongside the project plugin.
+        assert!(reg.resolve("cobertura").is_some());
+        // An unknown format resolves to None — merge_* warns and skips it.
+        assert!(reg.resolve("nope").is_none());
+    }
+
+    #[test]
+    fn coverage_source_flags_exec_lower_trust() {
+        let jaq = Collector::jaq(
+            "p",
+            CollectorKind::Coverage,
+            ["f"],
+            CollectorInput::Xml,
+            ".",
+        );
+        assert_eq!(coverage_source(&jaq), "coverage-report");
+        let exec = Collector::exec("clover-cli", CollectorKind::Coverage, ["f"], ["cat"]);
+        assert_eq!(coverage_source(&exec), "plugin-exec:clover-cli");
     }
 
     #[test]
@@ -1132,7 +1302,8 @@ mod tests {
                 end_snapshot_id: None,
                 summary: None,
             };
-            let report = h.service.merge_fresh_test_reports(&effort, &cfg);
+            let registry = h.service.registry(&cfg);
+            let report = h.service.merge_fresh_test_reports(&effort, &cfg, &registry);
             assert!(
                 report.is_some(),
                 "fresh JUnit report should be merged (effort start = epoch)"
@@ -1253,9 +1424,10 @@ mod tests {
                 ],
                 ..Default::default()
             };
+            let registry = h.service.registry(&cfg);
             let merged = h
                 .service
-                .merge_fresh_test_reports(&effort, &cfg)
+                .merge_fresh_test_reports(&effort, &cfg, &registry)
                 .expect("both fresh reports merged");
             let names: Vec<&str> = merged.suites.iter().map(|s| s.name.as_str()).collect();
             assert!(

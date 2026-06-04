@@ -1,0 +1,27 @@
+[package]
+name = "oxplow-collect-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# Typed output contracts (CoverageReport / TestReport) are reused from the
+# pure-parse crate so a plugin's output is the same shape oxplow already stores.
+oxplow-coverage = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# Container-parse helpers exposed to plugins (layer 1): XML/JSON/text → JSON.
+quick-xml = { workspace = true }
+regex = { workspace = true }
+sxd-document = { workspace = true }
+sxd-xpath = { workspace = true }
+# Transform runtimes (layer 2): jaq (primary) + Starlark (general).
+jaq-core = { workspace = true }
+jaq-json = { workspace = true }
+jaq-std = { workspace = true }
+starlark = { workspace = true }
+
+[lints]
+workspace = true

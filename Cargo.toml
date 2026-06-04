@@ -22,6 +22,7 @@ members = [
     "crates/oxplow-code-dup",
     "crates/oxplow-code-deps",
     "crates/oxplow-coverage",
+    "crates/oxplow-collect-plugin",
     "crates/oxplow-tree-source",
     "crates/oxplow-surface-parity",
 ]
@@ -57,6 +58,16 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 specta = { version = "=2.0.0-rc.24", features = ["derive", "time", "serde_json"] }
 quick-xml = "0.39"
+regex = "1.11"
+# XPath over report XML, exposed to collection plugins. Pure Rust.
+sxd-document = "0.3"
+sxd-xpath = "0.4"
+# Collection plugin transform runtimes (pure Rust, sandboxed, ship in-binary).
+# jaq = jq for JSON→JSON reshaping (primary); starlark = general/imperative tier.
+jaq-core = "3.0"
+jaq-json = "2.0"
+jaq-std = "3.0"
+starlark = "0.14"
 
 # Error handling & logging
 thiserror = "2.0"
@@ -129,6 +140,7 @@ oxplow-code-metrics = { path = "crates/oxplow-code-metrics" }
 oxplow-code-dup = { path = "crates/oxplow-code-dup" }
 oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-coverage = { path = "crates/oxplow-coverage" }
+oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-tree-source = { path = "crates/oxplow-tree-source" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-config = { path = "crates/oxplow-config" }

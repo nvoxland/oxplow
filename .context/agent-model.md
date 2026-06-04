@@ -731,6 +731,11 @@ deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
 detector, coverage ride-along, the `ingest_coverage` / `record_test_run` /
 `list_effort_observations` MCP tools) is documented in `.context/collection.md`.
+Report parsing is **pluggable**: those tools resolve a report's `format`
+against a `CollectorRegistry` (`crates/oxplow-collect-plugin`) — the four
+first-party parsers ship as bundled jaq plugins and a project can add its own
+via `collection.plugins` in `oxplow.yaml`, no recompile. No new MCP tool was
+added; the existing tools are now registry-backed.
 When the PostToolUse hook detects a test run but no configured report was
 refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext`
 steering the agent to the report-emitting command. See the "Report-less-run

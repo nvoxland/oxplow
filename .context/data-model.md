@@ -811,7 +811,15 @@ closest_git_version, git_version_exact, created_at`. Indexes on
   `observed` = oxplow saw it directly (the PostToolUse Bash hook, or oxplow
   parsing a coverage report itself); `asserted` = the agent reported it via
   MCP and we can't independently verify it. The UI marks asserted facts so a
-  reviewer never mistakes a typed number for a measured one.
+  reviewer never mistakes a typed number for a measured one. Within `observed`,
+  `source` carries the trust tier: deterministic in-process parses are
+  `coverage-report`/`post-tool-bash`; the external-exec plugin escape hatch is
+  `plugin-exec:<name>` (lower-trust — it can do I/O).
+- **`kind` is a *typed* collector kind, not a formless blob.** The two shipped
+  kinds (`test-run`, `diff-coverage`) each have a fixed `payload_json` schema
+  produced by a registered collector (`crates/oxplow-collect-plugin`); parsers
+  are pluggable but every observation is still a known, typed thing. A new kind
+  is a new `CollectorKind` + plugins, not an arbitrary payload.
 - **`effort_id` is NOT NULL + CASCADE** (a deliberate tightening of the
   original plan's nullable column): an observation only has meaning inside
   its effort's start/end snapshot bracket — `diff-coverage` intersects

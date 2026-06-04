@@ -1005,6 +1005,12 @@ export type CollectionConfig = {
 	 *  should know about the collection setup.
 	 */
 	agentHint: string | null,
+	/**
+	 *  Project-defined collection plugins (jaq/starlark/exec parsers). Each
+	 *  registers the formats it claims, so a project can add support for a new
+	 *  report format without any change to oxplow itself.
+	 */
+	plugins?: PluginConfig[],
 };
 
 /**
@@ -1640,6 +1646,34 @@ export type PageVisitDay = {
 
 export type PaneKindArg = "working" | "talking";
 
+/**
+ *  A project-defined collection plugin — the generic, kind-agnostic
+ *  definition mechanism. Mirrors `oxplow_collect_plugin::CollectorDescriptor`
+ *  but with plain-string `kind`/`runtime` so this crate stays dependency-light
+ *  (the collection layer maps it to a registered collector). `entry` is the
+ *  jaq/Starlark script (or the program for `exec`); `args` are extra exec
+ *  arguments.
+ */
+export type PluginConfig = {
+	name: string,
+	// What the plugin observes: `coverage` | `test`.
+	kind: string,
+	// Format name(s) this plugin claims (resolved against `reports[].format`).
+	formats: string[],
+	// Transform tier: `jaq` | `starlark` | `exec`.
+	runtime: string,
+	/**
+	 *  How the host pre-parses the report before the transform:
+	 *  `text` | `json` | `xml` | `lcov` | `lines` (default `text`). Applies to
+	 *  the in-process tiers (jaq/starlark); `exec` always gets raw content.
+	 */
+	input?: string | null,
+	// Script body (jaq/starlark) or program (exec). Required for all three.
+	entry?: string | null,
+	// Extra arguments for the `exec` runtime.
+	args?: string[],
+};
+
 // A recent-projects row plus a freshness flag for the UI.
 export type RecentProjectView = {
 	path: string,
@@ -1695,9 +1729,13 @@ export type RepoConflictState = {
 };
 
 /**
- *  One test/coverage report the project's test run emits. `format`
- *  selects the parser: `lcov` | `cobertura` | `jacoco-xml` are coverage
- *  reports; `junit` is a test-result report (the per-test tree).
+ *  One test/coverage report the project's test run emits. `format` selects
+ *  the parser (collector): the built-ins are `lcov` | `cobertura` |
+ *  `jacoco-xml` (coverage) and `junit` (test results), plus any format a
+ *  project plugin (see [`PluginConfig`]) registers. The format name is no
+ *  longer gate-kept here — it's resolved against the collector registry at
+ *  collection time, so an unknown format surfaces as a warning rather than a
+ *  config load failure.
  */
 export type ReportConfig = {
 	path: string,
