@@ -2,6 +2,7 @@ import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
 import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
+import { ipcErrorMessage } from "./ipc-error.js";
 import type {
   CommentIntent,
   CommentMessage,
@@ -15,13 +16,13 @@ import type {
 export type { SearchHit };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
-/// plain promise return. Errors arrive as IpcError objects with
-/// message/code; we surface message first so consumers can show
-/// the daemon's failure reason verbatim.
+/// plain promise return. Errors are usually IpcError objects with
+/// message/code, but arg-deserialization failures and panics arrive as
+/// a plain string — `ipcErrorMessage` surfaces the real reason verbatim
+/// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
-  const err = result.error as { message?: string; code?: string } | undefined;
-  throw new Error(err?.message ?? err?.code ?? "ipc error");
+  throw new Error(ipcErrorMessage(result.error));
 }
 
 /// Synthesize a success-shaped GitOpResult for void-returning Tauri
