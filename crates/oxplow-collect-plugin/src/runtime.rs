@@ -89,8 +89,16 @@ pub fn run_jaq(program: &str, input: &Value) -> Result<Value, CollectError> {
     let defs = jaq_core::defs()
         .chain(jaq_std::defs())
         .chain(jaq_json::defs());
+    // Drop jaq-std's impure natives so a collection transform stays
+    // deterministic and does no I/O — its output is trusted as `observed`.
+    // We keep the full `funs()` (not `base_funs()`) because jaq-std's *defs*
+    // depend on pure extras like `split_`/`matches`/`pow`; we only filter the
+    // ones that read host state. A `Fun` is `(name, arity, impl)`, so `f.0` is
+    // the name. None of these are referenced by jaq-std defs, so removing them
+    // doesn't break the library — a plugin calling them just fails to compile.
+    const IMPURE_JAQ_FUNS: &[&str] = &["env", "now", "localtime", "input", "inputs"];
     let funs = jaq_core::funs()
-        .chain(jaq_std::funs())
+        .chain(jaq_std::funs().filter(|f| !IMPURE_JAQ_FUNS.contains(&f.0)))
         .chain(jaq_json::funs());
 
     let loader = Loader::new(defs);
@@ -393,6 +401,21 @@ mod tests {
             run_jaq(".[", &json!({})),
             Err(CollectError::Runtime(_))
         ));
+    }
+
+    #[test]
+    fn jaq_impure_builtins_are_unavailable() {
+        // Determinism/trust guarantee: env/now/input must not resolve, so a
+        // plugin can't read the host environment or clock (which would make
+        // `observed` output non-deterministic/leaky).
+        for prog in ["env", "now", "input"] {
+            assert!(
+                matches!(run_jaq(prog, &json!({})), Err(CollectError::Runtime(_))),
+                "expected `{prog}` to be unavailable"
+            );
+        }
+        // A pure builtin still works.
+        assert_eq!(run_jaq("length", &json!([1, 2, 3])).unwrap(), json!(3));
     }
 
     #[test]
