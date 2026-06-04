@@ -1141,14 +1141,22 @@ mod tests {
         #[tokio::test]
         async fn record_test_run_embeds_junit_tree_and_derives_counts() {
             let h = build(None).await;
-            let junit = oxplow_coverage::parse_junit(
-                r#"<testsuites><testsuite name="oxplow-app">
+            // Run the bundled junit collector to build the suite/case tree
+            // (oxplow-coverage no longer exposes a parse entry point).
+            let junit = match CollectorRegistry::with_builtins()
+                .run(
+                    "junit",
+                    r#"<testsuites><testsuite name="oxplow-app">
                   <testcase classname="oxplow_app::collection" name="a"/>
                   <testcase classname="oxplow_app::collection" name="b"><failure/></testcase>
                   <testcase classname="oxplow_app::collection" name="c"><skipped/></testcase>
                 </testsuite></testsuites>"#,
-            )
-            .unwrap();
+                )
+                .unwrap()
+            {
+                CollectorOutput::Test(r) => r,
+                other => panic!("expected test output, got {other:?}"),
+            };
             h.service
                 .record_test_run(
                     &h.thread,

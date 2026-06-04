@@ -3721,9 +3721,8 @@ dependencies = [
 name = "oxplow-coverage"
 version = "0.5.0"
 dependencies = [
- "quick-xml",
  "serde",
- "thiserror 2.0.18",
+ "serde_json",
 ]
 
 [[package]]

@@ -160,12 +160,6 @@ impl CollectorInput {
     }
 }
 
-impl From<oxplow_coverage::CoverageParseError> for CollectError {
-    fn from(e: oxplow_coverage::CoverageParseError) -> Self {
-        CollectError::Parse(e.to_string())
-    }
-}
-
 /// The declarative, serde-friendly definition of a collector — the shape a
 /// project lists in `oxplow.yaml` (parsed in a later step) and the shape
 /// `crates/oxplow-plugin` ships bundled plugins as. `entry`/`args` are
@@ -694,32 +688,67 @@ mod tests {
   <testcase classname="tests.test_foo.TestBar" name="test_baz" time="0.01"/>
 </testsuite>"#;
 
-    fn rust_cov(fmt: oxplow_coverage::CoverageFormat, src: &str) -> CoverageReport {
-        oxplow_coverage::parse(fmt, src).expect("rust parser")
+    // Committed expected values (the bundled jaq plugins are the only parser;
+    // these golden fixtures pin their output — no live Rust-parser oracle).
+    fn cov(files: &[(&str, &[u32], &[u32])]) -> CoverageReport {
+        let mut report = CoverageReport::default();
+        for (path, instrumented, covered) in files {
+            report.files.insert(
+                (*path).to_string(),
+                oxplow_coverage::FileCoverage {
+                    instrumented: instrumented.iter().copied().collect(),
+                    covered: covered.iter().copied().collect(),
+                },
+            );
+        }
+        report
+    }
+
+    fn case(
+        classname: &str,
+        name: &str,
+        status: oxplow_coverage::TestStatus,
+        time_ms: Option<u64>,
+    ) -> oxplow_coverage::TestCase {
+        oxplow_coverage::TestCase {
+            classname: classname.into(),
+            name: name.into(),
+            status,
+            time_ms,
+        }
     }
 
     #[test]
-    fn builtin_cobertura_plugin_matches_rust_parser() {
+    fn builtin_cobertura_plugin_produces_expected_coverage() {
         let out = CollectorRegistry::with_builtins()
             .run("cobertura", GOLD_COBERTURA)
             .expect("plugin runs");
-        let expected = rust_cov(oxplow_coverage::CoverageFormat::Cobertura, GOLD_COBERTURA);
+        let expected = cov(&[
+            ("src/foo.rs", &[1, 2, 5], &[1, 5]),
+            ("src/bar.rs", &[10], &[]),
+        ]);
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
     #[test]
-    fn builtin_lcov_plugin_matches_rust_parser() {
+    fn builtin_lcov_plugin_produces_expected_coverage() {
         let out = CollectorRegistry::with_builtins()
             .run("lcov", GOLD_LCOV)
             .expect("plugin runs");
-        let expected = rust_cov(oxplow_coverage::CoverageFormat::Lcov, GOLD_LCOV);
+        let expected = cov(&[
+            ("src/foo.rs", &[1, 2, 5], &[1, 5]),
+            ("src/bar.rs", &[10], &[]),
+        ]);
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
     #[test]
-    fn builtin_jacoco_plugin_matches_rust_parser() {
+    fn builtin_jacoco_plugin_produces_expected_coverage() {
         let reg = CollectorRegistry::with_builtins();
-        let expected = rust_cov(oxplow_coverage::CoverageFormat::JacocoXml, GOLD_JACOCO);
+        let expected = cov(&[
+            ("com/example/Foo.java", &[1, 2], &[1]),
+            ("Root.java", &[7], &[7]),
+        ]);
         for fmt in ["jacoco", "jacoco-xml"] {
             let out = reg.run(fmt, GOLD_JACOCO).expect("plugin runs");
             assert_eq!(out.as_coverage().unwrap(), &expected, "format {fmt}");
@@ -727,13 +756,46 @@ mod tests {
     }
 
     #[test]
-    fn builtin_junit_plugin_matches_rust_parser() {
+    fn builtin_junit_plugin_produces_expected_tree() {
+        use oxplow_coverage::{TestStatus, TestSuite};
         let reg = CollectorRegistry::with_builtins();
-        for src in [GOLD_JUNIT_NEXTEST, GOLD_JUNIT_PYTEST] {
-            let out = reg.run("junit", src).expect("plugin runs");
-            let expected = oxplow_coverage::parse_junit(src).expect("rust parser");
-            assert_eq!(out.as_test().unwrap(), &expected);
-        }
+
+        let nextest = reg.run("junit", GOLD_JUNIT_NEXTEST).expect("plugin runs");
+        let expected_nextest = TestReport {
+            suites: vec![TestSuite {
+                name: "oxplow-app".into(),
+                cases: vec![
+                    case(
+                        "oxplow_app::collection",
+                        "detect_test_run",
+                        TestStatus::Passed,
+                        Some(1),
+                    ),
+                    case(
+                        "oxplow_app::collection",
+                        "ingest_coverage",
+                        TestStatus::Failed,
+                        Some(50),
+                    ),
+                    case("oxplow_app::collection", "flaky", TestStatus::Skipped, None),
+                ],
+            }],
+        };
+        assert_eq!(nextest.as_test().unwrap(), &expected_nextest);
+
+        let pytest = reg.run("junit", GOLD_JUNIT_PYTEST).expect("plugin runs");
+        let expected_pytest = TestReport {
+            suites: vec![TestSuite {
+                name: "pytest".into(),
+                cases: vec![case(
+                    "tests.test_foo.TestBar",
+                    "test_baz",
+                    TestStatus::Passed,
+                    Some(10),
+                )],
+            }],
+        };
+        assert_eq!(pytest.as_test().unwrap(), &expected_pytest);
     }
 
     #[test]
