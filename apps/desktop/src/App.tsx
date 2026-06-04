@@ -25,6 +25,7 @@ import {
   type GitOpResult,
   desktopBridge,
   listStreams,
+  listWorkspaceEntries,
   probeDaemon,
   readWorkspaceFile,
   renameWorkspacePath,
@@ -421,6 +422,18 @@ async function pickAndOpenProject(newWindow: boolean) {
   }
 }
 
+/** True when `path` is a directory in the workspace. `listWorkspaceEntries`
+ * does a `read_dir`, which succeeds (even for an empty dir) only for a
+ * directory and errors for a file or missing path. */
+async function isWorkspaceDir(streamId: string, path: string): Promise<boolean> {
+  try {
+    await listWorkspaceEntries(streamId, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
@@ -662,6 +675,16 @@ export function App() {
 
   async function handleOpenFile(path: string) {
     if (!stream) return;
+    // A path that resolves to a directory (e.g. a trailing-slash link from
+    // terminal/agent output) opens the Files tree rooted there, not the
+    // editor. Fast-path the common dir-link form (trailing slash) so no
+    // transient file tab is created; the catch below covers the rarer
+    // no-slash directory without an extra IPC on every file open.
+    if (path.endsWith("/") && (await isWorkspaceDir(stream.id, path))) {
+      setError(null);
+      handleOpenPageRef.current?.(directoryRef(path));
+      return;
+    }
     const currentSession = getFileSession(stream.id);
     const existing = currentSession.files[path];
     mutateFileSession(stream.id, (base) => {
@@ -704,6 +727,23 @@ export function App() {
       mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
       logUi("info", "opened file", { streamId: stream.id, path: file.path });
     } catch (e) {
+      // The clicked path is actually a directory (no trailing slash to
+      // fast-path above): open the Files tree rooted there and clean up the
+      // file tab we optimistically opened.
+      if (await isWorkspaceDir(stream.id, path)) {
+        mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
+        if (selectedThreadId) {
+          setThreadPageTabs((prev) => ({
+            ...prev,
+            [selectedThreadId]: (prev[selectedThreadId] ?? []).filter(
+              (t) => t.id !== `file:${path}`,
+            ),
+          }));
+        }
+        setError(null);
+        handleOpenPageRef.current?.(directoryRef(path));
+        return;
+      }
       const msg = String(e);
       // A simply-missing file (e.g. a stale terminal link) is benign — show a
       // friendly message and log at warn, not a scary error with a raw OS code.
