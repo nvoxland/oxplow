@@ -116,6 +116,7 @@ export function TerminalPane({
   onUserInterrupt,
   worktreePath,
   onOpenFile,
+  isLinkablePath,
   comments,
   terminateOnUnmount,
 }: {
@@ -136,6 +137,11 @@ export function TerminalPane({
   /// `worktreePath` when the source was relative) plus optional
   /// line/column.
   onOpenFile?(absPath: string, line?: number, column?: number): void;
+  /// Final gate for the file-path link detector: only paths this returns true
+  /// for become clickable links. Used to avoid linkifying dotted words in
+  /// prose (e.g. plugin names) that aren't real workspace files. When omitted,
+  /// every path-shaped token links (the prior behavior).
+  isLinkablePath?(path: string): boolean;
   /// When set, the pane becomes comment-enabled: a selection on terminal
   /// output can be commented, anchored to the buffer text and targeted at
   /// this page ref. `threadId` is null for the shell terminal.
@@ -160,8 +166,10 @@ export function TerminalPane({
   // registered once at terminal creation.
   const worktreePathRef = useRef<string | undefined>(worktreePath);
   const onOpenFileRef = useRef<typeof onOpenFile>(onOpenFile);
+  const isLinkablePathRef = useRef<typeof isLinkablePath>(isLinkablePath);
   worktreePathRef.current = worktreePath;
   onOpenFileRef.current = onOpenFile;
+  isLinkablePathRef.current = isLinkablePath;
   // Mirror so the session-open effect's cleanup (which captures values at
   // mount, deps `[paneTarget, transportMode]`) sees the latest flag.
   const terminateOnUnmountRef = useRef<boolean>(!!terminateOnUnmount);
@@ -289,6 +297,9 @@ export function TerminalPane({
           },
         );
       },
+      // Read through the ref so workspace-index updates are picked up without
+      // re-registering the provider. Permissive when no predicate is supplied.
+      validatePath: (path: string) => isLinkablePathRef.current?.(path) ?? true,
     });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {

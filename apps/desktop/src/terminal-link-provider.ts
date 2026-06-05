@@ -36,7 +36,17 @@ const LEADING_PUNCT = /^['"`(\[<]+/;
 // token starts at the second `/`, etc.).
 const URL_PREFIX_RE = /[a-zA-Z][\w+.-]*:\/?\/?$/;
 
-export function findFilePathMatches(line: string): FilePathMatch[] {
+/**
+ * Find file-path-shaped substrings in `line`. `validatePath`, when given, is a
+ * final gate: a candidate that passes the shape heuristics but `validatePath`
+ * rejects is dropped, so dotted words in prose that aren't real workspace
+ * targets (e.g. a plugin name like `oxplow.junit`) don't become links. It's
+ * given the bare path (no `:line:col` suffix).
+ */
+export function findFilePathMatches(
+  line: string,
+  validatePath?: (path: string) => boolean,
+): FilePathMatch[] {
   const out: FilePathMatch[] = [];
   TOKEN_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -84,6 +94,8 @@ export function findFilePathMatches(line: string): FilePathMatch[] {
     // Validation: must look like a path. Either contain a `/` or have
     // a recognizable filename.ext shape.
     if (!looksLikePath(pathText)) continue;
+    // Final gate: drop shapes that aren't real workspace targets.
+    if (validatePath && !validatePath(pathText)) continue;
 
     out.push({
       start,
@@ -136,7 +148,13 @@ export interface FilePathLinkActivation {
  */
 export function installFilePathLinkProvider(
   term: Terminal,
-  opts: { onActivate(match: FilePathLinkActivation): void; getHover?(match: FilePathLinkActivation): string },
+  opts: {
+    onActivate(match: FilePathLinkActivation): void;
+    getHover?(match: FilePathLinkActivation): string;
+    /** Final gate: only linkify a path this returns true for. Read fresh on
+     * every line render, so a ref-backed predicate picks up index updates. */
+    validatePath?: (path: string) => boolean;
+  },
 ): IDisposable {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
@@ -145,7 +163,7 @@ export function installFilePathLinkProvider(
         callback(undefined);
         return;
       }
-      const matches = findFilePathMatches(text);
+      const matches = findFilePathMatches(text, opts.validatePath);
       if (matches.length === 0) {
         callback(undefined);
         return;

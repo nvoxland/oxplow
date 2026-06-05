@@ -473,6 +473,13 @@ export function App() {
   const [threadPageHistory, setThreadPageHistory] = useState<ThreadHistory>(() => readPersistedThreadPageHistory());
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>(() => readPersistedDiffSpecs());
   const [error, setError] = useState<string | null>(null);
+  // The error banner auto-dismisses; it's transient feedback (e.g. a
+  // mistargeted file link), not a persistent state the user must clear.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 8000);
+    return () => clearTimeout(t);
+  }, [error]);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const { fileSessions, setFileSessions, getFileSession, mutateFileSession } = useFileSessions();
   const restoredStreamsRef = useRef<Set<string>>(new Set());
@@ -3252,7 +3259,28 @@ export function App() {
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         {!isMac ? <Menubar groups={menuGroups} /> : null}
         {error ? (
-          <div style={{ padding: "2px 12px", background: "var(--bg-2)", color: "#ff6b6b", fontSize: 11, minHeight: 22, borderBottom: "1px solid var(--border)" }}>{error}</div>
+          <div
+            onClick={() => setError(null)}
+            title="Click to dismiss"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              padding: "2px 12px",
+              background: "var(--bg-2)",
+              color: "#ff6b6b",
+              fontSize: 11,
+              minHeight: 22,
+              borderBottom: "1px solid var(--border)",
+              cursor: "pointer",
+            }}
+          >
+            <span>{error}</span>
+            <span aria-hidden style={{ opacity: 0.7, paddingLeft: 8 }}>
+              ✕
+            </span>
+          </div>
         ) : null}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>

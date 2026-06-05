@@ -54,6 +54,24 @@ describe("findFilePathMatches", () => {
     expect(m).toEqual([]);
   });
 
+  it("drops path-shaped tokens that validatePath rejects", () => {
+    // A plugin name in prose looks like name.ext but isn't a real file.
+    const validate = (p: string) => p === "apps/desktop/src/App.tsx";
+    const prose = findFilePathMatches("the oxplow.junit plugin", validate);
+    expect(prose).toEqual([]);
+    const real = findFilePathMatches("see apps/desktop/src/App.tsx now", validate);
+    expect(real.map((x) => x.text)).toEqual(["apps/desktop/src/App.tsx"]);
+  });
+
+  it("validatePath gets the bare path without the line:col suffix", () => {
+    const seen: string[] = [];
+    findFilePathMatches("apps/desktop/src/App.tsx:42 here", (p) => {
+      seen.push(p);
+      return true;
+    });
+    expect(seen).toEqual(["apps/desktop/src/App.tsx"]);
+  });
+
   it("rejects bare numbers and version-y dots", () => {
     const m = findFilePathMatches("version 1.5 of x has 3.14 problems");
     expect(m).toEqual([]);

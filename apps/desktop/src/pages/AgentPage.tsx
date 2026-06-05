@@ -2,6 +2,7 @@ import { Page } from "../tabs/Page.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import type { Stream, Thread } from "../api.js";
 import { recordUserInterrupt } from "../api.js";
+import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
 
 interface AgentPageProps {
   thread: Thread | null;
@@ -25,6 +26,9 @@ interface AgentPageProps {
  * what chrome it wants.
  */
 export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }: AgentPageProps) {
+  // Only linkify terminal paths that are real workspace files/dirs, so dotted
+  // words in agent prose (e.g. a plugin name) aren't turned into broken links.
+  const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
   if (!thread) {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
@@ -50,6 +54,7 @@ export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }
             transportMode={transportMode}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
+            isLinkablePath={isLinkablePath}
             comments={
               stream
                 ? {
