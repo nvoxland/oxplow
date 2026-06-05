@@ -678,75 +678,71 @@ export function App() {
     // A path that resolves to a directory (e.g. a trailing-slash link from
     // terminal/agent output) opens the Files tree rooted there, not the
     // editor. Fast-path the common dir-link form (trailing slash) so no
-    // transient file tab is created; the catch below covers the rarer
-    // no-slash directory without an extra IPC on every file open.
+    // existence probe runs on the common file-open path.
     if (path.endsWith("/") && (await isWorkspaceDir(stream.id, path))) {
       setError(null);
       handleOpenPageRef.current?.(directoryRef(path));
       return;
     }
-    const currentSession = getFileSession(stream.id);
-    const existing = currentSession.files[path];
-    mutateFileSession(stream.id, (base) => {
-      const opened = existing
-        ? selectOpenFile(base, path)
-        : setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
-      return enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS);
-    });
-    // File tabs participate in the unified per-thread page tab list
-    // so they share the same chrome and back/forward substrate as
-    // every other page kind. fileSessions still owns the file content
-    // + dirty state; threadPageTabs owns the tab membership.
-    if (selectedThreadId) {
-      const ref = fileRef(path);
-      setThreadPageTabs((prev) => {
-        const existing = prev[selectedThreadId] ?? [];
-        if (existing.some((t) => t.id === ref.id)) return prev;
-        return { ...prev, [selectedThreadId]: [...existing, ref] };
-      });
+
+    // Add the file to the unified per-thread page tab list and make it active.
+    // File tabs share the same chrome / back-forward substrate as every other
+    // page kind; fileSessions owns content + dirty state, threadPageTabs owns
+    // membership.
+    const activateFileTab = () => {
+      if (selectedThreadId) {
+        const ref = fileRef(path);
+        setThreadPageTabs((prev) => {
+          const existing = prev[selectedThreadId] ?? [];
+          if (existing.some((t) => t.id === ref.id)) return prev;
+          return { ...prev, [selectedThreadId]: [...existing, ref] };
+        });
+      }
+      setCenterActive(`file:${path}`);
+      setError(null);
+      void recordUsage({
+        kind: "editor-file",
+        key: path,
+        event: "open",
+        streamId: stream.id,
+        threadId: selectedThread?.id ?? null,
+      }).catch(() => {});
+    };
+
+    const existing = getFileSession(stream.id).files[path];
+    // Already open and loaded — just select it, no re-read.
+    if (existing && !existing.isLoading) {
+      mutateFileSession(stream.id, (base) =>
+        enforceOpenFileLimit(selectOpenFile(base, path), MAX_OPEN_FILE_TABS),
+      );
+      activateFileTab();
+      return;
     }
-    setCenterActive(`file:${path}`);
-    setError(null);
-    void recordUsage({
-      kind: "editor-file",
-      key: path,
-      event: "open",
-      streamId: stream.id,
-      threadId: selectedThread?.id ?? null,
-    }).catch(() => {});
-    if (existing && !existing.isLoading) return;
+
+    // Read FIRST, then open the tab — so a clicked path that isn't a real file
+    // (a dotted identifier in prose, a stale link) opens no tab and doesn't
+    // hijack the active tab; it just shows a dismissible message.
+    let file;
     try {
       logUi("debug", "open file: readWorkspaceFile start", { streamId: stream.id, path });
-      const file = await readWorkspaceFile(stream.id, path);
+      file = await readWorkspaceFile(stream.id, path);
       logUi("debug", "open file: readWorkspaceFile end", {
         streamId: stream.id,
         path,
         size: file.content.length,
         lineCount: file.content.split("\n").length,
       });
-      mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
-      logUi("info", "opened file", { streamId: stream.id, path: file.path });
     } catch (e) {
-      // The clicked path is actually a directory (no trailing slash to
-      // fast-path above): open the Files tree rooted there and clean up the
-      // file tab we optimistically opened.
+      // The clicked path is actually a directory (no trailing slash): open the
+      // Files tree rooted there.
       if (await isWorkspaceDir(stream.id, path)) {
-        mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
-        if (selectedThreadId) {
-          setThreadPageTabs((prev) => ({
-            ...prev,
-            [selectedThreadId]: (prev[selectedThreadId] ?? []).filter(
-              (t) => t.id !== `file:${path}`,
-            ),
-          }));
-        }
         setError(null);
         handleOpenPageRef.current?.(directoryRef(path));
         return;
       }
       const msg = String(e);
-      // A simply-missing file (e.g. a stale terminal link) is benign — show a
-      // friendly message and log at warn, not a scary error with a raw OS code.
+      // A simply-missing file (e.g. a stale terminal link or a dotted word in
+      // prose) is benign — friendly message, no tab opened, active untouched.
       const notFound = /no such file|not found|os error 2/i.test(msg);
       if (notFound) {
         setError(`File not found: ${path}`);
@@ -755,8 +751,19 @@ export function App() {
         setError(msg);
         logUi("error", "failed to open file", { streamId: stream.id, path, error: msg });
       }
-      mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
+      return;
     }
+
+    // Exists — open the tab, load its content, activate.
+    mutateFileSession(stream.id, (base) => {
+      const opened = existing
+        ? selectOpenFile(base, path)
+        : openFileInSession(base, path, "", false);
+      return enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS);
+    });
+    mutateFileSession(stream.id, (s) => setLoadedFileContent(s, path, file.content));
+    activateFileTab();
+    logUi("info", "opened file", { streamId: stream.id, path });
   }
 
   async function handleNavigateToLocation(target: EditorNavigationTarget) {
