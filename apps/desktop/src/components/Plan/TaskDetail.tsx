@@ -311,6 +311,7 @@ export function TaskDetailRail({
         color: "var(--text-muted)",
         fontSize: "var(--text-xs)",
       }}>
+        <RailMetaRow label="ID">#{item.id}</RailMetaRow>
         <RailMetaRow label="Created">{formatTimestamp(item.created_at)}</RailMetaRow>
         <RailMetaRow label="Updated">{formatTimestamp(item.updated_at)}</RailMetaRow>
         <RailMetaRow label="By">{item.created_by}</RailMetaRow>
