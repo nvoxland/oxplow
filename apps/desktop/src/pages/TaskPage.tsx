@@ -186,7 +186,7 @@ export function TaskPage({
   return (
     <Page
       testId="page-tasks"
-      title={item.title}
+      title={`#${item.id} ${item.title}`}
       kind="task"
       backlinks={backlinks}
       outbound={outbound}

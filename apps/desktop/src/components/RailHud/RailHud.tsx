@@ -395,6 +395,7 @@ function ActiveItemSection({
           <button
             type="button"
             data-testid="rail-active-epic-row"
+            title={`#${epic.id} ${epic.title}`}
             onClick={() => onOpenPage(taskRef(epic.id))}
             draggable
             onDragStart={(ev) => setContextRefDrag(ev, {
@@ -451,7 +452,7 @@ function ActiveItemSection({
                     background: isActive ? "var(--surface-card)" : "transparent",
                     fontWeight: isActive ? 500 : 400,
                   }}
-                  title={child.title}
+                  title={`#${child.id} ${child.title}`}
                 >
                   <span
                     aria-hidden
@@ -483,6 +484,7 @@ function ActiveItemSection({
       <button
         type="button"
         data-testid="rail-active-item"
+        title={`#${item.id} ${item.title}`}
         onClick={() => onOpenPage(taskRef(item.id))}
         draggable
         onDragStart={(ev) => setContextRefDrag(ev, {
@@ -800,7 +802,7 @@ function UpNextSection({
             key={item.id}
             type="button"
             data-testid={`rail-up-next-item-${item.id}`}
-            title={item.title}
+            title={`#${item.id} ${item.title}`}
             onClick={() => onOpenPage(taskRef(item.id))}
             draggable
             onDragStart={(ev) => setContextRefDrag(ev, {
@@ -996,7 +998,7 @@ function FinishedSection({
               key={`${e.kind}:${e.kind === "task" ? e.itemId : e.slug}`}
               type="button"
               data-testid={`rail-finished-${e.kind === "task" ? e.itemId : e.slug}`}
-              title={e.title}
+              title={e.kind === "task" ? `#${e.itemId} ${e.title}` : e.title}
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}
             >
