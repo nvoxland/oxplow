@@ -2636,7 +2636,12 @@ impl OxplowMcp {
         let child = self
             .services
             .threads
-            .create(&parent.stream_id, params.0.title, parent.pane_target)
+            .create(
+                &parent.stream_id,
+                params.0.title,
+                parent.pane_target,
+                parent.agent,
+            )
             .await
             .map_err(|e| internal(e.to_string()))?;
         json_result(&child)

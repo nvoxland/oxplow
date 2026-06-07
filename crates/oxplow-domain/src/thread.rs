@@ -9,6 +9,7 @@ use specta::Type;
 
 use crate::ids::{StreamId, ThreadId};
 use crate::time::Timestamp;
+use crate::AgentKind;
 
 /// Thread lifecycle status — mirrors the TS `ThreadState` shape.
 ///
@@ -41,6 +42,8 @@ pub struct Thread {
     pub sort_index: i64,
     /// Which pane (working/talking) is the agent's primary attach point.
     pub pane_target: String,
+    /// Agent implementation assigned to this thread at creation time.
+    pub agent: AgentKind,
     pub resume_session_id: String,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,
@@ -72,6 +75,7 @@ mod tests {
             status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
+            agent: AgentKind::Claude,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

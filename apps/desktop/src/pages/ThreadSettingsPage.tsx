@@ -63,6 +63,12 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           </div>
         ) : (
           <>
+            <Section title="Agent">
+              <Hint>
+                This thread runs {thread.agent === "codex" ? "Codex" : "Claude"}. Agent assignment is fixed after thread creation.
+              </Hint>
+            </Section>
+
             <Section title="Custom Prompt">
               <Hint>
                 Appended to the agent's system prompt for this thread (on top of any

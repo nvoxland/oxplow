@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{AgentKind, DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
 
 use crate::database::Database;
 
@@ -36,6 +36,20 @@ fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
     }
 }
 
+fn agent_to_str(agent: AgentKind) -> &'static str {
+    agent.as_str()
+}
+
+fn str_to_agent(s: &str) -> Result<AgentKind, DomainError> {
+    match s {
+        "claude" => Ok(AgentKind::Claude),
+        "codex" => Ok(AgentKind::Codex),
+        other => Err(DomainError::Invalid(format!(
+            "unknown thread agent: {other}"
+        ))),
+    }
+}
+
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
         .expect("Timestamp serializes to JSON")
@@ -55,6 +69,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let status: String = row.get("status")?;
     let sort_index: i64 = row.get("sort_index")?;
     let pane_target: String = row.get("pane_target")?;
+    let agent: String = row.get("agent")?;
     let resume_session_id: String = row.get("resume_session_id")?;
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
@@ -73,6 +88,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         status: str_to_status(&status).map_err(map_err)?,
         sort_index,
         pane_target,
+        agent: str_to_agent(&agent).map_err(map_err)?,
         resume_session_id,
         summary,
         summary_updated_at: summary_updated_at
@@ -130,15 +146,16 @@ impl ThreadStore for SqliteThreadStore {
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO threads (
-                        id, stream_id, title, status, sort_index, pane_target,
+                        id, stream_id, title, status, sort_index, pane_target, agent,
                         resume_session_id, summary, summary_updated_at, closed_at,
                         custom_prompt, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                      ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         status = excluded.status,
                         sort_index = excluded.sort_index,
                         pane_target = excluded.pane_target,
+                        agent = excluded.agent,
                         resume_session_id = excluded.resume_session_id,
                         summary = excluded.summary,
                         summary_updated_at = excluded.summary_updated_at,
@@ -152,6 +169,7 @@ impl ThreadStore for SqliteThreadStore {
                         status_to_str(thread.status),
                         thread.sort_index,
                         thread.pane_target,
+                        agent_to_str(thread.agent),
                         thread.resume_session_id,
                         thread.summary,
                         thread.summary_updated_at.map(ts_to_string),
@@ -278,6 +296,7 @@ mod tests {
             status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
+            agent: oxplow_domain::AgentKind::Claude,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

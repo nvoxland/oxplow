@@ -7,6 +7,7 @@ import {
   deleteTask,
   getThreadWorkState,
   getThreadState,
+  getConfig,
   createWorkspaceDirectory,
   reorderTasks,
   moveTaskToThread,
@@ -53,6 +54,7 @@ import {
   type BacklogState,
   type ThreadWorkState,
   type ThreadState,
+  type AgentKind,
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
@@ -437,11 +439,24 @@ async function isWorkspaceDir(streamId: string, path: string): Promise<boolean> 
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
+  const [enabledAgents, setEnabledAgents] = useState<AgentKind[]>(["claude"]);
   // Mirror of threadStates for subscription callbacks that need the
   // latest map without re-subscribing when it changes (see
   // useBackendSubscriptions). Kept current on every render.
   const threadStatesRef = useRef(threadStates);
   threadStatesRef.current = threadStates;
+
+  useEffect(() => {
+    let cancelled = false;
+    void getConfig()
+      .then((config) => {
+        if (!cancelled && config.agents?.length) setEnabledAgents(config.agents);
+      })
+      .catch((e) => logUi("warn", "failed to load project config", { error: String(e) }));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
@@ -928,10 +943,10 @@ export function App() {
     }
   }
 
-  async function handleCreateThread(title: string) {
+  async function handleCreateThread(title: string, agent?: AgentKind) {
     if (!stream) return;
     try {
-      const next = await createThread(stream.id, title);
+      const next = await createThread(stream.id, title, agent);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {
@@ -1344,6 +1359,7 @@ export function App() {
     setStream,
     setAgentStatuses,
     setGeneratedState,
+    setEnabledAgents,
   });
 
   useEffect(() => {
@@ -3290,11 +3306,12 @@ export function App() {
           threadStates={threadStates}
           streamStatuses={streamStatuses}
           agentStatuses={agentStatuses}
+          enabledAgents={enabledAgents}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
-          onCreateThread={async (streamId, title) => {
+          onCreateThread={async (streamId, title, agent) => {
             if (streamId !== stream?.id) await handleSwitch(streamId);
-            await handleCreateThread(title);
+            await handleCreateThread(title, agent);
           }}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}

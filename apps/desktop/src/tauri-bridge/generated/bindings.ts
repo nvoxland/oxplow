@@ -117,6 +117,8 @@ export const commands = {
 	sort_index: number,
 	// Which pane (working/talking) is the agent's primary attach point.
 	pane_target: string,
+	// Agent implementation assigned to this thread at creation time.
+	agent: AgentKind,
 	resume_session_id: string,
 	summary: string,
 	summary_updated_at: Timestamp | null,
@@ -496,6 +498,7 @@ export const commands = {
 	listRecentAgentTurns: (threadId: ThreadId, limit: number | null) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_recent_agent_turns", { threadId, limit })),
 	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
 	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
+	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
 	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
 	setGenerated: (entries: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { entries })),
@@ -707,7 +710,7 @@ export type AdoptWorktreeRequest = {
 	title: string,
 };
 
-export type AgentKind = "claude" | "copilot";
+export type AgentKind = "claude" | "codex";
 
 export type AgentStatus = {
 	thread_id: ThreadId,
@@ -1174,6 +1177,7 @@ export type CreateThreadRequest = {
 	streamId: StreamId,
 	title: string,
 	paneTarget: string | null,
+	agent: AgentKind | null,
 };
 
 export type CreateWorktreeRequest = {
@@ -1588,7 +1592,11 @@ export type MoveTaskRequest = {
 export type NoteId = string;
 
 export type OxplowConfig = {
-	agent: AgentKind,
+	/**
+	 *  Enabled agent implementations for this project, in priority order.
+	 *  The first entry is the default for newly-created threads.
+	 */
+	agents: AgentKind[],
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
 	 *  project dir when not set in oxplow.yaml.
@@ -2022,6 +2030,8 @@ export type Thread = {
 	sort_index: number,
 	// Which pane (working/talking) is the agent's primary attach point.
 	pane_target: string,
+	// Agent implementation assigned to this thread at creation time.
+	agent: AgentKind,
 	resume_session_id: string,
 	summary: string,
 	summary_updated_at: Timestamp | null,

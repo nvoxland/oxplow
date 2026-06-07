@@ -29,7 +29,10 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use thiserror::Error;
 
+use oxplow_domain::AgentKind;
+
 const PLUGIN_DIR_REL: &str = ".oxplow/runtime/claude-plugin";
+const CODEX_RUNTIME_DIR_REL: &str = ".oxplow/runtime/codex-plugin";
 const PLUGIN_NAME: &str = "oxplow";
 const PLUGIN_VERSION: &str = "0.0.0";
 
@@ -83,6 +86,42 @@ pub struct PluginPaths {
     pub work_next_command: PathBuf,
     pub review_comments_command: PathBuf,
     pub configure_command: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodexRuntimePaths {
+    pub runtime_dir: PathBuf,
+    pub manifest: PathBuf,
+    pub hooks: PathBuf,
+    pub oxplow_executable: PathBuf,
+    pub mcp_config: PathBuf,
+    pub runtime_skill: PathBuf,
+    pub subagent_skill: PathBuf,
+    pub wiki_capture_skill: PathBuf,
+    pub mermaid_skill: PathBuf,
+    pub collection_skill: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub enum AgentRuntimePaths {
+    Claude(PluginPaths),
+    Codex(CodexRuntimePaths),
+}
+
+pub fn write_agent_runtime(
+    agent: AgentKind,
+    project_dir: &Path,
+    hook_base_url: &str,
+    mcp_endpoint_url: &str,
+    hook_token: &str,
+) -> Result<AgentRuntimePaths, PluginError> {
+    match agent {
+        AgentKind::Claude => write_plugin(project_dir, hook_base_url, mcp_endpoint_url, hook_token)
+            .map(AgentRuntimePaths::Claude),
+        AgentKind::Codex => {
+            write_codex_runtime(project_dir, mcp_endpoint_url).map(AgentRuntimePaths::Codex)
+        }
+    }
 }
 
 /// Materialize the plugin directory. `hook_base_url` and
@@ -239,6 +278,145 @@ fn build_mcp_config(mcp_endpoint_url: &str, hook_token: &str) -> serde_json::Val
     })
 }
 
+pub fn write_codex_runtime(
+    project_dir: &Path,
+    mcp_endpoint_url: &str,
+) -> Result<CodexRuntimePaths, PluginError> {
+    let runtime_dir = project_dir.join(CODEX_RUNTIME_DIR_REL);
+    let manifest_dir = runtime_dir.join(".codex-plugin");
+    let hooks_dir = runtime_dir.join("hooks");
+    let skills_dir = runtime_dir.join("skills");
+
+    fs::create_dir_all(&manifest_dir)?;
+    fs::create_dir_all(&hooks_dir)?;
+    fs::create_dir_all(skills_dir.join("oxplow-runtime"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-subagent-work-protocol"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
+
+    let manifest = manifest_dir.join("plugin.json");
+    write_json(
+        &manifest,
+        &json!({
+            "name": PLUGIN_NAME,
+            "version": PLUGIN_VERSION,
+            "description": "Forwards Codex lifecycle hooks into the oxplow runtime.",
+            "skills": "./skills/"
+        }),
+    )?;
+
+    let legacy_hook_bridge = runtime_dir.join("scripts/hook_bridge.py");
+    if legacy_hook_bridge.exists() {
+        fs::remove_file(legacy_hook_bridge)?;
+    }
+    let oxplow_executable = std::env::current_exe()?;
+
+    let hooks = hooks_dir.join("hooks.json");
+    write_json(&hooks, &build_codex_hooks_json(&oxplow_executable))?;
+
+    let mcp_config = runtime_dir.join("mcp-config.toml");
+    fs::write(&mcp_config, build_codex_mcp_config(mcp_endpoint_url))?;
+
+    let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
+    fs::write(
+        &runtime_skill,
+        include_str!("../assets/oxplow-runtime.SKILL.md"),
+    )?;
+
+    let subagent_skill = skills_dir
+        .join("oxplow-subagent-work-protocol")
+        .join("SKILL.md");
+    fs::write(
+        &subagent_skill,
+        include_str!("../assets/oxplow-subagent.SKILL.md"),
+    )?;
+
+    let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
+    fs::write(
+        &wiki_capture_skill,
+        include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
+    )?;
+
+    let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
+    fs::write(
+        &mermaid_skill,
+        include_str!("../assets/oxplow-mermaid.SKILL.md"),
+    )?;
+
+    let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
+    fs::write(
+        &collection_skill,
+        include_str!("../assets/oxplow-collection.SKILL.md"),
+    )?;
+
+    Ok(CodexRuntimePaths {
+        runtime_dir,
+        manifest,
+        hooks,
+        oxplow_executable,
+        mcp_config,
+        runtime_skill,
+        subagent_skill,
+        wiki_capture_skill,
+        mermaid_skill,
+        collection_skill,
+    })
+}
+
+fn build_codex_hooks_json(oxplow_executable: &Path) -> serde_json::Value {
+    let command = |event: &str| {
+        format!(
+            "{} hook {}",
+            shell_quote_path(oxplow_executable),
+            shell_quote(event)
+        )
+    };
+    let mut hooks = serde_json::Map::new();
+    for event in [
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "UserPromptSubmit",
+        "SessionStart",
+        "Stop",
+    ] {
+        let entry = json!({
+            "type": "command",
+            "command": command(event),
+            "timeout": 30,
+            "statusMessage": "Syncing oxplow runtime",
+        });
+        let outer = if matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse") {
+            json!([{ "matcher": "*", "hooks": [entry] }])
+        } else {
+            json!([{ "hooks": [entry] }])
+        };
+        hooks.insert(event.to_string(), outer);
+    }
+    json!({ "hooks": serde_json::Value::Object(hooks) })
+}
+
+fn build_codex_mcp_config(mcp_endpoint_url: &str) -> String {
+    format!(
+        "[mcp_servers.oxplow]\nurl = \"{}\"\nbearer_token_env_var = \"OXPLOW_HOOK_TOKEN\"\n\n",
+        escape_toml_string(mcp_endpoint_url)
+    )
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+fn shell_quote(s: &str) -> String {
+    let escaped = s.replace('\'', r"'\''");
+    format!("'{escaped}'")
+}
+
+fn escape_toml_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), PluginError> {
     let mut s = serde_json::to_string_pretty(value)?;
     s.push('\n');
@@ -330,5 +508,35 @@ mod tests {
         assert!(body.contains("http://h2/hook"));
         let mcp_body = fs::read_to_string(&p.mcp_config).unwrap();
         assert!(mcp_body.contains("Bearer t2"));
+    }
+
+    #[test]
+    fn write_codex_runtime_emits_expected_files() {
+        let tmp = TempDir::new().unwrap();
+        let paths = write_codex_runtime(tmp.path(), "http://127.0.0.1:51823/mcp").unwrap();
+        assert!(paths.manifest.exists());
+        assert!(paths.hooks.exists());
+        assert!(paths.oxplow_executable.exists());
+        assert!(paths.mcp_config.exists());
+        assert!(paths.runtime_skill.exists());
+        assert!(paths.subagent_skill.exists());
+        assert!(paths.wiki_capture_skill.exists());
+        assert!(paths.mermaid_skill.exists());
+        assert!(paths.collection_skill.exists());
+    }
+
+    #[test]
+    fn codex_runtime_configures_hooks_and_mcp() {
+        let tmp = TempDir::new().unwrap();
+        let paths = write_codex_runtime(tmp.path(), "http://h/mcp").unwrap();
+        let hooks = fs::read_to_string(paths.hooks).unwrap();
+        assert!(hooks.contains("PreToolUse"));
+        assert!(!hooks.contains("http://"));
+        assert!(hooks.contains(" hook "));
+        assert!(!hooks.contains("python"));
+        let mcp = fs::read_to_string(paths.mcp_config).unwrap();
+        assert!(mcp.contains("[mcp_servers.oxplow]"));
+        assert!(mcp.contains("http://h/mcp"));
+        assert!(mcp.contains("OXPLOW_HOOK_TOKEN"));
     }
 }

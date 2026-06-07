@@ -1,7 +1,7 @@
 # Oxplow
 
-A desktop app for guiding and tracking coding agents (Claude Code and
-others) across many parallel branches of one project. Each **stream** is
+A desktop app for guiding and tracking coding agents (Claude Code, Codex,
+and others) across many parallel branches of one project. Each **stream** is
 its own branch, worktree, and agent instance.
 
 Oxplow is built around steering an agent like a pair-programming
@@ -39,7 +39,7 @@ not an IDE: the focus is the system, not the editor.
   diff tabs, and Git-aware decorations. Custom React file tree rather
   than the VS Code explorer.
 - **Agent control plane.** MCP tool surface (`mcp__oxplow__…`) plus
-  Claude Code hook integration — stop-hook directives feed a work-
+  agent hook integration — stop-hook directives feed a work-
   queue orchestrator that auto-progresses the agent without oxplow
   ever sending it a raw prompt.
 
@@ -48,7 +48,7 @@ not an IDE: the focus is the system, not the editor.
 A Rust backend (Tauri 2 shell + a set of `oxplow-*` crates) owns the
 SQLite database, the stores (streams, threads, work items, commit/wait
 points, snapshots, efforts), and an MCP server + hook endpoint that
-Claude Code connects to per thread. The React/Monaco/xterm frontend
+Claude Code or Codex connects to per thread. The React/Monaco/xterm frontend
 subscribes to store events and renders the rail HUD + pages UI (work
 queue, file browser, editor/diff pages, terminal, Local History).
 Detailed subsystem docs live under [.context/](./.context/).

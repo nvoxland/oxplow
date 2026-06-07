@@ -398,7 +398,7 @@ impl Services {
         std::fs::create_dir_all(&layout.state_dir)?;
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
-        info!(project = %layout.project_dir.display(), agent = ?config.agent, "config loaded");
+        info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
 

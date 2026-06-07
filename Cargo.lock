@@ -3757,6 +3757,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-mcp",
  "oxplow-tauri-ipc",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
@@ -3869,6 +3870,7 @@ dependencies = [
 name = "oxplow-plugin"
 version = "0.5.0"
 dependencies = [
+ "oxplow-domain",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use oxplow_app::config_service::read_config;
 use oxplow_app::OxplowEvent;
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{StreamId, Thread, ThreadId};
+use oxplow_domain::{AgentKind, StreamId, Thread, ThreadId};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -66,6 +67,7 @@ pub struct CreateThreadRequest {
     pub title: String,
     #[serde(rename = "paneTarget")]
     pub pane_target: Option<String>,
+    pub agent: Option<AgentKind>,
 }
 
 #[tauri::command]
@@ -75,9 +77,18 @@ pub async fn create_thread(
     req: CreateThreadRequest,
 ) -> Result<Thread, IpcError> {
     let pane = req.pane_target.unwrap_or_else(|| "working".into());
+    let config = read_config(&state.config);
+    let agent = req
+        .agent
+        .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
+    if !config.agents.contains(&agent) {
+        return Err(IpcError::invalid(format!(
+            "agent {agent:?} is not enabled for this project"
+        )));
+    }
     let t = state
         .threads
-        .create(&req.stream_id, req.title, pane)
+        .create(&req.stream_id, req.title, pane, agent)
         .await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
         stream_id: req.stream_id,

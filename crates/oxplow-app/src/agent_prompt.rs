@@ -7,9 +7,8 @@
 //! 4. The stream's `custom_prompt` if set.
 //! 5. The user's `agentPromptAppend` from `oxplow.yaml`.
 //!
-//! The combined string is what oxplow passes via Claude's
-//! `--append-system-prompt` flag (and/or the equivalent Copilot
-//! mechanism).
+//! The combined string is passed through the selected agent's
+//! system-prompt mechanism.
 
 use std::path::Path;
 
@@ -158,7 +157,7 @@ mod tests {
 
     fn config() -> OxplowConfig {
         OxplowConfig {
-            agent: AgentKind::Claude,
+            agents: vec![AgentKind::Claude],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: "be precise".into(),
@@ -198,6 +197,7 @@ mod tests {
             status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
+            agent: oxplow_domain::AgentKind::Claude,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

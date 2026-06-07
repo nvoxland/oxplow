@@ -215,7 +215,7 @@ mod tests {
 
     fn empty_config() -> Arc<std::sync::RwLock<OxplowConfig>> {
         Arc::new(std::sync::RwLock::new(OxplowConfig {
-            agent: AgentKind::Claude,
+            agents: vec![AgentKind::Claude],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: String::new(),
@@ -255,7 +255,7 @@ while True:
     write_message(msg)
 "#;
         Arc::new(std::sync::RwLock::new(OxplowConfig {
-            agent: AgentKind::Claude,
+            agents: vec![AgentKind::Claude],
             project_name: "p".into(),
             lsp_servers: vec![LspServerConfig {
                 language_id: "echo".into(),

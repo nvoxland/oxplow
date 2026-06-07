@@ -1,9 +1,11 @@
-generatedDirs:
+agents:
+- claude
+- codex
+generated:
 - target
 - .idea
 - node_modules
 - site
-- target
 - oxplow.iml
 - apps/desktop/test-report.xml
 collection:

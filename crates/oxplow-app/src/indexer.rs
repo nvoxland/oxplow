@@ -349,7 +349,7 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .create(&stream.id, "T", "working")
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
             .await
             .unwrap();
 
@@ -497,7 +497,7 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .create(&stream.id, "T", "working")
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
             .await
             .unwrap();
         let indexer = Indexer::new(svc.clone());

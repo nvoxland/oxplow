@@ -11,7 +11,8 @@ editor.
 consumer. It's mounted by two page renderers:
 
 - `apps/desktop/src/pages/AgentPage.tsx` — the agent tab, `paneTarget`
-  `"working"` / `"talking"`. The backend spawns the agent CLI.
+  `"working"` / `"talking"`. The backend spawns the thread's assigned
+  agent CLI (Claude or Codex).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
@@ -32,6 +33,11 @@ consumer. It's mounted by two page renderers:
 
 Both go through the same component; only the `paneTarget` (and thus the
 server-side spawn) differs.
+
+Agent sessions include the thread's `agent` in their backend session key, so
+Claude and Codex threads on the same stream/pane never reattach to the same
+PTY. Agent-specific runtime files are generated under `.oxplow/runtime/` by
+`oxplow-plugin`; shell terminals skip that path entirely.
 
 The component owns:
 

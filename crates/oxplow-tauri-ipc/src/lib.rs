@@ -182,6 +182,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // config
         commands::config::get_config,
         commands::config::set_agent_prompt_append,
+        commands::config::set_agents,
         commands::config::set_snapshot_retention_days,
         commands::config::set_snapshot_max_file_bytes,
         commands::config::set_generated,

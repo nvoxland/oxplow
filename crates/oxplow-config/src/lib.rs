@@ -11,6 +11,8 @@ use specta::Type;
 use thiserror::Error;
 use tracing::info;
 
+pub use oxplow_domain::AgentKind;
+
 pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
 
@@ -37,15 +39,6 @@ pub fn global_config_dir() -> Option<PathBuf> {
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-#[derive(Default)]
-pub enum AgentKind {
-    #[default]
-    Claude,
-    Copilot,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct LspServerConfig {
@@ -157,7 +150,9 @@ pub fn is_test_report_format(format: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
-    pub agent: AgentKind,
+    /// Enabled agent implementations for this project, in priority order.
+    /// The first entry is the default for newly-created threads.
+    pub agents: Vec<AgentKind>,
     /// Human-readable project name. Defaults to the basename of the
     /// project dir when not set in oxplow.yaml.
     #[serde(rename = "projectName")]
@@ -207,6 +202,8 @@ pub enum ConfigError {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
+    #[serde(default)]
+    agents: Option<Vec<AgentKind>>,
     #[serde(default)]
     agent: Option<AgentKind>,
     #[serde(rename = "projectName", default)]
@@ -306,7 +303,7 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     if !config_path.exists() {
         info!(
             config_path = %config_path.display(),
-            agent = ?AgentKind::default(),
+            agents = ?vec![AgentKind::default()],
             "project config not found; using defaults"
         );
         return Ok(default_config(fallback_name));
@@ -317,7 +314,7 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     let config = validate(parsed, &fallback_name)?;
     info!(
         config_path = %config_path.display(),
-        agent = ?config.agent,
+        agents = ?config.agents,
         project_name = %config.project_name,
         lsp_servers = config.lsp_servers.len(),
         "loaded project config"
@@ -359,6 +356,7 @@ pub fn write_project_config(
     // sitting in the file.
     const MANAGED_KEYS: &[&str] = &[
         "agent",
+        "agents",
         "projectName",
         "agentPromptAppend",
         "snapshotRetentionDays",
@@ -389,10 +387,10 @@ pub fn write_project_config(
     };
 
     let mut doc = serde_yaml::Mapping::new();
-    if config.agent != AgentKind::default() {
+    if config.agents != vec![AgentKind::default()] {
         doc.insert(
-            "agent".into(),
-            serde_yaml::to_value(config.agent).expect("agent serializes"),
+            "agents".into(),
+            serde_yaml::to_value(&config.agents).expect("agents serialize"),
         );
     }
     if !config.project_name.is_empty() && config.project_name != fallback_name {
@@ -533,7 +531,7 @@ pub fn write_project_config(
 
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
-        agent: AgentKind::default(),
+        agents: vec![AgentKind::default()],
         project_name,
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
@@ -546,7 +544,16 @@ fn default_config(project_name: String) -> OxplowConfig {
 }
 
 fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
-    let agent = raw.agent.unwrap_or_default();
+    let agents = match (raw.agents, raw.agent) {
+        (Some(_), Some(_)) => {
+            return Err(ConfigError::Invalid(
+                "configure either agents or the legacy agent key, not both".into(),
+            ));
+        }
+        (agents, legacy_agent) => {
+            validate_agents(agents.or_else(|| legacy_agent.map(|agent| vec![agent])))?
+        }
+    };
 
     let project_name = match raw.project_name {
         Some(name) => {
@@ -659,7 +666,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     };
 
     Ok(OxplowConfig {
-        agent,
+        agents,
         project_name,
         lsp_servers,
         agent_prompt_append,
@@ -678,6 +685,25 @@ const PLUGIN_RUNTIMES: &[&str] = &["jaq", "starlark", "exec"];
 const PLUGIN_KINDS: &[&str] = &["coverage", "test"];
 /// Container pre-parsers a plugin may select for its input.
 const PLUGIN_INPUTS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
+
+fn validate_agents(raw: Option<Vec<AgentKind>>) -> Result<Vec<AgentKind>, ConfigError> {
+    let agents = raw.unwrap_or_else(|| vec![AgentKind::default()]);
+    if agents.is_empty() {
+        return Err(ConfigError::Invalid(
+            "agents must list at least one enabled agent".into(),
+        ));
+    }
+    let mut seen = Vec::new();
+    for agent in agents {
+        if seen.contains(&agent) {
+            return Err(ConfigError::Invalid(format!(
+                "agents must not contain duplicates (got {agent:?})"
+            )));
+        }
+        seen.push(agent);
+    }
+    Ok(seen)
+}
 
 /// Require a non-empty (already-trimmed) report format. The *value* is no
 /// longer gate-kept against a hardcoded list — format names resolve against
@@ -863,7 +889,7 @@ mod tests {
     fn load_defaults_when_file_absent() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agent, AgentKind::Claude);
+        assert_eq!(cfg.agents, vec![AgentKind::Claude]);
         assert_eq!(cfg.snapshot_retention_days, DEFAULT_SNAPSHOT_RETENTION_DAYS);
         assert!(cfg.lsp_servers.is_empty());
         assert!(cfg.inject_session_context);
@@ -878,24 +904,69 @@ mod tests {
     }
 
     #[test]
-    fn loads_explicit_agent_and_project_name() {
+    fn loads_enabled_agents_and_project_name() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "agent: copilot\nprojectName: explicit-name\n",
+            "agents: [claude, codex]\nprojectName: explicit-name\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agent, AgentKind::Copilot);
+        assert_eq!(cfg.agents, vec![AgentKind::Claude, AgentKind::Codex]);
         assert_eq!(cfg.project_name, "explicit-name");
     }
 
     #[test]
-    fn rejects_invalid_agent() {
+    fn loads_legacy_agent_as_single_enabled_agent() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agent: emacs\n").unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agent: codex\nprojectName: explicit-name\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.agents, vec![AgentKind::Codex]);
+        assert_eq!(cfg.project_name, "explicit-name");
+    }
+
+    #[test]
+    fn rejects_agents_and_legacy_agent_together() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agent: claude\nagents: [claude, codex]\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("not both")));
+    }
+
+    #[test]
+    fn rejects_invalid_agent_in_agents() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: [emacs]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_empty_agents() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: []\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("at least one")));
+    }
+
+    #[test]
+    fn rejects_duplicate_agents() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agents: [claude, claude]\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("duplicates")));
     }
 
     #[test]
@@ -1276,7 +1347,7 @@ collection:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "agent: claude\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
+            "agents: [claude]\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
         )
         .unwrap();
 

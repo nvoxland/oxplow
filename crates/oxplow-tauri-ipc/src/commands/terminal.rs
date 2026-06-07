@@ -4,9 +4,62 @@ use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::SpawnRequest;
 use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
 use oxplow_domain::stores::ThreadStore;
+use oxplow_domain::AgentKind;
 
 use crate::error::IpcError;
 use crate::state::{AppState, PluginRuntimeState};
+
+fn codex_config_overrides(
+    paths: &oxplow_plugin::CodexRuntimePaths,
+    mcp_endpoint_url: &str,
+) -> Vec<String> {
+    let mut out = vec![
+        format!(
+            "mcp_servers.oxplow.url={}",
+            toml_cli_string(mcp_endpoint_url)
+        ),
+        "mcp_servers.oxplow.bearer_token_env_var=\"OXPLOW_HOOK_TOKEN\"".into(),
+    ];
+    for event in [
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "UserPromptSubmit",
+        "SessionStart",
+        "Stop",
+    ] {
+        let command = codex_hook_command(&paths.oxplow_executable, event);
+        let group = if matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse") {
+            format!(
+                "hooks.{event}=[{{matcher=\"*\",hooks=[{{type=\"command\",command={},timeout=30,statusMessage=\"Syncing oxplow runtime\"}}]}}]",
+                toml_cli_string(&command)
+            )
+        } else {
+            format!(
+                "hooks.{event}=[{{hooks=[{{type=\"command\",command={},timeout=30,statusMessage=\"Syncing oxplow runtime\"}}]}}]",
+                toml_cli_string(&command)
+            )
+        };
+        out.push(group);
+    }
+    out
+}
+
+fn codex_hook_command(oxplow_executable: &std::path::Path, event: &str) -> String {
+    format!(
+        "{} hook {}",
+        shell_command_arg(&oxplow_executable.to_string_lossy()),
+        shell_command_arg(event)
+    )
+}
+
+fn shell_command_arg(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+fn toml_cli_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
 
 impl From<TerminalSessionError> for IpcError {
     fn from(value: TerminalSessionError) -> Self {
@@ -119,6 +172,10 @@ pub async fn open_terminal_session(
     };
 
     let config = read_config(&state.config);
+    let agent = thread
+        .as_ref()
+        .map(|t| t.agent)
+        .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
     let cols = cols.max(20);
     let rows = rows.max(5);
 
@@ -126,19 +183,19 @@ pub async fn open_terminal_session(
     // same PTY instead of spawning a new one. Includes the thread id
     // when known so per-thread state is isolated.
     let session_key = format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}",
         stream.id.0,
         thread_id.as_ref().map(|t| t.0.as_str()).unwrap_or(""),
+        agent.as_str(),
         pane_target,
         transport_mode,
     );
 
-    // Materialize the Claude Code plugin (.oxplow/runtime/claude-plugin/)
-    // every spawn — overwrites in place so live edits to skill content
-    // take effect without manual cleanup. The hook URL + token live on
-    // the control-plane handle stashed at boot; per-spawn identity rides
-    // in env vars below.
-    let plugin_paths = oxplow_plugin::write_plugin(
+    // Materialize the agent-specific runtime on every spawn. Claude
+    // uses its plugin directory and MCP JSON; Codex uses command-hook
+    // and MCP config overrides. Per-spawn identity rides env vars below.
+    let agent_runtime = oxplow_plugin::write_agent_runtime(
+        agent,
         &state.layout.project_dir,
         &plugin_runtime.hook_base_url,
         &plugin_runtime.mcp_endpoint_url,
@@ -151,6 +208,10 @@ pub async fn open_terminal_session(
             "OXPLOW_HOOK_TOKEN".to_string(),
             plugin_runtime.hook_token.clone(),
         ),
+        (
+            "OXPLOW_HOOK_BASE_URL".to_string(),
+            plugin_runtime.hook_base_url.clone(),
+        ),
         ("OXPLOW_STREAM_ID".to_string(), stream.id.0.clone()),
         (
             "OXPLOW_THREAD_ID".to_string(),
@@ -159,28 +220,33 @@ pub async fn open_terminal_session(
         ("OXPLOW_PANE".to_string(), pane_target.clone()),
     ];
 
+    let prompt =
+        assemble_system_prompt(&state.layout.project_dir, &config, &stream, thread.as_ref());
+    let mut opts = AgentCommandOptions {
+        env: plugin_env.clone(),
+        append_system_prompt: if prompt.is_empty() {
+            None
+        } else {
+            Some(prompt)
+        },
+        ..Default::default()
+    };
+    match &agent_runtime {
+        oxplow_plugin::AgentRuntimePaths::Claude(paths) => {
+            opts.plugin_dir = Some(paths.plugin_dir.to_string_lossy().into_owned());
+            opts.mcp_config = Some(paths.mcp_config.to_string_lossy().into_owned());
+        }
+        oxplow_plugin::AgentRuntimePaths::Codex(paths) => {
+            opts.codex_config_overrides =
+                codex_config_overrides(paths, &plugin_runtime.mcp_endpoint_url);
+        }
+    }
+
     let result = match transport_mode.as_str() {
         "tmux" => {
-            let prompt = assemble_system_prompt(
-                &state.layout.project_dir,
-                &config,
-                &stream,
-                thread.as_ref(),
-            );
-            let opts = AgentCommandOptions {
-                plugin_dir: Some(plugin_paths.plugin_dir.to_string_lossy().into_owned()),
-                mcp_config: Some(plugin_paths.mcp_config.to_string_lossy().into_owned()),
-                env: plugin_env.clone(),
-                append_system_prompt: if prompt.is_empty() {
-                    None
-                } else {
-                    Some(prompt)
-                },
-                ..Default::default()
-            };
             let outcome = state
                 .agent_panes
-                .ensure_pane(&stream, pane_kind, &config, opts)
+                .ensure_pane(&stream, pane_kind, agent, opts.clone())
                 .await
                 .map_err(|e| IpcError::internal(e.to_string()))?;
             let target_label = outcome.target.as_str().to_string();
@@ -204,23 +270,6 @@ pub async fn open_terminal_session(
         }
         // Default to direct.
         _ => {
-            let prompt = assemble_system_prompt(
-                &state.layout.project_dir,
-                &config,
-                &stream,
-                thread.as_ref(),
-            );
-            let opts = AgentCommandOptions {
-                plugin_dir: Some(plugin_paths.plugin_dir.to_string_lossy().into_owned()),
-                mcp_config: Some(plugin_paths.mcp_config.to_string_lossy().into_owned()),
-                env: plugin_env.clone(),
-                append_system_prompt: if prompt.is_empty() {
-                    None
-                } else {
-                    Some(prompt)
-                },
-                ..Default::default()
-            };
             // Resume from the THREAD's resume_session_id (populated by
             // the resume-tracker in the control plane), not the
             // stream's working_session_id. Each thread runs an
@@ -231,7 +280,7 @@ pub async fn open_terminal_session(
                 .map(|t| t.resume_session_id.as_str())
                 .unwrap_or("");
             let command = build_agent_command_for_session(
-                config.agent,
+                agent,
                 &stream.worktree_path,
                 resume_session_id,
                 &opts,
@@ -318,7 +367,21 @@ pub async fn terminate_terminal_session(
 
 #[cfg(test)]
 mod tests {
-    use super::shell_session_key;
+    use super::{codex_hook_command, shell_session_key};
+    use std::path::Path;
+
+    #[test]
+    fn codex_hook_command_is_stable_and_url_independent() {
+        let command =
+            codex_hook_command(Path::new("/Applications/Oxplow App/oxplow"), "PreToolUse");
+        assert_eq!(
+            command,
+            "'/Applications/Oxplow App/oxplow' hook 'PreToolUse'"
+        );
+        assert!(!command.contains("python"));
+        assert!(!command.contains("http://"));
+        assert!(!command.contains("https://"));
+    }
 
     #[test]
     fn bare_shell_keeps_legacy_key() {

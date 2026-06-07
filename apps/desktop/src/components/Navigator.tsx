@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { archiveStream, type Stream, type Thread, type ThreadState } from "../api.js";
+import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
@@ -13,9 +13,10 @@ interface NavigatorProps {
   threadStates: Record<string, ThreadState>;
   streamStatuses: Record<string, AgentStatusDotState>;
   agentStatuses: Record<string, AgentStatusDotState>;
+  enabledAgents: AgentKind[];
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
-  onCreateThread(streamId: string, title: string): Promise<void>;
+  onCreateThread(streamId: string, title: string, agent?: AgentKind): Promise<void>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
@@ -60,6 +61,7 @@ export function Navigator({
   threadStates,
   streamStatuses,
   agentStatuses,
+  enabledAgents,
   onSwitchStream,
   onSelectThread,
   onCreateThread,
@@ -353,8 +355,9 @@ export function Navigator({
                 return (
                   <InlineNewThread
                     key={`o-addinput-${row.stream.id}`}
-                    onSubmit={async (title) => {
-                      await onCreateThread(row.stream.id, title);
+                    enabledAgents={enabledAgents}
+                    onSubmit={async (title, agent) => {
+                      await onCreateThread(row.stream.id, title, agent);
                       setPendingNewThreadFor(null);
                     }}
                     onCancel={() => setPendingNewThreadFor(null)}
@@ -836,14 +839,18 @@ function AddStreamButton({ gitEnabled, onClick }: { gitEnabled: boolean; onClick
 }
 
 function InlineNewThread({
+  enabledAgents,
   onSubmit,
   onCancel,
 }: {
-  onSubmit(title: string): Promise<void>;
+  enabledAgents: AgentKind[];
+  onSubmit(title: string, agent?: AgentKind): Promise<void>;
   onCancel(): void;
 }) {
   const [value, setValue] = useState("");
+  const [agent, setAgent] = useState<AgentKind>(enabledAgents[0] ?? "claude");
   const [busy, setBusy] = useState(false);
+  const choices = enabledAgents.length > 0 ? enabledAgents : ["claude" as AgentKind];
   return (
     <form
       onSubmit={async (e) => {
@@ -852,7 +859,7 @@ function InlineNewThread({
         if (!t) return onCancel();
         setBusy(true);
         try {
-          await onSubmit(t);
+          await onSubmit(t, agent);
         } finally {
           setBusy(false);
         }
@@ -862,6 +869,7 @@ function InlineNewThread({
         padding: "4px 12px",
         display: "flex",
         alignItems: "center",
+        gap: 6,
       }}
     >
       <input
@@ -890,6 +898,27 @@ function InlineNewThread({
           fontSize: "var(--text-xs)",
         }}
       />
+      {choices.length > 1 ? (
+        <select
+          value={agent}
+          disabled={busy}
+          onChange={(e) => setAgent(e.target.value as AgentKind)}
+          style={{
+            background: "var(--surface-card)",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 4,
+            padding: "4px 6px",
+            fontSize: "var(--text-xs)",
+          }}
+        >
+          {choices.map((choice) => (
+            <option key={choice} value={choice}>
+              {choice === "codex" ? "Codex" : "Claude"}
+            </option>
+          ))}
+        </select>
+      ) : null}
     </form>
   );
 }

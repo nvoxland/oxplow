@@ -19,7 +19,7 @@ use thiserror::Error;
 use tracing::info;
 
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{AgentKind, DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
 
 #[derive(Debug, Error)]
 pub enum ThreadError {
@@ -50,6 +50,7 @@ impl ThreadService {
         stream: &StreamId,
         title: impl Into<String>,
         pane_target: impl Into<String>,
+        agent: AgentKind,
     ) -> Result<Thread, ThreadError> {
         let existing = self.threads.list_for_stream(stream).await?;
         let any_active = existing.iter().any(|t| t.status == ThreadStatus::Active);
@@ -72,6 +73,7 @@ impl ThreadService {
             },
             sort_index: next_sort,
             pane_target: pane_target.into(),
+            agent,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

@@ -50,6 +50,7 @@ function makeHandlers(threadStatesRef: { current: ThreadStates }) {
     setStream: noop as never,
     setAgentStatuses: noop as never,
     setGeneratedState: noop,
+    setEnabledAgents: noop,
   };
 }
 

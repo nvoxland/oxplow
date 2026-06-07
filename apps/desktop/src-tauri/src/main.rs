@@ -16,6 +16,11 @@ use tauri::Emitter;
 static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn main() {
+    if let Some(event) = hook_event_arg() {
+        run_hook_command(&event);
+        return;
+    }
+
     init_tracing();
 
     // `generate_context!` embeds the Info.plist and may expand only
@@ -36,6 +41,79 @@ fn main() {
         None if restore_session() => {}
         None => run_launcher(ctx),
     }
+}
+
+fn hook_event_arg() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    match (args.next().as_deref(), args.next(), args.next()) {
+        (Some("hook"), Some(event), None) => Some(event),
+        _ => None,
+    }
+}
+
+fn run_hook_command(event: &str) {
+    use std::io::{Read, Write};
+
+    let mut payload = Vec::new();
+    if let Err(err) = std::io::stdin().read_to_end(&mut payload) {
+        eprintln!("oxplow hook failed to read stdin: {err}");
+        return;
+    }
+    if payload.is_empty() {
+        payload.extend_from_slice(b"{}");
+    }
+
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("oxplow hook failed to start runtime: {err}");
+            return;
+        }
+    };
+
+    let result = runtime.block_on(forward_hook(event, payload));
+    match result {
+        Ok(body) if !body.is_empty() => {
+            if let Err(err) = std::io::stdout().write_all(&body) {
+                eprintln!("oxplow hook failed to write response: {err}");
+            }
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("oxplow hook forwarding failed: {err}"),
+    }
+}
+
+async fn forward_hook(event: &str, payload: Vec<u8>) -> Result<Vec<u8>, reqwest::Error> {
+    let base_url = std::env::var("OXPLOW_HOOK_BASE_URL").unwrap_or_default();
+    let url = format!("{}/{}", base_url.trim_end_matches('/'), event);
+    let token = std::env::var("OXPLOW_HOOK_TOKEN").unwrap_or_default();
+
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .header(
+            "X-Oxplow-Stream",
+            std::env::var("OXPLOW_STREAM_ID").unwrap_or_default(),
+        )
+        .header(
+            "X-Oxplow-Thread",
+            std::env::var("OXPLOW_THREAD_ID").unwrap_or_default(),
+        )
+        .header(
+            "X-Oxplow-Pane",
+            std::env::var("OXPLOW_PANE").unwrap_or_default(),
+        )
+        .body(payload)
+        .send()
+        .await?;
+
+    Ok(response.bytes().await?.to_vec())
 }
 
 /// Reopen the project windows recorded in the global session (the set

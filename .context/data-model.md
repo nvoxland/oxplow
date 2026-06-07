@@ -87,7 +87,8 @@ Each stream owns:
   `<parent>/<project_basename>-<slug>/` for worktree kind — the
   `<slug>` is fixed at creation and does not rename on branch switch)
 - two tmux pane targets (`working` and `talking`)
-- per-pane Claude resume session ids (so reconnecting picks up history)
+- per-pane / per-thread agent resume session ids (so reconnecting picks up
+  history for the assigned agent)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
 - a `sort_index` column (migration v14) — streams are listed ordered by
   `sort_index, rowid`; drag-to-reorder in the StreamRail calls
@@ -154,6 +155,13 @@ instructions appended to the agent's system prompt after the stream-level
 IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
 `thread.changed` event (kind: "prompt-changed") so the UI refreshes thread
 state.
+
+`agent` (migration V30, non-null TEXT) — the agent implementation assigned
+to the thread at creation time. Values are `claude` or `codex`. Project
+config (`oxplow.yaml` `agents: [...]`) controls which values can be selected
+for new threads and the first configured agent is the default. Existing
+threads migrated at V30 default to `claude`; the assignment is immutable in
+v1 so resume/session history stays unambiguous.
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now

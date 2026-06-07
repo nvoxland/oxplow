@@ -1,3 +1,7 @@
+[target.aarch64-apple-darwin]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/opt/lld/bin/ld64.lld"]
+
 [alias]
 # `cargo cov` runs the workspace test suite under instrumentation via
 # nextest, emitting BOTH reports oxplow's collection subsystem reads

@@ -20,7 +20,7 @@ inside it:
   state.sqlite           # tasks, threads, snapshots, settings
   wiki/                  # wiki markdown files (`<slug>.md`)
   snapshots/             # per-effort file snapshots (Local History)
-  runtime/               # the Claude Code plugin oxplow installs per project
+  runtime/               # generated agent runtime files
   lsp/                   # cached LSP server binaries (Mason packages)
 ```
 

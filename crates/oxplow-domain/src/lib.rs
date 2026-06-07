@@ -5,6 +5,7 @@
 //! abstract traits that infrastructure crates implement. It contains
 //! no IO, no async runtime usage, and no platform-specific code.
 
+pub mod agent;
 pub mod comment;
 pub mod error;
 pub mod hook;
@@ -17,6 +18,7 @@ pub mod thread;
 pub mod time;
 pub mod tree_diff;
 
+pub use agent::AgentKind;
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
 };

@@ -120,6 +120,11 @@ For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.t
 Add a new helper any time more than one component would write the same
 filter.
 
+Config IPC includes `set_agents(agents: Vec<AgentKind>)`, which writes the
+project's ordered enabled-agent list in `oxplow.yaml`. Thread creation accepts
+an optional `agent`; the command validates that the requested agent is enabled
+and otherwise uses the first configured agent.
+
 **Listener count:** each UI subscriber registers via
 `listen("oxplow:event", ...)` from `@tauri-apps/api/event`. Tauri 2's
 event bus has no `MaxListeners` cap, so the historical

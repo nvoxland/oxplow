@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_app::config_service::{mutate_config, read_config};
-use oxplow_config::OxplowConfig;
+use oxplow_config::{AgentKind, OxplowConfig};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -21,6 +21,30 @@ pub async fn set_agent_prompt_append(
 ) -> Result<OxplowConfig, IpcError> {
     let project = state.layout.project_dir.clone();
     mutate_config(&state.config, &project, |c| c.agent_prompt_append = text)
+        .map_err(|e| IpcError::internal(e.to_string()))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_agents(
+    state: tauri::State<'_, AppState>,
+    agents: Vec<AgentKind>,
+) -> Result<OxplowConfig, IpcError> {
+    if agents.is_empty() {
+        return Err(IpcError::invalid(
+            "at least one agent must be enabled for the project",
+        ));
+    }
+    for (idx, agent) in agents.iter().enumerate() {
+        if agents[..idx].contains(agent) {
+            return Err(IpcError::invalid(format!(
+                "agent {} is listed more than once",
+                agent.as_str()
+            )));
+        }
+    }
+    let project = state.layout.project_dir.clone();
+    mutate_config(&state.config, &project, |c| c.agents = agents)
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 

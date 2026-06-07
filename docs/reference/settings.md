@@ -15,7 +15,7 @@ editing a file.
       state.sqlite        # tasks, threads, snapshots, settings
       wiki/               # wiki pages (markdown)
       snapshots/          # per-effort file snapshots (Local History)
-      runtime/            # Claude Code plugin oxplow installs per project
+      runtime/            # generated agent runtime files
       lsp/                # cached LSP server binaries (Mason packages)
     ```
 
@@ -49,11 +49,19 @@ framing ("you're on the migration branch, priority is not
 breaking schema") or thread-specific framing ("research only —
 never edit").
 
-### Agent kind
+### Agents
 
-Per-thread. Default is Claude Code. `copilot` is also supported
-but skips the oxplow plugin plumbing — no filing-enforcement, no
-Stop directives, no MCP tools.
+Per-project `agents` controls which agent implementations can be used:
+
+```yaml
+agents:
+- claude
+- codex
+```
+
+The first entry is the default for newly-created threads. Each thread
+stores its assigned agent at creation time, so Claude and Codex threads
+can run concurrently in the same project.
 
 ### tmux mode
 

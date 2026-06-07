@@ -2,10 +2,12 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
   getConfig,
+  setAgents,
   setAgentPromptAppend,
   setGenerated,
   setSnapshotMaxFileBytes,
   setSnapshotRetentionDays,
+  type AgentKind,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 
@@ -22,6 +24,7 @@ export interface SettingsPageProps {
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const [promptAppend, setPromptAppend] = useState("");
+  const [agents, setAgentsState] = useState<AgentKind[]>(["claude"]);
   const [retentionDays, setRetentionDays] = useState("7");
   const [maxFileMiB, setMaxFileMiB] = useState("5");
   const [generatedText, setGeneratedText] = useState("");
@@ -37,6 +40,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     void getConfig()
       .then((config) => {
         setPromptAppend(config.agentPromptAppend ?? "");
+        setAgentsState(config.agents?.length ? config.agents : ["claude"]);
         setRetentionDays(String(config.snapshotRetentionDays));
         setMaxFileMiB((config.snapshotMaxFileBytes / (1024 * 1024)).toString());
         setGeneratedText((config.generated ?? []).join("\n"));
@@ -70,6 +74,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
 
+      if (agents.length === 0) {
+        throw new Error("Enable at least one agent.");
+      }
+      await setAgents(agents);
       await setAgentPromptAppend(promptAppend);
       await setSnapshotRetentionDays(days);
       await setSnapshotMaxFileBytes(bytes);
@@ -95,6 +103,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       }
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
+        <Section title="Agents">
+          <Hint>
+            Enabled agents for this project. The first enabled agent is the default for new threads.
+          </Hint>
+          <AgentPicker agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
+        </Section>
+
         <Section title="Agent Prompt Additions">
           <Hint>
             Text appended to every agent's system prompt. Applies to agent sessions started after Save —
@@ -184,6 +199,78 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   );
 }
 
+const ALL_AGENTS: AgentKind[] = ["claude", "codex"];
+
+function AgentPicker({
+  agents,
+  onChange,
+  disabled,
+}: {
+  agents: AgentKind[];
+  onChange(next: AgentKind[]): void;
+  disabled: boolean;
+}) {
+  function setEnabled(agent: AgentKind, enabled: boolean) {
+    if (enabled) {
+      onChange(agents.includes(agent) ? agents : [...agents, agent]);
+      return;
+    }
+    onChange(agents.filter((a) => a !== agent));
+  }
+
+  function move(agent: AgentKind, direction: -1 | 1) {
+    const index = agents.indexOf(agent);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= agents.length) return;
+    const next = agents.slice();
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    onChange(next);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {ALL_AGENTS.map((agent) => {
+        const enabled = agents.includes(agent);
+        return (
+          <label key={agent} style={agentRowStyle}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={disabled || (enabled && agents.length === 1)}
+              onChange={(event) => setEnabled(agent, event.target.checked)}
+            />
+            <span style={{ minWidth: 64 }}>{agentLabel(agent)}</span>
+            {enabled ? (
+              <>
+                <button
+                  type="button"
+                  style={smallButtonStyle}
+                  disabled={disabled || agents.indexOf(agent) === 0}
+                  onClick={() => move(agent, -1)}
+                >
+                  Up
+                </button>
+                <button
+                  type="button"
+                  style={smallButtonStyle}
+                  disabled={disabled || agents.indexOf(agent) === agents.length - 1}
+                  onClick={() => move(agent, 1)}
+                >
+                  Down
+                </button>
+              </>
+            ) : null}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function agentLabel(agent: AgentKind): string {
+  return agent === "codex" ? "Codex" : "Claude";
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section style={{ marginBottom: 28 }}>
@@ -254,6 +341,20 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
+  fontSize: "var(--text-sm)",
+};
+
+const smallButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  padding: "3px 8px",
+  fontSize: "var(--text-xs)",
+};
+
+const agentRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  color: "var(--text-primary)",
   fontSize: "var(--text-sm)",
 };
 

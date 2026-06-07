@@ -358,7 +358,7 @@ export interface TopVisitedRowApi {
 }
 
 export interface OxplowConfig {
-  agent: string;
+  agents: import("./tauri-bridge/generated/bindings.js").AgentKind[];
   projectName: string;
   agentPromptAppend: string;
   snapshotRetentionDays: number;

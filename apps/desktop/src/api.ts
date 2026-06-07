@@ -270,8 +270,8 @@ export type {
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
 // custom_prompt) directly; no synthesis happens at the boundary.
-import type { Stream, Thread } from "./tauri-bridge/index.js";
-export type { Stream, Thread };
+import type { AgentKind, Stream, Thread } from "./tauri-bridge/index.js";
+export type { AgentKind, Stream, Thread };
 
 export interface ThreadState {
   selectedThreadId: string | null;
@@ -486,6 +486,10 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
 
 export async function getConfig(): Promise<import("./api-types.js").OxplowConfig> {
   return unwrap(await commands.getConfig()) as unknown as import("./api-types.js").OxplowConfig;
+}
+
+export async function setAgents(agents: AgentKind[]): Promise<import("./api-types.js").OxplowConfig> {
+  return unwrap(await commands.setAgents(agents)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setAgentPromptAppend(text: string): Promise<import("./api-types.js").OxplowConfig> {
@@ -742,9 +746,9 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
   return unwrap(await commands.getThreadState(streamId)) as unknown as ThreadState;
 }
 
-export async function createThread(streamId: string, title: string): Promise<ThreadState> {
+export async function createThread(streamId: string, title: string, agent?: AgentKind): Promise<ThreadState> {
   unwrap(
-    await commands.createThread({ streamId, title, paneTarget: null }),
+    await commands.createThread({ streamId, title, paneTarget: null, agent: agent ?? null }),
   );
   return getThreadState(streamId);
 }

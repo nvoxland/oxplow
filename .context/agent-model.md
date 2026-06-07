@@ -1,7 +1,7 @@
 # Agent execution model
 
 
-What this doc covers: how a Claude (or copilot) process is launched in a
+What this doc covers: how a Claude or Codex process is launched in a
 thread, how the runtime steers it through the work queue without ever
 sending it raw prompts, and the rules that keep non-writer threads from
 clobbering the writer's worktree. If you're touching MCP tools or the
@@ -53,8 +53,8 @@ oxplow agent:
 - **Where the agent runs.** Each thread has a tmux pane rendered in the
   first center-area tab. The renderer is `TerminalPane` attached to
   `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
-  `.xterm`. Click that element to focus, type with regular keystrokes —
-  xterm pipes them through the PTY to claude.
+  `.xterm`. Click that element to focus, type with regular keystrokes;
+  xterm pipes them through the PTY to the thread's assigned agent.
 - **When a turn is done.** `deriveThreadAgentStatus`
   (`crates/oxplow-domain/src/hook.rs`) reduces hook events to two states:
   `working` (agent is actively burning cycles) or `waiting` (agent
@@ -92,16 +92,20 @@ oxplow agent:
 
 ## Launching the agent
 
-`buildAgentCommandForSession` in `crates/oxplow-app/src/agent_command.rs` constructs a
-shell command that:
+`build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
+constructs a shell command for the thread's assigned `AgentKind`.
+`oxplow.yaml` lists enabled agents as `agents: [...]`; the first entry
+is the default for newly-created threads, and each thread persists its
+own `agent` at creation time so Claude and Codex threads can run
+concurrently.
 
-- `cd`s into the stream's worktree
-- runs `claude --plugin-dir <abs> --allowedTools mcp__oxplow__* --append-system-prompt <text> --mcp-config <json> [--resume <sid>]`
-- exports `OXPLOW_STREAM_ID`, `OXPLOW_BATCH_ID`, `OXPLOW_HOOK_TOKEN` so the
-  plugin's HTTP hooks can identify themselves to the runtime
-
-`copilot` is supported as an alternative agent kind but skips the plugin
-plumbing — it just `cd && exec copilot`.
+- Claude runs `claude --plugin-dir <abs> --append-system-prompt <text>
+  --mcp-config <json> [--resume <sid>]`.
+- Codex runs `codex --cd <worktree>` or `codex resume --cd <worktree>
+  <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
+- Both exports `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
+  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_PANE` so hooks can identify
+  themselves to the runtime.
 
 The command is launched in a tmux pane via `ensureAgentPane`
 (`crates/oxplow-app/src/agent_pane.rs`). Switching streams or threads doesn't kill
@@ -109,13 +113,20 @@ existing agent sessions; tmux keeps them alive in the background.
 
 ## Plugin hook bridge
 
-A per-project Claude Code plugin is installed at
-`<projectDir>/.oxplow/runtime/claude-plugin/` and passed to `claude`
-via the `--plugin-dir` flag built up in
-`crates/oxplow-app/src/agent_command.rs`. The plugin's `hooks.json`
-registers HTTP hooks for `PreToolUse`, `PostToolUse`,
-`UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and
-`Notification`.
+Agent-specific runtime files are materialized by `oxplow-plugin` under
+`.oxplow/runtime/` on every spawn. The rest of the app consumes only the
+provider output (`AgentCommandOptions`) instead of branching on plugin
+details.
+
+- Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
+  `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
+  `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`,
+  `Stop`, and `Notification`.
+- Codex writes `.oxplow/runtime/codex-plugin/`, packages the same
+  oxplow skills in Codex plugin layout, and registers command hooks
+  that POST Codex hook stdin to the same oxplow hook endpoint. Codex MCP
+  is configured with CLI `--config` overrides pointing at the
+  streamable-HTTP oxplow MCP endpoint.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
 are not supported for SessionStart" in `claude --debug-file`). Only command-

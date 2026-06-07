@@ -12,8 +12,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
 
-use oxplow_config::OxplowConfig;
-use oxplow_domain::Stream;
+use oxplow_domain::{AgentKind, Stream};
 use oxplow_tmux::{Session, TmuxError, TmuxRunner, WindowTarget};
 
 use crate::agent_command::{build_agent_command, AgentCommandOptions, PaneKind};
@@ -79,7 +78,7 @@ impl AgentPaneService {
         &self,
         stream: &Stream,
         pane: PaneKind,
-        config: &OxplowConfig,
+        agent: AgentKind,
         opts: AgentCommandOptions,
     ) -> Result<EnsurePaneOutcome, AgentPaneError> {
         let session = session_for_stream(stream);
@@ -87,7 +86,7 @@ impl AgentPaneService {
         self.tmux.ensure_session(&session, cwd).await?;
 
         let target = WindowTarget::from_parts(&session, window_name_for(pane));
-        let command = build_agent_command(config.agent, stream, pane, &opts);
+        let command = build_agent_command(agent, stream, pane, &opts);
         let signature = Self::launcher_signature(&command);
 
         let created = self

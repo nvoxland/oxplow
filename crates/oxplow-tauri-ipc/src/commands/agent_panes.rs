@@ -8,6 +8,7 @@ use oxplow_app::agent_pane::EnsurePaneOutcome;
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
 use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::AgentKind;
 use oxplow_domain::{StreamId, ThreadId};
 
 use crate::error::IpcError;
@@ -70,6 +71,10 @@ pub async fn ensure_agent_pane(
     };
 
     let config = read_config(&state.config);
+    let agent = thread
+        .as_ref()
+        .map(|t| t.agent)
+        .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
     let prompt =
         assemble_system_prompt(&state.layout.project_dir, &config, &stream, thread.as_ref());
 
@@ -88,7 +93,7 @@ pub async fn ensure_agent_pane(
         created,
     } = state
         .agent_panes
-        .ensure_pane(&stream, req.pane.into(), &config, opts)
+        .ensure_pane(&stream, req.pane.into(), agent, opts)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
     Ok(EnsureAgentPaneResponse {

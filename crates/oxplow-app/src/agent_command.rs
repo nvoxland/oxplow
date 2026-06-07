@@ -1,5 +1,5 @@
 //! Build the shell command oxplow runs in a tmux pane to launch the
-//! agent CLI (Claude or Copilot).
+//! agent CLI (Claude or Codex).
 //!
 //! Pure string-building, no IO. Mirrors the original
 //! `src/agent/agent-command.ts` so the launcher signature is stable
@@ -14,6 +14,7 @@ pub struct AgentCommandOptions {
     pub allowed_tools: Vec<String>,
     pub append_system_prompt: Option<String>,
     pub mcp_config: Option<String>,
+    pub codex_config_overrides: Vec<String>,
     pub env: Vec<(String, String)>,
 }
 
@@ -44,8 +45,22 @@ pub fn build_agent_command_for_session(
 ) -> String {
     let env_prefix = build_env_prefix(&opts.env);
 
-    if matches!(agent, AgentKind::Copilot) {
-        let inner = format!("cd {} && {}exec copilot", shell_escape(cwd), env_prefix);
+    if matches!(agent, AgentKind::Codex) {
+        let config_args = opts
+            .codex_config_overrides
+            .iter()
+            .map(|c| format!(" --config {}", shell_escape(c)))
+            .collect::<String>();
+        let base = if resume_session_id.is_empty() {
+            format!("codex --cd {}{config_args}", shell_escape(cwd))
+        } else {
+            format!(
+                "codex resume --cd {}{config_args} {}",
+                shell_escape(cwd),
+                shell_escape(resume_session_id)
+            )
+        };
+        let inner = format!("cd {} && {}exec {base}", shell_escape(cwd), env_prefix);
         return format!("sh -lc {}", shell_escape(&inner));
     }
 
@@ -145,17 +160,26 @@ mod tests {
     /// below check substrings of the inner command that survive that
     /// transform unchanged.
     #[test]
-    fn copilot_command_just_execs_copilot() {
+    fn codex_command_uses_codex_cli() {
         let s = stream();
-        let cmd = build_agent_command(
-            AgentKind::Copilot,
-            &s,
-            PaneKind::Working,
-            &Default::default(),
-        );
+        let cmd = build_agent_command(AgentKind::Codex, &s, PaneKind::Working, &Default::default());
         assert!(cmd.starts_with("sh -lc "));
-        assert!(cmd.contains("exec copilot"));
+        assert!(cmd.contains("exec codex"));
+        assert!(cmd.contains("--cd"));
         assert!(cmd.contains("/repo"));
+    }
+
+    #[test]
+    fn codex_command_includes_config_overrides() {
+        let s = stream();
+        let opts = AgentCommandOptions {
+            codex_config_overrides: vec!["mcp_servers.oxplow.url=\"http://127.0.0.1/mcp\"".into()],
+            ..Default::default()
+        };
+        let cmd = build_agent_command(AgentKind::Codex, &s, PaneKind::Working, &opts);
+        assert!(cmd.contains("--config"));
+        assert!(cmd.contains("mcp_servers.oxplow.url"));
+        assert!(!cmd.contains("--dangerously-bypass-hook-trust"));
     }
 
     #[test]

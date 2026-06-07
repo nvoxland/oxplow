@@ -151,6 +151,7 @@ mod tests {
             status: ThreadStatus::Queued,
             sort_index: 0,
             pane_target: "talking".into(),
+            agent: oxplow_domain::AgentKind::Claude,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
