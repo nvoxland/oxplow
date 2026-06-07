@@ -13,8 +13,8 @@ the runtime steers the agent are:
 
 1. The system prompt set at launch.
 2. Hook responses returned over HTTP — especially the Stop
-   hook's "block" form, which Claude treats as a fresh
-   instruction to keep going.
+   hook's continuation directive, which tells the active agent
+   to keep going.
 3. MCP tool responses (when the agent calls one).
 
 There is no auto-typing into the terminal. Auto-progression
@@ -23,9 +23,10 @@ agent from quitting until its obligations are settled.
 
 ## Stop hook
 
-When the agent finishes a turn, Claude Code fires the Stop hook.
-Oxplow's response decides whether the agent gets to stop or has
-to keep working. The pipeline runs in priority order:
+When the agent finishes a turn, its generated Claude Code or Codex
+integration fires the Stop hook. Oxplow's response decides whether the
+agent gets to stop or has to keep working. The pipeline runs in
+priority order:
 
 1. **Q&A short-circuit.** If the turn had no qualifying tool
    activity (no edits, no task filing, no dispatch), the
@@ -108,6 +109,9 @@ The wiki watcher syncs metadata on every file event.
 Most of this is infrastructure — set up once, then invisible.
 You can:
 
+- Enable and order Claude Code and Codex for the project (project
+  Settings or `oxplow.yaml`). The selected agent is fixed when a thread
+  is created.
 - Switch the writer thread per stream (thread kebab → "Promote
   to writer").
 - Promote a read-only thread when you want it to commit.
@@ -115,6 +119,9 @@ You can:
   / Thread Settings pages).
 - Pause or resume a thread's agent process from the thread
   tab kebab.
+
+See [Agents](agents.md) for agent selection and generated runtime
+details.
 
 The internal details (hook endpoints, MCP transport, snapshot
 storage) are not user-configurable on purpose — changing them

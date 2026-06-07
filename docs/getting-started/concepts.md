@@ -28,13 +28,15 @@ changing behind your back.
 
 Each thread carries its own:
 
+- assigned agent (Claude Code or Codex, fixed at thread creation)
 - agent terminal (a tmux pane that survives oxplow restarts)
 - set of open tabs and active tab
 - work queue view
 - live agent-status indicator
 
 Switching threads restores its tab set; the agent terminals stay
-alive in the background.
+alive in the background. Different threads may use different agents;
+the writer/read-only role remains a separate per-stream constraint.
 
 ## Worktree isolation
 

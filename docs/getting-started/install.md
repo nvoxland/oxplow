@@ -85,6 +85,10 @@ Prerequisites:
 - **Git** — oxplow expects the workspace root to be a repo.
 - **`tmux`** — agent panes are tmux-managed (the suite skips when
   it's missing, but real use needs it).
+- **An agent CLI** — install and authenticate Claude Code (`claude`),
+  Codex (`codex`), or both. Oxplow launches the CLI assigned to each
+  thread; enabling an agent does not install it or configure provider
+  credentials.
 
 If you use [mise](https://mise.jdx.dev), `mise install` picks up
 bun / node / rust from `mise.toml`.
@@ -108,6 +112,9 @@ release flow — see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV
    climb upward looking for an enclosing repo (workspace
    isolation rule).
 3. Read [Your first stream](first-stream.md) to send a prompt.
+
+See [Agents](../guide/agents.md) to enable Claude Code and Codex,
+choose the default, and run different agents in separate threads.
 
 Oxplow stores everything project-local under `.oxplow/` inside
 the project root: the SQLite database, the wiki pages folder,

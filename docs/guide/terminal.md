@@ -1,24 +1,27 @@
 # Terminal
 
 Each thread has an **Agent** tab that wraps a tmux pane running
-the thread's assigned agent, Claude Code or Codex, in the stream's worktree. The pane
-survives oxplow restarts because tmux owns the process —
+the thread's assigned agent, Claude Code or Codex, in the stream's
+worktree. The pane survives oxplow restarts because tmux owns the process —
 killing oxplow doesn't kill your in-flight agent.
 
 ## Agent terminal
 
-The project-level `agents` list controls which agents are available; the
-first enabled agent is the default for new threads. Type a prompt, hit enter,
-watch the agent work. The thread tab's status dot flips yellow (working)
-or red (waiting on you).
+The project-level `agents` list controls which agents are available;
+the first enabled agent is the default for new threads. When both are
+enabled, choose an agent while creating the thread. The assignment is
+fixed after creation. See [Agents](agents.md) for configuration and
+runtime details.
+
+Type a prompt, hit enter, and watch the agent work. The thread tab's
+status dot flips yellow (working) or red (waiting on you).
 
 Per-thread bits worth knowing:
 
-- **Stop hook integration.** Every Stop fires the runtime's
-  hook — that's how the in-progress audit, filing-enforcement,
-  and snapshot tracking get driven. You don't configure
-  anything; oxplow installs per-agent runtime files under
-  `.oxplow/runtime/` automatically.
+- **Lifecycle hook integration.** Claude Code and Codex load their own
+  generated hook configuration. Stop and tool events drive the
+  in-progress audit, filing enforcement, and snapshot tracking. Oxplow
+  installs the per-agent files under `.oxplow/runtime/` automatically.
 - **Write guard.** If the active thread is read-only,
   Edit / Write / MultiEdit / NotebookEdit are denied at the
   hook level. The agent can still read, search, and answer

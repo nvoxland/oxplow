@@ -51,17 +51,51 @@ never edit").
 
 ### Agents
 
-Per-project `agents` controls which agent implementations can be used:
+Per-project `agents` controls which agent implementations are offered
+when a thread is created. Configure it from the project Settings page
+or in `oxplow.yaml`:
 
 ```yaml
 agents:
-- claude
-- codex
+  - claude
+  - codex
 ```
 
-The first entry is the default for newly-created threads. Each thread
-stores its assigned agent at creation time, so Claude and Codex threads
-can run concurrently in the same project.
+Supported values:
+
+| Value | CLI Oxplow launches |
+| --- | --- |
+| `claude` | Claude Code (`claude`) |
+| `codex` | Codex (`codex`) |
+
+The list order matters: the first entry is the default for new threads.
+The Settings page's **Up** and **Down** buttons change that order. If
+only one agent is enabled, new threads use it automatically; if both
+are enabled, the new-thread row shows a selector.
+
+The setting must contain at least one value and cannot contain
+duplicates. Omitting it defaults to `[claude]`. Oxplow rejects unknown
+agent names, an empty list, and a list with duplicate entries.
+
+Each thread stores its assigned agent at creation time. The assignment
+cannot be changed from Thread Settings, and reordering or disabling
+agents does not rewrite existing threads. This allows Claude and Codex
+threads to run concurrently while preserving their independent
+sessions and history.
+
+Older configurations may contain the singular key:
+
+```yaml
+agent: codex
+```
+
+Oxplow still reads it as a one-entry enabled-agent list for migration.
+Use `agents` for new configuration; specifying both `agent` and
+`agents` is an error.
+
+The selected CLI must be installed, authenticated, and available on
+`PATH`. See [Agents](../guide/agents.md) for thread selection, runtime
+integration, and concurrent operation.
 
 ### tmux mode
 

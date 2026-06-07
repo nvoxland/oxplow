@@ -65,6 +65,11 @@ while it's working; it goes red when the agent is waiting on
 you. Asking the agent a question that doesn't need file edits
 just stops cleanly when it's answered — there's nothing to file.
 
+Oxplow supports Claude Code and Codex. The project Settings page
+controls which agents are enabled and their default order. If both are
+enabled, choose one when creating a thread; the assignment stays with
+that thread. See [Agents](../guide/agents.md).
+
 Non-trivial Q&A is captured into a wiki page automatically (the
 runtime nudges the agent to do this). Look for a new file under
 `.oxplow/wiki/` after the answer.
@@ -121,3 +126,5 @@ it to ship changes (only one writer per stream).
   backlinks, how the agent uses them.
 - [Agent control](../guide/agent-control.md) — Stop hook, write
   guard, filing enforcement.
+- [Agents](../guide/agents.md) — Claude Code and Codex selection,
+  configuration, and runtime integration.
