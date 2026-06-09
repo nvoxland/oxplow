@@ -2,7 +2,7 @@
 //!
 //! Combines (in order):
 //! 1. The repo-level `CLAUDE.md` (project instructions).
-//! 2. A `<session-context>` block describing the active stream/thread.
+//! 2. An Oxplow session-context note describing the active stream/thread.
 //! 3. The thread's `custom_prompt` if set.
 //! 4. The stream's `custom_prompt` if set.
 //! 5. The user's `agentPromptAppend` from `oxplow.yaml`.
@@ -51,14 +51,15 @@ pub fn load_claude_md(project_dir: &Path) -> String {
     std::fs::read_to_string(&path).unwrap_or_default()
 }
 
-/// Build the `<session-context>` block. Includes worktree path,
-/// stream/thread titles, and the thread's writer/read-only role.
+/// Build the visible Oxplow session-context note. Includes worktree
+/// path, stream/thread titles, identifiers, and the practical effect
+/// of the thread's writer/read-only role.
 pub fn build_session_context_block(stream: &Stream, thread: Option<&Thread>) -> String {
     build_session_context_block_with_role(stream, thread, None)
 }
 
-/// Like `build_session_context_block` but appends a loud
-/// `ROLE CHANGE:` line before `</session-context>` when the current
+/// Like `build_session_context_block` but appends a prominent role-
+/// change note before `</session-context>` when the current
 /// thread role differs from the supplied `initial_role`. The launch-
 /// time `NON_WRITER_PROMPT_BLOCK` is frozen in the system prompt and
 /// replayed via cache-read on every turn — without this banner, a
@@ -70,18 +71,27 @@ pub fn build_session_context_block_with_role(
     thread: Option<&Thread>,
     initial_role: Option<RoleMode>,
 ) -> String {
-    let mut s = String::from("<session-context>\n");
-    s.push_str(&format!("stream_id={}\n", stream.id));
-    s.push_str(&format!("stream_title={}\n", stream.title));
-    s.push_str(&format!("worktree_path={}\n", stream.worktree_path));
-    s.push_str(&format!("branch={}\n", stream.branch));
+    let mut s = String::from(
+        "<session-context>\n## Oxplow session context\n\n\
+         Oxplow is providing the agent's current workspace assignment. This note is refreshed after a session restart or when the assignment changes.\n\n",
+    );
+    s.push_str(&format!(
+        "- **Stream:** {} (`{}`)\n",
+        stream.title, stream.id
+    ));
+    s.push_str(&format!("- **Worktree:** `{}`\n", stream.worktree_path));
+    s.push_str(&format!("- **Branch:** `{}`\n", stream.branch));
     if let Some(t) = thread {
-        s.push_str(&format!("thread_id={}\n", t.id));
-        s.push_str(&format!("thread_title={}\n", t.title));
+        s.push_str(&format!("- **Thread:** {} (`{}`)\n", t.title, t.id));
         let current = RoleMode::from_thread(t);
-        s.push_str(&format!("role={}\n", current.as_str()));
+        s.push_str(&format!(
+            "- **Access:** **{}** — {}\n",
+            current.as_str(),
+            role_description(current)
+        ));
         if let Some(initial) = initial_role {
             if initial != current {
+                s.push('\n');
                 s.push_str(&role_change_banner(initial, current));
                 s.push('\n');
             }
@@ -91,14 +101,21 @@ pub fn build_session_context_block_with_role(
     s
 }
 
+fn role_description(role: RoleMode) -> &'static str {
+    match role {
+        RoleMode::Writer => "may edit project files after starting an `in_progress` task",
+        RoleMode::ReadOnly => "may inspect the project, but project file edits are blocked",
+    }
+}
+
 /// Loud banner emitted when the thread's role flipped mid-session.
 /// Phrased so the agent treats it as a direct override of the
 /// frozen `NON_WRITER_PROMPT_BLOCK` (or absence thereof) in the
 /// initial system prompt.
 pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
     match (initial, current) {
-        (RoleMode::ReadOnly, RoleMode::Writer) => "ROLE CHANGE: this thread has been promoted to writer mid-session. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree. File a tracked task before editing project files (filing-enforcement applies).".to_string(),
-        (RoleMode::Writer, RoleMode::ReadOnly) => "ROLE CHANGE: this thread has been demoted to read-only mid-session. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked. Wiki captures under .oxplow/wiki/ remain allowed.".to_string(),
+        (RoleMode::ReadOnly, RoleMode::Writer) => "**Access changed:** This thread was promoted to writer after the session started. It may now edit the worktree after starting an `in_progress` task; the earlier read-only instruction no longer applies.".to_string(),
+        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked, though wiki captures under `.oxplow/wiki/` remain allowed.".to_string(),
         // Same-role pairs never reach this fn — caller skips.
         _ => String::new(),
     }
@@ -212,9 +229,13 @@ mod tests {
     #[test]
     fn session_context_includes_stream_and_thread_metadata() {
         let block = build_session_context_block(&stream(), Some(&thread()));
-        assert!(block.contains("stream_id=s-1"));
-        assert!(block.contains("thread_id=b-1"));
-        assert!(block.contains("role=writer"));
+        assert!(block.contains("## Oxplow session context"));
+        assert!(block.contains("**Stream:** oxplow (`s-1`)"));
+        assert!(block.contains("**Worktree:** `/repo`"));
+        assert!(block.contains("**Branch:** `main`"));
+        assert!(block.contains("**Thread:** explore (`b-1`)"));
+        assert!(block.contains("**Access:** **writer**"));
+        assert!(block.contains("after a session restart or when the assignment changes"));
     }
 
     #[test]
@@ -258,7 +279,8 @@ mod tests {
         let mut t = thread();
         t.status = ThreadStatus::Queued;
         let block = build_session_context_block(&stream(), Some(&t));
-        assert!(block.contains("role=read-only"));
+        assert!(block.contains("**Access:** **read-only**"));
+        assert!(block.contains("project file edits are blocked"));
     }
 
     #[test]
@@ -269,10 +291,10 @@ mod tests {
             Some(&thread()),
             Some(RoleMode::ReadOnly),
         );
-        assert!(block.contains("role=writer"));
-        assert!(block.contains("ROLE CHANGE"));
+        assert!(block.contains("**Access:** **writer**"));
+        assert!(block.contains("**Access changed:**"));
         assert!(block.contains("promoted to writer"));
-        assert!(block.contains("SUPERSEDED"));
+        assert!(block.contains("earlier read-only instruction no longer applies"));
     }
 
     #[test]
@@ -282,9 +304,9 @@ mod tests {
         t.status = ThreadStatus::Queued;
         let block =
             build_session_context_block_with_role(&stream(), Some(&t), Some(RoleMode::Writer));
-        assert!(block.contains("role=read-only"));
-        assert!(block.contains("ROLE CHANGE"));
-        assert!(block.contains("demoted to read-only"));
+        assert!(block.contains("**Access:** **read-only**"));
+        assert!(block.contains("**Access changed:**"));
+        assert!(block.contains("changed to read-only"));
     }
 
     #[test]
@@ -295,8 +317,8 @@ mod tests {
             Some(&thread()),
             Some(RoleMode::Writer),
         );
-        assert!(block.contains("role=writer"));
-        assert!(!block.contains("ROLE CHANGE"));
+        assert!(block.contains("**Access:** **writer**"));
+        assert!(!block.contains("**Access changed:**"));
     }
 
     #[test]
@@ -304,6 +326,6 @@ mod tests {
         // Caller hasn't captured an initial role yet (e.g. very first
         // turn or hook fired before capture) — no banner.
         let block = build_session_context_block_with_role(&stream(), Some(&thread()), None);
-        assert!(!block.contains("ROLE CHANGE"));
+        assert!(!block.contains("**Access changed:**"));
     }
 }

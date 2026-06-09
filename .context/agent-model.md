@@ -836,22 +836,24 @@ Tauri commands (`open_terminal_session`, `ensure_agent_pane`) call
 `ThreadService::selected_or_active(&stream_id)`, which falls back from
 the user's explicit selection → the writer (active) thread → the first
 queued thread. This guarantees `OXPLOW_THREAD_ID` and the
-`<session-context>` block's `thread_id=…` line are populated for any
+visible `<session-context>` note's thread line are populated for any
 stream that has at least one thread (boot seeds a "Default" thread for
 every primary stream, so this is always true in practice).
 
 On every `UserPromptSubmit`, the runtime builds a fresh
-`<session-context>` block (stream/thread/writer flag) and returns it as
-`hookSpecificOutput.additionalContext` so the agent stays pointed at the
-right ids mid-session. The runtime caches the last-emitted block per
-Claude session id (`lastSessionContextBySessionId`) and **skips emission
+`<session-context>` note (a short Markdown status card explaining the
+current stream, worktree, branch, thread, and access role) and returns
+it as `hookSpecificOutput.additionalContext` so the agent stays pointed
+at the right ids mid-session. The runtime caches the last-emitted block per
+agent session id (`last_context_by_session_id`) and **skips emission
 when the candidate block is byte-identical to what was already sent** —
 re-sending the same string is pure overhead since the agent's prompt
 cache still holds the prior value. The first turn on a session, and any
 turn after the block's contents change (thread flip, writer promotion,
-title edit), emits normally. If a project wants to disable injection
-entirely, set `injectSessionContext: false` in `oxplow.yaml` — default is
-`true`.
+title edit), emits normally. `SessionStart` clears the baseline so
+startup, resume, clear, and compact receive one fresh note. If a project
+wants to disable injection entirely, set `injectSessionContext: false`
+in `oxplow.yaml` — default is `true`.
 
 ### ROLE CHANGE banner
 
@@ -861,21 +863,19 @@ writer promotion used to leave the agent acting read-only long after
 the UI flipped it. To supersede the stale block in-place,
 `build_session_context_block_with_role` (in
 `crates/oxplow-app/src/agent_prompt.rs`) accepts an `initial_role`
-input and appends a loud `ROLE CHANGE:` line before
+input and appends a prominent `**Access changed:**` note before
 `</session-context>` when the current role differs from it. The
 control plane (`crates/oxplow-control-plane/src/lib.rs::RoleState`)
-captures the role once per Claude session id in
+captures the role once per agent session id in
 `initial_role_by_session_id` on the first hook it sees for that
 session — UserPromptSubmit OR an ExitPlanMode PostToolUse, whichever
 fires first — so the comparison baseline is stable across subsequent
 turns. Both directions are covered:
 
-- **read-only → writer.** "The NON_WRITER block in your initial system
-  prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the
-  worktree."
-- **writer → read-only.** "The NON_WRITER block applies now even though
-  it wasn't in your initial system prompt — Write/Edit/Bash mutations
-  to the worktree will be blocked."
+- **read-only → writer.** Explains that the earlier read-only instruction
+  no longer applies and task filing is still required before edits.
+- **writer → read-only.** Explains that project edits are now blocked
+  while wiki capture remains allowed.
 
 No banner is emitted when the role has not changed, so steady-state
 turns don't grow.

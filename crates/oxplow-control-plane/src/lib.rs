@@ -95,16 +95,21 @@ struct StopState {
 }
 
 /// Captures the thread's writer/read-only role on the FIRST hook the
-/// runtime sees for a given Claude session id, then reuses that
+/// runtime sees for a given agent session id, then reuses that
 /// snapshot as the comparison baseline for the ROLE CHANGE banner on
 /// every subsequent hook of that session. Keyed by session_id (not
-/// thread_id) so a thread that re-attaches with a fresh Claude
+/// thread_id) so a thread that re-attaches with a fresh agent
 /// session — e.g. after a daemon restart — gets a fresh baseline.
 /// Loss across restart is acceptable: the worst case is one extra
 /// no-op turn before the next promotion gets a banner.
 #[derive(Default)]
 struct RoleState {
     initial_role_by_session_id: HashMap<String, RoleMode>,
+    /// Last `<session-context>` block returned for each session. The
+    /// launch prompt already carries this data; hook injection is for
+    /// refreshing mutable values, so byte-identical repeats add noise
+    /// without giving the agent new information.
+    last_context_by_session_id: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -242,15 +247,6 @@ async fn handle_hook(
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
 
-    let kind = match parse_hook_kind(&event) {
-        Some(k) => k,
-        None => {
-            // Unknown but non-fatal — record nothing, ack so the agent
-            // doesn't block.
-            return (StatusCode::ACCEPTED, "ignored unknown hook event").into_response();
-        }
-    };
-
     let stream_id = headers
         .get("x-oxplow-stream")
         .and_then(|v| v.to_str().ok())
@@ -275,6 +271,25 @@ async fn handle_hook(
         .and_then(|v| v.get("session_id"))
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
+
+    // SessionStart is runtime state, not a persisted domain hook. A
+    // startup/resume/clear/compact gives the agent a fresh system
+    // prompt, so discard both comparison baselines and let the next
+    // UserPromptSubmit inject one fresh block for the new context.
+    if event == "SessionStart" {
+        reset_session_context_state(&ctx.role_state, session_id.as_deref());
+        return (StatusCode::ACCEPTED, "session context reset").into_response();
+    }
+
+    let kind = match parse_hook_kind(&event) {
+        Some(k) => k,
+        None => {
+            // Unknown but non-fatal — record nothing, ack so the agent
+            // doesn't block.
+            return (StatusCode::ACCEPTED, "ignored unknown hook event").into_response();
+        }
+    };
+
     let prompt = if kind == HookKind::UserPromptSubmit {
         body_value
             .as_ref()
@@ -421,11 +436,9 @@ async fn handle_hook(
     }
 
     // UserPromptSubmit: refresh the agent's view of stream + thread +
-    // role on every prompt. Captures the launch-time role on the
-    // first prompt of each session so subsequent prompts can detect
-    // promotions/demotions and append a loud ROLE CHANGE banner. The
-    // block is returned via hookSpecificOutput.additionalContext per
-    // the Claude Code hook contract.
+    // role when it changed. Captures the launch-time role on the first
+    // prompt of each session so subsequent prompts can detect
+    // promotions/demotions and append a loud ROLE CHANGE banner.
     if kind == HookKind::UserPromptSubmit {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(ctx_block) = refreshed_session_context(
@@ -972,11 +985,40 @@ async fn refreshed_session_context(
         .ok()
         .flatten()?;
     let initial = capture_or_get_initial_role(ctx, thread_id, session_id).await;
-    Some(build_session_context_block_with_role(
-        &stream,
-        Some(&thread),
-        initial,
-    ))
+    let block = build_session_context_block_with_role(&stream, Some(&thread), initial);
+    should_emit_session_context(&ctx.role_state, session_id, &block).then_some(block)
+}
+
+fn should_emit_session_context(
+    state: &Mutex<RoleState>,
+    session_id: Option<&str>,
+    block: &str,
+) -> bool {
+    let Some(session_id) = session_id else {
+        // Without a stable identity, suppressing could hide a context
+        // change from a different session that happens to share a
+        // thread. Prefer the small duplicate over stale instructions.
+        return true;
+    };
+    let mut state = state.lock();
+    match state.last_context_by_session_id.get(session_id) {
+        Some(previous) if previous == block => false,
+        _ => {
+            state
+                .last_context_by_session_id
+                .insert(session_id.to_string(), block.to_string());
+            true
+        }
+    }
+}
+
+fn reset_session_context_state(state: &Mutex<RoleState>, session_id: Option<&str>) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    let mut state = state.lock();
+    state.initial_role_by_session_id.remove(session_id);
+    state.last_context_by_session_id.remove(session_id);
 }
 
 /// Returns just the ROLE CHANGE sentence (no surrounding session-
@@ -1218,5 +1260,57 @@ mod tests {
         let a = generate_token();
         let b = generate_token();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn session_context_emits_initial_and_changed_blocks_only() {
+        let state = Mutex::new(RoleState::default());
+
+        assert!(should_emit_session_context(
+            &state,
+            Some("session-1"),
+            "context-a"
+        ));
+        assert!(!should_emit_session_context(
+            &state,
+            Some("session-1"),
+            "context-a"
+        ));
+        assert!(should_emit_session_context(
+            &state,
+            Some("session-1"),
+            "context-b"
+        ));
+    }
+
+    #[test]
+    fn session_context_without_session_id_is_never_suppressed() {
+        let state = Mutex::new(RoleState::default());
+        assert!(should_emit_session_context(&state, None, "context"));
+        assert!(should_emit_session_context(&state, None, "context"));
+    }
+
+    #[test]
+    fn clearing_session_context_baseline_allows_fresh_emission() {
+        let state = Mutex::new(RoleState::default());
+        state
+            .lock()
+            .initial_role_by_session_id
+            .insert("session-1".into(), RoleMode::Writer);
+        assert!(should_emit_session_context(
+            &state,
+            Some("session-1"),
+            "context"
+        ));
+        reset_session_context_state(&state, Some("session-1"));
+        assert!(!state
+            .lock()
+            .initial_role_by_session_id
+            .contains_key("session-1"));
+        assert!(should_emit_session_context(
+            &state,
+            Some("session-1"),
+            "context"
+        ));
     }
 }
