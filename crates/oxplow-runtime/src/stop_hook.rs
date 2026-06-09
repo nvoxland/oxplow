@@ -235,8 +235,8 @@ mod tests {
 
     fn active_thread() -> Thread {
         Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: StreamId::from("s-1"),
+            id: ThreadId::new(1),
+            stream_id: StreamId::new(1),
             title: "t".into(),
             status: ThreadStatus::Active,
             sort_index: 0,

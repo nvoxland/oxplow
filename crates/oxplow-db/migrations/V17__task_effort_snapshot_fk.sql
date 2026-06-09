@@ -13,9 +13,9 @@
 -- intended as snapshot.id all along, so they're preserved as-is.
 
 CREATE TABLE task_effort_new (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
     start_snapshot_id INTEGER REFERENCES snapshot(id) ON DELETE SET NULL,

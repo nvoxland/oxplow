@@ -86,7 +86,7 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
   }
   if (ref.kind === "task") {
     const payload = ref.payload as { itemId?: unknown } | null;
-    if (payload && typeof payload.itemId === "number") {
+    if (payload && typeof payload.itemId === "string") {
       return { kind: "task", itemId: payload.itemId, title: String(payload.itemId), status: "" };
     }
     return null;

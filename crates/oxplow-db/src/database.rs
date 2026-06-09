@@ -255,12 +255,12 @@ mod tests {
         let now = "2026-04-29T00:00:00Z";
         conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES ('s-a', 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+             VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
             [now],
         ).unwrap();
         let result = conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES ('s-b', 'primary', 'b', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+             VALUES (2, 'primary', 'b', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
             [now],
         );
         assert!(result.is_err(), "DB should reject a second primary stream");
@@ -273,18 +273,18 @@ mod tests {
         let now = "2026-04-29T00:00:00Z";
         conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES ('s-1', 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+             VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
             [now],
         ).unwrap();
         conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES ('b-a', 's-1', 'a', 'active', ?1, ?1)",
+             VALUES (1, 1, 'a', 'active', ?1, ?1)",
             [now],
         )
         .unwrap();
         let result = conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES ('b-b', 's-1', 'b', 'active', ?1, ?1)",
+             VALUES (2, 1, 'b', 'active', ?1, ?1)",
             [now],
         );
         assert!(
@@ -299,7 +299,7 @@ mod tests {
         let conn = db.conn().unwrap();
         let result = conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES ('b-orphan', 's-nope', 't', 'queued', '2026-01-01', '2026-01-01')",
+             VALUES (1, 999, 't', 'queued', '2026-01-01', '2026-01-01')",
             [],
         );
         assert!(
@@ -316,18 +316,18 @@ mod tests {
         let now = "2026-04-29T00:00:00Z";
         conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES ('s-1', 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
+             VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
             [now],
         ).unwrap();
         conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
+             VALUES (1, 1, 't', 'active', ?1, ?1)",
             [now],
         )
         .unwrap();
         // Both null — must fail.
         let r = conn.execute(
-            "INSERT INTO task_note (id, body, author, created_at) VALUES ('n-bad', 'b', 'u', ?1)",
+            "INSERT INTO task_note (body, author, created_at) VALUES ('b', 'u', ?1)",
             [now],
         );
         assert!(
@@ -342,8 +342,8 @@ mod tests {
         );
         assert!(r.is_ok());
         let r = conn.execute(
-            "INSERT INTO task_note (id, task_id, thread_id, body, author, created_at)
-             VALUES ('n-bad2', 1, 'b-1', 'b', 'u', ?1)",
+            "INSERT INTO task_note (task_id, thread_id, body, author, created_at)
+             VALUES (1, 1, 'b', 'u', ?1)",
             [now],
         );
         assert!(r.is_err(), "task_note with both parents should fail CHECK");
@@ -365,26 +365,26 @@ mod tests {
         let now = "2026-04-29T00:00:00Z";
         conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES ('s-1', 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
+             VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
             [now],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
+             VALUES (1, 1, 't', 'active', ?1, ?1)",
             [now],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-             VALUES ('b-1', 't', 'in_progress', 'medium', 'user', ?1, ?1)",
+             VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
             [now],
         )
         .unwrap();
         let task_id: i64 = conn.last_insert_rowid();
         conn.execute(
-            "INSERT INTO task_effort (id, task_id, thread_id, started_at)
-             VALUES ('ef-test', ?1, 'b-1', ?2)",
+            "INSERT INTO task_effort (task_id, thread_id, started_at)
+             VALUES (?1, 1, ?2)",
             (task_id, now),
         )
         .unwrap();

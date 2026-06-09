@@ -334,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn kind_filter_restricts_results() {
         let s = store().await;
-        s.upsert("task", "1", Some("s-a"), "widget task", "build the widget")
+        s.upsert("task", "tsk1", Some("s-a"), "widget task", "build the widget")
             .await
             .unwrap();
         s.upsert(
@@ -357,10 +357,10 @@ mod tests {
     #[tokio::test]
     async fn upsert_replaces_in_place() {
         let s = store().await;
-        s.upsert("task", "1", Some("s-a"), "old title", "old body widget")
+        s.upsert("task", "tsk1", Some("s-a"), "old title", "old body widget")
             .await
             .unwrap();
-        s.upsert("task", "1", Some("s-a"), "new title", "new body gadget")
+        s.upsert("task", "tsk1", Some("s-a"), "new title", "new body gadget")
             .await
             .unwrap();
         assert!(s

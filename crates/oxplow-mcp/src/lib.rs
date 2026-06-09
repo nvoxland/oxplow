@@ -24,7 +24,7 @@ use oxplow_domain::stores::{
     CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
 };
 use oxplow_domain::{
-    CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
+    CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
     TaskStatus, ThreadId,
 };
 
@@ -192,14 +192,14 @@ pub struct ListCommentsParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RespondToCommentParams {
     /// Integer comment id (from `list_comments`).
-    pub comment_id: i64,
+    pub comment_id: String,
     pub body: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CommentIdParams {
     /// Integer comment id (from `list_comments`).
-    pub comment_id: i64,
+    pub comment_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -574,7 +574,7 @@ pub struct CreateCommentMcpParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SetCommentIntentParams {
     /// Integer comment id from `list_comments`.
-    pub comment_id: i64,
+    pub comment_id: String,
     /// `note` or `followup`.
     pub intent: String,
 }
@@ -636,7 +636,7 @@ impl OxplowMcp {
     /// comments + the Comments inbox after an agent-driven change.
     fn emit_comments_changed(&self, comment: &oxplow_domain::Comment) {
         self.services.events.emit(OxplowEvent::CommentsChanged {
-            stream_id: comment.stream_id.clone(),
+            stream_id: comment.stream_id,
             target_kind: comment.target_kind.clone(),
             target_id: comment.target_id.clone(),
         });
@@ -813,10 +813,12 @@ impl OxplowMcp {
             &params.0.stream_id,
             ID_STREAM,
         )?;
+        let stream_id = oxplow_domain::StreamId::try_from_str(&params.0.stream_id)
+            .ok_or_else(|| McpError::invalid_params("invalid stream id", None))?;
         let rows = self
             .services
             .snapshot_store
-            .list_snapshots_for_stream(&params.0.stream_id, params.0.limit.unwrap_or(200) as usize)
+            .list_snapshots_for_stream(stream_id, params.0.limit.unwrap_or(200) as usize)
             .await
             .map_err(internal)?;
         json_result(&rows)
@@ -1009,8 +1011,8 @@ impl OxplowMcp {
             expect_id_kind("create_comment", "thread_id", tid, ID_THREAD)?;
         }
         let intent = parse_comment_intent("create_comment", p.intent.as_deref().unwrap_or("note"))?;
-        let stream_id = StreamId::from(p.stream_id);
-        let thread_id = p.thread_id.map(ThreadId::from);
+        let stream_id = parse_stream_id(&p.stream_id)?;
+        let thread_id = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
         let target = oxplow_domain::CommentTarget {
             kind: p.target_kind,
             id: p.target_id,
@@ -1045,7 +1047,7 @@ impl OxplowMcp {
         params: Parameters<SetCommentIntentParams>,
     ) -> Result<CallToolResult, McpError> {
         let intent = parse_comment_intent("set_comment_intent", &params.0.intent)?;
-        let id = CommentId::new(params.0.comment_id);
+        let id = parse_comment_id(&params.0.comment_id)?;
         self.services
             .comment_store
             .set_intent(id, intent)
@@ -1069,14 +1071,14 @@ impl OxplowMcp {
         params: Parameters<RenameThreadMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("rename_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let thread = self
             .services
             .threads
             .rename(&id, params.0.title)
             .await
             .map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id.clone());
+        self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
 
@@ -1091,9 +1093,9 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let thread = self.services.threads.promote(&id).await.map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id.clone());
+        self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
 
@@ -1103,9 +1105,9 @@ impl OxplowMcp {
         params: Parameters<ThreadIdParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("close_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let thread = self.services.threads.close(&id).await.map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id.clone());
+        self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
 
@@ -1115,9 +1117,9 @@ impl OxplowMcp {
         params: Parameters<ThreadIdParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("reopen_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let thread = self.services.threads.reopen(&id).await.map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id.clone());
+        self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
 
@@ -1130,8 +1132,13 @@ impl OxplowMcp {
         if let Some(tid) = &params.0.thread_id {
             expect_id_kind("select_thread", "thread_id", tid, ID_THREAD)?;
         }
-        let stream_id = StreamId::from(params.0.stream_id);
-        let thread_id = params.0.thread_id.map(ThreadId::from);
+        let stream_id = parse_stream_id(&params.0.stream_id)?;
+        let thread_id = params
+            .0
+            .thread_id
+            .as_deref()
+            .map(parse_thread_id)
+            .transpose()?;
         self.services
             .threads
             .select(&stream_id, thread_id.as_ref())
@@ -1152,7 +1159,12 @@ impl OxplowMcp {
         params: Parameters<SwitchStreamParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("switch_stream", params.0.stream_id.as_deref())?;
-        let id = params.0.stream_id.map(StreamId::from);
+        let id = params
+            .0
+            .stream_id
+            .as_deref()
+            .map(parse_stream_id)
+            .transpose()?;
         self.services
             .streams
             .set_current(id.as_ref())
@@ -1170,7 +1182,7 @@ impl OxplowMcp {
         params: Parameters<RenameStreamParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("rename_stream", "stream_id", &params.0.stream_id, ID_STREAM)?;
-        let id = StreamId::from(params.0.stream_id);
+        let id = parse_stream_id(&params.0.stream_id)?;
         let stream = self
             .services
             .streams
@@ -1194,7 +1206,7 @@ impl OxplowMcp {
             &params.0.stream_id,
             ID_STREAM,
         )?;
-        let stream_id = oxplow_domain::StreamId::from(params.0.stream_id);
+        let stream_id = parse_stream_id(&params.0.stream_id)?;
         let list = self
             .services
             .thread_store
@@ -1230,9 +1242,10 @@ impl OxplowMcp {
                 McpError::invalid_params("thread_id is required for non-backlog status", None)
             })?;
             expect_id_kind("list_tasks", "thread_id", &tid, ID_THREAD)?;
+            let tid = parse_thread_id(&tid)?;
             self.services
                 .task_store
-                .list_by_status_for_thread(&ThreadId::from(tid), task_status)
+                .list_by_status_for_thread(&tid, task_status)
                 .await
                 .map_err(internal)?
         };
@@ -1257,7 +1270,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let thread_id = ThreadId::from(params.0.thread_id);
+        let thread_id = parse_thread_id(&params.0.thread_id)?;
         let result = self
             .services
             .tasks
@@ -1286,7 +1299,8 @@ impl OxplowMcp {
             .0
             .thread_id
             .as_deref()
-            .map(|s| ThreadId::from(s.to_string()));
+            .map(parse_thread_id)
+            .transpose()?;
         self.services
             .tasks
             .reorder(thread.as_ref(), &ids)
@@ -1327,7 +1341,7 @@ impl OxplowMcp {
                 .await
                 .map_err(internal)?;
         }
-        self.emit_tasks_changed(item.thread_id.clone());
+        self.emit_tasks_changed(item.thread_id);
         json_result(&item)
     }
 
@@ -1366,7 +1380,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let note = self
             .services
             .work_note_store
@@ -1387,7 +1401,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let notes = self
             .services
             .work_note_store
@@ -1418,7 +1432,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let tid = ThreadId::from(params.0.thread_id);
+        let tid = parse_thread_id(&params.0.thread_id)?;
         let outcome = self
             .services
             .collection
@@ -1444,7 +1458,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let tid = ThreadId::from(params.0.thread_id);
+        let tid = parse_thread_id(&params.0.thread_id)?;
         let id = self
             .services
             .collection
@@ -1482,7 +1496,7 @@ impl OxplowMcp {
             (Some(e), _) => e,
             (None, Some(t)) => {
                 expect_id_kind("list_effort_observations", "thread_id", &t, ID_THREAD)?;
-                let tid = ThreadId::from(t);
+                let tid = parse_thread_id(&t)?;
                 match self
                     .services
                     .effort_store
@@ -1490,7 +1504,7 @@ impl OxplowMcp {
                     .await
                     .map_err(internal)?
                 {
-                    Some(effort) => effort.id.as_str().to_string(),
+                    Some(effort) => effort.id.to_string(),
                     None => {
                         return Err(McpError::invalid_params(
                             "no open effort on that thread",
@@ -1533,7 +1547,7 @@ impl OxplowMcp {
         let threads = match params.0.scope.as_str() {
             "thread" => {
                 expect_id_kind("list_comments", "id", &params.0.id, ID_THREAD)?;
-                let id = ThreadId::from(params.0.id);
+                let id = parse_thread_id(&params.0.id)?;
                 self.services
                     .comment_store
                     .list_for_thread(&id)
@@ -1542,7 +1556,7 @@ impl OxplowMcp {
             }
             "stream" => {
                 expect_id_kind("list_comments", "id", &params.0.id, ID_STREAM)?;
-                let id = StreamId::from(params.0.id);
+                let id = parse_stream_id(&params.0.id)?;
                 self.services
                     .comment_store
                     .list_for_stream(&id)
@@ -1603,7 +1617,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<RespondToCommentParams>,
     ) -> Result<CallToolResult, McpError> {
-        let id = CommentId::new(params.0.comment_id);
+        let id = parse_comment_id(&params.0.comment_id)?;
         self.services
             .comment_store
             .add_message(id, "agent", &params.0.body)
@@ -1629,7 +1643,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<CommentIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        let id = CommentId::new(params.0.comment_id);
+        let id = parse_comment_id(&params.0.comment_id)?;
         self.services
             .comment_store
             .set_status(id, CommentStatus::Resolved)
@@ -1667,7 +1681,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let thread_id = ThreadId::from(params.0.thread_id.clone());
+        let thread_id = parse_thread_id(&params.0.thread_id)?;
         let question = params.0.question.trim().to_string();
         if question.is_empty() {
             return Err(McpError::invalid_params(
@@ -1688,12 +1702,12 @@ impl OxplowMcp {
             &params.0.thread_id,
             &question,
             &focus,
-            provisional.id.as_str(),
+            &provisional.id.to_string(),
         );
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,
-            "provisionalNoteId": provisional.id.as_str(),
+            "provisionalNoteId": provisional.id.to_string(),
         }))
     }
 
@@ -1718,7 +1732,7 @@ impl OxplowMcp {
             &params.0.note_id,
             ID_NOTE,
         )?;
-        let id = NoteId::from(params.0.note_id.clone());
+        let id = parse_note_id(&params.0.note_id)?;
         self.services
             .work_note_store
             .update_body(&id, &params.0.body)
@@ -1733,7 +1747,7 @@ impl OxplowMcp {
         params: Parameters<DeleteNoteParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("delete_wiki_page", "id", &params.0.id, ID_NOTE)?;
-        let id = NoteId::from(params.0.id);
+        let id = parse_note_id(&params.0.id)?;
         self.services
             .work_note_store
             .delete(&id)
@@ -1903,7 +1917,7 @@ impl OxplowMcp {
         params: Parameters<AddFollowupParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("add_followup", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let item = self.services.followups.add(id, params.0.body);
         json_result(&item)
     }
@@ -1919,7 +1933,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let list = self.services.followups.list_for_thread(&id);
         json_result(&list)
     }
@@ -2000,7 +2014,7 @@ impl OxplowMcp {
             Some(pid) => Some(parse_task_id("create_task", "parent_id", pid)?),
             None => None,
         };
-        let thread = p.thread_id.clone().map(ThreadId::from);
+        let thread = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
         let priority = match p.priority.as_deref() {
             Some(s) => Some(parse_priority(s)?),
             None => None,
@@ -2013,7 +2027,7 @@ impl OxplowMcp {
             .services
             .tasks
             .create(
-                thread.clone(),
+                thread,
                 CreateTaskInput {
                     title: p.title,
                     description: Some(p.description),
@@ -2034,7 +2048,7 @@ impl OxplowMcp {
         // the writes to this item.
         let touched = p.touched_files.unwrap_or_default();
         if !touched.is_empty() && matches!(item.status, TaskStatus::Done | TaskStatus::Blocked) {
-            let thread_for_effort = thread.or_else(|| item.thread_id.clone());
+            let thread_for_effort = thread.or(item.thread_id);
             if let Some(tid) = thread_for_effort {
                 let worktree = worktree_for_thread(&self.services, &tid).await;
                 if let Err(err) = self
@@ -2055,7 +2069,7 @@ impl OxplowMcp {
                 }
             }
         }
-        self.emit_tasks_changed(item.thread_id.clone());
+        self.emit_tasks_changed(item.thread_id);
         json_result(&item)
     }
 
@@ -2110,7 +2124,7 @@ impl OxplowMcp {
 
         let touched = p.touched_files.unwrap_or_default();
         if !touched.is_empty() && matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked) {
-            if let Some(tid) = updated.thread_id.clone() {
+            if let Some(tid) = updated.thread_id {
                 let worktree = worktree_for_thread(&self.services, &tid).await;
                 if let Err(err) = self
                     .services
@@ -2130,7 +2144,7 @@ impl OxplowMcp {
                 }
             }
         }
-        self.emit_tasks_changed(updated.thread_id.clone());
+        self.emit_tasks_changed(updated.thread_id);
         json_result(&updated)
     }
 
@@ -2191,7 +2205,6 @@ impl OxplowMcp {
         {
             let tid = item
                 .thread_id
-                .clone()
                 .expect("thread_id present — guarded by is_some() above");
             let summary = if summary_has_body {
                 Some(p.summary.clone())
@@ -2227,15 +2240,14 @@ impl OxplowMcp {
                 // (or silently agree). Recomputed at stop time so a
                 // subsequent amend_effort that already reconciled
                 // the discrepancy doesn't trigger a stale prompt.
-                if let (Some(r), Some(tid)) = (review.as_ref(), item.thread_id.clone()) {
-                    self.services.thread_runtime.record_pending_effort_review(
-                        &tid,
-                        oxplow_domain::EffortId::from(r.effort_id.clone()),
-                    );
+                if let (Some(r), Some(tid)) = (review.as_ref(), item.thread_id) {
+                    self.services
+                        .thread_runtime
+                        .record_pending_effort_review(&tid, parse_effort_id(&r.effort_id)?);
                 }
             }
         }
-        self.emit_tasks_changed(item.thread_id.clone());
+        self.emit_tasks_changed(item.thread_id);
         let payload = CompleteTaskResult {
             task: item,
             file_review: review,
@@ -2258,7 +2270,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         use oxplow_db::TaskEffortStore as _;
         let p = params.0;
-        let effort_id = oxplow_domain::EffortId::from(p.effort_id);
+        let effort_id = parse_effort_id(&p.effort_id)?;
         let add = p.add_files.unwrap_or_default();
         let remove = p.remove_files.unwrap_or_default();
         for path in &remove {
@@ -2331,7 +2343,7 @@ impl OxplowMcp {
                 .map_err(|e| internal(e.to_string()))?;
         }
         json_result(&serde_json::json!({
-            "effort_id": effort_id.as_str(),
+            "effort_id": effort_id.to_string(),
             "added": add,
             "removed": remove,
         }))
@@ -2347,7 +2359,7 @@ impl OxplowMcp {
         let from_id = parse_task_id("link_tasks", "from_id", &p.from_id)?;
         let to_id = parse_task_id("link_tasks", "to_id", &p.to_id)?;
         let link_type = parse_link_type(&p.link_type)?;
-        let thread = ThreadId::from(p.thread_id);
+        let thread = parse_thread_id(&p.thread_id)?;
         let link = self
             .services
             .task_link_store
@@ -2388,7 +2400,7 @@ impl OxplowMcp {
         let mut threads: std::collections::HashSet<Option<oxplow_domain::ThreadId>> =
             std::collections::HashSet::new();
         for row in &updated {
-            threads.insert(row.thread_id.clone());
+            threads.insert(row.thread_id);
         }
         for tid in threads {
             self.emit_tasks_changed(tid);
@@ -2405,14 +2417,15 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         expect_id_kind("await_user", "thread_id", &p.thread_id, ID_THREAD)?;
+        let tid = parse_thread_id(&p.thread_id)?;
         let payload = serde_json::json!({
             "await_user": true,
             "question": p.question,
         })
         .to_string();
         let event = oxplow_domain::HookEvent {
-            id: oxplow_domain::HookEventId::new(),
-            thread_id: Some(ThreadId::from(p.thread_id.clone())),
+            id: oxplow_domain::HookEventId::new(next_synthetic_hook_id()),
+            thread_id: Some(tid),
             stream_id: None,
             kind: oxplow_domain::HookKind::Stop,
             session_id: None,
@@ -2429,7 +2442,7 @@ impl OxplowMcp {
         self.services
             .agent_status_store
             .upsert(
-                &ThreadId::from(p.thread_id),
+                &tid,
                 "working",
                 oxplow_domain::AgentStatusState::AwaitingUser,
                 Some("await_user".into()),
@@ -2450,7 +2463,7 @@ impl OxplowMcp {
             &params.0.thread_id,
             ID_THREAD,
         )?;
-        let id = ThreadId::from(params.0.thread_id);
+        let id = parse_thread_id(&params.0.thread_id)?;
         let thread = self
             .services
             .thread_store
@@ -2488,12 +2501,12 @@ impl OxplowMcp {
         if let Some(t) = p.thread_id.as_deref() {
             expect_id_kind("file_epic_with_children", "thread_id", t, ID_THREAD)?;
         }
-        let thread = p.thread_id.map(ThreadId::from);
+        let thread = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
         let epic = self
             .services
             .tasks
             .create(
-                thread.clone(),
+                thread,
                 CreateTaskInput {
                     title: p.epic_title,
                     description: Some(p.epic_description),
@@ -2509,7 +2522,7 @@ impl OxplowMcp {
                 .services
                 .tasks
                 .create(
-                    thread.clone(),
+                    thread,
                     CreateTaskInput {
                         title: child.title,
                         description: Some(child.description),
@@ -2522,7 +2535,7 @@ impl OxplowMcp {
                 .map_err(|e| internal(e.to_string()))?;
             children_out.push(row);
         }
-        self.emit_tasks_changed(thread.clone());
+        self.emit_tasks_changed(thread);
         let bundle = serde_json::json!({ "epic": epic, "children": children_out });
         Ok(CallToolResult::success(vec![Content::text(
             bundle.to_string(),
@@ -2547,7 +2560,7 @@ impl OxplowMcp {
             Some(raw) => Some(parse_task_id("dispatch_task", "item_id", raw)?),
             None => None,
         };
-        let thread_id = ThreadId::from(params.0.thread_id.clone());
+        let thread_id = parse_thread_id(&params.0.thread_id)?;
         let target = match parsed_item_id {
             Some(id) => self
                 .services
@@ -2604,7 +2617,7 @@ impl OxplowMcp {
 
         let prompt =
             compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
-        self.emit_tasks_changed(updated.thread_id.clone());
+        self.emit_tasks_changed(updated.thread_id);
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,
@@ -2625,7 +2638,7 @@ impl OxplowMcp {
             &params.0.source_thread_id,
             ID_THREAD,
         )?;
-        let source = ThreadId::from(params.0.source_thread_id);
+        let source = parse_thread_id(&params.0.source_thread_id)?;
         let parent = self
             .services
             .thread_store
@@ -2875,7 +2888,7 @@ impl OxplowMcp {
             let Some(svc) = self.services.snapshot_captures.primary() else {
                 return Err(internal("primary snapshot service not registered"));
             };
-            let stream_id = oxplow_domain::StreamId::from(svc.stream_id().to_string());
+            let stream_id = *svc.stream_id();
             match svc.store().latest_snapshot_id_for_stream(stream_id).await {
                 Ok(Some(snapshot_id)) => {
                     file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
@@ -3074,7 +3087,7 @@ async fn resolve_lsp_proxy(
         .await
         .map_err(|e| internal(e.to_string()))?
         .into_iter()
-        .find(|s| s.id.as_str() == stream_id)
+        .find(|s| s.id.to_string() == stream_id)
         .ok_or_else(|| McpError::invalid_params(format!("stream not found: {stream_id}"), None))?;
     let cwd = std::path::PathBuf::from(&stream.worktree_path);
     services
@@ -3204,19 +3217,72 @@ fn wiki_ref_stale(local: Option<i64>, latest: Option<i64>) -> bool {
 /// returning straight from a tool handler when the input is not a
 /// non-negative integer.
 fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::TaskId, McpError> {
-    match oxplow_domain::TaskId::try_from_str(value) {
-        Some(id) => Ok(id),
-        None => Err(McpError::invalid_params(
-            format!("{tool}: `{param}` expects a task id (integer), got `{value}`"),
-            None,
-        )),
+    let v = value.trim();
+    // Accept the prefixed form (`tsk42`) or a bare positive integer (`42`).
+    if let Some(id) = oxplow_domain::TaskId::try_from_str(v) {
+        return Ok(id);
     }
+    if let Ok(n) = v.parse::<i64>() {
+        if n > 0 {
+            return Ok(oxplow_domain::TaskId::new(n));
+        }
+    }
+    Err(McpError::invalid_params(
+        format!("{tool}: `{param}` expects a task id (e.g. `tsk42` or `42`), got `{value}`"),
+        None,
+    ))
 }
 
-/// String-id prefix validator. Tasks now have integer ids and go
-/// through [`parse_task_id`]; everything else still carries a
-/// `<prefix>-<rest>` shape, and this helper confirms a caller-supplied
-/// value matches the prefix the tool wants.
+/// Monotonic id for synthetic in-memory hook events the MCP layer emits
+/// (e.g. the `await_user` Stop sentinel). The `hook_event` table was
+/// dropped in V2 — these live only in the in-memory ring buffer, so
+/// there's no rowid to allocate.
+fn next_synthetic_hook_id() -> i64 {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static NEXT: AtomicI64 = AtomicI64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Parse a comment id from its string form. Accepts the prefixed form
+/// (`cmt5`) or a bare positive integer.
+fn parse_comment_id(value: &str) -> Result<CommentId, McpError> {
+    let v = value.trim();
+    if let Some(id) = CommentId::try_from_str(v) {
+        return Ok(id);
+    }
+    if let Ok(n) = v.parse::<i64>() {
+        if n > 0 {
+            return Ok(CommentId::new(n));
+        }
+    }
+    Err(McpError::invalid_params(
+        format!("`comment_id` expects a comment id (e.g. `cmt5`), got `{value}`"),
+        None,
+    ))
+}
+
+fn parse_stream_id(value: &str) -> Result<StreamId, McpError> {
+    StreamId::try_from_str(value)
+        .ok_or_else(|| McpError::invalid_params(format!("invalid stream id `{value}`"), None))
+}
+fn parse_thread_id(value: &str) -> Result<ThreadId, McpError> {
+    ThreadId::try_from_str(value)
+        .ok_or_else(|| McpError::invalid_params(format!("invalid thread id `{value}`"), None))
+}
+fn parse_note_id(value: &str) -> Result<NoteId, McpError> {
+    NoteId::try_from_str(value)
+        .ok_or_else(|| McpError::invalid_params(format!("invalid note id `{value}`"), None))
+}
+fn parse_effort_id(value: &str) -> Result<EffortId, McpError> {
+    EffortId::try_from_str(value)
+        .ok_or_else(|| McpError::invalid_params(format!("invalid effort id `{value}`"), None))
+}
+
+/// String-id prefix validator. Every external id is now a
+/// `<3-letter-prefix><int>` string (e.g. `thr21`); this helper confirms
+/// a caller-supplied value parses to the [`EntityKind`] the tool wants.
+/// Task ids additionally accept the bare-integer form via
+/// [`parse_task_id`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IdPrefix {
     pub prefix: &'static str,
@@ -3224,20 +3290,20 @@ pub(crate) struct IdPrefix {
 }
 
 pub(crate) const ID_STREAM: IdPrefix = IdPrefix {
-    prefix: "s-",
-    label: "stream id (s-…)",
+    prefix: "str",
+    label: "stream id (str…)",
 };
 pub(crate) const ID_THREAD: IdPrefix = IdPrefix {
-    prefix: "b-",
-    label: "thread id (b-…)",
+    prefix: "thr",
+    label: "thread id (thr…)",
 };
 pub(crate) const ID_NOTE: IdPrefix = IdPrefix {
-    prefix: "n-",
-    label: "note id (n-…)",
+    prefix: "not",
+    label: "note id (not…)",
 };
 pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
-    prefix: "fu-",
-    label: "follow-up id (fu-…)",
+    prefix: "fup",
+    label: "follow-up id (fup…)",
 };
 
 fn str_to_task_status(s: &str) -> Result<TaskStatus, McpError> {
@@ -3264,35 +3330,30 @@ fn expect_id_kind(
     value: &str,
     expected: IdPrefix,
 ) -> Result<(), McpError> {
-    if value.starts_with(expected.prefix) && value.len() > expected.prefix.len() {
-        return Ok(());
+    // Parse against the canonical id grammar. A value that parses to the
+    // expected kind passes; anything else gets a corrective message that
+    // names what it *looks* like so the caller can fix an "I passed a
+    // thread id where a stream id was expected" mix-up in one round-trip.
+    match value.parse::<oxplow_domain::AnyId>() {
+        Ok(any) if any.kind.prefix() == expected.prefix => Ok(()),
+        Ok(any) => Err(McpError::invalid_params(
+            format!(
+                "{tool}: `{param}` expects a {expected_label}, but got `{value}` which looks like \
+                 a {actual_label}",
+                expected_label = expected.label,
+                actual_label = any.kind.label(),
+            ),
+            None,
+        )),
+        Err(_) => Err(McpError::invalid_params(
+            format!(
+                "{tool}: `{param}` expects a {expected_label}, but got `{value}` which isn't a \
+                 valid id",
+                expected_label = expected.label,
+            ),
+            None,
+        )),
     }
-    // Tell the caller what the value *looks* like so they can correct
-    // an "I passed a thread id where a stream id was expected" mix-up
-    // without a second round-trip.
-    let actual_label = match value.split_once('-') {
-        Some(("s", _)) => "stream id (s-…)",
-        Some(("b", _)) => "thread id (b-…)",
-        Some(("n", _)) => "note id (n-…)",
-        Some(("fu", _)) => "follow-up id (fu-…)",
-        Some(("at", _)) => "agent-turn id (at-…)",
-        Some(("he", _)) => "hook-event id (he-…)",
-        Some(("ef", _)) => "effort id (ef-…)",
-        Some(("pv", _)) => "page-visit id (pv-…)",
-        Some(("ue", _)) => "usage-event id (ue-…)",
-        Some(("bg", _)) => "background-task id (bg-…)",
-        Some(_) => "id with an unrecognised prefix",
-        None => "value with no `<prefix>-…` shape",
-    };
-    let msg = format!(
-        "{tool}: `{param}` expects a {expected_label}, but got `{value}` which looks like a \
-         {actual_label}",
-        tool = tool,
-        param = param,
-        expected_label = expected.label,
-        value = value,
-    );
-    Err(McpError::invalid_params(msg, None))
 }
 
 /// Compose the prompt the orchestrator passes to
@@ -3459,7 +3520,7 @@ mod tests {
     async fn list_comments_enriches_primary_and_context() {
         use oxplow_domain::comment::{CommentIntent, CommentTarget};
         let (_proj, services, server) = boot();
-        let stream = services.streams.list_streams().await.unwrap()[0].id.clone();
+        let stream = services.streams.list_streams().await.unwrap()[0].id;
 
         // A task to use as the primary target, and another as a context
         // ancestor (e.g. an epic the row sat under).
@@ -3636,7 +3697,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("primary stream must have a writer thread");
-        let mut item = make_task(Some(thread.id.clone()), "amend test");
+        let mut item = make_task(Some(thread.id), "amend test");
         let task_id = services.task_store.insert(&item).await.unwrap();
         item.id = task_id;
         // Open an effort for this task with a pre-recorded file.
@@ -3664,7 +3725,7 @@ mod tests {
         // Disclaim disclaim.rs, claim a new file.
         server
             .amend_effort(Parameters(AmendEffortParams {
-                effort_id: effort.id.as_str().to_string(),
+                effort_id: effort.id.to_string(),
                 add_files: Some(vec!["src/added.rs".into()]),
                 remove_files: Some(vec!["src/disclaim.rs".into()]),
             }))
@@ -3691,7 +3752,7 @@ mod tests {
         // Re-claiming an acknowledged path should clear its ack.
         server
             .amend_effort(Parameters(AmendEffortParams {
-                effort_id: effort.id.as_str().to_string(),
+                effort_id: effort.id.to_string(),
                 add_files: Some(vec!["src/disclaim.rs".into()]),
                 remove_files: None,
             }))
@@ -3908,7 +3969,7 @@ mod tests {
         let (_proj, _svc, server) = boot();
         let err = server
             .create_task(Parameters(CreateTaskMcpParams {
-                thread_id: Some("s-deadbeef".into()),
+                thread_id: Some("str999".into()),
                 backlog: false,
                 title: "x".into(),
                 description: "dev".into(),
@@ -3923,7 +3984,7 @@ mod tests {
         let msg = err.message.to_string();
         assert!(msg.contains("create_task"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
-        assert!(msg.contains("s-deadbeef"), "value missing: {msg}");
+        assert!(msg.contains("str999"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual kind missing: {msg}");
         assert!(msg.contains("thread id"), "expected kind missing: {msg}");
     }
@@ -4097,23 +4158,24 @@ mod tests {
 
     #[test]
     fn expect_id_kind_accepts_matching_prefix() {
-        assert!(expect_id_kind("tool", "thread_id", "b-abc123", ID_THREAD,).is_ok());
+        assert!(expect_id_kind("tool", "thread_id", "thr123", ID_THREAD).is_ok());
     }
 
     #[test]
     fn expect_id_kind_error_names_tool_param_value_and_kinds() {
-        let err = expect_id_kind("create_task", "thread_id", "s-abc123", ID_THREAD).unwrap_err();
+        // A stream id passed where a thread id was expected.
+        let err = expect_id_kind("create_task", "thread_id", "str123", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
         assert!(msg.contains("create_task"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
-        assert!(msg.contains("s-abc123"), "value missing: {msg}");
+        assert!(msg.contains("str123"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual label missing: {msg}");
         assert!(msg.contains("thread id"), "expected label missing: {msg}");
     }
 
     #[test]
     fn expect_id_kind_unrecognised_id_shape_errors() {
-        // No `<prefix>-…` shape at all — should still be flagged.
+        // No `<prefix><int>` shape at all — should still be flagged.
         let err = expect_id_kind("tool", "id", "no-prefix-shape", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
         assert!(msg.contains("no-prefix-shape"), "value missing: {msg}");

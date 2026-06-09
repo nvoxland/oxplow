@@ -206,7 +206,7 @@ export const commands = {
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
-	listTaskEvents: (itemId: number | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
+	listTaskEvents: (itemId: string | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
 	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
 	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
 	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
@@ -1060,11 +1060,7 @@ export type Comment = {
 	resolved_at: Timestamp | null,
 };
 
-/**
- *  Comment identifier — plain SQLite autoincrement integer (no UUIDs).
- *  Private field, same reasoning as [`TaskId`].
- */
-export type CommentId = number;
+export type CommentId = string;
 
 // Why the comment exists — drives what the agent acts on.
 export type CommentIntent = 
@@ -1083,8 +1079,7 @@ export type CommentMessage = {
 	created_at: Timestamp,
 };
 
-// Comment-message identifier — plain SQLite autoincrement integer.
-export type CommentMessageId = number;
+export type CommentMessageId = string;
 
 // Lifecycle of a comment thread.
 export type CommentStatus = "open" | "resolved";
@@ -1985,19 +1980,7 @@ export type TaskEvent = {
 	created_at: Timestamp,
 };
 
-/**
- *  Task identifier — plain SQLite autoincrement integer.
- * 
- *  The inner field is intentionally private: every construction path
- *  goes through one of the named constructors so the "what does this
- *  integer mean" question always has a textual answer at the call site.
- *  In particular, the `0` value is reserved as the
- *  [`TaskId::placeholder`] sentinel that the upsert IPC uses to
- *  distinguish "client doesn't know an id yet, allocate one" from
- *  "update this row in place". SQLite `AUTOINCREMENT` never issues 0,
- *  so the sentinel is unambiguous.
- */
-export type TaskId = number;
+export type TaskId = string;
 
 /**
  *  A note attached to either a task or a thread (mutually exclusive —

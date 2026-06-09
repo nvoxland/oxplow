@@ -290,7 +290,7 @@ impl TaskService {
         };
         // Lifecycle efforts need a thread to attach to; tasks on
         // the project-wide backlog skip snapshot pinning.
-        let Some(thread_id) = item.thread_id.clone() else {
+        let Some(thread_id) = item.thread_id else {
             return;
         };
         let Some(snapshot) = self.service_for_thread(&thread_id).await else {
@@ -620,7 +620,7 @@ fn review_from_lists(
         None
     };
     Some(EffortFileReview {
-        effort_id: effort_id.as_str().to_string(),
+        effort_id: effort_id.to_string(),
         task_id: task_id.value(),
         claimed_but_not_changed,
         changed_but_not_claimed,
@@ -804,7 +804,7 @@ mod tests {
         // `claimed.rs`. Without ack: `extra.rs` shows in
         // `changed_but_not_claimed`. With ack: it's filtered out
         // and the review collapses to `None`.
-        let effort = EffortId::from("ef-test");
+        let effort = EffortId::new(1);
         let task = TaskId::new(1);
         let claimed = vec!["claimed.rs".to_string()];
         let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
@@ -864,7 +864,7 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
         let store = Arc::new(SqliteTaskStore::new(db));
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -882,8 +882,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -918,7 +918,7 @@ mod tests {
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -961,7 +961,7 @@ mod tests {
                 snapshot_store,
                 blobs,
                 project.path().to_path_buf(),
-                s.id.clone(),
+                s.id,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),
             )
@@ -969,11 +969,11 @@ mod tests {
             .with_predrain_delay(std::time::Duration::ZERO),
         );
         snapshot_captures.unregister(&s.id);
-        snapshot_captures.insert_for_test(s.id.clone(), snapshot_svc);
-        snapshot_captures.set_primary(s.id.clone());
+        snapshot_captures.insert_for_test(s.id, snapshot_svc);
+        snapshot_captures.set_primary(s.id);
         let t = Thread {
-            id: ThreadId::from("b-life"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(2),
+            stream_id: s.id,
             title: "t".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -1002,7 +1002,7 @@ mod tests {
         let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "lifecycle".into(),
                     ..Default::default()
@@ -1080,7 +1080,7 @@ mod tests {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "born running".into(),
                     status: Some(TaskStatus::InProgress),
@@ -1106,7 +1106,7 @@ mod tests {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "retro".into(),
                     status: Some(TaskStatus::Done),
@@ -1127,7 +1127,7 @@ mod tests {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "merge".into(),
                     ..Default::default()
@@ -1185,7 +1185,7 @@ mod tests {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "direct".into(),
                     status: Some(TaskStatus::Done),
@@ -1217,7 +1217,7 @@ mod tests {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "skip".into(),
                     ..Default::default()
@@ -1248,7 +1248,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         let a = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "a".into(),
                     ..Default::default()
@@ -1258,7 +1258,7 @@ mod tests {
             .unwrap();
         let b = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "b".into(),
                     ..Default::default()
@@ -1361,7 +1361,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         let a = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "a".into(),
                     ..Default::default()
@@ -1371,7 +1371,7 @@ mod tests {
             .unwrap();
         let b = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "b".into(),
                     ..Default::default()
@@ -1381,7 +1381,7 @@ mod tests {
             .unwrap();
         let c = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "c".into(),
                     ..Default::default()
@@ -1480,7 +1480,7 @@ mod tests {
         let store = Arc::new(SqliteTaskStore::new(db.clone()));
         let link_store = oxplow_db::SqliteTaskLinkStore::new(db.clone());
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -1498,8 +1498,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -1523,7 +1523,7 @@ mod tests {
         let (svc, links, tid) = link_store_fixture().await;
         let a = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "in flight".into(),
                     ..Default::default()
@@ -1548,7 +1548,7 @@ mod tests {
     async fn read_work_options_returns_standalone_for_plain_task() {
         let (svc, links, tid) = link_store_fixture().await;
         svc.create(
-            Some(tid.clone()),
+            Some(tid),
             CreateTaskInput {
                 title: "ready task".into(),
                 ..Default::default()
@@ -1571,7 +1571,7 @@ mod tests {
         let (svc, links, tid) = link_store_fixture().await;
         let epic = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "the epic".into(),
                     ..Default::default()
@@ -1581,7 +1581,7 @@ mod tests {
             .unwrap();
         let _child_a = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "child A".into(),
                     parent_id: Some(epic.id),
@@ -1592,7 +1592,7 @@ mod tests {
             .unwrap();
         let _child_b = svc
             .create(
-                Some(tid.clone()),
+                Some(tid),
                 CreateTaskInput {
                     title: "child B".into(),
                     parent_id: Some(epic.id),
@@ -1632,7 +1632,7 @@ mod tests {
         let blobs = crate::blob_store::BlobStore::new(primary_dir.path().join(".oxplow/snapshots"));
 
         let primary = Stream {
-            id: StreamId::from("s-primary"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -1649,7 +1649,7 @@ mod tests {
             archived_at: None,
         };
         let worktree = Stream {
-            id: StreamId::from("s-worktree"),
+            id: StreamId::new(2),
             kind: StreamKind::Worktree,
             title: "feature".into(),
             branch: "feature".into(),
@@ -1688,22 +1688,22 @@ mod tests {
                     snapshot_store.clone(),
                     blobs.clone(),
                     std::path::PathBuf::from(&s.worktree_path),
-                    s.id.clone(),
+                    s.id,
                     1_000_000,
                     oxplow_fs_watch::WorkspaceFilter::default(),
                 )
                 .with_settle_duration(std::time::Duration::ZERO)
                 .with_predrain_delay(std::time::Duration::ZERO),
             );
-            snapshot_captures.insert_for_test(s.id.clone(), svc);
+            snapshot_captures.insert_for_test(s.id, svc);
         }
-        snapshot_captures.set_primary(primary.id.clone());
+        snapshot_captures.set_primary(primary.id);
 
         // Thread is on the WORKTREE stream — this is the case the bug
         // was about.
         let thread = Thread {
-            id: ThreadId::from("b-on-worktree"),
-            stream_id: worktree.id.clone(),
+            id: ThreadId::new(3),
+            stream_id: worktree.id,
             title: "t".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -1742,7 +1742,7 @@ mod tests {
         // start_snapshot_id.
         let item = svc
             .create(
-                Some(thread.id.clone()),
+                Some(thread.id),
                 CreateTaskInput {
                     title: "fix something in the worktree".into(),
                     status: Some(TaskStatus::InProgress),

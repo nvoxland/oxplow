@@ -25,8 +25,8 @@ pub use comment::{
 pub use error::DomainError;
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 pub use ids::{
-    AgentTurnId, CommentId, CommentMessageId, EffortId, HookEventId, NoteId, StreamId, TaskId,
-    TaskLinkId, ThreadId,
+    AgentTurnId, AnyId, CommentId, CommentMessageId, EffortId, EntityKind, FollowupId, HookEventId,
+    IdParseError, NoteId, PageVisitId, StreamId, TaskId, TaskLinkId, ThreadId, UsageEventId,
 };
 pub use stream::{Stream, StreamKind};
 pub use task::{

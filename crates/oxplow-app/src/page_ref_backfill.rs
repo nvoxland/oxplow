@@ -191,7 +191,7 @@ mod tests {
 
         streams
             .upsert(&Stream {
-                id: StreamId::from("s-1"),
+                id: StreamId::new(1),
                 kind: StreamKind::Primary,
                 title: "x".into(),
                 branch: "main".into(),
@@ -211,8 +211,8 @@ mod tests {
             .unwrap();
         threads
             .upsert(&Thread {
-                id: ThreadId::from("b-1"),
-                stream_id: StreamId::from("s-1"),
+                id: ThreadId::new(1),
+                stream_id: StreamId::new(1),
                 title: "x".into(),
                 status: ThreadStatus::Active,
                 sort_index: 0,
@@ -232,7 +232,7 @@ mod tests {
         let task_id = bare_items
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(ThreadId::from("b-1")),
+                thread_id: Some(ThreadId::new(1)),
                 parent_id: None,
                 title: "fix".into(),
                 description: "see [[src/app.rs]]".into(),

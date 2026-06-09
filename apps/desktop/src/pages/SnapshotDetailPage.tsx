@@ -145,9 +145,9 @@ export function SnapshotDetailPage({
         const inFlight = all.filter((e) => !e.completedHere);
         const titles = await getTaskSummaries(
           Array.from(new Set(all.map((e) => e.tasksId))),
-        ).catch(() => [] as Array<{ id: number; title: string }>);
-        const titleByTask = new Map<number, string>(
-          titles.map((t) => [t.id, t.title] as [number, string]),
+        ).catch(() => [] as Array<{ id: string; title: string }>);
+        const titleByTask = new Map<string, string>(
+          titles.map((t) => [t.id, t.title] as [string, string]),
         );
         type EffortFileRow = { path: string; change: "created" | "updated" | "deleted" };
         const filesByEffort: Array<[string, EffortFileRow[]]> = await Promise.all(
@@ -293,7 +293,7 @@ function ChangesByEffortSection({
 }: {
   grouped: GroupedChanges;
   effortById: Map<string, EffortRow>;
-  onOpenTask(taskId: number): void;
+  onOpenTask(taskId: string): void;
   onOpenSnapshot(snapshotId: number): void;
   onOpenFile?: (path: string) => void;
 }) {

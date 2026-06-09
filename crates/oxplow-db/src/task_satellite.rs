@@ -97,8 +97,12 @@ impl SqliteTaskNoteStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT id, body FROM task_note")?;
-                let rows =
-                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                let rows = stmt.query_map([], |r| {
+                    Ok((
+                        NoteId::new(r.get::<_, i64>(0)?).to_string(),
+                        r.get::<_, String>(1)?,
+                    ))
+                })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -114,9 +118,9 @@ impl SqliteTaskNoteStore {
 }
 
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
-    let id: String = row.get("id")?;
+    let id: i64 = row.get("id")?;
     let task_id: Option<i64> = row.get("task_id")?;
-    let thread_id: Option<String> = row.get("thread_id")?;
+    let thread_id: Option<i64> = row.get("thread_id")?;
     let body: String = row.get("body")?;
     let author: String = row.get("author")?;
     let created_at: String = row.get("created_at")?;
@@ -124,9 +128,9 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(TaskNote {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         task_id: task_id.map(TaskId::new),
-        thread_id: thread_id.map(ThreadId::from),
+        thread_id: thread_id.map(ThreadId::new),
         body,
         author,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
@@ -146,19 +150,13 @@ impl TaskNoteStore for SqliteTaskNoteStore {
         let note = self
             .db
             .call(move |conn| {
-                let id = NoteId::new();
                 let now = Timestamp::now();
                 conn.execute(
-                    "INSERT INTO task_note (id, task_id, body, author, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        id.as_str(),
-                        item.value(),
-                        body_owned,
-                        author,
-                        ts_to_string(now)
-                    ],
+                    "INSERT INTO task_note (task_id, body, author, created_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![item.value(), body_owned, author, ts_to_string(now)],
                 )?;
+                let id = NoteId::new(conn.last_insert_rowid());
                 Ok(TaskNote {
                     id,
                     task_id: Some(item),
@@ -169,7 +167,7 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                 })
             })
             .await?;
-        self.project_note(note.id.as_str(), &note.body).await?;
+        self.project_note(&note.id.to_string(), &note.body).await?;
         Ok(note)
     }
 
@@ -179,25 +177,19 @@ impl TaskNoteStore for SqliteTaskNoteStore {
         body: &str,
         author: &str,
     ) -> Result<TaskNote, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         let body_owned = body.to_string();
         let author = author.to_string();
         let note = self
             .db
             .call(move |conn| {
-                let id = NoteId::new();
                 let now = Timestamp::now();
                 conn.execute(
-                    "INSERT INTO task_note (id, thread_id, body, author, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        id.as_str(),
-                        thread.as_str(),
-                        body_owned,
-                        author,
-                        ts_to_string(now)
-                    ],
+                    "INSERT INTO task_note (thread_id, body, author, created_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![thread.value(), body_owned, author, ts_to_string(now)],
                 )?;
+                let id = NoteId::new(conn.last_insert_rowid());
                 Ok(TaskNote {
                     id,
                     task_id: None,
@@ -208,7 +200,7 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                 })
             })
             .await?;
-        self.project_note(note.id.as_str(), &note.body).await?;
+        self.project_note(&note.id.to_string(), &note.body).await?;
         Ok(note)
     }
 
@@ -225,47 +217,47 @@ impl TaskNoteStore for SqliteTaskNoteStore {
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_note WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![thread.as_str()], row_to_note)?;
+                let rows = stmt.query_map(params![thread.value()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
     async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let body_clone = body.to_string();
         self.db
             .call(move |conn| {
                 conn.execute(
                     "UPDATE task_note SET body = ?2 WHERE id = ?1",
-                    params![id_clone.as_str(), body_clone],
+                    params![id_clone.value(), body_clone],
                 )?;
                 Ok(())
             })
             .await?;
-        self.project_note(id.as_str(), body).await?;
+        self.project_note(&id.to_string(), body).await?;
         Ok(())
     }
 
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         self.db
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM task_note WHERE id = ?1",
-                    params![id_clone.as_str()],
+                    params![id_clone.value()],
                 )?;
                 Ok(())
             })
             .await?;
         if let Some(refs) = &self.page_refs {
-            refs.replace_source(KIND_TASK_NOTE, id.as_str(), vec![])
+            refs.replace_source(KIND_TASK_NOTE, &id.to_string(), vec![])
                 .await?;
         }
         Ok(())
@@ -337,7 +329,7 @@ impl SqliteTaskLinkStore {
 
 fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
     let id: i64 = row.get("id")?;
-    let thread_id: String = row.get("thread_id")?;
+    let thread_id: i64 = row.get("thread_id")?;
     let from_item_id: i64 = row.get("from_item_id")?;
     let to_item_id: i64 = row.get("to_item_id")?;
     let link_type: String = row.get("link_type")?;
@@ -347,7 +339,7 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
     };
     Ok(TaskLink {
         id: TaskLinkId::new(id),
-        thread_id: ThreadId::from(thread_id),
+        thread_id: ThreadId::new(thread_id),
         from_item_id: TaskId::new(from_item_id),
         to_item_id: TaskId::new(to_item_id),
         link_type: str_to_link_type(&link_type).map_err(map_err)?,
@@ -364,7 +356,7 @@ impl TaskLinkStore for SqliteTaskLinkStore {
         to: TaskId,
         link_type: TaskLinkType,
     ) -> Result<TaskLink, DomainError> {
-        let thread_clone = thread.clone();
+        let thread_clone = *thread;
         let link = self
             .db
             .call(move |conn| {
@@ -373,7 +365,7 @@ impl TaskLinkStore for SqliteTaskLinkStore {
                     "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
-                        thread_clone.as_str(),
+                        thread_clone.value(),
                         from.value(),
                         to.value(),
                         link_type_to_str(link_type),
@@ -456,7 +448,7 @@ impl SqliteTaskEventStore {
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     let id: String = row.get("id")?;
-    let thread_id: String = row.get("thread_id")?;
+    let thread_id: i64 = row.get("thread_id")?;
     let item_id: Option<i64> = row.get("item_id")?;
     let event_type: String = row.get("event_type")?;
     let actor_kind: String = row.get("actor_kind")?;
@@ -468,7 +460,7 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     };
     Ok(TaskEvent {
         id,
-        thread_id: ThreadId::from(thread_id),
+        thread_id: ThreadId::new(thread_id),
         item_id: item_id.map(TaskId::new),
         event_type,
         actor_kind: str_to_actor(&actor_kind).map_err(map_err)?,
@@ -490,7 +482,7 @@ impl TaskEventStore for SqliteTaskEventStore {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         event.id,
-                        event.thread_id.as_str(),
+                        event.thread_id.value(),
                         event.item_id.map(|i| i.value()),
                         event.event_type,
                         actor_to_str(event.actor_kind),
@@ -517,13 +509,13 @@ impl TaskEventStore for SqliteTaskEventStore {
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM task_event WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![thread.as_str()], row_to_event)?;
+                let rows = stmt.query_map(params![thread.value()], row_to_event)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -553,7 +545,7 @@ mod tests {
         let items = SqliteTaskStore::new(db.clone());
 
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -572,8 +564,8 @@ mod tests {
         streams.upsert(&s).await.unwrap();
 
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "t".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -592,7 +584,7 @@ mod tests {
 
         let item = Task {
             id: TaskId::placeholder(),
-            thread_id: Some(t.id.clone()),
+            thread_id: Some(t.id),
             parent_id: None,
             title: "x".into(),
             description: String::new(),
@@ -657,32 +649,38 @@ mod tests {
         let store = SqliteTaskNoteStore::new(db).with_page_refs(page_refs.clone());
 
         let note = store
-            .add_for_item(item_id, "blocked by task:99 see [[src/app.rs]]", "u")
+            .add_for_item(item_id, "blocked by tsk99 see [[src/app.rs]]", "u")
             .await
             .unwrap();
-        let inbound_task = page_refs.list_backlinks("task", "99", None).await.unwrap();
+        let inbound_task = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
         assert!(
             inbound_task
                 .iter()
-                .any(|e| e.source_kind == "task-note" && e.source_id == note.id.as_str()),
-            "expected note to backlink task:99; got {inbound_task:?}"
+                .any(|e| e.source_kind == "task-note" && e.source_id == note.id.to_string()),
+            "expected note to backlink tsk99; got {inbound_task:?}"
         );
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
             .unwrap();
-        assert!(inbound_file.iter().any(|e| e.source_id == note.id.as_str()));
+        assert!(inbound_file
+            .iter()
+            .any(|e| e.source_id == note.id.to_string()));
 
         store.update_body(&note.id, "no refs").await.unwrap();
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
             .unwrap();
-        assert!(inbound_file.iter().all(|e| e.source_id != note.id.as_str()));
+        assert!(inbound_file
+            .iter()
+            .all(|e| e.source_id != note.id.to_string()));
 
         store.delete(&note.id).await.unwrap();
-        let inbound_task = page_refs.list_backlinks("task", "99", None).await.unwrap();
-        assert!(inbound_task.iter().all(|e| e.source_id != note.id.as_str()));
+        let inbound_task = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
+        assert!(inbound_task
+            .iter()
+            .all(|e| e.source_id != note.id.to_string()));
 
         let tnote = store
             .add_for_thread(&tid, "see [[src/lib.rs]]", "u")
@@ -692,7 +690,9 @@ mod tests {
             .list_backlinks("file", "src/lib.rs", None)
             .await
             .unwrap();
-        assert!(inbound_lib.iter().any(|e| e.source_id == tnote.id.as_str()));
+        assert!(inbound_lib
+            .iter()
+            .any(|e| e.source_id == tnote.id.to_string()));
     }
 
     #[tokio::test]
@@ -707,7 +707,7 @@ mod tests {
 
         let to = Task {
             id: TaskId::placeholder(),
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             parent_id: None,
             title: "y".into(),
             description: String::new(),
@@ -770,7 +770,7 @@ mod tests {
         let items = SqliteTaskStore::new(db.clone());
         let to = Task {
             id: TaskId::placeholder(),
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             parent_id: None,
             title: "y".into(),
             description: String::new(),
@@ -804,7 +804,7 @@ mod tests {
         let store = SqliteTaskEventStore::new(db);
         let evt = TaskEvent {
             id: "evt-1".into(),
-            thread_id: tid.clone(),
+            thread_id: tid,
             item_id: Some(item_id),
             event_type: "transition".into(),
             actor_kind: TaskActorKind::Agent,

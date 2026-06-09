@@ -19,11 +19,17 @@
 //! Pure orchestration: stores own persistence; this module is the
 //! state machine on top.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
+
+/// Process-local counter for the in-memory hook-event log (the
+/// `hook_event` table was dropped in V2 — these rows live only in the
+/// `ThreadRuntimeRegistry` ring buffer, so there's no rowid to allocate).
+static NEXT_HOOK_EVENT_ID: AtomicI64 = AtomicI64::new(1);
 
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
 use oxplow_domain::{
@@ -85,9 +91,9 @@ impl HookIngestService {
     pub async fn ingest(&self, env: HookEnvelope) -> Result<HookEventId, HookIngestError> {
         let now = Timestamp::now();
         let stored = HookEvent {
-            id: HookEventId::new(),
-            thread_id: env.thread_id.clone(),
-            stream_id: env.stream_id.clone(),
+            id: HookEventId::new(NEXT_HOOK_EVENT_ID.fetch_add(1, Ordering::Relaxed)),
+            thread_id: env.thread_id,
+            stream_id: env.stream_id,
             kind: env.kind,
             session_id: env.session_id.clone(),
             payload_json: env.payload_json.clone(),
@@ -97,7 +103,7 @@ impl HookIngestService {
         self.events.emit(OxplowEvent::HookEventsChanged);
 
         // The agent_turn / agent_status branches need a thread.
-        let thread = match env.thread_id.clone() {
+        let thread = match env.thread_id {
             Some(t) => t,
             None => return Ok(stored.id),
         };
@@ -109,8 +115,8 @@ impl HookIngestService {
                 let open = self.turns.list_open(&thread).await?;
                 if open.is_empty() {
                     let turn = AgentTurn {
-                        id: AgentTurnId::new(),
-                        thread_id: thread.clone(),
+                        id: AgentTurnId::placeholder(),
+                        thread_id: thread,
                         task_id: None,
                         prompt: env.prompt.unwrap_or_default(),
                         answer: None,
@@ -168,7 +174,7 @@ impl HookIngestService {
                     .unwrap_or_default();
                 let derived = crate::agent_status_derive::derive_thread_status(&recent);
                 self.events.emit(OxplowEvent::AgentStatusChanged {
-                    thread_id: thread.clone(),
+                    thread_id: thread,
                     pane_target: self.thread_pane(&thread).await,
                     state: derived,
                 });
@@ -246,7 +252,7 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -264,8 +270,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -296,7 +302,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         let env = HookEnvelope {
             kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: Some("sess".into()),
             payload_json: "{}".into(),
@@ -316,7 +322,7 @@ mod tests {
         // Open a turn first.
         let prompt_env = HookEnvelope {
             kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -325,7 +331,7 @@ mod tests {
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
             kind: HookKind::Stop,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -342,7 +348,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -352,7 +358,7 @@ mod tests {
         .unwrap();
         svc.ingest(HookEnvelope {
             kind: HookKind::Stop,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: r#"{"await_user":true}"#.into(),
@@ -369,7 +375,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -379,7 +385,7 @@ mod tests {
         .unwrap();
         svc.ingest(HookEnvelope {
             kind: HookKind::Interrupt,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -397,7 +403,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
@@ -407,7 +413,7 @@ mod tests {
         .unwrap();
         svc.ingest(HookEnvelope {
             kind: HookKind::SubagentStop,
-            thread_id: Some(tid.clone()),
+            thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),

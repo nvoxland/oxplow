@@ -136,10 +136,12 @@ pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
 
 /// Edges contributed by the union of every effort's declared
 /// impacts. Self-task references are filtered out (an effort on
-/// task:7 declaring it "completed" task:7 is implicit).
+/// tsk7 declaring it "completed" tsk7 is implicit).
 pub fn effort_impact_edges(task_id: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
     let mut out = Vec::new();
-    let self_id: Option<i64> = task_id.parse().ok();
+    let self_id: Option<i64> = oxplow_domain::TaskId::try_from_str(task_id)
+        .map(|t| t.value())
+        .or_else(|| task_id.parse().ok());
     for imp in impacts {
         let Some(target_kind) = normalize_impact_kind(&imp.kind) else {
             continue;
@@ -206,7 +208,7 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
             KIND_WIKI,
             slug,
             KIND_TASK,
-            t.to_string(),
+            oxplow_domain::TaskId::new(t).to_string(),
             RT_BODY_TASK,
         ));
     }
@@ -267,7 +269,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
             KIND_TASK_NOTE,
             note_id,
             KIND_TASK,
-            t.to_string(),
+            oxplow_domain::TaskId::new(t).to_string(),
             RT_BODY_TASK,
         ));
     }
@@ -330,7 +332,7 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
             KIND_TASK,
             &id,
             KIND_TASK,
-            t.to_string(),
+            oxplow_domain::TaskId::new(t).to_string(),
             RT_BODY_TASK,
         ));
     }
@@ -414,7 +416,9 @@ pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefE
             RT_SUMMARY_WIKILINK,
         ));
     }
-    let self_id: Option<i64> = task_id.parse().ok();
+    let self_id: Option<i64> = oxplow_domain::TaskId::try_from_str(task_id)
+        .map(|t| t.value())
+        .or_else(|| task_id.parse().ok());
     for t in refs.tasks {
         if Some(t) == self_id {
             continue;
@@ -423,7 +427,7 @@ pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefE
             KIND_TASK,
             task_id,
             KIND_TASK,
-            t.to_string(),
+            oxplow_domain::TaskId::new(t).to_string(),
             RT_SUMMARY_TASK,
         ));
     }
@@ -515,7 +519,7 @@ mod tests {
 
     #[test]
     fn wiki_edges_cover_all_kinds() {
-        let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[task:7]] [[finding:fnd-1]] [[git:abcdef0]]";
+        let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
         let edges = wiki_edges("intro", body);
         let kinds: std::collections::BTreeSet<_> =
             edges.iter().map(|e| e.target_kind.as_str()).collect();
@@ -532,7 +536,7 @@ mod tests {
         let it = item(
             1,
             "fix something",
-            "see [[src/app.rs]] for context, blocked by task:2, touches finding:fnd-9",
+            "see [[src/app.rs]] for context, blocked by tsk2, touches finding:fnd-9",
         );
         let edges = task_edges(&it);
         let targets: Vec<_> = edges
@@ -540,7 +544,7 @@ mod tests {
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
         assert!(targets.contains(&("file", "src/app.rs")));
-        assert!(targets.contains(&("task", "2")));
+        assert!(targets.contains(&("task", "tsk2")));
         assert!(targets.contains(&("finding", "fnd-9")));
         // self-mention filtered out
         assert!(!targets.iter().any(|(k, id)| *k == "task" && *id == "1"));
@@ -575,7 +579,7 @@ mod tests {
     fn effort_summary_edges_extract_all_kinds() {
         let summaries = vec![
             "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
-            "Resolved task:99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
+            "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
         ];
         let edges = effort_summary_edges("7", &summaries);
         let by_kind: std::collections::BTreeMap<_, Vec<_>> =
@@ -595,7 +599,7 @@ mod tests {
             .any(|(id, rt)| *id == "src/foo.rs" && *rt == "summary_file_ref")));
         assert!(by_kind.get("task").is_some_and(|v| v
             .iter()
-            .any(|(id, rt)| *id == "99" && *rt == "summary_task_mention")));
+            .any(|(id, rt)| *id == "tsk99" && *rt == "summary_task_mention")));
         assert!(by_kind.get("finding").is_some_and(|v| v
             .iter()
             .any(|(id, rt)| *id == "fnd-2" && *rt == "summary_finding_mention")));
@@ -607,14 +611,14 @@ mod tests {
 
     #[test]
     fn effort_summary_edges_filter_self_task() {
-        let summaries = vec!["wraps up task:7 itself and references task:9".into()];
-        let edges = effort_summary_edges("7", &summaries);
+        let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
+        let edges = effort_summary_edges("tsk7", &summaries);
         let task_ids: Vec<_> = edges
             .iter()
             .filter(|e| e.target_kind == "task")
             .map(|e| e.target_id.as_str())
             .collect();
-        assert_eq!(task_ids, vec!["9"]);
+        assert_eq!(task_ids, vec!["tsk9"]);
     }
 
     #[test]
@@ -686,15 +690,15 @@ mod tests {
         use oxplow_domain::TaskLinkId;
         let link = TaskLink {
             id: TaskLinkId::new(1),
-            thread_id: oxplow_domain::ThreadId::from("b-1"),
+            thread_id: oxplow_domain::ThreadId::new(1),
             from_item_id: TaskId::new(10),
             to_item_id: TaskId::new(20),
             link_type: TaskLinkType::Blocks,
             created_at: ts(),
         };
         let edge = link_edge(&link);
-        assert_eq!(edge.source_id, "10");
-        assert_eq!(edge.target_id, "20");
+        assert_eq!(edge.source_id, "tsk10");
+        assert_eq!(edge.target_id, "tsk20");
         assert_eq!(edge.ref_type, "task_link:blocks");
     }
 

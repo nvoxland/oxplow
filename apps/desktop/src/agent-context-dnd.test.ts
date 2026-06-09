@@ -29,23 +29,23 @@ describe("decodeTaskDragPayload", () => {
   });
 
   test("returns ids from the itemIds array form", () => {
-    const raw = JSON.stringify({ itemIds: [101, 102, 9301], fromThreadId: "t-1" });
-    expect(decodeTaskDragPayload(raw)).toEqual([101, 102, 9301]);
+    const raw = JSON.stringify({ itemIds: ["tsk101", "tsk102", "tsk9301"], fromThreadId: "t-1" });
+    expect(decodeTaskDragPayload(raw)).toEqual(["tsk101", "tsk102", "tsk9301"]);
   });
 
   test("falls back to single itemId when itemIds is absent", () => {
-    const raw = JSON.stringify({ itemId: 101, fromThreadId: "t-1" });
-    expect(decodeTaskDragPayload(raw)).toEqual([101]);
+    const raw = JSON.stringify({ itemId: "tsk101", fromThreadId: "t-1" });
+    expect(decodeTaskDragPayload(raw)).toEqual(["tsk101"]);
   });
 
   test("prefers itemIds when both are present", () => {
-    const raw = JSON.stringify({ itemId: 101, itemIds: [102, 9301] });
-    expect(decodeTaskDragPayload(raw)).toEqual([102, 9301]);
+    const raw = JSON.stringify({ itemId: "tsk101", itemIds: ["tsk102", "tsk9301"] });
+    expect(decodeTaskDragPayload(raw)).toEqual(["tsk102", "tsk9301"]);
   });
 
-  test("skips non-number entries in itemIds", () => {
-    const raw = JSON.stringify({ itemIds: [101, "abc", null, 102] });
-    expect(decodeTaskDragPayload(raw)).toEqual([101, 102]);
+  test("skips non-string entries in itemIds", () => {
+    const raw = JSON.stringify({ itemIds: ["tsk101", 5, null, "tsk102"] });
+    expect(decodeTaskDragPayload(raw)).toEqual(["tsk101", "tsk102"]);
   });
 
   test("returns [] when itemIds is empty and no fallback id", () => {
@@ -56,24 +56,24 @@ describe("decodeTaskDragPayload", () => {
 
 describe("resolveTaskContextRefs", () => {
   test("maps each id through the lookup into a tasks ContextRef", () => {
-    const lookup = (id: number) => {
-      if (id === 101) return { title: "Alpha", status: "ready" };
-      if (id === 102) return { title: "Beta", status: "in_progress" };
+    const lookup = (id: string) => {
+      if (id === "tsk101") return { title: "Alpha", status: "ready" };
+      if (id === "tsk102") return { title: "Beta", status: "in_progress" };
       return null;
     };
-    const refs = resolveTaskContextRefs([101, 102], lookup);
+    const refs = resolveTaskContextRefs(["tsk101", "tsk102"], lookup);
     expect(refs).toEqual([
-      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
-      { kind: "task", itemId: 102, title: "Beta", status: "in_progress" },
+      { kind: "task", itemId: "tsk101", title: "Alpha", status: "ready" },
+      { kind: "task", itemId: "tsk102", title: "Beta", status: "in_progress" },
     ]);
   });
 
   test("skips ids the lookup doesn't resolve", () => {
-    const lookup = (id: number) =>
-      id === 101 ? { title: "Alpha", status: "ready" } : null;
-    const refs = resolveTaskContextRefs([999, 101], lookup);
+    const lookup = (id: string) =>
+      id === "tsk101" ? { title: "Alpha", status: "ready" } : null;
+    const refs = resolveTaskContextRefs(["tsk999", "tsk101"], lookup);
     expect(refs).toEqual([
-      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
+      { kind: "task", itemId: "tsk101", title: "Alpha", status: "ready" },
     ]);
   });
 
@@ -84,36 +84,36 @@ describe("resolveTaskContextRefs", () => {
 
 describe("decodeTaskDragRefs", () => {
   test("returns [] when items slice is absent", () => {
-    const raw = JSON.stringify({ itemIds: [101] });
+    const raw = JSON.stringify({ itemIds: ["tsk101"] });
     expect(decodeTaskDragRefs(raw)).toEqual([]);
   });
 
   test("returns ContextRefs from the items slice", () => {
     const raw = JSON.stringify({
-      itemIds: [101, 102],
+      itemIds: ["tsk101", "tsk102"],
       items: [
-        { id: 101, title: "Alpha", status: "ready" },
-        { id: 102, title: "Beta", status: "in_progress" },
+        { id: "tsk101", title: "Alpha", status: "ready" },
+        { id: "tsk102", title: "Beta", status: "in_progress" },
       ],
     });
     expect(decodeTaskDragRefs(raw)).toEqual([
-      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
-      { kind: "task", itemId: 102, title: "Beta", status: "in_progress" },
+      { kind: "task", itemId: "tsk101", title: "Alpha", status: "ready" },
+      { kind: "task", itemId: "tsk102", title: "Beta", status: "in_progress" },
     ]);
   });
 
   test("skips malformed entries but keeps valid ones", () => {
     const raw = JSON.stringify({
       items: [
-        { id: 101, title: "Alpha", status: "ready" },
-        { id: "not-a-number", title: "x", status: "y" },
-        { id: 9301, title: "Charlie", status: "done" },
+        { id: "tsk101", title: "Alpha", status: "ready" },
+        { id: "", title: "x", status: "y" },
+        { id: "tsk9301", title: "Charlie", status: "done" },
         { title: "no id", status: "x" },
       ],
     });
     expect(decodeTaskDragRefs(raw)).toEqual([
-      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
-      { kind: "task", itemId: 9301, title: "Charlie", status: "done" },
+      { kind: "task", itemId: "tsk101", title: "Alpha", status: "ready" },
+      { kind: "task", itemId: "tsk9301", title: "Charlie", status: "done" },
     ]);
   });
 

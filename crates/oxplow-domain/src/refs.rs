@@ -3,7 +3,7 @@
 //! Given a free-text body (wiki page, task description, commit
 //! message, task-note, …) extracts the references it makes to other
 //! pages: file paths, directory paths, wiki slugs, task ids
-//! (`task:<n>`), finding ids (`finding:…`), and git commit shas.
+//! (`tsk<n>`), finding ids (`finding:…`), and git commit shas.
 //!
 //! Lives in `oxplow-domain` because it has zero IO and no async — it
 //! takes a `&str` and returns plain data. Every writer that mirrors
@@ -15,14 +15,14 @@
 //!    - `dir:<path>` → directory ref
 //!    - `git:<sha>` → commit ref (also `[[<sha>]]` if 7-40 hex)
 //!    - `finding:<id>` → finding ref
-//!    - `task:<digits>` → task ref
+//!    - `tsk<digits>` → task ref
 //!    - `path/with/slash.ext[@version][:line]` → file ref
 //!    - `bare-slug` (kebab-case, no slash, no extension) → wiki slug
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
 //!
 //! 2. **Inline mentions** — fallback for free-text:
-//!    - bare `task:<digits>` task ids
+//!    - bare `tsk<digits>` task ids
 //!    - bare `finding:<id>` (with the prefix to disambiguate from words)
 //!    - bare file-shaped paths (slash + 1–6 char extension)
 //!
@@ -109,12 +109,12 @@ pub fn extract(body: &str) -> ExtractedRefs {
             }
             continue;
         }
-        // task:<digits>
-        if let Some(rest) = strip_prefix_ci(interior, "task:") {
+        // tsk<digits> — bare self-typed task ref (e.g. `[[tsk42]]`).
+        if let Some(rest) = strip_prefix_ci(interior, "tsk") {
             if let Some(id) = parse_task_id(rest) {
                 tasks.insert(id);
+                continue;
             }
-            continue;
         }
         // path/file.ext[@version][:line]
         if let Some(detail) = parse_file_ref(interior) {
@@ -427,7 +427,7 @@ fn is_path_join_prev(bytes: &[u8], i: usize) -> bool {
 
 fn find_inline_tasks(body: &str) -> Vec<i64> {
     let mut out = Vec::new();
-    let prefix = b"task:";
+    let prefix = b"tsk";
     let bytes = body.as_bytes();
     let mut i = 0;
     while i + prefix.len() < bytes.len() {
@@ -440,7 +440,7 @@ fn find_inline_tasks(body: &str) -> Vec<i64> {
                 end += 1;
             }
             // The character after the digits must not extend an id-ish
-            // token (e.g. `task:42abc` is not a valid task ref).
+            // token (e.g. `tsk42abc` is not a valid task ref).
             let next_extends = end < bytes.len() && is_id_boundary_char(bytes[end]);
             if end > start && !next_extends {
                 if let Ok(s) = std::str::from_utf8(&bytes[start..end]) {
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn wikilink_dir_and_slug_and_task_and_finding_and_commit() {
-        let body = "[[dir:src/components]] and [[architecture]] and [[task:42]] and [[finding:fnd-1]] and [[git:abcdef0]]";
+        let body = "[[dir:src/components]] and [[architecture]] and [[tsk42]] and [[finding:fnd-1]] and [[git:abcdef0]]";
         let r = extract(body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
@@ -655,26 +655,26 @@ mod tests {
 
     #[test]
     fn inline_task_and_finding_mention() {
-        let r = extract("blocked by task:42 see finding:fnd-2");
+        let r = extract("blocked by tsk42 see finding:fnd-2");
         assert_eq!(r.tasks, vec![42]);
         assert_eq!(r.findings, vec!["fnd-2"]);
     }
 
     #[test]
     fn inline_task_rejects_non_digits() {
-        let r = extract("task:foo and task:42abc");
+        let r = extract("tskfoo and tsk42abc");
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_task_with_trailing_punctuation() {
-        let r = extract("task:42 fixes issue. also task:7, see");
+        let r = extract("tsk42 fixes issue. also tsk7, see");
         assert_eq!(r.tasks, vec![7, 42]);
     }
 
     #[test]
     fn wikilink_task_rejects_non_digits() {
-        let r = extract("[[task:notanumber]] [[task:42abc]]");
+        let r = extract("[[tsknotanumber]] [[tsk42abc]]");
         assert!(r.tasks.is_empty());
     }
 
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn wikilink_task_form_does_not_become_slug() {
-        let r = extract("[[task:7]]");
+        let r = extract("[[tsk7]]");
         assert!(r.wikis.is_empty());
         assert_eq!(r.tasks, vec![7]);
     }
@@ -703,7 +703,7 @@ mod tests {
         // `0` is a valid integer; the renderer is free to treat it as a
         // dead link (since SQLite never assigns 0), but the extractor
         // itself does not gatekeep — that's the renderer's job.
-        let r = extract("[[task:0]] inline task:0");
+        let r = extract("[[tsk0]] inline tsk0");
         assert_eq!(r.tasks, vec![0]);
     }
 
@@ -711,7 +711,7 @@ mod tests {
     fn wikilink_task_negative_rejected() {
         // The wikilink grammar accepts only ASCII digits — the leading
         // `-` makes the body fail the digit check.
-        let r = extract("[[task:-1]] inline task:-1");
+        let r = extract("[[tsk-1]] inline tsk-1");
         assert!(r.tasks.is_empty());
     }
 
@@ -720,13 +720,13 @@ mod tests {
         // i64 overflows are dropped silently (parse::<i64>() returns
         // None). We don't surface a parse error; the renderer just
         // doesn't see the ref.
-        let r = extract("[[task:99999999999999999999]]");
+        let r = extract("[[tsk99999999999999999999]]");
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_task_overflow_rejected() {
-        let r = extract("see task:99999999999999999999 in passing");
+        let r = extract("see tsk99999999999999999999 in passing");
         assert!(r.tasks.is_empty());
     }
 

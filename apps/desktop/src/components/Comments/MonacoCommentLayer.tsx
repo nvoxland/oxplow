@@ -24,16 +24,16 @@ interface PendingSel {
 /// Imperative surface EditorPane drives from its right-click menu.
 export interface MonacoCommentHandle {
   /// The comment id whose decoration covers `position`, or null.
-  commentIdAt(position: any): number | null;
+  commentIdAt(position: any): string | null;
   /// Open the composer for the current editor selection (if non-empty).
   addCommentForSelection(): void;
   /// Open the thread popover for `commentId`.
-  openComment(commentId: number): void;
+  openComment(commentId: string): void;
   /// Orphaned comments for this file — drives "Relink orphaned" menu
   /// entries (the escape hatch when a quote drifted past fuzzy tolerance).
-  relinkTargets(): { id: number; quote: string }[];
+  relinkTargets(): { id: string; quote: string }[];
   /// Re-attach `commentId` to the editor's current selection.
-  relinkToSelection(commentId: number): void;
+  relinkToSelection(commentId: string): void;
 }
 
 /// Build the enriched `anchor_json` for a resolved Monaco range: the
@@ -77,8 +77,8 @@ export const MonacoCommentLayer = forwardRef<
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   const decoIdsRef = useRef<string[]>([]);
-  const decoMapRef = useRef<{ decoId: string; commentId: number }[]>([]);
-  const [active, setActive] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const decoMapRef = useRef<{ decoId: string; commentId: string }[]>([]);
+  const [active, setActive] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [pending, setPending] = useState<PendingSel | null>(null);
   // Bumped when the model's content or the model itself changes. The
   // file's content loads asynchronously after the editor mounts, so
@@ -108,7 +108,7 @@ export const MonacoCommentLayer = forwardRef<
     if (!model) return;
     const text: string = model.getValue();
     const decos: any[] = [];
-    const map: { decoId: string; commentId: number }[] = [];
+    const map: { decoId: string; commentId: string }[] = [];
 
     for (const thread of threads) {
       const c = thread.comment;
@@ -169,7 +169,7 @@ export const MonacoCommentLayer = forwardRef<
 
     const ids: string[] = editor.deltaDecorations(decoIdsRef.current, decos);
     decoIdsRef.current = ids;
-    decoMapRef.current = ids.map((decoId, i) => ({ decoId, commentId: map[i]?.commentId ?? -1 }));
+    decoMapRef.current = ids.map((decoId, i) => ({ decoId, commentId: map[i]?.commentId ?? "" }));
   }, [ready, editor, monaco, threads, filePath, contentTick]);
 
   // Build a viewport rect from a Monaco position (read model/editor live).

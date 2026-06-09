@@ -43,7 +43,7 @@ function targetElement(kind: string, id: string): Element | null {
 }
 
 interface Painted {
-  commentId: number;
+  commentId: string;
   range: Range;
 }
 
@@ -56,7 +56,7 @@ export function DomCommentLayer({
 }) {
   const { pending, composing, beginCompose, cancel } = useDomAnnotations();
   const [threads, setThreads] = useState<CommentThread[]>([]);
-  const [openId, setOpenId] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const [openId, setOpenId] = useState<{ id: string; rect: DOMRect } | null>(null);
   const paintedRef = useRef<Painted[]>([]);
 
   // Load + keep stream comments live.

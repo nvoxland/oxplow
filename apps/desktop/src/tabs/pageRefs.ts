@@ -86,7 +86,7 @@ export function wikiFreshnessRef(slug: string): TabRef {
   return { id: `wiki-freshness:${slug}`, kind: "wiki-freshness", payload: { slug } };
 }
 
-export function taskRef(itemId: number): TabRef {
+export function taskRef(itemId: string): TabRef {
   return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
 }
 
@@ -229,7 +229,7 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 
 export interface NewtasksPayload {
   /** Optional pre-selected parent epic id. */
-  parentId?: number | null;
+  parentId?: string | null;
   /** Optional default priority. */
   initialPriority?: string | null;
 }
@@ -308,10 +308,8 @@ export function refFromTabId(id: string): TabRef {
       return wikiPageRef(rest);
     case "wiki-freshness":
       return wikiFreshnessRef(rest);
-    case "task": {
-      const n = Number(rest);
-      return Number.isFinite(n) ? taskRef(n) : { id, kind: "task", payload: { itemId: n } };
-    }
+    case "task":
+      return taskRef(rest);
     case "finding":
       return findingRef(rest);
     case "directory":

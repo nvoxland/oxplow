@@ -16,7 +16,7 @@ use crate::state::AppState;
 
 fn emit_changed(state: &tauri::State<'_, AppState>, comment: &Comment) {
     state.events.emit(OxplowEvent::CommentsChanged {
-        stream_id: comment.stream_id.clone(),
+        stream_id: comment.stream_id,
         target_kind: comment.target_kind.clone(),
         target_id: comment.target_id.clone(),
     });

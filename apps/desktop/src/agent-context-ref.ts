@@ -13,7 +13,7 @@
 export type ContextRef =
   | { kind: "file"; path: string }
   | { kind: "wiki"; slug: string }
-  | { kind: "task"; itemId: number; title: string; status: string };
+  | { kind: "task"; itemId: string; title: string; status: string };
 
 export function formatContextMention(ref: ContextRef): string {
   if (ref.kind === "file") {

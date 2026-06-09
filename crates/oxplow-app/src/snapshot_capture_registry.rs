@@ -91,7 +91,7 @@ impl SnapshotCaptureRegistry {
                 self.config.snapshot_store.clone(),
                 self.config.blobs.clone(),
                 worktree,
-                stream.id.clone(),
+                stream.id,
                 self.config.max_file_bytes,
                 self.workspace_filter
                     .read()
@@ -106,7 +106,7 @@ impl SnapshotCaptureRegistry {
         if let Some(existing) = services.get(&stream.id) {
             return Some(existing.clone());
         }
-        services.insert(stream.id.clone(), svc.clone());
+        services.insert(stream.id, svc.clone());
         Some(svc)
     }
 
@@ -171,11 +171,10 @@ impl SnapshotCaptureRegistry {
     /// Fetch the primary stream's service. `None` only before boot
     /// has called [`Self::set_primary`].
     pub fn primary(&self) -> Option<Arc<SnapshotCaptureService>> {
-        let id = self
+        let id = (*self
             .primary_id
             .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()?;
+            .unwrap_or_else(|e| e.into_inner()))?;
         self.get(&id)
     }
 
@@ -218,7 +217,7 @@ mod tests {
 
     fn stream_at(path: &std::path::Path) -> Stream {
         Stream {
-            id: StreamId::from("s-reg"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),

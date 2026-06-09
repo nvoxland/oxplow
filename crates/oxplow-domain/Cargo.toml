@@ -12,7 +12,6 @@ serde_json = { workspace = true }
 specta = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-uuid = { workspace = true }
 async-trait = { workspace = true }
 
 [lints]

@@ -131,7 +131,7 @@ impl Indexer {
             for s in streams {
                 if let Ok(threads) = self.services.thread_store.list_for_stream(&s.id).await {
                     for t in threads {
-                        map.insert(t.id, s.id.clone());
+                        map.insert(t.id, s.id);
                     }
                 }
             }
@@ -162,13 +162,14 @@ impl Indexer {
     }
 
     async fn index_task(&self, t: &Task, stream: Option<&StreamId>) {
+        let stream = stream.map(|s| s.to_string());
         let _ = self
             .services
             .search_store
             .upsert(
                 KIND_TASK,
                 &t.id.to_string(),
-                stream.map(StreamId::as_str),
+                stream.as_deref(),
                 &t.title,
                 &t.description,
             )
@@ -203,7 +204,7 @@ impl Indexer {
             .upsert(
                 KIND_COMMENT,
                 &ct.comment.id.to_string(),
-                Some(ct.comment.stream_id.as_str()),
+                Some(&ct.comment.stream_id.to_string()),
                 &ct.comment.quote,
                 &body,
             )
@@ -220,17 +221,12 @@ impl Indexer {
             .list_for_thread(thread_id)
             .await
         {
+            let stream = stream.as_ref().map(|s| s.to_string());
             for n in &notes {
                 let _ = self
                     .services
                     .search_store
-                    .upsert(
-                        KIND_NOTE,
-                        n.id.as_str(),
-                        stream.as_ref().map(StreamId::as_str),
-                        "",
-                        &n.body,
-                    )
+                    .upsert(KIND_NOTE, &n.id.to_string(), stream.as_deref(), "", &n.body)
                     .await;
             }
         }
@@ -282,13 +278,14 @@ impl Indexer {
         else {
             return;
         };
+        let stream_key = stream_id.to_string();
         for f in files {
             // Deletion capture (no blob) → drop the index row.
             let Some(hash) = f.blob_hash.as_deref() else {
                 let _ = self
                     .services
                     .search_store
-                    .remove(KIND_FILE, &f.path, Some(stream_id.as_str()))
+                    .remove(KIND_FILE, &f.path, Some(&stream_key))
                     .await;
                 continue;
             };
@@ -306,13 +303,7 @@ impl Indexer {
             let _ = self
                 .services
                 .search_store
-                .upsert(
-                    KIND_FILE,
-                    &f.path,
-                    Some(stream_id.as_str()),
-                    &f.path,
-                    &content,
-                )
+                .upsert(KIND_FILE, &f.path, Some(&stream_key), &f.path, &content)
                 .await;
         }
     }
@@ -356,7 +347,7 @@ mod tests {
         let task = svc
             .tasks
             .create(
-                Some(thread.id.clone()),
+                Some(thread.id),
                 crate::CreateTaskInput {
                     title: "Indexable widget task".into(),
                     ..Default::default()
@@ -423,7 +414,7 @@ mod tests {
         use oxplow_domain::Timestamp;
         let snap_id = svc
             .snapshot_store
-            .create_snapshot(stream.clone())
+            .create_snapshot(*stream)
             .await
             .unwrap();
         let (blob_hash, size) = match content {
@@ -433,7 +424,7 @@ mod tests {
         svc.snapshot_store
             .capture(oxplow_db::FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: *stream,
                 path: path.into(),
                 blob_hash,
                 size_bytes: size,
@@ -457,7 +448,7 @@ mod tests {
         indexer.index_snapshot_files(&stream.id, snap).await;
         let hits = svc
             .search_store
-            .search("frobnicate", Some(stream.id.as_str()), &[], 10)
+            .search("frobnicate", Some(&stream.id.to_string()), &[], 10)
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);
@@ -469,7 +460,7 @@ mod tests {
         indexer.index_snapshot_files(&stream.id, snap2).await;
         assert!(svc
             .search_store
-            .search("frobnicate", Some(stream.id.as_str()), &[], 10)
+            .search("frobnicate", Some(&stream.id.to_string()), &[], 10)
             .await
             .unwrap()
             .is_empty());
@@ -485,7 +476,7 @@ mod tests {
         indexer.index_snapshot_files(&stream.id, snap).await;
         assert!(svc
             .search_store
-            .search("frobnicate", Some(stream.id.as_str()), &[], 10)
+            .search("frobnicate", Some(&stream.id.to_string()), &[], 10)
             .await
             .unwrap()
             .is_empty());
@@ -504,7 +495,7 @@ mod tests {
 
         svc.tasks
             .create(
-                Some(thread.id.clone()),
+                Some(thread.id),
                 crate::CreateTaskInput {
                     title: "fix the flux capacitor".into(),
                     ..Default::default()
@@ -517,7 +508,7 @@ mod tests {
 
         let hits = svc
             .search_store
-            .search("flux", Some(stream.id.as_str()), &[], 10)
+            .search("flux", Some(&stream.id.to_string()), &[], 10)
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);

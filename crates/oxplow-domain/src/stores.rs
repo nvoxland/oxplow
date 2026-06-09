@@ -21,7 +21,11 @@ use crate::DomainError;
 pub trait StreamStore: Send + Sync {
     async fn list(&self) -> Result<Vec<Stream>, DomainError>;
     async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError>;
-    async fn upsert(&self, stream: &Stream) -> Result<(), DomainError>;
+    /// Insert or update a stream. When `stream.id` is the placeholder
+    /// (`StreamId::placeholder()`) a fresh autoincrement id is allocated;
+    /// otherwise the explicit id is inserted / updated in place. Returns
+    /// the effective id.
+    async fn upsert(&self, stream: &Stream) -> Result<StreamId, DomainError>;
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
     /// Soft-delete: stamp `archived_at` so the row drops out of
     /// `list()` but stays referenced from history (efforts, snapshots,
@@ -40,7 +44,11 @@ pub trait StreamStore: Send + Sync {
 pub trait ThreadStore: Send + Sync {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, DomainError>;
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError>;
-    async fn upsert(&self, thread: &Thread) -> Result<(), DomainError>;
+    /// Insert or update a thread. When `thread.id` is the placeholder
+    /// (`ThreadId::placeholder()`) a fresh autoincrement id is allocated;
+    /// otherwise the explicit id is inserted / updated in place. Returns
+    /// the effective id.
+    async fn upsert(&self, thread: &Thread) -> Result<ThreadId, DomainError>;
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError>;
     /// Soft-delete: stamp `archived_at`. Excluded from
     /// `list_for_stream` after this fires.
@@ -151,7 +159,9 @@ pub trait AgentStatusStore: Send + Sync {
 
 #[async_trait]
 pub trait AgentTurnStore: Send + Sync {
-    async fn open(&self, turn: &AgentTurn) -> Result<(), DomainError>;
+    /// Open a turn. When `turn.id` is the placeholder a fresh
+    /// autoincrement id is allocated; returns the effective id.
+    async fn open(&self, turn: &AgentTurn) -> Result<AgentTurnId, DomainError>;
     async fn close(&self, id: &AgentTurnId, answer: Option<String>) -> Result<(), DomainError>;
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError>;
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError>;

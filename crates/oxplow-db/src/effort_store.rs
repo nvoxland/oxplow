@@ -115,9 +115,9 @@ fn str_to_change(s: &str) -> Result<EffortFileChange, DomainError> {
 }
 
 fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
-    let id: String = row.get("id")?;
+    let id: i64 = row.get("id")?;
     let task_id: i64 = row.get("task_id")?;
-    let thread_id: String = row.get("thread_id")?;
+    let thread_id: i64 = row.get("thread_id")?;
     let started_at: String = row.get("started_at")?;
     let ended_at: Option<String> = row.get("ended_at")?;
     let start_snapshot_id: Option<i64> = row.get("start_snapshot_id")?;
@@ -127,9 +127,9 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(TaskEffort {
-        id: EffortId::from(id),
+        id: EffortId::new(id),
         task_id: TaskId::new(task_id),
-        thread_id: ThreadId::from(thread_id),
+        thread_id: ThreadId::new(thread_id),
         started_at: string_to_ts(&started_at).map_err(map_err)?,
         ended_at: ended_at
             .map(|s| string_to_ts(&s))
@@ -345,11 +345,11 @@ impl SqliteTaskEffortStore {
     }
 
     async fn task_for_effort(&self, effort_id: &EffortId) -> Result<Option<TaskId>, DomainError> {
-        let id = effort_id.clone();
+        let id = *effort_id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT task_id FROM task_effort WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.as_str()], |r| r.get::<_, i64>(0))?;
+                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
                 Ok(rows.next().transpose()?.map(TaskId::new))
             })
             .await
@@ -364,12 +364,11 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         thread: &ThreadId,
         start_snapshot_id: Option<i64>,
     ) -> Result<TaskEffort, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         let now = Timestamp::now();
-        let id = EffortId::new();
-        let id_for_sql = id.clone();
-        let thread_for_sql = thread.clone();
-        self.db
+        let thread_for_sql = thread;
+        let id = self
+            .db
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO task_effort
@@ -377,14 +376,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                         start_snapshot_id, end_snapshot_id, summary)
                      VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
                     params![
-                        id_for_sql.as_str(),
+                        None::<i64>,
                         task.value(),
-                        thread_for_sql.as_str(),
+                        thread_for_sql.value(),
                         ts_to_string(now),
                         start_snapshot_id,
                     ],
                 )?;
-                Ok(())
+                Ok(EffortId::new(conn.last_insert_rowid()))
             })
             .await?;
         Ok(TaskEffort {
@@ -405,7 +404,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         end_snapshot_id: Option<i64>,
         summary: Option<String>,
     ) -> Result<(), DomainError> {
-        let id_for_sql = id.clone();
+        let id_for_sql = *id;
         let summary_has_body = summary
             .as_deref()
             .map(|s| !s.trim().is_empty())
@@ -417,7 +416,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     "UPDATE task_effort
                      SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
                      WHERE id = ?1 AND ended_at IS NULL",
-                    params![id_for_sql.as_str(), now, end_snapshot_id, summary],
+                    params![id_for_sql.value(), now, end_snapshot_id, summary],
                 )?;
                 Ok(())
             })
@@ -448,7 +447,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         &self,
         thread: &ThreadId,
     ) -> Result<Option<TaskEffort>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -456,7 +455,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC LIMIT 1",
                 )?;
-                let mut rows = stmt.query_map(params![thread.as_str()], row_to_effort)?;
+                let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
                 rows.next().transpose()
             })
             .await
@@ -476,12 +475,12 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError> {
-        let id_for_sql = id.clone();
+        let id_for_sql = *id;
         self.db
             .call(move |conn| {
                 conn.execute(
                     "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
-                    params![id_for_sql.as_str(), summary],
+                    params![id_for_sql.value(), summary],
                 )?;
                 Ok(())
             })
@@ -508,18 +507,18 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM task_effort WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.as_str()], row_to_effort)?;
+                let mut rows = stmt.query_map(params![id.value()], row_to_effort)?;
                 rows.next().transpose()
             })
             .await
     }
 
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -528,8 +527,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      FROM task_effort_file
                      WHERE effort_id = ?1 ORDER BY path ASC",
                 )?;
-                let rows = stmt.query_map(params![id.as_str()], |r| {
-                    let effort_id: String = r.get(0)?;
+                let rows = stmt.query_map(params![id.value()], |r| {
+                    let effort_id: i64 = r.get(0)?;
                     let path: String = r.get(1)?;
                     let kind: String = r.get(2)?;
                     let local_snapshot_id: i64 = r.get(3)?;
@@ -543,7 +542,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                         )
                     };
                     Ok(EffortFile {
-                        effort_id: EffortId::from(effort_id),
+                        effort_id: EffortId::new(effort_id),
                         path,
                         change: str_to_change(&kind).map_err(map_err)?,
                         local_snapshot_id,
@@ -557,7 +556,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let json = if impacts.is_empty() {
             None
         } else {
@@ -570,7 +569,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| {
                 conn.execute(
                     "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
-                    params![id_clone.as_str(), json],
+                    params![id_clone.value(), json],
                 )?;
                 Ok(())
             })
@@ -584,14 +583,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         let raw: Option<String> = self
             .db
             .call(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT impacts_json FROM task_effort WHERE id = ?1")?;
                 let mut rows =
-                    stmt.query_map(params![id.as_str()], |r| r.get::<_, Option<String>>(0))?;
+                    stmt.query_map(params![id.value()], |r| r.get::<_, Option<String>>(0))?;
                 Ok(rows.next().transpose()?.flatten())
             })
             .await?;
@@ -609,7 +608,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         change: EffortFileChange,
         version: FileRefVersion<'_>,
     ) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let path_clone = path.to_string();
         let local_snapshot_id = version.local_snapshot_id;
         let closest_git_version = version.closest_git_version.map(|s| s.to_string());
@@ -622,7 +621,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                         local_snapshot_id, closest_git_version, git_version_exact)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
-                        id_clone.as_str(),
+                        id_clone.value(),
                         path_clone,
                         change_to_str(change),
                         local_snapshot_id,
@@ -645,7 +644,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         &self,
         id: &EffortId,
     ) -> Result<Vec<String>, DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -661,20 +660,20 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      ORDER BY fs.path",
                 )?;
                 let rows =
-                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let path_clone = path.to_string();
         self.db
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM task_effort_file WHERE effort_id = ?1 AND path = ?2",
-                    params![id_clone.as_str(), path_clone],
+                    params![id_clone.value(), path_clone],
                 )?;
                 Ok(())
             })
@@ -692,14 +691,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         id: &EffortId,
         path: &str,
     ) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let path_clone = path.to_string();
         self.db
             .call(move |conn| {
                 conn.execute(
                     "INSERT OR IGNORE INTO effort_acknowledged_path (effort_id, path) \
                      VALUES (?1, ?2)",
-                    params![id_clone.as_str(), path_clone],
+                    params![id_clone.value(), path_clone],
                 )?;
                 Ok(())
             })
@@ -707,14 +706,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         let path_clone = path.to_string();
         self.db
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM effort_acknowledged_path \
                      WHERE effort_id = ?1 AND path = ?2",
-                    params![id_clone.as_str(), path_clone],
+                    params![id_clone.value(), path_clone],
                 )?;
                 Ok(())
             })
@@ -722,7 +721,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     }
 
     async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -730,7 +729,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      WHERE effort_id = ?1 ORDER BY path",
                 )?;
                 let rows =
-                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -740,7 +739,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         &self,
         id: &EffortId,
     ) -> Result<Vec<String>, DomainError> {
-        let id_clone = id.clone();
+        let id_clone = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -768,7 +767,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      ORDER BY tef.path",
                 )?;
                 let rows =
-                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -857,26 +856,26 @@ mod tests {
             db2.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 for (id, start, end) in [
-                    ("ef-self", 10, 30),
-                    ("ef-inside", 15, 20),
-                    ("ef-after", 25, 40),
-                    ("ef-before", 1, 5),
-                    ("ef-later", 35, 50),
+                    (1, 10, 30), // ef-self
+                    (2, 15, 20), // ef-inside
+                    (3, 25, 40), // ef-after
+                    (4, 1, 5),   // ef-before
+                    (5, 35, 50), // ef-later
                 ] {
                     conn.execute(
                         "INSERT INTO task_effort
                            (id, task_id, thread_id, started_at, ended_at,
                             start_snapshot_id, end_snapshot_id)
-                         VALUES (?1, 1, 'b-1', '2026-01-01T00:00:00Z',
+                         VALUES (?1, 1, 1, '2026-01-01T00:00:00Z',
                                  '2026-01-01T00:01:00Z', ?2, ?3)",
                         params![id, start, end],
                     )?;
                 }
                 for (eid, path) in [
-                    ("ef-inside", "inside.rs"),
-                    ("ef-after", "after.rs"),
-                    ("ef-before", "before.rs"),
-                    ("ef-later", "later.rs"),
+                    (2, "inside.rs"), // ef-inside
+                    (3, "after.rs"),  // ef-after
+                    (4, "before.rs"), // ef-before
+                    (5, "later.rs"),  // ef-later
                 ] {
                     conn.execute(
                         "INSERT INTO task_effort_file
@@ -894,7 +893,7 @@ mod tests {
         .unwrap();
 
         let got = store
-            .paths_claimed_by_intervening_efforts(&EffortId::from("ef-self"))
+            .paths_claimed_by_intervening_efforts(&EffortId::new(1))
             .await
             .unwrap();
         // Ordered by path; overlapping efforts only.
@@ -905,7 +904,7 @@ mod tests {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -923,7 +922,7 @@ mod tests {
         };
         SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
+            id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
@@ -943,7 +942,7 @@ mod tests {
         let tid = SqliteTaskStore::new(db.clone())
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(t.id.clone()),
+                thread_id: Some(t.id),
                 parent_id: None,
                 title: "x".into(),
                 description: String::new(),
@@ -1010,7 +1009,7 @@ mod tests {
             .finish(
                 &eff.id,
                 None,
-                Some("Filed [[url-schemes]] referencing [[src/foo.rs]] and task:99".into()),
+                Some("Filed [[url-schemes]] referencing [[src/foo.rs]] and tsk99".into()),
             )
             .await
             .unwrap();
@@ -1037,7 +1036,7 @@ mod tests {
             "file backlink missing; got {file_back:?}"
         );
 
-        let task_back = page_refs.list_backlinks("task", "99", None).await.unwrap();
+        let task_back = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
         assert!(
             task_back
                 .iter()
@@ -1167,7 +1166,7 @@ mod tests {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -1185,8 +1184,8 @@ mod tests {
         };
         SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -1205,7 +1204,7 @@ mod tests {
         let tid = SqliteTaskStore::new(db.clone())
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(t.id.clone()),
+                thread_id: Some(t.id),
                 parent_id: None,
                 title: "x".into(),
                 description: String::new(),
@@ -1226,9 +1225,9 @@ mod tests {
         // file_snapshot(id). Build real snapshot grouping rows so the
         // FK validates.
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());
-        let snap1 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
-        let snap2 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
-        let snap3 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
+        let snap1 = snap_store.create_snapshot(s.id).await.unwrap();
+        let snap2 = snap_store.create_snapshot(s.id).await.unwrap();
+        let snap3 = snap_store.create_snapshot(s.id).await.unwrap();
 
         let store = SqliteTaskEffortStore::new(db);
         // Effort A: start@snap1, end@snap2 — active at snap1 AND snap2

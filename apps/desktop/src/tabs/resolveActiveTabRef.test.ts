@@ -9,7 +9,7 @@ describe("resolveActiveTabRef", () => {
 
   test("matching pageTab id returns that ref", () => {
     const note = wikiPageRef("data-model");
-    const work = taskRef(1);
+    const work = taskRef("1");
     const got = resolveActiveTabRef(note.id, [work, note], []);
     expect(got).toBe(note);
   });

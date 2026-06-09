@@ -81,9 +81,7 @@ impl WikiPagesWatcher {
                             Some(svc) => {
                                 match svc
                                     .store()
-                                    .latest_snapshot_id_for_stream(oxplow_domain::StreamId::from(
-                                        svc.stream_id().to_string(),
-                                    ))
+                                    .latest_snapshot_id_for_stream(*svc.stream_id())
                                     .await
                                 {
                                     Ok(Some(snapshot_id)) => file_ref_version::resolve(

@@ -79,7 +79,7 @@ fn refs_to_json(refs: &[CommentTarget]) -> String {
 /// Canonical `(kind,id)` refs mentioned *inside* `quote`, derived from
 /// the shared [`oxplow_domain::refs::extract`] so the kind/id vocabulary
 /// matches the `page_ref` graph and tab ids exactly. Inline mentions
-/// like `task:42`, `src/x.rs`, or `[[slug]]` become typed refs even
+/// like `tsk42`, `src/x.rs`, or `[[slug]]` become typed refs even
 /// when the surface never rendered them as links.
 fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
     use crate::page_ref_projections::{
@@ -132,15 +132,15 @@ fn union_referenced_refs(provided: &[CommentTarget], quote: &str) -> Vec<Comment
 fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     let intent: String = row.get("intent")?;
     let status: String = row.get("status")?;
-    let thread_id: Option<String> = row.get("thread_id")?;
+    let thread_id: Option<i64> = row.get("thread_id")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let last_activity_at: String = row.get("last_activity_at")?;
     let resolved_at: Option<String> = row.get("resolved_at")?;
     Ok(Comment {
         id: CommentId::new(row.get("id")?),
-        stream_id: StreamId::from(row.get::<_, String>("stream_id")?),
-        thread_id: thread_id.map(ThreadId::from),
+        stream_id: StreamId::new(row.get::<_, i64>("stream_id")?),
+        thread_id: thread_id.map(ThreadId::new),
         target_kind: row.get("target_kind")?,
         target_id: row.get("target_id")?,
         quote: row.get("quote")?,
@@ -231,7 +231,7 @@ impl CommentStore for SqliteCommentStore {
         author: &str,
         body: &str,
     ) -> Result<CommentThread, DomainError> {
-        let stream = stream.clone();
+        let stream = *stream;
         let thread = thread.cloned();
         let target = target.clone();
         // Enrich the FE-captured refs with anything the durable quote
@@ -256,8 +256,8 @@ impl CommentStore for SqliteCommentStore {
                         intent, status, orphaned, author, created_at, updated_at, last_activity_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
                     params![
-                        stream.as_str(),
-                        thread.as_ref().map(|t| t.as_str()),
+                        stream.value(),
+                        thread.as_ref().map(|t| t.value()),
                         target.kind,
                         target.id,
                         quote,
@@ -277,8 +277,8 @@ impl CommentStore for SqliteCommentStore {
                 )?;
                 let comment = Comment {
                     id: CommentId::new(comment_id),
-                    stream_id: stream.clone(),
-                    thread_id: thread.clone(),
+                    stream_id: stream,
+                    thread_id: thread,
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
                     quote: quote.clone(),
@@ -360,16 +360,16 @@ impl CommentStore for SqliteCommentStore {
     }
 
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError> {
-        let stream = stream.clone();
+        let stream = *stream;
         self.db
-            .call(move |conn| list_threads(conn, "stream_id = ?1", &[&stream.as_str()]))
+            .call(move |conn| list_threads(conn, "stream_id = ?1", &[&stream.value()]))
             .await
     }
 
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
-            .call(move |conn| list_threads(conn, "thread_id = ?1", &[&thread.as_str()]))
+            .call(move |conn| list_threads(conn, "thread_id = ?1", &[&thread.value()]))
             .await
     }
 
@@ -507,7 +507,7 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
 
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -526,8 +526,8 @@ mod tests {
         streams.upsert(&s).await.unwrap();
 
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "t".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -640,7 +640,7 @@ mod tests {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(db);
         // The frontend captured one DOM-link ref; the quote *also* names
-        // `task:42` and `src/app.rs` inline (not rendered as links).
+        // `tsk42` and `src/app.rs` inline (not rendered as links).
         let provided = vec![CommentTarget {
             kind: "wiki".into(),
             id: "architecture".into(),
@@ -650,7 +650,7 @@ mod tests {
                 &stream,
                 Some(&thread),
                 &target(),
-                "see task:42 and src/app.rs for context",
+                "see tsk42 and src/app.rs for context",
                 "[]",
                 &[],
                 &provided,
@@ -686,7 +686,7 @@ mod tests {
     async fn create_dedups_quote_refs_against_provided() {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(db);
-        // FE already supplied task:42; the quote names it again. It must
+        // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
         let provided = vec![CommentTarget {
             kind: "task".into(),
@@ -697,7 +697,7 @@ mod tests {
                 &stream,
                 Some(&thread),
                 &target(),
-                "task:42 again",
+                "tsk42 again",
                 "[]",
                 &[],
                 &provided,
@@ -715,7 +715,7 @@ mod tests {
             .count();
         assert_eq!(
             n, 1,
-            "task:42 duplicated: {:?}",
+            "tsk42 duplicated: {:?}",
             created.comment.referenced_refs
         );
     }

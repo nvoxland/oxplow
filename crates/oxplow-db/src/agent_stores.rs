@@ -31,8 +31,8 @@ fn map_err_text(e: DomainError) -> rusqlite::Error {
 // -- AgentTurn ---------------------------------------------------------
 
 fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
-    let id: String = row.get("id")?;
-    let thread_id: String = row.get("thread_id")?;
+    let id: i64 = row.get("id")?;
+    let thread_id: i64 = row.get("thread_id")?;
     let task_id: Option<i64> = row.get("task_id")?;
     let prompt: String = row.get("prompt")?;
     let answer: Option<String> = row.get("answer")?;
@@ -40,8 +40,8 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     let started_at: String = row.get("started_at")?;
     let ended_at: Option<String> = row.get("ended_at")?;
     Ok(AgentTurn {
-        id: AgentTurnId::from(id),
-        thread_id: ThreadId::from(thread_id),
+        id: AgentTurnId::new(id),
+        thread_id: ThreadId::new(thread_id),
         task_id: task_id.map(TaskId::new),
         prompt,
         answer,
@@ -67,10 +67,15 @@ impl SqliteAgentTurnStore {
 
 #[async_trait]
 impl AgentTurnStore for SqliteAgentTurnStore {
-    async fn open(&self, turn: &AgentTurn) -> Result<(), DomainError> {
+    async fn open(&self, turn: &AgentTurn) -> Result<AgentTurnId, DomainError> {
         let turn = turn.clone();
         self.db
             .call(move |conn| {
+                let id_param: Option<i64> = if turn.id.is_placeholder() {
+                    None
+                } else {
+                    Some(turn.id.value())
+                };
                 conn.execute(
                     "INSERT INTO agent_turn (id, thread_id, task_id, prompt, answer, session_id, started_at, ended_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -79,8 +84,8 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                         task_id = excluded.task_id,
                         session_id = excluded.session_id",
                     params![
-                        turn.id.as_str(),
-                        turn.thread_id.as_str(),
+                        id_param,
+                        turn.thread_id.value(),
                         turn.task_id.map(|w| w.value()),
                         turn.prompt,
                         turn.answer,
@@ -89,20 +94,24 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                         turn.ended_at.map(ts_to_string),
                     ],
                 )?;
-                Ok(())
+                Ok(if turn.id.is_placeholder() {
+                    AgentTurnId::new(conn.last_insert_rowid())
+                } else {
+                    turn.id
+                })
             })
             .await
     }
 
     async fn close(&self, id: &AgentTurnId, answer: Option<String>) -> Result<(), DomainError> {
-        let id = id.clone();
+        let id = *id;
         let now = ts_to_string(Timestamp::now());
         self.db
             .call(move |conn| {
                 conn.execute(
                     "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
                      WHERE id = ?1 AND ended_at IS NULL",
-                    params![id.as_str(), now, answer],
+                    params![id.value(), now, answer],
                 )?;
                 Ok(())
             })
@@ -110,25 +119,25 @@ impl AgentTurnStore for SqliteAgentTurnStore {
     }
 
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM agent_turn WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.as_str()], row_to_turn)?;
+                let mut rows = stmt.query_map(params![id.value()], row_to_turn)?;
                 rows.next().transpose()
             })
             .await
     }
 
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM agent_turn WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC",
                 )?;
-                let rows = stmt.query_map(params![thread.as_str()], row_to_turn)?;
+                let rows = stmt.query_map(params![thread.value()], row_to_turn)?;
                 rows.collect()
             })
             .await
@@ -152,14 +161,14 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         thread: &ThreadId,
         limit: usize,
     ) -> Result<Vec<AgentTurn>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM agent_turn WHERE thread_id = ?1
                      ORDER BY started_at DESC LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![thread.as_str(), limit as i64], row_to_turn)?;
+                let rows = stmt.query_map(params![thread.value(), limit as i64], row_to_turn)?;
                 rows.collect()
             })
             .await
@@ -180,7 +189,7 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -198,8 +207,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -223,8 +232,8 @@ mod tests {
         let (db, tid) = fixture().await;
         let store = SqliteAgentTurnStore::new(db);
         let turn = AgentTurn {
-            id: AgentTurnId::new(),
-            thread_id: tid.clone(),
+            id: AgentTurnId::placeholder(),
+            thread_id: tid,
             task_id: None,
             prompt: "do the thing".into(),
             answer: None,
@@ -232,13 +241,13 @@ mod tests {
             started_at: Timestamp::now(),
             ended_at: None,
         };
-        store.open(&turn).await.unwrap();
+        let id = store.open(&turn).await.unwrap();
         let open = store.list_open(&tid).await.unwrap();
         assert_eq!(open.len(), 1);
-        store.close(&turn.id, Some("done".into())).await.unwrap();
+        store.close(&id, Some("done".into())).await.unwrap();
         let still_open = store.list_open(&tid).await.unwrap();
         assert!(still_open.is_empty());
-        let got = store.get(&turn.id).await.unwrap().unwrap();
+        let got = store.get(&id).await.unwrap().unwrap();
         assert!(got.ended_at.is_some());
         assert_eq!(got.answer.as_deref(), Some("done"));
     }

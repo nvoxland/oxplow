@@ -71,7 +71,7 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
             KIND_GIT_COMMIT,
             sha,
             KIND_TASK,
-            task_id.to_string(),
+            oxplow_domain::TaskId::new(task_id).to_string(),
             RT_BODY_TASK,
         ));
     }
@@ -218,7 +218,7 @@ mod tests {
     fn message_body_picks_up_task_and_wiki_refs() {
         let c = commit(
             "abc1234567890",
-            "Resolve task:42 and clarify [[architecture]]",
+            "Resolve tsk42 and clarify [[architecture]]",
             "see finding:fnd-7 for details",
             &[],
         );
@@ -227,7 +227,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("task", "42")));
+        assert!(targets.contains(&("task", "tsk42")));
         assert!(targets.contains(&("wiki", "architecture")));
         assert!(targets.contains(&("finding", "fnd-7")));
     }
@@ -276,7 +276,7 @@ mod tests {
                 "commit",
                 "-q",
                 "-m",
-                "fix task:42 and touch [[architecture]]",
+                "fix tsk42 and touch [[architecture]]",
             ])
             .current_dir(dir.path())
             .status()
@@ -287,8 +287,8 @@ mod tests {
         let n = index_recent(dir.path(), &page_refs, 50).await;
         assert_eq!(n, 1, "should index the one commit");
 
-        // task:42 has the commit as a backlink.
-        let inbound = page_refs.list_backlinks("task", "42", None).await.unwrap();
+        // tsk42 has the commit as a backlink.
+        let inbound = page_refs.list_backlinks("task", "tsk42", None).await.unwrap();
         assert!(inbound.iter().any(|e| e.source_kind == "git-commit"));
         // file backlink covers a.rs.
         let file_inbound = page_refs

@@ -145,8 +145,8 @@ mod tests {
 
     fn read_only_thread() -> Thread {
         Thread {
-            id: ThreadId::from("b-readonly"),
-            stream_id: StreamId::from("s-1"),
+            id: ThreadId::new(2),
+            stream_id: StreamId::new(1),
             title: "explore".into(),
             status: ThreadStatus::Queued,
             sort_index: 0,

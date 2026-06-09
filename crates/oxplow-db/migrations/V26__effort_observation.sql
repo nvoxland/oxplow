@@ -23,8 +23,8 @@
 
 CREATE TABLE effort_observation (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
-    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
+    stream_id INTEGER NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+    effort_id INTEGER NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     provenance TEXT NOT NULL CHECK (provenance IN ('observed', 'asserted')),
     source TEXT NOT NULL,

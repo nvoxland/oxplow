@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn agent_status_round_trips() {
         let s = AgentStatus {
-            thread_id: ThreadId::from("b-1"),
+            thread_id: ThreadId::new(1),
             pane_target: "working".into(),
             state: AgentStatusState::Running,
             detail: Some("typing".into()),

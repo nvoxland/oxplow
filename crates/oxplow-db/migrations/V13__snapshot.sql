@@ -15,7 +15,7 @@
 
 CREATE TABLE snapshot (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+    stream_id INTEGER REFERENCES streams(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL
 );
 

@@ -17,7 +17,7 @@
 -- prompting the agent.
 
 CREATE TABLE effort_acknowledged_path (
-    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
+    effort_id INTEGER NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     acknowledged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (effort_id, path)

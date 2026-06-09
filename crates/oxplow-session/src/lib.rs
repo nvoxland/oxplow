@@ -31,8 +31,8 @@ pub enum SessionError {
     PrimaryExists,
     #[error("primary stream missing")]
     PrimaryMissing,
-    #[error("worktree slug \"{0}\" already exists for stream {1}")]
-    DuplicateWorktreeSlug(String, StreamId),
+    #[error("worktree slug \"{0}\" already exists")]
+    DuplicateWorktreeSlug(String),
     #[error("git: {0}")]
     Git(#[from] oxplow_git::EnsureWorktreeError),
     #[error("storage: {0}")]
@@ -128,8 +128,8 @@ impl StreamService {
         }
         let now = Timestamp::now();
         let thread = oxplow_domain::Thread {
-            id: oxplow_domain::ThreadId::new(),
-            stream_id: stream_id.clone(),
+            id: oxplow_domain::ThreadId::placeholder(),
+            stream_id: *stream_id,
             title: DEFAULT_THREAD_TITLE.into(),
             status: oxplow_domain::ThreadStatus::Active,
             sort_index: 0,
@@ -177,8 +177,8 @@ impl StreamService {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "primary".into());
-        let stream = Stream {
-            id: StreamId::new(),
+        let mut stream = Stream {
+            id: StreamId::placeholder(),
             kind: StreamKind::Primary,
             title,
             branch: branch.clone(),
@@ -194,7 +194,7 @@ impl StreamService {
             updated_at: now,
             archived_at: None,
         };
-        self.streams.upsert(&stream).await?;
+        stream.id = self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, "primary stream created");
         Ok(stream)
@@ -237,10 +237,7 @@ impl StreamService {
                     return Ok(existing);
                 }
             }
-            return Err(SessionError::DuplicateWorktreeSlug(
-                slug.to_string(),
-                StreamId::from(slug),
-            ));
+            return Err(SessionError::DuplicateWorktreeSlug(slug.to_string()));
         }
 
         ensure_worktree(
@@ -251,8 +248,8 @@ impl StreamService {
         )?;
 
         let now = Timestamp::now();
-        let stream = Stream {
-            id: StreamId::new(),
+        let mut stream = Stream {
+            id: StreamId::placeholder(),
             kind: StreamKind::Worktree,
             title,
             branch: branch.clone(),
@@ -268,7 +265,7 @@ impl StreamService {
             updated_at: now,
             archived_at: None,
         };
-        self.streams.upsert(&stream).await?;
+        stream.id = self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, slug, "worktree stream created");
         Ok(stream)
@@ -311,8 +308,8 @@ impl StreamService {
 
         let title = title.into();
         let now = Timestamp::now();
-        let stream = Stream {
-            id: StreamId::new(),
+        let mut stream = Stream {
+            id: StreamId::placeholder(),
             kind: StreamKind::Worktree,
             title,
             branch: branch.clone(),
@@ -328,7 +325,7 @@ impl StreamService {
             updated_at: now,
             archived_at: None,
         };
-        self.streams.upsert(&stream).await?;
+        stream.id = self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, path = %worktree_path.display(), "adopted existing worktree");
         Ok(stream)

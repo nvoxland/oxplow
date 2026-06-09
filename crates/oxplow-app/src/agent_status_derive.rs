@@ -115,8 +115,8 @@ mod tests {
 
     fn ev(kind: HookKind, ms: i64, payload: &str) -> HookEvent {
         HookEvent {
-            id: HookEventId::new(),
-            thread_id: Some(ThreadId::from("b-1")),
+            id: HookEventId::new(ms),
+            thread_id: Some(ThreadId::new(1)),
             stream_id: None,
             kind,
             session_id: None,

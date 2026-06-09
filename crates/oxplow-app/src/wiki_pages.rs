@@ -1193,7 +1193,7 @@ mod tests {
         std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
         std::fs::write(
             wiki_pages_dir(project).join("intro.md"),
-            "# Intro\nblocks [[task:1]] and touches [[src/app.rs]] and finding:fnd-1\n",
+            "# Intro\nblocks [[tsk1]] and touches [[src/app.rs]] and finding:fnd-1\n",
         )
         .unwrap();
 
@@ -1206,7 +1206,7 @@ mod tests {
             .unwrap();
 
         // wi-1 backlink picks up the wiki source.
-        let inbound_wi = page_refs.list_backlinks("task", "1", None).await.unwrap();
+        let inbound_wi = page_refs.list_backlinks("task", "tsk1", None).await.unwrap();
         assert_eq!(inbound_wi.len(), 1);
         assert_eq!(inbound_wi[0].source_kind, "wiki");
         assert_eq!(inbound_wi[0].source_id, "intro");
@@ -1237,7 +1237,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("task", "1")));
+        assert!(targets.contains(&("task", "tsk1")));
         assert!(targets.contains(&("file", "src/app.rs")));
         assert!(targets.contains(&("finding", "fnd-1")));
     }
@@ -1326,7 +1326,7 @@ mod tests {
         let project = tmp.path();
         std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
         let body_path = wiki_pages_dir(project).join("intro.md");
-        std::fs::write(&body_path, "[[task:1]] [[task:2]]").unwrap();
+        std::fs::write(&body_path, "[[tsk1]] [[tsk2]]").unwrap();
 
         let db = oxplow_db::Database::in_memory();
         let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
@@ -1336,14 +1336,14 @@ mod tests {
             .await
             .unwrap();
         // Now drop wi-2 from the body.
-        std::fs::write(&body_path, "[[task:1]] only").unwrap();
+        std::fs::write(&body_path, "[[tsk1]] only").unwrap();
         sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
             .await
             .unwrap();
 
-        let inbound_2 = page_refs.list_backlinks("task", "2", None).await.unwrap();
+        let inbound_2 = page_refs.list_backlinks("task", "tsk2", None).await.unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
-        let inbound_1 = page_refs.list_backlinks("task", "1", None).await.unwrap();
+        let inbound_1 = page_refs.list_backlinks("task", "tsk1", None).await.unwrap();
         assert_eq!(inbound_1.len(), 1);
     }
 }

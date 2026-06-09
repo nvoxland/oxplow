@@ -51,7 +51,7 @@ export interface LocalHistoryDashboardPageProps {
 
 interface SnapshotRowEffort {
   effortId: string;
-  tasksId: number;
+  tasksId: string;
   title: string;
 }
 
@@ -178,10 +178,10 @@ export function LocalHistoryDashboardPage({
       const uniqueTaskIds = Array.from(new Set(effortsAt.map((e) => e.tasksId)));
       const taskSummaries = await getTaskSummaries(uniqueTaskIds).catch((err) => {
         logUi("warn", "task summaries fetch failed", { error: String(err) });
-        return [] as Array<{ id: number; title: string }>;
+        return [] as Array<{ id: string; title: string }>;
       });
-      const titleByTaskId = new Map<number, string>(
-        taskSummaries.map((t) => [t.id, t.title] as [number, string]),
+      const titleByTaskId = new Map<string, string>(
+        taskSummaries.map((t) => [t.id, t.title] as [string, string]),
       );
       const completedBySnap = new Map<number, SnapshotRowEffort[]>();
       const inFlightBySnap = new Map<number, SnapshotRowEffort[]>();

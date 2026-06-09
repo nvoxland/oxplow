@@ -16,7 +16,7 @@ describe("canonicalIdForTarget", () => {
     // Regression: taskRef stores itemId as a number, but Tauri
     // commands take String — without the stringify, IPC throws and
     // the Outbound dropdown on a task page silently renders empty.
-    const ref = taskRef(42);
+    const ref = taskRef("42");
     const id = canonicalIdForTarget(ref);
     expect(id).toBe("42");
     expect(typeof id).toBe("string");

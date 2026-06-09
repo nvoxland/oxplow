@@ -696,22 +696,22 @@ mod tests {
                     "INSERT INTO streams
                        (id, kind, title, branch, branch_ref, branch_source,
                         worktree_path, created_at, updated_at)
-                     VALUES ('s1','primary','S','main','refs/heads/main','local',
+                     VALUES (1,'primary','S','main','refs/heads/main','local',
                              '/tmp/s1','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 for id in [100i64, 200] {
                     conn.execute(
                         "INSERT INTO snapshot (id, stream_id, created_at)
-                         VALUES (?1,'s1','2026-01-01T00:00:00Z')",
+                         VALUES (?1,1,'2026-01-01T00:00:00Z')",
                         params![id],
                     )?;
                 }
                 conn.execute(
                     "INSERT INTO file_snapshot
                        (stream_id, path, size_bytes, captured_at, oversize, snapshot_id)
-                     VALUES ('s1','stale.rs',0,'2026-01-01T00:00:00Z',0,200),
-                            ('s1','fresh.rs',0,'2026-01-01T00:00:00Z',0,100)",
+                     VALUES (1,'stale.rs',0,'2026-01-01T00:00:00Z',0,200),
+                            (1,'fresh.rs',0,'2026-01-01T00:00:00Z',0,100)",
                     [],
                 )?;
                 Ok(())

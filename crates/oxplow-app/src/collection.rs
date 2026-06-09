@@ -172,7 +172,7 @@ impl CollectionService {
             .threads
             .get(thread)
             .await?
-            .map(|t| t.stream_id.as_str().to_string()))
+            .map(|t| t.stream_id.to_string()))
     }
 
     fn collection_cfg(&self) -> oxplow_config::CollectionConfig {
@@ -270,7 +270,7 @@ impl CollectionService {
             .observations
             .record(NewEffortObservation {
                 stream_id,
-                effort_id: effort.id.as_str().to_string(),
+                effort_id: effort.id.to_string(),
                 kind: "test-run".into(),
                 provenance: provenance.to_string(),
                 source: source.to_string(),
@@ -399,7 +399,7 @@ impl CollectionService {
             .observations
             .record(NewEffortObservation {
                 stream_id: stream_id.to_string(),
-                effort_id: effort.id.as_str().to_string(),
+                effort_id: effort.id.to_string(),
                 kind: "diff-coverage".into(),
                 provenance: "observed".into(),
                 source: source.to_string(),
@@ -489,7 +489,7 @@ impl CollectionService {
     /// time (caller should nudge), `false` afterwards.
     fn mark_nudged(&self, effort: &EffortId) -> bool {
         match self.nudged_efforts.lock() {
-            Ok(mut set) => set.insert(effort.clone()),
+            Ok(mut set) => set.insert(*effort),
             // Poisoned lock: don't nudge rather than risk a panic in a
             // best-effort hook.
             Err(_) => false,
@@ -639,8 +639,8 @@ impl CollectionService {
 
     fn emit(&self, thread: &ThreadId, effort: &TaskEffort) {
         self.events.emit(OxplowEvent::EffortObservationsChanged {
-            thread_id: thread.clone(),
-            effort_id: effort.id.as_str().to_string(),
+            thread_id: *thread,
+            effort_id: effort.id.to_string(),
         });
     }
 }
@@ -990,7 +990,7 @@ mod tests {
             let now = Timestamp::now();
 
             let stream = Stream {
-                id: StreamId::from("s-1"),
+                id: StreamId::new(1),
                 kind: StreamKind::Primary,
                 title: "p".into(),
                 branch: "main".into(),
@@ -1011,8 +1011,8 @@ mod tests {
                 .await
                 .unwrap();
             let thread = Thread {
-                id: ThreadId::from("b-1"),
-                stream_id: stream.id.clone(),
+                id: ThreadId::new(1),
+                stream_id: stream.id,
                 title: "x".into(),
                 status: ThreadStatus::Active,
                 sort_index: 0,
@@ -1034,7 +1034,7 @@ mod tests {
             let task_id = SqliteTaskStore::new(db.clone())
                 .insert(&Task {
                     id: TaskId::placeholder(),
-                    thread_id: Some(thread.id.clone()),
+                    thread_id: Some(thread.id),
                     parent_id: None,
                     title: "x".into(),
                     description: String::new(),
@@ -1056,11 +1056,11 @@ mod tests {
             let blobs = BlobStore::new(project_dir.join(".oxplow/snapshots"));
             let snapshots = Arc::new(SqliteSnapshotStore::new(db.clone()));
             let old_hash = blobs.write(b"a\nb\nc\n").unwrap();
-            let snap_id = snapshots.create_snapshot(stream.id.clone()).await.unwrap();
+            let snap_id = snapshots.create_snapshot(stream.id).await.unwrap();
             snapshots
                 .capture(FileSnapshot {
                     id: 0,
-                    stream_id: stream.id.clone(),
+                    stream_id: stream.id,
                     path: "src/foo.rs".into(),
                     blob_hash: Some(old_hash),
                     size_bytes: 6,
@@ -1104,7 +1104,7 @@ mod tests {
             Harness {
                 service,
                 thread: thread.id,
-                effort_id: effort.id.as_str().to_string(),
+                effort_id: effort.id.to_string(),
                 efforts,
                 tmp,
             }
@@ -1189,7 +1189,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].stream_id, "s-1");
+            assert_eq!(rows[0].stream_id, "str1");
             assert!(rows[0]
                 .payload_json
                 .as_deref()
@@ -1252,7 +1252,7 @@ mod tests {
         async fn ingest_coverage_no_open_effort_after_finish() {
             let h = build(Some(COBERTURA_50PCT)).await;
             h.efforts
-                .finish(&EffortId::from(h.effort_id.clone()), None, None)
+                .finish(&EffortId::try_from_str(&h.effort_id).unwrap(), None, None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -1360,9 +1360,9 @@ mod tests {
             // Synthetic effort started at the epoch so the just-written file
             // is always fresh (same approach as merge_fresh_test_reports test).
             let effort = TaskEffort {
-                id: EffortId::from("ef-fresh"),
+                id: EffortId::new(901),
                 task_id: TaskId::placeholder(),
-                thread_id: h.thread.clone(),
+                thread_id: h.thread,
                 started_at: Timestamp::from_unix_ms(0),
                 ended_at: None,
                 start_snapshot_id: None,
@@ -1383,7 +1383,7 @@ mod tests {
                 .nudged_efforts
                 .lock()
                 .unwrap()
-                .contains(&EffortId::from("ef-fresh"));
+                .contains(&EffortId::new(901));
             assert!(
                 !nudged,
                 "nudge should not have fired when a report was produced"
@@ -1469,9 +1469,9 @@ mod tests {
             // Synthetic effort started at the epoch → both files are fresh
             // (deterministic, no wall-clock/fs-granularity dependence).
             let effort = TaskEffort {
-                id: EffortId::from("ef-x"),
+                id: EffortId::new(902),
                 task_id: TaskId::placeholder(),
-                thread_id: ThreadId::from("b-1"),
+                thread_id: ThreadId::new(1),
                 started_at: Timestamp::from_unix_ms(0),
                 ended_at: None,
                 start_snapshot_id: None,

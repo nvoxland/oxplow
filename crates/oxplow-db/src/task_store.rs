@@ -125,7 +125,7 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let id: i64 = row.get("id")?;
-    let thread_id: Option<String> = row.get("thread_id")?;
+    let thread_id: Option<i64> = row.get("thread_id")?;
     let parent_id: Option<i64> = row.get("parent_id")?;
     let title: String = row.get("title")?;
     let description: String = row.get("description")?;
@@ -151,7 +151,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
     Ok(Task {
         id: TaskId::new(id),
-        thread_id: thread_id.map(ThreadId::from),
+        thread_id: thread_id.map(ThreadId::new),
         parent_id: parent_id.map(TaskId::new),
         title,
         description,
@@ -210,7 +210,7 @@ impl SqliteTaskStore {
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let sql = format!(
@@ -219,7 +219,7 @@ impl TaskStore for SqliteTaskStore {
                     SELECT_BASE
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.as_str()], row_to_task)?;
+                let rows = stmt.query_map(params![thread.value()], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -230,7 +230,7 @@ impl TaskStore for SqliteTaskStore {
         thread: &ThreadId,
         status: TaskStatus,
     ) -> Result<Vec<Task>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         let status_str = status_to_str(status);
         self.db
             .call(move |conn| {
@@ -240,7 +240,7 @@ impl TaskStore for SqliteTaskStore {
                     SELECT_BASE
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.as_str(), status_str], row_to_task)?;
+                let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -289,7 +289,7 @@ impl TaskStore for SqliteTaskStore {
                         completed_at, deleted_at, author
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
-                        item.thread_id.as_ref().map(|t| t.as_str()),
+                        item.thread_id.as_ref().map(|t| t.value()),
                         item.parent_id.map(|p| p.value()),
                         item.title,
                         item.description,
@@ -345,7 +345,7 @@ impl TaskStore for SqliteTaskStore {
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![
                         item.id.value(),
-                        item.thread_id.as_ref().map(|t| t.as_str()),
+                        item.thread_id.as_ref().map(|t| t.value()),
                         item.parent_id.map(|p| p.value()),
                         item.title,
                         item.description,
@@ -419,7 +419,7 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
         let work = SqliteTaskStore::new(db);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),
@@ -437,8 +437,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "explore".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -506,8 +506,8 @@ mod tests {
     #[tokio::test]
     async fn list_for_thread_excludes_deleted() {
         let (store, tid) = fixture().await;
-        let alive_id = store.insert(&item(Some(tid.clone()))).await.unwrap();
-        let dead_id = store.insert(&item(Some(tid.clone()))).await.unwrap();
+        let alive_id = store.insert(&item(Some(tid))).await.unwrap();
+        let dead_id = store.insert(&item(Some(tid))).await.unwrap();
         store.soft_delete(dead_id).await.unwrap();
         let list = store.list_for_thread(&tid).await.unwrap();
         assert_eq!(list.len(), 1);
@@ -528,9 +528,9 @@ mod tests {
     #[tokio::test]
     async fn list_orders_by_sort_index() {
         let (store, tid) = fixture().await;
-        let mut a = item(Some(tid.clone()));
+        let mut a = item(Some(tid));
         a.sort_index = 5;
-        let mut b = item(Some(tid.clone()));
+        let mut b = item(Some(tid));
         b.sort_index = 1;
         let a_id = store.insert(&a).await.unwrap();
         let b_id = store.insert(&b).await.unwrap();
@@ -578,7 +578,7 @@ mod tests {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
         store.soft_delete(id).await.unwrap();
-        let mut latest = item(Some(ThreadId::from("b-1")));
+        let mut latest = item(Some(ThreadId::new(1)));
         latest.id = id;
         latest.title = "ressurected".into();
         let err = store.update(&latest).await.unwrap_err();
@@ -592,7 +592,7 @@ mod tests {
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db.clone());
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),
@@ -610,8 +610,8 @@ mod tests {
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: s.id.clone(),
+            id: ThreadId::new(1),
+            stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -631,8 +631,8 @@ mod tests {
         let page_refs = SqlitePageRefStore::new(db.clone());
         let store = SqliteTaskStore::new(db.clone()).with_page_refs(page_refs.clone());
 
-        let mut it = item(Some(t.id.clone()));
-        it.description = "see [[src/app.rs]] and blocks task:99".into();
+        let mut it = item(Some(t.id));
+        it.description = "see [[src/app.rs]] and blocks tsk99".into();
         let new_id = store.insert(&it).await.unwrap();
 
         let inbound = page_refs

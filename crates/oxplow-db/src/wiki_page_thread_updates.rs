@@ -35,7 +35,7 @@ impl SqliteWikiPageThreadUpdateStore {
         slug: &str,
         at: Timestamp,
     ) -> Result<(), DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         let slug = slug.to_string();
         self.db
             .call(move |conn| {
@@ -44,7 +44,7 @@ impl SqliteWikiPageThreadUpdateStore {
                      VALUES (?1, ?2, ?3)
                      ON CONFLICT(thread_id, slug) DO UPDATE SET
                        last_seen_at = excluded.last_seen_at",
-                    params![thread.as_str(), slug, ts_to_string(at),],
+                    params![thread.value(), slug, ts_to_string(at),],
                 )?;
                 Ok(())
             })
@@ -57,7 +57,7 @@ impl SqliteWikiPageThreadUpdateStore {
         thread: &ThreadId,
         limit: usize,
     ) -> Result<Vec<WikiPageThreadUpdate>, DomainError> {
-        let thread = thread.clone();
+        let thread = *thread;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -67,8 +67,8 @@ impl SqliteWikiPageThreadUpdateStore {
                      ORDER BY last_seen_at DESC
                      LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![thread.as_str(), limit as i64], |row| {
-                    let tid: String = row.get("thread_id")?;
+                let rows = stmt.query_map(params![thread.value(), limit as i64], |row| {
+                    let tid: i64 = row.get("thread_id")?;
                     let slug: String = row.get("slug")?;
                     let ts: String = row.get("last_seen_at")?;
                     Ok((tid, slug, ts))
@@ -84,7 +84,7 @@ impl SqliteWikiPageThreadUpdateStore {
                         )
                     })?;
                     out.push(WikiPageThreadUpdate {
-                        thread_id: ThreadId::from(tid),
+                        thread_id: ThreadId::new(tid),
                         slug,
                         last_seen_at,
                     });
@@ -117,8 +117,8 @@ mod tests {
         // Migrations need to run before the table exists. The
         // in-memory DB applies them in `Database::in_memory`.
         // Insert a thread + stream first to satisfy the FK.
-        let stream_id = "s-1";
-        let thread_id = "b-1";
+        let stream_id = 1_i64;
+        let thread_id = 1_i64;
         db.with_conn(|c| {
             c.execute(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
@@ -146,7 +146,7 @@ mod tests {
         .unwrap();
 
         let store = SqliteWikiPageThreadUpdateStore::new(db);
-        let tid = ThreadId::from(thread_id.to_string());
+        let tid = ThreadId::new(thread_id);
         store
             .touch(&tid, "foo", Timestamp::from_unix_ms(1_700_000_000_000))
             .await

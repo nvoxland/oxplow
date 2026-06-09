@@ -827,11 +827,11 @@ export async function createTask(
 export async function updateTask(
   streamId: string,
   threadId: string,
-  itemId: number,
+  itemId: string,
   changes: {
     title?: string;
     description?: string;
-    parentId?: number | null;
+    parentId?: string | null;
     status?: TaskStatus;
     priority?: TaskPriority;
   },
@@ -843,7 +843,7 @@ export async function updateTask(
 export async function deleteTask(
   streamId: string,
   threadId: string,
-  itemId: number,
+  itemId: string,
 ): Promise<ThreadWorkState> {
   unwrap(await commands.deleteTask(itemId));
   return getThreadWorkState(streamId, threadId);
@@ -852,7 +852,7 @@ export async function deleteTask(
 export async function reorderTasks(
   streamId: string,
   threadId: string,
-  orderedItemIds: number[],
+  orderedItemIds: string[],
 ): Promise<ThreadWorkState> {
   unwrap(await commands.reorderTasks({ threadId, order: orderedItemIds }));
   return getThreadWorkState(streamId, threadId);
@@ -861,7 +861,7 @@ export async function reorderTasks(
 export async function moveTaskToThread(
   streamId: string,
   fromThreadId: string,
-  itemId: number,
+  itemId: string,
   toThreadId: string,
   _toStreamId?: string,
 ): Promise<{ from: ThreadWorkState; to: ThreadWorkState }> {
@@ -888,7 +888,7 @@ export async function createBacklogItem(input: {
 }
 
 export async function updateBacklogItem(
-  itemId: number,
+  itemId: string,
   changes: {
     title?: string;
     description?: string;
@@ -900,12 +900,12 @@ export async function updateBacklogItem(
   return getBacklogState();
 }
 
-export async function deleteBacklogItem(itemId: number): Promise<BacklogState> {
+export async function deleteBacklogItem(itemId: string): Promise<BacklogState> {
   unwrap(await commands.deleteTask(itemId));
   return getBacklogState();
 }
 
-export async function reorderBacklog(orderedItemIds: number[]): Promise<BacklogState> {
+export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogState> {
   unwrap(await commands.reorderTasks({ threadId: null, order: orderedItemIds }));
   return getBacklogState();
 }
@@ -913,7 +913,7 @@ export async function reorderBacklog(orderedItemIds: number[]): Promise<BacklogS
 export async function moveTaskToBacklog(
   streamId: string,
   fromThreadId: string,
-  itemId: number,
+  itemId: string,
 ): Promise<{ from: ThreadWorkState; backlog: BacklogState }> {
   unwrap(await commands.moveTask({ id: itemId, threadId: null }));
   const [from, backlog] = await Promise.all([
@@ -925,7 +925,7 @@ export async function moveTaskToBacklog(
 
 export async function moveBacklogItemToThread(
   streamId: string,
-  itemId: number,
+  itemId: string,
   toThreadId: string,
 ): Promise<{ backlog: BacklogState; to: ThreadWorkState }> {
   unwrap(await commands.moveTask({ id: itemId, threadId: toThreadId }));
@@ -1116,7 +1116,7 @@ export interface LocalBlameEntry {
   source: string;
   git: import("./tauri-bridge/index.js").BlameLine | null;
   tasks?: {
-    id: number;
+    id: string;
     title: string;
     endedAt: string;
   };
@@ -1196,7 +1196,7 @@ export async function createComment(input: {
 }
 
 export async function addCommentMessage(
-  commentId: number,
+  commentId: string,
   author: string,
   body: string,
 ): Promise<CommentMessage> {
@@ -1214,16 +1214,16 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
   return unwrap(await commands.listCommentsForStream(streamId));
 }
 
-export async function setCommentIntent(commentId: number, intent: CommentIntent): Promise<void> {
+export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
   unwrap(await commands.setCommentIntent(commentId, intent));
 }
 
-export async function setCommentStatus(commentId: number, status: CommentStatus): Promise<void> {
+export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
   unwrap(await commands.setCommentStatus(commentId, status));
 }
 
 export async function setCommentAnchor(
-  commentId: number,
+  commentId: string,
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
@@ -1233,14 +1233,14 @@ export async function setCommentAnchor(
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
 /// both quote + anchor and clears the orphan flag.
 export async function relinkComment(
-  commentId: number,
+  commentId: string,
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
   unwrap(await commands.relinkComment(commentId, quote, selectorsJson));
 }
 
-export async function deleteComment(commentId: number): Promise<void> {
+export async function deleteComment(commentId: string): Promise<void> {
   unwrap(await commands.deleteComment(commentId));
 }
 
@@ -1401,12 +1401,12 @@ export function subscribeCodeQualityEvents(
   });
 }
 
-export async function getTask(id: number): Promise<Task | null> {
+export async function getTask(id: string): Promise<Task | null> {
   return unwrap(await commands.getTask(id)) as unknown as Task | null;
 }
 
-export async function getTaskSummaries(ids: number[]): Promise<Array<{
-  id: number;
+export async function getTaskSummaries(ids: string[]): Promise<Array<{
+  id: string;
   title: string;
   status: import("./api-types.js").TaskStatus;
   thread_id: string | null;
@@ -1557,7 +1557,7 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
 export async function listTaskEvents(
   _streamId: string,
   _threadId: string,
-  itemId?: number,
+  itemId?: string,
 ): Promise<TaskEvent[]> {
   return unwrap(
     await commands.listTaskEvents(itemId ?? null, null),
@@ -1599,7 +1599,7 @@ export async function readFileAtRef(
   return { content };
 }
 
-export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
+export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
   // (TaskPage activity timeline, useBacklinks, TaskDetail) expect
   // the richer `EffortDetail` shape with changed paths + counts.
@@ -1840,7 +1840,7 @@ export async function listEffortFiles(
 export interface EffortAtSnapshot {
   snapshotId: number;
   effortId: string;
-  tasksId: number;
+  tasksId: string;
   threadId: string;
   startSnapshotId: number | null;
   endSnapshotId: number | null;
@@ -1878,7 +1878,7 @@ export async function listEffortsAtSnapshots(
     snapshot_id: number;
     effort: {
       id: string;
-      task_id: number;
+      task_id: string;
       thread_id: string;
       start_snapshot_id: number | null;
       end_snapshot_id: number | null;
@@ -2121,7 +2121,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 }
 
 export type FinishedEntry =
-  | { kind: "task"; itemId: number; title: string; t: string }
+  | { kind: "task"; itemId: string; title: string; t: string }
   | { kind: "wiki"; slug: string; title: string; t: string };
 
 export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {

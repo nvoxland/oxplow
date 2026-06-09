@@ -64,7 +64,7 @@ interface Pending {
 }
 
 interface Painted {
-  commentId: number;
+  commentId: string;
   decoration: IDecoration;
 }
 
@@ -87,7 +87,7 @@ export function TerminalCommentLayer({
 
   const [pending, setPending] = useState<Pending | null>(null);
   const [composing, setComposing] = useState(false);
-  const [openId, setOpenId] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const [openId, setOpenId] = useState<{ id: string; rect: DOMRect } | null>(null);
   const paintedRef = useRef<Painted[]>([]);
 
   // Capture a buffer-text selection into a pending comment.

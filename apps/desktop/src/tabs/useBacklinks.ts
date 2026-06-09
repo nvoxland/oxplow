@@ -97,12 +97,10 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       return p?.slug ?? null;
     }
     case "task": {
-      // payload.itemId is a number (see `taskRef` in pageRefs.ts);
-      // stringify so the Tauri command receives the `String` it
-      // declares. Without this the IPC throws on deserialize and
-      // the hook silently sets entries to [].
-      const p = ref.payload as { itemId?: string | number } | null;
-      return p?.itemId != null ? String(p.itemId) : null;
+      // payload.itemId is the prefixed `tsk…` id string (see `taskRef`
+      // in pageRefs.ts).
+      const p = ref.payload as { itemId?: string } | null;
+      return p?.itemId ?? null;
     }
     case "file": {
       const p = ref.payload as { path?: string } | null;
@@ -233,10 +231,8 @@ function refFor(kind: string, id: string): TabRef | null {
   switch (kind) {
     case "wiki":
       return wikiPageRef(id);
-    case "task": {
-      const n = Number(id);
-      return Number.isFinite(n) ? taskRef(n) : null;
-    }
+    case "task":
+      return taskRef(id);
     case "file":
       return fileRef(id);
     case "directory":

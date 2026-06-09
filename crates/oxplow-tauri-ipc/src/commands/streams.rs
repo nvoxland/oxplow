@@ -93,7 +93,7 @@ pub async fn delete_stream(
 ) -> Result<(), IpcError> {
     state.streams.delete_stream(&id).await?;
     // Drop the stream's file rows from the search index.
-    let _ = state.search_store.purge_stream(id.as_str()).await;
+    let _ = state.search_store.purge_stream(&id.to_string()).await;
     state.git.deregister(&id).await;
     // Drop the per-stream snapshot service from the registry. The
     // spawned watcher task continues until process exit (it holds an
@@ -133,7 +133,7 @@ pub async fn archive_stream(
     }
     state.streams.archive_stream(&id, delete_worktree).await?;
     // Drop the stream's file rows from the search index.
-    let _ = state.search_store.purge_stream(id.as_str()).await;
+    let _ = state.search_store.purge_stream(&id.to_string()).await;
     state.git.deregister(&id).await;
     state.snapshot_captures.unregister(&id);
     state.events.emit(OxplowEvent::StreamsChanged);

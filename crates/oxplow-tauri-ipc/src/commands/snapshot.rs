@@ -51,7 +51,7 @@ pub async fn list_file_snapshots_for_stream(
     let filter = current_filter(&state);
     let rows = state
         .snapshot_store
-        .list_for_stream(stream_id.as_str(), limit.unwrap_or(200))
+        .list_for_stream(stream_id, limit.unwrap_or(200))
         .await?;
     Ok(rows
         .into_iter()
@@ -70,7 +70,7 @@ pub async fn list_snapshots_for_stream(
 ) -> Result<Vec<Snapshot>, IpcError> {
     Ok(state
         .snapshot_store
-        .list_snapshots_for_stream(stream_id.as_str(), limit.unwrap_or(200))
+        .list_snapshots_for_stream(stream_id, limit.unwrap_or(200))
         .await?)
 }
 

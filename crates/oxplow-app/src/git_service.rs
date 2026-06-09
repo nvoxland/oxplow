@@ -98,8 +98,11 @@ impl GitService {
         let Some(id) = stream_id else {
             return self.project_dir.clone();
         };
+        let Some(id) = StreamId::try_from_str(id) else {
+            return self.project_dir.clone();
+        };
         let map = self.worktrees.read().await;
-        if let Some(p) = map.get(&StreamId::from(id)) {
+        if let Some(p) = map.get(&id) {
             return p.clone();
         }
         drop(map);
@@ -107,7 +110,7 @@ impl GitService {
         // an IPC call landing before boot finished seeding). Look it
         // up directly so we still hand back a useful path.
         if let Ok(rows) = self.streams.list().await {
-            if let Some(s) = rows.into_iter().find(|s| s.id.as_str() == id) {
+            if let Some(s) = rows.into_iter().find(|s| s.id == id) {
                 return resolve_worktree(&self.project_dir, &s.worktree_path);
             }
         }
@@ -117,7 +120,7 @@ impl GitService {
     /// Register a stream's worktree with the service. Idempotent.
     pub async fn register(&self, stream_id: &StreamId, worktree: PathBuf) {
         let mut map = self.worktrees.write().await;
-        map.insert(stream_id.clone(), worktree);
+        map.insert(*stream_id, worktree);
     }
 
     /// Drop a stream from the service. Used when a stream is deleted.
@@ -132,7 +135,7 @@ impl GitService {
             loop {
                 match rx.recv().await {
                     Ok(OxplowEvent::GitRefsChanged { stream_id }) => {
-                        let path = svc.resolve_repo_dir(Some(stream_id.as_str())).await;
+                        let path = svc.resolve_repo_dir(Some(&stream_id.to_string())).await;
                         svc.reconcile_branch(&stream_id, &path).await;
                     }
                     Ok(_) => {}
@@ -178,13 +181,13 @@ impl GitService {
     fn announce_write(&self, stream_id: Option<&StreamId>, refs_changed: bool) {
         if let Some(id) = stream_id {
             self.events.emit(OxplowEvent::WorkspaceChanged {
-                stream_id: id.clone(),
+                stream_id: *id,
                 change_kind: WorkspaceChangeKind::Updated,
                 path: String::new(),
             });
             if refs_changed {
                 self.events.emit(OxplowEvent::GitRefsChanged {
-                    stream_id: id.clone(),
+                    stream_id: *id,
                 });
             }
         }
@@ -681,7 +684,7 @@ impl GitService {
 }
 
 fn stream_id_from(s: Option<&str>) -> Option<StreamId> {
-    s.map(StreamId::from)
+    s.and_then(StreamId::try_from_str)
 }
 
 fn resolve_worktree(project_dir: &Path, recorded: &str) -> PathBuf {

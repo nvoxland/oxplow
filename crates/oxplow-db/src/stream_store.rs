@@ -47,7 +47,7 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
 }
 
 fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
-    let id: String = row.get("id")?;
+    let id: i64 = row.get("id")?;
     let kind: String = row.get("kind")?;
     let title: String = row.get("title")?;
     let branch: String = row.get("branch")?;
@@ -66,7 +66,7 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(Stream {
-        id: StreamId::from(id),
+        id: StreamId::new(id),
         kind: str_to_kind(&kind).map_err(map_err)?,
         title,
         branch,
@@ -105,11 +105,11 @@ impl StreamStore for SqliteStreamStore {
     }
 
     async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM streams WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.as_str()], row_to_stream)?;
+                let mut rows = stmt.query_map(params![id.value()], row_to_stream)?;
                 match rows.next() {
                     Some(r) => Ok(Some(r?)),
                     None => Ok(None),
@@ -118,10 +118,17 @@ impl StreamStore for SqliteStreamStore {
             .await
     }
 
-    async fn upsert(&self, stream: &Stream) -> Result<(), DomainError> {
+    async fn upsert(&self, stream: &Stream) -> Result<StreamId, DomainError> {
         let stream = stream.clone();
         self.db
             .call(move |conn| {
+                // Placeholder id → NULL so SQLite autoincrements; an
+                // explicit id is inserted / upserted in place.
+                let id_param: Option<i64> = if stream.id.is_placeholder() {
+                    None
+                } else {
+                    Some(stream.id.value())
+                };
                 conn.execute(
                     "INSERT INTO streams (
                         id, kind, title, branch, branch_ref, branch_source,
@@ -143,7 +150,7 @@ impl StreamStore for SqliteStreamStore {
                         custom_prompt = excluded.custom_prompt,
                         updated_at = excluded.updated_at",
                     params![
-                        stream.id.as_str(),
+                        id_param,
                         kind_to_str(stream.kind),
                         stream.title,
                         stream.branch,
@@ -159,23 +166,27 @@ impl StreamStore for SqliteStreamStore {
                         ts_to_string(stream.updated_at),
                     ],
                 )?;
-                Ok(())
+                Ok(if stream.id.is_placeholder() {
+                    StreamId::new(conn.last_insert_rowid())
+                } else {
+                    stream.id
+                })
             })
             .await
     }
 
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
-                conn.execute("DELETE FROM streams WHERE id = ?1", params![id.as_str()])?;
+                conn.execute("DELETE FROM streams WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
             .await
     }
 
     async fn archive(&self, id: &StreamId) -> Result<(), DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
@@ -183,7 +194,7 @@ impl StreamStore for SqliteStreamStore {
                     "UPDATE streams SET archived_at = COALESCE(archived_at, ?2),
                                           updated_at = ?2
                      WHERE id = ?1",
-                    params![id.as_str(), now],
+                    params![id.value(), now],
                 )?;
                 Ok(())
             })
@@ -195,9 +206,9 @@ impl StreamStore for SqliteStreamStore {
             .call(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT current_stream_id FROM runtime_state WHERE id = 1")?;
-                let mut rows = stmt.query_map([], |r| r.get::<_, Option<String>>(0))?;
+                let mut rows = stmt.query_map([], |r| r.get::<_, Option<i64>>(0))?;
                 match rows.next() {
-                    Some(Ok(Some(s))) => Ok(Some(StreamId::from(s))),
+                    Some(Ok(Some(s))) => Ok(Some(StreamId::new(s))),
                     Some(Ok(None)) => Ok(None),
                     Some(Err(e)) => Err(e),
                     None => Ok(None),
@@ -212,7 +223,7 @@ impl StreamStore for SqliteStreamStore {
             .call(move |conn| {
                 conn.execute(
                     "UPDATE runtime_state SET current_stream_id = ?1 WHERE id = 1",
-                    params![id.as_ref().map(|s| s.as_str())],
+                    params![id.as_ref().map(|s| s.value())],
                 )?;
                 Ok(())
             })
@@ -244,7 +255,7 @@ mod tests {
 
     fn primary() -> Stream {
         Stream {
-            id: StreamId::from("s-primary"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),
@@ -276,7 +287,7 @@ mod tests {
         let store = SqliteStreamStore::new(Database::in_memory());
         let p = primary();
         let mut wt = primary();
-        wt.id = StreamId::from("s-wt");
+        wt.id = StreamId::new(2);
         wt.kind = StreamKind::Worktree;
         wt.created_at = Timestamp::from_unix_ms(1_700_000_001_000);
         wt.updated_at = wt.created_at;
@@ -294,7 +305,7 @@ mod tests {
         let p = primary();
         store.upsert(&p).await.unwrap();
         let mut p2 = primary();
-        p2.id = StreamId::from("s-other-primary");
+        p2.id = StreamId::new(3);
         let err = store.upsert(&p2).await.unwrap_err();
         // Unique index on kind='primary' enforces single-primary invariant.
         assert!(matches!(err, DomainError::Invalid(_)));
@@ -315,7 +326,7 @@ mod tests {
         store.upsert(&s).await.unwrap();
         assert_eq!(store.current_id().await.unwrap(), None);
         store.set_current(Some(&s.id)).await.unwrap();
-        assert_eq!(store.current_id().await.unwrap(), Some(s.id.clone()));
+        assert_eq!(store.current_id().await.unwrap(), Some(s.id));
         store.set_current(None).await.unwrap();
         assert_eq!(store.current_id().await.unwrap(), None);
     }

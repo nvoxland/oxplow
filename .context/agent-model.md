@@ -477,12 +477,17 @@ children; the bucketing is computed on read.
 **Id-prefix validation at the boundary.** Every tool that takes a
 string id (`thread_id`, `stream_id`, `note_id`, `followup_id`, …) calls
 `expect_id_kind(tool, param, value, expected_prefix)` before
-constructing the typed id. The check confirms the string starts with
-the expected `<prefix>-` (`s-` → stream, `b-` → thread, `n-` → note,
-`fu-` → follow-up, …). When a caller passes the wrong kind — e.g. a
-stream id where a thread id was expected — the tool returns an
-`invalid_params` error that names the tool, the parameter, the value
-passed, what it looks like, and what was expected. This converts what
+constructing the typed id. Ids are `<3-letter-prefix><int>` strings
+(`str…` → stream, `thr…` → thread, `not…` → note, `fup…` → follow-up,
+`eff…` → effort, `cmt…` → comment, …; see
+[data-model.md](./data-model.md#entity-ids)). The check parses the value
+via `oxplow_domain::AnyId` and confirms its kind matches the expected
+prefix. Task and comment ids additionally accept the bare-integer form
+via `parse_task_id` / `parse_comment_id` (`42` as well as `tsk42`). When
+a caller passes the wrong kind — e.g. a stream id where a thread id was
+expected — the tool returns an `invalid_params` error that names the
+tool, the parameter, the value passed, what it looks like, and what was
+expected. This converts what
 would otherwise surface as an opaque downstream `FOREIGN KEY
 constraint failed` into something actionable. Add the same call at
 the top of any new tool handler — see `IdPrefix` and the

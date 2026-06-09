@@ -81,7 +81,7 @@ impl WorkspaceWatchRegistry {
             };
             let is_worktree = matches!(s.kind, StreamKind::Worktree);
             if let Some(w) = spawn_for_stream(
-                s.id.clone(),
+                s.id,
                 worktree,
                 events.clone(),
                 is_worktree,
@@ -116,7 +116,7 @@ async fn auto_archive_orphan(streams: &StreamService, events: &EventBus, stream:
         events.emit(OxplowEvent::StreamsChanged);
     }
     events.emit(OxplowEvent::StreamOrphaned {
-        stream_id: stream.id.clone(),
+        stream_id: stream.id,
         title: stream.title.clone(),
     });
 }
@@ -175,7 +175,7 @@ fn spawn_for_stream(
         // snapshot dirty set listens to the raw stream separately.)
         let mut rx = fs.subscribe_debounced(Duration::from_millis(250));
         let bus = events.clone();
-        let id = stream_id.clone();
+        let id = stream_id;
         let root = worktree.clone();
         let mut on_orphan_slot = Some(on_orphan);
         tokio::spawn(async move {
@@ -205,7 +205,7 @@ fn spawn_for_stream(
                             .to_string_lossy()
                             .into_owned();
                         bus.emit(OxplowEvent::WorkspaceChanged {
-                            stream_id: id.clone(),
+                            stream_id: id,
                             change_kind: classify(&kind),
                             path: rel,
                         });
@@ -231,12 +231,12 @@ fn spawn_for_stream(
     if let Some(refs_handle) = refs.as_ref() {
         let mut rx = refs_handle.subscribe();
         let bus = events.clone();
-        let id = stream_id.clone();
+        let id = stream_id;
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(_) => bus.emit(OxplowEvent::GitRefsChanged {
-                        stream_id: id.clone(),
+                        stream_id: id,
                     }),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -342,10 +342,10 @@ mod tests {
 
         let bus = EventBus::new();
         let mut rx = bus.subscribe();
-        let stream_id = oxplow_domain::StreamId::from("stream-test");
+        let stream_id = oxplow_domain::StreamId::new(1);
         let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
         let _watchers = spawn_for_stream(
-            stream_id.clone(),
+            stream_id,
             root.clone(),
             bus.clone(),
             false,

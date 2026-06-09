@@ -188,7 +188,7 @@ mod tests {
 
     fn stream() -> Stream {
         Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),
@@ -208,8 +208,8 @@ mod tests {
 
     fn thread() -> Thread {
         Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: StreamId::from("s-1"),
+            id: ThreadId::new(1),
+            stream_id: StreamId::new(1),
             title: "explore".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
@@ -230,10 +230,10 @@ mod tests {
     fn session_context_includes_stream_and_thread_metadata() {
         let block = build_session_context_block(&stream(), Some(&thread()));
         assert!(block.contains("## Oxplow session context"));
-        assert!(block.contains("**Stream:** oxplow (`s-1`)"));
+        assert!(block.contains("**Stream:** oxplow (`str1`)"));
         assert!(block.contains("**Worktree:** `/repo`"));
         assert!(block.contains("**Branch:** `main`"));
-        assert!(block.contains("**Thread:** explore (`b-1`)"));
+        assert!(block.contains("**Thread:** explore (`thr1`)"));
         assert!(block.contains("**Access:** **writer**"));
         assert!(block.contains("after a session restart or when the assignment changes"));
     }

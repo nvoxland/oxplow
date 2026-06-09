@@ -53,7 +53,7 @@ async fn main() {
     let stream_store = oxplow_db::SqliteStreamStore::new(db.clone());
     stream_store
         .upsert(&oxplow_domain::Stream {
-            id: oxplow_domain::StreamId::from("s-profile"),
+            id: oxplow_domain::StreamId::new(1),
             kind: oxplow_domain::StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -315,7 +315,7 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
         let _ = store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: oxplow_domain::StreamId::from("s-profile"),
+                stream_id: oxplow_domain::StreamId::new(1),
                 path: rel,
                 blob_hash: hash,
                 size_bytes: size,

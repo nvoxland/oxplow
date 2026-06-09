@@ -34,7 +34,7 @@ import type { MenuItem } from "../../menu.js";
  * sections stay hidden until a drag is active, at which point they appear
  * as drop targets.
  */
-export type QueueRow = { kind: "work"; id: number; sortIndex: number; item: Task };
+export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: Task };
 
 interface SectionBucket {
   kind: TaskSectionKind;
@@ -76,21 +76,21 @@ export function TaskGroupList({
 }: {
   group: TaskGroup;
   scopeThreadId: string | null;
-  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
-  onReorderTasks: (orderedItemIds: number[]) => Promise<void>;
+  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onReorderTasks: (orderedItemIds: string[]) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
    *  archive controls render alongside whatever's passed for `done`. */
   sectionActions?: Partial<Record<TaskSectionKind, React.ReactNode>>;
-  selectedId?: number | null;
-  markedIds?: ReadonlySet<number>;
-  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  selectedId?: string | null;
+  markedIds?: ReadonlySet<string>;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  epicChildrenMap: Map<number, Task[]>;
-  onReparentTask: (itemId: number, newParentId: number | null) => Promise<void>;
-  onAddChildTask?: (epicId: number) => void;
+  epicChildrenMap: Map<string, Task[]>;
+  onReparentTask: (itemId: string, newParentId: string | null) => Promise<void>;
+  onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
   /** Live agent state for this thread, used to drive the In Progress
    *  empty-state placeholder ("Thinking..." with a braille spinner when
@@ -135,7 +135,7 @@ export function TaskGroupList({
   // done-section header carries a "Show archived (N)" toggle and an
   // "Archive all" action.
   const [showArchived, setShowArchived] = useState(false);
-  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<number>>(() => new Set());
+  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<string>>(() => new Set());
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
@@ -192,7 +192,7 @@ export function TaskGroupList({
   // The agent terminal reads this slice to add each marked row as a
   // context ref without needing its own tasks lookup.
   const alltasksById = useMemo(() => {
-    const map = new Map<number, Task>();
+    const map = new Map<string, Task>();
     for (const item of group.items) map.set(item.id, item);
     for (const children of epicChildrenMap.values()) {
       for (const child of children) map.set(child.id, child);
@@ -200,7 +200,7 @@ export function TaskGroupList({
     return map;
   }, [group.items, epicChildrenMap]);
 
-  const keyFor = (row: { kind: string; id: number }) => `${row.kind}:${row.id}`;
+  const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
 
   // Look up the dragged tasks (if any) so cross-section drops can route
   // through onUpdateTask. Commit/wait rows don't have a status to change.
@@ -240,7 +240,7 @@ export function TaskGroupList({
     // would still look like its old section to the run detector, which
     // miscomputes the descending-run flips (regression when dragging out of
     // Done back to Ready).
-    const statusOverrides = new Map<number, TaskStatus>();
+    const statusOverrides = new Map<string, TaskStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
@@ -417,7 +417,7 @@ export function TaskGroupList({
         const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
         if (!raw) return;
         try {
-          const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; parentEpicId?: number };
+          const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; parentEpicId?: string };
           if (payload.parentEpicId) {
             const ids = payload.itemIds?.length ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
             for (const id of ids) void onReparentTask(id, null);
@@ -808,9 +808,9 @@ function EpicInlineRow({
   isDragging: boolean;
   scopeThreadId: string | null;
   lockInProgress?: boolean;
-  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
@@ -892,18 +892,18 @@ function EpicChildrenPane({
   onUpdateTask, onOpenMenu, scopeThreadId, onRequestEdit,
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
-  epicId: number;
+  epicId: string;
   children: Task[];
-  onReorderTasks(ids: number[]): Promise<void>;
-  onReparentTask(itemId: number, newParentId: number | null): Promise<void>;
-  onUpdateTask(itemId: number, changes: TaskDetailChanges): Promise<void>;
+  onReorderTasks(ids: string[]): Promise<void>;
+  onReparentTask(itemId: string, newParentId: string | null): Promise<void>;
+  onUpdateTask(itemId: string, changes: TaskDetailChanges): Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   scopeThreadId: string | null;
   onRequestEdit?(item: Task): void;
-  selectedId?: number | null;
-  markedIds?: ReadonlySet<number>;
-  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
-  onAddChildTask?: (epicId: number) => void;
+  selectedId?: string | null;
+  markedIds?: ReadonlySet<string>;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onAddChildTask?: (epicId: string) => void;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -912,10 +912,8 @@ function EpicChildrenPane({
 
   const handleDropOnChild = (targetId: string) => {
     if (draggingKey === null || draggingKey === targetId) { resetDrag(); return; }
-    const targetNum = Number(targetId);
-    const dragNum = Number(draggingKey);
-    const from = children.findIndex((c) => c.id === dragNum);
-    const to = children.findIndex((c) => c.id === targetNum);
+    const from = children.findIndex((c) => c.id === draggingKey);
+    const to = children.findIndex((c) => c.id === targetId);
     if (from < 0 || to < 0) { resetDrag(); return; }
     const next = children.slice();
     const [moved] = next.splice(from, 1);
@@ -930,7 +928,7 @@ function EpicChildrenPane({
     const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
     if (!raw) return;
     try {
-      const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; fromThreadId?: string | null };
+      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromThreadId?: string | null };
       const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId !== undefined ? [payload.itemId] : [];
       for (const id of ids) {
         if (!children.some((c) => c.id === id)) {
@@ -1067,9 +1065,9 @@ function InlineItemRow({
   isDragging: boolean;
   scopeThreadId: string | null;
   lockInProgress?: boolean;
-  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;

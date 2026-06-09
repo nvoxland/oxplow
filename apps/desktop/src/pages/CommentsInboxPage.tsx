@@ -16,10 +16,7 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 function targetRef(kind: string, id: string): TabRef | null {
   if (kind === "file") return fileRef(id);
   if (kind === "wiki") return wikiPageRef(id);
-  if (kind === "task") {
-    const n = Number(id);
-    return Number.isFinite(n) ? taskRef(n) : null;
-  }
+  if (kind === "task") return taskRef(id);
   return null;
 }
 
@@ -47,7 +44,7 @@ export function CommentsInboxPage({
   usePageTitle("Comments Dashboard");
   const ctxNav = useOptionalPageNavigation();
   const [threads, setThreads] = useState<CommentThread[]>([]);
-  const [active, setActive] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const [active, setActive] = useState<{ id: string; rect: DOMRect } | null>(null);
   // null = unresolved only (default); a number N = also show threads
   // resolved within the last N days.
   const [resolvedWindowDays, setResolvedWindowDays] = useState<number | null>(null);

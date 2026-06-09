@@ -7,5 +7,5 @@
 -- legitimate visits with no active thread (boot screens, settings).
 -- Existing rows stay NULL and read as "global" history.
 
-ALTER TABLE page_visit ADD COLUMN thread_id TEXT;
+ALTER TABLE page_visit ADD COLUMN thread_id INTEGER;
 CREATE INDEX idx_page_visit_thread_time ON page_visit(thread_id, visited_at DESC);

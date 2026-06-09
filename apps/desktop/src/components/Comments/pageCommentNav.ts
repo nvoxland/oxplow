@@ -27,9 +27,9 @@ export function partitionPageComments(threads: CommentThread[]): {
 /// prev/next still reach the anchored comments.
 export function stepComment(
   threads: CommentThread[],
-  currentId: number,
+  currentId: string,
   dir: -1 | 1,
-): number | null {
+): string | null {
   const { jumpable } = partitionPageComments(threads);
   if (jumpable.length === 0) return null;
   const idx = jumpable.findIndex((t) => t.comment.id === currentId);

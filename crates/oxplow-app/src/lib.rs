@@ -509,7 +509,7 @@ impl Services {
         for s in &active_streams {
             snapshot_captures.register(s);
         }
-        snapshot_captures.set_primary(primary_stream.id.clone());
+        snapshot_captures.set_primary(primary_stream.id);
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -674,7 +674,7 @@ impl Services {
         for s in &active_streams {
             snapshot_captures.register(s);
         }
-        snapshot_captures.set_primary(primary_stream.id.clone());
+        snapshot_captures.set_primary(primary_stream.id);
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())

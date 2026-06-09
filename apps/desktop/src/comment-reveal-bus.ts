@@ -15,24 +15,24 @@
 
 type Listener = () => void;
 
-let pending: number | null = null;
+let pending: string | null = null;
 const listeners = new Set<Listener>();
 
 /// Ask whichever comment surface owns `commentId` to reveal it.
-export function requestCommentReveal(commentId: number): void {
+export function requestCommentReveal(commentId: string): void {
   pending = commentId;
   for (const l of listeners) l();
 }
 
 /// The comment id awaiting reveal, or null. Surfaces only act on it when
 /// it matches one of their own threads.
-export function peekPendingCommentReveal(): number | null {
+export function peekPendingCommentReveal(): string | null {
   return pending;
 }
 
 /// Drop the pending reveal once a surface has handled it. No-op if a
 /// different id is now pending (a newer request superseded this one).
-export function clearCommentReveal(commentId: number): void {
+export function clearCommentReveal(commentId: string): void {
   if (pending === commentId) pending = null;
 }
 

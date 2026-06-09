@@ -176,7 +176,7 @@ pub async fn list_recently_finished(
     if let Some(tid) = thread_id.as_ref() {
         // Thread-scoped: only items filed against this thread, only
         // wiki pages the thread actually touched.
-        let tid = ThreadId::from(tid.clone());
+        let tid = ThreadId::try_from_str(tid).unwrap_or(ThreadId::placeholder());
         let items = state.task_store.list_for_thread(&tid).await?;
         for item in items {
             if item.status != TaskStatus::Done {

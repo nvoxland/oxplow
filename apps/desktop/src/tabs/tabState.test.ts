@@ -13,7 +13,7 @@ import {
 const FILE_A: TabRef = { id: "file:src/a.ts", kind: "file", payload: { path: "src/a.ts" } };
 const FILE_B: TabRef = { id: "file:src/b.ts", kind: "file", payload: { path: "src/b.ts" } };
 const AGENT: TabRef = { id: "agent", kind: "agent", payload: null };
-const WORK_ITEM: TabRef = { id: "task:123", kind: "task", payload: { itemId: 123 } };
+const WORK_ITEM: TabRef = { id: "task:123", kind: "task", payload: { itemId: "123" } };
 
 describe("tabStore", () => {
   test("a fresh thread has no tabs and no active tab", () => {

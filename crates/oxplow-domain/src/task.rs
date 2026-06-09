@@ -177,7 +177,7 @@ mod tests {
         let now = Timestamp::from_unix_ms(1_700_000_000_000);
         let item = Task {
             id: TaskId::new(1),
-            thread_id: Some(ThreadId::from("b-1")),
+            thread_id: Some(ThreadId::new(1)),
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
@@ -202,7 +202,7 @@ mod tests {
     fn backlog_task_has_no_thread() {
         let item: Task = serde_json::from_str(
             r#"{
-                "id":7,"thread_id":null,"parent_id":null,
+                "id":"tsk7","thread_id":null,"parent_id":null,
                 "title":"t","description":"",
                 "status":"ready","priority":"medium","sort_index":0,
                 "created_by":"user",

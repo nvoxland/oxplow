@@ -132,7 +132,7 @@ export function RichTextField({
 
   // Comment state. The hook is always called (empty target → no fetch).
   const { threads } = useCommentsForTarget(comments?.targetKind ?? "", comments?.targetId ?? "");
-  const [activeComment, setActiveComment] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const [activeComment, setActiveComment] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [pendingSel, setPendingSel] = useState<PendingSelection | null>(null);
   const [commentMenu, setCommentMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(
     null,
@@ -382,7 +382,7 @@ export function RichTextField({
     const commentEl = comments
       ? (targetEl?.closest?.("[data-comment-id]") as HTMLElement | null)
       : null;
-    const commentId = commentEl ? Number(commentEl.getAttribute("data-comment-id")) : null;
+    const commentId = commentEl ? commentEl.getAttribute("data-comment-id") : null;
 
     const items: MenuItem[] = [
       {

@@ -14,7 +14,7 @@ export const BLOCK_SEP = "\n";
 /// A comment's resolved span in ProseMirror coordinates. `approx` marks
 /// a fuzzy (drifted) re-attachment.
 export interface CommentRange {
-  id: number;
+  id: string;
   from: number;
   to: number;
   approx?: boolean;
@@ -29,7 +29,7 @@ export const commentDecorationsKey = new PluginKey<DecorationSet>("commentDecora
 /// transaction meta (`commentDecorationsKey`); between pushes the set
 /// maps through doc edits so highlights track typing.
 export const CommentDecorations = Extension.create<{
-  onClickComment: ((id: number, rect: DOMRect) => void) | null;
+  onClickComment: ((id: string, rect: DOMRect) => void) | null;
 }>({
   name: "commentDecorations",
 
@@ -72,7 +72,7 @@ export const CommentDecorations = Extension.create<{
             const target = event.target as HTMLElement | null;
             const el = target?.closest?.("[data-comment-id]") as HTMLElement | null;
             if (el && options.onClickComment) {
-              options.onClickComment(Number(el.getAttribute("data-comment-id")), el.getBoundingClientRect());
+              options.onClickComment(el.getAttribute("data-comment-id") ?? "", el.getBoundingClientRect());
               return true;
             }
             return false;

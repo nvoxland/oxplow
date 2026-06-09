@@ -100,7 +100,7 @@ export function dragHasTaskRefs(e: AnyDragEvent): boolean {
  *
  * Pure — exported for tests.
  */
-export function decodeTaskDragPayload(raw: string | null | undefined): number[] {
+export function decodeTaskDragPayload(raw: string | null | undefined): string[] {
   if (!raw) return [];
   let parsed: { itemId?: unknown; itemIds?: unknown };
   try {
@@ -109,13 +109,13 @@ export function decodeTaskDragPayload(raw: string | null | undefined): number[] 
     return [];
   }
   if (!parsed || typeof parsed !== "object") return [];
-  const ids: number[] = [];
+  const ids: string[] = [];
   if (Array.isArray(parsed.itemIds)) {
     for (const id of parsed.itemIds) {
-      if (typeof id === "number" && Number.isFinite(id)) ids.push(id);
+      if (typeof id === "string" && id) ids.push(id);
     }
   }
-  if (ids.length === 0 && typeof parsed.itemId === "number" && Number.isFinite(parsed.itemId)) {
+  if (ids.length === 0 && typeof parsed.itemId === "string" && parsed.itemId) {
     ids.push(parsed.itemId);
   }
   return ids;
@@ -146,11 +146,11 @@ export function decodeTaskDragRefs(raw: string | null | undefined): ContextRef[]
   for (const entry of parsed.items) {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as { id?: unknown; title?: unknown; status?: unknown };
-    const n = typeof e.id === "number" ? e.id : Number(e.id);
-    if (!Number.isFinite(n) || n <= 0) continue;
+    const id = typeof e.id === "string" ? e.id : String(e.id ?? "");
+    if (!id) continue;
     if (typeof e.title !== "string") continue;
     if (typeof e.status !== "string") continue;
-    out.push({ kind: "task", itemId: n, title: e.title, status: e.status });
+    out.push({ kind: "task", itemId: id, title: e.title, status: e.status });
   }
   return out;
 }
@@ -164,8 +164,8 @@ export function decodeTaskDragRefs(raw: string | null | undefined): ContextRef[]
  * Pure — exported for tests.
  */
 export function resolveTaskContextRefs(
-  ids: number[],
-  lookup: (id: number) => { title: string; status: string } | null,
+  ids: string[],
+  lookup: (id: string) => { title: string; status: string } | null,
 ): ContextRef[] {
   const out: ContextRef[] = [];
   for (const id of ids) {

@@ -88,6 +88,6 @@ pub async fn list_effort_observations(
 ) -> Result<Vec<EffortObservation>, IpcError> {
     Ok(state
         .observation_store
-        .list_for_effort(effort_id.as_str(), kind.as_deref())
+        .list_for_effort(&effort_id.to_string(), kind.as_deref())
         .await?)
 }

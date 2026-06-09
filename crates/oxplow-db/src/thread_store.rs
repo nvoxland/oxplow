@@ -63,8 +63,8 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
 }
 
 fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
-    let id: String = row.get("id")?;
-    let stream_id: String = row.get("stream_id")?;
+    let id: i64 = row.get("id")?;
+    let stream_id: i64 = row.get("stream_id")?;
     let title: String = row.get("title")?;
     let status: String = row.get("status")?;
     let sort_index: i64 = row.get("sort_index")?;
@@ -82,8 +82,8 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(Thread {
-        id: ThreadId::from(id),
-        stream_id: StreamId::from(stream_id),
+        id: ThreadId::new(id),
+        stream_id: StreamId::new(stream_id),
         title,
         status: str_to_status(&status).map_err(map_err)?,
         sort_index,
@@ -112,7 +112,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
 #[async_trait]
 impl ThreadStore for SqliteThreadStore {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, DomainError> {
-        let stream = stream.clone();
+        let stream = *stream;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -120,18 +120,18 @@ impl ThreadStore for SqliteThreadStore {
                      WHERE stream_id = ?1 AND archived_at IS NULL \
                      ORDER BY sort_index ASC, created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![stream.as_str()], row_to_thread)?;
+                let rows = stmt.query_map(params![stream.value()], row_to_thread)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM threads WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.as_str()], row_to_thread)?;
+                let mut rows = stmt.query_map(params![id.value()], row_to_thread)?;
                 match rows.next() {
                     Some(r) => Ok(Some(r?)),
                     None => Ok(None),
@@ -140,10 +140,15 @@ impl ThreadStore for SqliteThreadStore {
             .await
     }
 
-    async fn upsert(&self, thread: &Thread) -> Result<(), DomainError> {
+    async fn upsert(&self, thread: &Thread) -> Result<ThreadId, DomainError> {
         let thread = thread.clone();
         self.db
             .call(move |conn| {
+                let id_param: Option<i64> = if thread.id.is_placeholder() {
+                    None
+                } else {
+                    Some(thread.id.value())
+                };
                 conn.execute(
                     "INSERT INTO threads (
                         id, stream_id, title, status, sort_index, pane_target, agent,
@@ -163,8 +168,8 @@ impl ThreadStore for SqliteThreadStore {
                         custom_prompt = excluded.custom_prompt,
                         updated_at = excluded.updated_at",
                     params![
-                        thread.id.as_str(),
-                        thread.stream_id.as_str(),
+                        id_param,
+                        thread.stream_id.value(),
                         thread.title,
                         status_to_str(thread.status),
                         thread.sort_index,
@@ -179,23 +184,27 @@ impl ThreadStore for SqliteThreadStore {
                         ts_to_string(thread.updated_at),
                     ],
                 )?;
-                Ok(())
+                Ok(if thread.id.is_placeholder() {
+                    ThreadId::new(conn.last_insert_rowid())
+                } else {
+                    thread.id
+                })
             })
             .await
     }
 
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
-                conn.execute("DELETE FROM threads WHERE id = ?1", params![id.as_str()])?;
+                conn.execute("DELETE FROM threads WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
             .await
     }
 
     async fn archive(&self, id: &ThreadId) -> Result<(), DomainError> {
-        let id = id.clone();
+        let id = *id;
         self.db
             .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
@@ -203,7 +212,7 @@ impl ThreadStore for SqliteThreadStore {
                     "UPDATE threads SET archived_at = COALESCE(archived_at, ?2),
                                           updated_at = ?2
                      WHERE id = ?1",
-                    params![id.as_str(), now],
+                    params![id.value(), now],
                 )?;
                 Ok(())
             })
@@ -214,16 +223,16 @@ impl ThreadStore for SqliteThreadStore {
         &self,
         stream: &StreamId,
     ) -> Result<Option<ThreadId>, DomainError> {
-        let stream = stream.clone();
+        let stream = *stream;
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT selected_thread_id FROM thread_selection WHERE stream_id = ?1",
                 )?;
                 let mut rows =
-                    stmt.query_map(params![stream.as_str()], |r| r.get::<_, Option<String>>(0))?;
+                    stmt.query_map(params![stream.value()], |r| r.get::<_, Option<i64>>(0))?;
                 match rows.next() {
-                    Some(Ok(Some(s))) => Ok(Some(ThreadId::from(s))),
+                    Some(Ok(Some(s))) => Ok(Some(ThreadId::new(s))),
                     Some(Ok(None)) => Ok(None),
                     Some(Err(e)) => Err(e),
                     None => Ok(None),
@@ -237,7 +246,7 @@ impl ThreadStore for SqliteThreadStore {
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), DomainError> {
-        let stream = stream.clone();
+        let stream = *stream;
         let thread = thread.cloned();
         self.db
             .call(move |conn| {
@@ -245,7 +254,7 @@ impl ThreadStore for SqliteThreadStore {
                     "INSERT INTO thread_selection (stream_id, selected_thread_id)
                      VALUES (?1, ?2)
                      ON CONFLICT(stream_id) DO UPDATE SET selected_thread_id = excluded.selected_thread_id",
-                    params![stream.as_str(), thread.as_ref().map(|t| t.as_str())],
+                    params![stream.value(), thread.as_ref().map(|t| t.value())],
                 )?;
                 Ok(())
             })
@@ -268,7 +277,7 @@ mod tests {
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),
@@ -290,7 +299,7 @@ mod tests {
 
     fn thread(stream_id: StreamId) -> Thread {
         Thread {
-            id: ThreadId::from("b-1"),
+            id: ThreadId::new(1),
             stream_id,
             title: "explore".into(),
             status: ThreadStatus::Active,
@@ -319,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_overwrites_existing() {
         let (store, sid) = make_store().await;
-        let mut t = thread(sid.clone());
+        let mut t = thread(sid);
         store.upsert(&t).await.unwrap();
         t.title = "updated".into();
         t.status = ThreadStatus::Closed;
@@ -332,11 +341,11 @@ mod tests {
     #[tokio::test]
     async fn at_most_one_active_thread_per_stream() {
         let (store, sid) = make_store().await;
-        let mut a = thread(sid.clone());
-        a.id = ThreadId::from("b-a");
+        let mut a = thread(sid);
+        a.id = ThreadId::new(10);
         a.status = ThreadStatus::Active;
-        let mut b = thread(sid.clone());
-        b.id = ThreadId::from("b-b");
+        let mut b = thread(sid);
+        b.id = ThreadId::new(11);
         b.status = ThreadStatus::Active;
         store.upsert(&a).await.unwrap();
         // Second active thread on the same stream violates the
@@ -350,12 +359,12 @@ mod tests {
         let (store, sid) = make_store().await;
         // Only one Active per stream — give the second thread Queued
         // status so we don't trip the partial unique index.
-        let mut a = thread(sid.clone());
-        a.id = ThreadId::from("b-a");
+        let mut a = thread(sid);
+        a.id = ThreadId::new(10);
         a.sort_index = 1;
         a.status = ThreadStatus::Active;
-        let mut b = thread(sid.clone());
-        b.id = ThreadId::from("b-b");
+        let mut b = thread(sid);
+        b.id = ThreadId::new(11);
         b.sort_index = 0;
         b.status = ThreadStatus::Queued;
         store.upsert(&a).await.unwrap();
@@ -368,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn selected_thread_round_trips_per_stream() {
         let (store, sid) = make_store().await;
-        let t = thread(sid.clone());
+        let t = thread(sid);
         store.upsert(&t).await.unwrap();
         assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
         store
@@ -377,7 +386,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.selected_for_stream(&sid).await.unwrap(),
-            Some(t.id.clone())
+            Some(t.id)
         );
         store.set_selected_for_stream(&sid, None).await.unwrap();
         assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
@@ -389,7 +398,7 @@ mod tests {
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db);
         let s = Stream {
-            id: StreamId::from("s-cascade"),
+            id: StreamId::new(2),
             kind: StreamKind::Worktree,
             title: "wt".into(),
             branch: "feat".into(),
@@ -406,7 +415,7 @@ mod tests {
             archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
-        let t = thread(s.id.clone());
+        let t = thread(s.id);
         threads.upsert(&t).await.unwrap();
         streams.delete(&s.id).await.unwrap();
         assert!(threads.get(&t.id).await.unwrap().is_none());

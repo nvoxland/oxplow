@@ -62,9 +62,9 @@ impl ThreadService {
             .unwrap_or(-1)
             + 1;
         let now = Timestamp::now();
-        let thread = Thread {
-            id: ThreadId::new(),
-            stream_id: stream.clone(),
+        let mut thread = Thread {
+            id: ThreadId::placeholder(),
+            stream_id: *stream,
             title: title.into(),
             status: if any_active {
                 ThreadStatus::Queued
@@ -83,7 +83,7 @@ impl ThreadService {
             updated_at: now,
             archived_at: None,
         };
-        self.threads.upsert(&thread).await?;
+        thread.id = self.threads.upsert(&thread).await?;
         info!(thread_id = %thread.id, stream_id = %stream, "thread created");
         Ok(thread)
     }
@@ -118,7 +118,7 @@ impl ThreadService {
     pub async fn promote(&self, id: &ThreadId) -> Result<Thread, ThreadError> {
         let mut t = self.load(id).await?;
         if t.status == ThreadStatus::Closed {
-            return Err(ThreadError::Closed(id.clone()));
+            return Err(ThreadError::Closed(*id));
         }
         if t.status == ThreadStatus::Active {
             return Ok(t); // idempotent
@@ -243,7 +243,7 @@ impl ThreadService {
         self.threads
             .get(id)
             .await?
-            .ok_or_else(|| ThreadError::NotFound(id.clone()))
+            .ok_or(ThreadError::NotFound(*id))
     }
 }
 
@@ -258,7 +258,7 @@ mod tests {
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -282,8 +282,14 @@ mod tests {
     #[tokio::test]
     async fn selected_or_active_returns_writer_when_no_explicit_selection() {
         let (svc, sid) = fixture().await;
-        let a = svc.create(&sid, "a", "working").await.unwrap();
-        let _b = svc.create(&sid, "b", "working").await.unwrap();
+        let a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let _b = svc
+            .create(&sid, "b", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         // No `select()` call — fall-back path should return the active writer (`a`).
         assert_eq!(svc.selected(&sid).await.unwrap(), None);
         let id = svc.selected_or_active(&sid).await.unwrap();
@@ -293,8 +299,14 @@ mod tests {
     #[tokio::test]
     async fn selected_or_active_prefers_explicit_selection() {
         let (svc, sid) = fixture().await;
-        let _a = svc.create(&sid, "a", "working").await.unwrap();
-        let b = svc.create(&sid, "b", "working").await.unwrap();
+        let _a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let b = svc
+            .create(&sid, "b", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         svc.select(&sid, Some(&b.id)).await.unwrap();
         let id = svc.selected_or_active(&sid).await.unwrap();
         assert_eq!(id, Some(b.id));
@@ -309,23 +321,37 @@ mod tests {
     #[tokio::test]
     async fn first_thread_is_active() {
         let (svc, sid) = fixture().await;
-        let t = svc.create(&sid, "first", "working").await.unwrap();
+        let t = svc
+            .create(&sid, "first", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         assert_eq!(t.status, ThreadStatus::Active);
     }
 
     #[tokio::test]
     async fn second_thread_is_queued() {
         let (svc, sid) = fixture().await;
-        svc.create(&sid, "first", "working").await.unwrap();
-        let b = svc.create(&sid, "second", "working").await.unwrap();
+        svc.create(&sid, "first", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let b = svc
+            .create(&sid, "second", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         assert_eq!(b.status, ThreadStatus::Queued);
     }
 
     #[tokio::test]
     async fn promote_demotes_existing_active() {
         let (svc, sid) = fixture().await;
-        let a = svc.create(&sid, "a", "working").await.unwrap();
-        let b = svc.create(&sid, "b", "working").await.unwrap();
+        let a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let b = svc
+            .create(&sid, "b", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         let promoted = svc.promote(&b.id).await.unwrap();
         assert_eq!(promoted.status, ThreadStatus::Active);
         let list = svc.list_for_stream(&sid).await.unwrap();
@@ -336,7 +362,10 @@ mod tests {
     #[tokio::test]
     async fn close_then_reopen_lands_in_queued() {
         let (svc, sid) = fixture().await;
-        let a = svc.create(&sid, "a", "working").await.unwrap();
+        let a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         let closed = svc.close(&a.id).await.unwrap();
         assert_eq!(closed.status, ThreadStatus::Closed);
         assert!(closed.closed_at.is_some());
@@ -348,7 +377,10 @@ mod tests {
     #[tokio::test]
     async fn rename_updates_title() {
         let (svc, sid) = fixture().await;
-        let t = svc.create(&sid, "x", "working").await.unwrap();
+        let t = svc
+            .create(&sid, "x", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         let renamed = svc.rename(&t.id, "y").await.unwrap();
         assert_eq!(renamed.title, "y");
     }
@@ -356,7 +388,10 @@ mod tests {
     #[tokio::test]
     async fn set_prompt_round_trips_and_clears_on_empty() {
         let (svc, sid) = fixture().await;
-        let t = svc.create(&sid, "x", "working").await.unwrap();
+        let t = svc
+            .create(&sid, "x", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         let with = svc
             .set_prompt(&t.id, Some("Be terse".into()))
             .await
@@ -369,23 +404,38 @@ mod tests {
     #[tokio::test]
     async fn reorder_queue_rewrites_sort_index() {
         let (svc, sid) = fixture().await;
-        let a = svc.create(&sid, "a", "working").await.unwrap();
-        let b = svc.create(&sid, "b", "working").await.unwrap();
-        let c = svc.create(&sid, "c", "working").await.unwrap();
+        let a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let b = svc
+            .create(&sid, "b", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let c = svc
+            .create(&sid, "c", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         // c, a, b
-        svc.reorder_queue(&sid, &[c.id.clone(), a.id.clone(), b.id.clone()])
+        svc.reorder_queue(&sid, &[c.id, a.id, b.id])
             .await
             .unwrap();
         let list = svc.list_for_stream(&sid).await.unwrap();
-        let order: Vec<_> = list.iter().map(|t| t.id.clone()).collect();
+        let order: Vec<_> = list.iter().map(|t| t.id).collect();
         assert_eq!(order, vec![c.id, a.id, b.id]);
     }
 
     #[tokio::test]
     async fn list_closed_returns_only_closed_newest_first() {
         let (svc, sid) = fixture().await;
-        let a = svc.create(&sid, "a", "working").await.unwrap();
-        let b = svc.create(&sid, "b", "working").await.unwrap();
+        let a = svc
+            .create(&sid, "a", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let b = svc
+            .create(&sid, "b", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         svc.close(&a.id).await.unwrap();
         svc.close(&b.id).await.unwrap();
         let closed = svc.list_closed(&sid).await.unwrap();
@@ -396,7 +446,10 @@ mod tests {
     #[tokio::test]
     async fn select_round_trips() {
         let (svc, sid) = fixture().await;
-        let t = svc.create(&sid, "x", "working").await.unwrap();
+        let t = svc
+            .create(&sid, "x", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
         assert_eq!(svc.selected(&sid).await.unwrap(), None);
         svc.select(&sid, Some(&t.id)).await.unwrap();
         assert_eq!(svc.selected(&sid).await.unwrap(), Some(t.id));

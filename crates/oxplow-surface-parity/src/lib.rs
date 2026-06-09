@@ -255,6 +255,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("delete_thread"),
     ui("create_thread"),
     ui("set_thread_prompt"),
+    ui("set_agents"),
     ui("list_closed_threads"),
     ui("reorder_thread_queue"),
     ui("get_selected_thread"),

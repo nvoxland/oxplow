@@ -76,7 +76,7 @@ mod tests {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),
@@ -94,7 +94,7 @@ mod tests {
         };
         SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
         let t = Thread {
-            id: ThreadId::from("b-1"),
+            id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
             status: ThreadStatus::Active,
@@ -114,8 +114,8 @@ mod tests {
         let turns = Arc::new(SqliteAgentTurnStore::new(db.clone()));
 
         let turn = AgentTurn {
-            id: AgentTurnId::new(),
-            thread_id: t.id.clone(),
+            id: AgentTurnId::placeholder(),
+            thread_id: t.id,
             task_id: None,
             prompt: "do".into(),
             answer: None,

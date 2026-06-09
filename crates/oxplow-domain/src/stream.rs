@@ -54,7 +54,7 @@ mod tests {
     fn round_trip() {
         let now = Timestamp::from_unix_ms(1_700_000_000_000);
         let s = Stream {
-            id: StreamId::from("s-primary"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
             branch: "main".into(),

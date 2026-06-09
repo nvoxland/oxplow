@@ -49,7 +49,7 @@ export function useCollapsedSections(): {
 export interface TaskGroup {
   epic: Task | null;
   items: Task[];
-  epicChildren: Map<number, Task[]>;
+  epicChildren: Map<string, Task[]>;
 }
 
 export type TaskSectionKind = "inProgress" | "ready" | "blocked" | "done";
@@ -140,7 +140,7 @@ export function sectionDefaultStatus(section: TaskSectionKind): TaskStatus | nul
  */
 export function classifyRow(
   item: Task,
-  epicChildrenMap: Map<number, Task[]>,
+  epicChildrenMap: Map<string, Task[]>,
 ): TaskSectionKind {
   const children = epicChildrenMap.get(item.id);
   if (children && children.length > 0) {
@@ -186,8 +186,8 @@ const DESCENDING_STATUSES: ReadonlySet<TaskStatus> = new Set([
 ]);
 
 export function finalizeReorderIds(
-  rows: ReadonlyArray<{ id: number; status: TaskStatus }>,
-): number[] {
+  rows: ReadonlyArray<{ id: string; status: TaskStatus }>,
+): string[] {
   const ids = rows.map((row) => row.id);
   let runStart = -1;
   const flipRun = (end: number) => {
@@ -259,9 +259,9 @@ export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
  */
 export function filterAutoAuthored(groups: TaskGroup[]): TaskGroup[] {
   return groups.map((group) => {
-    const isParent = (id: number) => (group.epicChildren.get(id)?.length ?? 0) > 0;
+    const isParent = (id: string) => (group.epicChildren.get(id)?.length ?? 0) > 0;
     const items = group.items.filter((item) => isParent(item.id) || item.created_by !== "agent");
-    const epicChildren = new Map<number, Task[]>();
+    const epicChildren = new Map<string, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
       epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));
     }
@@ -290,7 +290,7 @@ export function applyStatusFilter(
   };
   return groups.map((group) => {
     const items = group.items.filter(keep);
-    const epicChildren = new Map<number, Task[]>();
+    const epicChildren = new Map<string, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
       epicChildren.set(epicId, children.filter(keep));
     }
@@ -313,8 +313,8 @@ export function buildGroups(threadWork: ThreadWorkState | null): TaskGroup[] {
     ...(threadWork.done ?? []),
   ];
 
-  const epicChildrenMap = new Map<number, Task[]>();
-  const epicIdSet = new Set<number>(threadWork.epics.map((e) => e.id));
+  const epicChildrenMap = new Map<string, Task[]>();
+  const epicIdSet = new Set<string>(threadWork.epics.map((e) => e.id));
 
   for (const epic of threadWork.epics) {
     epicChildrenMap.set(epic.id, []);

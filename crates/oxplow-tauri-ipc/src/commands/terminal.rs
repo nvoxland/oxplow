@@ -123,7 +123,7 @@ pub async fn open_terminal_session(
         let cols = cols.max(20);
         let rows = rows.max(5);
         // One persistent shell per (stream, terminal id); re-attach resumes it.
-        let session_key = shell_session_key(&stream.id.0, &pane_target, &transport_mode)
+        let session_key = shell_session_key(&stream.id.to_string(), &pane_target, &transport_mode)
             .expect("pane_target was verified to be a shell target above");
         let cwd = std::path::PathBuf::from(&stream.worktree_path);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
@@ -166,7 +166,7 @@ pub async fn open_terminal_session(
     // so the agent always knows its thread id (it shows up in the
     // `<session-context>` block + OXPLOW_THREAD_ID env).
     let thread_id = state.threads.selected_or_active(&stream.id).await?;
-    let thread = match thread_id.clone() {
+    let thread = match thread_id {
         Some(id) => state.thread_store.get(&id).await?,
         None => None,
     };
@@ -184,8 +184,11 @@ pub async fn open_terminal_session(
     // when known so per-thread state is isolated.
     let session_key = format!(
         "{}|{}|{}|{}|{}",
-        stream.id.0,
-        thread_id.as_ref().map(|t| t.0.as_str()).unwrap_or(""),
+        stream.id,
+        thread_id
+            .as_ref()
+            .map(|t| t.to_string())
+            .unwrap_or_default(),
         agent.as_str(),
         pane_target,
         transport_mode,
@@ -212,10 +215,13 @@ pub async fn open_terminal_session(
             "OXPLOW_HOOK_BASE_URL".to_string(),
             plugin_runtime.hook_base_url.clone(),
         ),
-        ("OXPLOW_STREAM_ID".to_string(), stream.id.0.clone()),
+        ("OXPLOW_STREAM_ID".to_string(), stream.id.to_string()),
         (
             "OXPLOW_THREAD_ID".to_string(),
-            thread_id.as_ref().map(|t| t.0.clone()).unwrap_or_default(),
+            thread_id
+                .as_ref()
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
         ),
         ("OXPLOW_PANE".to_string(), pane_target.clone()),
     ];

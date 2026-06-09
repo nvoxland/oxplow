@@ -157,11 +157,11 @@ mod tests {
         assert!(d.contains("+B"), "diff: {d}");
     }
 
-    async fn seed_stream(db: &oxplow_db::Database, id: &str) {
+    async fn seed_stream(db: &oxplow_db::Database, id: i64) {
         use oxplow_domain::stores::StreamStore;
         oxplow_db::SqliteStreamStore::new(db.clone())
             .upsert(&oxplow_domain::Stream {
-                id: oxplow_domain::StreamId::from(id),
+                id: oxplow_domain::StreamId::new(id),
                 kind: oxplow_domain::StreamKind::Primary,
                 title: "t".into(),
                 branch: "main".into(),
@@ -189,7 +189,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
         let db = Database::in_memory();
-        seed_stream(&db, "s1").await;
+        seed_stream(&db, 1).await;
         let page_refs = SqlitePageRefStore::new(db.clone());
         let snapshots = SqliteSnapshotStore::new(db.clone());
         let blobs = BlobStore::new(project.join(".oxplow/blobs"));
@@ -198,13 +198,13 @@ mod tests {
         let pinned = "alpha\nbeta\ngamma\n";
         let hash = blobs.write(pinned.as_bytes()).unwrap();
         let snap = snapshots
-            .create_snapshot(oxplow_domain::StreamId::from("s1"))
+            .create_snapshot(oxplow_domain::StreamId::new(1))
             .await
             .unwrap();
         snapshots
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: oxplow_domain::StreamId::from("s1"),
+                stream_id: oxplow_domain::StreamId::new(1),
                 path: "src/x.rs".into(),
                 blob_hash: Some(hash),
                 size_bytes: pinned.len() as i64,

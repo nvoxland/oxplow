@@ -132,7 +132,7 @@ mod tests {
 
     fn stream() -> Stream {
         Stream {
-            id: StreamId::from("s-1"),
+            id: StreamId::new(1),
             kind: StreamKind::Primary,
             title: "p".into(),
             branch: "main".into(),

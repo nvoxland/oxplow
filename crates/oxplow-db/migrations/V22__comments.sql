@@ -8,8 +8,8 @@
 -- survive the thread being archived/deleted.
 CREATE TABLE comment (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
-    thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+    stream_id INTEGER NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+    thread_id INTEGER REFERENCES threads(id) ON DELETE SET NULL,
     target_kind TEXT NOT NULL,
     target_id TEXT NOT NULL,
     -- The selected text: the durable anchor + the context handed to

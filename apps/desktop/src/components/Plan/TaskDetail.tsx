@@ -56,7 +56,7 @@ export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
 export interface TaskDetailChanges {
   title?: string;
   description?: string;
-  parentId?: number | null;
+  parentId?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
 }
@@ -84,7 +84,7 @@ export function TaskDetail({
   comments,
 }: {
   item: Task;
-  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   comments?: RichTextCommentConfig;
 }) {
   return (
@@ -213,7 +213,7 @@ export function TaskDetailRail({
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
   item: Task;
-  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   onRequestDelete(): void;
   /** Additional items rendered above Delete in the overflow menu —
    *  e.g. "Send to backlog" / "Bring to this thread". */

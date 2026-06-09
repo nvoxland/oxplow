@@ -44,7 +44,7 @@ describe("pageRefs", () => {
 
   test("wikiPageRef and taskRef encode their identifiers", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    expect(taskRef(123).id).toBe("task:123");
+    expect(taskRef("123").id).toBe("task:123");
   });
 
   test("findingRef encodes the finding id", () => {
@@ -89,7 +89,7 @@ describe("refFromTabId", () => {
 
   test("rebuilds payload-bearing kinds from their id", () => {
     expect(refFromTabId("wiki:some-slug")).toEqual(wikiPageRef("some-slug"));
-    expect(refFromTabId("task:42")).toEqual(taskRef(42));
+    expect(refFromTabId("task:42")).toEqual(taskRef("42"));
     expect(refFromTabId("snapshot:112")).toEqual(snapshotRef(112));
     expect(refFromTabId("external-url:https://x.test/p")).toEqual(externalUrlRef("https://x.test/p"));
   });

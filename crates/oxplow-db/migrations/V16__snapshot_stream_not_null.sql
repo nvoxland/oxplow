@@ -18,7 +18,7 @@ DELETE FROM snapshot;
 -- both tables.
 CREATE TABLE file_snapshot_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+    stream_id INTEGER NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     blob_hash TEXT,
     size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -35,7 +35,7 @@ CREATE INDEX idx_file_snapshot_snapshot ON file_snapshot(snapshot_id);
 
 CREATE TABLE snapshot_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+    stream_id INTEGER NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL,
     git_commit TEXT
 );

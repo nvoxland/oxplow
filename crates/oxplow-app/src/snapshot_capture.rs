@@ -249,8 +249,8 @@ impl SnapshotCaptureService {
         &self.inner.project_dir
     }
 
-    pub fn stream_id(&self) -> &str {
-        self.inner.stream_id.as_str()
+    pub fn stream_id(&self) -> &StreamId {
+        &self.inner.stream_id
     }
 
     pub fn blobs(&self) -> &BlobStore {
@@ -362,7 +362,7 @@ impl SnapshotCaptureService {
         let Some(latest_id) = self
             .inner
             .store
-            .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+            .latest_snapshot_id_for_stream(self.inner.stream_id)
             .await?
         else {
             // No snapshot yet — the regular capture path will create
@@ -897,7 +897,7 @@ impl SnapshotCaptureService {
             return Ok(self
                 .inner
                 .store
-                .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+                .latest_snapshot_id_for_stream(self.inner.stream_id)
                 .await?);
         }
         let capture_started = Instant::now();
@@ -931,7 +931,7 @@ impl SnapshotCaptureService {
         let unstaged_count = unstaged_entries.len() as u64;
 
         let project_dir = self.inner.project_dir.clone();
-        let stream_id = self.inner.stream_id.clone();
+        let stream_id = self.inner.stream_id;
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
         let settle = self.inner.settle_duration;
@@ -966,7 +966,7 @@ impl SnapshotCaptureService {
                 for (path, s) in staged_paths {
                     rows.push(FileSnapshot {
                         id: 0,
-                        stream_id: stream_id.clone(),
+                        stream_id,
                         path: rel_of(&project_dir, &path),
                         blob_hash: s.blob_hash,
                         size_bytes: s.size_bytes,
@@ -1000,7 +1000,7 @@ impl SnapshotCaptureService {
                             (None, false) => None,
                             (None, true) => Some(Outcome::Row(FileSnapshot {
                                 id: 0,
-                                stream_id: stream_id.clone(),
+                                stream_id,
                                 path: rel,
                                 blob_hash: None,
                                 size_bytes: 0,
@@ -1043,7 +1043,7 @@ impl SnapshotCaptureService {
                                 };
                                 Some(Outcome::Row(FileSnapshot {
                                     id: 0,
-                                    stream_id: stream_id.clone(),
+                                    stream_id,
                                     path: rel,
                                     blob_hash,
                                     size_bytes: size as i64,
@@ -1103,14 +1103,14 @@ impl SnapshotCaptureService {
             return Ok(self
                 .inner
                 .store
-                .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+                .latest_snapshot_id_for_stream(self.inner.stream_id)
                 .await?);
         }
 
         let snapshot_id = self
             .inner
             .store
-            .create_snapshot(self.inner.stream_id.clone())
+            .create_snapshot(self.inner.stream_id)
             .await?;
         // Fill in the real snapshot_id now that the row exists.
         let mut rows = rows;
@@ -1187,7 +1187,7 @@ impl SnapshotCaptureService {
         let guard = self.inner.events.read().unwrap_or_else(|e| e.into_inner());
         if let Some(bus) = guard.as_ref() {
             bus.emit(OxplowEvent::FileSnapshotsBatchCreated {
-                stream_id: Some(self.inner.stream_id.clone()),
+                stream_id: Some(self.inner.stream_id),
                 snapshot_id,
                 file_count,
                 source,
@@ -1204,14 +1204,14 @@ mod tests {
     use oxplow_db::Database;
     use tempfile::tempdir;
 
-    const TEST_STREAM: &str = "s-test";
+    const TEST_STREAM: StreamId = StreamId::new(1);
 
     async fn seed_stream(db: &Database) {
         use oxplow_domain::stores::StreamStore;
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         streams
             .upsert(&oxplow_domain::Stream {
-                id: StreamId::from(TEST_STREAM),
+                id: TEST_STREAM,
                 kind: oxplow_domain::StreamKind::Primary,
                 title: "t".into(),
                 branch: "main".into(),
@@ -1244,7 +1244,7 @@ mod tests {
             store.clone(),
             blobs,
             project.to_path_buf(),
-            StreamId::from(TEST_STREAM),
+            TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
@@ -1570,7 +1570,7 @@ mod tests {
         }
         // Only one snapshot row exists.
         let latest = store
-            .latest_snapshot_id_for_stream(StreamId::from(TEST_STREAM))
+            .latest_snapshot_id_for_stream(TEST_STREAM)
             .await
             .unwrap()
             .unwrap();
@@ -1642,7 +1642,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
-            StreamId::from(TEST_STREAM),
+            TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
@@ -1687,7 +1687,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
-            StreamId::from(TEST_STREAM),
+            TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
@@ -1904,14 +1904,11 @@ mod tests {
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = SqliteSnapshotStore::new(db);
-        let parent = store
-            .create_snapshot(StreamId::from(TEST_STREAM))
-            .await
-            .unwrap();
+        let parent = store.create_snapshot(TEST_STREAM).await.unwrap();
         let snaps: Vec<oxplow_db::FileSnapshot> = (0..100)
             .map(|i| oxplow_db::FileSnapshot {
                 id: 0,
-                stream_id: StreamId::from(TEST_STREAM),
+                stream_id: TEST_STREAM,
                 path: format!("file_{i:03}.txt"),
                 blob_hash: Some(format!("{:032x}", i)),
                 size_bytes: i as i64,
@@ -1950,7 +1947,7 @@ mod tests {
                 store.clone(),
                 blobs,
                 project.path().to_path_buf(),
-                StreamId::from(TEST_STREAM),
+                TEST_STREAM,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),
             )
@@ -1992,7 +1989,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
-            StreamId::from(TEST_STREAM),
+            TEST_STREAM,
             512, // 512 byte cap → 1KB is oversize
             oxplow_fs_watch::WorkspaceFilter::default(),
         )

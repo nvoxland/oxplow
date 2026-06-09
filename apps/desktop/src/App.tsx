@@ -1025,11 +1025,11 @@ export function App() {
   }
 
   async function handleUpdateTask(
-    itemId: number,
+    itemId: string,
     changes: {
       title?: string;
       description?: string;
-      parentId?: number | null;
+      parentId?: string | null;
       status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
       priority?: "low" | "medium" | "high" | "urgent";
     },
@@ -1045,7 +1045,7 @@ export function App() {
     }
   }
 
-  async function handleDeleteTask(itemId: number) {
+  async function handleDeleteTask(itemId: string) {
     if (!stream || !selectedThread) return;
     try {
       const next = await deleteTask(stream.id, selectedThread.id, itemId);
@@ -1057,7 +1057,7 @@ export function App() {
     }
   }
 
-  async function handleReorderTasks(orderedItemIds: number[]) {
+  async function handleReorderTasks(orderedItemIds: string[]) {
     if (!stream || !selectedThread) return;
     try {
       const next = await reorderTasks(stream.id, selectedThread.id, orderedItemIds);
@@ -1069,7 +1069,7 @@ export function App() {
     }
   }
 
-  async function handleMoveTaskToThread(itemId: number, fromThreadId: string, toThreadId: string) {
+  async function handleMoveTaskToThread(itemId: string, fromThreadId: string, toThreadId: string) {
     if (!stream || fromThreadId === toThreadId) return;
     try {
       const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId);
@@ -1081,7 +1081,7 @@ export function App() {
     }
   }
 
-  async function handleMoveItemToBacklog(itemId: number, fromThreadId: string) {
+  async function handleMoveItemToBacklog(itemId: string, fromThreadId: string) {
     if (!stream) return;
     try {
       const { from, backlog } = await moveTaskToBacklog(stream.id, fromThreadId, itemId);
@@ -1094,7 +1094,7 @@ export function App() {
     }
   }
 
-  async function handleUpdateBacklogItem(itemId: number, changes: Parameters<typeof updateBacklogItem>[1]) {
+  async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
     try {
       const next = await updateBacklogItem(itemId, changes);
       setBacklogState(next);
@@ -1105,7 +1105,7 @@ export function App() {
     }
   }
 
-  async function handleDeleteBacklogItem(itemId: number) {
+  async function handleDeleteBacklogItem(itemId: string) {
     try {
       const next = await deleteBacklogItem(itemId);
       setBacklogState(next);
@@ -1116,7 +1116,7 @@ export function App() {
     }
   }
 
-  async function handleReorderBacklog(orderedItemIds: number[]) {
+  async function handleReorderBacklog(orderedItemIds: string[]) {
     try {
       const next = await reorderBacklog(orderedItemIds);
       setBacklogState(next);
@@ -1186,7 +1186,7 @@ export function App() {
     return out;
   }, [streams, threadStates]);
 
-  async function handleDropTaskOnStream(targetStreamId: string, itemId: number, fromThreadId: string | null) {
+  async function handleDropTaskOnStream(targetStreamId: string, itemId: string, fromThreadId: string | null) {
     if (!stream || !fromThreadId) return;
     const toThreadId = streamActiveThreadIds[targetStreamId];
     if (!toThreadId || toThreadId === fromThreadId) return;
@@ -1441,7 +1441,7 @@ export function App() {
   // Reset to direct when the active thread changes (the old TerminalPane
   // had this behavior via a useEffect on paneTarget).
   const [agentTransportMode, setAgentTransportMode] = useState<"direct" | "tmux">("direct");
-  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: number; token: number } | null>(null);
+  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
   // Imperative shortcut for opening the New-Task modal. When PlanPane is
   // mounted it registers its openCreateModal here; the menu handler can
   // call this ref directly instead of going through setState + useEffect.
@@ -1830,7 +1830,7 @@ export function App() {
     handleOpenPage(gitCommitRef(sha));
   };
 
-  const handleRequestEditTask = (itemId: number) => {
+  const handleRequestEditTask = (itemId: string) => {
     const token = Date.now();
     handleOpenPage(indexRef("tasks"));
     setPlanEditRequest({ itemId, token });
@@ -2869,9 +2869,9 @@ export function App() {
           onMoveItemToBacklog: handleMoveItemToBacklog,
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
-          onOpenNewTaskPage: (payload: { parentId?: number | null }) =>
+          onOpenNewTaskPage: (payload: { parentId?: string | null }) =>
             navOpen(newTaskRef(payload)),
-          onOpenTaskPage: (itemId: number) => navOpen(taskRef(itemId)),
+          onOpenTaskPage: (itemId: string) => navOpen(taskRef(itemId)),
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
@@ -2991,7 +2991,7 @@ export function App() {
           ),
         });
       } else if (ref.kind === "task") {
-        const itemId = (ref.payload as { itemId?: number } | null)?.itemId ?? 0;
+        const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
         // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all
         // for the lookup so TaskPage can resolve any item on this thread, not
@@ -3477,11 +3477,9 @@ export function App() {
           onClose={() => setSearchOpen(false)}
           onOpen={(hit) => {
             switch (hit.kind) {
-              case "task": {
-                const id = Number(hit.ref_id);
-                if (Number.isFinite(id)) handleOpenPage(taskRef(id));
+              case "task":
+                handleOpenPage(taskRef(hit.ref_id));
                 break;
-              }
               case "wiki":
                 handleOpenPage(wikiPageRef(hit.ref_id));
                 break;

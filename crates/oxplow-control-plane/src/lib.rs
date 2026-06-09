@@ -251,12 +251,12 @@ async fn handle_hook(
         .get("x-oxplow-stream")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
-        .map(|s| StreamId::from(s.to_string()));
+        .and_then(StreamId::try_from_str);
     let thread_id = headers
         .get("x-oxplow-thread")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
-        .map(|s| ThreadId::from(s.to_string()));
+        .and_then(ThreadId::try_from_str);
 
     let body_str = match std::str::from_utf8(&body) {
         Ok(s) => s.to_string(),
@@ -308,8 +308,8 @@ async fn handle_hook(
             // shows what the runtime did.
             let envelope = HookEnvelope {
                 kind,
-                thread_id: thread_id.clone(),
-                stream_id: stream_id.clone(),
+                thread_id,
+                stream_id,
                 session_id: session_id.clone(),
                 payload_json: body_str,
                 prompt: None,
@@ -321,7 +321,7 @@ async fn handle_hook(
 
     let envelope = HookEnvelope {
         kind,
-        thread_id: thread_id.clone(),
+        thread_id,
         stream_id,
         session_id,
         payload_json: body_str,
@@ -852,11 +852,11 @@ async fn stop_directive(
             match eff {
                 StopHookSideEffect::RecordAuditSignature(sig) => {
                     st.last_audit_signature
-                        .insert(thread_id.clone(), sig.clone());
+                        .insert(*thread_id, sig.clone());
                 }
                 StopHookSideEffect::RecordFiledButDidntShipFired => {
                     st.filed_but_didnt_ship_fired
-                        .insert(thread_id.clone(), true);
+                        .insert(*thread_id, true);
                 }
             }
         }

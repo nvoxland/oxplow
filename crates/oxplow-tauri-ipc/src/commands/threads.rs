@@ -33,7 +33,7 @@ pub async fn upsert_thread(
     state: tauri::State<'_, AppState>,
     thread: Thread,
 ) -> Result<(), IpcError> {
-    let stream_id = thread.stream_id.clone();
+    let stream_id = thread.stream_id;
     state.thread_store.upsert(&thread).await?;
     state.events.emit(OxplowEvent::ThreadsChanged { stream_id });
     Ok(())
@@ -110,7 +110,7 @@ pub async fn rename_thread(
 ) -> Result<Thread, IpcError> {
     let t = state.threads.rename(&req.id, req.title).await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
-        stream_id: t.stream_id.clone(),
+        stream_id: t.stream_id,
     });
     Ok(t)
 }
@@ -129,7 +129,7 @@ pub async fn set_thread_prompt(
 ) -> Result<Thread, IpcError> {
     let t = state.threads.set_prompt(&req.id, req.prompt).await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
-        stream_id: t.stream_id.clone(),
+        stream_id: t.stream_id,
     });
     Ok(t)
 }
@@ -142,7 +142,7 @@ pub async fn promote_thread(
 ) -> Result<Thread, IpcError> {
     let t = state.threads.promote(&id).await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
-        stream_id: t.stream_id.clone(),
+        stream_id: t.stream_id,
     });
     Ok(t)
 }
@@ -155,7 +155,7 @@ pub async fn close_thread(
 ) -> Result<Thread, IpcError> {
     let t = state.threads.close(&id).await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
-        stream_id: t.stream_id.clone(),
+        stream_id: t.stream_id,
     });
     Ok(t)
 }
@@ -168,7 +168,7 @@ pub async fn reopen_thread(
 ) -> Result<Thread, IpcError> {
     let t = state.threads.reopen(&id).await?;
     state.events.emit(OxplowEvent::ThreadsChanged {
-        stream_id: t.stream_id.clone(),
+        stream_id: t.stream_id,
     });
     Ok(t)
 }
@@ -242,10 +242,10 @@ pub async fn get_thread_state(
     let active = threads
         .iter()
         .find(|t| t.status == oxplow_domain::ThreadStatus::Active)
-        .map(|t| t.id.clone());
+        .map(|t| t.id);
     let selected = state.threads.selected(&stream_id).await?;
     Ok(ThreadState {
-        selected_thread_id: selected.or_else(|| active.clone()),
+        selected_thread_id: selected.or(active),
         active_thread_id: active,
         threads,
     })

@@ -105,8 +105,8 @@ mod tests {
 
     fn open_thread() -> Thread {
         Thread {
-            id: ThreadId::from("b-1"),
-            stream_id: StreamId::from("s-1"),
+            id: ThreadId::new(1),
+            stream_id: StreamId::new(1),
             title: "explore".into(),
             status: ThreadStatus::Active,
             sort_index: 0,

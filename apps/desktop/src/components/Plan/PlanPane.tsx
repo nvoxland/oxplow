@@ -60,17 +60,17 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onUpdateTask(itemId: number, changes: TaskDetailChanges): Promise<void>;
-  onDeleteTask(itemId: number): Promise<void>;
-  onReorderTasks(orderedItemIds: number[]): Promise<void>;
-  onUpdateBacklogItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
-  onDeleteBacklogItem(itemId: number): Promise<void>;
-  onReorderBacklog(orderedItemIds: number[]): Promise<void>;
-  onMoveItemToBacklog(itemId: number, fromThreadId: string): Promise<void>;
+  onUpdateTask(itemId: string, changes: TaskDetailChanges): Promise<void>;
+  onDeleteTask(itemId: string): Promise<void>;
+  onReorderTasks(orderedItemIds: string[]): Promise<void>;
+  onUpdateBacklogItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
+  onDeleteBacklogItem(itemId: string): Promise<void>;
+  onReorderBacklog(orderedItemIds: string[]): Promise<void>;
+  onMoveItemToBacklog(itemId: string, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
   /** Open the edit modal for the specified tasks. Change the token to
    *  request again even if the itemId repeats. */
-  editRequest?: { itemId: number; token: number } | null;
+  editRequest?: { itemId: string; token: number } | null;
   /** On mount, PlanPane calls this with its openCreateModal function so
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
@@ -78,10 +78,10 @@ interface Props {
   /** Route the "new task" / "+ Task on epic" buttons to a NewTaskPage
    *  tab. When omitted, the legacy modal path stays in place (used by
    *  tests and standalone usages). */
-  onOpenNewTaskPage?(payload: { parentId?: number | null }): void;
+  onOpenNewTaskPage?(payload: { parentId?: string | null }): void;
   /** Route a row click / Enter to the read+edit TaskPage tab for that
    *  item. When omitted, row clicks still select but no page opens. */
-  onOpenTaskPage?(itemId: number): void;
+  onOpenTaskPage?(itemId: string): void;
   /** When true, agent-authored tasks are filtered out of the visible
    *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
@@ -124,7 +124,7 @@ interface ContextMenuState {
   y: number;
   item: Task;
   /** Non-null when the right-clicked item belongs to a multi-selection. */
-  groupIds: number[] | null;
+  groupIds: string[] | null;
 }
 
 export function PlanPane({
@@ -156,20 +156,20 @@ export function PlanPane({
   hideBacklogChip = false,
   hideArchiveToggle = false,
 }: Props) {
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
   const mode = forceMode ?? internalMode;
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
   // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
   // drag starts on any of the effectiveMarkedIds, the drag payload carries the
   // whole set so drop targets (ThreadRail, backlog chip, stream chip) can move
   // them all in one gesture. Plain click clears marks.
-  const [markedIds, setMarkedIds] = useState<Set<number>>(() => new Set());
-  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: number; extraIds?: number[] } | null>(null);
+  const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
+  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
@@ -188,7 +188,7 @@ export function PlanPane({
   // sync with the section split in TaskGroupList (In progress → To do →
   // Blocked → Done).
   const navigableIds = useMemo(() => {
-    const ids: number[] = [];
+    const ids: string[] = [];
     for (const group of groups) {
       const sorted = group.items.slice().sort((a, b) => {
         const byStatus = statusOrderRank(a.status) - statusOrderRank(b.status);
@@ -219,7 +219,7 @@ export function PlanPane({
       if (prev.size === 0) return prev;
       const live = new Set(navigableIds);
       let changed = false;
-      const next = new Set<number>();
+      const next = new Set<string>();
       for (const id of prev) {
         if (live.has(id)) next.add(id);
         else changed = true;
@@ -228,7 +228,7 @@ export function PlanPane({
     });
   }, [navigableIds]);
 
-  const handleSelect = (id: number, modifiers?: { toggle?: boolean; range?: boolean }) => {
+  const handleSelect = (id: string, modifiers?: { toggle?: boolean; range?: boolean }) => {
     const toggle = modifiers?.toggle ?? false;
     const range = modifiers?.range ?? false;
     if (toggle) {
@@ -250,7 +250,7 @@ export function PlanPane({
       const toIdx = navigableIds.indexOf(id);
       if (fromIdx >= 0 && toIdx >= 0) {
         const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
-        const next = new Set<number>();
+        const next = new Set<string>();
         for (let i = lo; i <= hi; i++) next.add(navigableIds[i]!);
         setMarkedIds(next);
         return;
@@ -348,7 +348,7 @@ export function PlanPane({
     return () => el.removeEventListener("keydown", handler);
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
-  const openCreateModal = (parentId: number | null = null) => {
+  const openCreateModal = (parentId: string | null = null) => {
     // The legacy inline NewtasksModal was retired by the IA redesign;
     // creation always routes through a full-tab NewTaskPage now. Tests
     // / standalone harnesses must wire `onOpenNewTaskPage`.
@@ -418,8 +418,8 @@ export function PlanPane({
     event.preventDefault();
     try {
       const payload = JSON.parse(raw) as {
-        itemId?: number;
-        itemIds?: number[];
+        itemId?: string;
+        itemIds?: string[];
         fromThreadId?: string | null;
       };
       const fromThreadId = payload.fromThreadId;
@@ -887,12 +887,12 @@ function buildtasksMenu(
 
 function buildGroupMenu(
   item: Task,
-  groupIds: number[],
+  groupIds: string[],
   actions: {
-    onChangeStatus: (item: Task, ids: number[]) => void;
-    onChangePriority: (item: Task, ids: number[]) => void;
-    onDelete: (item: Task, ids: number[]) => void;
-    onAddToAgent: (ids: number[]) => void;
+    onChangeStatus: (item: Task, ids: string[]) => void;
+    onChangePriority: (item: Task, ids: string[]) => void;
+    onDelete: (item: Task, ids: string[]) => void;
+    onAddToAgent: (ids: string[]) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";

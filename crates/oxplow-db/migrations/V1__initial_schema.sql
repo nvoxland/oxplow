@@ -8,12 +8,17 @@
 -- Naming note: the legacy schema used "batch" / "batches" for what
 -- the domain model now calls "thread". The Rust rewrite uses the
 -- domain name end-to-end, so tables are renamed accordingly.
+--
+-- Id note: every external entity id is a SQLite autoincrement INTEGER
+-- (rowid). The 3-letter type prefix (`str`, `thr`, `tsk`, …) lives
+-- only in the application layer (serde/Display), never in the DB — so
+-- all id columns and the FKs that point at them are INTEGER.
 
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 
 CREATE TABLE streams (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('primary', 'worktree')),
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
@@ -33,13 +38,13 @@ CREATE INDEX idx_streams_branch ON streams(branch);
 
 CREATE TABLE runtime_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    current_stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL
+    current_stream_id INTEGER REFERENCES streams(id) ON DELETE SET NULL
 );
 INSERT INTO runtime_state (id, current_stream_id) VALUES (1, NULL);
 
 CREATE TABLE threads (
-    id TEXT PRIMARY KEY,
-    stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stream_id INTEGER NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('active', 'queued', 'closed')),
     sort_index INTEGER NOT NULL DEFAULT 0,
@@ -59,14 +64,14 @@ CREATE UNIQUE INDEX idx_threads_one_active_per_stream
     ON threads(stream_id) WHERE status = 'active';
 
 CREATE TABLE thread_selection (
-    stream_id TEXT PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE,
-    selected_thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL
+    stream_id INTEGER PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE,
+    selected_thread_id INTEGER REFERENCES threads(id) ON DELETE SET NULL
 );
 
 CREATE TABLE task (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     -- Nullable: null means the task is on the project-wide backlog.
-    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER REFERENCES threads(id) ON DELETE CASCADE,
     parent_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -91,7 +96,7 @@ CREATE INDEX idx_task_backlog ON task(deleted_at, sort_index) WHERE thread_id IS
 
 CREATE TABLE task_link (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     from_item_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     to_item_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     link_type TEXT NOT NULL CHECK (link_type IN ('blocks', 'relates_to', 'discovered_from', 'duplicates', 'supersedes', 'replies_to')),
@@ -101,9 +106,11 @@ CREATE TABLE task_link (
 CREATE INDEX idx_task_link_thread_from ON task_link(thread_id, from_item_id);
 CREATE INDEX idx_task_link_thread_to ON task_link(thread_id, to_item_id);
 
+-- Internal event log. `id` is a non-entity string id (not surfaced to
+-- agents/users), so it stays TEXT; the FK to threads is INTEGER.
 CREATE TABLE task_event (
     id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     item_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL,
     actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user', 'agent', 'system')),
@@ -114,9 +121,9 @@ CREATE TABLE task_event (
 CREATE INDEX idx_task_event_thread_item ON task_event(thread_id, item_id, created_at);
 
 CREATE TABLE task_note (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
-    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER REFERENCES threads(id) ON DELETE CASCADE,
     body TEXT NOT NULL,
     author TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -151,7 +158,7 @@ CREATE VIRTUAL TABLE wiki_note_fts USING fts5(slug UNINDEXED, title, body_excerp
 
 -- Page-visit / usage telemetry — drives the "recent" rails.
 CREATE TABLE page_visit (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_kind TEXT NOT NULL,
     page_id TEXT NOT NULL,
     visited_at TEXT NOT NULL,
@@ -161,7 +168,7 @@ CREATE INDEX idx_page_visit_time ON page_visit(visited_at DESC);
 CREATE INDEX idx_page_visit_kind_id ON page_visit(page_kind, page_id);
 
 CREATE TABLE usage_event (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     occurred_at TEXT NOT NULL
@@ -197,7 +204,7 @@ CREATE INDEX idx_code_quality_finding_scan ON code_quality_finding(scan_id, path
 -- snapshots panel.
 CREATE TABLE file_snapshot (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+    stream_id INTEGER REFERENCES streams(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     blob_hash TEXT,
     size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -208,8 +215,8 @@ CREATE INDEX idx_file_snapshot_stream_path ON file_snapshot(stream_id, path, cap
 CREATE INDEX idx_file_snapshot_path ON file_snapshot(path, captured_at DESC);
 
 CREATE TABLE agent_turn (
-    id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     task_id INTEGER REFERENCES task(id) ON DELETE SET NULL,
     prompt TEXT NOT NULL,
     answer TEXT,
@@ -224,9 +231,9 @@ CREATE INDEX idx_agent_turn_open ON agent_turn(thread_id) WHERE ended_at IS NULL
 -- Durable hook-event log. Surfaces in the HookEventsPage and feeds
 -- the stop-hook pipeline / write-guard / filing-enforcement deciders.
 CREATE TABLE hook_event (
-    id TEXT PRIMARY KEY,
-    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
-    stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER REFERENCES threads(id) ON DELETE CASCADE,
+    stream_id INTEGER REFERENCES streams(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     session_id TEXT,
     payload_json TEXT NOT NULL,
@@ -238,7 +245,7 @@ CREATE INDEX idx_hook_event_kind_time ON hook_event(kind, received_at DESC);
 -- Per-thread agent status snapshot. Updated on hook events and pane
 -- lifecycle. One row per (thread_id, pane_target).
 CREATE TABLE agent_status (
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     pane_target TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('idle', 'running', 'awaiting_user', 'stopped', 'error')),
     detail TEXT,
@@ -252,7 +259,7 @@ CREATE INDEX idx_agent_status_state ON agent_status(state, updated_at DESC);
 CREATE TABLE task_commit (
     task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     commit_sha TEXT NOT NULL,
-    stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
+    stream_id INTEGER REFERENCES streams(id) ON DELETE SET NULL,
     recorded_at TEXT NOT NULL,
     PRIMARY KEY (task_id, commit_sha)
 );
@@ -262,9 +269,9 @@ CREATE INDEX idx_task_commit_sha ON task_commit(commit_sha);
 -- agent work on a task — bounded by snapshots at start and end. The
 -- effort_file rows attribute concrete file changes.
 CREATE TABLE task_effort (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
     start_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
@@ -275,21 +282,21 @@ CREATE INDEX idx_task_effort_task ON task_effort(task_id, started_at DESC);
 CREATE INDEX idx_task_effort_thread ON task_effort(thread_id, started_at DESC);
 
 CREATE TABLE task_effort_file (
-    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
+    effort_id INTEGER NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'deleted')),
     PRIMARY KEY (effort_id, path)
 );
 
 CREATE TABLE task_effort_turn (
-    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
-    turn_id TEXT NOT NULL REFERENCES agent_turn(id) ON DELETE CASCADE,
+    effort_id INTEGER NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
+    turn_id INTEGER NOT NULL REFERENCES agent_turn(id) ON DELETE CASCADE,
     PRIMARY KEY (effort_id, turn_id)
 );
 
 -- Per-thread last-seen wiki-note timestamps for the freshness badge.
 CREATE TABLE wiki_note_thread_update (
-    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     slug TEXT NOT NULL REFERENCES wiki_note(slug) ON DELETE CASCADE,
     last_seen_at TEXT NOT NULL,
     PRIMARY KEY (thread_id, slug)

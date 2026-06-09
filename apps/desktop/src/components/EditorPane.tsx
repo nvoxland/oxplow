@@ -26,7 +26,7 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onRevealCommit?(sha: string): void;
-  onRevealTask?(itemId: number): void;
+  onRevealTask?(itemId: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
 
@@ -81,7 +81,7 @@ export function EditorPane({
   const commentLayerRef = useRef<MonacoCommentHandle | null>(null);
   // Comment id under the last right-click (drives the "Open Comment"
   // menu item); set in onContextMenu before the menu opens.
-  const ctxCommentIdRef = useRef<number | null>(null);
+  const ctxCommentIdRef = useRef<string | null>(null);
   // Monaco loads asynchronously, so the model-binding effect below needs a
   // signal to retry once it lands — otherwise the first file opened arrives
   // before the editor instance exists and the effect's early return makes
@@ -742,7 +742,7 @@ function BlameOverlay({
   entries: LocalBlameEntry[];
   scrollTop: number;
   lineHeight: number;
-  onLocalClick(itemId: number): void;
+  onLocalClick(itemId: string): void;
   onGitClick(sha: string): void;
   /**
    * Open the git-blame menu for `sha`. `rect` is the bounding rect of the

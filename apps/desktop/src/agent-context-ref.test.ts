@@ -23,13 +23,13 @@ describe("formatContextMention", () => {
 
   test("tasks collapses whitespace in title", () => {
     expect(formatContextMention({
-      kind: "task", itemId: 1, title: "Multi\nline\ttitle  here", status: "ready",
+      kind: "task", itemId: "1", title: "Multi\nline\ttitle  here", status: "ready",
     })).toBe('[oxplow task 1: "Multi line title here" (ready)] ');
   });
 
   test("tasks leaves quotes in title untouched (plain text reference)", () => {
     expect(formatContextMention({
-      kind: "task", itemId: 1, title: 'Fix "broken" thing', status: "ready",
+      kind: "task", itemId: "1", title: 'Fix "broken" thing', status: "ready",
     })).toBe('[oxplow task 1: "Fix "broken" thing" (ready)] ');
   });
 

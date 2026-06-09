@@ -20,7 +20,7 @@ use crate::agent_command::{build_agent_command, AgentCommandOptions, PaneKind};
 /// Default tmux session name for an oxplow-managed stream. Per-stream
 /// so worktrees stay isolated.
 pub fn session_for_stream(stream: &Stream) -> Session {
-    Session(format!("oxplow-{}", sanitize(&stream.id.0)))
+    Session(format!("oxplow-{}", sanitize(&stream.id.to_string())))
 }
 
 /// Window names within a session — one per pane kind.
@@ -148,7 +148,7 @@ mod tests {
 
     fn stream() -> Stream {
         Stream {
-            id: StreamId::from("s-feature/x"),
+            id: StreamId::new(1),
             kind: StreamKind::Worktree,
             title: "feat".into(),
             branch: "feat".into(),

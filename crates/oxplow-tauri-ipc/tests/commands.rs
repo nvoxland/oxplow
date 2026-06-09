@@ -74,7 +74,7 @@ async fn get_backlog_state_starts_at_zero() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
-    let threads = commands::threads::list_threads(app.state(), StreamId::from("no-such"))
+    let threads = commands::threads::list_threads(app.state(), StreamId::new(999999))
         .await
         .unwrap();
     assert!(threads.is_empty());
@@ -83,7 +83,7 @@ async fn list_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_closed_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
-    let threads = commands::threads::list_closed_threads(app.state(), StreamId::from("no-such"))
+    let threads = commands::threads::list_closed_threads(app.state(), StreamId::new(999999))
         .await
         .unwrap();
     assert!(threads.is_empty());
@@ -101,7 +101,7 @@ async fn get_task_missing_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_tasks_for_thread_empty() {
     let app = TestApp::build();
-    let items = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::from("no-such"))
+    let items = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::new(999999))
         .await
         .unwrap();
     assert!(items.is_empty());
@@ -134,7 +134,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     let parent = commands::tasks::create_task(
         app.state(),
         commands::tasks::CreateTaskRequest {
-            thread_id: Some(thread.id.clone()),
+            thread_id: Some(thread.id),
             input: CreateTaskInput {
                 title: "parent".into(),
                 ..Default::default()
@@ -146,7 +146,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     let _child = commands::tasks::create_task(
         app.state(),
         commands::tasks::CreateTaskRequest {
-            thread_id: Some(thread.id.clone()),
+            thread_id: Some(thread.id),
             input: CreateTaskInput {
                 title: "child".into(),
                 parent_id: Some(parent.id),
@@ -156,7 +156,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     )
     .await
     .unwrap();
-    let work_state = commands::threads::get_thread_work_state(app.state(), thread.id.clone())
+    let work_state = commands::threads::get_thread_work_state(app.state(), thread.id)
         .await
         .unwrap();
     assert!(
@@ -280,7 +280,7 @@ async fn list_agent_statuses_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_followups_empty_for_unknown_thread() {
     let app = TestApp::build();
-    let v = commands::followup::list_followups(app.state(), ThreadId::from("nope"))
+    let v = commands::followup::list_followups(app.state(), ThreadId::new(999999))
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -385,7 +385,7 @@ async fn list_tasks_for_thread_returns_empty_again() {
     // Slightly different from the existing list_tasks_for_thread_empty
     // helper — exercises the same surface with an explicit ThreadId conversion.
     let app = TestApp::build();
-    let v = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::from("b-empty"))
+    let v = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::new(999998))
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -394,7 +394,7 @@ async fn list_tasks_for_thread_returns_empty_again() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_task_summaries_for_empty_thread() {
     let app = TestApp::build();
-    let v = commands::tasks::get_task_summaries(app.state(), Some(ThreadId::from("b-empty")))
+    let v = commands::tasks::get_task_summaries(app.state(), Some(ThreadId::new(999998)))
         .await
         .unwrap();
     assert!(v.is_empty());

@@ -10,7 +10,9 @@ use specta::Type;
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::{diff_trees, DomainError, FileChange, StreamId, Timestamp};
+use oxplow_domain::{
+    diff_trees, DomainError, FileChange, PageVisitId, StreamId, ThreadId, Timestamp, UsageEventId,
+};
 
 use crate::database::Database;
 use crate::page_ref_projections::finding_edges;
@@ -102,13 +104,19 @@ impl PageVisitStore for SqlitePageVisitStore {
         let thread_id = thread_id.map(|s| s.to_string());
         self.db
             .call(move |conn| {
-                let id = format!("pv-{}", uuid::Uuid::new_v4().simple());
                 let now = Timestamp::now();
+                // thread_id arrives as a prefixed string ("thr3"); the
+                // column is INTEGER, so store the raw rowid.
+                let thread_id_val: Option<i64> = thread_id
+                    .as_deref()
+                    .and_then(ThreadId::try_from_str)
+                    .map(|t| t.value());
                 conn.execute(
-                    "INSERT INTO page_visit (id, page_kind, page_id, label, visited_at, duration_ms, thread_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![id, page_kind, page_id, label, ts_to_string(now), duration_ms, thread_id],
+                    "INSERT INTO page_visit (page_kind, page_id, label, visited_at, duration_ms, thread_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![page_kind, page_id, label, ts_to_string(now), duration_ms, thread_id_val],
                 )?;
+                let id = PageVisitId::new(conn.last_insert_rowid()).to_string();
                 Ok(PageVisit {
                     id,
                     page_kind,
@@ -145,13 +153,15 @@ impl PageVisitStore for SqlitePageVisitStore {
                     )?
                 };
                 let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<PageVisit> {
-                    let id: String = row.get(0)?;
+                    let id = PageVisitId::new(row.get::<_, i64>(0)?).to_string();
                     let page_kind: String = row.get(1)?;
                     let page_id: String = row.get(2)?;
                     let label: Option<String> = row.get(3)?;
                     let visited_at: String = row.get(4)?;
                     let duration_ms: Option<i64> = row.get(5)?;
-                    let thread_id: Option<String> = row.get(6)?;
+                    let thread_id = row
+                        .get::<_, Option<i64>>(6)?
+                        .map(|t| ThreadId::new(t).to_string());
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -169,7 +179,11 @@ impl PageVisitStore for SqlitePageVisitStore {
                         thread_id,
                     })
                 };
-                if let Some(tid) = thread_id.as_deref() {
+                if let Some(tid) = thread_id
+                    .as_deref()
+                    .and_then(ThreadId::try_from_str)
+                    .map(|t| t.value())
+                {
                     let rows: rusqlite::Result<Vec<_>> = stmt
                         .query_map(params![limit as i64, tid], map_row)?
                         .collect();
@@ -198,7 +212,11 @@ impl PageVisitStore for SqlitePageVisitStore {
                         row.get::<_, i64>(2)?,
                     ))
                 };
-                if let Some(tid) = thread_id.as_deref() {
+                if let Some(tid) = thread_id
+                    .as_deref()
+                    .and_then(ThreadId::try_from_str)
+                    .map(|t| t.value())
+                {
                     let mut stmt = conn.prepare(
                         "SELECT page_kind, page_id, COUNT(*) AS visits
                          FROM page_visit
@@ -260,13 +278,15 @@ impl PageVisitStore for SqlitePageVisitStore {
                      LIMIT ?1",
                 )?;
                 let rows = stmt.query_map(params![limit as i64], |row| {
-                    let id: String = row.get(0)?;
+                    let id = PageVisitId::new(row.get::<_, i64>(0)?).to_string();
                     let page_kind: String = row.get(1)?;
                     let page_id: String = row.get(2)?;
                     let label: Option<String> = row.get(3)?;
                     let visited_at: String = row.get(4)?;
                     let duration_ms: Option<i64> = row.get(5)?;
-                    let thread_id: Option<String> = row.get(6)?;
+                    let thread_id = row
+                        .get::<_, Option<i64>>(6)?
+                        .map(|t| ThreadId::new(t).to_string());
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -350,13 +370,13 @@ impl SqliteUsageStore {
         let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
         self.db
             .call(move |conn| {
-                let id = format!("ue-{}", uuid::Uuid::new_v4().simple());
                 let now = Timestamp::now();
                 conn.execute(
-                    "INSERT INTO usage_event (id, kind, payload_json, occurred_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![id, kind, payload_json, ts_to_string(now)],
+                    "INSERT INTO usage_event (kind, payload_json, occurred_at)
+                     VALUES (?1, ?2, ?3)",
+                    params![kind, payload_json, ts_to_string(now)],
                 )?;
+                let id = UsageEventId::new(conn.last_insert_rowid()).to_string();
                 Ok(UsageEvent {
                     id,
                     kind,
@@ -454,7 +474,7 @@ impl SqliteUsageStore {
                      ORDER BY occurred_at DESC LIMIT ?1",
                 )?;
                 let rows = stmt.query_map(params![limit as i64], |row| {
-                    let id: String = row.get(0)?;
+                    let id = UsageEventId::new(row.get::<_, i64>(0)?).to_string();
                     let kind: String = row.get(1)?;
                     let payload_json: String = row.get(2)?;
                     let occurred_at: String = row.get(3)?;
@@ -804,7 +824,7 @@ impl SqliteCodeQualityStore {
 
 fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let id: i64 = row.get(0)?;
-    let stream_id: String = row.get(1)?;
+    let stream_id: i64 = row.get(1)?;
     let path: String = row.get(2)?;
     let blob_hash: Option<String> = row.get(3)?;
     let size_bytes: i64 = row.get(4)?;
@@ -820,7 +840,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     };
     Ok(FileSnapshot {
         id,
-        stream_id: StreamId::from(stream_id),
+        stream_id: StreamId::new(stream_id),
         path,
         blob_hash,
         size_bytes,
@@ -952,7 +972,7 @@ impl SqliteSnapshotStore {
                         .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
                     for snap in &snaps {
                         stmt.execute(params![
-                            snap.stream_id.as_str(),
+                            snap.stream_id.value(),
                             snap.path,
                             snap.blob_hash,
                             snap.size_bytes,
@@ -982,7 +1002,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO snapshot (stream_id, created_at) VALUES (?1, ?2)",
-                    params![stream_id.as_str(), now],
+                    params![stream_id.value(), now],
                 )?;
                 Ok(conn.last_insert_rowid())
             })
@@ -1063,7 +1083,7 @@ impl SqliteSnapshotStore {
                     .query_row(
                         "SELECT id FROM snapshot WHERE stream_id = ?1
                          ORDER BY created_at DESC, id DESC LIMIT 1",
-                        params![stream_id.as_str()],
+                        params![stream_id.value()],
                         |row| row.get(0),
                     )
                     .optional()?;
@@ -1075,10 +1095,9 @@ impl SqliteSnapshotStore {
     /// Snapshot rows for a stream, newest first.
     pub async fn list_snapshots_for_stream(
         &self,
-        stream_id: &str,
+        stream_id: StreamId,
         limit: usize,
     ) -> Result<Vec<Snapshot>, DomainError> {
-        let stream_id = stream_id.to_string();
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -1090,9 +1109,9 @@ impl SqliteSnapshotStore {
                      WHERE s.stream_id = ?1
                      ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![stream_id, limit as i64], |row| {
+                let rows = stmt.query_map(params![stream_id.value(), limit as i64], |row| {
                     let id: i64 = row.get(0)?;
-                    let stream_id: String = row.get(1)?;
+                    let stream_id: i64 = row.get(1)?;
                     let created_at: String = row.get(2)?;
                     let file_count: i64 = row.get(3)?;
                     let git_commit: Option<String> = row.get(4)?;
@@ -1105,7 +1124,7 @@ impl SqliteSnapshotStore {
                     };
                     Ok(Snapshot {
                         id,
-                        stream_id: StreamId::from(stream_id),
+                        stream_id: StreamId::new(stream_id),
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                         file_count,
                         git_commit,
@@ -1219,7 +1238,7 @@ impl SqliteSnapshotStore {
     pub async fn tree_at(&self, snapshot_id: i64) -> Result<BTreeMap<String, String>, DomainError> {
         self.db
             .call(move |conn| {
-                let stream_id: Option<String> = conn
+                let stream_id: Option<i64> = conn
                     .query_row(
                         "SELECT stream_id FROM snapshot WHERE id = ?1",
                         params![snapshot_id],
@@ -1358,10 +1377,9 @@ impl SqliteSnapshotStore {
 
     pub async fn list_for_stream(
         &self,
-        stream_id: &str,
+        stream_id: StreamId,
         limit: usize,
     ) -> Result<Vec<FileSnapshot>, DomainError> {
-        let stream_id = stream_id.to_string();
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -1369,7 +1387,7 @@ impl SqliteSnapshotStore {
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![stream_id, limit as i64], row_to_snapshot)?;
+                let rows = stmt.query_map(params![stream_id.value(), limit as i64], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1499,7 +1517,7 @@ impl SqliteSnapshotStore {
         let path = path.to_string();
         self.db
             .call(move |conn| {
-                let stream_id: Option<String> = conn
+                let stream_id: Option<i64> = conn
                     .query_row(
                         "SELECT stream_id FROM snapshot WHERE id = ?1",
                         params![snapshot_id],
@@ -1549,14 +1567,14 @@ mod tests {
                 "INSERT INTO streams
                        (id, kind, title, branch, branch_ref, branch_source,
                         worktree_path, created_at, updated_at)
-                     VALUES ('s-1','primary','s','main','refs/heads/main','origin',
+                     VALUES (1,'primary','s','main','refs/heads/main','origin',
                              '/tmp','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
                 [],
             )?;
             for sid in &snaps {
                 conn.execute(
                     "INSERT INTO snapshot (id, stream_id, created_at)
-                         VALUES (?1, 's-1', '2026-01-01T00:00:00Z')",
+                         VALUES (?1, 1, '2026-01-01T00:00:00Z')",
                     params![sid],
                 )?;
             }
@@ -1565,7 +1583,7 @@ mod tests {
                     "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at,
                             oversize, snapshot_id, mtime_ms)
-                         VALUES ('s-1', ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
+                         VALUES (1, ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
                     params![path, hash, *oversize as i32, sid],
                 )?;
             }
@@ -1730,13 +1748,13 @@ mod tests {
                     "INSERT INTO streams
                        (id, kind, title, branch, branch_ref, branch_source,
                         worktree_path, created_at, updated_at)
-                     VALUES ('s-1', 'primary', 's', 'main', 'refs/heads/main', 'origin',
+                     VALUES (1, 'primary', 's', 'main', 'refs/heads/main', 'origin',
                              '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 conn.execute(
                     "INSERT INTO snapshot (stream_id, created_at)
-                     VALUES ('s-1', '2026-01-01T00:00:00Z')",
+                     VALUES (1, '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 Ok(conn.last_insert_rowid())
@@ -1754,8 +1772,8 @@ mod tests {
             db_for_seed.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 conn.execute(
-                    "INSERT INTO task_effort (id, task_id, thread_id, started_at)
-                     VALUES ('ef-1', 1, 'b-1', '2026-01-01T00:00:00Z')",
+                    "INSERT INTO task_effort (task_id, thread_id, started_at)
+                     VALUES (1, 1, '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 conn.execute(
@@ -1763,7 +1781,7 @@ mod tests {
                        (effort_id, path, change_kind,
                         local_snapshot_id, closest_git_version, git_version_exact)
                      VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
-                    params!["ef-1", "src/a.rs", snap_id, "aaaa"],
+                    params![1, "src/a.rs", snap_id, "aaaa"],
                 )?;
                 conn.execute(
                     "INSERT INTO page_ref
@@ -1795,7 +1813,7 @@ mod tests {
             db_for_check.with_conn(|conn| {
                 let mut row = conn.query_row(
                     "SELECT closest_git_version, git_version_exact FROM task_effort_file
-                         WHERE effort_id = 'ef-1' AND path = 'src/a.rs'",
+                         WHERE effort_id = 1 AND path = 'src/a.rs'",
                     [],
                     |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
                 )?;
@@ -1862,15 +1880,15 @@ mod tests {
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("b-1"))
+            .record("wiki", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("b-2"))
+            .record("wiki", "b", None, None, Some("thr2"))
             .await
             .unwrap();
         store.record("wiki", "c", None, None, None).await.unwrap();
-        let in_thread = store.list_recent(10, Some("b-1")).await.unwrap();
+        let in_thread = store.list_recent(10, Some("thr1")).await.unwrap();
         assert_eq!(in_thread.len(), 1);
         assert_eq!(in_thread[0].page_id, "a");
         let global = store.list_recent(10, None).await.unwrap();
@@ -1881,22 +1899,22 @@ mod tests {
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("b-1"))
+            .record("wiki", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("b-1"))
+            .record("wiki", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("b-2"))
+            .record("wiki", "a", None, None, Some("thr2"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("b-1"))
+            .record("wiki", "b", None, None, Some("thr1"))
             .await
             .unwrap();
-        let in_thread = store.list_top(10, Some("b-1")).await.unwrap();
+        let in_thread = store.list_top(10, Some("thr1")).await.unwrap();
         // a appears twice in b-1, b once
         assert_eq!(in_thread[0].1, "a");
         assert_eq!(in_thread[0].2, 2);
@@ -2022,12 +2040,12 @@ mod tests {
     #[tokio::test]
     async fn snapshot_capture_then_list() {
         let db = Database::in_memory();
-        seed_stream(&db, "s-test");
+        seed_stream(&db, 1);
         let store = SqliteSnapshotStore::new(db);
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: StreamId::from("s-test"),
+                stream_id: StreamId::new(1),
                 path: "src/foo.rs".into(),
                 blob_hash: Some("abc".into()),
                 size_bytes: 42,
@@ -2046,17 +2064,17 @@ mod tests {
     #[tokio::test]
     async fn stats_for_snapshot_classifies_created_modified_deleted() {
         let db = Database::in_memory();
-        seed_stream(&db, "s-test");
+        seed_stream(&db, 1);
         let store = SqliteSnapshotStore::new(db);
-        let stream = StreamId::from("s-test");
+        let stream = StreamId::new(1);
 
         // Parent 1: baseline of three paths.
-        let p1 = store.create_snapshot(stream.clone()).await.unwrap();
+        let p1 = store.create_snapshot(stream).await.unwrap();
         for path in ["a.txt", "b.txt", "c.txt"] {
             store
                 .capture(FileSnapshot {
                     id: 0,
-                    stream_id: stream.clone(),
+                    stream_id: stream,
                     path: path.into(),
                     blob_hash: Some(format!("h-{path}-v1")),
                     size_bytes: 10,
@@ -2071,11 +2089,11 @@ mod tests {
 
         // Parent 2: a modified, b unchanged-but-recaptured (modified by
         // the rule, since the row exists at all), c deleted, d created.
-        let p2 = store.create_snapshot(stream.clone()).await.unwrap();
+        let p2 = store.create_snapshot(stream).await.unwrap();
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "a.txt".into(),
                 blob_hash: Some("h-a.txt-v2".into()),
                 size_bytes: 20,
@@ -2089,7 +2107,7 @@ mod tests {
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "c.txt".into(),
                 blob_hash: None,
                 size_bytes: 0,
@@ -2103,7 +2121,7 @@ mod tests {
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "d.txt".into(),
                 blob_hash: Some("h-d.txt-v1".into()),
                 size_bytes: 5,
@@ -2132,16 +2150,16 @@ mod tests {
     #[tokio::test]
     async fn list_changes_for_snapshot_carries_status_and_prior_id() {
         let db = Database::in_memory();
-        seed_stream(&db, "s-test");
+        seed_stream(&db, 1);
         let store = SqliteSnapshotStore::new(db);
-        let stream = StreamId::from("s-test");
+        let stream = StreamId::new(1);
 
         // p1: a and b baselined.
-        let p1 = store.create_snapshot(stream.clone()).await.unwrap();
+        let p1 = store.create_snapshot(stream).await.unwrap();
         let a1 = store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "a.txt".into(),
                 blob_hash: Some("h-a-v1".into()),
                 size_bytes: 1,
@@ -2155,7 +2173,7 @@ mod tests {
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "b.txt".into(),
                 blob_hash: Some("h-b-v1".into()),
                 size_bytes: 1,
@@ -2168,11 +2186,11 @@ mod tests {
             .unwrap();
 
         // p2: a modified, c added, b deleted.
-        let p2 = store.create_snapshot(stream.clone()).await.unwrap();
+        let p2 = store.create_snapshot(stream).await.unwrap();
         for snap in [
             FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "a.txt".into(),
                 blob_hash: Some("h-a-v2".into()),
                 size_bytes: 1,
@@ -2183,7 +2201,7 @@ mod tests {
             },
             FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "c.txt".into(),
                 blob_hash: Some("h-c-v1".into()),
                 size_bytes: 1,
@@ -2194,7 +2212,7 @@ mod tests {
             },
             FileSnapshot {
                 id: 0,
-                stream_id: stream.clone(),
+                stream_id: stream,
                 path: "b.txt".into(),
                 blob_hash: None,
                 size_bytes: 0,
@@ -2218,7 +2236,7 @@ mod tests {
         assert!(by_path["b.txt"].prior_file_id.is_some());
     }
 
-    fn seed_stream(db: &Database, id: &str) {
+    fn seed_stream(db: &Database, id: i64) {
         let conn = db.conn().unwrap();
         conn.execute(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)

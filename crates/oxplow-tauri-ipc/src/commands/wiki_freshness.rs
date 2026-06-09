@@ -142,7 +142,7 @@ async fn resolve_current(state: &AppState) -> Option<file_ref_version::ResolvedF
     // A proper fix would be a dedicated wiki pseudo-stream — see
     // follow-up filed under epic #28.
     let svc = state.snapshot_captures.primary()?;
-    let stream_id = oxplow_domain::StreamId::from(svc.stream_id().to_string());
+    let stream_id = *svc.stream_id();
     let snapshot_id = svc
         .store()
         .latest_snapshot_id_for_stream(stream_id)

@@ -76,7 +76,7 @@ impl ThreadRuntimeRegistry {
     /// and surfaces a directive listing each. Idempotent.
     pub fn record_pending_effort_review(&self, thread: &ThreadId, effort: EffortId) {
         let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let runtime = m.entry(thread.clone()).or_default();
+        let runtime = m.entry(*thread).or_default();
         runtime.pending_effort_reviews.insert(effort);
     }
 
@@ -101,7 +101,7 @@ impl HookEventStore for ThreadRuntimeRegistry {
         // ingest the event for state effects but don't store it. This
         // matches the prior SQLite behavior which made thread_id
         // nullable (it stored them but no consumer looked for them).
-        let Some(tid) = event.thread_id.clone() else {
+        let Some(tid) = event.thread_id else {
             return Ok(());
         };
         let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -161,14 +161,14 @@ impl AgentStatusStore for ThreadRuntimeRegistry {
         detail: Option<String>,
     ) -> Result<AgentStatus, DomainError> {
         let status = AgentStatus {
-            thread_id: thread.clone(),
+            thread_id: *thread,
             pane_target: pane_target.to_string(),
             state,
             detail,
             updated_at: Timestamp::now(),
         };
         let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let runtime = m.entry(thread.clone()).or_default();
+        let runtime = m.entry(*thread).or_default();
         runtime
             .statuses
             .insert(pane_target.to_string(), status.clone());
@@ -198,10 +198,10 @@ mod tests {
     use super::*;
     use oxplow_domain::HookEventId;
 
-    fn ev(thread: &str, kind: HookKind, ms: i64) -> HookEvent {
+    fn ev(thread: i64, kind: HookKind, ms: i64) -> HookEvent {
         HookEvent {
-            id: HookEventId::new(),
-            thread_id: Some(ThreadId::from(thread.to_string())),
+            id: HookEventId::new(ms),
+            thread_id: Some(ThreadId::new(thread)),
             stream_id: None,
             kind,
             session_id: None,
@@ -213,15 +213,12 @@ mod tests {
     #[tokio::test]
     async fn append_then_list_recent_returns_newest_first_within_thread() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+        r.append(&ev(1, HookKind::UserPromptSubmit, 1))
             .await
             .unwrap();
-        r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
-        r.append(&ev("b-2", HookKind::Stop, 3)).await.unwrap();
-        let recent = r
-            .list_recent(Some(&ThreadId::from("b-1".to_string())), 10)
-            .await
-            .unwrap();
+        r.append(&ev(1, HookKind::PreToolUse, 2)).await.unwrap();
+        r.append(&ev(2, HookKind::Stop, 3)).await.unwrap();
+        let recent = r.list_recent(Some(&ThreadId::new(1)), 10).await.unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].kind, HookKind::PreToolUse); // newest first
         assert_eq!(recent[1].kind, HookKind::UserPromptSubmit);
@@ -231,12 +228,9 @@ mod tests {
     async fn ring_caps_per_thread() {
         let r = ThreadRuntimeRegistry::new(3);
         for i in 0..5 {
-            r.append(&ev("b-1", HookKind::PreToolUse, i)).await.unwrap();
+            r.append(&ev(1, HookKind::PreToolUse, i)).await.unwrap();
         }
-        let recent = r
-            .list_recent(Some(&ThreadId::from("b-1".to_string())), 100)
-            .await
-            .unwrap();
+        let recent = r.list_recent(Some(&ThreadId::new(1)), 100).await.unwrap();
         assert_eq!(recent.len(), 3);
         // The newest three should remain (ms 4, 3, 2).
         assert_eq!(recent[0].received_at, Timestamp::from_unix_ms(4));
@@ -246,11 +240,11 @@ mod tests {
     #[tokio::test]
     async fn list_recent_with_no_thread_filter_merges_across_threads_desc() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+        r.append(&ev(1, HookKind::UserPromptSubmit, 1))
             .await
             .unwrap();
-        r.append(&ev("b-2", HookKind::Stop, 3)).await.unwrap();
-        r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
+        r.append(&ev(2, HookKind::Stop, 3)).await.unwrap();
+        r.append(&ev(1, HookKind::PreToolUse, 2)).await.unwrap();
         let all = r.list_recent(None, 10).await.unwrap();
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].received_at, Timestamp::from_unix_ms(3));
@@ -260,11 +254,11 @@ mod tests {
     #[tokio::test]
     async fn list_by_kind_filters() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+        r.append(&ev(1, HookKind::UserPromptSubmit, 1))
             .await
             .unwrap();
-        r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
-        r.append(&ev("b-1", HookKind::Stop, 3)).await.unwrap();
+        r.append(&ev(1, HookKind::PreToolUse, 2)).await.unwrap();
+        r.append(&ev(1, HookKind::Stop, 3)).await.unwrap();
         let stops = r.list_by_kind(HookKind::Stop, 10).await.unwrap();
         assert_eq!(stops.len(), 1);
     }
@@ -272,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn agent_status_upsert_get_list() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        let tid = ThreadId::from("b-1".to_string());
+        let tid = ThreadId::new(1);
         let s = r
             .upsert(&tid, "working", AgentStatusState::Running, None)
             .await
@@ -287,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn hooks_without_thread_id_are_dropped() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        let mut e = ev("ignored", HookKind::Stop, 1);
+        let mut e = ev(0, HookKind::Stop, 1);
         e.thread_id = None;
         r.append(&e).await.unwrap();
         let all = r.list_recent(None, 10).await.unwrap();

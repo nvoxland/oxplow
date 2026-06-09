@@ -20,7 +20,7 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 export interface TaskPageProps {
   stream: Stream | null;
   thread: Thread | null;
-  itemId: number;
+  itemId: string;
   /** Live snapshot of all tasks in the current thread (used to find this one). */
   items: Task[];
   threadWork: ThreadWorkState | null;
@@ -63,7 +63,6 @@ export function TaskPage({
         label: `Effort ${i + 1} end snapshot`,
         source: "effort-end",
         snapshotLabel: null,
-        tasksId: itemId,
         subtitle: `${d.changed_paths.length} file${d.changed_paths.length === 1 ? "" : "s"}`,
       }));
   }, [efforts, itemId]);
@@ -102,7 +101,7 @@ export function TaskPage({
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
       if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: number }).itemId;
+      const targetId = (event as unknown as { itemId?: string }).itemId;
       if (targetId !== itemId) return;
       refetch();
     });
@@ -120,7 +119,7 @@ export function TaskPage({
     });
     const unsub = subscribeOxplowEvents((event) => {
       if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: number }).itemId;
+      const targetId = (event as unknown as { itemId?: string }).itemId;
       if (targetId !== item.id) return;
       void listTaskEfforts(item.id).then((rows) => {
         if (!cancelled) setEfforts(rows);
@@ -133,7 +132,7 @@ export function TaskPage({
   }, [item?.id]);
 
   const handleUpdate = async (
-    targetId: number,
+    targetId: string,
     changes: { title?: string; description?: string; status?: TaskStatus; priority?: TaskPriority; category?: string | null; tags?: string | null },
   ) => {
     if (!stream || !thread) return;

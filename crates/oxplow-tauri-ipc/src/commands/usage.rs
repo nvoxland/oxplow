@@ -51,7 +51,7 @@ fn extract_stream_id(payload: &serde_json::Value) -> Option<oxplow_domain::Strea
         .get("streamId")
         .or_else(|| payload.as_object()?.get("stream_id"))
         .and_then(|v| v.as_str())
-        .map(oxplow_domain::StreamId::from)
+        .and_then(oxplow_domain::StreamId::try_from_str)
 }
 
 fn extract_thread_id(payload: &serde_json::Value) -> Option<oxplow_domain::ThreadId> {
@@ -60,7 +60,7 @@ fn extract_thread_id(payload: &serde_json::Value) -> Option<oxplow_domain::Threa
         .get("threadId")
         .or_else(|| payload.as_object()?.get("thread_id"))
         .and_then(|v| v.as_str())
-        .map(oxplow_domain::ThreadId::from)
+        .and_then(oxplow_domain::ThreadId::try_from_str)
 }
 
 #[tauri::command]

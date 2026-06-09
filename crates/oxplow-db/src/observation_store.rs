@@ -10,7 +10,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, Timestamp};
+use oxplow_domain::{DomainError, EffortId, StreamId, Timestamp};
 
 use crate::database::Database;
 
@@ -76,8 +76,8 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<EffortObserva
     };
     Ok(EffortObservation {
         id: row.get(0)?,
-        stream_id: row.get(1)?,
-        effort_id: row.get(2)?,
+        stream_id: StreamId::new(row.get::<_, i64>(1)?).to_string(),
+        effort_id: EffortId::new(row.get::<_, i64>(2)?).to_string(),
         kind: row.get(3)?,
         provenance: row.get(4)?,
         source: row.get(5)?,
@@ -111,6 +111,16 @@ impl SqliteEffortObservationStore {
             .call_mut(move |conn| {
                 let sql_err = |e: rusqlite::Error| DomainError::Invalid(format!("sql: {e}"));
                 let tx = conn.transaction().map_err(sql_err)?;
+                let stream_val = StreamId::try_from_str(&obs.stream_id)
+                    .ok_or_else(|| {
+                        DomainError::Invalid(format!("bad stream id: {}", obs.stream_id))
+                    })?
+                    .value();
+                let effort_val = EffortId::try_from_str(&obs.effort_id)
+                    .ok_or_else(|| {
+                        DomainError::Invalid(format!("bad effort id: {}", obs.effort_id))
+                    })?
+                    .value();
                 let now = ts_to_string(Timestamp::now());
                 tx.execute(
                     "INSERT INTO effort_observation
@@ -119,8 +129,8 @@ impl SqliteEffortObservationStore {
                         git_version_exact, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
-                        obs.stream_id,
-                        obs.effort_id,
+                        stream_val,
+                        effort_val,
                         obs.kind,
                         obs.provenance,
                         obs.source,
@@ -144,7 +154,7 @@ impl SqliteEffortObservationStore {
                            WHERE effort_id = ?1 AND kind = ?2
                            ORDER BY created_at DESC, id DESC
                            LIMIT ?3)",
-                    params![obs.effort_id, obs.kind, KEEP_LAST],
+                    params![effort_val, obs.kind, KEEP_LAST],
                 )
                 .map_err(sql_err)?;
                 tx.commit().map_err(sql_err)?;
@@ -160,7 +170,7 @@ impl SqliteEffortObservationStore {
         effort_id: &str,
         kind: Option<&str>,
     ) -> Result<Vec<EffortObservation>, DomainError> {
-        let effort_id = effort_id.to_string();
+        let effort_val = EffortId::try_from_str(effort_id).map(|e| e.value());
         let kind = kind.map(str::to_string);
         self.db
             .call(move |conn| {
@@ -170,7 +180,7 @@ impl SqliteEffortObservationStore {
                       ORDER BY created_at DESC, id DESC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![effort_id, kind], row_to_observation)?;
+                let rows = stmt.query_map(params![effort_val, kind], row_to_observation)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -182,7 +192,7 @@ impl SqliteEffortObservationStore {
         effort_id: &str,
         kind: &str,
     ) -> Result<Option<EffortObservation>, DomainError> {
-        let effort_id = effort_id.to_string();
+        let effort_val = EffortId::try_from_str(effort_id).map(|e| e.value());
         let kind = kind.to_string();
         self.db
             .call(move |conn| {
@@ -192,7 +202,7 @@ impl SqliteEffortObservationStore {
                       ORDER BY created_at DESC, id DESC LIMIT 1"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let mut rows = stmt.query_map(params![effort_id, kind], row_to_observation)?;
+                let mut rows = stmt.query_map(params![effort_val, kind], row_to_observation)?;
                 match rows.next() {
                     Some(r) => Ok(Some(r?)),
                     None => Ok(None),
@@ -216,23 +226,23 @@ mod tests {
                 let now = "2026-05-26T00:00:00Z";
                 conn.execute(
                     "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-                     VALUES ('s-1', 'primary', 'p', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+                     VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
                     [now],
                 )?;
                 conn.execute(
                     "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                     VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
+                     VALUES (1, 1, 't', 'active', ?1, ?1)",
                     [now],
                 )?;
                 conn.execute(
                     "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-                     VALUES ('b-1', 't', 'in_progress', 'medium', 'user', ?1, ?1)",
+                     VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
-                    "INSERT INTO task_effort (id, task_id, thread_id, started_at)
-                     VALUES ('ef-1', ?1, 'b-1', ?2)",
+                    "INSERT INTO task_effort (task_id, thread_id, started_at)
+                     VALUES (?1, 1, ?2)",
                     params![task_id, now],
                 )?;
                 Ok(())
@@ -241,13 +251,13 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        (SqliteEffortObservationStore::new(db), "ef-1".to_string())
+        (SqliteEffortObservationStore::new(db), "eff1".to_string())
     }
 
     fn sample(kind: &str, source: &str, metric: Option<f64>) -> NewEffortObservation {
         NewEffortObservation {
-            stream_id: "s-1".into(),
-            effort_id: "ef-1".into(),
+            stream_id: "str1".into(),
+            effort_id: "eff1".into(),
             kind: kind.into(),
             provenance: "observed".into(),
             source: source.into(),
@@ -376,7 +386,7 @@ mod tests {
         // Deleting the parent effort removes its observations (ON DELETE CASCADE).
         store
             .db
-            .call(|conn| conn.execute("DELETE FROM task_effort WHERE id = 'ef-1'", []))
+            .call(|conn| conn.execute("DELETE FROM task_effort WHERE id = 1", []))
             .await
             .unwrap();
         assert!(store

@@ -92,9 +92,9 @@ impl From<SessionError> for IpcError {
                 message: "primary stream missing".into(),
                 cause: None,
             },
-            SessionError::DuplicateWorktreeSlug(slug, sid) => Self {
+            SessionError::DuplicateWorktreeSlug(slug) => Self {
                 code: "DUPLICATE_WORKTREE_SLUG".into(),
-                message: format!("worktree slug \"{slug}\" already exists for stream {sid}"),
+                message: format!("worktree slug \"{slug}\" already exists"),
                 cause: None,
             },
             SessionError::Git(e) => Self {
@@ -220,12 +220,10 @@ mod tests {
     }
 
     #[test]
-    fn from_session_duplicate_slug_includes_slug_and_stream() {
-        let sid = oxplow_domain::StreamId::from("s-fake");
-        let e: IpcError = SessionError::DuplicateWorktreeSlug("feature".into(), sid.clone()).into();
+    fn from_session_duplicate_slug_includes_slug() {
+        let e: IpcError = SessionError::DuplicateWorktreeSlug("feature".into()).into();
         assert_eq!(e.code, "DUPLICATE_WORKTREE_SLUG");
         assert!(e.message.contains("feature"), "msg: {}", e.message);
-        assert!(e.message.contains(sid.as_str()), "msg: {}", e.message);
     }
 
     #[test]
@@ -250,16 +248,16 @@ mod tests {
 
     #[test]
     fn from_thread_error_not_found_maps_to_not_found() {
-        let e: IpcError = ThreadError::NotFound(oxplow_domain::ThreadId::from("b-x")).into();
+        let e: IpcError = ThreadError::NotFound(oxplow_domain::ThreadId::new(1)).into();
         assert_eq!(e.code, "NOT_FOUND");
     }
 
     #[test]
     fn from_thread_error_closed_uses_dedicated_code() {
-        let id = oxplow_domain::ThreadId::from("b-closed");
-        let e: IpcError = ThreadError::Closed(id.clone()).into();
+        let id = oxplow_domain::ThreadId::new(2);
+        let e: IpcError = ThreadError::Closed(id).into();
         assert_eq!(e.code, "THREAD_CLOSED");
-        assert!(e.message.contains(id.as_str()), "msg: {}", e.message);
+        assert!(e.message.contains(&id.to_string()), "msg: {}", e.message);
     }
 
     #[test]

@@ -67,7 +67,7 @@ pub async fn open_lsp_client(
         .and_then(|streams| {
             streams
                 .into_iter()
-                .find(|s| s.id.as_str() == stream_id)
+                .find(|s| s.id.to_string() == stream_id)
                 .map(|s| std::path::PathBuf::from(&s.worktree_path))
         })
         .unwrap_or_else(|| state.layout.project_dir.clone());
