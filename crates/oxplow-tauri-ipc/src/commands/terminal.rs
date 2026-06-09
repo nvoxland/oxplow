@@ -2,7 +2,7 @@ use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOpt
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::SpawnRequest;
-use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
+use oxplow_app::terminal_sessions::AttachResult;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::AgentKind;
 
@@ -59,19 +59,6 @@ fn shell_command_arg(value: &str) -> String {
 
 fn toml_cli_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-impl From<TerminalSessionError> for IpcError {
-    fn from(value: TerminalSessionError) -> Self {
-        match value {
-            TerminalSessionError::NotFound(id) => {
-                IpcError::invalid(format!("terminal session not found: {id}"))
-            }
-            TerminalSessionError::Pty(e) => IpcError::internal(e.to_string()),
-            TerminalSessionError::InvalidMessage(msg) => IpcError::invalid(msg),
-            TerminalSessionError::Base64(msg) => IpcError::invalid(format!("base64: {msg}")),
-        }
-    }
 }
 
 /// Build the PTY session key for a shell terminal, or `None` for a

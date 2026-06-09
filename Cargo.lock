@@ -3896,6 +3896,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-rpc"
+version = "0.5.0"
+dependencies = [
+ "oxplow-app",
+ "oxplow-domain",
+ "oxplow-session",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "oxplow-runtime"
 version = "0.5.0"
 dependencies = [
@@ -3953,6 +3969,7 @@ dependencies = [
  "oxplow-fs-watch",
  "oxplow-git",
  "oxplow-plugin",
+ "oxplow-rpc",
  "oxplow-session",
  "oxplow-tree-source",
  "serde",

@@ -41,6 +41,21 @@ touches roughly seven files. They sit in this order:
    regenerates `apps/desktop/src/tauri-bridge/generated/bindings.ts`;
    CI fails on a non-empty diff after regen, so check that file in.
 
+   **Shared dispatch (`oxplow-rpc`)**: the command *body* lives as a
+   plain core fn in `crates/oxplow-rpc/src/commands.rs`
+   (`async fn(svc: &Services, args…) -> Result<T, IpcError>`), and the
+   Tauri adapter is a one-line delegate to it. Register the core in the
+   `rpc_dispatch!` registry (`crates/oxplow-rpc/src/lib.rs`) under the
+   same snake_case wire name; the registry powers the remote-daemon
+   HTTP path (`POST /ipc/:name`), so a command that exists only as a
+   Tauri adapter is invisible to remote mode. `IpcError` (and every
+   `From<…> for IpcError` impl) lives in `oxplow-rpc::error` —
+   `oxplow-tauri-ipc::error` is a re-export. `oxplow-rpc` must stay
+   free of `tauri` deps so the headless daemon builds without a
+   webview toolchain. Commands that touch the OS shell
+   (`AppHandle`/window/clipboard/menu) stay Tauri-only and are NOT
+   registered in the dispatch.
+
 6. **UI api wrapper** — `apps/desktop/src/api.ts`. Thin wrapper around
    the typed `commands.name(...)` import from the generated bindings.
 

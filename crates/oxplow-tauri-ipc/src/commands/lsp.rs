@@ -1,17 +1,10 @@
-use oxplow_app::lsp_clients::LspClientError;
-use oxplow_app::lsp_installer::{InstalledManifestEntry, LspInstallerError};
+use oxplow_app::lsp_installer::InstalledManifestEntry;
 use oxplow_app::{BackgroundTaskKind, StartInput};
 use serde::Serialize;
 use specta::Type;
 
 use crate::error::IpcError;
 use crate::state::AppState;
-
-impl From<LspInstallerError> for IpcError {
-    fn from(value: LspInstallerError) -> Self {
-        IpcError::internal(value.to_string())
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct InstalledLspPackage {
@@ -28,21 +21,6 @@ impl From<InstalledManifestEntry> for InstalledLspPackage {
             version: value.version,
             language_ids: value.language_ids,
             binary: value.binary.to_string_lossy().to_string(),
-        }
-    }
-}
-
-impl From<LspClientError> for IpcError {
-    fn from(value: LspClientError) -> Self {
-        match value {
-            LspClientError::NotFound(id) => {
-                IpcError::invalid(format!("lsp client not found: {id}"))
-            }
-            LspClientError::NoConfig(lang) => {
-                IpcError::invalid(format!("no lsp server configured for language `{lang}`"))
-            }
-            LspClientError::Spawn(msg) => IpcError::internal(msg),
-            LspClientError::Dropped => IpcError::internal("lsp client dropped"),
         }
     }
 }

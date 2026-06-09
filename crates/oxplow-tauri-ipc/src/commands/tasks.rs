@@ -23,7 +23,7 @@ pub async fn get_task(
     state: tauri::State<'_, AppState>,
     id: TaskId,
 ) -> Result<Option<Task>, IpcError> {
-    Ok(state.task_store.get(id).await?)
+    oxplow_rpc::commands::get_task(&state, id).await
 }
 
 /// Insert-or-update a Task. The id field acts as the discriminator —

@@ -5,7 +5,13 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	appVersion: () => typedError<AppVersion, IpcError>(__TAURI_INVOKE("app_version")),
-	// Liveness check the UI uses to verify the daemon is reachable.
+	/**
+	 *  Liveness check the UI uses to verify the daemon is reachable.
+	 * 
+	 *  Takes `AppState` purely so the body can delegate to the shared
+	 *  `oxplow_rpc` core (the `State` param is injected by Tauri and is
+	 *  invisible to the generated TS binding — `ping()` stays arg-less).
+	 */
 	ping: () => typedError<string, IpcError>(__TAURI_INVOKE("ping")),
 	/**
 	 *  Forward a UI-side log line into the daemon's tracing pipeline.
@@ -1510,9 +1516,10 @@ export type InstalledLspPackage = {
 /**
  *  Frontend-facing error envelope.
  * 
- *  All `#[tauri::command]` functions return `Result<T, IpcError>`.
- *  Internal errors from the service layer are converted here so the
- *  JS side never has to reason about Rust-specific error types.
+ *  All command cores return `Result<T, IpcError>`, and the Tauri
+ *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
+ *  same shape. Internal errors from the service layer are converted here
+ *  so the JS side never has to reason about Rust-specific error types.
  */
 export type IpcError = {
 	code: string,

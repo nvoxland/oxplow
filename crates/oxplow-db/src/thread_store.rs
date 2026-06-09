@@ -384,10 +384,7 @@ mod tests {
             .set_selected_for_stream(&sid, Some(&t.id))
             .await
             .unwrap();
-        assert_eq!(
-            store.selected_for_stream(&sid).await.unwrap(),
-            Some(t.id)
-        );
+        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), Some(t.id));
         store.set_selected_for_stream(&sid, None).await.unwrap();
         assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
     }

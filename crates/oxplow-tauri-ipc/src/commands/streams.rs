@@ -10,7 +10,7 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub async fn list_streams(state: tauri::State<'_, AppState>) -> Result<Vec<Stream>, IpcError> {
-    Ok(state.streams.list_streams().await?)
+    oxplow_rpc::commands::list_streams(&state).await
 }
 
 #[tauri::command]

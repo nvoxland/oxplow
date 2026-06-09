@@ -417,9 +417,7 @@ mod tests {
             .await
             .unwrap();
         // c, a, b
-        svc.reorder_queue(&sid, &[c.id, a.id, b.id])
-            .await
-            .unwrap();
+        svc.reorder_queue(&sid, &[c.id, a.id, b.id]).await.unwrap();
         let list = svc.list_for_stream(&sid).await.unwrap();
         let order: Vec<_> = list.iter().map(|t| t.id).collect();
         assert_eq!(order, vec![c.id, a.id, b.id]);

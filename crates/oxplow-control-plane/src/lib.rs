@@ -851,12 +851,10 @@ async fn stop_directive(
         for eff in &outcome.side_effects {
             match eff {
                 StopHookSideEffect::RecordAuditSignature(sig) => {
-                    st.last_audit_signature
-                        .insert(*thread_id, sig.clone());
+                    st.last_audit_signature.insert(*thread_id, sig.clone());
                 }
                 StopHookSideEffect::RecordFiledButDidntShipFired => {
-                    st.filed_but_didnt_ship_fired
-                        .insert(*thread_id, true);
+                    st.filed_but_didnt_ship_fired.insert(*thread_id, true);
                 }
             }
         }

@@ -412,11 +412,7 @@ mod tests {
         content: Option<&[u8]>,
     ) -> i64 {
         use oxplow_domain::Timestamp;
-        let snap_id = svc
-            .snapshot_store
-            .create_snapshot(*stream)
-            .await
-            .unwrap();
+        let snap_id = svc.snapshot_store.create_snapshot(*stream).await.unwrap();
         let (blob_hash, size) = match content {
             Some(bytes) => (Some(svc.blobs.write(bytes).unwrap()), bytes.len() as i64),
             None => (None, 0),

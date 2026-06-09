@@ -17,10 +17,16 @@ pub async fn app_version() -> Result<AppVersion, IpcError> {
 }
 
 /// Liveness check the UI uses to verify the daemon is reachable.
+///
+/// Takes `AppState` purely so the body can delegate to the shared
+/// `oxplow_rpc` core (the `State` param is injected by Tauri and is
+/// invisible to the generated TS binding — `ping()` stays arg-less).
 #[tauri::command]
 #[specta::specta]
-pub async fn ping() -> Result<&'static str, IpcError> {
-    Ok("pong")
+pub async fn ping(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<&'static str, IpcError> {
+    oxplow_rpc::commands::ping(&state).await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

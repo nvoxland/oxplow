@@ -1036,7 +1036,10 @@ mod tests {
             "file backlink missing; got {file_back:?}"
         );
 
-        let task_back = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
+        let task_back = page_refs
+            .list_backlinks("task", "tsk99", None)
+            .await
+            .unwrap();
         assert!(
             task_back
                 .iter()

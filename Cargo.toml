@@ -15,6 +15,7 @@ members = [
     "crates/oxplow-lsp-installer",
     "crates/oxplow-mcp",
     "crates/oxplow-app",
+    "crates/oxplow-rpc",
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-plugin",
     "crates/oxplow-control-plane",
@@ -154,6 +155,7 @@ oxplow-lsp = { path = "crates/oxplow-lsp" }
 oxplow-lsp-installer = { path = "crates/oxplow-lsp-installer" }
 oxplow-mcp = { path = "crates/oxplow-mcp" }
 oxplow-app = { path = "crates/oxplow-app" }
+oxplow-rpc = { path = "crates/oxplow-rpc" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
 oxplow-plugin = { path = "crates/oxplow-plugin" }
 oxplow-control-plane = { path = "crates/oxplow-control-plane" }

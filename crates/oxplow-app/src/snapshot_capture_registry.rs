@@ -171,10 +171,7 @@ impl SnapshotCaptureRegistry {
     /// Fetch the primary stream's service. `None` only before boot
     /// has called [`Self::set_primary`].
     pub fn primary(&self) -> Option<Arc<SnapshotCaptureService>> {
-        let id = (*self
-            .primary_id
-            .read()
-            .unwrap_or_else(|e| e.into_inner()))?;
+        let id = (*self.primary_id.read().unwrap_or_else(|e| e.into_inner()))?;
         self.get(&id)
     }
 

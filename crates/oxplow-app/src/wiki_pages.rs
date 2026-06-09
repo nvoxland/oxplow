@@ -1206,7 +1206,10 @@ mod tests {
             .unwrap();
 
         // wi-1 backlink picks up the wiki source.
-        let inbound_wi = page_refs.list_backlinks("task", "tsk1", None).await.unwrap();
+        let inbound_wi = page_refs
+            .list_backlinks("task", "tsk1", None)
+            .await
+            .unwrap();
         assert_eq!(inbound_wi.len(), 1);
         assert_eq!(inbound_wi[0].source_kind, "wiki");
         assert_eq!(inbound_wi[0].source_id, "intro");
@@ -1341,9 +1344,15 @@ mod tests {
             .await
             .unwrap();
 
-        let inbound_2 = page_refs.list_backlinks("task", "tsk2", None).await.unwrap();
+        let inbound_2 = page_refs
+            .list_backlinks("task", "tsk2", None)
+            .await
+            .unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
-        let inbound_1 = page_refs.list_backlinks("task", "tsk1", None).await.unwrap();
+        let inbound_1 = page_refs
+            .list_backlinks("task", "tsk1", None)
+            .await
+            .unwrap();
         assert_eq!(inbound_1.len(), 1);
     }
 }

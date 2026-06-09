@@ -652,7 +652,10 @@ mod tests {
             .add_for_item(item_id, "blocked by tsk99 see [[src/app.rs]]", "u")
             .await
             .unwrap();
-        let inbound_task = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
+        let inbound_task = page_refs
+            .list_backlinks("task", "tsk99", None)
+            .await
+            .unwrap();
         assert!(
             inbound_task
                 .iter()
@@ -677,7 +680,10 @@ mod tests {
             .all(|e| e.source_id != note.id.to_string()));
 
         store.delete(&note.id).await.unwrap();
-        let inbound_task = page_refs.list_backlinks("task", "tsk99", None).await.unwrap();
+        let inbound_task = page_refs
+            .list_backlinks("task", "tsk99", None)
+            .await
+            .unwrap();
         assert!(inbound_task
             .iter()
             .all(|e| e.source_id != note.id.to_string()));

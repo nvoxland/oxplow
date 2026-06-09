@@ -272,12 +272,7 @@ mod tests {
             .status()
             .unwrap();
         std::process::Command::new("git")
-            .args([
-                "commit",
-                "-q",
-                "-m",
-                "fix tsk42 and touch [[architecture]]",
-            ])
+            .args(["commit", "-q", "-m", "fix tsk42 and touch [[architecture]]"])
             .current_dir(dir.path())
             .status()
             .unwrap();
@@ -288,7 +283,10 @@ mod tests {
         assert_eq!(n, 1, "should index the one commit");
 
         // tsk42 has the commit as a backlink.
-        let inbound = page_refs.list_backlinks("task", "tsk42", None).await.unwrap();
+        let inbound = page_refs
+            .list_backlinks("task", "tsk42", None)
+            .await
+            .unwrap();
         assert!(inbound.iter().any(|e| e.source_kind == "git-commit"));
         // file backlink covers a.rs.
         let file_inbound = page_refs

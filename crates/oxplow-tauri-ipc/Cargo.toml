@@ -10,6 +10,7 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-rpc = { workspace = true }
 oxplow-config = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }

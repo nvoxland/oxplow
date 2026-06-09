@@ -334,9 +334,15 @@ mod tests {
     #[tokio::test]
     async fn kind_filter_restricts_results() {
         let s = store().await;
-        s.upsert("task", "tsk1", Some("s-a"), "widget task", "build the widget")
-            .await
-            .unwrap();
+        s.upsert(
+            "task",
+            "tsk1",
+            Some("s-a"),
+            "widget task",
+            "build the widget",
+        )
+        .await
+        .unwrap();
         s.upsert(
             "file",
             "src/a.rs",

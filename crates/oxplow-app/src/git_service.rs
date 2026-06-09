@@ -186,9 +186,8 @@ impl GitService {
                 path: String::new(),
             });
             if refs_changed {
-                self.events.emit(OxplowEvent::GitRefsChanged {
-                    stream_id: *id,
-                });
+                self.events
+                    .emit(OxplowEvent::GitRefsChanged { stream_id: *id });
             }
         }
     }

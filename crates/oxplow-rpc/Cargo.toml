@@ -1,0 +1,31 @@
+[package]
+name = "oxplow-rpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Transport-neutral command dispatch. Holds the command "core" functions
+# (`fn(&Services, args) -> Result<T, IpcError>`) and a `dispatch(name,
+# json, &Services)` registry, so both the local Tauri command wrappers
+# (oxplow-tauri-ipc) and the remote HTTP daemon (oxplow-daemon) call one
+# source of truth. Deliberately has NO `tauri` dependency so the headless
+# daemon can build on a Linux host without a webview toolchain.
+
+[dependencies]
+oxplow-domain = { workspace = true }
+oxplow-session = { workspace = true }
+oxplow-app = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+specta = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

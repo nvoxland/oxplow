@@ -27,7 +27,8 @@ async fn app_version_returns_pkg_version() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn ping_returns_pong() {
-    let v = commands::app::ping().await.unwrap();
+    let app = TestApp::build();
+    let v = commands::app::ping(app.state()).await.unwrap();
     assert_eq!(v, "pong");
 }
 

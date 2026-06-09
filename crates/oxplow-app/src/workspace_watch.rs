@@ -80,13 +80,9 @@ impl WorkspaceWatchRegistry {
                 })
             };
             let is_worktree = matches!(s.kind, StreamKind::Worktree);
-            if let Some(w) = spawn_for_stream(
-                s.id,
-                worktree,
-                events.clone(),
-                is_worktree,
-                on_orphan,
-            ) {
+            if let Some(w) =
+                spawn_for_stream(s.id, worktree, events.clone(), is_worktree, on_orphan)
+            {
                 watchers.push(w);
             }
         }
@@ -235,9 +231,7 @@ fn spawn_for_stream(
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(_) => bus.emit(OxplowEvent::GitRefsChanged {
-                        stream_id: id,
-                    }),
+                    Ok(_) => bus.emit(OxplowEvent::GitRefsChanged { stream_id: id }),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -344,14 +338,8 @@ mod tests {
         let mut rx = bus.subscribe();
         let stream_id = oxplow_domain::StreamId::new(1);
         let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
-        let _watchers = spawn_for_stream(
-            stream_id,
-            root.clone(),
-            bus.clone(),
-            false,
-            on_orphan,
-        )
-        .expect("watchers");
+        let _watchers = spawn_for_stream(stream_id, root.clone(), bus.clone(), false, on_orphan)
+            .expect("watchers");
 
         // Give notify a moment to settle the cache walk before writing.
         tokio::time::sleep(Duration::from_millis(200)).await;
