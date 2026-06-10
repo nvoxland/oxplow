@@ -170,6 +170,16 @@ to `runtime.handleHookEnvelope`, which:
    launch-time system prompt no longer win.
 6. For `Stop`: runs `computeStopDirective` (below).
 
+**Hook handling is time-bounded.** Claude Code blocks on the hook
+response, so the control plane races the whole post-auth pipeline
+against a 5s timeout (`HOOK_HANDLING_TIMEOUT` /
+`bounded_hook_response` in `crates/oxplow-control-plane/src/lib.rs`).
+On expiry it logs a warning and returns the generic ack — tool call
+allowed, no directive — so a wedged DB (e.g. the writer lock held by
+a snapshot flush) can never stall the agent. Availability over
+enforcement: the MCP tools re-check write-guard + filing at the call
+site, so a timed-out PreToolUse deny is still caught there.
+
 ## Stop-hook pipeline
 
 The decision logic lives in `decideStopDirective` (a pure function in

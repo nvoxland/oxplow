@@ -237,6 +237,15 @@ async fn handle_dev_ping() -> Response {
         .into_response()
 }
 
+/// Upper bound on hook decision time. Claude Code blocks on the hook
+/// response, so a wedged backend (DB writer held by a snapshot flush,
+/// a slow store query) must not stall the agent indefinitely. On
+/// expiry we return the generic ack — i.e. allow the tool call / emit
+/// no directive. Availability over enforcement: a missed deny on one
+/// pathological turn beats a frozen agent, and the MCP tools re-check
+/// write-guard + filing at the call site anyway.
+const HOOK_HANDLING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 async fn handle_hook(
     State(ctx): State<AppCtx>,
     AxumPath(event): AxumPath<String>,
@@ -246,7 +255,41 @@ async fn handle_hook(
     if !check_bearer(&headers, &ctx.hook_token) {
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
+    let event_name = event.clone();
+    bounded_hook_response(
+        HOOK_HANDLING_TIMEOUT,
+        &event_name,
+        handle_hook_inner(ctx, event, headers, body),
+    )
+    .await
+}
 
+/// Race `fut` against `timeout`; on expiry, log and fall back to the
+/// generic ack (allow / no directive). Split from [`handle_hook`] so
+/// the timeout path is unit-testable with a never-resolving future.
+async fn bounded_hook_response<F>(timeout: std::time::Duration, event: &str, fut: F) -> Response
+where
+    F: std::future::Future<Output = Response>,
+{
+    match tokio::time::timeout(timeout, fut).await {
+        Ok(resp) => resp,
+        Err(_) => {
+            warn!(
+                event,
+                timeout_ms = timeout.as_millis() as u64,
+                "hook handling timed out — returning default allow/ack so the agent isn't stalled"
+            );
+            (StatusCode::ACCEPTED, Json(serde_json::json!({}))).into_response()
+        }
+    }
+}
+
+async fn handle_hook_inner(
+    ctx: AppCtx,
+    event: String,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
     let stream_id = headers
         .get("x-oxplow-stream")
         .and_then(|v| v.to_str().ok())
@@ -1068,6 +1111,27 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bounded_hook_response_passes_through_fast_futures() {
+        let resp = bounded_hook_response(std::time::Duration::from_secs(1), "Stop", async {
+            (StatusCode::OK, "directive").into_response()
+        })
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn bounded_hook_response_falls_back_to_ack_on_timeout() {
+        let resp = bounded_hook_response(
+            std::time::Duration::from_millis(10),
+            "PreToolUse",
+            std::future::pending::<Response>(),
+        )
+        .await;
+        // Safe default: allow / no directive — never stall the agent.
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    }
 
     #[test]
     fn token_is_long_enough() {
