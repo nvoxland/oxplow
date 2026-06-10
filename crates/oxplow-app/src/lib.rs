@@ -13,6 +13,7 @@ pub mod agent_prompt;
 pub mod agent_status_derive;
 pub mod background_task;
 pub mod blob_store;
+pub mod boot;
 pub mod code_quality_runner;
 pub mod collection;
 pub mod commit_indexer;

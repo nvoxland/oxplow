@@ -103,8 +103,13 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `oxplow-coverage` (pure report-parse data types),
   `oxplow-collect-plugin` (pluggable collector registry + host
   parse helpers + jaq/Starlark/exec transform runtimes),
-  `oxplow-app` (Services orchestration), `oxplow-tauri-ipc`
-  (`#[tauri::command]` adapters + `tauri-specta` exports).
+  `oxplow-app` (Services orchestration + shared boot orchestration in
+  `boot.rs`), `oxplow-rpc` (transport-neutral command cores + the
+  `rpc_dispatch!` registry; no tauri deps), `oxplow-daemon` (headless
+  HTTP backend for remote dev — serves the dispatch over loopback,
+  paired with an `ssh -L` tunnel), `oxplow-tauri-ipc`
+  (`#[tauri::command]` adapters + `tauri-specta` exports; one-line
+  delegates into `oxplow-rpc`).
 - Old top-level `src/` (the Electron/Node backend) is gone; nothing
   TS lives at the repo root anymore.
 
