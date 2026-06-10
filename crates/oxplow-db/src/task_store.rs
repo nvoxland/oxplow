@@ -3,8 +3,8 @@ use rusqlite::params;
 
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
-    Timestamp,
+    DomainError, EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus,
+    ThreadId, Timestamp,
 };
 
 use crate::database::Database;
@@ -17,6 +17,20 @@ pub struct SqliteTaskStore {
     page_refs: SqlitePageRefStore,
 }
 
+/// Outcome of [`SqliteTaskStore::update_with_effort_transition`]: which
+/// effort row the in_progress boundary crossing touched.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EffortTransition {
+    /// Entered in_progress — this effort row was opened (or an
+    /// already-open one adopted) with no snapshot pin yet.
+    Opened(EffortId),
+    /// Left in_progress — this open effort row was finished with no
+    /// end-snapshot pin yet.
+    Finished(EffortId),
+    /// Left in_progress but no open effort existed to finish.
+    NoOpenEffort,
+}
+
 impl SqliteTaskStore {
     pub fn new(db: Database) -> Self {
         Self {
@@ -24,6 +38,135 @@ impl SqliteTaskStore {
             db,
         }
     }
+
+    /// Every live thread-attached task currently `in_progress`. Used
+    /// by boot recovery to heal the "in_progress without an open
+    /// effort" orphan.
+    pub async fn list_in_progress(&self) -> Result<Vec<Task>, DomainError> {
+        self.db
+            .call(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task
+                     WHERE status = 'in_progress'
+                       AND deleted_at IS NULL
+                       AND thread_id IS NOT NULL
+                     ORDER BY id",
+                )?;
+                let rows = stmt.query_map([], row_to_task)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Persist a task row that just crossed the in_progress boundary
+    /// AND open/finish its lifecycle effort — one transaction, so the
+    /// invariant "in_progress ⟺ one open effort" can't be torn by a
+    /// crash or a failed side-band step. Snapshot pins are deliberately
+    /// NOT part of this: the caller requests the snapshot AFTER commit
+    /// and backfills via `set_start_snapshot` / `set_end_snapshot`
+    /// (effort attribution must never be gated on snapshot success).
+    ///
+    /// On entry an already-open effort is adopted instead of erroring —
+    /// the V31 unique index makes a true double-open impossible, and
+    /// adoption keeps the op idempotent under Busy retry.
+    pub async fn update_with_effort_transition(
+        &self,
+        item: &Task,
+        thread: ThreadId,
+        entering: bool,
+    ) -> Result<EffortTransition, DomainError> {
+        use crate::database::map_sql_err;
+        let edges_item = item.clone();
+        let item = std::sync::Arc::new(item.clone());
+        let outcome = self
+            .db
+            .transaction(move |tx| {
+                let rows = update_task_tx(tx, &item).map_err(map_sql_err)?;
+                if rows == 0 {
+                    return Err(DomainError::NotFound);
+                }
+                if entering {
+                    match crate::effort_store::find_open_for_task_tx(tx, item.id)
+                        .map_err(map_sql_err)?
+                    {
+                        Some(open) => Ok(EffortTransition::Opened(open.id)),
+                        None => Ok(EffortTransition::Opened(
+                            crate::effort_store::start_tx(
+                                tx,
+                                item.id,
+                                thread,
+                                None,
+                                Timestamp::now(),
+                            )
+                            .map_err(map_sql_err)?,
+                        )),
+                    }
+                } else {
+                    match crate::effort_store::find_open_for_task_tx(tx, item.id)
+                        .map_err(map_sql_err)?
+                    {
+                        Some(open) => {
+                            let now = serde_json::to_string(&Timestamp::now())
+                                .expect("Timestamp serializes to JSON")
+                                .trim_matches('"')
+                                .to_string();
+                            crate::effort_store::finish_tx(tx, open.id, None, None, &now)
+                                .map_err(map_sql_err)?;
+                            Ok(EffortTransition::Finished(open.id))
+                        }
+                        None => Ok(EffortTransition::NoOpenEffort),
+                    }
+                }
+            })
+            .await?;
+        // Post-commit: same body-ref projection `update()` runs.
+        let edges = task_edges(&edges_item);
+        self.page_refs
+            .replace_source_for_ref_types(
+                KIND_TASK,
+                &edges_item.id.to_string(),
+                task_body_ref_types(),
+                edges,
+            )
+            .await?;
+        Ok(outcome)
+    }
+}
+
+/// Sync core for the task-row UPDATE — connection-parameterized so it
+/// composes inside a `Database::transaction` closure (the lifecycle
+/// transition pairs it with effort open/finish). Returns affected-row
+/// count; callers map 0 to `NotFound`.
+pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE task SET
+            thread_id = ?2,
+            parent_id = ?3,
+            title = ?4,
+            description = ?5,
+            status = ?6,
+            priority = ?7,
+            sort_index = ?8,
+            updated_at = ?9,
+            completed_at = ?10,
+            deleted_at = ?11,
+            author = ?12
+         WHERE id = ?1 AND deleted_at IS NULL",
+        params![
+            item.id.value(),
+            item.thread_id.as_ref().map(|t| t.value()),
+            item.parent_id.map(|p| p.value()),
+            item.title,
+            item.description,
+            status_to_str(item.status),
+            priority_to_str(item.priority),
+            item.sort_index,
+            ts_to_string(item.updated_at),
+            item.completed_at.map(ts_to_string),
+            item.deleted_at.map(ts_to_string),
+            item.author.map(author_to_str),
+        ],
+    )
 }
 
 fn status_to_str(s: TaskStatus) -> &'static str {
@@ -324,38 +467,7 @@ impl TaskStore for SqliteTaskStore {
         let edges_item = item.clone();
         let rows_affected: usize = self
             .db
-            .call(move |conn| {
-                let rows = conn.execute(
-                    "UPDATE task SET
-                        thread_id = ?2,
-                        parent_id = ?3,
-                        title = ?4,
-                        description = ?5,
-                        status = ?6,
-                        priority = ?7,
-                        sort_index = ?8,
-                        updated_at = ?9,
-                        completed_at = ?10,
-                        deleted_at = ?11,
-                        author = ?12
-                     WHERE id = ?1 AND deleted_at IS NULL",
-                    params![
-                        item.id.value(),
-                        item.thread_id.as_ref().map(|t| t.value()),
-                        item.parent_id.map(|p| p.value()),
-                        item.title,
-                        item.description,
-                        status_to_str(item.status),
-                        priority_to_str(item.priority),
-                        item.sort_index,
-                        ts_to_string(item.updated_at),
-                        item.completed_at.map(ts_to_string),
-                        item.deleted_at.map(ts_to_string),
-                        item.author.map(author_to_str),
-                    ],
-                )?;
-                Ok(rows)
-            })
+            .call(move |conn| update_task_tx(conn, &item))
             .await?;
         if rows_affected == 0 {
             return Err(DomainError::NotFound);

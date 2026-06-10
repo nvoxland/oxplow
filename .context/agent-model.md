@@ -170,6 +170,13 @@ to `runtime.handleHookEnvelope`, which:
    launch-time system prompt no longer win.
 6. For `Stop`: runs `computeStopDirective` (below).
 
+**Side-band hook steps are best-effort by design.** The PostToolUse
+extras (collection observations, wiki-page attribution, the resume
+tracker) are individually try/warn — a coverage parse failure must
+never fail the hook or block the agent. This is deliberate policy,
+not an oversight; the durable lifecycle writes they decorate are
+covered by the transactional invariants in `data-model.md` instead.
+
 **Hook handling is time-bounded.** Claude Code blocks on the hook
 response, so the control plane races the whole post-auth pipeline
 against a 5s timeout (`HOOK_HANDLING_TIMEOUT` /

@@ -29,8 +29,8 @@ pub use analytics_stores::{
 pub use comment_store::SqliteCommentStore;
 pub use database::{Database, DbInitError};
 pub use effort_store::{
-    EffortAtSnapshot, EffortFile, EffortFileChange, FileRefVersion, SqliteTaskEffortStore,
-    TaskEffort, TaskEffortStore,
+    EffortAtSnapshot, EffortFile, EffortFileChange, FileRefVersion, OwnedFileRefVersion,
+    RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use observation_store::{
     EffortObservation, NewEffortObservation, SqliteEffortObservationStore,
@@ -39,7 +39,7 @@ pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use stream_store::SqliteStreamStore;
 pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
-pub use task_store::SqliteTaskStore;
+pub use task_store::{EffortTransition, SqliteTaskStore};
 pub use thread_store::SqliteThreadStore;
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

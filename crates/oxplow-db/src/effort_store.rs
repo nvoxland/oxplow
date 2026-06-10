@@ -71,6 +71,44 @@ pub struct FileRefVersion<'a> {
     pub git_version_exact: bool,
 }
 
+/// Owned variant of [`FileRefVersion`] for callers that need to move
+/// the triple into a `'static` transaction closure.
+#[derive(Debug, Clone)]
+pub struct OwnedFileRefVersion {
+    pub local_snapshot_id: i64,
+    pub closest_git_version: Option<String>,
+    pub git_version_exact: bool,
+}
+
+impl OwnedFileRefVersion {
+    pub fn as_ref(&self) -> FileRefVersion<'_> {
+        FileRefVersion {
+            local_snapshot_id: self.local_snapshot_id,
+            closest_git_version: self.closest_git_version.as_deref(),
+            git_version_exact: self.git_version_exact,
+        }
+    }
+}
+
+/// One user-visible attribution action for
+/// [`SqliteTaskEffortStore::record_effort_atomic`]: merge files,
+/// impacts, and a summary into the task's current effort (opening one
+/// if none exists) — committed as a single transaction.
+#[derive(Debug, Clone)]
+pub struct RecordEffortAtomic {
+    pub task: TaskId,
+    pub thread: ThreadId,
+    /// `(path, change)` pairs; callers pre-filter empty paths.
+    pub files: Vec<(String, EffortFileChange)>,
+    /// Version triple stamped on every file row. Resolved by the
+    /// caller BEFORE the transaction (it reads the snapshot store) —
+    /// advisory metadata, so a racing effort change between resolve
+    /// and commit only yields a slightly stale pin, never bad rows.
+    pub version: OwnedFileRefVersion,
+    pub impacts: Vec<TaskImpact>,
+    pub summary: Option<String>,
+}
+
 /// One (snapshot, effort) pair returned from
 /// `list_efforts_at_snapshots`. The renderer derives
 /// `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
@@ -86,6 +124,127 @@ fn ts_to_string(ts: Timestamp) -> String {
         .expect("Timestamp serializes to JSON")
         .trim_matches('"')
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Sync `_tx` cores — connection-parameterized so they compose inside a
+// single `Database::transaction` closure (a `rusqlite::Transaction`
+// derefs to `Connection`). The async trait methods below are thin
+// wrappers over these; multi-write actions like `record_effort_atomic`
+// compose several cores in one transaction. See `.context/data-model.md`,
+// "Transactions".
+// ---------------------------------------------------------------------------
+
+pub(crate) fn start_tx(
+    conn: &rusqlite::Connection,
+    task: TaskId,
+    thread: ThreadId,
+    start_snapshot_id: Option<i64>,
+    now: Timestamp,
+) -> rusqlite::Result<EffortId> {
+    conn.execute(
+        "INSERT INTO task_effort
+           (id, task_id, thread_id, started_at, ended_at,
+            start_snapshot_id, end_snapshot_id, summary)
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
+        params![
+            None::<i64>,
+            task.value(),
+            thread.value(),
+            ts_to_string(now),
+            start_snapshot_id,
+        ],
+    )?;
+    Ok(EffortId::new(conn.last_insert_rowid()))
+}
+
+pub(crate) fn finish_tx(
+    conn: &rusqlite::Connection,
+    id: EffortId,
+    end_snapshot_id: Option<i64>,
+    summary: Option<&str>,
+    now: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE task_effort
+         SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
+         WHERE id = ?1 AND ended_at IS NULL",
+        params![id.value(), now, end_snapshot_id, summary],
+    )?;
+    Ok(())
+}
+
+fn set_summary_tx(
+    conn: &rusqlite::Connection,
+    id: EffortId,
+    summary: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
+        params![id.value(), summary],
+    )?;
+    Ok(())
+}
+
+fn set_impacts_json_tx(
+    conn: &rusqlite::Connection,
+    id: EffortId,
+    json: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
+        params![id.value(), json],
+    )?;
+    Ok(())
+}
+
+fn record_file_tx(
+    conn: &rusqlite::Connection,
+    id: EffortId,
+    path: &str,
+    change: EffortFileChange,
+    version: FileRefVersion<'_>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO task_effort_file
+           (effort_id, path, change_kind,
+            local_snapshot_id, closest_git_version, git_version_exact)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            id.value(),
+            path,
+            change_to_str(change),
+            version.local_snapshot_id,
+            version.closest_git_version,
+            if version.git_version_exact { 1 } else { 0 },
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn find_open_for_task_tx(
+    conn: &rusqlite::Connection,
+    task: TaskId,
+) -> rusqlite::Result<Option<TaskEffort>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM task_effort
+         WHERE task_id = ?1 AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+    rows.next().transpose()
+}
+
+fn most_recent_for_task_tx(
+    conn: &rusqlite::Connection,
+    task: TaskId,
+) -> rusqlite::Result<Option<TaskEffort>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM task_effort WHERE task_id = ?1
+         ORDER BY started_at DESC LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+    rows.next().transpose()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -337,6 +496,119 @@ impl SqliteTaskEffortStore {
             .await
     }
 
+    /// One attribution action — start-if-missing + files + impacts +
+    /// finish/summary — committed as a single transaction (composing
+    /// the `_tx` cores above), then ONE post-commit page_ref slice
+    /// projection. Replaces the old 3+N separate statements where a
+    /// crash mid-way left files recorded with no summary/finish.
+    /// Returns the effort the action landed on.
+    pub async fn record_effort_atomic(
+        &self,
+        args: RecordEffortAtomic,
+    ) -> Result<EffortId, DomainError> {
+        use crate::database::map_sql_err;
+        let task = args.task;
+        let a = std::sync::Arc::new(args);
+        let effort_id = self
+            .db
+            .transaction(move |tx| {
+                let existing = most_recent_for_task_tx(tx, a.task).map_err(map_sql_err)?;
+                let (effort_id, open) = match &existing {
+                    Some(e) => (e.id, e.ended_at.is_none()),
+                    None => (
+                        start_tx(tx, a.task, a.thread, None, Timestamp::now())
+                            .map_err(map_sql_err)?,
+                        true,
+                    ),
+                };
+                let version = a.version.as_ref();
+                for (path, change) in &a.files {
+                    record_file_tx(tx, effort_id, path, *change, version).map_err(map_sql_err)?;
+                }
+                if !a.impacts.is_empty() {
+                    let json = serde_json::to_string(&a.impacts).map_err(|e| {
+                        DomainError::Invalid(format!("impacts serialize failed: {e}"))
+                    })?;
+                    set_impacts_json_tx(tx, effort_id, Some(&json)).map_err(map_sql_err)?;
+                }
+                if open {
+                    // No lifecycle close happened (or this is the
+                    // freshly-started fallback) — close with the
+                    // summary; end_snapshot_id stays NULL because this
+                    // is attribution, not a status transition.
+                    finish_tx(
+                        tx,
+                        effort_id,
+                        None,
+                        a.summary.as_deref(),
+                        &ts_to_string(Timestamp::now()),
+                    )
+                    .map_err(map_sql_err)?;
+                } else if a.summary.is_some() {
+                    // Lifecycle finish already closed the row but left
+                    // summary NULL — backfill it.
+                    set_summary_tx(tx, effort_id, a.summary.as_deref()).map_err(map_sql_err)?;
+                }
+                Ok(effort_id)
+            })
+            .await?;
+        self.project_effort_slice(task).await?;
+        Ok(effort_id)
+    }
+
+    /// Every open effort row (`ended_at IS NULL`) across all tasks.
+    /// Used by boot recovery to heal lifecycle orphans.
+    pub async fn list_all_open(&self) -> Result<Vec<TaskEffort>, DomainError> {
+        self.db
+            .call(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort WHERE ended_at IS NULL ORDER BY started_at",
+                )?;
+                let rows = stmt.query_map([], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Backfill the start-snapshot pin on an effort opened by the
+    /// transactional lifecycle transition. The snapshot is requested
+    /// AFTER that transaction commits, so a snapshot failure degrades
+    /// to "effort without a pin" rather than "no effort row".
+    pub async fn set_start_snapshot(
+        &self,
+        id: &EffortId,
+        snapshot_id: i64,
+    ) -> Result<(), DomainError> {
+        let id = *id;
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE task_effort SET start_snapshot_id = ?2 WHERE id = ?1",
+                    params![id.value(), snapshot_id],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Backfill the end-snapshot pin. See [`Self::set_start_snapshot`].
+    pub async fn set_end_snapshot(
+        &self,
+        id: &EffortId,
+        snapshot_id: i64,
+    ) -> Result<(), DomainError> {
+        let id = *id;
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE task_effort SET end_snapshot_id = ?2 WHERE id = ?1",
+                    params![id.value(), snapshot_id],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
     async fn task_for_effort(&self, effort_id: &EffortId) -> Result<Option<TaskId>, DomainError> {
         let id = *effort_id;
         self.db
@@ -359,25 +631,9 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     ) -> Result<TaskEffort, DomainError> {
         let thread = *thread;
         let now = Timestamp::now();
-        let thread_for_sql = thread;
         let id = self
             .db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO task_effort
-                       (id, task_id, thread_id, started_at, ended_at,
-                        start_snapshot_id, end_snapshot_id, summary)
-                     VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
-                    params![
-                        None::<i64>,
-                        task.value(),
-                        thread_for_sql.value(),
-                        ts_to_string(now),
-                        start_snapshot_id,
-                    ],
-                )?;
-                Ok(EffortId::new(conn.last_insert_rowid()))
-            })
+            .call(move |conn| start_tx(conn, task, thread, start_snapshot_id, now))
             .await?;
         Ok(TaskEffort {
             id,
@@ -405,13 +661,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         let now = ts_to_string(Timestamp::now());
         self.db
             .call(move |conn| {
-                conn.execute(
-                    "UPDATE task_effort
-                     SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
-                     WHERE id = ?1 AND ended_at IS NULL",
-                    params![id_for_sql.value(), now, end_snapshot_id, summary],
-                )?;
-                Ok(())
+                finish_tx(conn, id_for_sql, end_snapshot_id, summary.as_deref(), &now)
             })
             .await?;
         if summary_has_body {
@@ -456,27 +706,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
 
     async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
         self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort WHERE task_id = ?1
-                     ORDER BY started_at DESC LIMIT 1",
-                )?;
-                let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
-                rows.next().transpose()
-            })
+            .call(move |conn| most_recent_for_task_tx(conn, task))
             .await
     }
 
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError> {
         let id_for_sql = *id;
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
-                    params![id_for_sql.value(), summary],
-                )?;
-                Ok(())
-            })
+            .call(move |conn| set_summary_tx(conn, id_for_sql, summary.as_deref()))
             .await?;
         {
             if let Some(tid) = self.task_for_effort(id).await? {
@@ -559,13 +796,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             )
         };
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
-                    params![id_clone.value(), json],
-                )?;
-                Ok(())
-            })
+            .call(move |conn| set_impacts_json_tx(conn, id_clone, json.as_deref()))
             .await?;
         {
             if let Some(tid) = self.task_for_effort(id).await? {
@@ -602,28 +833,14 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         version: FileRefVersion<'_>,
     ) -> Result<(), DomainError> {
         let id_clone = *id;
+        let owned = OwnedFileRefVersion {
+            local_snapshot_id: version.local_snapshot_id,
+            closest_git_version: version.closest_git_version.map(|s| s.to_string()),
+            git_version_exact: version.git_version_exact,
+        };
         let path_clone = path.to_string();
-        let local_snapshot_id = version.local_snapshot_id;
-        let closest_git_version = version.closest_git_version.map(|s| s.to_string());
-        let exact = if version.git_version_exact { 1 } else { 0 };
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO task_effort_file
-                       (effort_id, path, change_kind,
-                        local_snapshot_id, closest_git_version, git_version_exact)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        id_clone.value(),
-                        path_clone,
-                        change_to_str(change),
-                        local_snapshot_id,
-                        closest_git_version,
-                        exact,
-                    ],
-                )?;
-                Ok(())
-            })
+            .call(move |conn| record_file_tx(conn, id_clone, &path_clone, change, owned.as_ref()))
             .await?;
         {
             if let Some(tid) = self.task_for_effort(id).await? {
@@ -968,6 +1185,165 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert!(list[0].ended_at.is_some());
         assert_eq!(list[0].summary.as_deref(), Some("done"));
+    }
+
+    fn atomic_args(
+        tid: TaskId,
+        thread: ThreadId,
+        files: Vec<(String, EffortFileChange)>,
+        summary: Option<&str>,
+    ) -> RecordEffortAtomic {
+        RecordEffortAtomic {
+            task: tid,
+            thread,
+            files,
+            version: OwnedFileRefVersion {
+                local_snapshot_id: 0,
+                closest_git_version: None,
+                git_version_exact: false,
+            },
+            impacts: Vec::new(),
+            summary: summary.map(|s| s.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn record_effort_atomic_opens_records_and_closes_in_one_action() {
+        let (store, tid, t) = fixture().await;
+        let eff = store
+            .record_effort_atomic(atomic_args(
+                tid,
+                t,
+                vec![
+                    ("src/a.rs".into(), EffortFileChange::Updated),
+                    ("src/b.rs".into(), EffortFileChange::Created),
+                ],
+                Some("shipped"),
+            ))
+            .await
+            .unwrap();
+        let row = store.get_effort(&eff).await.unwrap().unwrap();
+        assert!(row.ended_at.is_some(), "fresh effort is closed");
+        assert_eq!(row.summary.as_deref(), Some("shipped"));
+        assert_eq!(store.list_files(&eff).await.unwrap().len(), 2);
+        assert!(store.find_open_for_task(tid).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn record_effort_atomic_merges_into_open_lifecycle_effort() {
+        let (store, tid, t) = fixture().await;
+        let lifecycle = store.start(tid, &t, None).await.unwrap();
+        let eff = store
+            .record_effort_atomic(atomic_args(
+                tid,
+                t,
+                vec![("src/a.rs".into(), EffortFileChange::Updated)],
+                Some("done"),
+            ))
+            .await
+            .unwrap();
+        // Merged into the lifecycle row, not a duplicate.
+        assert_eq!(eff, lifecycle.id);
+        let row = store.get_effort(&eff).await.unwrap().unwrap();
+        assert!(row.ended_at.is_some());
+        assert_eq!(row.summary.as_deref(), Some("done"));
+    }
+
+    #[tokio::test]
+    async fn record_effort_atomic_backfills_summary_on_closed_effort() {
+        let (store, tid, t) = fixture().await;
+        let eff = store.start(tid, &t, None).await.unwrap();
+        store.finish(&eff.id, None, None).await.unwrap();
+        let landed = store
+            .record_effort_atomic(atomic_args(tid, t, Vec::new(), Some("late summary")))
+            .await
+            .unwrap();
+        assert_eq!(landed, eff.id);
+        let row = store.get_effort(&eff.id).await.unwrap().unwrap();
+        assert_eq!(row.summary.as_deref(), Some("late summary"));
+    }
+
+    fn task_row(id: TaskId, thread: ThreadId, status: TaskStatus) -> Task {
+        let now = Timestamp::from_unix_ms(2);
+        Task {
+            id,
+            thread_id: Some(thread),
+            parent_id: None,
+            title: "x".into(),
+            description: String::new(),
+            status,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: Some(TaskAuthor::User),
+        }
+    }
+
+    #[tokio::test]
+    async fn transition_opens_and_finishes_effort_with_status_flip() {
+        use crate::task_store::EffortTransition;
+        let (store, db, tid, t) = fixture_with_db().await;
+        let tasks = SqliteTaskStore::new(db.clone());
+
+        let entering = tasks
+            .update_with_effort_transition(&task_row(tid, t, TaskStatus::InProgress), t, true)
+            .await
+            .unwrap();
+        let EffortTransition::Opened(eff) = entering else {
+            panic!("expected Opened, got {entering:?}");
+        };
+        let open = store.find_open_for_task(tid).await.unwrap().unwrap();
+        assert_eq!(open.id, eff);
+        assert!(open.start_snapshot_id.is_none(), "pin backfills later");
+
+        // Entering again (e.g. Busy retry / re-issued transition)
+        // adopts the open row instead of tripping the V31 index.
+        let again = tasks
+            .update_with_effort_transition(&task_row(tid, t, TaskStatus::InProgress), t, true)
+            .await
+            .unwrap();
+        assert_eq!(again, EffortTransition::Opened(eff));
+
+        let leaving = tasks
+            .update_with_effort_transition(&task_row(tid, t, TaskStatus::Done), t, false)
+            .await
+            .unwrap();
+        assert_eq!(leaving, EffortTransition::Finished(eff));
+        assert!(store.find_open_for_task(tid).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn transition_on_missing_task_rolls_back_effort_open() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        let tasks = SqliteTaskStore::new(db.clone());
+        let ghost = TaskId::new(9999);
+        let err = tasks
+            .update_with_effort_transition(&task_row(ghost, t, TaskStatus::InProgress), t, true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound), "got {err:?}");
+        // The whole action rolled back — no effort row for the ghost.
+        assert!(store.find_open_for_task(ghost).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn second_open_effort_for_same_task_is_a_constraint() {
+        // The V31 partial unique index enforces the lifecycle
+        // invariant: at most one open effort per task. A double-open
+        // must surface as a typed Constraint, never silently diverge.
+        let (store, tid, t) = fixture().await;
+        store.start(tid, &t, None).await.unwrap();
+        let err = store.start(tid, &t, None).await.unwrap_err();
+        assert!(matches!(err, DomainError::Constraint(_)), "got {err:?}");
+        // Finishing the open row frees the slot.
+        let open = store.find_open_for_task(tid).await.unwrap().unwrap();
+        store.finish(&open.id, None, None).await.unwrap();
+        store.start(tid, &t, None).await.unwrap();
     }
 
     #[tokio::test]

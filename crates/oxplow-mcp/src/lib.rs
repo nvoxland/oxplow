@@ -2226,7 +2226,19 @@ impl OxplowMcp {
                 )
                 .await
             {
+                // Attribution is one atomic transaction now, so a
+                // failure means NOTHING landed (summary, files,
+                // impacts). Surface it instead of warn-and-swallow —
+                // the agent can simply retry complete_task; the
+                // status flip above is idempotent and the atomic op
+                // re-merges into the same effort.
                 tracing::warn!(?err, "complete_task: effort record failed");
+                return Err(internal(format!(
+                    "task {} was marked done, but recording the summary/files \
+                     attribution failed: {err}. Retry complete_task — the \
+                     attribution commits atomically, so nothing partial landed.",
+                    item.id
+                )));
             } else {
                 review = oxplow_app::task_service::compute_effort_file_review(
                     &self.services.effort_store,

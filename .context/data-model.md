@@ -16,6 +16,33 @@ exception so far: the entity-id scheme change edited the historical
 migrations in place and reset the dev DB, since there was no back-compat
 to preserve and only a single instance existed.)
 
+**Transactions.** One user-visible action that spans multiple writes
+to the same DB must commit as ONE transaction. The pattern (see the
+`transactional-boundaries-design` wiki page): store write ops are
+split into sync `*_tx(conn, …)` cores (free functions in the store's
+module, taking `&rusqlite::Connection`); the async store method is a
+thin `db.call` wrapper over its core; multi-write actions compose
+several cores inside one `Database::transaction(f)` closure
+(`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
+the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
+left no trace; that's why `f` is `Fn`). Event-bus emits, page_ref
+projections, and snapshot requests run AFTER commit, never inside the
+closure. Don't convert existing single-op methods preemptively —
+extract a `_tx` core the first time an op needs to join a
+transaction. Current users: `record_effort_atomic` and
+`update_with_effort_transition`.
+
+**Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
+has exactly one open `task_effort` row. Enforced three ways: the
+status flip and effort open/finish commit in one transaction
+(`SqliteTaskStore::update_with_effort_transition`); a V31 partial
+unique index on `task_effort(task_id) WHERE ended_at IS NULL` makes a
+double-open a `Constraint` error; and boot recovery
+(`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
+Snapshot pins are backfilled after commit (`set_start_snapshot` /
+`set_end_snapshot`) — an effort row is never gated on snapshot
+success.
+
 **Error typing.** Store failures surface as typed `DomainError`
 variants, not stringified blobs: `map_sql_err`
 (`crates/oxplow-db/src/database.rs`) classifies rusqlite errors —

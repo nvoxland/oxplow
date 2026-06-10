@@ -142,7 +142,61 @@ impl Database {
             f(&mut conn)
         })
         .await
-        .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
+    }
+}
+
+impl Database {
+    /// Run `f` inside a single SQLite transaction, off the async
+    /// runtime. THE composition point for multi-write actions: services
+    /// compose sync `*_tx(conn, …)` store cores inside one closure so a
+    /// user-visible action commits or rolls back as a unit (see
+    /// `.context/data-model.md`, "Transactions").
+    ///
+    /// Owns the `SQLITE_BUSY` retry: a failed attempt rolled back and
+    /// left no trace, so re-running the closure is safe by
+    /// construction — which is why `f` is `Fn`, not `FnOnce`, and why
+    /// retry lives here and nowhere else. Only [`DomainError::Busy`]
+    /// retries (bounded, short backoff); every other error — including
+    /// `Constraint` — returns immediately after rollback.
+    ///
+    /// Event-bus emits, page_ref projections, and snapshot requests
+    /// belong AFTER this returns, never inside `f`.
+    pub async fn transaction<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
+        const MAX_ATTEMPTS: u32 = 3;
+        const BACKOFF: [std::time::Duration; 2] = [
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(200),
+        ];
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut attempt: u32 = 0;
+            loop {
+                attempt += 1;
+                let mut conn = db
+                    .conn()
+                    .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let outcome = f(&tx).and_then(|value| {
+                    tx.commit().map_err(map_sql_err)?;
+                    Ok(value)
+                });
+                match outcome {
+                    Ok(value) => return Ok(value),
+                    Err(err) if err.is_retryable() && attempt < MAX_ATTEMPTS => {
+                        // Dropped `tx` already rolled back; safe to rerun.
+                        std::thread::sleep(BACKOFF[(attempt - 1) as usize % BACKOFF.len()]);
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+        })
+        .await
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
     }
 }
 
@@ -213,6 +267,89 @@ mod tests {
         let mapped = map_sql_err(busy);
         assert!(matches!(mapped, oxplow_domain::DomainError::Busy(_)));
         assert!(mapped.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn transaction_commits_all_writes() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE t (v TEXT)")
+                .map_err(map_sql_err)?;
+            tx.execute("INSERT INTO t (v) VALUES ('a')", [])
+                .map_err(map_sql_err)?;
+            tx.execute("INSERT INTO t (v) VALUES ('b')", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let n: i64 = db
+            .call(|conn| conn.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    #[tokio::test]
+    async fn transaction_rolls_back_on_closure_error() {
+        let db = Database::in_memory();
+        db.call(|conn| conn.execute_batch("CREATE TABLE t (v TEXT)"))
+            .await
+            .unwrap();
+        let err = db
+            .transaction(|tx| {
+                tx.execute("INSERT INTO t (v) VALUES ('a')", [])
+                    .map_err(map_sql_err)?;
+                Err::<(), _>(oxplow_domain::DomainError::Invariant(
+                    "midway failure".into(),
+                ))
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, oxplow_domain::DomainError::Invariant(_)));
+        // The pre-error insert must not survive.
+        let n: i64 = db
+            .call(|conn| conn.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn transaction_retries_busy_but_not_constraint() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        let db = Database::in_memory();
+        // Busy on the first two attempts, success on the third — the
+        // bounded retry must absorb the transient contention.
+        let calls = Arc::new(AtomicU32::new(0));
+        let seen = calls.clone();
+        let out = db
+            .transaction(move |_tx| {
+                if seen.fetch_add(1, Ordering::SeqCst) < 2 {
+                    Err(oxplow_domain::DomainError::Busy("locked".into()))
+                } else {
+                    Ok(42)
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(out, 42);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        // Constraint is deterministic — exactly one attempt.
+        let calls = Arc::new(AtomicU32::new(0));
+        let seen = calls.clone();
+        let err = db
+            .transaction(move |_tx| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                Err::<(), _>(oxplow_domain::DomainError::Constraint("dup".into()))
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, oxplow_domain::DomainError::Constraint(_)));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

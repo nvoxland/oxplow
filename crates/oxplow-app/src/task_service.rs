@@ -224,8 +224,27 @@ impl TaskService {
         // same lifecycle hook that update() runs on a Ready →
         // InProgress transition — otherwise complete_task's EffortEnd
         // snapshot has no open effort to land on and gets orphaned.
+        // The insert above already committed, so this is open + backfill
+        // (best-effort; boot recovery heals an in_progress task with no
+        // open effort).
         if matches!(item.status, TaskStatus::InProgress) {
-            self.apply_lifecycle_snapshot(&item, true).await;
+            if let (Some(effort_store), Some(thread_id)) =
+                (self.effort_store.as_ref(), item.thread_id)
+            {
+                match effort_store.start(item.id, &thread_id, None).await {
+                    Ok(eff) => {
+                        self.backfill_effort_snapshot(
+                            &item,
+                            true,
+                            oxplow_db::EffortTransition::Opened(eff.id),
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, task = %item.id, "effort lifecycle: start on create failed");
+                    }
+                }
+            }
         }
         Ok(item)
     }
@@ -261,35 +280,61 @@ impl TaskService {
             item.priority = p;
         }
         item.updated_at = Timestamp::now();
-        self.store.update(&item).await?;
 
-        // Effort lifecycle: when a task crosses the `in_progress`
-        // boundary, request a snapshot and open/close an effort row
-        // pinned to it. The snapshot+store hooks are optional so
-        // bare TaskService tests (no Services boot) skip this path.
+        // Effort lifecycle: when a thread-attached task crosses the
+        // `in_progress` boundary, the status flip and the effort
+        // open/finish commit as ONE transaction (the invariant
+        // "in_progress ⟺ one open effort" can't be torn by a crash),
+        // and the snapshot pin is backfilled after commit. The
+        // effort-store hook is optional so bare TaskService tests
+        // (no Services boot) take the plain-update path.
         let crossed_in =
             prior_status != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
         let crossed_out =
             prior_status == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
-        if crossed_in || crossed_out {
-            self.apply_lifecycle_snapshot(&item, crossed_in).await;
+        match (
+            crossed_in || crossed_out,
+            self.effort_store.is_some(),
+            item.thread_id,
+        ) {
+            (true, true, Some(thread_id)) => {
+                let transition = self
+                    .store
+                    .update_with_effort_transition(&item, thread_id, crossed_in)
+                    .await?;
+                self.backfill_effort_snapshot(&item, crossed_in, transition)
+                    .await;
+            }
+            _ => {
+                self.store.update(&item).await?;
+            }
         }
         Ok(item)
     }
 
-    /// Triggered from `update()` when the task just crossed the
-    /// in_progress boundary. On entry: request a snapshot and open
-    /// a new effort row anchored to it. On exit: request a snapshot,
-    /// find the still-open effort for this task, and finish it with
-    /// the end snapshot id. All errors are logged + swallowed —
-    /// status persistence already succeeded and we don't want a
-    /// snapshot failure to roll that back.
-    async fn apply_lifecycle_snapshot(&self, item: &Task, entering: bool) {
+    /// Post-commit half of the lifecycle transition: request the
+    /// EffortStart/EffortEnd snapshot and stamp it onto the effort row
+    /// the transaction opened/finished. Best-effort by design — the
+    /// effort row is already durable, so a snapshot failure degrades
+    /// to a missing pin (no bracket diff), never missing attribution.
+    async fn backfill_effort_snapshot(
+        &self,
+        item: &Task,
+        entering: bool,
+        transition: oxplow_db::EffortTransition,
+    ) {
+        let effort_id = match transition {
+            oxplow_db::EffortTransition::Opened(id) | oxplow_db::EffortTransition::Finished(id) => {
+                id
+            }
+            oxplow_db::EffortTransition::NoOpenEffort => {
+                tracing::debug!(task = %item.id, "effort lifecycle: no open effort to finish");
+                return;
+            }
+        };
         let Some(effort_store) = self.effort_store.as_ref() else {
             return;
         };
-        // Lifecycle efforts need a thread to attach to; tasks on
-        // the project-wide backlog skip snapshot pinning.
         let Some(thread_id) = item.thread_id else {
             return;
         };
@@ -302,31 +347,20 @@ impl TaskService {
             crate::events::SnapshotSourceKind::EffortEnd
         };
         let snap_id = match snapshot.request_snapshot(source).await {
-            Ok(id) => id,
+            Ok(Some(id)) => id,
+            Ok(None) => return,
             Err(e) => {
                 tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot failed");
                 return;
             }
         };
-        if entering {
-            if let Err(e) = effort_store.start(item.id, &thread_id, snap_id).await {
-                tracing::warn!(error = %e, task = %item.id, "effort lifecycle: start failed");
-            }
+        let stamp = if entering {
+            effort_store.set_start_snapshot(&effort_id, snap_id).await
         } else {
-            let open = match effort_store.find_open_for_task(item.id).await {
-                Ok(open) => open,
-                Err(e) => {
-                    tracing::warn!(error = %e, task = %item.id, "effort lifecycle: open lookup failed");
-                    return;
-                }
-            };
-            if let Some(open) = open {
-                if let Err(e) = effort_store.finish(&open.id, snap_id, None).await {
-                    tracing::warn!(error = %e, task = %item.id, "effort lifecycle: finish failed");
-                }
-            } else {
-                tracing::debug!(task = %item.id, "effort lifecycle: no open effort to finish");
-            }
+            effort_store.set_end_snapshot(&effort_id, snap_id).await
+        };
+        if let Err(e) = stamp {
+            tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot backfill failed");
         }
     }
 
@@ -398,40 +432,41 @@ impl TaskService {
         impacts: &[TaskImpact],
         worktree_root: Option<&Path>,
     ) -> Result<(), TaskServiceError> {
-        // Attach to the most-recent effort row for this task — that's
-        // the lifecycle effort that `update()` opened on in_progress
-        // entry and (typically) closed on exit. If none exists (e.g.
-        // a task filed directly into `done` with touched_files), open
-        // a fresh atomic effort.
-        let existing = effort_store.most_recent_for_task(item).await?;
-        let effort = match existing {
-            Some(e) => e,
-            None => effort_store.start(item, thread, None).await?,
+        // Resolve the version triple from the most-recent effort
+        // BEFORE the transaction — it reads the snapshot store. The
+        // attribution itself (attach-or-start + files + impacts +
+        // finish/summary) commits as one transaction, so a crash can
+        // no longer leave files recorded without their summary/finish.
+        let version = match effort_store.most_recent_for_task(item).await? {
+            Some(e) => self.resolve_effort_file_version(&e).await,
+            // No effort yet — the atomic op will open one with no
+            // snapshot pin, so the version triple is the unpinned
+            // default.
+            None => crate::file_ref_version::ResolvedFileVersion {
+                local_snapshot_id: 0,
+                closest_git_version: None,
+                git_version_exact: false,
+            },
         };
-        let version = self.resolve_effort_file_version(&effort).await;
-        for path in touched_files {
-            if path.is_empty() {
-                continue;
-            }
-            let change = classify_change(worktree_root, path);
-            effort_store
-                .record_file(&effort.id, path, change, version.as_ref())
-                .await?;
-        }
-        if !impacts.is_empty() {
-            effort_store.set_impacts(&effort.id, impacts).await?;
-        }
-        if effort.ended_at.is_none() {
-            // Still open (no lifecycle close happened, or this is
-            // the freshly-started fallback). Close it now with the
-            // summary; end_snapshot_id stays NULL because record_effort
-            // is summary/files attribution, not a status transition.
-            effort_store.finish(&effort.id, None, summary).await?;
-        } else if summary.is_some() {
-            // Lifecycle finish already closed the row but left
-            // summary NULL — backfill it.
-            effort_store.set_summary(&effort.id, summary).await?;
-        }
+        let files: Vec<(String, oxplow_db::EffortFileChange)> = touched_files
+            .iter()
+            .filter(|p| !p.is_empty())
+            .map(|p| (p.clone(), classify_change(worktree_root, p)))
+            .collect();
+        effort_store
+            .record_effort_atomic(oxplow_db::RecordEffortAtomic {
+                task: item,
+                thread: *thread,
+                files,
+                version: oxplow_db::OwnedFileRefVersion {
+                    local_snapshot_id: version.local_snapshot_id,
+                    closest_git_version: version.closest_git_version,
+                    git_version_exact: version.git_version_exact,
+                },
+                impacts: impacts.to_vec(),
+                summary,
+            })
+            .await?;
         Ok(())
     }
 
