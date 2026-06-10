@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
-use specta::Type;
-
-use oxplow_app::{CreateTaskInput, OxplowEvent, UpdateTaskChanges};
-use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{Task, TaskId, ThreadId};
+
+pub use oxplow_rpc::commands::tasks::{
+    CreateTaskRequest, MoveTaskRequest, ReorderTasksRequest, UpdateTaskRequest,
+};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -14,7 +13,7 @@ pub async fn list_tasks_for_thread(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<Vec<Task>, IpcError> {
-    Ok(state.task_store.list_for_thread(&thread_id).await?)
+    oxplow_rpc::commands::tasks::list_tasks_for_thread(&state, thread_id).await
 }
 
 #[tauri::command]
@@ -23,7 +22,7 @@ pub async fn get_task(
     state: tauri::State<'_, AppState>,
     id: TaskId,
 ) -> Result<Option<Task>, IpcError> {
-    oxplow_rpc::commands::get_task(&state, id).await
+    oxplow_rpc::commands::tasks::get_task(&state, id).await
 }
 
 /// Insert-or-update a Task. The id field acts as the discriminator —
@@ -35,39 +34,13 @@ pub async fn get_task(
 #[tauri::command]
 #[specta::specta]
 pub async fn upsert_task(state: tauri::State<'_, AppState>, item: Task) -> Result<Task, IpcError> {
-    let thread_id = item.thread_id;
-    let result = if item.id.is_placeholder() {
-        let mut new_item = item;
-        let id = state.task_store.insert(&new_item).await?;
-        new_item.id = id;
-        new_item
-    } else {
-        let id = item.id;
-        state.task_store.update(&item).await?;
-        state
-            .task_store
-            .get(id)
-            .await?
-            .ok_or_else(IpcError::not_found)?
-    };
-    state.events.emit(OxplowEvent::TasksChanged { thread_id });
-    Ok(result)
+    oxplow_rpc::commands::tasks::upsert_task(&state, item).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_task(state: tauri::State<'_, AppState>, id: TaskId) -> Result<(), IpcError> {
-    let thread_id = state.task_store.get(id).await?.and_then(|i| i.thread_id);
-    state.task_store.soft_delete(id).await?;
-    state.events.emit(OxplowEvent::TasksChanged { thread_id });
-    Ok(())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct CreateTaskRequest {
-    #[serde(rename = "threadId")]
-    pub thread_id: Option<ThreadId>,
-    pub input: CreateTaskInput,
+    oxplow_rpc::commands::tasks::delete_task(&state, id).await
 }
 
 #[tauri::command]
@@ -76,17 +49,7 @@ pub async fn create_task(
     state: tauri::State<'_, AppState>,
     req: CreateTaskRequest,
 ) -> Result<Task, IpcError> {
-    let item = state.tasks.create(req.thread_id, req.input).await?;
-    state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: req.thread_id,
-    });
-    Ok(item)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct UpdateTaskRequest {
-    pub id: TaskId,
-    pub changes: UpdateTaskChanges,
+    oxplow_rpc::commands::tasks::create_task(&state, req).await
 }
 
 #[tauri::command]
@@ -95,18 +58,7 @@ pub async fn update_task(
     state: tauri::State<'_, AppState>,
     req: UpdateTaskRequest,
 ) -> Result<Task, IpcError> {
-    let item = state.tasks.update(req.id, req.changes).await?;
-    state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: item.thread_id,
-    });
-    Ok(item)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct ReorderTasksRequest {
-    #[serde(rename = "threadId")]
-    pub thread_id: Option<ThreadId>,
-    pub order: Vec<TaskId>,
+    oxplow_rpc::commands::tasks::update_task(&state, req).await
 }
 
 #[tauri::command]
@@ -115,22 +67,7 @@ pub async fn reorder_tasks(
     state: tauri::State<'_, AppState>,
     req: ReorderTasksRequest,
 ) -> Result<(), IpcError> {
-    state
-        .tasks
-        .reorder(req.thread_id.as_ref(), &req.order)
-        .await?;
-    state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: req.thread_id,
-    });
-    Ok(())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct MoveTaskRequest {
-    pub id: TaskId,
-    /// Destination thread, or `None` to move onto the backlog.
-    #[serde(rename = "threadId")]
-    pub thread_id: Option<ThreadId>,
+    oxplow_rpc::commands::tasks::reorder_tasks(&state, req).await
 }
 
 #[tauri::command]
@@ -139,10 +76,7 @@ pub async fn get_task_summaries(
     state: tauri::State<'_, AppState>,
     thread_id: Option<ThreadId>,
 ) -> Result<Vec<Task>, IpcError> {
-    Ok(match thread_id {
-        Some(t) => state.task_store.list_for_thread(&t).await?,
-        None => state.task_store.list_backlog().await?,
-    })
+    oxplow_rpc::commands::tasks::get_task_summaries(&state, thread_id).await
 }
 
 #[tauri::command]
@@ -151,22 +85,5 @@ pub async fn move_task(
     state: tauri::State<'_, AppState>,
     req: MoveTaskRequest,
 ) -> Result<Task, IpcError> {
-    let origin_thread_id = state
-        .task_store
-        .get(req.id)
-        .await?
-        .and_then(|i| i.thread_id);
-    let item = state.tasks.move_to(req.id, req.thread_id).await?;
-    // Notify both buckets so the renderer refetches the source and
-    // destination. When origin == destination it's a noop reorder and
-    // a single event is enough.
-    state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: origin_thread_id,
-    });
-    if origin_thread_id != req.thread_id {
-        state.events.emit(OxplowEvent::TasksChanged {
-            thread_id: req.thread_id,
-        });
-    }
-    Ok(item)
+    oxplow_rpc::commands::tasks::move_task(&state, req).await
 }

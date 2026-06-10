@@ -1,4 +1,4 @@
-use oxplow_git::{CommitDetail, GitLogCommit, GitLogOptions, GitLogResult};
+use oxplow_git::{CommitDetail, GitLogCommit, GitLogResult};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -11,11 +11,7 @@ pub async fn get_git_log(
     limit: Option<u32>,
     all: bool,
 ) -> Result<GitLogResult, IpcError> {
-    let opts = GitLogOptions {
-        limit: limit.map(|n| n as usize),
-        all,
-    };
-    Ok(state.git.git_log(stream_id.as_deref(), opts).await)
+    oxplow_rpc::commands::log::get_git_log(&state, stream_id, limit, all).await
 }
 
 #[tauri::command]
@@ -25,7 +21,7 @@ pub async fn get_commit_detail(
     stream_id: Option<String>,
     sha: String,
 ) -> Result<Option<CommitDetail>, IpcError> {
-    Ok(state.git.commit_detail(stream_id.as_deref(), sha).await)
+    oxplow_rpc::commands::log::get_commit_detail(&state, stream_id, sha).await
 }
 
 #[tauri::command]
@@ -37,8 +33,5 @@ pub async fn get_commits_ahead_of(
     head: String,
     limit: u32,
 ) -> Result<Vec<GitLogCommit>, IpcError> {
-    Ok(state
-        .git
-        .commits_ahead_of(stream_id.as_deref(), base, head, limit as usize)
-        .await)
+    oxplow_rpc::commands::log::get_commits_ahead_of(&state, stream_id, base, head, limit).await
 }

@@ -17,11 +17,26 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
+# The full non-Tauri dep set of oxplow-tauri-ipc, mirrored up front so
+# migrating a command module never requires a manifest change.
+oxplow-config = { workspace = true }
+oxplow-db = { workspace = true }
+oxplow-git = { workspace = true }
+oxplow-fs-watch = { workspace = true }
+oxplow-plugin = { workspace = true }
+oxplow-code-metrics = { workspace = true }
+oxplow-code-deps = { workspace = true }
+oxplow-tree-source = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tempfile = { workspace = true }
+# Line-diff for per-function churn attribution (used by code_quality).
+similar = "2"
 
 [dev-dependencies]
 tokio = { workspace = true }

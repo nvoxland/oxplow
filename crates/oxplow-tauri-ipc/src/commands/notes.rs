@@ -3,7 +3,6 @@
 //! — task_effort.summary already records what shipped on a
 //! task, so a separate note table for the same purpose was duplicative.
 
-use oxplow_domain::stores::{TaskEventStore, TaskNoteStore};
 use oxplow_domain::{NoteId, TaskEvent, TaskId, TaskNote, ThreadId};
 
 use crate::error::IpcError;
@@ -17,10 +16,7 @@ pub async fn add_thread_note(
     body: String,
     author: String,
 ) -> Result<TaskNote, IpcError> {
-    Ok(state
-        .work_note_store
-        .add_for_thread(&thread_id, &body, &author)
-        .await?)
+    oxplow_rpc::commands::notes::add_thread_note(&state, thread_id, body, author).await
 }
 
 #[tauri::command]
@@ -29,7 +25,7 @@ pub async fn list_thread_notes(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<Vec<TaskNote>, IpcError> {
-    Ok(state.work_note_store.list_for_thread(&thread_id).await?)
+    oxplow_rpc::commands::notes::list_thread_notes(&state, thread_id).await
 }
 
 #[tauri::command]
@@ -38,7 +34,7 @@ pub async fn delete_work_note(
     state: tauri::State<'_, AppState>,
     id: NoteId,
 ) -> Result<(), IpcError> {
-    Ok(state.work_note_store.delete(&id).await?)
+    oxplow_rpc::commands::notes::delete_work_note(&state, id).await
 }
 
 #[tauri::command]
@@ -48,9 +44,5 @@ pub async fn list_task_events(
     item_id: Option<TaskId>,
     thread_id: Option<ThreadId>,
 ) -> Result<Vec<TaskEvent>, IpcError> {
-    match (item_id, thread_id) {
-        (Some(i), _) => Ok(state.task_event_store.list_for_item(i).await?),
-        (None, Some(t)) => Ok(state.task_event_store.list_for_thread(&t).await?),
-        (None, None) => Ok(vec![]),
-    }
+    oxplow_rpc::commands::notes::list_task_events(&state, item_id, thread_id).await
 }

@@ -3900,15 +3900,25 @@ name = "oxplow-rpc"
 version = "0.5.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-code-deps",
+ "oxplow-code-metrics",
+ "oxplow-config",
+ "oxplow-db",
  "oxplow-domain",
+ "oxplow-fs-watch",
+ "oxplow-git",
+ "oxplow-plugin",
  "oxplow-session",
+ "oxplow-tree-source",
  "serde",
  "serde_json",
+ "similar",
  "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

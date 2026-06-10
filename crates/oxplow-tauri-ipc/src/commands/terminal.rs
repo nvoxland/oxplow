@@ -1,8 +1,8 @@
 use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions, PaneKind};
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
-use oxplow_app::terminal_sessions::SpawnRequest;
 use oxplow_app::terminal_sessions::AttachResult;
+use oxplow_app::terminal_sessions::SpawnRequest;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::AgentKind;
 
@@ -310,8 +310,7 @@ pub async fn send_terminal_message(
     session_id: String,
     message: String,
 ) -> Result<(), IpcError> {
-    state.terminal_sessions.send(&session_id, &message).await?;
-    Ok(())
+    oxplow_rpc::commands::terminal::send_terminal_message(&state, session_id, message).await
 }
 
 /// Detach the renderer from `session_id` without killing the PTY —
@@ -324,8 +323,7 @@ pub async fn close_terminal_session(
     state: tauri::State<'_, AppState>,
     session_id: String,
 ) -> Result<(), IpcError> {
-    let _ = state.terminal_sessions.detach(&session_id).await;
-    Ok(())
+    oxplow_rpc::commands::terminal::close_terminal_session(&state, session_id).await
 }
 
 /// Best-effort live working directory of a session's child process, as an
@@ -339,11 +337,7 @@ pub async fn terminal_session_cwd(
     state: tauri::State<'_, AppState>,
     session_id: String,
 ) -> Result<Option<String>, IpcError> {
-    Ok(state
-        .terminal_sessions
-        .session_cwd(&session_id)
-        .await
-        .map(|p| p.to_string_lossy().into_owned()))
+    oxplow_rpc::commands::terminal::terminal_session_cwd(&state, session_id).await
 }
 
 /// Permanently kill the PTY behind `session_id`. Used when a thread
@@ -354,8 +348,7 @@ pub async fn terminate_terminal_session(
     state: tauri::State<'_, AppState>,
     session_id: String,
 ) -> Result<(), IpcError> {
-    let _ = state.terminal_sessions.close(&session_id).await;
-    Ok(())
+    oxplow_rpc::commands::terminal::terminate_terminal_session(&state, session_id).await
 }
 
 #[cfg(test)]

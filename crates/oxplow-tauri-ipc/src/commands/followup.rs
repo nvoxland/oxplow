@@ -10,7 +10,7 @@ pub async fn list_followups(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<Vec<Followup>, IpcError> {
-    Ok(state.followups.list_for_thread(&thread_id))
+    oxplow_rpc::commands::followup::list_followups(&state, thread_id).await
 }
 
 #[tauri::command]
@@ -20,7 +20,7 @@ pub async fn add_followup(
     thread_id: ThreadId,
     body: String,
 ) -> Result<Followup, IpcError> {
-    Ok(state.followups.add(thread_id, body))
+    oxplow_rpc::commands::followup::add_followup(&state, thread_id, body).await
 }
 
 #[tauri::command]
@@ -29,8 +29,7 @@ pub async fn remove_followup(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<(), IpcError> {
-    state.followups.remove(&id);
-    Ok(())
+    oxplow_rpc::commands::followup::remove_followup(&state, id).await
 }
 
 #[tauri::command]
@@ -39,6 +38,5 @@ pub async fn clear_followups_for_thread(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<(), IpcError> {
-    state.followups.clear_for_thread(&thread_id);
-    Ok(())
+    oxplow_rpc::commands::followup::clear_followups_for_thread(&state, thread_id).await
 }

@@ -156,7 +156,9 @@ impl From<LspInstallerError> for IpcError {
 impl From<LspClientError> for IpcError {
     fn from(value: LspClientError) -> Self {
         match value {
-            LspClientError::NotFound(id) => IpcError::invalid(format!("lsp client not found: {id}")),
+            LspClientError::NotFound(id) => {
+                IpcError::invalid(format!("lsp client not found: {id}"))
+            }
             LspClientError::NoConfig(lang) => {
                 IpcError::invalid(format!("no lsp server configured for language `{lang}`"))
             }

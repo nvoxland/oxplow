@@ -24,47 +24,7 @@ pub async fn read_file(
     relative_path: String,
     version: TreeVersion,
 ) -> Result<Option<String>, IpcError> {
-    match version {
-        TreeVersion::Disk => match state
-            .git
-            .read_workspace_file(stream_id.as_deref(), relative_path)
-            .await
-        {
-            Ok(file) => Ok(Some(file.content)),
-            Err(e) => {
-                // The git facade returns NotFound as an error; surface
-                // that as Ok(None) so the IPC contract matches the
-                // ref-reader's None semantics.
-                if e.to_string().to_lowercase().contains("not found") {
-                    Ok(None)
-                } else {
-                    Err(IpcError::internal(e.to_string()))
-                }
-            }
-        },
-        TreeVersion::Ref { r#ref } => Ok(state.git.read_file_at_ref(r#ref, relative_path).await),
-        TreeVersion::Snapshot { id } => {
-            let snapshot_id: i64 = id
-                .parse()
-                .map_err(|_| IpcError::invalid(format!("invalid snapshot id: {id}")))?;
-            let Some(hash) = state
-                .snapshot_store
-                .blob_hash_for_path(snapshot_id, &relative_path)
-                .await
-                .map_err(|e| IpcError::internal(e.to_string()))?
-            else {
-                return Ok(None);
-            };
-            let blobs = state.blobs.clone();
-            let bytes = tokio::task::spawn_blocking(move || blobs.read(&hash))
-                .await
-                .map_err(|e| IpcError::internal(e.to_string()))?;
-            match bytes {
-                Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
-                Err(_) => Ok(None),
-            }
-        }
-    }
+    oxplow_rpc::commands::workspace::read_file(&state, stream_id, relative_path, version).await
 }
 
 #[tauri::command]
@@ -74,11 +34,7 @@ pub async fn list_workspace_entries(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<Vec<WorkspaceEntry>, IpcError> {
-    state
-        .git
-        .list_workspace_entries(stream_id.as_deref(), relative_path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::workspace::list_workspace_entries(&state, stream_id, relative_path).await
 }
 
 #[tauri::command]
@@ -87,11 +43,7 @@ pub async fn list_workspace_files(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
-    state
-        .git
-        .list_workspace_files(stream_id.as_deref())
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::workspace::list_workspace_files(&state, stream_id).await
 }
 
 #[tauri::command]
@@ -101,11 +53,7 @@ pub async fn read_workspace_file(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    state
-        .git
-        .read_workspace_file(stream_id.as_deref(), relative_path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::workspace::read_workspace_file(&state, stream_id, relative_path).await
 }
 
 #[tauri::command]
@@ -116,11 +64,8 @@ pub async fn write_workspace_file(
     relative_path: String,
     content: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    state
-        .git
-        .write_workspace_file(stream_id.as_deref(), relative_path, content)
+    oxplow_rpc::commands::workspace::write_workspace_file(&state, stream_id, relative_path, content)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -131,11 +76,13 @@ pub async fn create_workspace_file(
     relative_path: String,
     content: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    state
-        .git
-        .create_workspace_file(stream_id.as_deref(), relative_path, content)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::workspace::create_workspace_file(
+        &state,
+        stream_id,
+        relative_path,
+        content,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -145,11 +92,8 @@ pub async fn create_workspace_directory(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<String, IpcError> {
-    state
-        .git
-        .create_workspace_directory(stream_id.as_deref(), relative_path)
+    oxplow_rpc::commands::workspace::create_workspace_directory(&state, stream_id, relative_path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -160,11 +104,8 @@ pub async fn rename_workspace_path(
     from_path: String,
     to_path: String,
 ) -> Result<(String, String), IpcError> {
-    state
-        .git
-        .rename_workspace_path(stream_id.as_deref(), from_path, to_path)
+    oxplow_rpc::commands::workspace::rename_workspace_path(&state, stream_id, from_path, to_path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -174,11 +115,7 @@ pub async fn delete_workspace_path(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<String, IpcError> {
-    state
-        .git
-        .delete_workspace_path(stream_id.as_deref(), relative_path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::workspace::delete_workspace_path(&state, stream_id, relative_path).await
 }
 
 #[tauri::command]
@@ -187,7 +124,7 @@ pub async fn get_workspace_status_summary(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<WorkspaceStatusSummary, IpcError> {
-    Ok(state.git.status_summary(stream_id.as_deref()).await)
+    oxplow_rpc::commands::workspace::get_workspace_status_summary(&state, stream_id).await
 }
 
 /// Re-export so the binding for GitFileStatus is generated.

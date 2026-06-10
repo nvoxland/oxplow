@@ -1,19 +1,13 @@
-use serde::{Deserialize, Serialize};
-use specta::Type;
+pub use oxplow_rpc::commands::app::{AppVersion, UiLogEntry};
 
 use crate::error::IpcError;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct AppVersion {
-    pub version: &'static str,
-}
-
 #[tauri::command]
 #[specta::specta]
-pub async fn app_version() -> Result<AppVersion, IpcError> {
-    Ok(AppVersion {
-        version: env!("CARGO_PKG_VERSION"),
-    })
+pub async fn app_version(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<AppVersion, IpcError> {
+    oxplow_rpc::commands::app::app_version(&state).await
 }
 
 /// Liveness check the UI uses to verify the daemon is reachable.
@@ -26,19 +20,7 @@ pub async fn app_version() -> Result<AppVersion, IpcError> {
 pub async fn ping(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<&'static str, IpcError> {
-    oxplow_rpc::commands::ping(&state).await
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct UiLogEntry {
-    #[serde(rename = "clientId")]
-    pub client_id: Option<String>,
-    pub level: String,
-    pub message: String,
-    /// JSON-encoded structured context (the renderer stringifies its
-    /// own object so the boundary is plain `Option<String>`).
-    pub context: Option<String>,
-    pub timestamp: Option<String>,
+    oxplow_rpc::commands::app::ping(&state).await
 }
 
 /// Forward a UI-side log line into the daemon's tracing pipeline.
@@ -47,15 +29,9 @@ pub struct UiLogEntry {
 /// renderer's devtools.
 #[tauri::command]
 #[specta::specta]
-pub async fn log_ui(entry: UiLogEntry) -> Result<(), IpcError> {
-    let context = entry.context.clone().unwrap_or_default();
-    let level = entry.level.to_lowercase();
-    let client = entry.client_id.as_deref().unwrap_or("?");
-    match level.as_str() {
-        "error" => tracing::error!(target: "ui", client, %context, "{}", entry.message),
-        "warn" => tracing::warn!(target: "ui", client, %context, "{}", entry.message),
-        "debug" => tracing::debug!(target: "ui", client, %context, "{}", entry.message),
-        _ => tracing::info!(target: "ui", client, %context, "{}", entry.message),
-    }
-    Ok(())
+pub async fn log_ui(
+    state: tauri::State<'_, crate::state::AppState>,
+    entry: UiLogEntry,
+) -> Result<(), IpcError> {
+    oxplow_rpc::commands::app::log_ui(&state, entry).await
 }

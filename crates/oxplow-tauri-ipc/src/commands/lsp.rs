@@ -1,29 +1,7 @@
-use oxplow_app::lsp_installer::InstalledManifestEntry;
-use oxplow_app::{BackgroundTaskKind, StartInput};
-use serde::Serialize;
-use specta::Type;
+pub use oxplow_rpc::commands::lsp::InstalledLspPackage;
 
 use crate::error::IpcError;
 use crate::state::AppState;
-
-#[derive(Debug, Clone, Serialize, Type)]
-pub struct InstalledLspPackage {
-    pub name: String,
-    pub version: String,
-    pub language_ids: Vec<String>,
-    pub binary: String,
-}
-
-impl From<InstalledManifestEntry> for InstalledLspPackage {
-    fn from(value: InstalledManifestEntry) -> Self {
-        Self {
-            name: value.name,
-            version: value.version,
-            language_ids: value.language_ids,
-            binary: value.binary.to_string_lossy().to_string(),
-        }
-    }
-}
 
 /// Spawn a new language-server child for `(stream_id, language_id)`.
 /// Returns an opaque `client_id` the renderer uses to address
@@ -37,20 +15,7 @@ pub async fn open_lsp_client(
     stream_id: String,
     language_id: String,
 ) -> Result<String, IpcError> {
-    let cwd = state
-        .streams
-        .list_streams()
-        .await
-        .ok()
-        .and_then(|streams| {
-            streams
-                .into_iter()
-                .find(|s| s.id.to_string() == stream_id)
-                .map(|s| std::path::PathBuf::from(&s.worktree_path))
-        })
-        .unwrap_or_else(|| state.layout.project_dir.clone());
-    let id = state.lsp_clients.open(&language_id, cwd).await?;
-    Ok(id)
+    oxplow_rpc::commands::lsp::open_lsp_client(&state, stream_id, language_id).await
 }
 
 /// Forward a raw JSON-RPC frame body (no headers) from the renderer
@@ -62,8 +27,7 @@ pub async fn send_lsp_message(
     client_id: String,
     payload: String,
 ) -> Result<(), IpcError> {
-    state.lsp_clients.send(&client_id, payload).await?;
-    Ok(())
+    oxplow_rpc::commands::lsp::send_lsp_message(&state, client_id, payload).await
 }
 
 /// Tear down the language server backing `client_id`. Idempotent on
@@ -74,8 +38,7 @@ pub async fn close_lsp_client(
     state: tauri::State<'_, AppState>,
     client_id: String,
 ) -> Result<(), IpcError> {
-    state.lsp_clients.close(&client_id).await?;
-    Ok(())
+    oxplow_rpc::commands::lsp::close_lsp_client(&state, client_id).await
 }
 
 /// Download + install a Mason package by name, register the resulting
@@ -88,23 +51,7 @@ pub async fn install_lsp_package(
     state: tauri::State<'_, AppState>,
     package_name: String,
 ) -> Result<InstalledLspPackage, IpcError> {
-    let task = state.background_tasks.start(StartInput {
-        kind: BackgroundTaskKind::Lsp,
-        label: format!("Install language server: {package_name}"),
-        detail: Some("downloading from mason-registry".into()),
-        progress: None,
-    });
-    match state.lsp_installer.install(&package_name).await {
-        Ok(entry) => {
-            state.background_tasks.complete(&task.id, None);
-            Ok(entry.into())
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            state.background_tasks.fail(&task.id, msg.clone(), None);
-            Err(e.into())
-        }
-    }
+    oxplow_rpc::commands::lsp::install_lsp_package(&state, package_name).await
 }
 
 /// List all Mason packages currently installed for this project.
@@ -113,6 +60,5 @@ pub async fn install_lsp_package(
 pub async fn list_installed_lsp_packages(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledLspPackage>, IpcError> {
-    let entries = state.lsp_installer.list_installed().await?;
-    Ok(entries.into_iter().map(Into::into).collect())
+    oxplow_rpc::commands::lsp::list_installed_lsp_packages(&state).await
 }

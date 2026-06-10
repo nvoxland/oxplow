@@ -17,14 +17,5 @@ pub async fn search(
     kinds: Option<Vec<String>>,
     limit: Option<u32>,
 ) -> Result<Vec<SearchHit>, IpcError> {
-    let kinds = kinds.unwrap_or_default();
-    Ok(state
-        .search_store
-        .search(
-            &query,
-            stream_id.as_deref(),
-            &kinds,
-            limit.unwrap_or(50) as usize,
-        )
-        .await?)
+    oxplow_rpc::commands::search::search(&state, query, stream_id, kinds, limit).await
 }

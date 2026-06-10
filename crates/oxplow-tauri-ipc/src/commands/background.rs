@@ -1,4 +1,3 @@
-use oxplow_app::background_task::{StartInput, UpdateInput};
 use oxplow_app::{BackgroundTask, BackgroundTaskKind};
 
 use crate::error::IpcError;
@@ -9,7 +8,7 @@ use crate::state::AppState;
 pub async fn list_background_tasks(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<BackgroundTask>, IpcError> {
-    Ok(state.background_tasks.list_running())
+    oxplow_rpc::commands::background::list_background_tasks(&state).await
 }
 
 #[tauri::command]
@@ -18,7 +17,7 @@ pub async fn get_background_task(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<Option<BackgroundTask>, IpcError> {
-    Ok(state.background_tasks.get(&id))
+    oxplow_rpc::commands::background::get_background_task(&state, id).await
 }
 
 #[tauri::command]
@@ -29,12 +28,7 @@ pub async fn start_background_task(
     label: String,
     detail: Option<String>,
 ) -> Result<BackgroundTask, IpcError> {
-    Ok(state.background_tasks.start(StartInput {
-        kind,
-        label,
-        detail,
-        progress: None,
-    }))
+    oxplow_rpc::commands::background::start_background_task(&state, kind, label, detail).await
 }
 
 #[tauri::command]
@@ -44,9 +38,7 @@ pub async fn complete_background_task(
     id: String,
     result_json: Option<String>,
 ) -> Result<(), IpcError> {
-    let result = result_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-    state.background_tasks.complete(&id, result);
-    Ok(())
+    oxplow_rpc::commands::background::complete_background_task(&state, id, result_json).await
 }
 
 #[tauri::command]
@@ -56,8 +48,7 @@ pub async fn fail_background_task(
     id: String,
     error: String,
 ) -> Result<(), IpcError> {
-    state.background_tasks.fail(&id, error, None);
-    Ok(())
+    oxplow_rpc::commands::background::fail_background_task(&state, id, error).await
 }
 
 #[tauri::command]
@@ -69,13 +60,6 @@ pub async fn update_background_task(
     detail: Option<Option<String>>,
     progress: Option<Option<f64>>,
 ) -> Result<(), IpcError> {
-    state.background_tasks.update(
-        &id,
-        UpdateInput {
-            label,
-            detail,
-            progress,
-        },
-    );
-    Ok(())
+    oxplow_rpc::commands::background::update_background_task(&state, id, label, detail, progress)
+        .await
 }

@@ -1,4 +1,4 @@
-use oxplow_git::{BranchRef, BranchRefKind};
+use oxplow_git::BranchRef;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -6,7 +6,7 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<BranchRef>, IpcError> {
-    Ok(state.git.list_branches_project().await)
+    oxplow_rpc::commands::branch::list_branches(&state).await
 }
 
 #[tauri::command]
@@ -14,7 +14,7 @@ pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<Bran
 pub async fn get_default_branch(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, IpcError> {
-    Ok(state.git.detect_default_branch().await)
+    oxplow_rpc::commands::branch::get_default_branch(&state).await
 }
 
 #[tauri::command]
@@ -24,11 +24,7 @@ pub async fn rename_branch(
     from: String,
     to: String,
 ) -> Result<(), IpcError> {
-    state
-        .git
-        .rename_branch(from, to)
-        .await
-        .map_err(|e| IpcError::invalid(e.to_string()))
+    oxplow_rpc::commands::branch::rename_branch(&state, from, to).await
 }
 
 #[tauri::command]
@@ -38,11 +34,7 @@ pub async fn delete_branch(
     branch: String,
     force: bool,
 ) -> Result<(), IpcError> {
-    state
-        .git
-        .delete_branch(branch, force)
-        .await
-        .map_err(|e| IpcError::invalid(e.to_string()))
+    oxplow_rpc::commands::branch::delete_branch(&state, branch, force).await
 }
 
 /// Filter helper for the UI that wants only locals or only remotes.
@@ -51,9 +43,5 @@ pub async fn delete_branch(
 pub async fn list_local_branches(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<BranchRef>, IpcError> {
-    let all = state.git.list_branches_project().await;
-    Ok(all
-        .into_iter()
-        .filter(|b| b.kind == BranchRefKind::Local)
-        .collect())
+    oxplow_rpc::commands::branch::list_local_branches(&state).await
 }

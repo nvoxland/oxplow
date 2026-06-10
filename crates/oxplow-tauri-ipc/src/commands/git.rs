@@ -1,4 +1,3 @@
-use oxplow_domain::stores::StreamStore;
 use oxplow_git::{
     AheadBehind, BlameLine, BranchChanges, ChangeScopes, CommitRefLabel, GitOpResult,
     GitOperationKind, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry,
@@ -15,7 +14,7 @@ pub async fn get_repo_conflict_state(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<RepoConflictState, IpcError> {
-    Ok(state.git.conflict_state(stream_id.as_deref()).await)
+    oxplow_rpc::commands::git::get_repo_conflict_state(&state, stream_id).await
 }
 
 #[tauri::command]
@@ -26,10 +25,7 @@ pub async fn get_ahead_behind(
     base: String,
     head: String,
 ) -> Result<AheadBehind, IpcError> {
-    Ok(state
-        .git
-        .ahead_behind(stream_id.as_deref(), base, head)
-        .await)
+    oxplow_rpc::commands::git::get_ahead_behind(&state, stream_id, base, head).await
 }
 
 #[tauri::command]
@@ -39,11 +35,7 @@ pub async fn append_to_gitignore(
     stream_id: Option<String>,
     entry: String,
 ) -> Result<(), IpcError> {
-    state
-        .git
-        .append_to_gitignore(stream_id.as_deref(), entry)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::append_to_gitignore(&state, stream_id, entry).await
 }
 
 #[tauri::command]
@@ -53,11 +45,7 @@ pub async fn restore_path(
     stream_id: Option<String>,
     path: String,
 ) -> Result<(), IpcError> {
-    state
-        .git
-        .restore_path(stream_id.as_deref(), path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::restore_path(&state, stream_id, path).await
 }
 
 /// Re-export the operation kind so the TS bindings include it.
@@ -72,11 +60,7 @@ pub async fn git_fetch(
     stream_id: Option<String>,
     remote: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .fetch(stream_id.as_deref(), remote)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_fetch(&state, stream_id, remote).await
 }
 
 #[tauri::command]
@@ -85,11 +69,7 @@ pub async fn git_pull(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .pull(stream_id.as_deref())
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_pull(&state, stream_id).await
 }
 
 #[tauri::command]
@@ -100,11 +80,7 @@ pub async fn git_pull_remote_into_current(
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .pull_remote_into_current(stream_id.as_deref(), remote, branch)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_pull_remote_into_current(&state, stream_id, remote, branch).await
 }
 
 #[tauri::command]
@@ -113,11 +89,7 @@ pub async fn git_push(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .push(stream_id.as_deref())
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_push(&state, stream_id).await
 }
 
 #[tauri::command]
@@ -128,11 +100,7 @@ pub async fn git_push_current_to(
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .push_current_to(stream_id.as_deref(), remote, branch)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_push_current_to(&state, stream_id, remote, branch).await
 }
 
 #[tauri::command]
@@ -142,11 +110,7 @@ pub async fn git_merge_into(
     stream_id: Option<String>,
     source: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .merge(stream_id.as_deref(), source)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_merge_into(&state, stream_id, source).await
 }
 
 #[tauri::command]
@@ -156,11 +120,7 @@ pub async fn git_rebase_onto(
     stream_id: Option<String>,
     onto: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .rebase(stream_id.as_deref(), onto)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_rebase_onto(&state, stream_id, onto).await
 }
 
 #[tauri::command]
@@ -170,11 +130,7 @@ pub async fn git_commit_all(
     stream_id: Option<String>,
     message: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .commit_all(stream_id.as_deref(), message)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_commit_all(&state, stream_id, message).await
 }
 
 #[tauri::command]
@@ -184,17 +140,13 @@ pub async fn git_add_path(
     stream_id: Option<String>,
     path: String,
 ) -> Result<GitOpResult, IpcError> {
-    state
-        .git
-        .add_path(stream_id.as_deref(), path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    oxplow_rpc::commands::git::git_add_path(&state, stream_id, path).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_all_refs(state: tauri::State<'_, AppState>) -> Result<GroupedGitRefs, IpcError> {
-    Ok(state.git.list_all_refs().await)
+    oxplow_rpc::commands::git::list_all_refs(&state).await
 }
 
 /// Map commit SHAs to a single user-facing branch/tag label. Used by
@@ -207,7 +159,7 @@ pub async fn resolve_commit_ref_labels(
     state: tauri::State<'_, AppState>,
     shas: Vec<String>,
 ) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
-    Ok(state.git.resolve_commit_ref_labels(shas).await)
+    oxplow_rpc::commands::git::resolve_commit_ref_labels(&state, shas).await
 }
 
 #[tauri::command]
@@ -216,10 +168,7 @@ pub async fn list_recent_remote_branches(
     state: tauri::State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<Vec<RemoteBranchEntry>, IpcError> {
-    Ok(state
-        .git
-        .list_recent_remote_branches(limit.unwrap_or(50))
-        .await)
+    oxplow_rpc::commands::git::list_recent_remote_branches(&state, limit).await
 }
 
 #[tauri::command]
@@ -230,10 +179,7 @@ pub async fn list_file_commits(
     path: String,
     limit: Option<usize>,
 ) -> Result<Vec<oxplow_git::GitLogCommit>, IpcError> {
-    Ok(state
-        .git
-        .list_file_commits(stream_id.as_deref(), path, limit.unwrap_or(50))
-        .await)
+    oxplow_rpc::commands::git::list_file_commits(&state, stream_id, path, limit).await
 }
 
 #[tauri::command]
@@ -243,7 +189,7 @@ pub async fn git_blame(
     stream_id: Option<String>,
     path: String,
 ) -> Result<Vec<BlameLine>, IpcError> {
-    Ok(state.git.blame(stream_id.as_deref(), path).await)
+    oxplow_rpc::commands::git::git_blame(&state, stream_id, path).await
 }
 
 #[tauri::command]
@@ -254,10 +200,7 @@ pub async fn local_blame(
     path: String,
     disk_text: String,
 ) -> Result<Vec<LocalBlameEntry>, IpcError> {
-    Ok(state
-        .git
-        .local_blame(stream_id.as_deref(), path, disk_text)
-        .await)
+    oxplow_rpc::commands::git::local_blame(&state, stream_id, path, disk_text).await
 }
 
 #[tauri::command]
@@ -266,7 +209,7 @@ pub async fn get_change_scopes(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
-    Ok(state.git.change_scopes(stream_id.as_deref()).await)
+    oxplow_rpc::commands::git::get_change_scopes(&state, stream_id).await
 }
 
 #[tauri::command]
@@ -276,10 +219,7 @@ pub async fn get_branch_changes(
     stream_id: Option<String>,
     base_ref: String,
 ) -> Result<BranchChanges, IpcError> {
-    Ok(state
-        .git
-        .branch_changes(stream_id.as_deref(), base_ref)
-        .await)
+    oxplow_rpc::commands::git::get_branch_changes(&state, stream_id, base_ref).await
 }
 
 #[tauri::command]
@@ -287,7 +227,7 @@ pub async fn get_branch_changes(
 pub async fn list_existing_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    Ok(state.git.list_existing_worktrees().await)
+    oxplow_rpc::commands::git::list_existing_worktrees(&state).await
 }
 
 #[tauri::command]
@@ -295,14 +235,7 @@ pub async fn list_existing_worktrees(
 pub async fn list_adoptable_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
-    let registered: Vec<String> = store
-        .list()
-        .await?
-        .into_iter()
-        .map(|s| s.worktree_path)
-        .collect();
-    Ok(state.git.list_adoptable_worktrees(registered).await)
+    oxplow_rpc::commands::git::list_adoptable_worktrees(&state).await
 }
 
 #[tauri::command]
@@ -313,10 +246,7 @@ pub async fn search_workspace_text(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<TextSearchHit>, IpcError> {
-    Ok(state
-        .git
-        .search_workspace_text(stream_id.as_deref(), query, limit)
-        .await)
+    oxplow_rpc::commands::git::search_workspace_text(&state, stream_id, query, limit).await
 }
 
 #[tauri::command]
@@ -326,5 +256,5 @@ pub async fn read_file_at_ref(
     r#ref: String,
     path: String,
 ) -> Result<Option<String>, IpcError> {
-    Ok(state.git.read_file_at_ref(r#ref, path).await)
+    oxplow_rpc::commands::git::read_file_at_ref(&state, r#ref, path).await
 }

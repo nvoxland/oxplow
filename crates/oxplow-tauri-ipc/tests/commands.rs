@@ -21,7 +21,8 @@ use oxplow_tauri_ipc::commands;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn app_version_returns_pkg_version() {
-    let v = commands::app::app_version().await.unwrap();
+    let app = TestApp::build();
+    let v = commands::app::app_version(app.state()).await.unwrap();
     assert!(!v.version.is_empty());
 }
 
@@ -34,13 +35,17 @@ async fn ping_returns_pong() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn log_ui_accepts_a_record() {
-    commands::app::log_ui(commands::app::UiLogEntry {
-        level: "info".into(),
-        message: "hello from test".into(),
-        context: Some("{\"k\":\"v\"}".into()),
-        client_id: None,
-        timestamp: None,
-    })
+    let app = TestApp::build();
+    commands::app::log_ui(
+        app.state(),
+        commands::app::UiLogEntry {
+            level: "info".into(),
+            message: "hello from test".into(),
+            context: Some("{\"k\":\"v\"}".into()),
+            client_id: None,
+            timestamp: None,
+        },
+    )
     .await
     .unwrap();
 }
