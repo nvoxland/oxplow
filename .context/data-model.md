@@ -16,6 +16,16 @@ exception so far: the entity-id scheme change edited the historical
 migrations in place and reset the dev DB, since there was no back-compat
 to preserve and only a single instance existed.)
 
+**Error typing.** Store failures surface as typed `DomainError`
+variants, not stringified blobs: `map_sql_err`
+(`crates/oxplow-db/src/database.rs`) classifies rusqlite errors —
+constraint violations → `Constraint`, `SQLITE_BUSY`/`SQLITE_LOCKED` →
+`Busy` (the only `is_retryable()` variant), everything else →
+`Storage`. `Invalid` is reserved for caller-supplied validation
+failures. The IPC layer maps these to `CONSTRAINT` / `BUSY` /
+`STORAGE` codes (`crates/oxplow-rpc/src/error.rs`). Don't map SQL
+errors to `Invalid` in new store code.
+
 ## Entity ids
 
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**

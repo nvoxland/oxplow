@@ -69,6 +69,21 @@ impl From<DomainError> for IpcError {
                 message: msg.clone(),
                 cause: None,
             },
+            DomainError::Constraint(msg) => Self {
+                code: "CONSTRAINT".into(),
+                message: msg.clone(),
+                cause: None,
+            },
+            DomainError::Busy(msg) => Self {
+                code: "BUSY".into(),
+                message: msg.clone(),
+                cause: None,
+            },
+            DomainError::Storage(msg) => Self {
+                code: "STORAGE".into(),
+                message: msg.clone(),
+                cause: None,
+            },
         }
     }
 }
@@ -218,6 +233,16 @@ mod tests {
     fn from_domain_invariant_uses_invariant_code() {
         let e: IpcError = DomainError::Invariant("rule".into()).into();
         assert_eq!(e.code, "INVARIANT");
+    }
+
+    #[test]
+    fn from_domain_storage_variants_use_dedicated_codes() {
+        let e: IpcError = DomainError::Constraint("dup".into()).into();
+        assert_eq!(e.code, "CONSTRAINT");
+        let e: IpcError = DomainError::Busy("locked".into()).into();
+        assert_eq!(e.code, "BUSY");
+        let e: IpcError = DomainError::Storage("io".into()).into();
+        assert_eq!(e.code, "STORAGE");
     }
 
     #[test]

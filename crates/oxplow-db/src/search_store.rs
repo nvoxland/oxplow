@@ -81,9 +81,7 @@ impl SqliteSearchStore {
         let body = body.to_string();
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
@@ -93,11 +91,11 @@ impl SqliteSearchStore {
                         |row| row.get(0),
                     )
                     .optional()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 let rowid = match existing {
                     Some(id) => {
                         tx.execute("DELETE FROM search_fts WHERE rowid = ?1", params![id])
-                            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                            .map_err(crate::database::map_sql_err)?;
                         id
                     }
                     None => {
@@ -106,7 +104,7 @@ impl SqliteSearchStore {
                              VALUES (?1, ?2, ?3)",
                             params![kind, ref_id, stream_id],
                         )
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                         tx.last_insert_rowid()
                     }
                 };
@@ -114,9 +112,8 @@ impl SqliteSearchStore {
                     "INSERT INTO search_fts (rowid, title, body) VALUES (?1, ?2, ?3)",
                     params![rowid, title, body],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
+                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await
@@ -134,9 +131,7 @@ impl SqliteSearchStore {
         let stream_id = stream_id.map(|s| s.to_string());
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
@@ -146,15 +141,14 @@ impl SqliteSearchStore {
                         |row| row.get(0),
                     )
                     .optional()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 if let Some(id) = existing {
                     tx.execute("DELETE FROM search_fts WHERE rowid = ?1", params![id])
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                     tx.execute("DELETE FROM search_entry WHERE rowid = ?1", params![id])
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                 }
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await
@@ -166,22 +160,19 @@ impl SqliteSearchStore {
         let stream_id = stream_id.to_string();
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "DELETE FROM search_fts WHERE rowid IN \
                      (SELECT rowid FROM search_entry WHERE stream_id = ?1)",
                     params![stream_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "DELETE FROM search_entry WHERE stream_id = ?1",
                     params![stream_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
+                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await

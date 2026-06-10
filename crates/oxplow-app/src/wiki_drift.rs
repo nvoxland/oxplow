@@ -117,7 +117,7 @@ pub async fn compute_wiki_ref_drift(
 fn read_blob(blobs: &BlobStore, hash: &str) -> Result<Vec<u8>, DomainError> {
     blobs
         .read(hash)
-        .map_err(|e| DomainError::Invalid(format!("blob read {hash}: {e}")))
+        .map_err(|e| DomainError::Storage(format!("blob read {hash}: {e}")))
 }
 
 /// Pure line-level unified diff of `old`→`new`, headed with `path`,

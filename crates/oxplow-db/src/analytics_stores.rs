@@ -957,9 +957,7 @@ impl SqliteSnapshotStore {
         }
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 let mut ids = Vec::with_capacity(snaps.len());
                 {
                     let mut stmt = tx
@@ -969,7 +967,7 @@ impl SqliteSnapshotStore {
                             snapshot_id, mtime_ms)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         )
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                     for snap in &snaps {
                         stmt.execute(params![
                             snap.stream_id.value(),
@@ -981,12 +979,11 @@ impl SqliteSnapshotStore {
                             snap.snapshot_id,
                             snap.mtime_ms,
                         ])
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                         ids.push(tx.last_insert_rowid());
                     }
                 }
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(ids)
             })
             .await
@@ -1037,14 +1034,12 @@ impl SqliteSnapshotStore {
     ) -> Result<(), DomainError> {
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
                     params![sha, snapshot_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
                 // Cascade: every file-ref row pointing at this snapshot
                 // now has an exact git pin. Flip both the version sha
                 // (in case capture-time wrote a different HEAD) and the
@@ -1056,7 +1051,7 @@ impl SqliteSnapshotStore {
                   WHERE local_snapshot_id = ?2",
                     params![sha, snapshot_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "UPDATE page_ref
                     SET closest_git_version = ?1,
@@ -1064,9 +1059,8 @@ impl SqliteSnapshotStore {
                   WHERE local_snapshot_id = ?2",
                     params![sha, snapshot_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+                .map_err(crate::database::map_sql_err)?;
+                tx.commit().map_err(crate::database::map_sql_err)
             })
             .await
     }

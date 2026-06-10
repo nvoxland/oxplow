@@ -112,14 +112,12 @@ impl SqlitePageRefStore {
         let source_id = source_id.to_string();
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "DELETE FROM page_ref WHERE source_kind = ?1 AND source_id = ?2",
                     params![source_kind, source_id],
                 )
-                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                .map_err(crate::database::map_sql_err)?;
                 for edge in edges {
                     if edge.source_kind != source_kind || edge.source_id != source_id {
                         continue;
@@ -142,10 +140,9 @@ impl SqlitePageRefStore {
                             if edge.git_version_exact { 1 } else { 0 },
                         ],
                     )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 }
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+                tx.commit().map_err(crate::database::map_sql_err)
             })
             .await
     }
@@ -176,9 +173,7 @@ impl SqlitePageRefStore {
         let source_id = source_id.to_string();
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 // Read existing PKs + version data for this source. The
                 // unique key for an edge within a source is
                 // (target_kind, target_id, ref_type).
@@ -193,7 +188,7 @@ impl SqlitePageRefStore {
                          FROM page_ref
                          WHERE source_kind = ?1 AND source_id = ?2",
                         )
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                     let rows = stmt
                         .query_map(params![&source_kind, &source_id], |r| {
                             let kind: String = r.get(0)?;
@@ -204,10 +199,10 @@ impl SqlitePageRefStore {
                             let exact: i64 = r.get(5)?;
                             Ok(((kind, id, rt), (local, git, exact != 0)))
                         })
-                        .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        .map_err(crate::database::map_sql_err)?;
                     let mut map = std::collections::HashMap::new();
                     for row in rows {
-                        let (k, v) = row.map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                        let (k, v) = row.map_err(crate::database::map_sql_err)?;
                         map.insert(k, v);
                     }
                     map
@@ -262,7 +257,7 @@ impl SqlitePageRefStore {
                             if exact { 1 } else { 0 },
                         ],
                     )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 }
                 // Delete edges that existed but aren't in the new set.
                 for key in existing.keys() {
@@ -276,10 +271,9 @@ impl SqlitePageRefStore {
                        AND ref_type = ?5",
                         params![&source_kind, &source_id, &key.0, &key.1, &key.2],
                     )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 }
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+                tx.commit().map_err(crate::database::map_sql_err)
             })
             .await
     }
@@ -471,9 +465,7 @@ impl SqlitePageRefStore {
         let source_id = source_id.to_string();
         self.db
             .call_mut(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 let placeholders: Vec<String> =
                     (3..3 + ref_types.len()).map(|i| format!("?{i}")).collect();
                 let sql = format!(
@@ -490,7 +482,7 @@ impl SqlitePageRefStore {
                     params_vec.push(rt);
                 }
                 tx.execute(&sql, &params_vec[..])
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 for edge in edges {
                     if edge.source_kind != source_kind || edge.source_id != source_id {
                         continue;
@@ -516,10 +508,9 @@ impl SqlitePageRefStore {
                             if edge.git_version_exact { 1 } else { 0 },
                         ],
                     )
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    .map_err(crate::database::map_sql_err)?;
                 }
-                tx.commit()
-                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+                tx.commit().map_err(crate::database::map_sql_err)
             })
             .await
     }

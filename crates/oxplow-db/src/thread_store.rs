@@ -349,9 +349,9 @@ mod tests {
         b.status = ThreadStatus::Active;
         store.upsert(&a).await.unwrap();
         // Second active thread on the same stream violates the
-        // partial unique index → DB error → DomainError::Invalid.
+        // partial unique index → DB error → DomainError::Constraint.
         let err = store.upsert(&b).await.unwrap_err();
-        assert!(matches!(err, DomainError::Invalid(_)));
+        assert!(matches!(err, DomainError::Constraint(_)));
     }
 
     #[tokio::test]

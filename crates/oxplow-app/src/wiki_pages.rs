@@ -261,7 +261,7 @@ pub async fn sync_from_disk_with_refs_versioned(
         return store.delete(slug).await;
     }
     let raw_body = fs::read_to_string(&file_path)
-        .map_err(|e| DomainError::Invalid(format!("read note {slug}: {e}")))?;
+        .map_err(|e| DomainError::Storage(format!("read note {slug}: {e}")))?;
     // Strip @version literals from any (file|dir):path@version or
     // [[path@version]] form. The body is prose; versioning lives in
     // the page_ref row. @disk / @local / @<sha> / @<branch> — all

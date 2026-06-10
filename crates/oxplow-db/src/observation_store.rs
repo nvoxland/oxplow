@@ -109,7 +109,7 @@ impl SqliteEffortObservationStore {
     pub async fn record(&self, obs: NewEffortObservation) -> Result<i64, DomainError> {
         self.db
             .call_mut(move |conn| {
-                let sql_err = |e: rusqlite::Error| DomainError::Invalid(format!("sql: {e}"));
+                let sql_err = crate::database::map_sql_err;
                 let tx = conn.transaction().map_err(sql_err)?;
                 let stream_val = StreamId::try_from_str(&obs.stream_id)
                     .ok_or_else(|| {

@@ -307,8 +307,7 @@ mod tests {
         let mut p2 = primary();
         p2.id = StreamId::new(3);
         let err = store.upsert(&p2).await.unwrap_err();
-        // Unique index on kind='primary' enforces single-primary invariant.
-        assert!(matches!(err, DomainError::Invalid(_)));
+        assert!(matches!(err, DomainError::Constraint(_)));
     }
 
     #[tokio::test]

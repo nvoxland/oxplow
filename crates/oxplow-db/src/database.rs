@@ -103,8 +103,8 @@ impl Database {
     ) -> Result<R, oxplow_domain::DomainError> {
         let conn = self
             .conn()
-            .map_err(|e| oxplow_domain::DomainError::Invalid(format!("pool: {e}")))?;
-        f(&conn).map_err(|e| oxplow_domain::DomainError::Invalid(format!("sql: {e}")))
+            .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
+        f(&conn).map_err(map_sql_err)
     }
 
     /// Run a blocking DB closure off the async runtime. Wraps
@@ -121,7 +121,7 @@ impl Database {
         let db = self.clone();
         tokio::task::spawn_blocking(move || db.with_conn(f))
             .await
-            .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
+            .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
     }
 
     /// Like [`Self::call`] but hands the closure a `&mut Connection`, for
@@ -138,11 +138,32 @@ impl Database {
         tokio::task::spawn_blocking(move || {
             let mut conn = db
                 .conn()
-                .map_err(|e| oxplow_domain::DomainError::Invalid(format!("pool: {e}")))?;
+                .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
             f(&mut conn)
         })
         .await
         .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
+    }
+}
+
+/// Classify a `rusqlite::Error` into the typed `DomainError` storage
+/// variants so upper layers can implement retry / user-message policy
+/// instead of pattern-matching on stringified SQL errors:
+/// constraint violations → `Constraint`, `SQLITE_BUSY`/`SQLITE_LOCKED`
+/// → `Busy` (retryable), everything else → `Storage`.
+pub(crate) fn map_sql_err(e: rusqlite::Error) -> oxplow_domain::DomainError {
+    use rusqlite::ffi::ErrorCode;
+    match &e {
+        rusqlite::Error::SqliteFailure(f, _) => match f.code {
+            ErrorCode::ConstraintViolation => {
+                oxplow_domain::DomainError::Constraint(format!("sql: {e}"))
+            }
+            ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => {
+                oxplow_domain::DomainError::Busy(format!("sql: {e}"))
+            }
+            _ => oxplow_domain::DomainError::Storage(format!("sql: {e}")),
+        },
+        _ => oxplow_domain::DomainError::Storage(format!("sql: {e}")),
     }
 }
 
@@ -157,6 +178,42 @@ pub enum DbInitError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Provoke real rusqlite errors through a scratch connection and
+    /// check `map_sql_err`'s classification — upper layers key retry /
+    /// user-message policy off these variants.
+    #[test]
+    fn map_sql_err_classifies_constraint_busy_and_other() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT UNIQUE)")
+            .unwrap();
+        conn.execute("INSERT INTO t (v) VALUES ('a')", []).unwrap();
+        let dup = conn
+            .execute("INSERT INTO t (v) VALUES ('a')", [])
+            .unwrap_err();
+        assert!(matches!(
+            map_sql_err(dup),
+            oxplow_domain::DomainError::Constraint(_)
+        ));
+
+        let missing_table = conn
+            .execute("INSERT INTO nope (v) VALUES (1)", [])
+            .unwrap_err();
+        assert!(matches!(
+            map_sql_err(missing_table),
+            oxplow_domain::DomainError::Storage(_)
+        ));
+
+        // Busy is hard to provoke deterministically on :memory:; build
+        // the ffi error directly.
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".into()),
+        );
+        let mapped = map_sql_err(busy);
+        assert!(matches!(mapped, oxplow_domain::DomainError::Busy(_)));
+        assert!(mapped.is_retryable());
+    }
 
     #[test]
     fn in_memory_db_runs_migrations() {
