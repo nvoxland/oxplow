@@ -23,12 +23,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path as AxumPath, State,
+    },
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use futures::{SinkExt, StreamExt};
 use oxplow_app::Services;
 
 /// Shared router state: the booted services plus the control-plane
@@ -73,11 +77,109 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// `GET /events` — WebSocket multiplexing the three event channels the
+/// Tauri shell bridges natively (`oxplow:event`, `lsp:event`,
+/// `terminal:event`). Each frame is `{"channel":"oxplow"|"lsp"|
+/// "terminal","payload":<existing event shape>}` — the payloads are
+/// the same serialized types `app.emit` sends locally, so the
+/// renderer's handlers are transport-agnostic.
+async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| events_stream(socket, state))
+}
+
+/// Spawn a forwarder per broadcast source into one mpsc, then pump the
+/// socket from it. A lagged subscriber just drops frames — the
+/// renderer's coarse "bucket changed, refetch" model recovers on the
+/// next event (and refetches everything on reconnect anyway).
+async fn events_stream(socket: WebSocket, state: DaemonState) {
+    let (mut sink, mut inbound) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
+
+    fn forward<T, F>(
+        mut rx: tokio::sync::broadcast::Receiver<T>,
+        tx: tokio::sync::mpsc::Sender<String>,
+        frame: F,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        T: Clone + Send + 'static,
+        F: Fn(&T) -> Option<String> + Send + 'static,
+    {
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Some(text) = frame(&event) {
+                            if tx.send(text).await.is_err() {
+                                break; // client gone
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "events ws forwarder lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    }
+
+    fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
+        match serde_json::to_value(event) {
+            Ok(payload) => {
+                Some(serde_json::json!({ "channel": channel, "payload": payload }).to_string())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, channel, "events ws: serialize failed");
+                None
+            }
+        }
+    }
+
+    let forwarders = [
+        forward(state.services.events.subscribe(), tx.clone(), |e| {
+            frame_json("oxplow", e)
+        }),
+        forward(state.services.lsp_clients.subscribe(), tx.clone(), |e| {
+            frame_json("lsp", e)
+        }),
+        forward(
+            state.services.terminal_sessions.subscribe(),
+            tx.clone(),
+            |e| frame_json("terminal", e),
+        ),
+    ];
+    drop(tx);
+
+    loop {
+        tokio::select! {
+            frame = rx.recv() => match frame {
+                Some(text) => {
+                    if sink.send(Message::Text(text.into())).await.is_err() {
+                        break;
+                    }
+                }
+                None => break,
+            },
+            msg = inbound.next() => match msg {
+                // Inbound traffic is only ping/close — commands go over
+                // /ipc. None/Close ends the stream.
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(_)) => continue,
+                Some(Err(_)) => break,
+            },
+        }
+    }
+    for f in forwarders {
+        f.abort();
+    }
+}
+
 /// Build the daemon router. Split out so tests and the binary share
 /// the exact route table.
 pub fn router(state: DaemonState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/events", get(events_ws))
         .route("/ipc/{name}", post(ipc_handler))
         .with_state(state)
 }
@@ -210,6 +312,36 @@ mod tests {
             .unwrap();
         assert_eq!(resp["status"], "error");
         assert_eq!(resp["error"]["code"], "INVALID");
+    }
+
+    #[tokio::test]
+    async fn events_ws_streams_oxplow_events() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let url = format!("ws://{}/events", daemon.bind_addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        // The server-side forwarders subscribe after the upgrade
+        // completes, so a single immediate emit can race them — keep
+        // emitting until the first frame lands.
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                svc.events.emit(oxplow_app::OxplowEvent::StreamsChanged);
+                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
+                    Ok(Some(Ok(msg))) if msg.is_text() => {
+                        return msg.into_text().unwrap().to_string()
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .expect("ws frame within timeout");
+        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(v["channel"], "oxplow");
+        assert_eq!(v["payload"]["kind"], "streamsChanged");
     }
 
     #[tokio::test]
