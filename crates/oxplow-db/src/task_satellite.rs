@@ -76,20 +76,15 @@ fn str_to_actor(s: &str) -> Result<TaskActorKind, DomainError> {
 #[derive(Clone)]
 pub struct SqliteTaskNoteStore {
     db: Database,
-    page_refs: Option<SqlitePageRefStore>,
+    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteTaskNoteStore {
     pub fn new(db: Database) -> Self {
         Self {
+            page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            page_refs: None,
         }
-    }
-
-    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
-        self.page_refs = Some(store);
-        self
     }
 
     /// Iterate every note id + body for the boot-time backfill.
@@ -109,9 +104,7 @@ impl SqliteTaskNoteStore {
     }
 
     async fn project_note(&self, id: &str, body: &str) -> Result<(), DomainError> {
-        let Some(refs) = &self.page_refs else {
-            return Ok(());
-        };
+        let refs = &self.page_refs;
         let edges = note_edges(id, body);
         refs.replace_source(KIND_TASK_NOTE, id, edges).await
     }
@@ -256,7 +249,8 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                 Ok(())
             })
             .await?;
-        if let Some(refs) = &self.page_refs {
+        {
+            let refs = &self.page_refs;
             refs.replace_source(KIND_TASK_NOTE, &id.to_string(), vec![])
                 .await?;
         }
@@ -269,14 +263,14 @@ impl TaskNoteStore for SqliteTaskNoteStore {
 #[derive(Clone)]
 pub struct SqliteTaskLinkStore {
     db: Database,
-    page_refs: Option<SqlitePageRefStore>,
+    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteTaskLinkStore {
     pub fn new(db: Database) -> Self {
         Self {
+            page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            page_refs: None,
         }
     }
 
@@ -294,18 +288,11 @@ impl SqliteTaskLinkStore {
             .await
     }
 
-    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
-        self.page_refs = Some(store);
-        self
-    }
-
     /// Re-emit `task_link:*` edges for all currently-stored outgoing
     /// links of `from_item`. Called after create/delete when
     /// `page_refs` is attached.
     async fn project_outgoing_links(&self, from_item: TaskId) -> Result<(), DomainError> {
-        let Some(refs) = &self.page_refs else {
-            return Ok(());
-        };
+        let refs = &self.page_refs;
         let links: Vec<TaskLink> = self
             .db
             .call(move |conn| {
@@ -646,7 +633,7 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskNoteStore::new(db).with_page_refs(page_refs.clone());
+        let store = SqliteTaskNoteStore::new(db);
 
         let note = store
             .add_for_item(item_id, "blocked by tsk99 see [[src/app.rs]]", "u")
@@ -706,7 +693,7 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, from_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let items = SqliteTaskStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let items = SqliteTaskStore::new(db.clone());
         let mut sender = items.get(from_id).await.unwrap().unwrap();
         sender.description = "see [[src/app.rs]]".into();
         items.update(&sender).await.unwrap();
@@ -730,7 +717,7 @@ mod tests {
         };
         let to_id = items.insert(&to).await.unwrap();
 
-        let links = SqliteTaskLinkStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let links = SqliteTaskLinkStore::new(db.clone());
         let link = links
             .create(&tid, from_id, to_id, TaskLinkType::Blocks)
             .await

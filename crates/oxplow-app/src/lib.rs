@@ -403,26 +403,27 @@ impl Services {
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
+        Self::build(layout, config, db)
+    }
 
+    /// Shared construction core for [`Self::boot`] and
+    /// [`Self::in_memory`]: every store, service, and registry is
+    /// wired here, in dependency order, exactly once. The two
+    /// entrypoints differ only in how they resolve the layout,
+    /// config, and `Database` handle.
+    fn build(layout: AppLayout, config: OxplowConfig, db: Database) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone()));
-        let task_store =
-            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
-        let work_note_store = Arc::new(
-            SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
-        let task_link_store = Arc::new(
-            SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
+        let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let task_event_store = Arc::new(SqliteTaskEventStore::new(db.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
-        let code_quality_store = Arc::new(
-            SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
+        let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime =
@@ -430,9 +431,7 @@ impl Services {
         let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
-        let effort_store = Arc::new(
-            SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
+        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
@@ -591,156 +590,7 @@ impl Services {
             state_db_path: state_dir.join("state.sqlite"),
         };
         let config = oxplow_config::load_project_config(&project_dir)?;
-        let db = Database::in_memory();
-        let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
-        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
-        let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
-        let comment_store = Arc::new(SqliteCommentStore::new(db.clone()));
-        let task_store =
-            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
-        let work_note_store = Arc::new(
-            SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
-        let task_link_store = Arc::new(
-            SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
-        let task_event_store = Arc::new(SqliteTaskEventStore::new(db.clone()));
-        let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
-        let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
-        let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
-        let code_quality_store = Arc::new(
-            SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
-        let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
-        let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
-        let thread_runtime =
-            Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
-        let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
-        let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
-        let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
-        let effort_store = Arc::new(
-            SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
-        let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
-        let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
-        let workspace_layout = WorkspaceLayout::for_project(&project_dir);
-        let streams =
-            StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
-        let threads = ThreadService::new(thread_store.clone());
-        let tasks = TaskService::new(task_store.clone());
-        let event_bus = EventBus::new();
-        let hook_ingest = HookIngestService::new(
-            hook_event_store.clone(),
-            agent_status_store.clone(),
-            agent_turn_store.clone(),
-            event_bus.clone(),
-        );
-        let recovery_svc =
-            recovery::RecoveryService::new(agent_turn_store.clone(), event_bus.clone());
-        let pty = oxplow_pty::PtyManager::spawn();
-        let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
-        let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
-        let config_arc = Arc::new(RwLock::new(config));
-        let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
-        let lsp_installer_svc =
-            lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());
-        if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
-            tracing::warn!(?e, "lsp installer manifest replay failed");
-        }
-        let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
-        let terminal_sessions =
-            terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
-        let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
-        let git = git_service::GitService::spawn(
-            layout.project_dir.clone(),
-            stream_store.clone(),
-            event_bus.clone(),
-        );
-        let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
-        let workspace_filter = {
-            let g = config_arc.read();
-            g.as_ref()
-                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
-                .unwrap_or_default()
-        };
-        let snapshot_captures = snapshot_capture_registry::SnapshotCaptureRegistry::new(
-            snapshot_capture_registry::SnapshotCaptureRegistryConfig {
-                snapshot_store: snapshot_store.clone(),
-                blobs: blobs.clone(),
-                max_file_bytes: 5 * 1024 * 1024,
-                workspace_filter,
-                events: event_bus.clone(),
-            },
-        );
-        let active_streams = futures::executor::block_on(streams.list_streams())?;
-        for s in &active_streams {
-            snapshot_captures.register(s);
-        }
-        snapshot_captures.set_primary(primary_stream.id);
-        let tasks = tasks
-            .with_effort_store(effort_store.clone())
-            .with_snapshot_captures(snapshot_captures.clone())
-            .with_thread_store(thread_store.clone());
-        let collection = collection::CollectionService::new(
-            observation_store.clone(),
-            effort_store.clone(),
-            thread_store.clone(),
-            snapshot_store.clone(),
-            blobs.clone(),
-            config_arc.clone(),
-            layout.project_dir.clone(),
-            event_bus.clone(),
-        );
-        Ok(Self {
-            config: config_arc,
-            db,
-            layout,
-            streams,
-            threads,
-            tasks,
-            stream_store,
-            thread_store,
-            task_store,
-            work_note_store,
-            task_link_store,
-            task_event_store,
-            wiki_page_store,
-            page_visit_store,
-            usage_store,
-            code_quality_store,
-            snapshot_store,
-            search_store,
-            snapshot_captures,
-            hook_event_store,
-            agent_status_store,
-            agent_turn_store,
-            thread_runtime,
-            effort_store,
-            observation_store,
-            collection,
-            wiki_page_thread_updates,
-            page_ref_store,
-            comment_store,
-            hook_ingest,
-            background_tasks: {
-                let store = BackgroundTaskStore::new();
-                bridge_background_task_events(&store, &event_bus);
-                store
-            },
-            followups: FollowupStore::new(),
-            pty,
-            tmux,
-            agent_panes,
-            blobs,
-            lsp_sessions: lsp,
-            lsp_installer: lsp_installer_svc,
-            lsp_clients,
-            terminal_sessions,
-            recovery: recovery_svc,
-            events: event_bus,
-            git,
-            finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        })
+        Self::build(layout, config, Database::in_memory())
     }
 
     /// Reload `oxplow.yaml` from disk into the in-memory config, re-apply

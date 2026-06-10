@@ -518,19 +518,23 @@ each other:
    `DELETE`s only rows matching the source AND one of the
    ref_types, then inserts the new edges. Other slices for the
    same source survive untouched.
-3. **Builder-attached projection** at each writer store. Each
-   `Sqlite*Store` gains a `with_page_refs(store: SqlitePageRefStore)
-   -> Self` builder; when set, the relevant write methods (upsert,
-   record_file, link create/delete) call the slice helper after
-   the primary write. Stores not given a `page_refs` are unchanged
-   — useful for tests that don't need backlinks.
+3. **Built-in projection** at each writer store. Each owning
+   `Sqlite*Store` constructs its own `SqlitePageRefStore` over the
+   same `Database` in `new()` (the field is NOT optional), and the
+   relevant write methods (upsert, record_file, link create/delete)
+   call the slice helper after the primary write. There is no way to
+   construct a store that silently skips graph mirroring — tests get
+   the projection for free, and the backfill
+   (`page_ref_backfill.rs`) exists only for rows written before
+   mirroring did.
 
 When a single writer owns the WHOLE source (wiki sync, findings
 write, commit indexer), use the simpler `replace_source` instead.
 
 To add a new source kind to the graph: add a projection helper, a
-ref-type-list helper, attach a `with_page_refs` to the owning
-store, and call the slice or full replace from its write methods.
+ref-type-list helper, construct the page-ref mirror inside the owning
+store's `new()`, and call the slice or full replace from its write
+methods.
 For body-text sources that should pick up the same wikilink rules
 the wiki + tasks use, route through
 `oxplow_domain::refs::extract` rather than re-implementing the

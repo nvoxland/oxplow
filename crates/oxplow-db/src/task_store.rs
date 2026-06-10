@@ -14,20 +14,15 @@ use crate::page_ref_store::SqlitePageRefStore;
 #[derive(Clone)]
 pub struct SqliteTaskStore {
     db: Database,
-    page_refs: Option<SqlitePageRefStore>,
+    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteTaskStore {
     pub fn new(db: Database) -> Self {
         Self {
+            page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            page_refs: None,
         }
-    }
-
-    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
-        self.page_refs = Some(store);
-        self
     }
 }
 
@@ -308,7 +303,8 @@ impl TaskStore for SqliteTaskStore {
                 Ok(TaskId::new(id))
             })
             .await?;
-        if let Some(refs) = &self.page_refs {
+        {
+            let refs = &self.page_refs;
             let mut placed = item.clone();
             placed.id = new_id;
             let edges = task_edges(&placed);
@@ -364,7 +360,8 @@ impl TaskStore for SqliteTaskStore {
         if rows_affected == 0 {
             return Err(DomainError::NotFound);
         }
-        if let Some(refs) = &self.page_refs {
+        {
+            let refs = &self.page_refs;
             let edges = task_edges(&edges_item);
             refs.replace_source_for_ref_types(
                 KIND_TASK,
@@ -388,7 +385,8 @@ impl TaskStore for SqliteTaskStore {
                 Ok(())
             })
             .await?;
-        if let Some(refs) = &self.page_refs {
+        {
+            let refs = &self.page_refs;
             refs.replace_source_for_ref_types(
                 KIND_TASK,
                 &id.to_string(),
@@ -629,7 +627,7 @@ mod tests {
         threads.upsert(&t).await.unwrap();
 
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let store = SqliteTaskStore::new(db.clone());
 
         let mut it = item(Some(t.id));
         it.description = "see [[src/app.rs]] and blocks tsk99".into();

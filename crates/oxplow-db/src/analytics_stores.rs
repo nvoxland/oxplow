@@ -582,20 +582,15 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
 #[derive(Clone)]
 pub struct SqliteCodeQualityStore {
     db: Database,
-    page_refs: Option<SqlitePageRefStore>,
+    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteCodeQualityStore {
     pub fn new(db: Database) -> Self {
         Self {
+            page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            page_refs: None,
         }
-    }
-
-    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
-        self.page_refs = Some(store);
-        self
     }
 
     pub async fn create_scan(&self, tool: &str, scope: &str) -> Result<i64, DomainError> {
@@ -689,7 +684,8 @@ impl SqliteCodeQualityStore {
                 Ok(conn.last_insert_rowid())
             })
             .await?;
-        if let Some(refs) = &self.page_refs {
+        {
+            let refs = &self.page_refs;
             let edges = finding_edges(&finding_id.to_string(), &finding.path);
             refs.replace_source("finding", &finding_id.to_string(), edges)
                 .await?;

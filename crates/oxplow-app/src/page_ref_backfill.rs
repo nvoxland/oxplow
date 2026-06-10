@@ -183,8 +183,9 @@ mod tests {
     async fn backfill_picks_up_pre_existing_task_refs() {
         let db = Database::in_memory();
 
-        // Construct stores WITHOUT page_refs first so writes don't
-        // mirror — this simulates pre-migration data.
+        // Every store mirrors into the ref graph at write time now —
+        // a "bare" writer can't exist. Simulate pre-migration data by
+        // inserting normally, then clearing the projected slice below.
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         let threads = oxplow_db::SqliteThreadStore::new(db.clone());
         let bare_items = SqliteTaskStore::new(db.clone());
@@ -251,7 +252,12 @@ mod tests {
             .unwrap();
 
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
-        // No backlinks for the file yet — writer was bare.
+        // Wipe the slice the insert just projected so the table looks
+        // like a DB written before ref mirroring existed.
+        page_refs
+            .replace_source("task", &task_id.to_string(), Vec::new())
+            .await
+            .unwrap();
         let pre = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
@@ -259,16 +265,11 @@ mod tests {
         assert!(pre.is_empty());
 
         // Build the attached stores the backfill consumes.
-        let items_attached =
-            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_refs).clone()));
-        let links =
-            Arc::new(SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_refs).clone()));
-        let efforts =
-            Arc::new(SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_refs).clone()));
-        let findings_store =
-            Arc::new(SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_refs).clone()));
-        let notes =
-            Arc::new(SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_refs).clone()));
+        let items_attached = Arc::new(SqliteTaskStore::new(db.clone()));
+        let links = Arc::new(SqliteTaskLinkStore::new(db.clone()));
+        let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
+        let notes = Arc::new(SqliteTaskNoteStore::new(db.clone()));
 
         let counts = run(
             page_refs.clone(),

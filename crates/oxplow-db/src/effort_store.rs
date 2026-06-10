@@ -251,20 +251,15 @@ pub trait TaskEffortStore: Send + Sync {
 #[derive(Clone)]
 pub struct SqliteTaskEffortStore {
     db: Database,
-    page_refs: Option<SqlitePageRefStore>,
+    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteTaskEffortStore {
     pub fn new(db: Database) -> Self {
         Self {
+            page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            page_refs: None,
         }
-    }
-
-    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
-        self.page_refs = Some(store);
-        self
     }
 
     /// Re-emit the full effort-owned slice for `task_id` — the
@@ -274,9 +269,7 @@ impl SqliteTaskEffortStore {
     /// Replaces under `effort_ref_types()` so the task-body slice
     /// (owned by `task_store`) is unaffected.
     async fn project_effort_slice(&self, task_id: TaskId) -> Result<(), DomainError> {
-        let Some(refs) = &self.page_refs else {
-            return Ok(());
-        };
+        let refs = &self.page_refs;
         type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
         let (paths, summaries, impact_jsons): SliceRows = self
             .db
@@ -421,7 +414,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 Ok(())
             })
             .await?;
-        if summary_has_body && self.page_refs.is_some() {
+        if summary_has_body {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
@@ -485,7 +478,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 Ok(())
             })
             .await?;
-        if self.page_refs.is_some() {
+        {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
@@ -574,7 +567,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 Ok(())
             })
             .await?;
-        if self.page_refs.is_some() {
+        {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
@@ -632,7 +625,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 Ok(())
             })
             .await?;
-        if self.page_refs.is_some() {
+        {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
@@ -678,7 +671,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 Ok(())
             })
             .await?;
-        if self.page_refs.is_some() {
+        {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
@@ -1003,7 +996,7 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let store = SqliteTaskEffortStore::new(db);
         let eff = store.start(tid, &t, None).await.unwrap();
         store
             .finish(
@@ -1054,7 +1047,7 @@ mod tests {
         use oxplow_domain::TaskImpact;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let store = SqliteTaskEffortStore::new(db);
         let eff = store.start(tid, &t, None).await.unwrap();
         let impacts = vec![
             TaskImpact {
@@ -1136,7 +1129,7 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let store = SqliteTaskEffortStore::new(db);
         let first = store.start(tid, &t, None).await.unwrap();
         store
             .finish(&first.id, None, Some("Filed [[url-schemes]]".into()))
