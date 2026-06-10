@@ -47,7 +47,8 @@ pub use agent_prompt::{
     RoleMode,
 };
 pub use events::{
-    CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind, WorkspaceChangeKind,
+    event_channels, CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind,
+    WorkspaceChangeKind,
 };
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use oxplow_lsp::{LspError, LspProxy};

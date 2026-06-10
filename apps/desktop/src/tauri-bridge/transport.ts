@@ -19,14 +19,13 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
+import { EVENT_CHANNELS } from "./channels";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
-/// the wire `channel` value in each frame.
-const REMOTE_CHANNELS: Record<string, string> = {
-  oxplow: "oxplow:event",
-  lsp: "lsp:event",
-  terminal: "terminal:event",
-};
+/// the wire `channel` value in each frame. Sourced from the shared
+/// channel registry (see channels.ts) so the demux table can't drift
+/// from what the daemon frames.
+const REMOTE_CHANNELS: Record<string, string> = EVENT_CHANNELS;
 
 function readRemoteBase(): string | null {
   try {

@@ -3989,6 +3989,7 @@ dependencies = [
 name = "oxplow-surface-parity"
 version = "0.5.0"
 dependencies = [
+ "oxplow-app",
  "oxplow-mcp",
  "oxplow-tauri-ipc",
  "tauri-specta",

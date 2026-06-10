@@ -17,6 +17,26 @@ use tokio::sync::broadcast;
 
 use oxplow_domain::{AgentStatusState, StreamId, TaskId, ThreadId};
 
+/// Event channel names shared by every transport that carries backend
+/// events to the renderer. The Tauri shell `app.emit`s on the channel
+/// names; the daemon's `/events` WebSocket multiplexes them with the
+/// frame keys; `apps/desktop/src/tauri-bridge/channels.ts` mirrors the
+/// mapping for the renderer (pinned by the surface-parity test —
+/// change either side and that test points at the other).
+pub mod event_channels {
+    /// `OxplowEvent` payloads (the cross-store bus).
+    pub const OXPLOW: &str = "oxplow:event";
+    /// LSP bridge events.
+    pub const LSP: &str = "lsp:event";
+    /// Terminal bridge events.
+    pub const TERMINAL: &str = "terminal:event";
+
+    /// Frame keys used as `{"channel": <key>, "payload": …}` on the
+    /// daemon's multiplexed `/events` socket, keyed to the channel
+    /// each frame demuxes back onto.
+    pub const FRAMES: &[(&str, &str)] = &[("oxplow", OXPLOW), ("lsp", LSP), ("terminal", TERMINAL)];
+}
+
 /// fs-watch classification mirrored onto the wire so the renderer can
 /// distinguish create / modify / delete / rename without re-stating
 /// every variant of the upstream `notify` crate.

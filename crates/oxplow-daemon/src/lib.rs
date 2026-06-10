@@ -82,6 +82,21 @@ async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Re
     ws.on_upgrade(move |socket| events_stream(socket, state))
 }
 
+/// The three `/events` frame keys in [oxplow, lsp, terminal] order,
+/// resolved from `oxplow_app::event_channels::FRAMES` by the channel
+/// each key demuxes onto.
+fn ws_frame_keys() -> [&'static str; 3] {
+    use oxplow_app::event_channels as ch;
+    let key_for = |channel: &str| -> &'static str {
+        ch::FRAMES
+            .iter()
+            .find(|(_, c)| *c == channel)
+            .map(|(k, _)| *k)
+            .unwrap_or_else(|| unreachable!("channel {channel} missing from FRAMES"))
+    };
+    [key_for(ch::OXPLOW), key_for(ch::LSP), key_for(ch::TERMINAL)]
+}
+
 /// Spawn a forwarder per broadcast source into one mpsc, then pump the
 /// socket from it. A lagged subscriber just drops frames — the
 /// renderer's coarse "bucket changed, refetch" model recovers on the
@@ -130,16 +145,21 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
         }
     }
 
+    // Frame keys come from the shared channel registry so the daemon,
+    // the Tauri shell, and the renderer's demux table can't drift.
+    let [oxplow_key, lsp_key, terminal_key] = ws_frame_keys();
     let forwarders = [
-        forward(state.ctx.events.subscribe(), tx.clone(), |e| {
-            frame_json("oxplow", e)
+        forward(state.ctx.events.subscribe(), tx.clone(), move |e| {
+            frame_json(oxplow_key, e)
         }),
-        forward(state.ctx.lsp_clients.subscribe(), tx.clone(), |e| {
-            frame_json("lsp", e)
+        forward(state.ctx.lsp_clients.subscribe(), tx.clone(), move |e| {
+            frame_json(lsp_key, e)
         }),
-        forward(state.ctx.terminal_sessions.subscribe(), tx.clone(), |e| {
-            frame_json("terminal", e)
-        }),
+        forward(
+            state.ctx.terminal_sessions.subscribe(),
+            tx.clone(),
+            move |e| frame_json(terminal_key, e),
+        ),
     ];
     drop(tx);
 

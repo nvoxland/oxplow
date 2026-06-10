@@ -1,5 +1,6 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "./tauri-bridge/transport.js";
+import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { ipcErrorMessage } from "./ipc-error.js";
@@ -144,7 +145,7 @@ function buildBridge() {
       handler: (event: { clientId: string; message: string }) => void,
     ): (() => void) => {
       let stopped = false;
-      const unlistenPromise = listen("lsp:event", (e) => {
+      const unlistenPromise = listen(EVENT_CHANNELS.lsp, (e) => {
         if (stopped) return;
         handler(e.payload as { clientId: string; message: string });
       });
@@ -197,7 +198,7 @@ function buildBridge() {
       handler: (event: { sessionId: string; message: string }) => void,
     ): (() => void) => {
       let stopped = false;
-      const unlistenPromise = listen("terminal:event", (e) => {
+      const unlistenPromise = listen(EVENT_CHANNELS.terminal, (e) => {
         if (stopped) return;
         handler(e.payload as { sessionId: string; message: string });
       });
@@ -2020,7 +2021,7 @@ export function subscribeOxplowEvents(
   listener: (event: OxplowEvent) => void,
 ): () => void {
   let stopped = false;
-  const unlistenPromise = listen("oxplow:event", (e) => {
+  const unlistenPromise = listen(EVENT_CHANNELS.oxplow, (e) => {
     if (stopped) return;
     listener(e.payload as OxplowEvent);
   });

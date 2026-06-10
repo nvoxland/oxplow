@@ -979,6 +979,12 @@ export type CodeQualityScan = {
 	file_filter: string,
 };
 
+/**
+ *  Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
+ *  renderer-era enum.
+ */
+export type CodeQualityScanPhase = "started" | "completed" | "failed";
+
 export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
 
 /**
@@ -1634,6 +1640,125 @@ export type OxplowConfig = {
 	collection: CollectionConfig,
 };
 
+/**
+ *  What changed. Variants are deliberately broad — the renderer
+ *  refetches the affected bucket on receipt rather than trying to
+ *  reconcile diffs from the payload.
+ */
+export type OxplowEvent = 
+/**
+ *  Any stream row changed (created, renamed, deleted, panes
+ *  updated). Renderer refetches `list_streams`.
+ */
+{ kind: "streamsChanged" } | 
+// The current-stream pointer in `runtime_state` moved.
+{ kind: "currentStreamChanged"; streamId: StreamId | null } | 
+// Threads on `stream_id` changed (created, status flipped, etc.).
+{ kind: "threadsChanged"; streamId: StreamId } | 
+// Selected-thread pointer for `stream_id` moved.
+{ kind: "selectedThreadChanged"; streamId: StreamId; threadId: ThreadId | null } | 
+// tasks on `thread_id` (or backlog if `thread_id` is None).
+{ kind: "tasksChanged"; threadId: ThreadId | null } | 
+// A note was added or removed against an item or thread.
+{ kind: "workNotesChanged"; itemId: TaskId | null; threadId: ThreadId | null } | 
+/**
+ *  A comment (or one of its messages) changed on `target_kind` /
+ *  `target_id` within `stream_id`. Renderer refetches the affected
+ *  page's comments + the Comments inbox.
+ */
+{ kind: "commentsChanged"; streamId: StreamId; targetKind: string; targetId: string } | 
+/**
+ *  A wiki page's backing file changed on disk (creation, body
+ *  update, deletion). `slug` is the file stem — subscribers
+ *  (e.g. `WikiPageTab`) filter by their own slug so an unrelated
+ *  edit doesn't trigger a refresh.
+ */
+{ kind: "wikiPagesChanged"; slug: string } | 
+// Followups for a thread.
+{ kind: "followupsChanged"; threadId: ThreadId } | 
+// Background task progress.
+{ kind: "backgroundTasksChanged" } | 
+// A new hook event landed; renderer refreshes the hook log.
+{ kind: "hookEventsChanged" } | 
+/**
+ *  Per-thread per-pane agent status changed. `state` carries the
+ *  derived status so the renderer can update without a refetch
+ *  round-trip — sources that don't have it pre-derived (e.g.
+ *  PreToolUse/PostToolUse, where the renderer used to refetch and
+ *  re-derive) compute it inline before emitting.
+ */
+{ kind: "agentStatusChanged"; threadId: ThreadId; paneTarget: string; state: AgentStatusState } | 
+// agent_turn opened or closed.
+{ kind: "agentTurnsChanged"; threadId: ThreadId } | 
+/**
+ *  A page visit was recorded (rail history, recently-finished, etc.).
+ *  Coarse — renderer refetches whatever view it cares about.
+ */
+{ kind: "pageVisitChanged" } | 
+/**
+ *  A usage event was recorded. The renderer's filtering uses
+ *  `usage_kind` to scope refetches (wiki vs editor-file vs
+ *  task, etc.).
+ */
+{ kind: "usageRecorded"; usageKind: string; key: string; streamId: StreamId | null; threadId: ThreadId | null } | 
+/**
+ *  A file snapshot landed in the snapshot store. Driven by the
+ *  background snapshot capture loop or an explicit task event.
+ */
+{ kind: "fileSnapshotCreated"; streamId: StreamId | null; snapshotId: number; source: SnapshotSourceKind; effortId: string | null; threadId: ThreadId | null } | 
+/**
+ *  A batched flush of N file snapshots landed under one parent.
+ *  Emitted instead of N per-file `FileSnapshotCreated` events when
+ *  `request_snapshot` drains many paths at once (startup sweep,
+ *  branch switch). Renderer treats it the same as the per-file
+ *  variant — fire-and-forget refetch — so a 34k-file batch causes
+ *  one refetch, not 34k.
+ */
+{ kind: "fileSnapshotsBatchCreated"; streamId: StreamId | null; snapshotId: number; fileCount: number; source: SnapshotSourceKind; effortId: string | null; threadId: ThreadId | null } | 
+/**
+ *  Effort-scoped collection observations changed for `effort_id`
+ *  (a test-run or diff-coverage row landed). The renderer refetches
+ *  the effort's observation list. See `.context/collection.md`.
+ */
+{ kind: "effortObservationsChanged"; threadId: ThreadId; effortId: string } | 
+/**
+ *  `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
+ *  running `/oxplow:configure`). The in-memory config has been swapped;
+ *  the renderer refetches `get_config`.
+ */
+{ kind: "configChanged" } | 
+/**
+ *  A code-quality scan transitioned states (started / completed /
+ *  failed). The renderer refreshes scan + finding lists on receipt.
+ */
+{ kind: "codeQualityScanned"; streamId: StreamId | null; scanId: number; tool: string; scope: string; phase: CodeQualityScanPhase } | 
+/**
+ *  `.git` directory appeared/disappeared at the project root —
+ *  "is this a git workspace" flipped. Renderer hides/restores the
+ *  git-aware UI on receipt.
+ */
+{ kind: "workspaceContextChanged"; gitEnabled: boolean } | 
+/**
+ *  A worktree file changed on disk. Renderer-wide: file tree, quick
+ *  open, project panel, git dashboard, uncommitted changes view all
+ *  refresh in response.
+ */
+{ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string } | 
+/**
+ *  A ref under `.git/refs/` changed. Drives history, branch list,
+ *  and ahead/behind refreshes. Coarse per stream.
+ */
+{ kind: "gitRefsChanged"; streamId: StreamId } | 
+/**
+ *  A non-primary stream's backing worktree was deleted out from
+ *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
+ *  The runtime has already archived the stream by the time this
+ *  fires; the renderer surfaces a toast so the user knows why the
+ *  rail row vanished. `title` carries the archived stream's display
+ *  name.
+ */
+{ kind: "streamOrphaned"; streamId: StreamId; title: string };
+
 export type PageVisit = {
 	id: string,
 	page_kind: string,
@@ -1855,6 +1980,24 @@ export type SnapshotPairDiff = {
 	 */
 	changed: boolean,
 };
+
+/**
+ *  Snapshot trigger source. The renderer renders these differently in
+ *  the Snapshots panel ("startup" rows are dimmer than "effort-end").
+ * 
+ *  Tasks themselves don't have a start/end — only efforts do. The
+ *  Effort* variants are the snapshot bracket for a single effort
+ *  row's lifetime.
+ */
+export type SnapshotSourceKind = "effort-start" | "effort-end" | "effort-event" | "startup" | "manual" | 
+/**
+ *  Triggered by a HEAD/refs change (commit, branch switch, pull,
+ *  rebase, …). The capture service still drains any pending
+ *  dirty files; the new variant exists so an empty drain can
+ *  still emit a snapshot row that records the new HEAD when the
+ *  previous snapshot pointed at a different commit.
+ */
+"git-refs";
 
 /**
  *  Aggregate created/modified/deleted counts for the file rows
@@ -2199,6 +2342,13 @@ export type WikiRefFreshness = {
 	 */
 	stale: boolean,
 };
+
+/**
+ *  fs-watch classification mirrored onto the wire so the renderer can
+ *  distinguish create / modify / delete / rename without re-stating
+ *  every variant of the upstream `notify` crate.
+ */
+export type WorkspaceChangeKind = "created" | "updated" | "deleted" | "renamed";
 
 export type WorkspaceContext = {
 	project_dir: string,

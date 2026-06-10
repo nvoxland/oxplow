@@ -176,3 +176,49 @@ fn surface_parity() {
         problems.join("\n")
     );
 }
+
+/// The renderer's event-channel registry
+/// (`apps/desktop/src/tauri-bridge/channels.ts`) must mirror
+/// `oxplow_app::event_channels` exactly: same frame keys, same channel
+/// names, no extras on either side. The daemon frames `/events` with
+/// the Rust side; the renderer demuxes with the TS side — drift means
+/// a whole event channel silently goes dark in remote mode.
+#[test]
+fn event_channels_match_typescript() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let channels_ts = Path::new(&manifest_dir)
+        .join("../../apps/desktop/src/tauri-bridge/channels.ts")
+        .canonicalize()
+        .expect("channels.ts exists");
+    let body = std::fs::read_to_string(&channels_ts).expect("read channels.ts");
+
+    // Extract `key: "value",` pairs from the EVENT_CHANNELS literal.
+    let block = body
+        .split("export const EVENT_CHANNELS = {")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .expect("EVENT_CHANNELS literal in channels.ts");
+    let mut ts_pairs: Vec<(String, String)> = Vec::new();
+    for line in block.lines() {
+        let line = line.trim().trim_end_matches(',');
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        ts_pairs.push((key.trim().to_string(), value.to_string()));
+    }
+    ts_pairs.sort();
+
+    let mut rust_pairs: Vec<(String, String)> = oxplow_app::event_channels::FRAMES
+        .iter()
+        .map(|(k, c)| (k.to_string(), c.to_string()))
+        .collect();
+    rust_pairs.sort();
+
+    assert_eq!(
+        ts_pairs, rust_pairs,
+        "event-channel registries drifted — update \
+         crates/oxplow-app/src/events.rs (event_channels) and \
+         apps/desktop/src/tauri-bridge/channels.ts together"
+    );
+}

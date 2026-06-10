@@ -510,7 +510,7 @@ fn spawn_lsp_event_bridge(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if let Err(err) = app.emit("lsp:event", &event) {
+                    if let Err(err) = app.emit(oxplow_app::event_channels::LSP, &event) {
                         tracing::warn!(?err, "failed to emit lsp event");
                     }
                 }
@@ -534,7 +534,7 @@ fn spawn_terminal_event_bridge(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if let Err(err) = app.emit("terminal:event", &event) {
+                    if let Err(err) = app.emit(oxplow_app::event_channels::TERMINAL, &event) {
                         tracing::warn!(?err, "failed to emit terminal event");
                     }
                 }

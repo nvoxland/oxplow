@@ -89,19 +89,34 @@ union. To add an event:
    `#[serde(tag = "kind", rename_all = "camelCase")]`, so a Rust
    variant `FooChanged { stream_id }` lands on the wire as
    `{ kind: "fooChanged", streamId }`.
-2. Mirror the new kind in `apps/desktop/src/tauri-bridge/index.ts`
-   under `OxplowEventKind`.
+2. Re-run `cargo test -p oxplow-tauri-ipc` to regenerate the TS
+   bindings. `OxplowEvent` is exported through the specta builder, and
+   `OxplowEventKind` in `apps/desktop/src/tauri-bridge/index.ts` is
+   derived from the generated union (`OxplowEvent["kind"]`) — there is
+   no hand-maintained kind list anymore. CI's bindings-drift guard
+   fails the PR if you forget the regen.
 3. Publish from the relevant service or command by calling
    `state.events.emit(OxplowEvent::FooChanged { … })`. The Tauri shell
    forwards every emit to the renderer via
-   `app_handle.emit("oxplow:event", ...)`.
+   `app_handle.emit(event_channels::OXPLOW, ...)`.
 4. Consume in the UI via
    `subscribeOxplowEvents((e) => { if (e.kind === "fooChanged") … })`.
 
-**Camelcase trap:** the wire shape is camelCase (`event.kind`,
-`event.streamId`, …). A subscriber that filters on `event.type ===
-"foo.changed"` will silently never fire — the agent-status dot bug
-came from exactly this mismatch. Keep `OxplowEventKind` in sync.
+**Camelcase trap (mostly defused):** the wire shape is camelCase
+(`event.kind`, `event.streamId`, …). A subscriber that filters on
+`event.type === "foo.changed"` will silently never fire — the
+agent-status dot bug came from exactly this mismatch. The kind union
+is now generated, so the remaining trap is only in hand-written
+filter strings at subscriber call sites.
+
+**Event channel names** live in one registry:
+`oxplow_app::event_channels` (`crates/oxplow-app/src/events.rs`) on
+the Rust side — consumed by the Tauri shell's emit bridges and the
+daemon's `/events` frame keys — mirrored by
+`apps/desktop/src/tauri-bridge/channels.ts` (`EVENT_CHANNELS`) on the
+renderer side. The surface-parity test
+(`event_channels_match_typescript`) fails if the two diverge; update
+both together when adding a channel.
 
 ## Git dashboard / cross-worktree IPC
 

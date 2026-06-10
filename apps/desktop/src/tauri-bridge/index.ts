@@ -9,7 +9,8 @@
 // change between modes.
 
 import { listen } from "./transport";
-import { commands } from "./generated/bindings";
+import { commands, type OxplowEvent } from "./generated/bindings";
+import { EVENT_CHANNELS } from "./channels";
 
 export { commands };
 export * as oxplow from "./generated/bindings";
@@ -20,32 +21,11 @@ export * as oxplow from "./generated/bindings";
 // whether X is on the export list.
 export type * from "./generated/bindings";
 
-/// Discriminant kinds for the cross-store event bus. Mirrors the
-/// `OxplowEvent` enum on the Rust side.
-export type OxplowEventKind =
-  | "streamsChanged"
-  | "currentStreamChanged"
-  | "threadsChanged"
-  | "selectedThreadChanged"
-  | "tasksChanged"
-  | "workNotesChanged"
-  | "commentsChanged"
-  | "wikiPagesChanged"
-  | "followupsChanged"
-  | "backgroundTasksChanged"
-  | "hookEventsChanged"
-  | "agentStatusChanged"
-  | "agentTurnsChanged"
-  | "pageVisitChanged"
-  | "usageRecorded"
-  | "fileSnapshotCreated"
-  | "codeQualityScanned"
-  | "effortObservationsChanged"
-  | "configChanged"
-  | "workspaceContextChanged"
-  | "workspaceChanged"
-  | "gitRefsChanged"
-  | "streamOrphaned";
+/// Discriminant kinds for the cross-store event bus. Derived from the
+/// specta-generated `OxplowEvent` union, so a new Rust variant lands
+/// here automatically when the bindings regenerate — no hand-synced
+/// list to forget (the old "camelcase trap").
+export type OxplowEventKind = OxplowEvent["kind"];
 
 /// Subscribe to all oxplow events on the cross-store bus. Returns an
 /// unlisten callback. Each event is the raw `OxplowEvent` payload —
@@ -56,7 +36,7 @@ export function subscribeOxplowEvents(
 ): () => Promise<void> {
   let cleanup: (() => void) | null = null;
   const promise = listen<{ kind: OxplowEventKind } & Record<string, unknown>>(
-    "oxplow:event",
+    EVENT_CHANNELS.oxplow,
     (e) => {
       onEvent(e.payload);
     },
