@@ -29,25 +29,89 @@ use std::sync::Arc;
 
 use oxplow_app::Services;
 
-/// Build the [`dispatch`] function from a list of
-/// `"wire_name" => core_fn { field: Type, ... }` entries.
+/// Control-plane coordinates an agent spawn needs: where the plugin's
+/// HTTP hooks POST to, the MCP endpoint, and the bearer token both
+/// use. The Tauri shell materializes this from its in-process control
+/// plane; the daemon from its own. Lives here (not oxplow-tauri-ipc)
+/// so the headless daemon can construct it without tauri deps.
+#[derive(Clone, Debug)]
+pub struct PluginRuntime {
+    pub hook_base_url: String,
+    pub mcp_endpoint_url: String,
+    pub hook_token: String,
+}
+
+/// Everything a dispatched command may need. Most cores only touch
+/// `services` (and the registry hands them `&Services` directly);
+/// agent-spawning commands also need `plugin_runtime`. `None` means
+/// the host can't support agent spawn — the affected commands return
+/// INVALID instead of panicking.
+#[derive(Clone)]
+pub struct RpcContext {
+    pub services: Arc<Services>,
+    pub plugin_runtime: Option<PluginRuntime>,
+}
+
+/// Cores and helpers overwhelmingly want `&Services`; deref so a
+/// context behaves like one wherever that's all that's needed.
+impl std::ops::Deref for RpcContext {
+    type Target = Services;
+    fn deref(&self) -> &Services {
+        &self.services
+    }
+}
+
+/// Build the [`dispatch`] function from two sections of
+/// `"wire_name" => core_fn { field: Type, ... }` entries:
+///
+/// - `svc { ... }` — the common case; the core's first parameter is
+///   `&Services`.
+/// - `ctx { ... }` — commands that need more than the services (today:
+///   agent spawn, which reads `plugin_runtime`); the core's first
+///   parameter is `&RpcContext`.
 ///
 /// Each entry generates a match arm that deserializes the args object
-/// into a private camelCase struct, destructures it, and calls the core
-/// with `(svc, fields...)`. An empty field list means the command takes
-/// no args beyond `&Services`.
+/// into a private camelCase struct, destructures it, and calls the
+/// core. An empty field list means no args beyond the context.
 #[macro_export]
 macro_rules! rpc_dispatch {
-    ( $( $name:literal => $core:path { $( $field:ident : $fty:ty ),* $(,)? } ),* $(,)? ) => {
+    (
+        ctx { $( $cname:literal => $ccore:path { $( $cfield:ident : $cfty:ty ),* $(,)? } ),* $(,)? }
+        svc { $( $name:literal => $core:path { $( $field:ident : $fty:ty ),* $(,)? } ),* $(,)? }
+    ) => {
         /// Route a command by name to its core, deserializing `args`
         /// (the renderer's camelCase invoke payload) and re-serializing
         /// the result. An unknown name yields `NOT_FOUND`.
         pub async fn dispatch(
             name: &str,
             args: serde_json::Value,
-            svc: &Arc<Services>,
+            ctx: &$crate::RpcContext,
         ) -> Result<serde_json::Value, $crate::IpcError> {
+            // The renderer omits the body for no-arg commands; normalize
+            // `null`/absent to an empty object so the (possibly empty)
+            // Args struct still deserializes.
+            let args = if args.is_null() {
+                serde_json::Value::Object(serde_json::Map::new())
+            } else {
+                args
+            };
             match name {
+                $(
+                    $cname => {
+                        #[derive(serde::Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Args {
+                            $( $cfield : $cfty ),*
+                        }
+                        let Args { $( $cfield ),* } = serde_json::from_value(args).map_err(|e| {
+                            $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
+                        })?;
+                        let out = $ccore(ctx $(, $cfield )*).await?;
+                        serde_json::to_value(out).map_err(|e| {
+                            $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
+                        })
+                    }
+                )*
                 $(
                     $name => {
                         #[derive(serde::Deserialize)]
@@ -55,18 +119,10 @@ macro_rules! rpc_dispatch {
                         struct Args {
                             $( $field : $fty ),*
                         }
-                        // The renderer omits the body for no-arg commands;
-                        // normalize `null`/absent to an empty object so the
-                        // (possibly empty) Args struct still deserializes.
-                        let args = if args.is_null() {
-                            serde_json::Value::Object(serde_json::Map::new())
-                        } else {
-                            args
-                        };
                         let Args { $( $field ),* } = serde_json::from_value(args).map_err(|e| {
                             $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
                         })?;
-                        let out = $core(svc.as_ref() $(, $field )*).await?;
+                        let out = $core(ctx.services.as_ref() $(, $field )*).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
@@ -79,6 +135,11 @@ macro_rules! rpc_dispatch {
 }
 
 rpc_dispatch! {
+    ctx {
+        // terminal — the agent-spawn path needs plugin_runtime
+        "open_terminal_session" => commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16, transport_mode: String },
+    }
+    svc {
     // app
     "ping" => commands::app::ping {},
     "app_version" => commands::app::app_version {},
@@ -290,6 +351,7 @@ rpc_dispatch! {
     "get_git_log" => commands::log::get_git_log { stream_id: Option<String>, limit: Option<u32>, all: bool },
     "get_commit_detail" => commands::log::get_commit_detail { stream_id: Option<String>, sha: String },
     "get_commits_ahead_of" => commands::log::get_commits_ahead_of { stream_id: Option<String>, base: String, head: String, limit: u32 },
+    }
 }
 
 /// Shared helpers for dispatch round-trip tests. Crate-visible so each
@@ -301,11 +363,14 @@ pub(crate) mod test_support {
 
     use oxplow_app::Services;
 
-    /// Build a `Services` over an in-memory DB rooted at a fresh git
-    /// repo (ensure_primary refuses non-git dirs). Keep the returned
+    /// Build an [`crate::RpcContext`] over an in-memory DB rooted at a
+    /// fresh git repo (ensure_primary refuses non-git dirs). Returns a
+    /// context with no plugin runtime — agent-spawn tests exercise the
+    /// graceful-degradation path. Derefs to `Services`, so existing
+    /// `svc.<store>` test usage keeps working. Keep the returned
     /// `TempDir` alive for the duration of the test.
     #[allow(clippy::unwrap_used)]
-    pub fn services() -> (Arc<Services>, tempfile::TempDir) {
+    pub fn services() -> (crate::RpcContext, tempfile::TempDir) {
         use std::process::Command;
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
@@ -321,8 +386,11 @@ pub(crate) mod test_support {
         git(&["config", "user.name", "test"]);
         git(&["config", "user.email", "test@example.com"]);
         git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-        let svc = Arc::new(Services::in_memory(dir.path()).unwrap());
-        (svc, dir)
+        let ctx = crate::RpcContext {
+            services: Arc::new(Services::in_memory(dir.path()).unwrap()),
+            plugin_runtime: None,
+        };
+        (ctx, dir)
     }
 }
 

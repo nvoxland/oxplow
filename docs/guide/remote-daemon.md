@@ -66,11 +66,6 @@ connection from the launcher).
 
 This is the first cut. Known gaps:
 
-- **Starting a new agent pane from the UI doesn't work remotely
-  yet** — the agent-spawn path still depends on the desktop shell's
-  runtime. Start agents in tmux on the remote box directly; their
-  hooks, MCP, and oxplow tracking all work (the daemon runs the same
-  control plane the desktop app does).
 - **External URL tabs** open in your local browser context, not the
   remote box.
 - **Native menus and clipboard** are your laptop's, as you'd expect.

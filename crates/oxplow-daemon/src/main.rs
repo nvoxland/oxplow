@@ -126,10 +126,14 @@ async fn main() {
         });
 
     let daemon_state = DaemonState {
-        services: state,
-        hook_base_url: control_plane.hook_base_url(),
-        mcp_endpoint_url: control_plane.mcp_endpoint_url(),
-        hook_token: control_plane.hook_token.clone(),
+        ctx: oxplow_rpc::RpcContext {
+            services: state,
+            plugin_runtime: Some(oxplow_rpc::PluginRuntime {
+                hook_base_url: control_plane.hook_base_url(),
+                mcp_endpoint_url: control_plane.mcp_endpoint_url(),
+                hook_token: control_plane.hook_token.clone(),
+            }),
+        },
     };
 
     let daemon = run_server(args.bind, daemon_state)

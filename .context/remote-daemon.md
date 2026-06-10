@@ -46,14 +46,22 @@ bearer check behind a flag is the designated extension point for a
 later direct-expose mode (mirror the control-plane's `hook_token`
 pattern). Multi-user is explicitly out of scope.
 
+## Dispatch context
+
+`dispatch` takes an `RpcContext { services, plugin_runtime }`
+(`crates/oxplow-rpc/src/lib.rs`; derefs to `Services`). The
+`rpc_dispatch!` registry has two sections: `svc { … }` cores receive
+`&Services` (the ~180 common commands) and `ctx { … }` cores receive
+`&RpcContext` (today just `open_terminal_session`, whose agent path
+reads `plugin_runtime` — the control-plane hook/MCP URLs + token).
+Both hosts populate it from their own control plane: the Tauri
+wrapper from the managed `PluginRuntimeState`, the daemon in
+`main.rs` from its `ControlPlane` handle. A host that passes
+`plugin_runtime: None` degrades cleanly — plain shell terminals
+work, agent spawn returns INVALID.
+
 ## Known v1 gaps
 
-- **Remote agent spawn**: `terminal::open_terminal_session` needs
-  `PluginRuntimeState` (control-plane URLs + token), which only the
-  Tauri shell materializes today. The daemon already carries the
-  same values in `DaemonState` — wiring a dispatch context that
-  includes them is the designed next step. Until then, start agents
-  in tmux on the remote box directly.
 - **Picking a different project** = restarting the daemon with a
   different `--project` (it's project-scoped, like the shell's
   process-per-window model). No remote directory browser.

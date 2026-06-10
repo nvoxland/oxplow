@@ -64,15 +64,14 @@ impl LaunchInfo {
 /// reads it at agent-spawn time so it can materialize the plugin dir
 /// and thread the URLs / token into the agent process env.
 ///
+/// The struct itself lives in `oxplow-rpc` (the daemon constructs the
+/// same shape from its own control plane); this re-export keeps the
+/// historical `oxplow_tauri_ipc::PluginRuntime` path working.
+///
 /// Decoupled from `Services` so the boot order doesn't gain a new
 /// dependency: control-plane spawn happens after `Services::boot`,
 /// inside the Tauri shell, and is registered via `.manage(…)`
 /// alongside `AppState`.
-#[derive(Clone, Debug)]
-pub struct PluginRuntime {
-    pub hook_base_url: String,
-    pub mcp_endpoint_url: String,
-    pub hook_token: String,
-}
+pub use oxplow_rpc::PluginRuntime;
 
 pub type PluginRuntimeState = Arc<PluginRuntime>;

@@ -20,7 +20,6 @@
 //! boot the full stack on an ephemeral port in-process.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::{
     extract::{
@@ -33,16 +32,12 @@ use axum::{
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
-use oxplow_app::Services;
 
-/// Shared router state: the booted services plus the control-plane
-/// info (hook/MCP URLs + token) for a future remote agent-spawn path.
+/// Shared router state: the dispatch context (booted services + this
+/// box's control-plane coordinates, so agent spawn works remotely).
 #[derive(Clone)]
 pub struct DaemonState {
-    pub services: Arc<Services>,
-    pub hook_base_url: String,
-    pub mcp_endpoint_url: String,
-    pub hook_token: String,
+    pub ctx: oxplow_rpc::RpcContext,
 }
 
 /// Handle returned by [`run_server`]: the bound address (useful when
@@ -64,7 +59,7 @@ async fn ipc_handler(
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
-    let result = oxplow_rpc::dispatch(&name, args, &state.services).await;
+    let result = oxplow_rpc::dispatch(&name, args, &state.ctx).await;
     let envelope = match result {
         Ok(data) => serde_json::json!({ "status": "ok", "data": data }),
         Err(e) => serde_json::json!({ "status": "error", "error": e }),
@@ -136,17 +131,15 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
     }
 
     let forwarders = [
-        forward(state.services.events.subscribe(), tx.clone(), |e| {
+        forward(state.ctx.events.subscribe(), tx.clone(), |e| {
             frame_json("oxplow", e)
         }),
-        forward(state.services.lsp_clients.subscribe(), tx.clone(), |e| {
+        forward(state.ctx.lsp_clients.subscribe(), tx.clone(), |e| {
             frame_json("lsp", e)
         }),
-        forward(
-            state.services.terminal_sessions.subscribe(),
-            tx.clone(),
-            |e| frame_json("terminal", e),
-        ),
+        forward(state.ctx.terminal_sessions.subscribe(), tx.clone(), |e| {
+            frame_json("terminal", e)
+        }),
     ];
     drop(tx);
 
@@ -201,7 +194,9 @@ pub async fn run_server(addr: SocketAddr, state: DaemonState) -> std::io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_app::Services;
     use std::process::Command;
+    use std::sync::Arc;
 
     fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -224,10 +219,14 @@ mod tests {
 
     fn daemon_state(services: Arc<Services>) -> DaemonState {
         DaemonState {
-            services,
-            hook_base_url: "http://127.0.0.1:0/hook".into(),
-            mcp_endpoint_url: "http://127.0.0.1:0/mcp".into(),
-            hook_token: "test-token".into(),
+            ctx: oxplow_rpc::RpcContext {
+                services,
+                plugin_runtime: Some(oxplow_rpc::PluginRuntime {
+                    hook_base_url: "http://127.0.0.1:0/hook".into(),
+                    mcp_endpoint_url: "http://127.0.0.1:0/mcp".into(),
+                    hook_token: "test-token".into(),
+                }),
+            },
         }
     }
 
