@@ -638,8 +638,14 @@ tab kebab × | menu close
 ## Persistence across restart
 
 `threadPageTabs`, `threadPageHistory`, `diffTabs` (the spec registry)
-are all persisted to `localStorage` on change and restored via the
-`useState` initializer on boot. Storage keys:
+and the per-thread active-tab pointer are owned by the
+`useThreadPageTabs` hook (`apps/desktop/src/tabs/useThreadPageTabs.ts`),
+which persists them to `localStorage` on change and restores them in
+the `useState` initializers on boot. The read/write functions —
+including the corrupt-JSON fallbacks and the legacy-blob coercions
+(bare-TabRef history stacks, pre-versioning diff specs) — live in
+`apps/desktop/src/tabs/pageTabsPersistence.ts` and are unit-tested in
+`pageTabsPersistence.test.ts`. Storage keys:
 `oxplow.layout.v1.threadPageTabs`, `oxplow.layout.v1.threadPageHistory`,
 `oxplow.layout.v1.diffSpecs`.
 
