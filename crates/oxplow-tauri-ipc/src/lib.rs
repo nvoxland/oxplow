@@ -281,6 +281,21 @@ mod tests {
         builder
             .export(specta_typescript::Typescript::default(), &target)
             .expect("export bindings");
+        // Route every generated invoke through the transport switch so
+        // remote mode (fetch to the daemon) works without touching the
+        // ~130 call sites. tauri-specta has no hook for the import
+        // path, so rewrite it post-export; local mode is unchanged
+        // because ../transport delegates to @tauri-apps/api/core.
+        let generated = std::fs::read_to_string(&target).expect("read bindings");
+        let routed = generated.replace(
+            "import { invoke as __TAURI_INVOKE } from \"@tauri-apps/api/core\";",
+            "import { invoke as __TAURI_INVOKE } from \"../transport\";",
+        );
+        assert!(
+            routed.contains("from \"../transport\""),
+            "expected to rewrite the bindings' invoke import; did tauri-specta change its header?"
+        );
+        std::fs::write(&target, routed).expect("write routed bindings");
         let metadata = std::fs::metadata(&target).expect("bindings written");
         assert!(metadata.len() > 0, "bindings file should not be empty");
     }

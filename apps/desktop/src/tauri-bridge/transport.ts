@@ -1,0 +1,150 @@
+// Transport switch: local Tauri IPC vs remote daemon over HTTP/WS.
+//
+// Every command in the generated bindings funnels through `invoke`
+// below (the bindings' import of `@tauri-apps/api/core` is rewritten
+// to this module at export time), and every event subscription funnels
+// through `listen`. In local mode both delegate straight to
+// `@tauri-apps/api` — byte-for-byte today's behavior. In remote mode
+// `invoke` POSTs to the daemon's `/ipc/:name` and `listen` reads the
+// multiplexed `/events` WebSocket.
+//
+// Remote mode is selected by a base URL in either:
+//   - localStorage "oxplow.remoteBase" (set by the connect UI), or
+//   - VITE_OXPLOW_REMOTE at build/dev time (developer override).
+// The value is read once at module load — switching modes is a
+// reload-level decision, matching the process-per-project model.
+//
+// Channels that are inherently local to the shell (the native menu's
+// "menu:command") always use Tauri listen, even in remote mode.
+
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
+
+/// Channels multiplexed over the daemon's /events WebSocket, keyed by
+/// the wire `channel` value in each frame.
+const REMOTE_CHANNELS: Record<string, string> = {
+  oxplow: "oxplow:event",
+  lsp: "lsp:event",
+  terminal: "terminal:event",
+};
+
+function readRemoteBase(): string | null {
+  try {
+    const stored = window.localStorage.getItem("oxplow.remoteBase");
+    if (stored && stored.trim().length > 0) return stored.trim().replace(/\/+$/, "");
+  } catch {
+    // localStorage unavailable (tests) — fall through.
+  }
+  const env = (import.meta as { env?: Record<string, string> }).env?.VITE_OXPLOW_REMOTE;
+  if (env && env.trim().length > 0) return env.trim().replace(/\/+$/, "");
+  return null;
+}
+
+const remoteBase: string | null = readRemoteBase();
+
+/// True when this renderer drives a remote daemon instead of the
+/// in-process backend.
+export function isRemote(): boolean {
+  return remoteBase !== null;
+}
+
+/// The remote daemon's HTTP base (e.g. "http://127.0.0.1:7420"), or
+/// null in local mode.
+export function remoteBaseUrl(): string | null {
+  return remoteBase;
+}
+
+/// Tauri-invoke-compatible entry point. The generated bindings import
+/// this as `__TAURI_INVOKE`. Resolves with the command's data and
+/// REJECTS with the IpcError object on failure — the same semantics
+/// as `@tauri-apps/api/core`'s invoke, which the bindings' typedError
+/// wrapper converts into the `{status, data|error}` envelope.
+export async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  if (remoteBase === null) {
+    return tauriInvoke<T>(name, args);
+  }
+  const resp = await fetch(`${remoteBase}/ipc/${name}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args ?? null),
+  });
+  if (!resp.ok) {
+    // Transport-level failure (tunnel down, daemon restarting).
+    throw { code: "TRANSPORT", message: `daemon http ${resp.status}`, cause: null };
+  }
+  const envelope = (await resp.json()) as
+    | { status: "ok"; data: T }
+    | { status: "error"; error: unknown };
+  if (envelope.status === "ok") return envelope.data;
+  throw envelope.error;
+}
+
+// ---------------------------------------------------------------------------
+// Remote event stream: one shared WebSocket, demuxed by channel.
+
+type Handler = (event: { payload: unknown }) => void;
+
+const channelHandlers = new Map<string, Set<Handler>>();
+let socket: WebSocket | null = null;
+let reconnectDelayMs = 500;
+
+function ensureSocket(): void {
+  if (remoteBase === null || socket !== null) return;
+  const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events`;
+  const ws = new WebSocket(wsUrl);
+  socket = ws;
+  ws.onmessage = (msg) => {
+    let frame: { channel?: string; payload?: unknown };
+    try {
+      frame = JSON.parse(String(msg.data));
+    } catch {
+      return;
+    }
+    const local = frame.channel ? REMOTE_CHANNELS[frame.channel] : undefined;
+    if (!local) return;
+    const handlers = channelHandlers.get(local);
+    if (!handlers) return;
+    for (const h of handlers) h({ payload: frame.payload });
+  };
+  ws.onopen = () => {
+    reconnectDelayMs = 500;
+  };
+  ws.onclose = () => {
+    socket = null;
+    // Basic backoff reconnect; the reconnect-UX workstream layers the
+    // banner + refetch-all on top of this via the events below.
+    if (channelHandlers.size > 0) {
+      setTimeout(ensureSocket, reconnectDelayMs);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+    }
+  };
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+/// Tauri-listen-compatible entry point. In remote mode the three
+/// daemon-multiplexed channels read from the shared WebSocket; any
+/// other channel (e.g. the native menu) still listens on the local
+/// Tauri event bus.
+export async function listen<T>(
+  channel: string,
+  handler: (event: { payload: T }) => void,
+): Promise<UnlistenFn> {
+  const isMultiplexed = Object.values(REMOTE_CHANNELS).includes(channel);
+  if (remoteBase === null || !isMultiplexed) {
+    return tauriListen<T>(channel, handler);
+  }
+  let handlers = channelHandlers.get(channel);
+  if (!handlers) {
+    handlers = new Set();
+    channelHandlers.set(channel, handlers);
+  }
+  const h = handler as Handler;
+  handlers.add(h);
+  ensureSocket();
+  return () => {
+    handlers.delete(h);
+    if (handlers.size === 0) channelHandlers.delete(channel);
+  };
+}

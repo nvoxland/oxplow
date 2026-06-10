@@ -59,6 +59,15 @@ touches roughly seven files. They sit in this order:
 6. **UI api wrapper** — `apps/desktop/src/api.ts`. Thin wrapper around
    the typed `commands.name(...)` import from the generated bindings.
 
+   **Transport switch**: the generated bindings import `invoke` from
+   `apps/desktop/src/tauri-bridge/transport.ts` (the export test
+   rewrites the import line post-export), and all event subscriptions
+   import `listen` from the same module. Local mode delegates to
+   `@tauri-apps/api`; remote mode (localStorage `oxplow.remoteBase` or
+   `VITE_OXPLOW_REMOTE`) fetches `POST <base>/ipc/<name>` on the
+   daemon and reads the multiplexed `/events` WebSocket. Never import
+   `@tauri-apps/api/core` or `/event` directly from UI code.
+
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
 

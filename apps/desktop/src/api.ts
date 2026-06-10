@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./tauri-bridge/transport.js";
 import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { ipcErrorMessage } from "./ipc-error.js";

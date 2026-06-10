@@ -1,12 +1,14 @@
-// Frontend facade over the Tauri IPC.
+// Frontend facade over the backend IPC.
 //
 // Re-exports the tauri-specta-generated bindings (every Rust command
 // becomes a typed async TS function) plus a small ergonomics layer
 // for events. UI code imports from here, never directly from
-// @tauri-apps/api — that way swapping transports later (sidecar
-// binary, remote daemon, etc.) doesn't ripple through the UI.
+// @tauri-apps/api — the actual transport (local Tauri invoke/listen
+// vs a remote daemon over HTTP/WebSocket) is selected in
+// ./transport.ts, so neither the bindings' call sites nor the UI
+// change between modes.
 
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./transport";
 import { commands } from "./generated/bindings";
 
 export { commands };
