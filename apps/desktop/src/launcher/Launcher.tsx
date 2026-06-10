@@ -3,8 +3,16 @@ import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 
 import { listRecentProjects, openProjectGuarded, removeRecentProject } from "../api.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
+import { connectRemote, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { Kebab } from "../components/Kebab.js";
 import { logUi } from "../logger.js";
+import {
+  forgetRemote,
+  loadRecentRemotes,
+  normalizeBase,
+  rememberRemote,
+  type RecentRemote,
+} from "./remoteRecents.js";
 
 /// Start screen shown when oxplow launches with no project (a bare
 /// Finder/dock launch). Lists recent projects to reopen and offers an
@@ -114,8 +122,117 @@ export function Launcher() {
             ))}
           </ul>
         )}
+
+        <RemoteConnectSection />
       </div>
     </div>
+  );
+}
+
+/// "Connect to Remote Daemon" — attach this window to an oxplow-daemon
+/// reached through an SSH tunnel. The daemon is project-scoped (it was
+/// started with --project on the remote box), so connecting IS picking
+/// the project; on success the remote base is persisted and the window
+/// reloads into remote mode (see tauri-bridge/transport.ts).
+function RemoteConnectSection() {
+  const [url, setUrl] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recents, setRecents] = useState<RecentRemote[]>(() =>
+    loadRecentRemotes(window.localStorage),
+  );
+
+  const connect = useCallback(async (raw: string) => {
+    const base = normalizeBase(raw);
+    if (!base) return;
+    setError(null);
+    setConnecting(true);
+    try {
+      await probeRemoteDaemon(base);
+      rememberRemote(window.localStorage, base);
+      connectRemote(base); // reloads the window into remote mode
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      setConnecting(false);
+      logUi("warn", "launcher: remote daemon probe failed", { base, error: message });
+    }
+  }, []);
+
+  const handleForget = useCallback((base: string) => {
+    setRecents(forgetRemote(window.localStorage, base));
+  }, []);
+
+  return (
+    <section>
+      <h2 style={sectionHeaderStyle}>Remote Daemon</h2>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void connect(url);
+        }}
+        style={remoteFormStyle}
+      >
+        <input
+          data-testid="launcher-remote-url"
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="http://127.0.0.1:7420"
+          spellCheck={false}
+          style={remoteInputStyle}
+          disabled={connecting}
+        />
+        <button
+          type="submit"
+          data-testid="launcher-remote-connect"
+          disabled={connecting || normalizeBase(url).length === 0}
+          style={remoteConnectButtonStyle}
+        >
+          {connecting ? "Connecting…" : "Connect"}
+        </button>
+      </form>
+      <p style={remoteHintStyle}>
+        Start <code>oxplow-daemon --project &lt;dir&gt;</code> on the remote box, tunnel with{" "}
+        <code>ssh -L 7420:127.0.0.1:7420 &lt;host&gt;</code>, then connect.
+      </p>
+      {error ? (
+        <div data-testid="launcher-remote-error" style={errorStyle}>
+          {error}
+        </div>
+      ) : null}
+      {recents.length > 0 ? (
+        <ul style={listStyle}>
+          {recents.map((r) => (
+            <li key={r.base} data-testid={`launcher-remote-recent-${r.base}`} style={rowStyle}>
+              <button
+                type="button"
+                onClick={() => void connect(r.base)}
+                disabled={connecting}
+                style={rowOpenButtonStyle}
+                title={r.base}
+              >
+                <span style={rowTitleStyle}>{r.base}</span>
+              </button>
+              <div style={rowMetaStyle}>
+                <span style={rowTimeStyle}>{formatRelative(Math.floor(r.lastConnectedAt / 1000))}</span>
+                <Kebab
+                  items={[
+                    {
+                      id: "launcher.remoteForget",
+                      label: "Remove from List",
+                      enabled: true,
+                      run: () => handleForget(r.base),
+                    },
+                  ]}
+                  testId={`launcher-remote-kebab-${r.base}`}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
@@ -317,4 +434,38 @@ const errorStyle: React.CSSProperties = {
   padding: "8px 12px",
   marginBottom: 12,
   fontSize: "var(--text-xs)",
+};
+
+const remoteFormStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+};
+
+const remoteInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  padding: "8px 10px",
+  background: "var(--surface-app)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  fontSize: "var(--text-sm)",
+};
+
+const remoteConnectButtonStyle: React.CSSProperties = {
+  padding: "8px 14px",
+  background: "var(--accent)",
+  color: "var(--accent-on-accent)",
+  border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: "var(--text-sm)",
+  fontWeight: "var(--weight-medium)" as unknown as number,
+};
+
+const remoteHintStyle: React.CSSProperties = {
+  margin: "8px 0 12px",
+  color: "var(--text-muted)",
+  fontSize: "var(--text-xs)",
+  lineHeight: 1.5,
 };

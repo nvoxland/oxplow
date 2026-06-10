@@ -4,6 +4,7 @@ import { App } from "./App.js";
 import { Launcher } from "./launcher/Launcher.js";
 import { ProjectSetup } from "./launcher/ProjectSetup.js";
 import { getLaunchMode } from "./api.js";
+import { isRemote } from "./tauri-bridge/transport.js";
 import { logUi } from "./logger.js";
 
 type Screen =
@@ -20,6 +21,14 @@ export function Root() {
   const [screen, setScreen] = useState<Screen>({ kind: "loading" });
 
   useEffect(() => {
+    // Remote mode: this window is a thin client to an oxplow-daemon
+    // that owns the project — the LOCAL process's launch mode (usually
+    // "launcher", since there's no local project) is irrelevant.
+    // get_launch_mode is also a local-only command, so skip it.
+    if (isRemote()) {
+      setScreen({ kind: "project" });
+      return;
+    }
     getLaunchMode()
       .then((info) => {
         if (info.mode === "launcher") setScreen({ kind: "launcher" });

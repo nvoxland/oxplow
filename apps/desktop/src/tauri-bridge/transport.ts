@@ -54,6 +54,49 @@ export function remoteBaseUrl(): string | null {
   return remoteBase;
 }
 
+/// Persist a remote daemon base and reload into remote mode. The
+/// transport reads the key once at module load, so a reload is the
+/// mode switch.
+export function connectRemote(base: string): void {
+  window.localStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
+  window.location.reload();
+}
+
+/// Drop the remote base and reload back into local mode.
+export function disconnectRemote(): void {
+  window.localStorage.removeItem("oxplow.remoteBase");
+  window.location.reload();
+}
+
+/// Probe a daemon base before committing to it: POST /ipc/ping and
+/// expect the ok envelope. Throws with a human-readable message on
+/// any failure (unreachable, non-JSON, wrong service).
+export async function probeRemoteDaemon(base: string, timeoutMs = 4000): Promise<void> {
+  const cleaned = base.trim().replace(/\/+$/, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${cleaned}/ipc/ping`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`daemon replied HTTP ${resp.status}`);
+    const envelope = (await resp.json()) as { status?: string; data?: unknown };
+    if (envelope.status !== "ok" || envelope.data !== "pong") {
+      throw new Error("endpoint is not an oxplow daemon");
+    }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(`no response within ${timeoutMs / 1000}s — is the tunnel up?`);
+    }
+    throw e instanceof Error ? e : new Error(String(e));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /// Tauri-invoke-compatible entry point. The generated bindings import
 /// this as `__TAURI_INVOKE`. Resolves with the command's data and
 /// REJECTS with the IpcError object on failure — the same semantics
