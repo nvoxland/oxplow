@@ -80,6 +80,7 @@ import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
+import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { useFileSessions } from "./useFileSessions.js";
@@ -3495,6 +3496,7 @@ export function App() {
         />
       ) : null}
       <UndoToastStack />
+      <RemoteConnectionBanner />
     </div>
   );
 }

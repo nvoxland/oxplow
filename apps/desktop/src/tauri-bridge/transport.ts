@@ -131,6 +131,23 @@ const channelHandlers = new Map<string, Set<Handler>>();
 let socket: WebSocket | null = null;
 let reconnectDelayMs = 500;
 
+/// Remote connection lifecycle, for the reconnect banner. "up" fires
+/// on every successful (re)connect; "down" on every drop. Local mode
+/// never fires either.
+export type RemoteConnectionState = "up" | "down";
+const connectionStateHandlers = new Set<(s: RemoteConnectionState) => void>();
+
+export function onRemoteConnectionState(
+  handler: (state: RemoteConnectionState) => void,
+): () => void {
+  connectionStateHandlers.add(handler);
+  return () => connectionStateHandlers.delete(handler);
+}
+
+function notifyConnectionState(state: RemoteConnectionState): void {
+  for (const h of connectionStateHandlers) h(state);
+}
+
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null) return;
   const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events`;
@@ -151,11 +168,13 @@ function ensureSocket(): void {
   };
   ws.onopen = () => {
     reconnectDelayMs = 500;
+    notifyConnectionState("up");
   };
   ws.onclose = () => {
     socket = null;
-    // Basic backoff reconnect; the reconnect-UX workstream layers the
-    // banner + refetch-all on top of this via the events below.
+    notifyConnectionState("down");
+    // Backoff reconnect; the RemoteConnectionBanner drives the
+    // user-facing state off the notifications above.
     if (channelHandlers.size > 0) {
       setTimeout(ensureSocket, reconnectDelayMs);
       reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);

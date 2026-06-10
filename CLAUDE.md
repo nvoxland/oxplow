@@ -72,6 +72,7 @@ open questions.
 | Effort-scoped collection (test-run + diff-coverage observations, the coverage parser, the `collection:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |
+| Remote daemon mode (oxplow-rpc dispatch, oxplow-daemon, transport switch, connect flow, reconnect banner) | `.context/remote-daemon.md` |
 | Blog posts, user docs, release notes, README copy — anything reader-facing | `.context/writing-tone.md` |
 
 When you finish a change that alters how a subsystem works, **update
