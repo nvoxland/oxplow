@@ -427,6 +427,97 @@ mod tests {
         assert_eq!(status.state, AgentStatusState::Running);
     }
 
+    #[tokio::test]
+    async fn stop_without_open_turn_still_marks_idle() {
+        // Out-of-order: a Stop arriving with no open turn (e.g. after
+        // a daemon restart dropped the in-memory turn, or a duplicate
+        // Stop) must not error — it just lands the status transition.
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::Stop,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        assert_eq!(status.state, AgentStatusState::Idle);
+    }
+
+    #[tokio::test]
+    async fn envelope_without_thread_id_persists_event_only() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: None,
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("orphan".into()),
+        })
+        .await
+        .unwrap();
+        // No turn opened, no status row created — the thread-scoped
+        // state machine never ran.
+        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        assert!(svc.statuses.get(&tid, "working").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn reprompt_while_turn_open_does_not_open_second_turn() {
+        let (svc, tid) = fixture().await;
+        for prompt in ["first", "mid-turn re-prompt"] {
+            svc.ingest(HookEnvelope {
+                kind: HookKind::UserPromptSubmit,
+                thread_id: Some(tid),
+                stream_id: None,
+                session_id: None,
+                payload_json: "{}".into(),
+                prompt: Some(prompt.into()),
+            })
+            .await
+            .unwrap();
+        }
+        let open = svc.turns.list_open(&tid).await.unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].prompt, "first");
+    }
+
+    #[tokio::test]
+    async fn agent_boot_marks_idle_without_touching_turns() {
+        let (svc, tid) = fixture().await;
+        // Open a turn, then boot — the status flips but the turn
+        // survives (a pane restart mid-turn shouldn't lose the turn).
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("p".into()),
+        })
+        .await
+        .unwrap();
+        svc.ingest(HookEnvelope {
+            kind: HookKind::AgentBoot,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(svc.turns.list_open(&tid).await.unwrap().len(), 1);
+        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        assert_eq!(status.state, AgentStatusState::Idle);
+        assert_eq!(status.detail.as_deref(), Some("boot"));
+    }
+
     #[test]
     fn await_user_payload_detection() {
         assert!(payload_signals_await_user(r#"{"await_user":true}"#));
