@@ -39,6 +39,7 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 
 [lints]
 workspace = true
