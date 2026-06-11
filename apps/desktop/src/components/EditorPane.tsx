@@ -5,7 +5,9 @@ import type { LocalBlameEntry, Stream } from "../api.js";
 import { desktopBridge, readFileAtRef } from "../api.js";
 import { languageForPath } from "../editor-language.js";
 import { hasLspServer } from "../lsp-servers-store.js";
-import { type EditorNavigationTarget, type LspClient, relativePathFromFileUri, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
+import { type EditorNavigationTarget, relativePathFromFileUri, streamFileUri } from "../lsp.js";
+import { normalizeDefinitionTarget } from "../lsp-monaco-mapping.js";
+import { registerLspProviders } from "./editor-lsp-providers.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
@@ -168,11 +170,13 @@ export function EditorPane({
         () => { void onSaveRef.current(); },
       );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
-      registerLspProviders(
-        monaco,
-        (languageId) => ensureLspClient(streamRef.current, languageId),
-        (model) => flushPendingChanges(relativePathFromFileUri(streamRef.current, model.uri.toString())),
-      );
+      registerLspProviders(monaco, {
+        hasServer: hasLspServer,
+        getClient: (languageId) => ensureLspClient(streamRef.current, languageId),
+        flushDoc: (model) =>
+          flushPendingChanges(relativePathFromFileUri(streamRef.current, model.uri.toString())),
+        setStatus: setLspStatus,
+      });
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
@@ -481,6 +485,13 @@ export function EditorPane({
       shortcut: "F12",
       enabled: !!filePath && hasLspServer(languageForPath(filePath)),
       run: () => goToDefinition(),
+    },
+    {
+      id: "editor.rename-symbol",
+      label: "Rename Symbol",
+      shortcut: "F2",
+      enabled: !!filePath && hasLspServer(languageForPath(filePath)),
+      run: () => editorRef.current?.getAction("editor.action.rename")?.run(),
     },
     {
       id: "editor.format-document",
@@ -949,144 +960,5 @@ function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promi
     keybindings: [monaco.KeyCode.F12],
     contextMenuGroupId: "navigation",
     run,
-  });
-}
-
-function registerLspProviders(
-  monaco: any,
-  getClient: (languageId: string) => LspClient,
-  flushDoc: (model: any) => void,
-) {
-  for (const languageId of ["typescript", "javascript"]) {
-    monaco.languages.registerDefinitionProvider(languageId, {
-      provideDefinition: async (model: any, position: any) => {
-        flushDoc(model);
-        const client = getClient(languageId);
-        const result = await client.request<unknown>("textDocument/definition", {
-          textDocument: { uri: model.uri.toString() },
-          position: {
-            line: position.lineNumber - 1,
-            character: position.column - 1,
-          },
-        });
-        return definitionResultToMonacoLocations(monaco, result);
-      },
-    });
-    monaco.languages.registerHoverProvider(languageId, {
-      provideHover: async (model: any, position: any) => {
-        flushDoc(model);
-        const client = getClient(languageId);
-        const result = await client.request<any>("textDocument/hover", {
-          textDocument: { uri: model.uri.toString() },
-          position: {
-            line: position.lineNumber - 1,
-            character: position.column - 1,
-          },
-        });
-        if (!result?.contents) return null;
-        return {
-          contents: normalizeHoverContents(result.contents),
-          range: result.range ? toMonacoRange(monaco, result.range) : undefined,
-        };
-      },
-    });
-    monaco.languages.registerReferenceProvider(languageId, {
-      provideReferences: async (model: any, position: any) => {
-        flushDoc(model);
-        const client = getClient(languageId);
-        const result = await client.request<unknown[]>("textDocument/references", {
-          textDocument: { uri: model.uri.toString() },
-          position: {
-            line: position.lineNumber - 1,
-            character: position.column - 1,
-          },
-          context: { includeDeclaration: true },
-        });
-        return Array.isArray(result)
-          ? result
-            .map((item) => referenceToMonacoLocation(monaco, item))
-            .filter(Boolean)
-          : [];
-      },
-    });
-  }
-}
-
-function normalizeDefinitionTarget(stream: Stream, result: unknown): EditorNavigationTarget | null {
-  const locations = Array.isArray(result) ? result : result ? [result] : [];
-  for (const location of locations) {
-    if (!location || typeof location !== "object") continue;
-    const candidate = location as {
-      uri?: string;
-      targetUri?: string;
-      range?: { start?: { line?: number; character?: number } };
-      targetSelectionRange?: { start?: { line?: number; character?: number } };
-      targetRange?: { start?: { line?: number; character?: number } };
-    };
-    if (candidate.targetUri) {
-      const target = toEditorNavigationTarget(stream, candidate.targetUri, candidate.targetSelectionRange ?? candidate.targetRange);
-      if (target) return target;
-    }
-    if (candidate.uri) {
-      const target = toEditorNavigationTarget(stream, candidate.uri, candidate.range);
-      if (target) return target;
-    }
-  }
-  return null;
-}
-
-function definitionResultToMonacoLocations(monaco: any, result: unknown): any[] {
-  const locations = Array.isArray(result) ? result : result ? [result] : [];
-  return locations
-    .map((item) => referenceToMonacoLocation(monaco, item))
-    .filter(Boolean);
-}
-
-function referenceToMonacoLocation(monaco: any, item: unknown): any | null {
-  if (!item || typeof item !== "object") return null;
-  const candidate = item as {
-    uri?: string;
-    targetUri?: string;
-    range?: unknown;
-    targetSelectionRange?: unknown;
-    targetRange?: unknown;
-  };
-  const uri = candidate.targetUri ?? candidate.uri;
-  const range = candidate.targetSelectionRange ?? candidate.targetRange ?? candidate.range;
-  if (!uri || !range) return null;
-  return {
-    uri: monaco.Uri.parse(uri),
-    range: toMonacoRange(monaco, range),
-  };
-}
-
-function toMonacoRange(monaco: any, range: unknown): any {
-  const candidate = range as {
-    start?: { line?: number; character?: number };
-    end?: { line?: number; character?: number };
-  };
-  return new monaco.Range(
-    (candidate.start?.line ?? 0) + 1,
-    (candidate.start?.character ?? 0) + 1,
-    (candidate.end?.line ?? candidate.start?.line ?? 0) + 1,
-    (candidate.end?.character ?? candidate.start?.character ?? 0) + 1,
-  );
-}
-
-function normalizeHoverContents(contents: unknown): { value: string }[] {
-  const values = Array.isArray(contents) ? contents : [contents];
-  return values.flatMap((item) => {
-    if (!item) return [];
-    if (typeof item === "string") return [{ value: item }];
-    if (typeof item === "object" && "value" in item && typeof (item as { value?: unknown }).value === "string") {
-      return [{ value: (item as { value: string }).value }];
-    }
-    if (typeof item === "object" && "language" in item && "value" in item) {
-      const markup = item as { language?: unknown; value?: unknown };
-      if (typeof markup.value === "string") {
-        return [{ value: `\`\`\`${typeof markup.language === "string" ? markup.language : ""}\n${markup.value}\n\`\`\`` }];
-      }
-    }
-    return [];
   });
 }

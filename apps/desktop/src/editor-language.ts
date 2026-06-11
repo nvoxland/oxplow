@@ -85,6 +85,13 @@ const EXTENSION_MAP: ReadonlyArray<readonly [string, string]> = [
   [".fish", "shell"],
 ];
 
+/// Every distinct Monaco language id we map extensions to. The LSP
+/// providers register once for each of these and no-op per call via
+/// `hasLspServer` — see `editor-lsp-providers.ts`.
+export function allKnownLanguageIds(): string[] {
+  return [...new Set(EXTENSION_MAP.map(([, id]) => id))];
+}
+
 /// Whether a language can use LSP features is data-driven now: see
 /// `hasLspServer` in `lsp-servers-store.ts` (any language with a
 /// configured or installed server qualifies).

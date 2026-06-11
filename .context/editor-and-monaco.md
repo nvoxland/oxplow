@@ -240,10 +240,25 @@ subsystem) owns every language-server process — one shared session per
 demuxes `LspSessionEvent` payloads (publishDiagnostics, session
 status) to the live clients.
 
-`EditorPane` registers Monaco providers (definition, hover, references)
-that proxy to the client; the work of mapping LSP positions ↔ Monaco
-positions and locations ↔ Monaco editor ranges happens in the editor
-component (`registerLspProviders`).
+Monaco provider registration lives in
+`apps/desktop/src/components/editor-lsp-providers.ts`
+(`registerLspProviders(monaco, deps)`): definition, hover, references,
+**completion**, **rename**, **code actions**, and **document symbols**
+(outline). Providers register ONCE for every language id in
+`editor-language.ts`'s extension map (`allKnownLanguageIds()`) and
+no-op per call via `hasLspServer` — re-registering on server-list
+changes would race Monaco's open widgets. Every provider calls
+`flushDoc(model)` before its request (didChange debounce race). LSP ↔
+Monaco shape conversion is pure and unit-tested in
+`apps/desktop/src/lsp-monaco-mapping.ts` (completion kinds map by enum
+*name*, symbol kinds by `-1` offset; `normalizeWorkspaceEdit` handles
+`changes` + `documentChanges` and counts skipped file create/rename/
+delete ops). Code-action commands are forwarded to
+`workspace/executeCommand` through the registered Monaco command
+`oxplow.lsp.executeCommand`. Rename rides Monaco's own rename UI
+(`editor.action.rename`, F2 + context-menu item) and applies the
+returned WorkspaceEdit via Monaco's bulk-edit service — open models
+only (v1).
 
 The **client lifecycle** itself lives in
 `apps/desktop/src/components/useLspClients.ts` (a hook EditorPane mounts):
