@@ -152,7 +152,7 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
         forward(state.ctx.events.subscribe(), tx.clone(), move |e| {
             frame_json(oxplow_key, e)
         }),
-        forward(state.ctx.lsp_clients.subscribe(), tx.clone(), move |e| {
+        forward(state.ctx.lsp_sessions.subscribe(), tx.clone(), move |e| {
             frame_json(lsp_key, e)
         }),
         forward(
@@ -361,6 +361,43 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(v["channel"], "oxplow");
         assert_eq!(v["payload"]["kind"], "streamsChanged");
+    }
+
+    #[tokio::test]
+    async fn events_ws_streams_lsp_session_events() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let url = format!("ws://{}/events", daemon.bind_addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        // Same subscribe-race handling as the oxplow-events test above.
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                svc.lsp_sessions.emit_event_for_tests(
+                    oxplow_app::lsp_sessions::LspSessionEvent::SessionStatus {
+                        stream_id: "s-1".into(),
+                        language: "rust".into(),
+                        status: oxplow_app::lsp_sessions::LspSessionStatus::Crashed,
+                        message: Some("boom".into()),
+                    },
+                );
+                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
+                    Ok(Some(Ok(msg))) if msg.is_text() => {
+                        return msg.into_text().unwrap().to_string()
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .expect("ws frame within timeout");
+        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(v["channel"], "lsp");
+        assert_eq!(v["payload"]["kind"], "sessionStatus");
+        assert_eq!(v["payload"]["status"], "crashed");
+        assert_eq!(v["payload"]["streamId"], "s-1");
     }
 
     #[tokio::test]

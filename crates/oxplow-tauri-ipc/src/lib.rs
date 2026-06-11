@@ -233,9 +233,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::webview::open_external_url,
             commands::webview::clipboard_read_text,
             // lsp
-            commands::lsp::open_lsp_client,
-            commands::lsp::send_lsp_message,
-            commands::lsp::close_lsp_client,
             commands::lsp::install_lsp_package,
             commands::lsp::list_installed_lsp_packages,
             commands::lsp::lsp_request,

@@ -3,44 +3,6 @@ pub use oxplow_rpc::commands::lsp::InstalledLspPackage;
 use crate::error::IpcError;
 use crate::state::AppState;
 
-/// Spawn a new language-server child for `(stream_id, language_id)`.
-/// Returns an opaque `client_id` the renderer uses to address
-/// subsequent send/close commands. The cwd is resolved from the
-/// stream's worktree path; if the stream isn't found we fall back to
-/// the project dir.
-#[tauri::command]
-#[specta::specta]
-pub async fn open_lsp_client(
-    state: tauri::State<'_, AppState>,
-    stream_id: String,
-    language_id: String,
-) -> Result<String, IpcError> {
-    oxplow_rpc::commands::lsp::open_lsp_client(&state, stream_id, language_id).await
-}
-
-/// Forward a raw JSON-RPC frame body (no headers) from the renderer
-/// to the language server addressed by `client_id`.
-#[tauri::command]
-#[specta::specta]
-pub async fn send_lsp_message(
-    state: tauri::State<'_, AppState>,
-    client_id: String,
-    payload: String,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::lsp::send_lsp_message(&state, client_id, payload).await
-}
-
-/// Tear down the language server backing `client_id`. Idempotent on
-/// already-closed clients (returns `INVALID` rather than panicking).
-#[tauri::command]
-#[specta::specta]
-pub async fn close_lsp_client(
-    state: tauri::State<'_, AppState>,
-    client_id: String,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::lsp::close_lsp_client(&state, client_id).await
-}
-
 /// Download + install a Mason package by name, register the resulting
 /// binary with `LspSessionManager`, and persist it to the manifest so
 /// subsequent boots pick it up. Blocks for the duration of the
@@ -72,9 +34,10 @@ pub async fn lsp_request(
     stream_id: String,
     language_id: String,
     method: String,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, IpcError> {
-    oxplow_rpc::commands::lsp::lsp_request(&state, stream_id, language_id, method, params).await
+    params_json: String,
+) -> Result<String, IpcError> {
+    oxplow_rpc::commands::lsp::lsp_request(&state, stream_id, language_id, method, params_json)
+        .await
 }
 
 /// Send a JSON-RPC notification on the shared `(stream, language)`
@@ -87,9 +50,9 @@ pub async fn lsp_notify(
     stream_id: String,
     language_id: String,
     method: String,
-    params: serde_json::Value,
+    params_json: String,
 ) -> Result<(), IpcError> {
-    oxplow_rpc::commands::lsp::lsp_notify(&state, stream_id, language_id, method, params).await
+    oxplow_rpc::commands::lsp::lsp_notify(&state, stream_id, language_id, method, params_json).await
 }
 
 /// All known language servers (oxplow.yaml + Mason-installed), with

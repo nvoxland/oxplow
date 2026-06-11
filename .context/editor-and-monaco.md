@@ -230,9 +230,16 @@ rich-text integration:
 
 ## LSP bridge
 
-`apps/desktop/src/lsp.ts` defines `LspClient`, which talks to a per-language LSP
-server through a runtime-managed socket (the runtime spawns the server
-process via `LspSessionManager` and bridges its stdio to a WebSocket).
+The backend (`LspSessionManager`, see `.context/lsp.md` for the full
+subsystem) owns every language-server process — one shared session per
+`(stream, language)`, used by both the editor and the MCP tools.
+`apps/desktop/src/lsp.ts` defines `LspClient`, a thin facade per
+`(stream, language)`: `request`/`notify` ride the `lsp_request` /
+`lsp_notify` RPCs (payloads as JSON strings — specta can't type
+`serde_json::Value`), and one module-level `lsp:event` subscription
+demuxes `LspSessionEvent` payloads (publishDiagnostics, session
+status) to the live clients.
+
 `EditorPane` registers Monaco providers (definition, hover, references)
 that proxy to the client; the work of mapping LSP positions ↔ Monaco
 positions and locations ↔ Monaco editor ranges happens in the editor
@@ -241,32 +248,40 @@ component (`registerLspProviders`).
 The **client lifecycle** itself lives in
 `apps/desktop/src/components/useLspClients.ts` (a hook EditorPane mounts):
 the per-language `LspClient` cache + `ensureLspClient`, diagnostics →
-Monaco markers (`markerOwnerRef`), the `didOpen` / `didClose` / `didSave`
-document sync as files open/close/save, the install-suggestion state +
+Monaco markers (`markerOwnerRef`), the document sync (`didOpen` /
+`didChange` / `didClose` / `didSave`), the install-suggestion state +
 `installSuggested` flow, and disposal on both stream-switch and unmount.
-EditorPane keeps the Monaco editor + provider registration and calls the
-hook's `ensureLspClient`; the shared status banner (`lspStatus`) stays in
-EditorPane because blame + go-to-definition also write to it, so the hook
-takes `setLspStatus` as a param.
+`didChange` rides `DocumentSyncTracker`
+(`apps/desktop/src/lsp-document-sync.ts`): per-path **monotonic** LSP
+versions (Monaco's `getVersionId` resets on model swaps — don't use it)
+with a ~200ms debounce; the hook's `flushPendingChanges(path)` must be
+called before `didSave` and before any positional request so the server
+never answers against stale text. EditorPane keeps the Monaco editor +
+provider registration and calls the hook's `ensureLspClient`; the shared
+status banner (`lspStatus`) stays in EditorPane because blame +
+go-to-definition also write to it, so the hook takes `setLspStatus` as
+a param.
 
-The set of languages eligible for LSP is determined by
-`isLspCandidateLanguage` (`apps/desktop/src/editor-language.ts`). The runtime
-loads extra LSP servers from `oxplow.yaml` on startup
-(`config.lspServers` → `registerLanguageServer` per server).
+Language eligibility is **data-driven**: `hasLspServer(languageId)`
+(`apps/desktop/src/lsp-servers-store.ts`, backed by `list_lsp_servers`,
+refreshed on `lspServersChanged` / `configChanged`) replaces the old
+hardcoded `isLspCandidateLanguage`. Any language with a yaml-configured
+or Mason-installed server lights up.
 
-When the LSP bridge fails to open a server for the current file's
-language, `EditorPane` checks
+When a request fails with "no language server configured", the status
+banner surfaces the self-describing error and `EditorPane` checks
 `apps/desktop/src/lspSuggestions.ts` for a Mason package mapping. If a
-suggestion exists, the LSP status banner in the editor's lower-right
-shows an "Install <package>" button that calls `installLspPackage`
-(an IPC into `oxplow-app::lsp_installer`). The install runs against
-the Mason registry (`mason-org/mason-registry`) and lands the binary
-in `.oxplow/lsp/<name>/`; on success the cached `LspClient` for that
-language is dropped so the next request retries with the new binary.
+suggestion exists, the banner shows an "Install <package>" button that
+calls `installLspPackage` (an IPC into `oxplow-app::lsp_installer`).
+The install runs against the Mason registry
+(`mason-org/mason-registry`) and lands the binary in
+`.oxplow/lsp/<name>/`; on success the server list refreshes and the
+cached `LspClient` for that language is dropped so the next request
+retries with the new binary.
 
-LSP is also exposed to **agents** via `buildLspMcpTools`
-(`crates/oxplow-mcp/src/lib.rs`) so they can run definition/reference queries
-without shelling out.
+LSP is also exposed to **agents** via the `lsp_*` MCP tools
+(`crates/oxplow-mcp/src/lib.rs`) so they can run definition/reference
+queries without shelling out — same backend sessions as the editor.
 
 ## Monaco workers
 

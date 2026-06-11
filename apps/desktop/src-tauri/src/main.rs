@@ -394,7 +394,7 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
 
     let state: AppState = Arc::new(services);
     let event_bus = state.events.clone();
-    let lsp_clients = state.lsp_clients.clone();
+    let lsp_sessions = state.lsp_sessions.clone();
     let terminal_sessions = state.terminal_sessions.clone();
 
     // Recovery + primary-stream seeding + every standard background
@@ -455,7 +455,7 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
             // raises this window instead of failing on the lock.
             start_focus_listener(app.handle(), project_dir_for_focus.clone());
             spawn_event_bridge(app.handle().clone(), event_bus.clone());
-            spawn_lsp_event_bridge(app.handle().clone(), lsp_clients.clone());
+            spawn_lsp_event_bridge(app.handle().clone(), lsp_sessions.clone());
             spawn_terminal_event_bridge(app.handle().clone(), terminal_sessions.clone());
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
             Ok(())
@@ -499,14 +499,15 @@ fn spawn_event_bridge(app: tauri::AppHandle, bus: oxplow_app::EventBus) {
     });
 }
 
-/// Forwards every `LspBridgeEvent` from the LSP client registry onto
-/// `lsp:event` for the renderer's lsp.ts module.
+/// Forwards every `LspSessionEvent` (server notifications + session
+/// lifecycle) from the session manager onto `lsp:event` for the
+/// renderer's lsp.ts demux.
 fn spawn_lsp_event_bridge(
     app: tauri::AppHandle,
-    registry: oxplow_app::lsp_clients::LspClientRegistry,
+    sessions: oxplow_app::lsp_sessions::LspSessionManager,
 ) {
     tauri::async_runtime::spawn(async move {
-        let mut rx = registry.subscribe();
+        let mut rx = sessions.subscribe();
         loop {
             match rx.recv().await {
                 Ok(event) => {

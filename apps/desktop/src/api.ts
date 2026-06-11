@@ -129,29 +129,18 @@ function buildBridge() {
         // Don't let a logging failure surface to callers.
       }
     },
-    openLspClient: async (streamId: string, languageId: string): Promise<string> =>
-      unwrap(await commands.openLspClient(streamId, languageId)),
-    closeLspClient: async (clientId: string): Promise<void> => {
-      try {
-        unwrap(await commands.closeLspClient(clientId));
-      } catch {
-        // Idempotent: already-closed clients return INVALID; treat as no-op.
-      }
-    },
-    sendLspMessage: async (clientId: string, payload: string): Promise<void> => {
-      unwrap(await commands.sendLspMessage(clientId, payload));
-    },
-    onLspEvent: (
-      handler: (event: { clientId: string; message: string }) => void,
-    ): (() => void) => {
+    onLspEvent: (handler: (event: unknown) => void): (() => void) => {
       let stopped = false;
+      // `listen` rejects when no transport is mounted (bun tests);
+      // swallow so client construction never produces an unhandled
+      // rejection.
       const unlistenPromise = listen(EVENT_CHANNELS.lsp, (e) => {
         if (stopped) return;
-        handler(e.payload as { clientId: string; message: string });
-      });
+        handler(e.payload);
+      }).catch(() => null);
       return () => {
         stopped = true;
-        void unlistenPromise.then((u) => u());
+        void unlistenPromise.then((u) => u?.());
       };
     },
     openTerminalSession: async (
@@ -417,8 +406,8 @@ export interface WorkspaceIndexedFile {
 }
 
 import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
-import type { InstalledLspPackage } from "./tauri-bridge/generated/bindings.js";
-export type { InstalledLspPackage };
+import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/generated/bindings.js";
+export type { InstalledLspPackage, LspServerListing };
 export type { WorkspaceStatusSummary };
 
 export interface WorkspaceContext {
@@ -2436,6 +2425,43 @@ export async function installLspPackage(packageName: string): Promise<InstalledL
 
 export async function listInstalledLspPackages(): Promise<InstalledLspPackage[]> {
   return unwrap(await commands.listInstalledLspPackages());
+}
+
+/// JSON-RPC request on the shared backend LSP session for
+/// (stream, language). Payloads cross the boundary as JSON strings
+/// (specta can't type serde_json::Value cleanly); the (de)serialization
+/// is contained here.
+export async function lspRequest(
+  streamId: string,
+  languageId: string,
+  method: string,
+  params: unknown,
+): Promise<unknown> {
+  const result = unwrap(
+    await commands.lspRequest(streamId, languageId, method, JSON.stringify(params ?? {})),
+  );
+  return JSON.parse(result);
+}
+
+export async function lspNotify(
+  streamId: string,
+  languageId: string,
+  method: string,
+  params: unknown,
+): Promise<void> {
+  unwrap(await commands.lspNotify(streamId, languageId, method, JSON.stringify(params ?? {})));
+}
+
+export async function listLspServers(): Promise<LspServerListing[]> {
+  return unwrap(await commands.listLspServers());
+}
+
+export async function restartLspServer(streamId: string, languageId: string): Promise<void> {
+  unwrap(await commands.restartLspServer(streamId, languageId));
+}
+
+export async function removeLspPackage(packageName: string): Promise<void> {
+  unwrap(await commands.removeLspPackage(packageName));
 }
 
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {

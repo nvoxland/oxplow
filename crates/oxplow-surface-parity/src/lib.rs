@@ -362,10 +362,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: webview ----
     ui("open_external_url"),
     ui("clipboard_read_text"),
-    // ---- ui-only: lsp client lifecycle ----
-    ui("open_lsp_client"),
-    ui("send_lsp_message"),
-    ui("close_lsp_client"),
+    // ---- ui-only: lsp (shared sessions + installer) ----
     ui("install_lsp_package"),
     ui("list_installed_lsp_packages"),
     ui("lsp_request"),

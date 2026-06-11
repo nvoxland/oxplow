@@ -254,6 +254,13 @@ impl LspSessionManager {
         self.events.subscribe()
     }
 
+    /// Test seam: inject an event onto the broadcast as if a session
+    /// pump produced it (transport tests don't want a real server).
+    #[doc(hidden)]
+    pub fn emit_event_for_tests(&self, event: LspSessionEvent) {
+        let _ = self.events.send(event);
+    }
+
     fn find_server_config(&self, language: &str) -> Option<LspServerConfig> {
         if let Ok(cfg) = self.config.read() {
             if let Some(s) = cfg.lsp_servers.iter().find(|s| s.language_id == language) {

@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../editor-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
 import { desktopBridge, readFileAtRef } from "../api.js";
-import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
-import { type EditorNavigationTarget, type LspClient, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
+import { languageForPath } from "../editor-language.js";
+import { hasLspServer } from "../lsp-servers-store.js";
+import { type EditorNavigationTarget, type LspClient, relativePathFromFileUri, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
@@ -66,6 +67,7 @@ export function EditorPane({
   const [lspStatus, setLspStatus] = useState<string | null>(null);
   const {
     ensureLspClient,
+    flushPendingChanges,
     lspInstallSuggestion,
     lspInstalling,
     installSuggested,
@@ -166,7 +168,11 @@ export function EditorPane({
         () => { void onSaveRef.current(); },
       );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
-      registerLspProviders(monaco, (languageId) => ensureLspClient(streamRef.current, languageId));
+      registerLspProviders(
+        monaco,
+        (languageId) => ensureLspClient(streamRef.current, languageId),
+        (model) => flushPendingChanges(relativePathFromFileUri(streamRef.current, model.uri.toString())),
+      );
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
@@ -295,20 +301,13 @@ export function EditorPane({
     editor.setModel(model);
     changeDisposeRef.current?.dispose();
     logUi("debug", "editor: model-setup end", { path: filePath, ms: Math.round(performance.now() - t0) });
+    // didChange sync is NOT pushed from here: edits flow through
+    // onChange → openFiles draft state, and useLspClients feeds drafts
+    // into its debounced DocumentSyncTracker (per-path monotonic LSP
+    // versions — Monaco's getVersionId resets on model swaps).
     changeDisposeRef.current = editor.onDidChangeModelContent(() => {
       const next = editor.getValue();
       if (next !== value) onChangeRef.current(next);
-      const currentModel = editor.getModel();
-      if (!currentModel || !filePathRef.current) return;
-      const currentLanguage = currentModel.getLanguageId();
-      if (!isLspCandidateLanguage(currentLanguage)) return;
-      ensureLspClient(streamRef.current, currentLanguage).notify("textDocument/didChange", {
-        textDocument: {
-          uri: currentModel.uri.toString(),
-          version: currentModel.getVersionId(),
-        },
-        contentChanges: [{ text: next }],
-      });
     });
   }, [stream.id, filePath, value, monacoReady]);
 
@@ -396,10 +395,11 @@ export function EditorPane({
     const position = editor.getPosition();
     if (!position) return;
     const languageId = model.getLanguageId();
-    if (!isLspCandidateLanguage(languageId)) {
+    if (!hasLspServer(languageId)) {
       setLspStatus(`LSP not configured for ${languageId}`);
       return;
     }
+    flushPendingChanges(filePathRef.current);
     const client = ensureLspClient(streamRef.current, languageId);
     const result = await client.request<unknown>("textDocument/definition", {
       textDocument: { uri: model.uri.toString() },
@@ -479,7 +479,7 @@ export function EditorPane({
       id: "editor.go-to-definition",
       label: "Go to Definition",
       shortcut: "F12",
-      enabled: !!filePath && isLspCandidateLanguage(languageForPath(filePath)),
+      enabled: !!filePath && hasLspServer(languageForPath(filePath)),
       run: () => goToDefinition(),
     },
     {
@@ -955,10 +955,12 @@ function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promi
 function registerLspProviders(
   monaco: any,
   getClient: (languageId: string) => LspClient,
+  flushDoc: (model: any) => void,
 ) {
   for (const languageId of ["typescript", "javascript"]) {
     monaco.languages.registerDefinitionProvider(languageId, {
       provideDefinition: async (model: any, position: any) => {
+        flushDoc(model);
         const client = getClient(languageId);
         const result = await client.request<unknown>("textDocument/definition", {
           textDocument: { uri: model.uri.toString() },
@@ -972,6 +974,7 @@ function registerLspProviders(
     });
     monaco.languages.registerHoverProvider(languageId, {
       provideHover: async (model: any, position: any) => {
+        flushDoc(model);
         const client = getClient(languageId);
         const result = await client.request<any>("textDocument/hover", {
           textDocument: { uri: model.uri.toString() },
@@ -989,6 +992,7 @@ function registerLspProviders(
     });
     monaco.languages.registerReferenceProvider(languageId, {
       provideReferences: async (model: any, position: any) => {
+        flushDoc(model);
         const client = getClient(languageId);
         const result = await client.request<unknown[]>("textDocument/references", {
           textDocument: { uri: model.uri.toString() },

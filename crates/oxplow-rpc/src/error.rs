@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-use oxplow_app::lsp_clients::LspClientError;
 use oxplow_app::lsp_installer::LspInstallerError;
 use oxplow_app::terminal_sessions::TerminalSessionError;
 use oxplow_app::TaskServiceError;
@@ -176,21 +175,6 @@ impl From<oxplow_app::lsp_sessions::LspSessionError> for IpcError {
             // message (suggested Mason package + fix paths).
             e @ LspSessionError::NoConfig(_) => IpcError::invalid(e.to_string()),
             e => IpcError::internal(e.to_string()),
-        }
-    }
-}
-
-impl From<LspClientError> for IpcError {
-    fn from(value: LspClientError) -> Self {
-        match value {
-            LspClientError::NotFound(id) => {
-                IpcError::invalid(format!("lsp client not found: {id}"))
-            }
-            LspClientError::NoConfig(lang) => {
-                IpcError::invalid(format!("no lsp server configured for language `{lang}`"))
-            }
-            LspClientError::Spawn(msg) => IpcError::internal(msg),
-            LspClientError::Dropped => IpcError::internal("lsp client dropped"),
         }
     }
 }

@@ -46,50 +46,6 @@ impl From<InstalledManifestEntry> for InstalledLspPackage {
     }
 }
 
-/// Spawn a new language-server child for `(stream_id, language_id)`.
-/// Returns an opaque `client_id` the renderer uses to address
-/// subsequent send/close commands. The cwd is resolved from the
-/// stream's worktree path; if the stream isn't found we fall back to
-/// the project dir.
-pub async fn open_lsp_client(
-    svc: &Services,
-    stream_id: String,
-    language_id: String,
-) -> Result<String, IpcError> {
-    let cwd = svc
-        .streams
-        .list_streams()
-        .await
-        .ok()
-        .and_then(|streams| {
-            streams
-                .into_iter()
-                .find(|s| s.id.to_string() == stream_id)
-                .map(|s| std::path::PathBuf::from(&s.worktree_path))
-        })
-        .unwrap_or_else(|| svc.layout.project_dir.clone());
-    let id = svc.lsp_clients.open(&language_id, cwd).await?;
-    Ok(id)
-}
-
-/// Forward a raw JSON-RPC frame body (no headers) from the renderer
-/// to the language server addressed by `client_id`.
-pub async fn send_lsp_message(
-    svc: &Services,
-    client_id: String,
-    payload: String,
-) -> Result<(), IpcError> {
-    svc.lsp_clients.send(&client_id, payload).await?;
-    Ok(())
-}
-
-/// Tear down the language server backing `client_id`. Idempotent on
-/// already-closed clients (returns `INVALID` rather than panicking).
-pub async fn close_lsp_client(svc: &Services, client_id: String) -> Result<(), IpcError> {
-    svc.lsp_clients.close(&client_id).await?;
-    Ok(())
-}
-
 /// Download + install a Mason package by name, register the resulting
 /// binary with `LspSessionManager`, and persist it to the manifest so
 /// subsequent boots pick it up. Blocks for the duration of the
@@ -128,31 +84,41 @@ pub async fn list_installed_lsp_packages(
 
 /// Issue a JSON-RPC request on the shared `(stream, language)` session
 /// (spawned + initialized lazily) and return the raw LSP result.
+///
+/// `params_json` / the returned string are JSON-encoded LSP payloads.
+/// String-typed on purpose: putting `serde_json::Value` in a command
+/// signature makes specta emit a broken `Value` reference into
+/// bindings.ts.
 pub async fn lsp_request(
     svc: &Services,
     stream_id: String,
     language_id: String,
     method: String,
-    params: Value,
-) -> Result<Value, IpcError> {
+    params_json: String,
+) -> Result<String, IpcError> {
+    let params: Value = serde_json::from_str(&params_json)
+        .map_err(|e| IpcError::invalid(format!("lsp params not valid JSON: {e}")))?;
     let cwd = stream_cwd(svc, &stream_id).await;
     let out = svc
         .lsp_sessions
         .request_session(&stream_id, &language_id, cwd, &method, params)
         .await?;
-    Ok(out)
+    Ok(out.to_string())
 }
 
 /// Send a JSON-RPC notification on the shared `(stream, language)`
 /// session. Document-sync notifications also update the backend's
-/// document mirror (crash/restart replay).
+/// document mirror (crash/restart replay). `params_json` as in
+/// [`lsp_request`].
 pub async fn lsp_notify(
     svc: &Services,
     stream_id: String,
     language_id: String,
     method: String,
-    params: Value,
+    params_json: String,
 ) -> Result<(), IpcError> {
+    let params: Value = serde_json::from_str(&params_json)
+        .map_err(|e| IpcError::invalid(format!("lsp params not valid JSON: {e}")))?;
     let cwd = stream_cwd(svc, &stream_id).await;
     svc.lsp_sessions
         .notify_session(&stream_id, &language_id, cwd, &method, params)
@@ -221,7 +187,7 @@ mod tests {
                 "streamId": "s-1",
                 "languageId": "rust",
                 "method": "textDocument/hover",
-                "params": {},
+                "paramsJson": "{}",
             }),
             &svc,
         )
@@ -250,18 +216,5 @@ mod tests {
         )
         .await
         .unwrap();
-    }
-
-    #[tokio::test]
-    async fn send_lsp_message_rejects_unknown_client() {
-        let (svc, _dir) = services();
-        let err = crate::dispatch(
-            "send_lsp_message",
-            json!({ "clientId": "nope", "payload": "{}" }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
-        assert!(!err.code.is_empty());
     }
 }

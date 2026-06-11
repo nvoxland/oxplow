@@ -26,7 +26,6 @@ pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;
 pub mod indexer;
-pub mod lsp_clients;
 pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod page_ref_backfill;
@@ -376,7 +375,6 @@ pub struct Services {
     pub blobs: blob_store::BlobStore,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
     pub lsp_installer: lsp_installer::LspInstallerService,
-    pub lsp_clients: lsp_clients::LspClientRegistry,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
@@ -466,7 +464,6 @@ impl Services {
         if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
             tracing::warn!(?e, "lsp installer manifest replay failed");
         }
-        let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
@@ -572,7 +569,6 @@ impl Services {
             blobs,
             lsp_sessions: lsp,
             lsp_installer: lsp_installer_svc,
-            lsp_clients,
             terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,

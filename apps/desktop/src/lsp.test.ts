@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { relativePathFromFileUri, streamFileUri, toEditorNavigationTarget } from "./lsp.js";
+import {
+  handleLspSessionEvent,
+  LspClient,
+  relativePathFromFileUri,
+  streamFileUri,
+  toEditorNavigationTarget,
+  type LspDiagnostic,
+} from "./lsp.js";
 
 const stream = {
   id: "s-1",
@@ -35,5 +42,79 @@ describe("streamFileUri helpers", () => {
       line: 5,
       column: 3,
     });
+  });
+});
+
+describe("LspClient session-event demux", () => {
+  const diag: LspDiagnostic = {
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    severity: 1,
+    message: "boom",
+  };
+
+  test("publishDiagnostics reaches only the matching (stream, language) client", () => {
+    const tsClient = new LspClient("s-1", "typescript");
+    const rustClient = new LspClient("s-1", "rust");
+    const otherStream = new LspClient("s-2", "typescript");
+    const got: { client: string; uri: string; count: number }[] = [];
+    tsClient.onDiagnostics((uri, d) => got.push({ client: "ts", uri, count: d.length }));
+    rustClient.onDiagnostics((uri, d) => got.push({ client: "rust", uri, count: d.length }));
+    otherStream.onDiagnostics((uri, d) => got.push({ client: "s2", uri, count: d.length }));
+    try {
+      handleLspSessionEvent({
+        kind: "serverNotification",
+        streamId: "s-1",
+        language: "typescript",
+        method: "textDocument/publishDiagnostics",
+        params: { uri: "file:///tmp/proj1/a.ts", diagnostics: [diag] },
+      });
+      expect(got).toEqual([{ client: "ts", uri: "file:///tmp/proj1/a.ts", count: 1 }]);
+    } finally {
+      tsClient.dispose();
+      rustClient.dispose();
+      otherStream.dispose();
+    }
+  });
+
+  test("sessionStatus crashed surfaces a status message; ready clears it", () => {
+    const client = new LspClient("s-1", "typescript");
+    const statuses: (string | null)[] = [];
+    client.onStatus((m) => statuses.push(m));
+    try {
+      handleLspSessionEvent({
+        kind: "sessionStatus",
+        streamId: "s-1",
+        language: "typescript",
+        status: "crashed",
+        message: "language server exited",
+      });
+      handleLspSessionEvent({
+        kind: "sessionStatus",
+        streamId: "s-1",
+        language: "typescript",
+        status: "ready",
+        message: null,
+      });
+      expect(statuses).toHaveLength(2);
+      expect(statuses[0]).toMatch(/crashed/i);
+      expect(statuses[1]).toBeNull();
+    } finally {
+      client.dispose();
+    }
+  });
+
+  test("disposed clients receive nothing", () => {
+    const client = new LspClient("s-1", "typescript");
+    const statuses: (string | null)[] = [];
+    client.onStatus((m) => statuses.push(m));
+    client.dispose();
+    handleLspSessionEvent({
+      kind: "sessionStatus",
+      streamId: "s-1",
+      language: "typescript",
+      status: "crashed",
+      message: null,
+    });
+    expect(statuses).toHaveLength(0);
   });
 });

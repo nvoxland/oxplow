@@ -20,8 +20,9 @@ docs — this note is the developer-facing mechanics.
   tmux on that box). Routes: `POST /ipc/:name` (tauri-specta result
   envelope), `GET /events` (WebSocket multiplexing
   `{channel:"oxplow"|"lsp"|"terminal", payload}` with the exact
-  payload shapes the Tauri bridges emit), `GET /health`. Same
-  per-project instance lock as the shell.
+  payload shapes the Tauri bridges emit; the `lsp` frame carries
+  `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`),
+  `GET /health`. Same per-project instance lock as the shell.
 - **`apps/desktop/src/tauri-bridge/transport.ts`** — the frontend
   switch. Local mode delegates to `@tauri-apps/api`; remote mode
   (localStorage `oxplow.remoteBase`, set by the launcher's connect

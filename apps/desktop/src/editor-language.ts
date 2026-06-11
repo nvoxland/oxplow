@@ -85,6 +85,6 @@ const EXTENSION_MAP: ReadonlyArray<readonly [string, string]> = [
   [".fish", "shell"],
 ];
 
-export function isLspCandidateLanguage(languageId: string): boolean {
-  return languageId === "typescript" || languageId === "javascript";
-}
+/// Whether a language can use LSP features is data-driven now: see
+/// `hasLspServer` in `lsp-servers-store.ts` (any language with a
+/// configured or installed server qualifies).

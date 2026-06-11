@@ -1,22 +1,23 @@
 //! LSP client lifecycle for `EditorPane`, extracted into a hook.
 //!
 //! Owns the per-language `LspClient` cache and everything that hangs off
-//! it: diagnostics → Monaco markers, the `didOpen`/`didClose`/`didSave`
-//! document sync as files open/close/save, the LSP status banner state
-//! (+ the "Install <pkg>" suggestion/flow), and disposal on both
-//! stream-switch and unmount. `EditorPane` keeps the Monaco editor itself
-//! and calls `ensureLspClient` from its provider registration + the
-//! model's change handler.
+//! it: diagnostics → Monaco markers, the `didOpen`/`didChange`/`didClose`/
+//! `didSave` document sync as files open/edit/close/save, the LSP status
+//! banner state (+ the "Install <pkg>" suggestion/flow), and disposal on
+//! both stream-switch and unmount. `EditorPane` keeps the Monaco editor
+//! itself and calls `ensureLspClient` from its provider registration.
 //!
-//! Behavior-preserving extraction from EditorPane — the effect bodies,
-//! dependency arrays, and disposal points are unchanged; they just live
-//! here now. (No automated net: Monaco/LSP don't mount under happy-dom.)
+//! didChange rides `DocumentSyncTracker` (per-path monotonic versions +
+//! debounce); `flushPendingChanges` must be called before didSave and
+//! before any positional request so the server never sees stale text.
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 
 import { installLspPackage, type Stream } from "../api.js";
 import type { OpenFileState } from "../editor-session.js";
-import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
+import { languageForPath } from "../editor-language.js";
+import { hasLspServer, refreshLspServers } from "../lsp-servers-store.js";
+import { DocumentSyncTracker } from "../lsp-document-sync.js";
 import { LspClient, streamFileUri } from "../lsp.js";
 import { getSuggestedLspPackage } from "../lspSuggestions.js";
 import { logUi } from "../logger.js";
@@ -45,6 +46,9 @@ export interface LspClientsApi {
   /// Get-or-create the cached client for a language; registers its
   /// diagnostics + status handlers on first creation.
   ensureLspClient: (currentStream: Stream, languageId: string) => LspClient;
+  /// Send any pending (debounced) didChange for `path` right now. Call
+  /// before issuing a positional request against that document.
+  flushPendingChanges: (path: string | null) => void;
   lspInstallSuggestion: LspInstallSuggestion | null;
   lspInstalling: boolean;
   /// Run the suggested Mason install, then drop the stale client so the
@@ -69,6 +73,8 @@ export function useLspClients(opts: {
   const trackedSavedContentRef = useRef(new Map<string, string>());
   const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
   const markerOwnerRef = useRef(`oxplow-lsp-${stream.id}`);
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
   const [lspInstallSuggestion, setLspInstallSuggestion] = useState<LspInstallSuggestion | null>(null);
   const [lspInstalling, setLspInstalling] = useState(false);
 
@@ -101,7 +107,7 @@ export function useLspClients(opts: {
         diagnosticsDisposersRef.current.push(
           client.onStatus((message) => {
             const currentLanguage = languageForPath(filePathRef.current);
-            if (!isLspCandidateLanguage(currentLanguage) || currentLanguage !== languageId) return;
+            if (currentLanguage !== languageId) return;
             setLspStatus(message);
             if (message && /LSP unavailable/i.test(message)) {
               const pkg = getSuggestedLspPackage(languageId);
@@ -118,6 +124,28 @@ export function useLspClients(opts: {
     [monacoRef, filePathRef, setLspStatus],
   );
 
+  // didChange sender: per-path monotonic version + debounce. Lives for
+  // the hook's lifetime; reset on stream switch.
+  const syncTrackerRef = useRef<DocumentSyncTracker | null>(null);
+  if (!syncTrackerRef.current) {
+    syncTrackerRef.current = new DocumentSyncTracker((path, text, version) => {
+      const currentStream = streamRef.current;
+      const languageId = trackedOpenDocsRef.current.get(path) ?? languageForPath(path);
+      ensureLspClient(currentStream, languageId).notify("textDocument/didChange", {
+        textDocument: { uri: streamFileUri(currentStream, path), version },
+        contentChanges: [{ text }],
+      });
+    });
+  }
+  const syncTracker = syncTrackerRef.current;
+
+  const flushPendingChanges = useCallback(
+    (path: string | null) => {
+      if (path) syncTracker.flush(path);
+    },
+    [syncTracker],
+  );
+
   // Sync didOpen/didClose as files open/close. Mirrors the editor's open
   // set into the LSP server; closing a doc clears its markers.
   useEffect(() => {
@@ -130,15 +158,16 @@ export function useLspClients(opts: {
       const openFile = openFiles[path];
       if (!openFile || openFile.isLoading) continue;
       const languageId = languageForPath(path);
-      if (!isLspCandidateLanguage(languageId)) continue;
+      if (!hasLspServer(languageId)) continue;
       const uri = streamFileUri(stream, path);
       nextOpenDocs.set(path, languageId);
       if (!trackedOpenDocsRef.current.has(path)) {
+        const version = syncTracker.open(path, openFile.draftContent);
         ensureLspClient(stream, languageId).notify("textDocument/didOpen", {
           textDocument: {
             uri,
             languageId,
-            version: 1,
+            version,
             text: openFile.draftContent,
           },
         });
@@ -148,6 +177,7 @@ export function useLspClients(opts: {
 
     for (const [path, languageId] of trackedOpenDocsRef.current) {
       if (nextOpenDocs.has(path)) continue;
+      syncTracker.close(path);
       ensureLspClient(stream, languageId).notify("textDocument/didClose", {
         textDocument: { uri: streamFileUri(stream, path) },
       });
@@ -164,29 +194,37 @@ export function useLspClients(opts: {
       tracked: trackedOpenDocsRef.current.size,
       ms: Math.round(performance.now() - t0),
     });
-  }, [openFileOrder, openFiles, stream, ensureLspClient, monacoRef]);
+  }, [openFileOrder, openFiles, stream, ensureLspClient, monacoRef, syncTracker]);
 
-  // Notify didSave when a tracked doc's saved content advances to match
-  // its draft (i.e. an actual save, not a transient edit).
+  // Feed draft edits into the didChange tracker (debounced full-text
+  // sync), and notify didSave when a tracked doc's saved content
+  // advances to match its draft (i.e. an actual save).
   useEffect(() => {
     for (const [path, languageId] of trackedOpenDocsRef.current) {
       const openFile = openFiles[path];
+      if (!openFile) continue;
+      syncTracker.changed(path, openFile.draftContent);
       const previousSaved = trackedSavedContentRef.current.get(path);
-      if (!openFile || previousSaved === undefined || previousSaved === openFile.savedContent) continue;
+      if (previousSaved === undefined || previousSaved === openFile.savedContent) continue;
       trackedSavedContentRef.current.set(path, openFile.savedContent);
       if (openFile.savedContent !== openFile.draftContent) continue;
+      syncTracker.flush(path);
       ensureLspClient(stream, languageId).notify("textDocument/didSave", {
         textDocument: { uri: streamFileUri(stream, path) },
         text: openFile.savedContent,
       });
     }
-  }, [openFiles, stream, ensureLspClient]);
+  }, [openFiles, stream, ensureLspClient, syncTracker]);
 
   // On stream switch, drop every client + tracked-doc state and reset the
-  // marker owner so the new stream's diagnostics don't collide.
+  // marker owner so the new stream's diagnostics don't collide. Also
+  // refresh the server list — a different worktree may carry a different
+  // oxplow.yaml.
   useEffect(() => {
     markerOwnerRef.current = `oxplow-lsp-${stream.id}`;
     setLspStatus(null);
+    void refreshLspServers();
+    syncTracker.reset();
     for (const client of lspClientsRef.current.values()) {
       client.dispose();
     }
@@ -195,21 +233,23 @@ export function useLspClients(opts: {
     trackedSavedContentRef.current.clear();
     diagnosticsDisposersRef.current.forEach((dispose) => dispose());
     diagnosticsDisposersRef.current = [];
-  }, [stream.id, setLspStatus]);
+  }, [stream.id, setLspStatus, syncTracker]);
 
   // Dispose everything on unmount (the editor's setup effect used to own
   // this half of the cleanup).
   useEffect(() => {
     const clients = lspClientsRef.current;
     const disposers = diagnosticsDisposersRef.current;
+    const tracker = syncTracker;
     return () => {
+      tracker.reset();
       disposers.forEach((dispose) => dispose());
       for (const client of clients.values()) {
         client.dispose();
       }
       clients.clear();
     };
-  }, []);
+  }, [syncTracker]);
 
   const installSuggested = useCallback(async () => {
     const suggestion = lspInstallSuggestion;
@@ -220,6 +260,7 @@ export function useLspClients(opts: {
       await installLspPackage(pkg);
       setLspStatus(`Installed ${pkg} — reopen file to start the server`);
       setLspInstallSuggestion(null);
+      await refreshLspServers();
       // Drop the cached client so the next open re-tries.
       const stale = lspClientsRef.current.get(lang);
       if (stale) {
@@ -233,5 +274,5 @@ export function useLspClients(opts: {
     }
   }, [lspInstallSuggestion, setLspStatus]);
 
-  return { ensureLspClient, lspInstallSuggestion, lspInstalling, installSuggested };
+  return { ensureLspClient, flushPendingChanges, lspInstallSuggestion, lspInstalling, installSuggested };
 }

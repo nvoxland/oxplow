@@ -606,24 +606,6 @@ export const commands = {
 	 */
 	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
 	/**
-	 *  Spawn a new language-server child for `(stream_id, language_id)`.
-	 *  Returns an opaque `client_id` the renderer uses to address
-	 *  subsequent send/close commands. The cwd is resolved from the
-	 *  stream's worktree path; if the stream isn't found we fall back to
-	 *  the project dir.
-	 */
-	openLspClient: (streamId: string, languageId: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_lsp_client", { streamId, languageId })),
-	/**
-	 *  Forward a raw JSON-RPC frame body (no headers) from the renderer
-	 *  to the language server addressed by `client_id`.
-	 */
-	sendLspMessage: (clientId: string, payload: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_lsp_message", { clientId, payload })),
-	/**
-	 *  Tear down the language server backing `client_id`. Idempotent on
-	 *  already-closed clients (returns `INVALID` rather than panicking).
-	 */
-	closeLspClient: (clientId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_lsp_client", { clientId })),
-	/**
 	 *  Download + install a Mason package by name, register the resulting
 	 *  binary with `LspSessionManager`, and persist it to the manifest so
 	 *  subsequent boots pick it up. Blocks for the duration of the
@@ -636,13 +618,13 @@ export const commands = {
 	 *  Issue a JSON-RPC request on the shared `(stream, language)` session
 	 *  (spawned + initialized lazily) and return the raw LSP result.
 	 */
-	lspRequest: (streamId: string, languageId: string, method: string, params: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<"Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }, IpcError>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, params })),
+	lspRequest: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<string, IpcError>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, paramsJson })),
 	/**
 	 *  Send a JSON-RPC notification on the shared `(stream, language)`
 	 *  session. Document-sync notifications also update the backend's
 	 *  document mirror (crash/restart replay).
 	 */
-	lspNotify: (streamId: string, languageId: string, method: string, params: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, params })),
+	lspNotify: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, paramsJson })),
 	/**
 	 *  All known language servers (oxplow.yaml + Mason-installed), with
 	 *  binary presence and live-session metadata for the settings UI.
