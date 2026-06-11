@@ -168,6 +168,18 @@ impl From<LspInstallerError> for IpcError {
     }
 }
 
+impl From<oxplow_app::lsp_sessions::LspSessionError> for IpcError {
+    fn from(value: oxplow_app::lsp_sessions::LspSessionError) -> Self {
+        use oxplow_app::lsp_sessions::LspSessionError;
+        match value {
+            // NoConfig carries its own self-describing, actionable
+            // message (suggested Mason package + fix paths).
+            e @ LspSessionError::NoConfig(_) => IpcError::invalid(e.to_string()),
+            e => IpcError::internal(e.to_string()),
+        }
+    }
+}
+
 impl From<LspClientError> for IpcError {
     fn from(value: LspClientError) -> Self {
         match value {

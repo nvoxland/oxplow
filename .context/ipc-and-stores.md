@@ -315,8 +315,11 @@ UI). Active producers:
   IPC downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
   and registers the binary with `LspSessionManager`'s
   `InstalledServers` overlay. Manifest at `.oxplow/lsp/installed.json`
-  replays into the session manager on boot. Indeterminate; not yet
-  bridged to BackgroundTaskStore (TODO).
+  replays into the session manager on boot. `remove_lsp_package`
+  reverses all of that. Both emit `LspServersChanged` on the oxplow
+  event bus so the renderer refetches `list_lsp_servers`. The shared
+  session surface (`lsp_request` / `lsp_notify` / `list_lsp_servers` /
+  `restart_lsp_server`) is documented in `.context/lsp.md`.
 - **Notes wiki resync** — `NotesWatcher.start` (`crates/oxplow-fs-watch/src/lib.rs`)
   takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
   runtime registers a row only when `total >= 5` (smaller dirs aren't

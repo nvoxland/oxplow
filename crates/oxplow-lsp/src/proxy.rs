@@ -147,6 +147,24 @@ impl LspProxy {
         Ok(())
     }
 
+    /// Answer a server-originated request (`ServerEvent::Request`).
+    /// `id` must be the id the server sent; `result` is the response
+    /// payload (use `Value::Null` when the method has no meaningful
+    /// answer).
+    pub async fn respond(&self, id: Value, result: Value) -> Result<(), LspError> {
+        let frame = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        })
+        .to_string();
+        self.write_tx
+            .send(frame)
+            .await
+            .map_err(|_| LspError::Dropped)?;
+        Ok(())
+    }
+
     /// Subscribe to server-originated events. Multiple subscribers
     /// allowed; events emitted before subscription are dropped.
     pub fn events(&self) -> broadcast::Receiver<ServerEvent> {
@@ -321,6 +339,12 @@ while True:
         break
     elif msg.get("method") == "ping":
         write_message({"jsonrpc": "2.0", "method": "pong", "params": msg.get("params")})
+    elif msg.get("method") == "ask":
+        # Server -> client request; once the client answers, echo the
+        # answer back as a notification so the test can observe it.
+        write_message({"jsonrpc": "2.0", "id": 999, "method": "client/ask", "params": {}})
+    elif "id" in msg and "method" not in msg:
+        write_message({"jsonrpc": "2.0", "method": "answered", "params": msg.get("result")})
 "#;
         SpawnConfig {
             command: "python3".into(),
@@ -359,6 +383,38 @@ while True:
             ServerEvent::Notification { method, params } => {
                 assert_eq!(method, "pong");
                 assert_eq!(params, json!({"hi": 1}));
+            }
+            other => panic!("expected Notification, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn respond_answers_server_request() {
+        let proxy = LspProxy::spawn(fake_server_cfg()).expect("spawn");
+        let mut events = proxy.events();
+        proxy.request("initialize", json!({})).await.unwrap();
+        // Ask the server to issue a request *of* the client.
+        proxy.notify("ask", json!({})).await.unwrap();
+        let req = timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("timely")
+            .expect("ok");
+        let (id, method) = match req {
+            ServerEvent::Request { id, method, .. } => (id, method),
+            other => panic!("expected Request, got {other:?}"),
+        };
+        assert_eq!(method, "client/ask");
+        proxy.respond(id, json!({"answer": 42})).await.unwrap();
+        // The fake server echoes our response back as an `answered`
+        // notification carrying the result payload.
+        let evt = timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("timely")
+            .expect("ok");
+        match evt {
+            ServerEvent::Notification { method, params } => {
+                assert_eq!(method, "answered");
+                assert_eq!(params, json!({"answer": 42}));
             }
             other => panic!("expected Notification, got {other:?}"),
         }

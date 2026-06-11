@@ -98,12 +98,16 @@ impl LspInstallerService {
         let manifest = self.read_manifest().await?;
         for entry in manifest.entries.values() {
             for lang in &entry.language_ids {
-                self.sessions.installed_servers().register(LspServerConfig {
-                    language_id: lang.clone(),
-                    extensions: vec![],
-                    command: entry.binary.to_string_lossy().to_string(),
-                    args: vec![],
-                });
+                self.sessions.installed_servers().register(
+                    LspServerConfig {
+                        language_id: lang.clone(),
+                        extensions: vec![],
+                        command: entry.binary.to_string_lossy().to_string(),
+                        args: vec![],
+                    },
+                    &entry.name,
+                    &entry.version,
+                );
             }
         }
         info!(
@@ -128,15 +132,40 @@ impl LspInstallerService {
         let installed = installer.install(&pkg, &target).await?;
         let entry = self.persist(installed, &target).await?;
         for lang in &entry.language_ids {
-            self.sessions.installed_servers().register(LspServerConfig {
-                language_id: lang.clone(),
-                extensions: vec![],
-                command: entry.binary.to_string_lossy().to_string(),
-                args: vec![],
-            });
+            self.sessions.installed_servers().register(
+                LspServerConfig {
+                    language_id: lang.clone(),
+                    extensions: vec![],
+                    command: entry.binary.to_string_lossy().to_string(),
+                    args: vec![],
+                },
+                &entry.name,
+                &entry.version,
+            );
         }
         info!(package = package_name, languages = ?entry.language_ids, "lsp package installed");
         Ok(entry)
+    }
+
+    /// Remove an installed package: delete its install directory, drop
+    /// it from the manifest, and unregister its language servers. A
+    /// package that isn't installed is a no-op (idempotent).
+    pub async fn remove(&self, package_name: &str) -> Result<(), LspInstallerError> {
+        let _guard = self.inner.lock().await;
+        let mut manifest = self.read_manifest().await?;
+        manifest.entries.remove(package_name);
+        self.write_manifest(&manifest).await?;
+        let dir = self.install_root.join(package_name);
+        match tokio::fs::remove_dir_all(&dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        self.sessions
+            .installed_servers()
+            .unregister_package(package_name);
+        info!(package = package_name, "lsp package removed");
+        Ok(())
     }
 
     pub async fn list_installed(&self) -> Result<Vec<InstalledManifestEntry>, LspInstallerError> {
@@ -244,6 +273,38 @@ mod tests {
         svc.replay_into_sessions().await.unwrap();
         let listed = mgr.installed_servers().list();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].language_id, "rust");
+        assert_eq!(listed[0].config.language_id, "rust");
+        assert_eq!(listed[0].package, "rust-analyzer");
+        assert_eq!(listed[0].version, "v1");
+    }
+
+    #[tokio::test]
+    async fn remove_drops_manifest_entry_dir_and_registration() {
+        let tmp = tempdir().unwrap();
+        let mgr = empty_session_mgr();
+        let svc = LspInstallerService::new(tmp.path(), mgr.clone());
+        let install_dir = tmp.path().join("lsp/rust-analyzer");
+        tokio::fs::create_dir_all(&install_dir).await.unwrap();
+        let binary = install_dir.join("rust-analyzer");
+        tokio::fs::write(&binary, b"#!/bin/sh\n").await.unwrap();
+        let entry = InstalledManifestEntry {
+            name: "rust-analyzer".into(),
+            version: "v1".into(),
+            language_ids: vec!["rust".into()],
+            binary,
+        };
+        let manifest = Manifest {
+            entries: HashMap::from([("rust-analyzer".to_string(), entry)]),
+        };
+        svc.write_manifest(&manifest).await.unwrap();
+        svc.replay_into_sessions().await.unwrap();
+        assert_eq!(mgr.installed_servers().list().len(), 1);
+
+        svc.remove("rust-analyzer").await.unwrap();
+        assert!(svc.list_installed().await.unwrap().is_empty());
+        assert!(mgr.installed_servers().list().is_empty());
+        assert!(!install_dir.exists());
+        // Idempotent on a package that isn't installed.
+        svc.remove("rust-analyzer").await.unwrap();
     }
 }

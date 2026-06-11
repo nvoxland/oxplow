@@ -127,6 +127,9 @@ pub enum OxplowEvent {
     FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.
     BackgroundTasksChanged,
+    /// The set of known language servers changed (Mason package
+    /// installed or removed). Renderer refetches `list_lsp_servers`.
+    LspServersChanged,
     /// A new hook event landed; renderer refreshes the hook log.
     HookEventsChanged,
     /// Per-thread per-pane agent status changed. `state` carries the

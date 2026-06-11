@@ -321,6 +321,11 @@ rpc_dispatch! {
     "close_lsp_client" => commands::lsp::close_lsp_client { client_id: String },
     "install_lsp_package" => commands::lsp::install_lsp_package { package_name: String },
     "list_installed_lsp_packages" => commands::lsp::list_installed_lsp_packages {},
+    "lsp_request" => commands::lsp::lsp_request { stream_id: String, language_id: String, method: String, params: serde_json::Value },
+    "lsp_notify" => commands::lsp::lsp_notify { stream_id: String, language_id: String, method: String, params: serde_json::Value },
+    "list_lsp_servers" => commands::lsp::list_lsp_servers {},
+    "restart_lsp_server" => commands::lsp::restart_lsp_server { stream_id: String, language_id: String },
+    "remove_lsp_package" => commands::lsp::remove_lsp_package { package_name: String },
     // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
     "send_terminal_message" => commands::terminal::send_terminal_message { session_id: String, message: String },
     "close_terminal_session" => commands::terminal::close_terminal_session { session_id: String },

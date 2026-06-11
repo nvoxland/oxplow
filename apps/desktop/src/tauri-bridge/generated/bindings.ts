@@ -633,6 +633,32 @@ export const commands = {
 	// List all Mason packages currently installed for this project.
 	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError>(__TAURI_INVOKE("list_installed_lsp_packages")),
 	/**
+	 *  Issue a JSON-RPC request on the shared `(stream, language)` session
+	 *  (spawned + initialized lazily) and return the raw LSP result.
+	 */
+	lspRequest: (streamId: string, languageId: string, method: string, params: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<"Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }, IpcError>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, params })),
+	/**
+	 *  Send a JSON-RPC notification on the shared `(stream, language)`
+	 *  session. Document-sync notifications also update the backend's
+	 *  document mirror (crash/restart replay).
+	 */
+	lspNotify: (streamId: string, languageId: string, method: string, params: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, params })),
+	/**
+	 *  All known language servers (oxplow.yaml + Mason-installed), with
+	 *  binary presence and live-session metadata for the settings UI.
+	 */
+	listLspServers: () => typedError<LspServerListing[], IpcError>(__TAURI_INVOKE("list_lsp_servers")),
+	/**
+	 *  Tear down and respawn the `(stream, language)` session, replaying
+	 *  every mirrored open document.
+	 */
+	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
+	/**
+	 *  Uninstall a Mason package: delete its files, manifest entry, and
+	 *  language-server registrations.
+	 */
+	removeLspPackage: (packageName: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_lsp_package", { packageName })),
+	/**
 	 *  Open a renderer-attached terminal session.
 	 * 
 	 *  Two transports, mirroring the main-branch design:
@@ -1572,6 +1598,33 @@ export type LspServerConfig = {
 	args?: string[],
 };
 
+/**
+ *  One row of `list_servers()` — everything the settings page and the
+ *  agent need to reason about a configured server.
+ */
+export type LspServerListing = {
+	languageId: string,
+	extensions: string[],
+	command: string,
+	args: string[],
+	source: LspServerSource,
+	// Mason package name when `source == Installed`.
+	packageName: string | null,
+	// Installed package version when `source == Installed`.
+	version: string | null,
+	binaryExists: boolean,
+	// Stream ids with a live session for this language.
+	runningStreams: string[],
+	/**
+	 *  `completionProvider.triggerCharacters` from a running session's
+	 *  server capabilities, when one exists.
+	 */
+	completionTriggerCharacters: string[] | null,
+};
+
+// Where a server config came from, for the settings UI.
+export type LspServerSource = "yaml" | "installed";
+
 export type MenuGroupSnapshot = {
 	id: string,
 	label: string,
@@ -1678,6 +1731,11 @@ export type OxplowEvent =
 { kind: "followupsChanged"; threadId: ThreadId } | 
 // Background task progress.
 { kind: "backgroundTasksChanged" } | 
+/**
+ *  The set of known language servers changed (Mason package
+ *  installed or removed). Renderer refetches `list_lsp_servers`.
+ */
+{ kind: "lspServersChanged" } | 
 // A new hook event landed; renderer refreshes the hook log.
 { kind: "hookEventsChanged" } | 
 /**
