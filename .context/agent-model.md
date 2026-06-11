@@ -657,9 +657,16 @@ intermediate `ready` step.
     `list_backlinks`/`list_outbound`'s `source_label` is just
     `resolve_ref(...).title`.
 
-`buildLspMcpTools` (`crates/oxplow-mcp/src/lib.rs`) adds language-server
-queries (definition, references, hover) the agent can use without
-shelling out.
+**LSP tools** (`crates/oxplow-mcp/src/lib.rs`): `lsp_definition`,
+`lsp_hover`, `lsp_references`, `lsp_diagnostics` run against the same
+shared backend sessions the editor uses (`.context/lsp.md`). When no
+server is configured for a language, the error is self-describing — it
+names the suggested Mason package and both fix paths. The agent can fix
+it itself: `lsp_install_server({ package_name })` installs from the
+Mason registry (picked up immediately by editor + tools), and
+`lsp_list_servers` shows what's configured/installed/running. Adding an
+`lsp.servers` entry to `oxplow.yaml` is the manual alternative for
+servers not in Mason.
 
 **Unified backlinks graph (`list_backlinks` / `list_outbound`).** Every
 page kind — wiki, task, file, commit, finding, directory — lives

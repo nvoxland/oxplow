@@ -466,6 +466,13 @@ pub struct LspDiagnosticsParams {
     pub uri: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LspInstallParams {
+    /// Mason-registry package name (e.g. "rust-analyzer", "gopls",
+    /// "typescript-language-server").
+    pub package_name: String,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -2828,6 +2835,41 @@ impl OxplowMcp {
         )]))
     }
 
+    #[tool(
+        description = "List every configured language server (oxplow.yaml + Mason-installed): \
+                       languageId, command, source, binary presence, running streams. Use to \
+                       check what LSP coverage exists before lsp_hover/definition/references, \
+                       and to verify an lsp_install_server took effect."
+    )]
+    async fn lsp_list_servers(&self) -> Result<CallToolResult, McpError> {
+        let listings = self.services.lsp_sessions.list_servers().await;
+        json_result(&listings)
+    }
+
+    #[tool(
+        description = "Install a language server from the Mason registry (mason-org/\
+                       mason-registry package name, e.g. \"rust-analyzer\"). Downloads the \
+                       binary into .oxplow/lsp/<name>/ and registers it for its languages — \
+                       the lsp_* tools and the editor pick it up immediately. Use when an \
+                       lsp_* tool errors with `no language server configured`."
+    )]
+    async fn lsp_install_server(
+        &self,
+        params: Parameters<LspInstallParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let package_name = params.0.package_name;
+        let entry = self
+            .services
+            .lsp_installer
+            .install(&package_name)
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        self.services
+            .events
+            .emit(oxplow_app::OxplowEvent::LspServersChanged);
+        json_result(&entry)
+    }
+
     #[tool(description = "Re-read a wiki page's body file and refresh the FTS index.")]
     async fn resync_wiki_page(
         &self,
@@ -3106,7 +3148,15 @@ async fn resolve_lsp_proxy(
         .lsp_sessions
         .ensure(stream_id, language, cwd)
         .await
-        .map_err(|e| internal(e.to_string()))
+        .map_err(|e| match e {
+            // Self-describing (suggested Mason package + fix paths) and
+            // caller-fixable — surface as invalid_params so the agent
+            // sees the message instead of a generic internal error.
+            e @ oxplow_app::lsp_sessions::LspSessionError::NoConfig(_) => {
+                McpError::invalid_params(e.to_string(), None)
+            }
+            e => internal(e.to_string()),
+        })
 }
 
 fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
@@ -3596,6 +3646,36 @@ mod tests {
         assert!(row["referenced"][0]["title"].is_null());
         // The raw thread still travels under `thread`.
         assert_eq!(row["thread"]["comment"]["quote"], "the highlighted text");
+    }
+
+    #[tokio::test]
+    async fn lsp_list_servers_returns_array() {
+        let (_proj, _svc, server) = boot();
+        let r = server.lsp_list_servers().await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert!(parsed.is_array());
+    }
+
+    #[tokio::test]
+    async fn lsp_no_config_error_is_self_describing_for_agents() {
+        let (_proj, services, server) = boot();
+        let stream_id = services.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
+        let err = server
+            .lsp_hover(Parameters(LspPositionParams {
+                stream_id,
+                language: "rust".into(),
+                uri: "file:///x.rs".into(),
+                line: 0,
+                character: 0,
+            }))
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("rust-analyzer"), "got: {msg}");
+        assert!(msg.contains("lsp_install_server"), "got: {msg}");
+        assert!(msg.contains("oxplow.yaml"), "got: {msg}");
     }
 
     #[tokio::test]

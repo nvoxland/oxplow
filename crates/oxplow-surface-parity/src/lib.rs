@@ -184,6 +184,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("lsp_hover"),
     agent("lsp_references"),
     agent("lsp_diagnostics"),
+    agent("lsp_list_servers"),
+    agent("lsp_install_server"),
     // ---- git: read tools mirrored to MCP (Child 2) ----
     both_named("git.status", "get_change_scopes", "git_status"),
     both_named("git.diff", "get_branch_changes", "git_diff"),
