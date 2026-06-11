@@ -7,7 +7,7 @@
  * not every Mason package. Users who want something off this list
  * can install via a future "All packages" picker.
  */
-const SUGGESTIONS: Record<string, string> = {
+export const SUGGESTIONS: Record<string, string> = {
   rust: "rust-analyzer",
   go: "gopls",
   typescript: "typescript-language-server",

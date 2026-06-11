@@ -10,6 +10,7 @@ import {
   type AgentKind,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
+import { LspServersSection } from "../components/LspServersSection.js";
 
 export interface SettingsPageProps {
   /** Closes the page (caller closes the tab). Optional — settings can be a
@@ -176,6 +177,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             placeholder={"e.g.\ncoverage\n.cache"}
             style={{ ...textareaStyle, minHeight: 100 }}
           />
+        </Section>
+
+        <Section title="Language Servers">
+          <Hint>
+            Servers come from <code>oxplow.yaml</code> (<code>lsp.servers</code>) or one-click
+            installs from the Mason registry (landed in <code>.oxplow/lsp/</code>). Changes apply
+            immediately — no Save needed. Agents can also configure these for you.
+          </Hint>
+          <LspServersSection />
         </Section>
 
         <div style={actionsRowStyle}>
