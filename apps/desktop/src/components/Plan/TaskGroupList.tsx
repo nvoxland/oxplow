@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, ThreadFollowup, Task, TaskPriority, TaskStatus } from "../../api.js";
+import type { AgentStatus, OpenAgentTurn, ThreadFollowup, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { TASK_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyRow,
@@ -67,6 +67,7 @@ export function TaskGroupList({
   agentStatus,
   isSectionCollapsed,
   onToggleSectionCollapsed,
+  openTurns,
   followups,
   onDismissFollowup,
   visibleSections,
@@ -100,6 +101,12 @@ export function TaskGroupList({
   /** Collapse-state accessors from PlanPane's useCollapsedSections. */
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;
   onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
+  /** Open agent turns (`ended_at IS NULL`) for this thread. Each
+   *  renders as a non-interactive live row — spinner + prompt — at the
+   *  top of the In Progress section, and disappears when the Stop hook
+   *  closes the turn. Observational only: no status, no drag, no menu.
+   *  Only the root group renders them. */
+  openTurns?: OpenAgentTurn[];
   /** Transient agent follow-ups for this thread (in-memory on the
    *  runtime, lost on restart). Rendered at the very top of the Ready
    *  section as italic muted "↳ follow-up: …" lines with a single ✕
@@ -604,6 +611,9 @@ export function TaskGroupList({
             </div>
             {!isCollapsed || empty ? (
               <>
+                {!isCollapsed && section.kind === "inProgress" && openTurns && openTurns.length > 0
+                  ? openTurns.map((turn) => <LiveTurnRow key={turn.id} turn={turn} />)
+                  : null}
                 {!isCollapsed && section.kind === "ready" && followups && followups.length > 0
                   ? followups.map((fu) => (
                       <FollowupRow
@@ -614,7 +624,9 @@ export function TaskGroupList({
                     ))
                   : null}
                 {!isCollapsed ? renderedRows.map(renderRow) : null}
-                {(isDone ? renderedRows.length === 0 : empty) && !draggedTask ? (
+                {(isDone ? renderedRows.length === 0 : empty)
+                && !draggedTask
+                && !(section.kind === "inProgress" && openTurns && openTurns.length > 0) ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     {section.kind === "inProgress"
                       ? (isActive !== false && agentStatus === "working"
@@ -652,6 +664,35 @@ function BrailleSpinner() {
     >
       {BRAILLE_FRAMES[frame]}
     </span>
+  );
+}
+
+/** Live agent-turn row at the top of the In Progress section: spinner
+ *  + the turn's prompt (single line, ellipsized). Observational — the
+ *  row is not selectable, draggable, or menu-bearing; it exists so an
+ *  active turn is visible in the Work panel even before (or without)
+ *  the agent filing a task. Disappears when the Stop hook closes the
+ *  turn (PlanPane refetches on agentTurnsChanged). */
+function LiveTurnRow({ turn }: { turn: OpenAgentTurn }) {
+  const prompt = turn.prompt.trim() || "(agent turn in progress)";
+  return (
+    <div
+      data-testid={`plan-live-turn-${turn.id}`}
+      title={prompt}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 10px",
+        fontSize: 12,
+        color: "var(--muted)",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+    >
+      <BrailleSpinner />
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", fontStyle: "italic" }}>{prompt}</span>
+    </div>
   );
 }
 

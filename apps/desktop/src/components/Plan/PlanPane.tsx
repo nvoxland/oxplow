@@ -10,7 +10,10 @@ import type {
   TaskStatus,
 } from "../../api.js";
 import {
+  listOpenAgentTurns,
+  type OpenAgentTurn,
   removeFollowup,
+  subscribeAgentTurns,
 } from "../../api.js";
 import { TASK_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
@@ -174,6 +177,37 @@ export function PlanPane({
 
   const threadId = thread?.id ?? null;
   const streamId = thread?.stream_id ?? null;
+
+  // Open agent turns (ended_at IS NULL) render as live spinner rows at
+  // the top of the In Progress section — the passive "agent is doing
+  // something right now" affordance CLAUDE.md describes. Seeded per
+  // thread, refreshed on every agentTurnsChanged event for it, and
+  // emptied when the Stop hook closes the turn.
+  const [openTurns, setOpenTurns] = useState<OpenAgentTurn[]>([]);
+  useEffect(() => {
+    if (!threadId) {
+      setOpenTurns([]);
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      void listOpenAgentTurns(threadId)
+        .then((turns) => {
+          if (!cancelled) setOpenTurns(turns);
+        })
+        .catch(() => {
+          if (!cancelled) setOpenTurns([]);
+        });
+    };
+    refresh();
+    const unsubscribe = subscribeAgentTurns((event) => {
+      if (event.threadId === threadId) refresh();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [threadId]);
 
   const groups = useMemo(() => {
     let raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
@@ -574,6 +608,7 @@ export function PlanPane({
                 agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
+                openTurns={mode === "thread" && !group.epic ? openTurns : []}
                 followups={isRootThread && !group.epic ? threadWork?.followups ?? [] : []}
                 onDismissFollowup={isRootThread && threadId
                   ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))

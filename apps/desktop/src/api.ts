@@ -2304,6 +2304,37 @@ export function subscribeAgentStatus(
   });
 }
 
+export interface OpenAgentTurn {
+  id: string;
+  threadId: string;
+  prompt: string;
+  startedAt: string;
+}
+
+/// Open agent turns (`ended_at IS NULL`) for a thread. The Work
+/// panel renders each as a live spinner row at the top of the In
+/// Progress section; the Stop hook closes the row and an
+/// `agentTurnsChanged` event triggers the refetch that removes it.
+export async function listOpenAgentTurns(threadId: string): Promise<OpenAgentTurn[]> {
+  const rows = unwrap(await commands.listOpenAgentTurns(threadId));
+  return rows.map((row) => ({
+    id: row.id,
+    threadId: row.thread_id,
+    prompt: row.prompt,
+    startedAt: row.started_at,
+  }));
+}
+
+/// Fires whenever an agent turn opens or closes on any thread.
+export function subscribeAgentTurns(onEvent: (event: { threadId: string }) => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "agentTurnsChanged") return;
+    const threadId = event.threadId as string | undefined;
+    if (!threadId) return;
+    onEvent({ threadId });
+  });
+}
+
 export interface AgentStallAlertEvent {
   threadId: string;
   inProgressCount: number;
