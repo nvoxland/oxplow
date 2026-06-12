@@ -178,6 +178,7 @@ export function completionResultToMonacoList(
       filterText?: string;
       preselect?: boolean;
       insertText?: string;
+      insertTextFormat?: number;
       commitCharacters?: string[];
       textEdit?: {
         newText?: string;
@@ -210,6 +211,12 @@ export function completionResultToMonacoList(
         label,
         kind: lspCompletionKindToMonaco(monaco, item.kind),
         insertText: item.textEdit?.newText ?? item.insertText ?? label,
+        // LSP InsertTextFormat.Snippet (2) — Monaco's snippet controller
+        // shares the TextMate ${n:placeholder} syntax.
+        insertTextRules:
+          item.insertTextFormat === 2
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
         range,
         detail: item.detail,
         documentation: documentationValue(item.documentation),

@@ -16,8 +16,10 @@ manager owns:
 - **initialize** with real client capabilities (`client_capabilities()`
   — sync/diagnostics/hover/definition/references/completion/rename/
   codeAction/documentSymbol). Keep it in step with what the Monaco
-  providers actually implement. `snippetSupport` is `false` until the
-  completion provider handles LSP snippet syntax. The server's
+  providers actually implement. `snippetSupport` is `true`: the
+  completion mapping (`lsp-monaco-mapping.ts`) sets Monaco's
+  `InsertAsSnippet` rule on items with `insertTextFormat: 2` — the two
+  snippet syntaxes are the same TextMate dialect. The server's
   capabilities are stored on the session (`list_servers` exposes
   `completion_trigger_characters` from them).
 - **Event pump** per session: server *notifications* re-emit as

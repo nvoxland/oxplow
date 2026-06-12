@@ -38,6 +38,9 @@ const fakeMonaco = {
       Text: 18,
       Snippet: 27,
     },
+    CompletionItemInsertTextRule: {
+      InsertAsSnippet: 4,
+    },
   },
 };
 
@@ -102,6 +105,22 @@ describe("completion mapping", () => {
     expect(incomplete).toBe(true);
     expect(suggestions[0].range.insert.endColumn).toBe(2);
     expect(suggestions[0].range.replace.endColumn).toBe(6);
+  });
+
+  test("insertTextFormat 2 marks the item as a Monaco snippet", () => {
+    const { suggestions } = completionResultToMonacoList(
+      fakeMonaco,
+      [
+        { label: "do_thing", insertText: "do_thing(${1:arg})$0", insertTextFormat: 2 },
+        { label: "plain", insertText: "plain" },
+        { label: "explicitPlain", insertText: "explicitPlain", insertTextFormat: 1 },
+      ],
+      defaultRange,
+    );
+    expect(suggestions[0].insertTextRules).toBe(4); // InsertAsSnippet
+    expect(suggestions[0].insertText).toBe("do_thing(${1:arg})$0");
+    expect(suggestions[1].insertTextRules).toBeUndefined();
+    expect(suggestions[2].insertTextRules).toBeUndefined();
   });
 
   test("null result and junk items yield no suggestions", () => {

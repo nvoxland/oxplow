@@ -664,10 +664,9 @@ fn client_capabilities() -> Value {
             "references": {},
             "completion": {
                 "completionItem": {
-                    // Plain-text inserts only for now; flipping this on
-                    // requires LSP-snippet → Monaco-snippet handling in
-                    // the completion provider.
-                    "snippetSupport": false,
+                    // The completion provider maps insertTextFormat 2 to
+                    // Monaco's InsertAsSnippet rule (lsp-monaco-mapping.ts).
+                    "snippetSupport": true,
                     "documentationFormat": ["markdown", "plaintext"],
                 },
                 "contextSupport": true,
@@ -958,7 +957,7 @@ while True:
         );
         assert_eq!(
             echoed.pointer("/textDocument/completion/completionItem/snippetSupport"),
-            Some(&json!(false)),
+            Some(&json!(true)),
         );
     }
 
