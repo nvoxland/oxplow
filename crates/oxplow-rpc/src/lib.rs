@@ -314,6 +314,7 @@ rpc_dispatch! {
     "set_snapshot_retention_days" => commands::config::set_snapshot_retention_days { days: u32 },
     "set_snapshot_max_file_bytes" => commands::config::set_snapshot_max_file_bytes { bytes: u64 },
     "set_generated" => commands::config::set_generated { entries: Vec<String> },
+    "set_agent_model" => commands::config::set_agent_model { agent: oxplow_config::AgentKind, model: Option<String> },
     "get_workspace_context" => commands::config::get_workspace_context {},
     // lsp
     "install_lsp_package" => commands::lsp::install_lsp_package { package_name: String },

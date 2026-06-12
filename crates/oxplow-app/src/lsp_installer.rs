@@ -242,6 +242,7 @@ mod tests {
             snapshot_max_file_bytes: 0,
             inject_session_context: true,
             collection: Default::default(),
+            agent_models: Default::default(),
         }));
         LspSessionManager::new(cfg)
     }

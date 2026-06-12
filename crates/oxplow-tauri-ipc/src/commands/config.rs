@@ -58,6 +58,16 @@ pub async fn set_generated(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn set_agent_model(
+    state: tauri::State<'_, AppState>,
+    agent: oxplow_config::AgentKind,
+    model: Option<String>,
+) -> Result<OxplowConfig, IpcError> {
+    oxplow_rpc::commands::config::set_agent_model(&state, agent, model).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn get_workspace_context(
     state: tauri::State<'_, AppState>,
 ) -> Result<WorkspaceContext, IpcError> {

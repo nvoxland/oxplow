@@ -185,6 +185,13 @@ pub struct OxplowConfig {
     pub inject_session_context: bool,
     /// Per-project collection profile (test + coverage instrumentation).
     pub collection: CollectionConfig,
+    /// Per-agent launch model overrides, e.g.
+    /// `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
+    /// Only opencode consumes this today (its `-m provider/model`
+    /// flag); claude/codex launch with their own defaults. Absent
+    /// entries fall back to the built-in constant.
+    #[serde(rename = "agentModels")]
+    pub agent_models: std::collections::BTreeMap<AgentKind, String>,
 }
 
 #[derive(Debug, Error)]
@@ -224,6 +231,8 @@ struct RawConfig {
     inject_session_context: Option<bool>,
     #[serde(default)]
     collection: Option<RawCollectionBlock>,
+    #[serde(rename = "agentModels", default)]
+    agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -366,6 +375,7 @@ pub fn write_project_config(
         "injectSessionContext",
         "lsp",
         "collection",
+        "agentModels",
     ];
 
     let existing_extras: serde_yaml::Mapping = if path.exists() {
@@ -518,6 +528,13 @@ pub fn write_project_config(
         doc.insert("collection".into(), serde_yaml::Value::Mapping(col));
     }
 
+    if !config.agent_models.is_empty() {
+        doc.insert(
+            "agentModels".into(),
+            serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
+        );
+    }
+
     // Carry forward any unknown top-level keys the user (or a
     // sibling tool) added to oxplow.yaml.
     for (k, v) in existing_extras {
@@ -540,6 +557,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         collection: CollectionConfig::default(),
+        agent_models: Default::default(),
     }
 }
 
@@ -625,6 +643,21 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let collection = validate_collection(raw.collection)?;
 
+    let agent_models = {
+        let mut out = std::collections::BTreeMap::new();
+        for (agent, model) in raw.agent_models.unwrap_or_default() {
+            let trimmed = model.trim().to_string();
+            if trimmed.is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "agentModels.{} must be a non-empty string",
+                    agent.as_str()
+                )));
+            }
+            out.insert(agent, trimmed);
+        }
+        out
+    };
+
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
             let mut out = Vec::with_capacity(servers.len());
@@ -675,6 +708,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         snapshot_max_file_bytes,
         inject_session_context,
         collection,
+        agent_models,
     })
 }
 
@@ -1124,6 +1158,53 @@ lsp:
             !raw.contains("generatedDirs"),
             "legacy alias must not survive a round-trip, got:\n{raw}"
         );
+    }
+
+    #[test]
+    fn agent_models_round_trip() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agentModels:\n  opencode: github-copilot/gpt-5-mini\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.agent_models
+                .get(&AgentKind::Opencode)
+                .map(String::as_str),
+            Some("github-copilot/gpt-5-mini")
+        );
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        assert!(raw.contains("agentModels:"), "got:\n{raw}");
+        assert!(
+            raw.contains("opencode: github-copilot/gpt-5-mini"),
+            "got:\n{raw}"
+        );
+    }
+
+    #[test]
+    fn agent_models_rejects_unknown_agent_and_blank_model() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agentModels:\n  goose: some/model\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load_project_config(dir.path()).unwrap_err(),
+            ConfigError::Parse(_)
+        ));
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agentModels:\n  opencode: \"  \"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load_project_config(dir.path()).unwrap_err(),
+            ConfigError::Invalid(msg) if msg.contains("agentModels.opencode")
+        ));
     }
 
     #[test]

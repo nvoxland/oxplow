@@ -508,6 +508,7 @@ export const commands = {
 	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
 	setGenerated: (entries: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { entries })),
+	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
 	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
@@ -1693,6 +1694,14 @@ export type OxplowConfig = {
 	injectSessionContext: boolean,
 	// Per-project collection profile (test + coverage instrumentation).
 	collection: CollectionConfig,
+	/**
+	 *  Per-agent launch model overrides, e.g.
+	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
+	 *  Only opencode consumes this today (its `-m provider/model`
+	 *  flag); claude/codex launch with their own defaults. Absent
+	 *  entries fall back to the built-in constant.
+	 */
+	agentModels: Partial<{ [key in AgentKind]: string }>,
 };
 
 /**

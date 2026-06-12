@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
   getConfig,
+  setAgentModel,
   setAgents,
   setAgentPromptAppend,
   setGenerated,
@@ -27,6 +28,7 @@ export interface SettingsPageProps {
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const [promptAppend, setPromptAppend] = useState("");
   const [agents, setAgentsState] = useState<AgentKind[]>(["claude"]);
+  const [opencodeModel, setOpencodeModel] = useState("");
   const [retentionDays, setRetentionDays] = useState("7");
   const [maxFileMiB, setMaxFileMiB] = useState("5");
   const [generatedText, setGeneratedText] = useState("");
@@ -43,6 +45,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       .then((config) => {
         setPromptAppend(config.agentPromptAppend ?? "");
         setAgentsState(config.agents?.length ? config.agents : ["claude"]);
+        setOpencodeModel(config.agentModels?.opencode ?? "");
         setRetentionDays(String(config.snapshotRetentionDays));
         setMaxFileMiB((config.snapshotMaxFileBytes / (1024 * 1024)).toString());
         setGeneratedText((config.generated ?? []).join("\n"));
@@ -80,6 +83,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         throw new Error("Enable at least one agent.");
       }
       await setAgents(agents);
+      await setAgentModel("opencode", opencodeModel.trim() || null);
       await setAgentPromptAppend(promptAppend);
       await setSnapshotRetentionDays(days);
       await setSnapshotMaxFileBytes(bytes);
@@ -110,6 +114,24 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             Enabled agents for this project. The first enabled agent is the default for new threads.
           </Hint>
           <AgentPicker agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
+          {agents.includes("opencode") ? (
+            <div style={{ marginTop: 10 }}>
+              <Hint>
+                Model OpenCode launches with (<code>provider/model</code>, e.g.{" "}
+                <code>github-copilot/gpt-5-mini</code>). Blank uses the built-in default. Applies to
+                sessions started after Save.
+              </Hint>
+              <input
+                data-testid="settings-opencode-model"
+                type="text"
+                value={opencodeModel}
+                onChange={(event) => setOpencodeModel(event.target.value)}
+                disabled={!loaded || saving}
+                placeholder="github-copilot/gpt-5-mini"
+                style={{ ...numberInputStyle, width: 320 }}
+              />
+            </div>
+          ) : null}
         </Section>
 
         <Section title="Agent Prompt Additions">

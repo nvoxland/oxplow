@@ -490,6 +490,16 @@ export async function setGenerated(entries: string[]): Promise<import("./api-typ
   return unwrap(await commands.setGenerated(entries)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
+/// Set (or clear, with null/blank) the launch-model override for one
+/// agent — `agentModels.<agent>` in oxplow.yaml. Only opencode consumes
+/// the override today (`opencode -m provider/model`).
+export async function setAgentModel(
+  agent: AgentKind,
+  model: string | null,
+): Promise<import("./api-types.js").OxplowConfig> {
+  return unwrap(await commands.setAgentModel(agent, model)) as unknown as import("./api-types.js").OxplowConfig;
+}
+
 export async function setSnapshotRetentionDays(days: number): Promise<import("./api-types.js").OxplowConfig> {
   return unwrap(await commands.setSnapshotRetentionDays(days)) as unknown as import("./api-types.js").OxplowConfig;
 }

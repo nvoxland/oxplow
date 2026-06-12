@@ -367,6 +367,9 @@ export interface OxplowConfig {
   snapshotMaxFileBytes: number;
   generated: string[];
   injectSessionContext: boolean;
+  /** Per-agent launch model overrides (`agentModels:` in oxplow.yaml).
+   *  Only opencode consumes its entry today. */
+  agentModels?: Partial<Record<import("./tauri-bridge/generated/bindings.js").AgentKind, string>>;
 }
 
 export interface BackgroundTask {

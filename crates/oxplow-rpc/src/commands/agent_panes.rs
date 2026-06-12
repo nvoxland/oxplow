@@ -82,6 +82,7 @@ pub async fn ensure_agent_pane(
         } else {
             Some(prompt)
         },
+        opencode_model: config.agent_models.get(&AgentKind::Opencode).cloned(),
         ..Default::default()
     };
 

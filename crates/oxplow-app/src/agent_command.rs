@@ -8,9 +8,10 @@
 use oxplow_config::AgentKind;
 use oxplow_domain::Stream;
 
-/// Model opencode launches with (`-m provider/model`). Hardcoded for
-/// now — assumes GitHub Copilot auth in opencode's own auth store.
-/// Making this configurable per-project is a filed follow-up.
+/// Model opencode launches with (`-m provider/model`) when the project
+/// config doesn't override it (`agentModels: { opencode: … }` in
+/// oxplow.yaml). Assumes GitHub Copilot auth in opencode's own auth
+/// store.
 pub const OPENCODE_MODEL: &str = "github-copilot/gpt-5-mini";
 
 #[derive(Debug, Clone, Default)]
@@ -21,6 +22,10 @@ pub struct AgentCommandOptions {
     pub mcp_config: Option<String>,
     pub codex_config_overrides: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// `agentModels.opencode` from oxplow.yaml — overrides
+    /// [`OPENCODE_MODEL`] when set. Claude/codex launch with their
+    /// own defaults and ignore this.
+    pub opencode_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +80,8 @@ pub fn build_agent_command_for_session(
         // `opts.env`); the CLI itself only needs the model and an
         // optional session to resume. cwd comes from the `cd` (opencode
         // starts in the working directory).
-        let base = format!("opencode -m {}", shell_escape(OPENCODE_MODEL));
+        let model = opts.opencode_model.as_deref().unwrap_or(OPENCODE_MODEL);
+        let base = format!("opencode -m {}", shell_escape(model));
         let fresh = format!("{env_prefix}exec {base}");
         let command = if resume_session_id.is_empty() {
             fresh.clone()
@@ -251,6 +257,18 @@ mod tests {
         assert!(cmd.contains(OPENCODE_MODEL));
         assert!(!cmd.contains(" -s "));
         assert!(cmd.contains("/repo"));
+    }
+
+    #[test]
+    fn opencode_command_honors_configured_model_override() {
+        let s = stream();
+        let opts = AgentCommandOptions {
+            opencode_model: Some("anthropic/claude-sonnet-4-6".into()),
+            ..Default::default()
+        };
+        let cmd = build_agent_command(AgentKind::Opencode, &s, PaneKind::Talking, &opts);
+        assert!(cmd.contains("anthropic/claude-sonnet-4-6"));
+        assert!(!cmd.contains(OPENCODE_MODEL));
     }
 
     #[test]

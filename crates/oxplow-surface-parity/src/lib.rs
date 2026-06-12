@@ -331,6 +331,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_snapshot_retention_days"),
     ui("set_snapshot_max_file_bytes"),
     ui("set_generated"),
+    ui("set_agent_model"),
     ui("get_workspace_context"),
     // ---- ui-only: agent panes ----
     ui("ensure_agent_pane"),

@@ -257,6 +257,7 @@ pub async fn open_terminal_session(
         } else {
             Some(prompt)
         },
+        opencode_model: config.agent_models.get(&AgentKind::Opencode).cloned(),
         ..Default::default()
     };
     match &agent_runtime {

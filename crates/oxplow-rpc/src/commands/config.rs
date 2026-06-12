@@ -59,6 +59,29 @@ pub async fn set_snapshot_max_file_bytes(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
+/// Set (or clear, with `None`/blank) the launch-model override for one
+/// agent — `agentModels.<agent>` in oxplow.yaml. Only opencode consumes
+/// the override today.
+pub async fn set_agent_model(
+    svc: &Services,
+    agent: AgentKind,
+    model: Option<String>,
+) -> Result<OxplowConfig, IpcError> {
+    let model = model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    let project = svc.layout.project_dir.clone();
+    mutate_config(&svc.config, &project, |c| match model {
+        Some(m) => {
+            c.agent_models.insert(agent, m);
+        }
+        None => {
+            c.agent_models.remove(&agent);
+        }
+    })
+    .map_err(|e| IpcError::internal(e.to_string()))
+}
+
 pub async fn set_generated(svc: &Services, entries: Vec<String>) -> Result<OxplowConfig, IpcError> {
     let project = svc.layout.project_dir.clone();
     let updated = mutate_config(&svc.config, &project, |c| c.generated = entries)
