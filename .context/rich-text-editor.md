@@ -139,7 +139,10 @@ In `apps/desktop/index.html`:
 `RichTextField` becomes comment-enabled when given a `comments`
 config (`{ streamId, threadId, targetKind, targetId, author? }`).
 WikiPageTab passes `{ targetKind: "wiki", targetId: slug, threadId:
-null }` (wiki pages aren't thread-bound); TaskPage passes
+null }` (wiki pages aren't thread-bound) and additionally wraps the
+body scroll host in a `wiki:<slug>` context node
+(`contextNodeProps`), so plain-DOM selections around the editor
+resolve to the page too; TaskPage passes
 `{ targetKind: "task", targetId: String(item.id), threadId:
 item.thread_id }`.
 
@@ -183,21 +186,28 @@ item.thread_id }`.
   lists "Relink orphaned: …" entries that re-attach an orphaned comment
   to the current selection via `relink_comment` (rewrites quote +
   anchor, clears orphaned).
-- **Authoring is right-click-driven** (not an auto-popping button or
-  click-to-open — those fight normal selection/cursor editing). The
-  wrapper's `onContextMenu` **always** fires and `preventDefault`s, so
-  the native webview menu never appears in the editor. It builds a
-  shared `ContextMenu` with Cut / Copy / Paste (via `navigator.clipboard`
-  + ProseMirror commands, using positions captured at menu-open so they
-  survive the click moving focus) plus, when comment-enabled, "Add
-  Comment" (selection non-empty) and "Open Comment" (right-click target's
-  `closest("[data-comment-id]")` hits a decoration). "Add Comment" opens
-  `NewCommentPopover` (composer anchored to the selection-end caret via
-  `coordsAtPos`); "Open Comment" opens `CommentPopover`. Both live in
-  `components/Comments/` and `stopPropagation` their pointer events so
-  the wrapper's editor-focus `onClick` doesn't steal focus. The
-  highlight CSS class is `.oxplow-comment-highlight`
-  (`--comment-highlight*` tokens).
+- **Authoring: selection toolbar + right-click.** On mouseup with a
+  non-collapsed selection, the field floats the shared
+  `SelectionCommentToolbar` ("Add comment") at the selection end —
+  mirroring the plain-DOM surfaces, which this contenteditable region
+  is deliberately carved out of (`useDomAnnotations` skips
+  contenteditable). Gating is the pure `selectionToolbarVisible`
+  (`RichText/selectionToolbar.ts`); the toolbar hides when the
+  selection collapses or a composer/popover is open. *Opening* an
+  existing comment stays right-click-only (click-to-open would fight
+  cursor placement). The wrapper's `onContextMenu` **always** fires and
+  `preventDefault`s, so the native webview menu never appears in the
+  editor. It builds a shared `ContextMenu` with Cut / Copy / Paste (via
+  `navigator.clipboard` + ProseMirror commands, using positions
+  captured at menu-open so they survive the click moving focus) plus,
+  when comment-enabled, "Add Comment" (selection non-empty) and "Open
+  Comment" (right-click target's `closest("[data-comment-id]")` hits a
+  decoration). "Add Comment" opens `NewCommentPopover` (composer
+  anchored to the selection-end caret via `coordsAtPos`); "Open
+  Comment" opens `CommentPopover`. Both live in `components/Comments/`
+  and `stopPropagation` their pointer events so the wrapper's
+  editor-focus `onClick` doesn't steal focus. The highlight CSS class
+  is `.oxplow-comment-highlight` (`--comment-highlight*` tokens).
 - **Cross-page reveal.** The field subscribes to `comment-reveal-bus.ts`.
   When the Comments Dashboard's "Go to location" button fires
   `requestCommentReveal(id)` and navigation lands on this wiki page, the

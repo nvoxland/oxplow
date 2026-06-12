@@ -5,6 +5,7 @@ import {
   type WikiPageSummary,
 } from "../../api.js";
 import { MarkdownView, preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
+import { contextNodeProps } from "../Comments/contextNodes.js";
 import { RichTextField } from "../RichText/RichTextField.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
@@ -92,6 +93,10 @@ export function WikiPageTab({
         }}
         onScroll={(e) => { scrollYRef.current = (e.currentTarget as HTMLDivElement).scrollTop; }}
         style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
+        // The body is a wiki context node so any plain-DOM selection in
+        // it (and the page_ref graph) resolves to `wiki:<slug>`; the
+        // Tiptap surface inside carries its own comment affordance.
+        {...contextNodeProps("wiki", slug)}
       >
         {notFound ? (
           <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>

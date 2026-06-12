@@ -30,6 +30,8 @@ import {
 } from "../../comment-reveal-bus.js";
 import { CommentPopover } from "../Comments/CommentPopover.js";
 import { NewCommentPopover } from "../Comments/NewCommentPopover.js";
+import { SelectionCommentToolbar } from "../Comments/SelectionCommentToolbar.js";
+import { selectionToolbarVisible } from "./selectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
@@ -38,9 +40,11 @@ import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pag
 import { DISK } from "../../file-version.js";
 
 /// Comment integration bundle. When provided, the field highlights
-/// anchored ranges and exposes "Add comment" / "Open comment" via the
-/// right-click menu (no auto-popping button or click-to-open, so
-/// comments don't fight selection/cursor). `targetId` identifies the
+/// anchored ranges and exposes "Add comment" via both the floating
+/// selection toolbar (mirroring the plain-DOM surfaces, which this
+/// contenteditable region is carved out of) and the right-click menu;
+/// "Open comment" stays right-click-only so existing comments don't
+/// fight selection/cursor. `targetId` identifies the
 /// page (wiki slug / task id); `streamId` is the hard scope and
 /// `threadId` the origin thread (null for non-thread-bound surfaces).
 export interface RichTextCommentConfig {
@@ -137,6 +141,9 @@ export function RichTextField({
   const [commentMenu, setCommentMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(
     null,
   );
+  // Floating "Add comment" toolbar over a fresh selection (mouse-driven,
+  // like the plain-DOM layer). Null when hidden.
+  const [selToolbarRect, setSelToolbarRect] = useState<DOMRect | null>(null);
 
   const editor = useEditor({
     // Defer the first editor render out of React's render phase. With
@@ -344,8 +351,53 @@ export function RichTextField({
     };
   };
 
+  // Hide the selection toolbar whenever the selection collapses
+  // (keyboard or programmatic) — the mouseup path below only covers
+  // mouse-driven selections.
+  useEffect(() => {
+    if (!editor) return;
+    const onSelectionUpdate = () => {
+      if (editor.state.selection.empty) setSelToolbarRect(null);
+    };
+    editor.on("selectionUpdate", onSelectionUpdate);
+    return () => {
+      editor.off("selectionUpdate", onSelectionUpdate);
+    };
+  }, [editor]);
+
+  // Mirror the plain-DOM selection affordance: on mouseup with a fresh
+  // non-collapsed selection, float the "Add comment" toolbar at the
+  // selection's end. Deferred a tick so the browser finalizes the
+  // selection first (same trick as useDomAnnotations).
+  const handleSelectionMouseUp = () => {
+    if (!editor || !comments) return;
+    window.setTimeout(() => {
+      if (!editor || editor.isDestroyed) return;
+      const { to, empty } = editor.state.selection;
+      const visible = selectionToolbarVisible({
+        commentsEnabled: !!comments,
+        selectionEmpty: empty,
+        composerOpen: !!pendingSel,
+        popoverOpen: !!activeComment,
+      });
+      if (!visible) {
+        setSelToolbarRect(null);
+        return;
+      }
+      try {
+        const c = editor.view.coordsAtPos(to);
+        setSelToolbarRect(new DOMRect(c.left, c.top, 0, c.bottom - c.top));
+      } catch {
+        const domSel = window.getSelection();
+        if (!domSel || domSel.rangeCount === 0) return;
+        setSelToolbarRect(domSel.getRangeAt(0).getBoundingClientRect());
+      }
+    }, 0);
+  };
+
   const startCommentForSelection = () => {
     if (!editor || !comments) return;
+    setSelToolbarRect(null);
     const { from, to, empty } = editor.state.selection;
     if (empty) return;
     const captured = captureAnchor(from, to);
@@ -535,6 +587,7 @@ export function RichTextField({
         // Middle-click on a link → new-tab navigate.
         if (event.button === 1) handleAnchorIntent(event, true);
       }}
+      onMouseUp={handleSelectionMouseUp}
       onContextMenu={handleContextMenu}
     >
       {!hidePencil ? (
@@ -554,6 +607,12 @@ export function RichTextField({
         />
       ) : null}
       <EditorContent editor={editor} />
+      {comments && selToolbarRect && !pendingSel && !activeComment && (
+        <SelectionCommentToolbar
+          rect={selToolbarRect}
+          onAdd={() => startCommentForSelection()}
+        />
+      )}
       {comments && pendingSel && (
         <NewCommentPopover
           rect={pendingSel.rect}
