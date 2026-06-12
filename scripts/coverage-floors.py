@@ -48,11 +48,13 @@ FLOORS = {
     # link_type, expect_id_kind, compose_*_brief) lifted this from
     # 25% → 40%. 35 leaves cushion for the next batch.
     "oxplow-mcp": 35.0,
-    # oxplow-tauri-ipc: full-conversion error tests + a few new
-    # command integration tests (page_visit, wiki, work_items, effort)
-    # moved this from 22% → 27%. 22 keeps the prior floor while the
-    # next batch lands.
-    "oxplow-tauri-ipc": 22.0,
+    # oxplow-tauri-ipc: a broad read-command batch (git/branch/stream/
+    # config/thread/comment/note/snapshot/effort/workspace/lsp adapters,
+    # driven through the mock-runtime harness) lifted this from 27% →
+    # ~48%. Pinned at 42 (≈5pt cushion) to lock the gain; raise as the
+    # remaining process-bound adapters (launch/menu/terminal/webview)
+    # get covered.
+    "oxplow-tauri-ipc": 42.0,
 }
 
 CRATE_RE = re.compile(r"/crates/([^/]+)/")

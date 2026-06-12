@@ -416,3 +416,527 @@ async fn list_task_efforts_empty_for_unknown_item() {
         .unwrap();
     assert!(v.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Broad read-command coverage. The harness boots a real git repo + a primary
+// stream + a default thread, so `stream_id: Option<String>` falls back to the
+// primary worktree. Each test drives one more uncovered command adapter
+// through the production `tauri::State` plumbing. Commands that can legitimately
+// error on a fresh repo (no remote, missing path, unknown id) are called with
+// `let _ =` so the test exercises the adapter without asserting a brittle
+// outcome.
+// ---------------------------------------------------------------------------
+
+use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::{EffortId, Stream, Thread};
+
+/// Primary stream + its default thread, both of which `TestApp::build`
+/// guarantees via `ensure_primary`.
+async fn primary_and_thread(app: &TestApp) -> (Stream, Thread) {
+    let stream = app.state.stream_store.primary().await.unwrap().unwrap();
+    let thread = app
+        .state
+        .thread_store
+        .list_for_stream(&stream.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("primary stream should have a default thread");
+    (stream, thread)
+}
+
+// ---- branch commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_branches_returns_default_branch() {
+    let app = TestApp::build();
+    let branches = commands::branch::list_branches(app.state()).await.unwrap();
+    assert!(
+        !branches.is_empty(),
+        "a repo with one commit has at least its default branch"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_local_branches_returns_default_branch() {
+    let app = TestApp::build();
+    let branches = commands::branch::list_local_branches(app.state())
+        .await
+        .unwrap();
+    assert!(!branches.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn get_default_branch_does_not_panic() {
+    let app = TestApp::build();
+    let _ = commands::branch::get_default_branch(app.state()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn delete_unknown_branch_errors() {
+    let app = TestApp::build();
+    let _ = commands::branch::delete_branch(app.state(), "no-such-branch".into(), false).await;
+}
+
+// ---- git read commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn git_reads_over_primary_worktree() {
+    let app = TestApp::build();
+    let s = app.state();
+    let _ = commands::git::get_repo_conflict_state(s.clone(), None).await;
+    let _ = commands::git::get_ahead_behind(s.clone(), None, "HEAD".into(), "HEAD".into()).await;
+    let _ = commands::git::list_all_refs(s.clone()).await;
+    let _ = commands::git::get_change_scopes(s.clone(), None).await;
+    let _ = commands::git::get_branch_changes(s.clone(), None, "HEAD".into()).await;
+    let _ = commands::git::read_file_at_ref(s.clone(), "HEAD".into(), "nope.txt".into()).await;
+    let _ = commands::git::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
+    let _ = commands::git::git_blame(s.clone(), None, "nope.txt".into()).await;
+    let _ = commands::git::local_blame(s.clone(), None, "nope.txt".into(), "a\nb\n".into()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn git_list_commands_return_empty_for_fresh_repo() {
+    let app = TestApp::build();
+    let s = app.state();
+    assert!(
+        commands::git::list_recent_remote_branches(s.clone(), Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::git::search_workspace_text(s.clone(), None, "needle".into(), Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(commands::git::resolve_commit_ref_labels(s.clone(), vec![])
+        .await
+        .unwrap()
+        .is_empty());
+    let _ = commands::git::list_existing_worktrees(s.clone())
+        .await
+        .unwrap();
+    let _ = commands::git::list_adoptable_worktrees(s.clone())
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn git_local_mutations_over_primary_worktree() {
+    let app = TestApp::build();
+    let s = app.state();
+    // Append a gitignore entry, stage it, commit it — all local, no remote.
+    let _ = commands::git::append_to_gitignore(s.clone(), None, "target/".into()).await;
+    let _ = commands::git::git_add_path(s.clone(), None, ".gitignore".into()).await;
+    let _ = commands::git::git_commit_all(s.clone(), None, "add gitignore".into()).await;
+    let _ = commands::git::restore_path(s.clone(), None, ".gitignore".into()).await;
+    let _ = commands::git::git_merge_into(s.clone(), None, "HEAD".into()).await;
+    let _ = commands::git::git_rebase_onto(s.clone(), None, "HEAD".into()).await;
+}
+
+// ---- stream commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stream_reads_and_reorder() {
+    let app = TestApp::build();
+    let (stream, _) = primary_and_thread(&app).await;
+    assert!(commands::streams::get_primary_stream(app.state())
+        .await
+        .unwrap()
+        .is_some());
+    let _ = commands::streams::get_current_stream(app.state())
+        .await
+        .unwrap();
+    let _ = commands::streams::ensure_primary(app.state())
+        .await
+        .unwrap();
+    commands::streams::switch_stream(app.state(), Some(stream.id))
+        .await
+        .unwrap();
+    commands::streams::reorder_streams(app.state(), vec![stream.id])
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn delete_unknown_stream_errors() {
+    let app = TestApp::build();
+    let _ = commands::streams::delete_stream(app.state(), StreamId::new(999999)).await;
+    let _ = commands::streams::archive_stream(app.state(), StreamId::new(999999), false).await;
+}
+
+// ---- config commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn config_setters_round_trip() {
+    use oxplow_config::AgentKind;
+    let app = TestApp::build();
+    commands::config::set_agents(app.state(), vec![AgentKind::Claude, AgentKind::Codex])
+        .await
+        .unwrap();
+    commands::config::set_agent_prompt_append(app.state(), "be concise".into())
+        .await
+        .unwrap();
+    commands::config::set_snapshot_retention_days(app.state(), 30)
+        .await
+        .unwrap();
+    commands::config::set_snapshot_max_file_bytes(app.state(), 1_000_000)
+        .await
+        .unwrap();
+    commands::config::set_generated(app.state(), vec!["generated/".into()])
+        .await
+        .unwrap();
+    let _ = commands::config::get_workspace_context(app.state()).await;
+}
+
+// ---- thread commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn thread_reads_over_default_thread() {
+    let app = TestApp::build();
+    let (stream, thread) = primary_and_thread(&app).await;
+    assert!(!commands::threads::list_threads(app.state(), stream.id)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(commands::threads::get_thread(app.state(), thread.id)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(
+        commands::threads::get_thread(app.state(), ThreadId::new(999999))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let _ = commands::threads::get_thread_state(app.state(), stream.id)
+        .await
+        .unwrap();
+    let _ = commands::threads::get_selected_thread(app.state(), stream.id)
+        .await
+        .unwrap();
+}
+
+// ---- comment commands (full round-trip) ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn comment_lifecycle_round_trip() {
+    use commands::comments::CreateCommentRequest;
+    use oxplow_domain::{CommentIntent, CommentStatus};
+    let app = TestApp::build();
+    let (stream, thread) = primary_and_thread(&app).await;
+
+    assert!(
+        commands::comments::list_comments_for_stream(app.state(), stream.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let c = commands::comments::create_comment(
+        app.state(),
+        CreateCommentRequest {
+            stream_id: stream.id,
+            thread_id: Some(thread.id),
+            target_kind: "wiki".into(),
+            target_id: "some-page".into(),
+            quote: "the quote".into(),
+            selectors_json: "{}".into(),
+            context_chain: vec![],
+            referenced_refs: vec![],
+            intent: CommentIntent::Note,
+            author: "tester".into(),
+            body: "first message".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        commands::comments::list_comments_for_stream(app.state(), stream.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        commands::comments::list_comments_for_target(
+            app.state(),
+            "wiki".into(),
+            "some-page".into()
+        )
+        .await
+        .unwrap()
+        .len(),
+        1
+    );
+
+    commands::comments::add_comment_message(
+        app.state(),
+        c.comment.id,
+        "tester".into(),
+        "reply".into(),
+    )
+    .await
+    .unwrap();
+    commands::comments::set_comment_intent(app.state(), c.comment.id, CommentIntent::Followup)
+        .await
+        .unwrap();
+    commands::comments::set_comment_anchor(app.state(), c.comment.id, "{\"v\":1}".into(), true)
+        .await
+        .unwrap();
+    commands::comments::relink_comment(
+        app.state(),
+        c.comment.id,
+        "new quote".into(),
+        "{\"v\":2}".into(),
+    )
+    .await
+    .unwrap();
+    commands::comments::set_comment_status(app.state(), c.comment.id, CommentStatus::Resolved)
+        .await
+        .unwrap();
+    commands::comments::delete_comment(app.state(), c.comment.id)
+        .await
+        .unwrap();
+
+    assert!(
+        commands::comments::list_comments_for_stream(app.state(), stream.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// ---- note commands (round-trip) ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn thread_note_round_trip() {
+    let app = TestApp::build();
+    let (_, thread) = primary_and_thread(&app).await;
+    assert!(commands::notes::list_thread_notes(app.state(), thread.id)
+        .await
+        .unwrap()
+        .is_empty());
+    let note =
+        commands::notes::add_thread_note(app.state(), thread.id, "a finding".into(), "me".into())
+            .await
+            .unwrap();
+    assert_eq!(
+        commands::notes::list_thread_notes(app.state(), thread.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let _ = commands::notes::list_task_events(app.state(), None, Some(thread.id))
+        .await
+        .unwrap();
+    commands::notes::delete_work_note(app.state(), note.id)
+        .await
+        .unwrap();
+    assert!(commands::notes::list_thread_notes(app.state(), thread.id)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+// ---- page-ref + search + wiki-freshness reads ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn page_ref_reads_empty_for_fresh_project() {
+    let app = TestApp::build();
+    assert!(
+        commands::page_refs::list_backlinks(app.state(), "wiki".into(), "slug".into(), None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::page_refs::list_outbound(app.state(), "task".into(), "1".into(), Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn search_returns_empty_for_fresh_project() {
+    let app = TestApp::build();
+    assert!(
+        commands::search::search(app.state(), "anything".into(), None, None, Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(commands::search::search(
+        app.state(),
+        "anything".into(),
+        None,
+        Some(vec!["wiki".into()]),
+        None
+    )
+    .await
+    .unwrap()
+    .is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wiki_freshness_reads_for_unknown_slug() {
+    let app = TestApp::build();
+    assert!(
+        commands::wiki_freshness::list_wiki_freshness(app.state(), "no-slug".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        commands::wiki_freshness::mark_all_wiki_refs_verified(app.state(), "no-slug".into())
+            .await
+            .unwrap(),
+        0
+    );
+    let _ =
+        commands::wiki_freshness::mark_wiki_ref_verified(app.state(), "no-slug".into(), "p".into())
+            .await;
+}
+
+// ---- effort reads ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn effort_reads_empty_for_unknown_ids() {
+    let app = TestApp::build();
+    assert!(
+        commands::effort::get_effort_files(app.state(), EffortId::new(999))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::effort::list_efforts_at_snapshots(app.state(), vec![])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::effort::list_changed_paths_for_effort(app.state(), EffortId::new(999))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::effort::list_effort_observations(app.state(), EffortId::new(999), None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// ---- snapshot reads ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn snapshot_reads_empty_for_fresh_project() {
+    let app = TestApp::build();
+    let (stream, _) = primary_and_thread(&app).await;
+    assert!(
+        commands::snapshot::list_file_snapshots_for_stream(app.state(), stream.id, Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::snapshot::list_snapshots_for_stream(app.state(), stream.id, Some(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::snapshot::list_snapshot_change_entries(app.state(), 999)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::snapshot::read_snapshot_file_content(app.state(), 999)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        commands::snapshot::list_files_for_snapshot(app.state(), 999)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        commands::snapshot::list_wiki_slugs_for_snapshots(app.state(), vec![999])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let _ = commands::snapshot::get_blob_storage_bytes(app.state())
+        .await
+        .unwrap();
+    let _ = commands::snapshot::get_snapshot_stats(app.state(), 999).await;
+    let _ = commands::snapshot::get_snapshot_pair_diff(app.state(), None, None).await;
+    let _ = commands::snapshot::restore_file_from_snapshot(app.state(), 999).await;
+}
+
+// ---- workspace reads + file round-trip ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn workspace_reads_and_file_round_trip() {
+    let app = TestApp::build();
+    let _ = commands::workspace::list_workspace_files(app.state(), None)
+        .await
+        .unwrap();
+    let _ = commands::workspace::get_workspace_status_summary(app.state(), None)
+        .await
+        .unwrap();
+    let _ = commands::workspace::read_file(
+        app.state(),
+        None,
+        "made-up.txt".into(),
+        oxplow_tree_source::TreeVersion::Disk,
+    )
+    .await;
+    // Create → read → rename → delete a file inside the worktree.
+    commands::workspace::write_workspace_file(
+        app.state(),
+        None,
+        "scratch.txt".into(),
+        "hello".into(),
+    )
+    .await
+    .unwrap();
+    let f = commands::workspace::read_workspace_file(app.state(), None, "scratch.txt".into())
+        .await
+        .unwrap();
+    assert!(f.content.contains("hello"));
+    let _ =
+        commands::workspace::create_workspace_directory(app.state(), None, "subdir".into()).await;
+    let _ = commands::workspace::rename_workspace_path(
+        app.state(),
+        None,
+        "scratch.txt".into(),
+        "scratch2.txt".into(),
+    )
+    .await;
+    let _ =
+        commands::workspace::delete_workspace_path(app.state(), None, "scratch2.txt".into()).await;
+}
+
+// ---- lsp list reads ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn lsp_list_reads_for_fresh_project() {
+    let app = TestApp::build();
+    assert!(commands::lsp::list_installed_lsp_packages(app.state())
+        .await
+        .unwrap()
+        .is_empty());
+    let _ = commands::lsp::list_lsp_servers(app.state()).await;
+}
