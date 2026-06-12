@@ -172,7 +172,8 @@ impl HookIngestService {
                     .list_recent(Some(&thread), 200)
                     .await
                     .unwrap_or_default();
-                let derived = crate::agent_status_derive::derive_thread_status(&recent);
+                let derived =
+                    crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now());
                 self.events.emit(OxplowEvent::AgentStatusChanged {
                     thread_id: thread,
                     pane_target: self.thread_pane(&thread).await,

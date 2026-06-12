@@ -2066,12 +2066,24 @@ export interface tasksChangeEvent {
   itemId: number | null;
 }
 
-export type AgentStatus = "working" | "waiting";
+export type AgentStatus = "working" | "waiting" | "stalled";
 
 export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
   status: AgentStatus;
+}
+
+/// Collapse the backend `AgentStatusState` enum to the dot's alphabet.
+/// "running" → working; "stalled" (derived when a Running hook log
+/// goes silent past the stall threshold — the agent died without ever
+/// emitting a Stop hook) stays distinct so the dot can render it as a
+/// failure rather than ordinary waiting; everything else (idle /
+/// awaiting_user / stopped / error) → waiting.
+export function collapseAgentStatusState(raw: string | undefined): AgentStatus {
+  if (raw === "running") return "working";
+  if (raw === "stalled") return "stalled";
+  return "waiting";
 }
 
 /// Synthesize an Interrupt hook for `threadId`. Used by the agent
@@ -2096,9 +2108,8 @@ export async function recordUserInterrupt(threadId: string, streamId: string | n
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {
   // The Rust binding returns the raw `AgentStatus` row
   // ({ thread_id, pane_target, state: "idle"|"running"|... }). The
-  // renderer only cares about a 2-state working/waiting indicator, so
-  // collapse the AgentStatusState enum here. "running" → working;
-  // every other state (idle / awaiting_user / stopped / error) → waiting.
+  // renderer only cares about the dot's narrow alphabet, so collapse
+  // the AgentStatusState enum here (see collapseAgentStatusState).
   // Without this transform the consumer reads `entry.threadId` and
   // `entry.status` off raw rows that have neither field, so the dot
   // never leaves its waiting fallback.
@@ -2106,7 +2117,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
   return rows.map((row) => ({
     streamId: "",
     threadId: row.thread_id,
-    status: row.state === "running" ? "working" : "waiting",
+    status: collapseAgentStatusState(row.state),
   }));
 }
 
@@ -2278,19 +2289,49 @@ export function subscribeAgentStatus(
 ): () => void {
   // The backend `AgentStatusChanged` event payload carries the
   // derived state directly, so the renderer can update without a
-  // refetch round-trip. Map the AgentStatusState enum to the 2-state
-  // working/waiting indicator the same way listAgentStatuses() does.
+  // refetch round-trip. Map the AgentStatusState enum to the dot's
+  // alphabet the same way listAgentStatuses() does.
   return subscribeOxplowEvents((event) => {
     if (event.kind !== "agentStatusChanged") return;
     const threadId = event.threadId as string | undefined;
     const rawState = event.state as string | undefined;
     if (!threadId || !rawState) return;
-    const status: AgentStatus = rawState === "running" ? "working" : "waiting";
+    const status = collapseAgentStatusState(rawState);
     // streamId filter is a no-op — the event doesn't carry stream
     // attribution. The single caller in App.tsx subscribes with "all".
     void streamId;
     onEvent({ streamId: "", threadId, status });
   });
+}
+
+export interface AgentStallAlertEvent {
+  threadId: string;
+  inProgressCount: number;
+  waitingMs: number;
+}
+
+/// The backend stall watchdog fires this (once per stall episode) when
+/// a thread has in_progress tasks but its agent has not been running
+/// past the alert threshold — e.g. the agent process died on an API
+/// error without a Stop hook, or stopped cleanly and never resumed.
+export function subscribeAgentStallAlerts(onEvent: (alert: AgentStallAlertEvent) => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "agentStallAlert") return;
+    const threadId = event.threadId as string | undefined;
+    if (!threadId) return;
+    onEvent({
+      threadId,
+      inProgressCount: (event.inProgressCount as number | undefined) ?? 0,
+      waitingMs: (event.waitingMs as number | undefined) ?? 0,
+    });
+  });
+}
+
+/// Toast copy for a stall alert. Pure so tests can pin the wording.
+export function formatAgentStallAlert(alert: AgentStallAlertEvent): string {
+  const minutes = Math.max(1, Math.round(alert.waitingMs / 60_000));
+  const tasks = alert.inProgressCount === 1 ? "1 in-progress task" : `${alert.inProgressCount} in-progress tasks`;
+  return `Agent appears stalled: ${tasks} but no agent activity for ${minutes} min`;
 }
 
 export interface BacklogChangeEvent {

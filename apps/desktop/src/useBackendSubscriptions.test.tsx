@@ -21,6 +21,7 @@ function makeApi(): BackendSubscriptionApi {
     subscribeBacklogEvents: noopSub,
     subscribeTaskEvents: noopSub,
     subscribeAgentStatus: noopSub,
+    subscribeAgentStallAlerts: noopSub,
     subscribeOxplowEvents: ((handler: Handler) => {
       oxplowHandlers.push(handler);
       return () => {
@@ -93,8 +94,9 @@ test("does not re-subscribe across re-renders (no churn)", () => {
 test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness threadStates={{}} />);
   unmount();
-  // 6 oxplow + workspace-context + backlog + task + agent-status = 10.
-  expect(unsubCount).toBe(10);
+  // 6 oxplow + workspace-context + backlog + task + agent-status +
+  // stall-alerts = 11.
+  expect(unsubCount).toBe(11);
 });
 
 test("followup.changed reads the current threadStates ref to recover the stream id", async () => {

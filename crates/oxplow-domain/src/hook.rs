@@ -49,6 +49,12 @@ pub enum AgentStatusState {
     AwaitingUser,
     Stopped,
     Error,
+    /// Derived-only: the hook log says Running but no event has
+    /// arrived for longer than the stall threshold. Claude Code emits
+    /// no hook when a turn dies on an API error and the process drops
+    /// back to its prompt, so a wall-clock check is the only way to
+    /// notice. Never persisted to the agent_status table.
+    Stalled,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

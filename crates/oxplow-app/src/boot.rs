@@ -221,6 +221,19 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
+    // Agent stall watchdog: once a minute, re-derive every thread's
+    // status against the wall clock. Catches agent processes that died
+    // mid-turn without emitting a Stop hook (API errors) — flips the
+    // stuck Working dot to Stalled and alerts when in_progress work
+    // sits on a non-running agent. See agent_stall_watch.rs.
+    crate::agent_stall_watch::AgentStallWatch::new(
+        state.agent_status_store.clone(),
+        state.hook_event_store.clone(),
+        state.task_store.clone(),
+        event_bus.clone(),
+    )
+    .spawn();
+
     // Lightweight self-diagnostics: once a minute, log RSS + open fds
     // + stream count so a long-running process leaves a trail.
     {

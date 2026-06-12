@@ -1041,6 +1041,31 @@ currently `working` so a user idly tapping Escape at a prompt is a
 no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
 filtered out — only the bare interrupt byte counts. See the original ticket history.
 
+**Stall detection (API-error deaths).** Claude Code emits *no* hook at
+all when a turn dies on a transient API error (socket closed
+mid-stream) and the process drops back to its prompt — observed live as
+a dot stuck on `working` for hours while the queue silently stalled.
+Nothing event-driven can catch that, so the derivation is time-aware:
+`derive_thread_status(events, now)` degrades a derived `Running` whose
+newest hook event is older than `AGENT_STALL_AFTER_MS` (15 min — clears
+a max-timeout 10-min Bash call with margin) to a derived-only
+`AgentStatusState::Stalled` (never persisted to the agent_status
+table). The ExitPlanMode `AwaitingUser` override is exempt — waiting on
+the user indefinitely is legitimate. Because no hook will ever arrive
+to trigger a re-derive, `AgentStallWatch`
+(`crates/oxplow-app/src/agent_stall_watch.rs`, spawned from `boot.rs`)
+re-derives every thread once a minute and pushes
+`AgentStatusChanged { state: Stalled }` so the renderer's dot recovers
+on its own. The same watchdog emits `AgentStallAlert { thread_id,
+in_progress_count, waiting_ms }` — once per stall episode, re-armed
+when the agent runs again or the in_progress bucket empties — whenever
+a thread holds in_progress tasks but its agent has not been running
+past the threshold (covers both the died-mid-turn case and "stopped
+cleanly, never resumed"). The renderer collapses status as running →
+`working`, stalled → `stalled` (red pulsing dot), everything else →
+`waiting`, and surfaces the alert as a toast
+(`useBackendSubscriptions.ts` → `formatAgentStallAlert`).
+
 ## Snapshot tracking
 
 The runtime keeps a content-addressed history of worktree files so the

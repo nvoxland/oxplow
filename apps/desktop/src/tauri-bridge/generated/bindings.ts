@@ -739,7 +739,15 @@ export type AgentStatus = {
 	updated_at: Timestamp,
 };
 
-export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" | "error";
+export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" | "error" | 
+/**
+ *  Derived-only: the hook log says Running but no event has
+ *  arrived for longer than the stall threshold. Claude Code emits
+ *  no hook when a turn dies on an API error and the process drops
+ *  back to its prompt, so a wall-clock check is the only way to
+ *  notice. Never persisted to the agent_status table.
+ */
+"stalled";
 
 /**
  *  One open or closed agent turn. Open rows render as live in-progress
@@ -1735,6 +1743,14 @@ export type OxplowEvent =
 { kind: "agentStatusChanged"; threadId: ThreadId; paneTarget: string; state: AgentStatusState } | 
 // agent_turn opened or closed.
 { kind: "agentTurnsChanged"; threadId: ThreadId } | 
+/**
+ *  The stall watchdog noticed `thread_id` has in_progress tasks
+ *  but its agent has not been running for longer than the alert
+ *  threshold — the queue is silently stalled. Emitted once per
+ *  stall episode (re-armed when the agent runs again or the
+ *  in_progress bucket empties). Renderer surfaces a toast.
+ */
+{ kind: "agentStallAlert"; threadId: ThreadId; inProgressCount: number; waitingMs: number } | 
 /**
  *  A page visit was recorded (rail history, recently-finished, etc.).
  *  Coarse — renderer refetches whatever view it cares about.

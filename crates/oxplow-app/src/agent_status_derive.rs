@@ -18,13 +18,29 @@
 //! from it matches the source of truth and self-heals when the
 //! sidecar table goes wrong.
 
-use oxplow_domain::{AgentStatusState, HookEvent, HookKind};
+use oxplow_domain::{AgentStatusState, HookEvent, HookKind, Timestamp};
+
+/// How long a `Running` thread may go without emitting any hook event
+/// before the derivation declares it `Stalled`. Claude Code emits no
+/// hook when a turn dies on an API error (socket closed, etc.) and the
+/// process drops back to its prompt — the log just stops mid-Running.
+/// An active turn emits Pre/PostToolUse continuously; the longest
+/// silent stretch is a single max-timeout Bash call (10 minutes), so
+/// 15 minutes clears that with margin while still catching real
+/// deaths quickly.
+pub const AGENT_STALL_AFTER_MS: i64 = 15 * 60 * 1000;
 
 /// Replay `events` (which may arrive in any order) and return the
-/// status the thread should currently show. Sorts by `received_at`
-/// ascending internally so callers can hand in DESC-ordered store
-/// results without flipping them first.
-pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
+/// status the thread should currently show *as of `now`*. Sorts by
+/// `received_at` ascending internally so callers can hand in
+/// DESC-ordered store results without flipping them first.
+///
+/// Time-awareness: a derived `Running` whose newest event is older
+/// than [`AGENT_STALL_AFTER_MS`] degrades to `Stalled` — the agent
+/// process almost certainly died (or errored back to its prompt)
+/// without emitting a Stop hook. `AwaitingUser` is exempt: waiting on
+/// the user indefinitely is legitimate.
+pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatusState {
     let mut sorted: Vec<&HookEvent> = events.iter().collect();
     sorted.sort_by_key(|e| e.received_at);
 
@@ -41,7 +57,7 @@ pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
     // the derived state at the end.
     let mut pending_exit_plan_mode: i32 = 0;
 
-    for ev in sorted {
+    for ev in &sorted {
         match ev.kind {
             HookKind::UserPromptSubmit => {
                 state = AgentStatusState::Running;
@@ -95,10 +111,16 @@ pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
     }
 
     if pending_exit_plan_mode > 0 {
-        AgentStatusState::AwaitingUser
-    } else {
-        state
+        return AgentStatusState::AwaitingUser;
     }
+    if state == AgentStatusState::Running {
+        if let Some(last) = sorted.last() {
+            if now.unix_ms() - last.received_at.unix_ms() > AGENT_STALL_AFTER_MS {
+                return AgentStatusState::Stalled;
+            }
+        }
+    }
+    state
 }
 
 fn payload_tool_name(payload: &str) -> Option<String> {
@@ -112,6 +134,10 @@ fn payload_tool_name(payload: &str) -> Option<String> {
 mod tests {
     use super::*;
     use oxplow_domain::{HookEventId, ThreadId, Timestamp};
+
+    fn at(ms: i64) -> Timestamp {
+        Timestamp::from_unix_ms(ms)
+    }
 
     fn ev(kind: HookKind, ms: i64, payload: &str) -> HookEvent {
         HookEvent {
@@ -127,7 +153,7 @@ mod tests {
 
     #[test]
     fn empty_log_is_idle() {
-        assert_eq!(derive_thread_status(&[]), AgentStatusState::Idle);
+        assert_eq!(derive_thread_status(&[], at(10)), AgentStatusState::Idle);
     }
 
     #[test]
@@ -136,7 +162,10 @@ mod tests {
             ev(HookKind::UserPromptSubmit, 1, "{}"),
             ev(HookKind::Stop, 2, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Idle
+        );
     }
 
     #[test]
@@ -145,7 +174,10 @@ mod tests {
             ev(HookKind::UserPromptSubmit, 1, "{}"),
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Running);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Running
+        );
     }
 
     #[test]
@@ -157,7 +189,10 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
             ev(HookKind::Stop, 3, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Running);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Running
+        );
     }
 
     #[test]
@@ -168,7 +203,10 @@ mod tests {
             ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Task"}"#),
             ev(HookKind::Stop, 4, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Idle
+        );
     }
 
     #[test]
@@ -180,7 +218,10 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
             ev(HookKind::UserPromptSubmit, 1, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Idle
+        );
     }
 
     #[test]
@@ -190,7 +231,10 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
             ev(HookKind::Interrupt, 3, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Idle
+        );
     }
 
     #[test]
@@ -204,7 +248,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events),
+            derive_thread_status(&events, at(10)),
             AgentStatusState::AwaitingUser
         );
     }
@@ -218,7 +262,65 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
             ev(HookKind::PostToolUse, 3, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Running);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn running_with_stale_log_degrades_to_stalled() {
+        // The API-error death: the log ends mid-Running (no Stop ever
+        // arrives) and wall-clock time keeps moving. Past the stall
+        // threshold the derivation must stop claiming Running.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
+            AgentStatusState::Stalled
+        );
+    }
+
+    #[test]
+    fn running_within_threshold_stays_running() {
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS)),
+            AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn stale_idle_log_is_not_stalled() {
+        // Only Running degrades — a thread that stopped cleanly hours
+        // ago is just idle, not stalled.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::Stop, 2, "{}"),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            AgentStatusState::Idle
+        );
+    }
+
+    #[test]
+    fn stale_exit_plan_mode_stays_awaiting_user() {
+        // Waiting on the user indefinitely is legitimate — the plan
+        // approval gap must not degrade to Stalled.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            AgentStatusState::AwaitingUser
+        );
     }
 
     #[test]
@@ -232,6 +334,9 @@ mod tests {
             ev(HookKind::SubagentStop, 3, "{}"),
             ev(HookKind::Stop, 4, "{}"),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Idle
+        );
     }
 }

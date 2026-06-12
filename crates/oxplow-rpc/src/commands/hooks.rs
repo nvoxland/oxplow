@@ -49,13 +49,14 @@ pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, Ipc
     // actually emitted, so deriving from it self-heals against
     // ingest-pipeline bugs. Mirrors `src/session/agent-status.ts`
     // on main, which has the proven state machine for this.
+    let now = oxplow_domain::Timestamp::now();
     let mut statuses = svc.agent_status_store.list_all().await?;
     for s in &mut statuses {
         let events = svc
             .hook_event_store
             .list_recent(Some(&s.thread_id), 200)
             .await?;
-        s.state = derive_thread_status(&events);
+        s.state = derive_thread_status(&events, now);
     }
     Ok(statuses)
 }
