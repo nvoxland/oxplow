@@ -8,7 +8,9 @@ export const ALL_AGENT_KINDS: AgentKind[] = ["claude", "codex", "opencode"];
 const LABELS: Record<AgentKind, string> = {
   claude: "Claude",
   codex: "Codex",
-  opencode: "opencode",
+  // The brand styles itself lowercase, but next to "Claude" / "Codex"
+  // a lowercase entry reads as a bug — match the picker's casing.
+  opencode: "OpenCode",
 };
 
 export function agentLabel(agent: AgentKind): string {
