@@ -102,4 +102,39 @@ mod tests {
             .unwrap();
         assert!(out.is_array());
     }
+
+    #[tokio::test]
+    async fn agent_status_row_keeps_pane_and_state_semantics() {
+        // Pins the DTO field semantics (audited after a live reading of
+        // `{"pane_target":"working","state":"idle"}` looked like a
+        // swap): `pane_target` is a pane NAME — "working" or "talking",
+        // the tmux window the agent lives in (threads.pane_target
+        // defaults to 'working' in the schema) — while `state` carries
+        // the AgentStatusState enum. The two are never cross-assigned;
+        // "the working pane's agent is idle" is a correct row.
+        let (svc, _dir) = crate::test_support::services();
+        crate::dispatch(
+            "ingest_hook_event",
+            serde_json::json!({
+                "envelope": {
+                    "kind": "user_prompt_submit",
+                    "thread_id": "thr1",
+                    "stream_id": null,
+                    "session_id": "s1",
+                    "payload_json": "{}",
+                    "prompt": "do the thing",
+                }
+            }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let out = crate::dispatch("list_agent_statuses", serde_json::json!(null), &svc)
+            .await
+            .unwrap();
+        let rows = out.as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["pane_target"], "working");
+        assert_eq!(rows[0]["state"], "running");
+    }
 }
