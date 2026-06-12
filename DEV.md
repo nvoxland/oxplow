@@ -114,6 +114,50 @@ Then iterate:
   iterating on Rust. Killing Vite and re-running the binary is
   what produces the empty white window.
 
+## Run headless (daemon + browser)
+
+The full app also runs without the Tauri shell: `oxplow-daemon`
+serves the backend over HTTP/WebSocket, and the frontend in remote
+mode talks to it from any browser. This is the route for driving the
+UI with Playwright (no Tauri driver exists for macOS) and for remote
+dev (see `.context/remote-daemon.md`).
+
+```
+  # terminal 1 — headless backend on loopback
+  cargo build -p oxplow-daemon && ./target/debug/oxplow-daemon --project . --bind 127.0.0.1:7420
+
+  # terminal 2 — frontend in remote mode (vite on :5173)
+  VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 bun run --cwd apps/desktop dev
+```
+
+No HMR wanted? Serve a static production build instead of the dev
+server — either bake the remote base in at build time:
+
+```
+  VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 bun run --cwd apps/desktop build
+  bun run --cwd apps/desktop preview      # serves dist/ on :4173
+```
+
+or build plain (`bun run --cwd apps/desktop build`), serve `dist/`
+with any static server, and use the launcher's Remote connect flow —
+it stores `oxplow.remoteBase` in localStorage at runtime, no baked-in
+URL.
+
+Then open `http://localhost:5173` in a browser (or point Playwright
+at it). Notes:
+
+- The project dir must already contain `.oxplow/`; sanity-check the
+  daemon with `curl http://127.0.0.1:7420/health`.
+- `VITE_OXPLOW_REMOTE` flips the frontend transport switch
+  (`apps/desktop/src/tauri-bridge/transport.ts`) into remote mode at
+  dev/build time; without it the frontend expects Tauri IPC and a
+  browser tab won't boot.
+- The daemon takes the same per-project instance lock as the desktop
+  shell — the app and the daemon can't run against the same project
+  simultaneously.
+- Shell-native surfaces (native menus, window chrome, Tauri dialogs)
+  don't exist in this mode; everything else is the real app.
+
 ## Test
 
 ```
