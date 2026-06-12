@@ -82,9 +82,10 @@ pub async fn list_workspace_files(
     stream_id: Option<String>,
 ) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
     // Same exclusion rule as fs-watch/snapshots: the `generated:`
-    // config list. Keeps node_modules/dist junk out of quick-open
-    // results and bounds the walk (a vendor tree is hundreds of
-    // thousands of entries the index has no use for).
+    // config list, and nothing else (`.gitignore` is not consulted).
+    // Keeps node_modules/dist junk out of quick-open results and bounds
+    // the walk (a vendor tree is hundreds of thousands of entries the
+    // index has no use for).
     let filter = {
         let cfg = svc.config.read();
         cfg.as_ref()

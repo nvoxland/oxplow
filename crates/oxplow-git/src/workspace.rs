@@ -127,28 +127,16 @@ pub fn list_workspace_entries(
 /// tree is hundreds of thousands of entries the quick-open index has
 /// no use for.
 ///
-/// `.gitignore`'d paths are excluded too: the repo is opened once and
-/// each entry is checked against libgit2's ignore rules
-/// (`status_should_ignore`, which caches per-directory ignore files
-/// internally). Ignored directories are pruned before descending, so a
-/// gitignored build tree costs one check. Non-git workspaces skip the
-/// git filter entirely.
+/// Exclusion is driven solely by `ignore` (the `generated:` config
+/// list), matching fs-watch/snapshots. `.gitignore` is deliberately
+/// NOT consulted: a path being absent from git doesn't mean the user
+/// doesn't want to find it. The single source of truth for "don't
+/// index this" is the `generated:` list.
 pub fn list_workspace_files(
     root_dir: &Path,
     git_statuses: &HashMap<String, GitFileStatus>,
     relative_path: &str,
     ignore: &dyn Fn(&str) -> bool,
-) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
-    let repo = git2::Repository::open(root_dir).ok();
-    list_workspace_files_inner(root_dir, git_statuses, relative_path, ignore, repo.as_ref())
-}
-
-fn list_workspace_files_inner(
-    root_dir: &Path,
-    git_statuses: &HashMap<String, GitFileStatus>,
-    relative_path: &str,
-    ignore: &dyn Fn(&str) -> bool,
-    repo: Option<&git2::Repository>,
 ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
     let dir = resolve_workspace_path(root_dir, relative_path)?;
     let mut files = Vec::new();
@@ -162,20 +150,8 @@ fn list_workspace_files_inner(
         if ignore(&path) {
             continue;
         }
-        if repo
-            .map(|r| r.status_should_ignore(Path::new(&path)).unwrap_or(false))
-            .unwrap_or(false)
-        {
-            continue;
-        }
         if entry.file_type()?.is_dir() {
-            files.extend(list_workspace_files_inner(
-                root_dir,
-                git_statuses,
-                &path,
-                ignore,
-                repo,
-            )?);
+            files.extend(list_workspace_files(root_dir, git_statuses, &path, ignore)?);
         } else {
             files.push(WorkspaceIndexedFile {
                 path: path.clone(),
@@ -465,7 +441,10 @@ mod tests {
     }
 
     #[test]
-    fn list_files_excludes_gitignored_paths() {
+    fn list_files_does_not_consult_gitignore() {
+        // `.gitignore` is deliberately NOT honored — the `generated:`
+        // list (the `ignore` closure) is the single source of truth for
+        // exclusions. A gitignored-but-not-generated path stays visible.
         let dir = tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
         write_workspace_file(dir.path(), ".gitignore", "dist/\nsecret.log\n").unwrap();
@@ -476,20 +455,10 @@ mod tests {
         write_workspace_file(dir.path(), "secret.log", "").unwrap();
         let files = list_workspace_files(dir.path(), &HashMap::new(), "", &|_| false).unwrap();
         let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec![".gitignore", "src/main.rs"]);
-    }
-
-    #[test]
-    fn list_files_in_non_git_dir_skips_gitignore_filtering() {
-        // No repo → no ignore rules to honor; the walk must not error
-        // and a stray .gitignore file has no effect.
-        let dir = tempdir().unwrap();
-        write_workspace_file(dir.path(), ".gitignore", "dist/\n").unwrap();
-        create_workspace_directory(dir.path(), "dist").unwrap();
-        write_workspace_file(dir.path(), "dist/bundle.js", "").unwrap();
-        let files = list_workspace_files(dir.path(), &HashMap::new(), "", &|_| false).unwrap();
-        let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec![".gitignore", "dist/bundle.js"]);
+        assert_eq!(
+            paths,
+            vec![".gitignore", "dist/bundle.js", "secret.log", "src/main.rs"]
+        );
     }
 
     #[test]
