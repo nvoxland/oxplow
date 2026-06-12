@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Stream, ThreadWorkState } from "../tauri-bridge/index.js";
+import type { Stream, ThreadWorkState, WikiRefFreshness } from "../tauri-bridge/index.js";
 import { commands } from "../tauri-bridge/index.js";
+import { summarizeWikiFreshness, type WikiFreshnessSummary } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { WikiPageTab, FreshnessBadge } from "../components/Wiki/WikiPageTab.js";
@@ -105,20 +106,21 @@ function WikiPageBody({
   const controller = useWikiPageController(stream, slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
   const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
-  const [staleCount, setStaleCount] = useState<number | null>(null);
+  // The ONE freshness fetch for the page — header chip, rail badge, and
+  // referenced-files footer all derive from these rows (see
+  // wikiFreshness.ts for why splitting sources is forbidden).
+  const [freshnessRows, setFreshnessRows] = useState<WikiRefFreshness[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const r = await commands.listWikiFreshness(slug);
       if (cancelled) return;
-      if (r.status === "ok") {
-        setStaleCount(r.data.filter((row) => row.stale).length);
-      } else {
-        setStaleCount(null);
-      }
+      setFreshnessRows(r.status === "ok" ? r.data : null);
     })();
     return () => { cancelled = true; };
   }, [slug, controller.summary?.updated_at]);
+  const freshness = freshnessRows != null ? summarizeWikiFreshness(freshnessRows) : null;
+  const staleCount = freshness != null ? freshness.staleRefs.length : null;
   const openFreshness = () => {
     const ref = wikiFreshnessRef(slug);
     if (nav) nav.navigate(ref);
@@ -128,6 +130,7 @@ function WikiPageBody({
     <WikiPageRail
       controller={controller}
       scrollHost={scrollHost}
+      freshness={freshness}
     />
   );
 
@@ -168,6 +171,7 @@ function WikiPageBody({
         stream={stream}
         slug={slug}
         controller={controller}
+        freshnessRows={freshnessRows ?? undefined}
         onScrollHostMounted={setScrollHost}
         onNavigateInternalWikiPage={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenWikiPage(nextSlug)}
         onOpenWikiPageInNewTab={onOpenWikiPage}
@@ -183,9 +187,11 @@ function WikiPageBody({
 function WikiPageRail({
   controller,
   scrollHost,
+  freshness,
 }: {
   controller: ReturnType<typeof useWikiPageController>;
   scrollHost: HTMLElement | null;
+  freshness: WikiFreshnessSummary | null;
 }) {
   const { summary, body, notFound, loadError, create, remove } = controller;
 
@@ -197,9 +203,9 @@ function WikiPageRail({
       gap: 16,
       padding: "4px 0",
     }}>
-      {summary && (
+      {freshness && (
         <div style={{ display: "flex" }}>
-          <FreshnessBadge note={summary} />
+          <FreshnessBadge summary={freshness} />
         </div>
       )}
 

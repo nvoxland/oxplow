@@ -2,8 +2,12 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   writeWikiPageBody,
   type Stream,
-  type WikiPageSummary,
 } from "../../api.js";
+import type { WikiRefFreshness } from "../../tauri-bridge/generated/bindings.js";
+import {
+  type WikiFreshnessLevel,
+  type WikiFreshnessSummary,
+} from "./wikiFreshness.js";
 import { MarkdownView, preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
 import { contextNodeProps } from "../Comments/contextNodes.js";
 import { RichTextField } from "../RichText/RichTextField.js";
@@ -13,15 +17,13 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 import type { WikiPageController } from "./useWikiPageController.js";
 
-type FreshnessStatus = WikiPageSummary["freshness"];
-
-const FRESHNESS_LABEL: Record<NonNullable<FreshnessStatus>, string> = {
+const FRESHNESS_LABEL: Record<WikiFreshnessLevel, string> = {
   "fresh": "fresh",
   "stale": "stale",
   "very-stale": "very stale",
 };
 
-const FRESHNESS_COLOR: Record<NonNullable<FreshnessStatus>, string> = {
+const FRESHNESS_COLOR: Record<WikiFreshnessLevel, string> = {
   "fresh": "var(--freshness-fresh)",
   "stale": "var(--freshness-stale)",
   "very-stale": "var(--freshness-very-stale)",
@@ -31,6 +33,10 @@ interface Props {
   stream: Stream;
   slug: string;
   controller: WikiPageController;
+  /** Per-ref freshness rows from `list_wiki_freshness` — the page's one
+   *  freshness source (fetched by WikiPage, shared with the header chip
+   *  and rail badge). Drives the referenced-files footer. */
+  freshnessRows?: WikiRefFreshness[];
   /** Published on mount so the parent can render rail content (TOC) that
    *  needs to read scroll position from the same container. */
   onScrollHostMounted?: (el: HTMLElement | null) => void;
@@ -46,6 +52,7 @@ export function WikiPageTab({
   stream,
   slug,
   controller,
+  freshnessRows,
   onScrollHostMounted,
   onNavigateInternalWikiPage,
   onOpenWikiPageInNewTab,
@@ -133,9 +140,9 @@ export function WikiPageTab({
           />
         )}
       </div>
-      {!notFound && !loadError && summary && (summary.referenced_files?.length ?? 0) > 0 && (
-        <BacklinksFooter
-          summary={summary}
+      {!notFound && !loadError && (freshnessRows?.length ?? 0) > 0 && (
+        <ReferencedFilesFooter
+          rows={freshnessRows ?? []}
           onOpenFile={onOpenFile}
         />
       )}
@@ -143,11 +150,11 @@ export function WikiPageTab({
   );
 }
 
-function BacklinksFooter({
-  summary,
+function ReferencedFilesFooter({
+  rows,
   onOpenFile,
 }: {
-  summary: WikiPageSummary;
+  rows: WikiRefFreshness[];
   onOpenFile: (path: string) => void;
 }) {
   const ctxNav = useOptionalPageNavigation();
@@ -155,9 +162,6 @@ function BacklinksFooter({
     if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
     else onOpenFile(path);
   };
-  const changed = useMemo(() => new Set(summary.changed_refs ?? []), [summary.changed_refs]);
-  const deleted = useMemo(() => new Set(summary.deleted_refs ?? []), [summary.deleted_refs]);
-  const referencedFiles = summary.referenced_files ?? [];
   return (
     <footer
       style={{
@@ -172,65 +176,44 @@ function BacklinksFooter({
       }}
     >
       <span>
-        Referenced file{referencedFiles.length === 1 ? "" : "s"} ({referencedFiles.length}):
+        Referenced file{rows.length === 1 ? "" : "s"} ({rows.length}):
       </span>
-      {referencedFiles.map((path) => {
-        const status = deleted.has(path) ? "deleted" : changed.has(path) ? "changed" : "fresh";
-        const color =
-          status === "deleted"
-            ? "var(--severity-critical)"
-            : status === "changed"
-              ? "var(--status-waiting)"
-              : "var(--text-primary)";
-        return (
-          <button
-            key={path}
-            type="button"
-            onClick={() => {
-              if (status === "deleted") return;
-              openFile(path);
-            }}
-            disabled={status === "deleted"}
-            title={
-              status === "deleted"
-                ? `${path} (deleted from workspace)`
-                : status === "changed"
-                  ? `${path} (changed since this wiki page was written)`
-                  : `Open ${path}`
-            }
-            style={{
-              fontFamily: "var(--font-mono, monospace)",
-              fontSize: 11,
-              padding: "1px 6px",
-              borderRadius: 3,
-              border: "1px solid var(--border-subtle)",
-              background: "transparent",
-              color,
-              cursor: status === "deleted" ? "not-allowed" : "pointer",
-              textDecoration: status === "deleted" ? "line-through" : "none",
-            }}
-          >
-            {path}
-          </button>
-        );
-      })}
+      {rows.map((row) => (
+        <button
+          key={row.path}
+          type="button"
+          onClick={() => openFile(row.path)}
+          title={
+            row.stale
+              ? `${row.path} (changed since this wiki page was written)`
+              : `Open ${row.path}`
+          }
+          style={{
+            fontFamily: "var(--font-mono, monospace)",
+            fontSize: 11,
+            padding: "1px 6px",
+            borderRadius: 3,
+            border: "1px solid var(--border-subtle)",
+            background: "transparent",
+            color: row.stale ? "var(--status-waiting)" : "var(--text-primary)",
+            cursor: "pointer",
+          }}
+        >
+          {row.path}
+        </button>
+      ))}
     </footer>
   );
 }
 
-export function FreshnessBadge({ note }: { note: WikiPageSummary }) {
-  const reasons = useMemo(() => {
-    const r: string[] = [];
-    const changedCount = note.changed_refs?.length ?? 0;
-    const deletedCount = note.deleted_refs?.length ?? 0;
-    if (note.head_advanced) r.push("HEAD advanced");
-    if (changedCount > 0) r.push(`${changedCount} ref${changedCount === 1 ? "" : "s"} changed`);
-    if (deletedCount > 0) r.push(`${deletedCount} deleted`);
-    return r;
-  }, [note]);
-  const totalRefs = note.total_refs ?? note.referenced_files?.length ?? 0;
-  const title = reasons.length > 0 ? reasons.join("; ") : `${totalRefs} referenced files`;
-  const freshness = note.freshness ?? "fresh";
+/// Renders the freshness level derived from the page's
+/// `list_wiki_freshness` rows (`summarizeWikiFreshness`) — the same
+/// source the header chip counts, so the two can't disagree.
+export function FreshnessBadge({ summary }: { summary: WikiFreshnessSummary }) {
+  const title =
+    summary.staleRefs.length > 0
+      ? `${summary.staleRefs.length} of ${summary.totalRefs} ref${summary.totalRefs === 1 ? "" : "s"} stale`
+      : `${summary.totalRefs} referenced file${summary.totalRefs === 1 ? "" : "s"}`;
   return (
     <span
       title={title}
@@ -238,11 +221,11 @@ export function FreshnessBadge({ note }: { note: WikiPageSummary }) {
         fontSize: 11,
         padding: "2px 6px",
         borderRadius: 3,
-        background: FRESHNESS_COLOR[freshness],
+        background: FRESHNESS_COLOR[summary.freshness],
         color: "#fff",
       }}
     >
-      {FRESHNESS_LABEL[freshness]}
+      {FRESHNESS_LABEL[summary.freshness]}
     </span>
   );
 }
