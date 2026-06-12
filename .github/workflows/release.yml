@@ -95,8 +95,12 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
       - name: Install JS deps
         run: bun install --frozen-lockfile
+      # Canonical entrypoint: runs the frontend suite from apps/desktop
+      # (so apps/desktop/bunfig.toml preloads the happy-dom harness —
+      # bare `bun test` from root leaves `document` undefined) plus
+      # `cargo test --workspace`. Mirrors how ci.yml gates.
       - name: Test
-        run: bun test
+        run: bun run test
 
   release:
     needs: test
