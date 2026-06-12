@@ -132,6 +132,7 @@ import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
 import { closedThreadsRef, commentsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, snapshotRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
+import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
@@ -289,8 +290,6 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [streamCreateRequest, setStreamCreateRequest] = useState(0);
-  const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
   const [generated, setGeneratedState] = useState<string[]>([]);
   const opErrorsStore = getOpErrorsStore();
@@ -1310,7 +1309,9 @@ export function App() {
     },
     newThread() {
       if (!stream) return;
-      setThreadCreateRequest((n) => n + 1);
+      // The Navigator owns thread creation (inline title + agent
+      // picker); route there via the bus instead of a local counter.
+      requestNewThread(stream.id);
     },
     openHistory() {
       handleOpenPageRef.current?.(indexRef("git-history"));

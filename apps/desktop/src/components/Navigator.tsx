@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
 import { agentLabel } from "../agentKinds.js";
+import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
@@ -85,6 +86,18 @@ export function Navigator({
   const [removeWorktree, setRemoveWorktree] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  // Command-palette "New Thread…" (and any other external surface)
+  // requests land here: open the overlay and show the inline creator
+  // for the requested stream — the same flow as the kebab menu item.
+  useEffect(
+    () =>
+      subscribeNewThreadRequests((streamId) => {
+        setOverlayOpen(true);
+        setPendingNewThreadFor(streamId);
+      }),
+    [],
+  );
 
   async function handleRemoveStream() {
     if (!removeStream) return;
