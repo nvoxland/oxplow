@@ -37,18 +37,39 @@ const numberStyle: CSSProperties = {
  * feels informative when nothing is selected, which is the most
  * common state on a quiet thread.
  */
+/// Derive the summary view from the backend's bucketed work state.
+/// `items` carries only Ready tasks — in_progress / blocked / done
+/// rows arrive solely via their own buckets, so counting by filtering
+/// `items` would pin those numbers at zero. The done bucket also
+/// folds in canceled/archived rows; the summary counts real
+/// completions only. Exported for tests.
+export function summarizeThreadWork(threadWork: ThreadWorkState | null): {
+  counts: { inProgress: number; ready: number; blocked: number; done: number };
+  oldestBlocked: Task | null;
+  recentDone: Task[];
+} {
+  const inProgress = threadWork?.inProgress ?? [];
+  const ready = threadWork?.items ?? [];
+  const blocked = threadWork?.waiting ?? [];
+  const done = (threadWork?.done ?? []).filter((i) => i.status === "done");
+  return {
+    counts: {
+      inProgress: inProgress.length,
+      ready: ready.length,
+      blocked: blocked.length,
+      done: done.length,
+    },
+    oldestBlocked: pickOldestBlocked(blocked),
+    recentDone: pickRecentlyClosed(done, 3),
+  };
+}
+
 export function TaskDetailPane({
   threadWork,
 }: {
   threadWork: ThreadWorkState | null;
 }) {
-  const items = threadWork?.items ?? [];
-  const inProgress = items.filter((i) => i.status === "in_progress");
-  const ready = items.filter((i) => i.status === "ready");
-  const blocked = items.filter((i) => i.status === "blocked");
-  const done = items.filter((i) => i.status === "done");
-  const oldestBlocked = pickOldestBlocked(blocked);
-  const recent = pickRecentlyClosed(done, 3);
+  const { counts, oldestBlocked, recentDone: recent } = summarizeThreadWork(threadWork);
   return (
     <div style={paneStyle} data-testid="task-detail-pane">
       <div style={{ fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10 }}>
@@ -56,19 +77,19 @@ export function TaskDetailPane({
       </div>
       <div style={rowStyle}>
         <span>In progress</span>
-        <span style={numberStyle} data-testid="tasks-summary-in-progress">{inProgress.length}</span>
+        <span style={numberStyle} data-testid="tasks-summary-in-progress">{counts.inProgress}</span>
       </div>
       <div style={rowStyle}>
         <span>To do</span>
-        <span style={numberStyle} data-testid="tasks-summary-ready">{ready.length}</span>
+        <span style={numberStyle} data-testid="tasks-summary-ready">{counts.ready}</span>
       </div>
       <div style={rowStyle}>
         <span>Blocked</span>
-        <span style={numberStyle} data-testid="tasks-summary-blocked">{blocked.length}</span>
+        <span style={numberStyle} data-testid="tasks-summary-blocked">{counts.blocked}</span>
       </div>
       <div style={rowStyle}>
         <span>Done</span>
-        <span style={numberStyle} data-testid="tasks-summary-done">{done.length}</span>
+        <span style={numberStyle} data-testid="tasks-summary-done">{counts.done}</span>
       </div>
       {oldestBlocked ? (
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
