@@ -169,8 +169,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <Hint>
             Directory names (one per line, matched at any path segment) excluded from fs-watch,
             snapshot tracking, and the quick-open file index. Added on top of the built-in
-            exclusions (.git, .oxplow) — build dirs like node_modules or target are NOT excluded
-            unless listed here.
+            exclusions (.git, .oxplow). The quick-open index also skips .gitignore&apos;d paths
+            automatically; list build dirs here so fs-watch and snapshots skip them too.
           </Hint>
           <textarea
             value={generatedText}
