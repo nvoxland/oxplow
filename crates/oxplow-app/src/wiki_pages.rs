@@ -442,20 +442,59 @@ pub fn strip_body_version_literals(body: &str) -> String {
     out
 }
 
+/// Retry an operation through transient `SQLITE_BUSY` errors with
+/// exponential backoff (50/100/200/400ms, then one final attempt).
+/// The common hit: the boot scan racing a previous process that's
+/// still releasing the WAL lock — the per-project instance lock makes
+/// real steady-state contention rare, so a short wait usually wins.
+/// Non-`Busy` errors return immediately.
+pub async fn retry_busy<T, F, Fut>(mut op: F) -> Result<T, DomainError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, DomainError>>,
+{
+    let mut delay = std::time::Duration::from_millis(50);
+    for _ in 0..4 {
+        match op().await {
+            Err(DomainError::Busy(err)) => {
+                tracing::debug!(%err, ?delay, "storage busy — retrying");
+                tokio::time::sleep(delay).await;
+                delay *= 2;
+            }
+            other => return other,
+        }
+    }
+    op().await
+}
+
+/// What a full scan accomplished: pages synced (or pruned) vs pages
+/// that individually failed. The scan never aborts at the first bad
+/// page — one poisoned file must not strand the rest of the index
+/// stale.
+#[derive(Debug, Default)]
+pub struct ScanReport {
+    pub synced: usize,
+    pub failures: Vec<(String, DomainError)>,
+}
+
 /// Sync every `.md` file in the notes dir + prune rows for deleted
 /// files. Run once at watcher startup.
 pub async fn scan_and_sync_all(
     project_dir: &Path,
     store: &SqliteWikiPageStore,
-) -> Result<(), DomainError> {
+) -> Result<ScanReport, DomainError> {
     scan_and_sync_all_with_refs(project_dir, store, None).await
 }
 
+/// Full scan. Per-slug failures are collected into the report (and
+/// warned) rather than aborting; transient `Busy` errors retry with
+/// backoff first. The outer `Err` is reserved for scan-fatal failures
+/// (listing the known rows).
 pub async fn scan_and_sync_all_with_refs(
     project_dir: &Path,
     store: &SqliteWikiPageStore,
     page_refs: Option<&SqlitePageRefStore>,
-) -> Result<(), DomainError> {
+) -> Result<ScanReport, DomainError> {
     let dir = wiki_pages_dir(project_dir);
     fs::create_dir_all(&dir).ok();
     let mut on_disk: BTreeSet<String> = BTreeSet::new();
@@ -470,19 +509,37 @@ pub async fn scan_and_sync_all_with_refs(
             }
         }
     }
+    let mut report = ScanReport::default();
     for slug in &on_disk {
-        sync_from_disk_with_refs(project_dir, store, page_refs, slug).await?;
+        match retry_busy(|| sync_from_disk_with_refs(project_dir, store, page_refs, slug)).await {
+            Ok(()) => report.synced += 1,
+            Err(err) => {
+                tracing::warn!(slug, ?err, "wiki page sync failed during scan");
+                report.failures.push((slug.clone(), err));
+            }
+        }
     }
-    let known = store.list().await?;
+    let known = retry_busy(|| store.list()).await?;
     for note in known {
-        if !on_disk.contains(&note.slug) {
+        if on_disk.contains(&note.slug) {
+            continue;
+        }
+        let prune = retry_busy(|| async {
             if let Some(refs) = page_refs {
                 refs.replace_source(KIND_WIKI, &note.slug, vec![]).await?;
             }
-            store.delete(&note.slug).await?;
+            store.delete(&note.slug).await
+        })
+        .await;
+        match prune {
+            Ok(()) => report.synced += 1,
+            Err(err) => {
+                tracing::warn!(slug = note.slug, ?err, "wiki page prune failed during scan");
+                report.failures.push((note.slug.clone(), err));
+            }
         }
     }
-    Ok(())
+    Ok(report)
 }
 
 /// Return all notes whose `file_refs` contains `path`. The query is
@@ -756,6 +813,81 @@ mod tests {
             third.updated_at > first.updated_at,
             "content change must bump updated_at"
         );
+    }
+
+    /// A poisoned page (here: a *directory* named `bad.md`, which makes
+    /// `read_to_string` fail) must not strand the rest of the wiki
+    /// stale — the scan keeps going and reports the failure.
+    #[tokio::test]
+    async fn scan_continues_past_poisoned_page() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().to_path_buf();
+        let wiki_dir = wiki_pages_dir(&project);
+        std::fs::create_dir_all(wiki_dir.join("bad.md")).unwrap();
+        std::fs::write(wiki_dir.join("good.md"), "# Good\nbody\n").unwrap();
+        std::fs::write(wiki_dir.join("zz-later.md"), "# Later\nbody\n").unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = oxplow_db::SqliteWikiPageStore::new(db);
+
+        let report = scan_and_sync_all(&project, &store).await.unwrap();
+        assert_eq!(report.synced, 2, "both healthy pages sync");
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].0, "bad");
+        assert!(store.get("good").await.unwrap().is_some());
+        assert!(
+            store.get("zz-later").await.unwrap().is_some(),
+            "slug sorting after the poisoned one must still sync"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_busy_retries_transient_busy_then_succeeds() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = AtomicUsize::new(0);
+        let out: Result<u32, DomainError> = retry_busy(|| {
+            let n = attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err(DomainError::Busy("database is locked".into()))
+                } else {
+                    Ok(7)
+                }
+            }
+        })
+        .await;
+        assert_eq!(out.unwrap(), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_busy_gives_up_after_backoff_and_surfaces_busy() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = AtomicUsize::new(0);
+        let out: Result<(), DomainError> = retry_busy(|| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async { Err(DomainError::Busy("database is locked".into())) }
+        })
+        .await;
+        assert!(matches!(out, Err(DomainError::Busy(_))));
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            5,
+            "4 backoff retries + final"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_busy_does_not_retry_non_busy_errors() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = AtomicUsize::new(0);
+        let out: Result<(), DomainError> = retry_busy(|| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async { Err(DomainError::Storage("disk on fire".into())) }
+        })
+        .await;
+        assert!(matches!(out, Err(DomainError::Storage(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
     #[test]

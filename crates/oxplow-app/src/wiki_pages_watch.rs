@@ -39,12 +39,20 @@ impl WikiPagesWatcher {
         let dir = wiki_pages::wiki_pages_dir(&project_dir);
         std::fs::create_dir_all(&dir).ok();
 
-        if let Err(err) =
-            wiki_pages::scan_and_sync_all_with_refs(&project_dir, &store, Some(&page_refs)).await
+        match wiki_pages::scan_and_sync_all_with_refs(&project_dir, &store, Some(&page_refs)).await
         {
-            warn!(?err, "wiki pages initial scan failed");
-        } else {
-            info!(dir = %dir.display(), "wiki pages initial scan complete");
+            Ok(report) if report.failures.is_empty() => {
+                info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
+            }
+            Ok(report) => {
+                let failed: Vec<&str> = report.failures.iter().map(|(s, _)| s.as_str()).collect();
+                warn!(
+                    synced = report.synced,
+                    ?failed,
+                    "wiki pages initial scan completed with per-page failures"
+                );
+            }
+            Err(err) => warn!(?err, "wiki pages initial scan failed"),
         }
 
         let watcher = match FsWatcher::watch(&dir) {
