@@ -67,7 +67,12 @@ fn shell_command_arg(value: &str) -> String {
 /// `OPENCODE_CONFIG_CONTENT` env var (opencode merges it on top of the
 /// user's global/project config). Wires the oxplow MCP server (bearer
 /// token interpolated from env by opencode itself), the hook-bridge
-/// plugin, and the per-thread system-prompt file as an instruction.
+/// plugin, the per-thread system-prompt file as an instruction, and
+/// the oxplow slash commands (inline `command` defs — opencode's
+/// markdown-command dirs are fixed locations, but config commands ride
+/// this env var with no disk footprint). Skills can't ride the config
+/// (no key exists) — `write_opencode_runtime` materializes them into
+/// `.opencode/skills/` instead.
 fn opencode_config_content(
     mcp_endpoint_url: &str,
     hooks_plugin: &std::path::Path,
@@ -86,6 +91,7 @@ fn opencode_config_content(
         },
         "plugin": [hooks_plugin.to_string_lossy()],
         "instructions": instructions,
+        "command": oxplow_plugin::opencode_command_definitions(),
     })
     .to_string()
 }
@@ -449,6 +455,16 @@ mod tests {
         assert_eq!(
             v["plugin"][0],
             "/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"
+        );
+        // Slash commands ride the inline `command` key — markdown
+        // command dirs are fixed locations opencode controls, but
+        // config commands have no disk footprint.
+        assert!(
+            v["command"]["oxplow-work-next"]["template"]
+                .as_str()
+                .map(|t| !t.is_empty())
+                .unwrap_or(false),
+            "oxplow-work-next command must be defined inline"
         );
         assert_eq!(
             v["instructions"][0],

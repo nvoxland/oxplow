@@ -106,13 +106,22 @@ pub struct CodexRuntimePaths {
 /// Paths emitted by `write_opencode_runtime`. opencode needs no
 /// on-disk hooks/MCP config — both ride the per-spawn
 /// `OPENCODE_CONFIG_CONTENT` env var the spawn path assembles — so the
-/// runtime dir carries only the JS hook-bridge plugin and a `prompts/`
-/// dir for per-thread instruction files.
+/// runtime dir carries the JS hook-bridge plugin and a `prompts/`
+/// dir for per-thread instruction files. Skills are the exception:
+/// opencode only discovers them from fixed locations (project
+/// `.opencode/skills/`, `.claude/skills/`, `.agents/skills/` — no
+/// config key), so the oxplow skills land in `.opencode/skills/`
+/// with a self-ignoring `.gitignore` per skill dir. Slash commands
+/// ride the config env var (`command` key) — see
+/// [`opencode_command_definitions`].
 #[derive(Debug, Clone)]
 pub struct OpencodeRuntimePaths {
     pub runtime_dir: PathBuf,
     pub hooks_plugin: PathBuf,
     pub prompts_dir: PathBuf,
+    /// `<project>/.opencode/skills` — where the oxplow skills were
+    /// materialized for opencode's fixed-location discovery.
+    pub skills_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -152,11 +161,98 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
     let hooks_plugin = plugin_dir.join("oxplow-hooks.js");
     fs::write(&hooks_plugin, include_str!("../assets/opencode-hooks.js"))?;
 
+    // Skills: opencode discovers SKILL.md only from fixed project
+    // locations (`.opencode/skills/<name>/SKILL.md` et al) — there is
+    // no opencode.json key to point at the .oxplow runtime dir. The
+    // assets' frontmatter (name matching the dir, description) is
+    // already opencode-compatible. Each generated dir gets a `*`
+    // .gitignore so these never land in the user's commits.
+    let skills_dir = project_dir.join(".opencode").join("skills");
+    for (name, body) in OXPLOW_SKILLS {
+        let dir = skills_dir.join(name);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("SKILL.md"), body)?;
+        fs::write(dir.join(".gitignore"), "*\n")?;
+    }
+
     Ok(OpencodeRuntimePaths {
         runtime_dir,
         hooks_plugin,
         prompts_dir,
+        skills_dir,
     })
+}
+
+/// The five oxplow skills every agent runtime ships, as
+/// `(dir_name, SKILL.md body)` pairs. The dir name must match the
+/// frontmatter `name:` — both Claude and opencode key discovery on it.
+const OXPLOW_SKILLS: &[(&str, &str)] = &[
+    (
+        "oxplow-runtime",
+        include_str!("../assets/oxplow-runtime.SKILL.md"),
+    ),
+    (
+        "oxplow-subagent-work-protocol",
+        include_str!("../assets/oxplow-subagent.SKILL.md"),
+    ),
+    (
+        "oxplow-wiki-capture",
+        include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
+    ),
+    (
+        "oxplow-mermaid",
+        include_str!("../assets/oxplow-mermaid.SKILL.md"),
+    ),
+    (
+        "oxplow-collection",
+        include_str!("../assets/oxplow-collection.SKILL.md"),
+    ),
+];
+
+/// Slash-command definitions for opencode's inline `command` config
+/// key (carried per-spawn in `OPENCODE_CONFIG_CONTENT`, so nothing
+/// lands on disk). Mirrors the claude plugin's `commands/` markdown
+/// assets: the frontmatter `description` becomes the TUI description
+/// and the body becomes the prompt template. Names are prefixed
+/// `oxplow-` since opencode has no plugin namespacing (`/oxplow-work-next`
+/// vs claude's `/oxplow:work-next`).
+pub fn opencode_command_definitions() -> serde_json::Value {
+    const COMMANDS: &[(&str, &str)] = &[
+        ("oxplow-work-next", include_str!("../assets/work-next.md")),
+        (
+            "oxplow-review-comments",
+            include_str!("../assets/review-comments.md"),
+        ),
+        ("oxplow-configure", include_str!("../assets/configure.md")),
+    ];
+    let mut map = serde_json::Map::new();
+    for (name, asset) in COMMANDS {
+        let (description, template) = split_frontmatter_description(asset);
+        let mut def = serde_json::Map::new();
+        def.insert("template".into(), template.into());
+        if let Some(description) = description {
+            def.insert("description".into(), description.into());
+        }
+        map.insert((*name).into(), serde_json::Value::Object(def));
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Split a command asset into its frontmatter `description:` (if any)
+/// and the markdown body after the closing `---`. Assets without
+/// frontmatter come back whole as the template.
+fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
+    let Some(rest) = asset.strip_prefix("---\n") else {
+        return (None, asset.trim().to_string());
+    };
+    let Some((front, body)) = rest.split_once("\n---\n") else {
+        return (None, asset.trim().to_string());
+    };
+    let description = front
+        .lines()
+        .find_map(|l| l.strip_prefix("description:"))
+        .map(|d| d.trim().to_string());
+    (description, body.trim().to_string())
 }
 
 /// Materialize the plugin directory. `hook_base_url` and
@@ -579,6 +675,54 @@ mod tests {
         assert!(js.contains("permissionDecision"));
         assert!(js.contains("session.idle"));
         assert!(js.contains("file_path"));
+    }
+
+    #[test]
+    fn write_opencode_runtime_materializes_skills_with_gitignore() {
+        let tmp = TempDir::new().unwrap();
+        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        assert_eq!(paths.skills_dir, tmp.path().join(".opencode/skills"));
+        for name in [
+            "oxplow-runtime",
+            "oxplow-subagent-work-protocol",
+            "oxplow-wiki-capture",
+            "oxplow-mermaid",
+            "oxplow-collection",
+        ] {
+            let skill = paths.skills_dir.join(name).join("SKILL.md");
+            let body = fs::read_to_string(&skill).unwrap_or_else(|_| panic!("missing {name}"));
+            // opencode keys discovery on frontmatter name == dir name.
+            assert!(
+                body.contains(&format!("name: {name}")),
+                "frontmatter name must match dir for {name}"
+            );
+            // Generated dirs self-ignore so they never land in commits.
+            let ignore =
+                fs::read_to_string(paths.skills_dir.join(name).join(".gitignore")).unwrap();
+            assert_eq!(ignore.trim(), "*");
+        }
+    }
+
+    #[test]
+    fn opencode_command_definitions_carry_description_and_template() {
+        let defs = opencode_command_definitions();
+        for name in [
+            "oxplow-work-next",
+            "oxplow-review-comments",
+            "oxplow-configure",
+        ] {
+            let def = &defs[name];
+            let template = def["template"].as_str().unwrap_or_default();
+            assert!(!template.is_empty(), "{name} template empty");
+            assert!(
+                !template.starts_with("---"),
+                "{name} template must not retain frontmatter"
+            );
+            assert!(
+                !def["description"].as_str().unwrap_or_default().is_empty(),
+                "{name} description missing"
+            );
+        }
     }
 
     #[test]

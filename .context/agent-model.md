@@ -160,9 +160,19 @@ details.
   verification. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle (the Claude analogue is SubagentStop handling).
-  Known gaps vs the Claude bridge: no SessionStart/SessionEnd/
-  Notification events, no skills/slash-command packaging, model
-  hardcoded — see the filed follow-ups.
+  Skills + slash commands ship too: opencode only discovers SKILL.md
+  from fixed locations (no config key), so `write_opencode_runtime`
+  materializes the five oxplow skills into `<project>/.opencode/skills/
+  <name>/` — each dir carries a `*` .gitignore so the generated files
+  never land in commits. The work-next / review-comments / configure
+  commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
+  (`oxplow_plugin::opencode_command_definitions()`, frontmatter
+  description + body template) as `/oxplow-work-next` etc. — opencode
+  has no plugin namespacing, hence the `oxplow-` prefix instead of
+  Claude's `/oxplow:` form. The launch model comes from
+  `agentModels.opencode` in oxplow.yaml (falling back to the
+  `OPENCODE_MODEL` const). Known gaps vs the Claude bridge: no
+  SessionStart/SessionEnd/Notification events.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
 are not supported for SessionStart" in `claude --debug-file`). Only command-
