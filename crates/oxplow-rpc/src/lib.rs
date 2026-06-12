@@ -21,8 +21,10 @@
 //! a time as the remaining commands are migrated.
 
 pub mod commands;
+pub mod envelope;
 pub mod error;
 
+pub use envelope::{ipc_envelope, ENVELOPE_CONTRACT};
 pub use error::IpcError;
 
 use std::sync::Arc;

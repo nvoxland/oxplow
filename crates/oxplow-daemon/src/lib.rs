@@ -60,10 +60,10 @@ async fn ipc_handler(
 ) -> Response {
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
     let result = oxplow_rpc::dispatch(&name, args, &state.ctx).await;
-    let envelope = match result {
-        Ok(data) => serde_json::json!({ "status": "ok", "data": data }),
-        Err(e) => serde_json::json!({ "status": "error", "error": e }),
-    };
+    // Single source of truth for the `{status, data|error}` shape — the
+    // Tauri path reaches the byte-identical envelope via typedError +
+    // the shared IpcError. See oxplow_rpc::envelope.
+    let envelope = oxplow_rpc::ipc_envelope(result);
     (StatusCode::OK, Json(envelope)).into_response()
 }
 
@@ -274,6 +274,39 @@ mod tests {
             .unwrap();
         assert_eq!(resp["status"], "ok");
         assert_eq!(resp["data"], "pong");
+    }
+
+    #[tokio::test]
+    async fn ipc_envelope_is_byte_identical_to_shared_wrapper() {
+        // Pins that the daemon route delegates to oxplow_rpc::ipc_envelope
+        // rather than hand-rolling the shape — for both the ok and error
+        // branches. The Tauri host reaches the same shape via typedError +
+        // the shared IpcError, so this is the single source of truth.
+        let (svc, _dir) = services();
+        let state = daemon_state(svc);
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), state.clone())
+            .await
+            .unwrap();
+        let client = reqwest::Client::new();
+
+        for (name, args) in [
+            ("ping", serde_json::Value::Null),
+            ("no_such_command", serde_json::json!({})),
+        ] {
+            let expected = oxplow_rpc::ipc_envelope(
+                oxplow_rpc::dispatch(name, args.clone(), &state.ctx).await,
+            );
+            let live: serde_json::Value = client
+                .post(format!("http://{}/ipc/{name}", daemon.bind_addr))
+                .json(&args)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(live, expected, "envelope drift for /ipc/{name}");
+        }
     }
 
     #[tokio::test]

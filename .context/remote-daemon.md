@@ -18,7 +18,11 @@ docs — this note is the developer-facing mechanics.
   (shared with the Tauri shell — recovery, ensure_primary, all
   watchers/indexers) → control-plane spawn (hooks/MCP for agents in
   tmux on that box). Routes: `POST /ipc/:name` (tauri-specta result
-  envelope), `GET /events` (WebSocket multiplexing
+  envelope — built by the shared `oxplow_rpc::ipc_envelope`, the single
+  Rust owner of the `{status, data|error}` shape; the Tauri path reaches
+  the byte-identical shape via the TS `typedError` wrapper + the same
+  `IpcError`, so the two hosts can't diverge on error mapping),
+  `GET /events` (WebSocket multiplexing
   `{channel:"oxplow"|"lsp"|"terminal", payload}` with the exact
   payload shapes the Tauri bridges emit; the `lsp` frame carries
   `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`),
