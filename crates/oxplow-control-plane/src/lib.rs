@@ -279,7 +279,7 @@ where
                 timeout_ms = timeout.as_millis() as u64,
                 "hook handling timed out — returning default allow/ack so the agent isn't stalled"
             );
-            (StatusCode::ACCEPTED, Json(serde_json::json!({}))).into_response()
+            hook_ack()
         }
     }
 }
@@ -321,7 +321,7 @@ async fn handle_hook_inner(
     // UserPromptSubmit inject one fresh block for the new context.
     if event == "SessionStart" {
         reset_session_context_state(&ctx.role_state, session_id.as_deref());
-        return (StatusCode::ACCEPTED, "session context reset").into_response();
+        return hook_ack();
     }
 
     let kind = match parse_hook_kind(&event) {
@@ -329,7 +329,7 @@ async fn handle_hook_inner(
         None => {
             // Unknown but non-fatal — record nothing, ack so the agent
             // doesn't block.
-            return (StatusCode::ACCEPTED, "ignored unknown hook event").into_response();
+            return hook_ack();
         }
     };
 
@@ -386,12 +386,11 @@ async fn handle_hook_inner(
 
     let envelope_for_resume = envelope.clone();
     if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
+        // The agent can't act on an error status — Claude Code just
+        // prints a "non-blocking status code" warning into the user's
+        // terminal. Log the cause server-side and ack anyway.
         warn!(?event, ?err, "hook ingest failed");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("ingest failed: {err}"),
-        )
-            .into_response();
+        return hook_ack();
     }
 
     // Resume-tracker: Claude Code drops HTTP hooks for SessionStart, so
@@ -524,7 +523,16 @@ async fn handle_hook_inner(
         }
     }
 
-    (StatusCode::ACCEPTED, Json(serde_json::json!({}))).into_response()
+    hook_ack()
+}
+
+/// The default no-op hook acknowledgement. MUST be `200 {}` — Claude
+/// Code's HTTP hooks treat any other status (including an empty 202)
+/// as a failure and print a "Failed with non-blocking status code"
+/// warning into the user's terminal, which fills the xterm with noise
+/// on Edit/Write-heavy turns. See `.context/agent-model.md`.
+fn hook_ack() -> Response {
+    (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
 /// Run write_guard then filing_enforcement against the PreToolUse
@@ -1101,7 +1109,7 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
         "Stop" => Some(HookKind::Stop),
         // SessionStart / SessionEnd / Notification aren't on the
         // HookKind enum yet — they're informational from oxplow's
-        // perspective. Returning None routes them to ACCEPTED above
+        // perspective. Returning None routes them to the 200 ack above
         // without persisting. AgentBoot, SubagentStop, Interrupt are
         // synthetic / not posted by the plugin.
         _ => None,
@@ -1130,7 +1138,9 @@ mod tests {
         )
         .await;
         // Safe default: allow / no directive — never stall the agent.
-        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        // Must be 200 (not 202): Claude Code prints a "non-blocking
+        // status code" warning into the terminal on any other status.
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[test]

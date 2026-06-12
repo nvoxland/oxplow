@@ -19,7 +19,12 @@ the agent are:
    fresh instruction to keep going). The default no-op response is
    `200 {}` (not `202` empty) — Claude Code prints a "non-blocking
    status code" warning into the user's terminal on every empty 202,
-   which fills the xterm with noise on Edit/Write-heavy turns.
+   which fills the xterm with noise on Edit/Write-heavy turns. This
+   covers *every* path: ingest failures and handler timeouts also ack
+   `200 {}` (the agent can't act on a 4xx/5xx — it just prints the
+   warning) with the cause logged server-side. The shared helper is
+   `hook_ack()` in `crates/oxplow-control-plane/src/lib.rs`; never
+   return a bespoke status from a hook branch.
 3. MCP tool responses (when the agent calls a `oxplow__*` tool).
 
 Auto-progression through the queue is built entirely on (2). The agent

@@ -150,7 +150,10 @@ async fn hook_post_without_bearer_is_unauthorized() {
 async fn unknown_hook_event_is_acked_not_persisted() {
     let (cp, _svc, _root, _dir) = boot().await;
     let resp = post_hook(&cp, "TotallyNovelEvent", None, serde_json::json!({})).await;
-    assert_eq!(resp.status(), 202);
+    // Claude Code's HTTP hooks treat anything but 200 as a failure and
+    // print a "non-blocking status code" warning into the agent's
+    // terminal — every ack path must be a plain 200.
+    assert_eq!(resp.status(), 200);
 }
 
 #[tokio::test]
@@ -163,7 +166,7 @@ async fn session_start_resets_and_acks() {
         serde_json::json!({ "session_id": "s1" }),
     )
     .await;
-    assert_eq!(resp.status(), 202);
+    assert_eq!(resp.status(), 200);
 }
 
 #[tokio::test]
@@ -234,7 +237,7 @@ async fn pre_tool_use_with_in_progress_task_is_allowed() {
     )
     .await;
     // Allowed calls fall through to the generic ack.
-    assert_eq!(resp.status(), 202);
+    assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!({}));
 }
@@ -297,5 +300,51 @@ async fn stop_with_in_progress_task_returns_block_directive() {
     )
     .await;
     let resp2 = post_hook(&cp, "Stop", Some(tid), serde_json::json!({})).await;
-    assert_eq!(resp2.status(), 202);
+    assert_eq!(resp2.status(), 200);
+}
+
+#[tokio::test]
+async fn post_tool_use_edit_acks_200_empty() {
+    // The observed regression: every Edit's PostToolUse fell through
+    // to a 202 ack, and Claude Code printed "PostToolUse:Edit hook
+    // error ... non-blocking status code" into the agent terminal on
+    // every single edit.
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    seed_in_progress_task(&svc, tid).await;
+    let target = root.join("src/x.rs");
+    let resp = post_hook(
+        &cp,
+        "PostToolUse",
+        Some(tid),
+        serde_json::json!({
+            "tool_name": "Edit",
+            "tool_input": { "file_path": target.to_string_lossy() },
+            "session_id": "s1",
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body, serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn ingest_failure_still_acks_200() {
+    // An unknown thread id makes agent_turn's thread FK fail inside
+    // ingest. The agent can't do anything useful with a 500 — it just
+    // prints the warning line — so the handler logs server-side and
+    // acks 200 {} anyway.
+    let (cp, _svc, _root, _dir) = boot().await;
+    let bogus = ThreadId::new(999_999);
+    let resp = post_hook(
+        &cp,
+        "UserPromptSubmit",
+        Some(bogus),
+        serde_json::json!({ "prompt": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body, serde_json::json!({}));
 }
