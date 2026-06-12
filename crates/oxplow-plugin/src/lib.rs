@@ -33,6 +33,7 @@ use oxplow_domain::AgentKind;
 
 const PLUGIN_DIR_REL: &str = ".oxplow/runtime/claude-plugin";
 const CODEX_RUNTIME_DIR_REL: &str = ".oxplow/runtime/codex-plugin";
+const OPENCODE_RUNTIME_DIR_REL: &str = ".oxplow/runtime/opencode-plugin";
 const PLUGIN_NAME: &str = "oxplow";
 const PLUGIN_VERSION: &str = "0.0.0";
 
@@ -102,10 +103,23 @@ pub struct CodexRuntimePaths {
     pub collection_skill: PathBuf,
 }
 
+/// Paths emitted by `write_opencode_runtime`. opencode needs no
+/// on-disk hooks/MCP config — both ride the per-spawn
+/// `OPENCODE_CONFIG_CONTENT` env var the spawn path assembles — so the
+/// runtime dir carries only the JS hook-bridge plugin and a `prompts/`
+/// dir for per-thread instruction files.
+#[derive(Debug, Clone)]
+pub struct OpencodeRuntimePaths {
+    pub runtime_dir: PathBuf,
+    pub hooks_plugin: PathBuf,
+    pub prompts_dir: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentRuntimePaths {
     Claude(PluginPaths),
     Codex(CodexRuntimePaths),
+    Opencode(OpencodeRuntimePaths),
 }
 
 pub fn write_agent_runtime(
@@ -121,7 +135,28 @@ pub fn write_agent_runtime(
         AgentKind::Codex => {
             write_codex_runtime(project_dir, mcp_endpoint_url).map(AgentRuntimePaths::Codex)
         }
+        AgentKind::Opencode => write_opencode_runtime(project_dir).map(AgentRuntimePaths::Opencode),
     }
+}
+
+/// Materialize the opencode hook-bridge plugin. Idempotent like the
+/// other writers; per-spawn identity rides env vars (the JS reads
+/// `OXPLOW_*` from its process env), so one dir serves every spawn.
+pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths, PluginError> {
+    let runtime_dir = project_dir.join(OPENCODE_RUNTIME_DIR_REL);
+    let plugin_dir = runtime_dir.join("plugin");
+    let prompts_dir = runtime_dir.join("prompts");
+    fs::create_dir_all(&plugin_dir)?;
+    fs::create_dir_all(&prompts_dir)?;
+
+    let hooks_plugin = plugin_dir.join("oxplow-hooks.js");
+    fs::write(&hooks_plugin, include_str!("../assets/opencode-hooks.js"))?;
+
+    Ok(OpencodeRuntimePaths {
+        runtime_dir,
+        hooks_plugin,
+        prompts_dir,
+    })
 }
 
 /// Materialize the plugin directory. `hook_base_url` and
@@ -523,6 +558,35 @@ mod tests {
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.collection_skill.exists());
+    }
+
+    #[test]
+    fn write_opencode_runtime_emits_hook_bridge_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        assert!(paths.hooks_plugin.exists());
+        assert!(paths.prompts_dir.is_dir());
+        let js = fs::read_to_string(&paths.hooks_plugin).unwrap();
+        // The bridge reads its routing identity from env, posts the
+        // Claude-shaped lifecycle events, and maps tool names so the
+        // write-guard / filing enforcement match.
+        assert!(js.contains("OXPLOW_HOOK_BASE_URL"));
+        assert!(js.contains("OXPLOW_HOOK_TOKEN"));
+        assert!(js.contains("X-Oxplow-Thread"));
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] {
+            assert!(js.contains(event), "missing {event}");
+        }
+        assert!(js.contains("permissionDecision"));
+        assert!(js.contains("session.idle"));
+        assert!(js.contains("file_path"));
+    }
+
+    #[test]
+    fn write_opencode_runtime_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        write_opencode_runtime(tmp.path()).unwrap();
+        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        assert!(paths.hooks_plugin.exists());
     }
 
     #[test]

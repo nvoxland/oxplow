@@ -917,6 +917,21 @@ mod tests {
     }
 
     #[test]
+    fn loads_all_three_agent_kinds() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agents: [claude, codex, opencode]\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.agents,
+            vec![AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode]
+        );
+    }
+
+    #[test]
     fn loads_legacy_agent_as_single_enabled_agent() {
         let dir = tempdir().unwrap();
         std::fs::write(

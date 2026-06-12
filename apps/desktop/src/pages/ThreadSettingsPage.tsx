@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { setThreadPrompt, type Thread } from "../api.js";
+import { agentLabel } from "../agentKinds.js";
 import { Page } from "../tabs/Page.js";
 import { normalizePromptForSave } from "./StreamSettingsPage.js";
 
@@ -65,7 +66,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           <>
             <Section title="Agent">
               <Hint>
-                This thread runs {thread.agent === "codex" ? "Codex" : "Claude"}. Agent assignment is fixed after thread creation.
+                This thread runs {agentLabel(thread.agent)}. Agent assignment is fixed after thread creation.
               </Hint>
             </Section>
 

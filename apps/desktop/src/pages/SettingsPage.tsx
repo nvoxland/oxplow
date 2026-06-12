@@ -11,6 +11,7 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
+import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
 export interface SettingsPageProps {
   /** Closes the page (caller closes the tab). Optional — settings can be a
@@ -209,7 +210,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   );
 }
 
-const ALL_AGENTS: AgentKind[] = ["claude", "codex"];
+const ALL_AGENTS: AgentKind[] = ALL_AGENT_KINDS;
 
 function AgentPicker({
   agents,
@@ -275,10 +276,6 @@ function AgentPicker({
       })}
     </div>
   );
-}
-
-function agentLabel(agent: AgentKind): string {
-  return agent === "codex" ? "Codex" : "Claude";
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

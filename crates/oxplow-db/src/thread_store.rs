@@ -44,6 +44,7 @@ fn str_to_agent(s: &str) -> Result<AgentKind, DomainError> {
     match s {
         "claude" => Ok(AgentKind::Claude),
         "codex" => Ok(AgentKind::Codex),
+        "opencode" => Ok(AgentKind::Opencode),
         other => Err(DomainError::Invalid(format!(
             "unknown thread agent: {other}"
         ))),
@@ -323,6 +324,26 @@ mod tests {
         let t = thread(sid);
         store.upsert(&t).await.unwrap();
         assert_eq!(store.get(&t.id).await.unwrap().unwrap(), t);
+    }
+
+    #[tokio::test]
+    async fn every_agent_kind_round_trips() {
+        let (store, sid) = make_store().await;
+        for (i, agent) in [
+            oxplow_domain::AgentKind::Claude,
+            oxplow_domain::AgentKind::Codex,
+            oxplow_domain::AgentKind::Opencode,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut t = thread(sid);
+            t.id = ThreadId::new(100 + i as i64);
+            t.status = ThreadStatus::Queued;
+            t.agent = agent;
+            store.upsert(&t).await.unwrap();
+            assert_eq!(store.get(&t.id).await.unwrap().unwrap().agent, agent);
+        }
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 agents:
 - claude
 - codex
+- opencode
 generated:
 - target
 - .idea

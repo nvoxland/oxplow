@@ -63,6 +63,33 @@ fn shell_command_arg(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
+/// Inline opencode config carried per-spawn in the
+/// `OPENCODE_CONFIG_CONTENT` env var (opencode merges it on top of the
+/// user's global/project config). Wires the oxplow MCP server (bearer
+/// token interpolated from env by opencode itself), the hook-bridge
+/// plugin, and the per-thread system-prompt file as an instruction.
+fn opencode_config_content(
+    mcp_endpoint_url: &str,
+    hooks_plugin: &std::path::Path,
+    instructions: &[String],
+) -> String {
+    serde_json::json!({
+        "mcp": {
+            "oxplow": {
+                "type": "remote",
+                "url": mcp_endpoint_url,
+                "enabled": true,
+                "headers": {
+                    "Authorization": "Bearer {env:OXPLOW_HOOK_TOKEN}",
+                },
+            },
+        },
+        "plugin": [hooks_plugin.to_string_lossy()],
+        "instructions": instructions,
+    })
+    .to_string()
+}
+
 fn toml_cli_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -241,6 +268,34 @@ pub async fn open_terminal_session(
             opts.codex_config_overrides =
                 codex_config_overrides(paths, &plugin_runtime.mcp_endpoint_url);
         }
+        oxplow_plugin::AgentRuntimePaths::Opencode(paths) => {
+            // opencode has no --append-system-prompt; the assembled
+            // prompt lands in a per-thread instructions file referenced
+            // from the inline config. Hooks + MCP ride the same config
+            // via OPENCODE_CONFIG_CONTENT (merged last by opencode).
+            let mut instructions = Vec::new();
+            if let Some(prompt_text) = opts.append_system_prompt.take() {
+                let file_name = format!(
+                    "{}.md",
+                    thread_id
+                        .as_ref()
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "default".into())
+                );
+                let prompt_path = paths.prompts_dir.join(file_name);
+                std::fs::write(&prompt_path, prompt_text)
+                    .map_err(|e| IpcError::internal(format!("prompt write failed: {e}")))?;
+                instructions.push(prompt_path.to_string_lossy().into_owned());
+            }
+            opts.env.push((
+                "OPENCODE_CONFIG_CONTENT".to_string(),
+                opencode_config_content(
+                    &plugin_runtime.mcp_endpoint_url,
+                    &paths.hooks_plugin,
+                    &instructions,
+                ),
+            ));
+        }
     }
 
     let result = match transport_mode.as_str() {
@@ -358,7 +413,7 @@ mod tests {
     use serde_json::json;
     use std::path::Path;
 
-    use super::{codex_hook_command, shell_session_key};
+    use super::{codex_hook_command, opencode_config_content, shell_session_key};
     use crate::test_support::services;
 
     #[test]
@@ -372,6 +427,32 @@ mod tests {
         assert!(!command.contains("python"));
         assert!(!command.contains("http://"));
         assert!(!command.contains("https://"));
+    }
+
+    #[test]
+    fn opencode_config_content_wires_mcp_plugin_and_instructions() {
+        let content = opencode_config_content(
+            "http://127.0.0.1:9/mcp",
+            Path::new("/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"),
+            &["/proj/.oxplow/runtime/opencode-plugin/prompts/thr1.md".to_string()],
+        );
+        let v: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+        assert_eq!(v["mcp"]["oxplow"]["type"], "remote");
+        assert_eq!(v["mcp"]["oxplow"]["url"], "http://127.0.0.1:9/mcp");
+        // opencode interpolates {env:VAR} itself — the literal token
+        // must NOT be baked into the env var value.
+        assert_eq!(
+            v["mcp"]["oxplow"]["headers"]["Authorization"],
+            "Bearer {env:OXPLOW_HOOK_TOKEN}"
+        );
+        assert_eq!(
+            v["plugin"][0],
+            "/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"
+        );
+        assert_eq!(
+            v["instructions"][0],
+            "/proj/.oxplow/runtime/opencode-plugin/prompts/thr1.md"
+        );
     }
 
     #[test]

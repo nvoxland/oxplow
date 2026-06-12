@@ -729,7 +729,7 @@ export type AdoptWorktreeRequest = {
 	title: string,
 };
 
-export type AgentKind = "claude" | "codex";
+export type AgentKind = "claude" | "codex" | "opencode";
 
 export type AgentStatus = {
 	thread_id: ThreadId,

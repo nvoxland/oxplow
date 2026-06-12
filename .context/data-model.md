@@ -217,7 +217,11 @@ IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
 state.
 
 `agent` (migration V30, non-null TEXT) — the agent implementation assigned
-to the thread at creation time. Values are `claude` or `codex`. Project
+to the thread at creation time. Values are `claude`, `codex`, or
+`opencode` (V32 widened the CHECK; because migrations run with
+`foreign_keys=ON`, V32 swaps the column — ADD/copy/DROP/RENAME —
+instead of rebuilding the table, since `DROP TABLE threads` would
+cascade-delete child rows). Project
 config (`oxplow.yaml` `agents: [...]`) controls which values can be selected
 for new threads and the first configured agent is the default. Existing
 threads migrated at V30 default to `claude`; the assignment is immutable in

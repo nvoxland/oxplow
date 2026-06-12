@@ -1,7 +1,8 @@
 # Agent execution model
 
 
-What this doc covers: how a Claude or Codex process is launched in a
+What this doc covers: how a Claude, Codex, or opencode process is
+launched in a
 thread, how the runtime steers it through the work queue without ever
 sending it raw prompts, and the rules that keep non-writer threads from
 clobbering the writer's worktree. If you're touching MCP tools or the
@@ -103,7 +104,17 @@ concurrently.
   --mcp-config <json> [--resume <sid>]`.
 - Codex runs `codex --cd <worktree>` or `codex resume --cd <worktree>
   <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
-- Both exports `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
+- opencode runs `opencode -m <model> [-s <sid>]` (with a fresh-session
+  fallback when the saved resume id is stale). The model is currently
+  hardcoded to `github-copilot/gpt-5-mini` (`OPENCODE_MODEL` in
+  `crates/oxplow-app/src/agent_command.rs`); per-project configurability
+  is a filed follow-up. Hooks, MCP, and the per-thread system prompt
+  all ride the `OPENCODE_CONFIG_CONTENT` env var — inline opencode
+  config (merged last by opencode) wiring the oxplow MCP server
+  (bearer via opencode's own `{env:OXPLOW_HOOK_TOKEN}` interpolation),
+  the hook-bridge plugin, and an `instructions` entry pointing at the
+  per-thread prompt file (opencode has no `--append-system-prompt`).
+- All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
   `OXPLOW_HOOK_TOKEN`, and `OXPLOW_PANE` so hooks can identify
   themselves to the runtime.
 
@@ -127,6 +138,26 @@ details.
   that POST Codex hook stdin to the same oxplow hook endpoint. Codex MCP
   is configured with CLI `--config` overrides pointing at the
   streamable-HTTP oxplow MCP endpoint.
+- opencode writes `.oxplow/runtime/opencode-plugin/` —
+  `plugin/oxplow-hooks.js` (an opencode JS plugin loaded via the
+  `plugin` array in `OPENCODE_CONFIG_CONTENT`) plus a `prompts/` dir
+  the spawn path fills with the per-thread system prompt. The JS
+  bridge translates opencode plugin hooks into the same Claude-shaped
+  payloads the control plane parses: `chat.message` →
+  `UserPromptSubmit`, `tool.execute.before` → `PreToolUse` (a deny
+  response throws inside opencode, which blocks the tool call — so
+  write-guard + filing enforcement work; opencode's lowercase tool
+  names and `filePath` arg are mapped to Claude's `Edit`/`Write`/… and
+  `file_path`), `tool.execute.after` → `PostToolUse`, and the
+  `session.idle` event → `Stop`. A blocked Stop (`{decision:"block",
+  reason}`) is relayed best-effort as a fresh prompt via
+  `client.session.prompt` — Stop-hook steering parity, pending live
+  verification. Subagent sessions (`parentID` set) are filtered out of
+  UserPromptSubmit/Stop so child activity doesn't flip the thread's
+  turn lifecycle (the Claude analogue is SubagentStop handling).
+  Known gaps vs the Claude bridge: no SessionStart/SessionEnd/
+  Notification events, no skills/slash-command packaging, model
+  hardcoded — see the filed follow-ups.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
 are not supported for SessionStart" in `claude --debug-file`). Only command-

@@ -1,5 +1,5 @@
 //! Build the shell command oxplow runs in a tmux pane to launch the
-//! agent CLI (Claude or Codex).
+//! agent CLI (Claude, Codex, or opencode).
 //!
 //! Pure string-building, no IO. Mirrors the original
 //! `src/agent/agent-command.ts` so the launcher signature is stable
@@ -7,6 +7,11 @@
 
 use oxplow_config::AgentKind;
 use oxplow_domain::Stream;
+
+/// Model opencode launches with (`-m provider/model`). Hardcoded for
+/// now — assumes GitHub Copilot auth in opencode's own auth store.
+/// Making this configurable per-project is a filed follow-up.
+pub const OPENCODE_MODEL: &str = "github-copilot/gpt-5-mini";
 
 #[derive(Debug, Clone, Default)]
 pub struct AgentCommandOptions {
@@ -61,6 +66,26 @@ pub fn build_agent_command_for_session(
             )
         };
         let inner = format!("cd {} && {}exec {base}", shell_escape(cwd), env_prefix);
+        return format!("sh -lc {}", shell_escape(&inner));
+    }
+
+    if matches!(agent, AgentKind::Opencode) {
+        // Hooks + MCP + the per-spawn system prompt all ride the
+        // OPENCODE_CONFIG_CONTENT env var (set by the caller via
+        // `opts.env`); the CLI itself only needs the model and an
+        // optional session to resume. cwd comes from the `cd` (opencode
+        // starts in the working directory).
+        let base = format!("opencode -m {}", shell_escape(OPENCODE_MODEL));
+        let fresh = format!("{env_prefix}exec {base}");
+        let command = if resume_session_id.is_empty() {
+            fresh.clone()
+        } else {
+            format!(
+                "{env_prefix}{base} -s {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh opencode session' >&2; {fresh}; }}",
+                shell_escape(resume_session_id)
+            )
+        };
+        let inner = format!("cd {} && {command}", shell_escape(cwd));
         return format!("sh -lc {}", shell_escape(&inner));
     }
 
@@ -209,6 +234,54 @@ mod tests {
         );
         assert!(!cmd.contains("--resume"));
         assert!(cmd.contains("exec claude"));
+    }
+
+    #[test]
+    fn opencode_command_fresh_when_no_session() {
+        let s = stream();
+        let cmd = build_agent_command(
+            AgentKind::Opencode,
+            &s,
+            PaneKind::Talking,
+            &Default::default(),
+        );
+        assert!(cmd.starts_with("sh -lc "));
+        assert!(cmd.contains("exec opencode"));
+        assert!(cmd.contains(" -m "));
+        assert!(cmd.contains(OPENCODE_MODEL));
+        assert!(!cmd.contains(" -s "));
+        assert!(cmd.contains("/repo"));
+    }
+
+    #[test]
+    fn opencode_command_resumes_with_stale_fallback() {
+        let s = stream();
+        let cmd = build_agent_command(
+            AgentKind::Opencode,
+            &s,
+            PaneKind::Working,
+            &Default::default(),
+        );
+        assert!(cmd.contains(" -s "));
+        assert!(cmd.contains("sess-w"));
+        // Falls back to a fresh session on stale id, like claude.
+        assert!(cmd.contains("stale"));
+        assert!(cmd.contains("exec opencode"));
+    }
+
+    #[test]
+    fn opencode_command_carries_config_content_env() {
+        let s = stream();
+        let opts = AgentCommandOptions {
+            env: vec![(
+                "OPENCODE_CONFIG_CONTENT".into(),
+                r#"{"mcp":{"oxplow":{"url":"http://x/mcp"}}}"#.into(),
+            )],
+            ..Default::default()
+        };
+        let cmd = build_agent_command(AgentKind::Opencode, &s, PaneKind::Talking, &opts);
+        assert!(cmd.contains("OPENCODE_CONFIG_CONTENT="));
+        assert!(cmd.contains("http://x/mcp"));
     }
 
     #[test]

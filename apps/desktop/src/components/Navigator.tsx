@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
+import { agentLabel } from "../agentKinds.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
@@ -914,7 +915,7 @@ function InlineNewThread({
         >
           {choices.map((choice) => (
             <option key={choice} value={choice}>
-              {choice === "codex" ? "Codex" : "Claude"}
+              {agentLabel(choice)}
             </option>
           ))}
         </select>
