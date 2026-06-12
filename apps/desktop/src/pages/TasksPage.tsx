@@ -13,6 +13,7 @@ import {
   isReadOnlyScope,
 } from "../components/Plan/tasks-scope.js";
 import { cardLinkButton } from "../components/Card.js";
+import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
@@ -42,6 +43,18 @@ export type TasksPageProps =
   };
 
 const PREVIEW_LIMIT = 5;
+
+/// Every bucket the Summary pane counts must render as a section here —
+/// a counted-but-hidden bucket is how the page once showed
+/// "In progress: 1" with no in-progress rows anywhere. In Progress sits
+/// above Ready and reuses the Work panel's bucket behavior (agent-owned
+/// rows drag-locked, live-status placeholder when empty).
+export const TASKS_PAGE_SECTIONS: TaskSectionKind[] = [
+  "inProgress",
+  "ready",
+  "blocked",
+  "done",
+];
 
 const NOOP_ASYNC = async () => {};
 
@@ -238,7 +251,7 @@ export function TasksPage({
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
           <TasksList
             {...listProps}
-            visibleSections={["ready", "blocked", "done"]}
+            visibleSections={TASKS_PAGE_SECTIONS}
             sectionItemLimit={{ done: PREVIEW_LIMIT }}
             sectionLabelOverrides={{ done: "Recently Done" }}
             extraSectionLinks={{ done: viewAllDone }}
