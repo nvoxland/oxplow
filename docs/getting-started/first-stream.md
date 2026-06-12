@@ -50,7 +50,7 @@ The window is web-style, not IDE-style:
   indicator.
 
 The amber accents are deliberate: anything amber is a primitive
-oxplow added on top of git or Claude Code.
+oxplow added on top of git or your coding agent.
 
 ## 3. Send a prompt
 
