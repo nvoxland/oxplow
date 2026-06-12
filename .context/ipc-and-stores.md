@@ -319,7 +319,8 @@ UI). Active producers:
   reverses all of that. Both emit `LspServersChanged` on the oxplow
   event bus so the renderer refetches `list_lsp_servers`. The shared
   session surface (`lsp_request` / `lsp_notify` / `list_lsp_servers` /
-  `restart_lsp_server`) is documented in `.context/lsp.md`.
+  `restart_lsp_server` / `respond_lsp_apply_edit`) is documented in
+  `.context/lsp.md`.
 - **Notes wiki resync** — `NotesWatcher.start` (`crates/oxplow-fs-watch/src/lib.rs`)
   takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
   runtime registers a row only when `total >= 5` (smaller dirs aren't

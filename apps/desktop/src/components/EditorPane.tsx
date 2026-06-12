@@ -7,6 +7,7 @@ import { languageForPath } from "../editor-language.js";
 import { hasLspServer } from "../lsp-servers-store.js";
 import { type EditorNavigationTarget, relativePathFromFileUri, streamFileUri } from "../lsp.js";
 import { normalizeDefinitionTarget } from "../lsp-monaco-mapping.js";
+import { applyNormalizedWorkspaceEdit, workspaceEditIOForStream } from "../lsp-workspace-edit.js";
 import { registerLspProviders } from "./editor-lsp-providers.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
@@ -176,6 +177,12 @@ export function EditorPane({
         flushDoc: (model) =>
           flushPendingChanges(relativePathFromFileUri(streamRef.current, model.uri.toString())),
         setStatus: setLspStatus,
+        applyEdits: (normalized) =>
+          applyNormalizedWorkspaceEdit(
+            monaco,
+            workspaceEditIOForStream(monaco, streamRef.current),
+            normalized,
+          ),
       });
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));

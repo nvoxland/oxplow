@@ -253,12 +253,22 @@ Monaco shape conversion is pure and unit-tested in
 `apps/desktop/src/lsp-monaco-mapping.ts` (completion kinds map by enum
 *name*, symbol kinds by `-1` offset; `normalizeWorkspaceEdit` handles
 `changes` + `documentChanges` and counts skipped file create/rename/
-delete ops). Code-action commands are forwarded to
-`workspace/executeCommand` through the registered Monaco command
-`oxplow.lsp.executeCommand`. Rename rides Monaco's own rename UI
-(`editor.action.rename`, F2 + context-menu item) and applies the
-returned WorkspaceEdit via Monaco's bulk-edit service — open models
-only (v1).
+delete ops). Workspace edits apply across open AND non-open files via
+`apps/desktop/src/lsp-workspace-edit.ts`
+(`applyNormalizedWorkspaceEdit`): open Monaco models through
+`pushEditOperations` (draft + undo intact), non-open files through the
+workspace file IPC read-modify-write; file create/rename/delete ops
+are still skipped + surfaced on the status banner. Rename rides
+Monaco's own rename UI (`editor.action.rename`, F2 + context-menu
+item): the open-model subset returns to Monaco's bulk-edit service,
+the non-open subset (`partitionByOpenModel`) is written at accept
+time. Code actions whose edits stay within open models keep Monaco's
+native application; anything touching a non-open file (and any LSP
+`command`) routes through the registered Monaco command
+`oxplow.lsp.applyCodeAction`, which applies the edit then forwards
+the command to `workspace/executeCommand`. Server-initiated
+`workspace/applyEdit` arrives as an `applyEditRequest` event and is
+applied by the stream's mounted editor (see `.context/lsp.md`).
 
 The **client lifecycle** itself lives in
 `apps/desktop/src/components/useLspClients.ts` (a hook EditorPane mounts):

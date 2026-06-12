@@ -240,6 +240,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::lsp::list_lsp_servers,
             commands::lsp::restart_lsp_server,
             commands::lsp::remove_lsp_package,
+            commands::lsp::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,
             commands::terminal::send_terminal_message,

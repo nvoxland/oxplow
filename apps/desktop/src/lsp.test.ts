@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  _setApplyEditResponderForTests,
   handleLspSessionEvent,
   LspClient,
+  registerLspApplyEditHandler,
   relativePathFromFileUri,
   streamFileUri,
   toEditorNavigationTarget,
@@ -100,6 +102,60 @@ describe("LspClient session-event demux", () => {
       expect(statuses[1]).toBeNull();
     } finally {
       client.dispose();
+    }
+  });
+
+  test("applyEditRequest routes to the registered handler and answers with its verdict", async () => {
+    const responses: { token: number; applied: boolean; reason?: string }[] = [];
+    _setApplyEditResponderForTests(async (token, applied, reason) => {
+      responses.push({ token, applied, reason });
+    });
+    const unregister = registerLspApplyEditHandler(async (req) => {
+      if (req.streamId !== "s-1") return null;
+      expect(req.edit).toEqual({ changes: {} });
+      return { applied: true };
+    });
+    try {
+      handleLspSessionEvent({
+        kind: "applyEditRequest",
+        streamId: "s-1",
+        language: "typescript",
+        token: 7,
+        label: "refactor",
+        edit: { changes: {} },
+      });
+      await Bun.sleep(0);
+      expect(responses).toEqual([{ token: 7, applied: true, reason: undefined }]);
+    } finally {
+      unregister();
+      _setApplyEditResponderForTests(null);
+    }
+  });
+
+  test("applyEditRequest with no willing handler answers applied:false", async () => {
+    const responses: { token: number; applied: boolean; reason?: string }[] = [];
+    _setApplyEditResponderForTests(async (token, applied, reason) => {
+      responses.push({ token, applied, reason });
+    });
+    const unregister = registerLspApplyEditHandler(async (req) =>
+      req.streamId === "s-other" ? { applied: true } : null,
+    );
+    try {
+      handleLspSessionEvent({
+        kind: "applyEditRequest",
+        streamId: "s-1",
+        language: "typescript",
+        token: 8,
+        label: null,
+        edit: {},
+      });
+      await Bun.sleep(0);
+      expect(responses).toHaveLength(1);
+      expect(responses[0].applied).toBe(false);
+      expect(responses[0].reason).toMatch(/no editor/i);
+    } finally {
+      unregister();
+      _setApplyEditResponderForTests(null);
     }
   });
 

@@ -25,11 +25,18 @@ manager owns:
 - **Event pump** per session: server *notifications* re-emit as
   `LspSessionEvent::ServerNotification` on a manager broadcast
   (`subscribe()`); server→client *requests* are auto-answered
-  (`workspace/configuration` → nulls, `workspace/applyEdit` →
-  `{applied:false}` (v1 limitation), everything else → `null`) via
+  (`workspace/configuration` → nulls, everything else → `null`) via
   `LspProxy::respond`. Without those answers rust-analyzer/gopls
   stall their own pipelines — this must stay in lockstep with the
   declared capabilities.
+- **`workspace/applyEdit` is honored**, not auto-answered: the pump
+  forwards it as `LspSessionEvent::ApplyEditRequest` (token + label +
+  edit), the renderer applies it and answers via the
+  `respond_lsp_apply_edit` RPC, and `respond_apply_edit` relays the
+  verdict to the server. A timeout fallback (`APPLY_EDIT_TIMEOUT`,
+  15s; immediate when the broadcast has no subscribers — headless
+  MCP-only runs) answers `{applied:false}` so the server never stalls;
+  late renderer answers are no-ops.
 - **Document mirror**: `notify_session` intercepts
   `didOpen`/`didChange`/`didClose` (full-text sync) so a crashed or
   restarted server is respawned with every open buffer replayed as
@@ -57,7 +64,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `lsp_notify` (LSP payloads cross as **JSON strings** — specta emits a
   broken `Value` reference into bindings.ts otherwise), `list_lsp_servers`,
   `restart_lsp_server`, `remove_lsp_package`, `install_lsp_package`,
-  `list_installed_lsp_packages`.
+  `list_installed_lsp_packages`, `respond_lsp_apply_edit`.
 - **Events**: `lsp:event` carries `LspSessionEvent` (camelCase, tagged
   `kind`). Forwarded by the Tauri shell (`spawn_lsp_event_bridge`) and
   the daemon's `/events` WS (`lsp` frame). The renderer demux lives in
@@ -65,7 +72,16 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `(streamId, language)`.
 - **Renderer**: `LspClient` facade + `lsp-servers-store.ts`
   (`hasLspServer` gating) + `lsp-document-sync.ts` (didChange versions
-  + debounce). Editor wiring details: `.context/editor-and-monaco.md`.
+  + debounce). Workspace edits apply through
+  `lsp-workspace-edit.ts`: open Monaco models via `pushEditOperations`
+  (lands in the draft, undo intact), non-open files via
+  `readFile`/`writeWorkspaceFile` read-modify-write (lands on disk);
+  file create/rename/delete ops are still skipped + surfaced.
+  `registerLspApplyEditHandler` in `lsp.ts` routes server-initiated
+  applyEdits to the editor owning that stream (`useLspClients`
+  registers per mounted editor; unclaimed requests answer
+  `applied:false`). Editor wiring details:
+  `.context/editor-and-monaco.md`.
 - **MCP**: `lsp_hover` / `lsp_definition` / `lsp_references` /
   `lsp_diagnostics` in `crates/oxplow-mcp/src/lib.rs`, riding the same
   sessions.

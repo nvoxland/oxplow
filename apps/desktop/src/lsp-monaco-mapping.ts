@@ -235,6 +235,35 @@ export function completionResultToMonacoList(
 // Workspace edits (rename, code actions)
 // ---------------------------------------------------------------------
 
+/// Apply LSP text edits to a plain string — the non-open-file path of
+/// workspace-edit application (open files go through Monaco models).
+/// LSP `character` counts UTF-16 code units, which is exactly what JS
+/// string indexing uses. Positions past the end of content clamp.
+export function applyTextEditsToContent(
+  content: string,
+  edits: { range: LspRange; newText: string }[],
+): string {
+  const lineStarts = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === "\n") lineStarts.push(i + 1);
+  }
+  const offsetOf = (pos: { line?: number; character?: number }): number => {
+    const line = pos.line ?? 0;
+    if (line >= lineStarts.length) return content.length;
+    const lineEnd = line + 1 < lineStarts.length ? lineStarts[line + 1] : content.length;
+    return Math.min(lineStarts[line] + (pos.character ?? 0), lineEnd, content.length);
+  };
+  // Apply back-to-front so earlier edits' offsets stay valid.
+  const resolved = edits
+    .map((e) => ({ start: offsetOf(e.range.start), end: offsetOf(e.range.end), text: e.newText }))
+    .sort((a, b) => b.start - a.start || b.end - a.end);
+  let out = content;
+  for (const e of resolved) {
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  }
+  return out;
+}
+
 export interface NormalizedFileEdits {
   uri: string;
   edits: { range: LspRange; newText: string }[];

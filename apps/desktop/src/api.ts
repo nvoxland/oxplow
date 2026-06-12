@@ -2464,6 +2464,17 @@ export async function removeLspPackage(packageName: string): Promise<void> {
   unwrap(await commands.removeLspPackage(packageName));
 }
 
+/// Answer a server-initiated workspace/applyEdit forwarded over the
+/// lsp:event channel (kind "applyEditRequest"). Late answers are no-ops
+/// backend-side.
+export async function respondLspApplyEdit(
+  token: number,
+  applied: boolean,
+  failureReason?: string,
+): Promise<void> {
+  unwrap(await commands.respondLspApplyEdit(token, applied, failureReason ?? null));
+}
+
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {
   try {
     unwrap(await commands.openExternalUrl(url));

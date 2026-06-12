@@ -372,6 +372,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_lsp_servers"),
     ui("restart_lsp_server"),
     ui("remove_lsp_package"),
+    ui("respond_lsp_apply_edit"),
     // ---- ui-only: terminal ----
     ui("open_terminal_session"),
     ui("send_terminal_message"),

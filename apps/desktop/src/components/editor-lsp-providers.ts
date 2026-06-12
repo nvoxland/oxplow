@@ -24,6 +24,10 @@ import {
   toMonacoWorkspaceEdit,
   type NormalizedWorkspaceEdit,
 } from "../lsp-monaco-mapping.js";
+import {
+  partitionByOpenModel,
+  type ApplyWorkspaceEditResult,
+} from "../lsp-workspace-edit.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,6 +38,9 @@ export interface LspProviderDeps {
   flushDoc(model: any): void;
   /// Surface a status-banner message (skipped file ops, etc.).
   setStatus(message: string | null): void;
+  /// Apply a normalized workspace edit across open models AND non-open
+  /// files (read-modify-write through the workspace file IPC).
+  applyEdits(normalized: NormalizedWorkspaceEdit): Promise<ApplyWorkspaceEditResult>;
 }
 
 /// Default completion trigger characters; covers member access,
@@ -53,21 +60,34 @@ function positionParams(model: any, position: any) {
 }
 
 export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
-  // Forwarder for LSP code-action commands: Monaco runs CodeAction
-  // `command`s through its own command service, so the LSP command is
-  // wrapped behind this id and forwarded to workspace/executeCommand.
+  // Finisher for LSP code actions: Monaco runs CodeAction `command`s
+  // through its own command service, so the action's tail work — edits
+  // that touch non-open files, plus the optional LSP command — is
+  // wrapped behind this id. Runs when the user picks the action.
   monaco.editor.registerCommand(
-    "oxplow.lsp.executeCommand",
-    (_accessor: unknown, languageId: string, command: { command: string; arguments?: unknown[] }) => {
-      void deps
-        .getClient(languageId)
-        .request("workspace/executeCommand", {
-          command: command.command,
-          arguments: command.arguments ?? [],
-        })
-        .catch(() => {
-          /* status banner already updated by LspClient */
-        });
+    "oxplow.lsp.applyCodeAction",
+    (
+      _accessor: unknown,
+      languageId: string,
+      normalized: NormalizedWorkspaceEdit | null,
+      command: { command: string; arguments?: unknown[] } | null,
+    ) => {
+      void (async () => {
+        if (normalized) {
+          reportApplyResult(deps, "code action", await deps.applyEdits(normalized));
+        }
+        if (command?.command) {
+          await deps
+            .getClient(languageId)
+            .request("workspace/executeCommand", {
+              command: command.command,
+              arguments: command.arguments ?? [],
+            })
+            .catch(() => {
+              /* status banner already updated by LspClient */
+            });
+        }
+      })();
     },
   );
 
@@ -155,7 +175,20 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         if (!normalized.files.length) {
           return { edits: [], rejectReason: "nothing to rename here" };
         }
-        return toMonacoWorkspaceEdit(monaco, normalized);
+        // Monaco's rename machinery applies the returned edit, but only
+        // to open models — files without a model are written via the
+        // workspace file IPC here (provideRenameEdits runs on accept,
+        // so the side effect is user-initiated).
+        const { open, closed } = partitionByOpenModel(
+          { findModel: (uri) => monaco.editor.getModel(monaco.Uri.parse(uri)) },
+          normalized.files,
+        );
+        if (closed.length) {
+          void deps
+            .applyEdits({ files: closed, skippedFileOps: 0 })
+            .then((applied) => reportApplyResult(deps, "rename", applied));
+        }
+        return toMonacoWorkspaceEdit(monaco, { files: open, skippedFileOps: 0 });
       },
     });
 
@@ -190,21 +223,34 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
           if (typeof a.title !== "string") return [];
           const normalized = a.edit ? normalizeWorkspaceEdit(a.edit) : null;
           if (normalized) reportSkippedOps(deps, normalized);
+          // Edits confined to open models ride Monaco's native code-
+          // action application; anything touching a non-open file is
+          // deferred to the applyCodeAction command (runs on selection,
+          // partitions again at that point).
+          const touchesClosedFiles =
+            !!normalized?.files.length &&
+            partitionByOpenModel(
+              { findModel: (uri) => monaco.editor.getModel(monaco.Uri.parse(uri)) },
+              normalized.files,
+            ).closed.length > 0;
+          const commandEdit = touchesClosedFiles ? normalized : null;
           return [
             {
               title: a.title,
               kind: a.kind,
               isPreferred: a.isPreferred,
-              edit: normalized?.files.length
-                ? toMonacoWorkspaceEdit(monaco, normalized)
-                : undefined,
-              command: a.command?.command
-                ? {
-                    id: "oxplow.lsp.executeCommand",
-                    title: a.command.title ?? a.title,
-                    arguments: [languageId, a.command],
-                  }
-                : undefined,
+              edit:
+                normalized?.files.length && !touchesClosedFiles
+                  ? toMonacoWorkspaceEdit(monaco, normalized)
+                  : undefined,
+              command:
+                commandEdit || a.command?.command
+                  ? {
+                      id: "oxplow.lsp.applyCodeAction",
+                      title: a.command?.title ?? a.title,
+                      arguments: [languageId, commandEdit, a.command ?? null],
+                    }
+                  : undefined,
             },
           ];
         });
@@ -231,5 +277,17 @@ function reportSkippedOps(deps: LspProviderDeps, normalized: NormalizedWorkspace
     deps.setStatus(
       `LSP: skipped ${normalized.skippedFileOps} file create/rename/delete operation(s) — apply those manually`,
     );
+  }
+}
+
+function reportApplyResult(
+  deps: LspProviderDeps,
+  what: string,
+  result: ApplyWorkspaceEditResult,
+): void {
+  if (result.failures.length) {
+    deps.setStatus(`LSP ${what}: ${result.failures.length} file(s) failed — ${result.failures[0]}`);
+  } else if (result.appliedFiles > 0) {
+    deps.setStatus(`LSP ${what}: updated ${result.appliedFiles} file(s)`);
   }
 }

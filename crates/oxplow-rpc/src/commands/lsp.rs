@@ -146,6 +146,21 @@ pub async fn restart_lsp_server(
     Ok(())
 }
 
+/// Answer a server-initiated `workspace/applyEdit` that was forwarded
+/// to the renderer as an `ApplyEditRequest` event. Late answers (the
+/// backend timeout already replied `applied: false`) are no-ops.
+pub async fn respond_lsp_apply_edit(
+    svc: &Services,
+    token: u32,
+    applied: bool,
+    failure_reason: Option<String>,
+) -> Result<(), IpcError> {
+    svc.lsp_sessions
+        .respond_apply_edit(token, applied, failure_reason)
+        .await?;
+    Ok(())
+}
+
 /// Uninstall a Mason package: delete its files, manifest entry, and
 /// language-server registrations.
 pub async fn remove_lsp_package(svc: &Services, package_name: String) -> Result<(), IpcError> {
@@ -204,6 +219,18 @@ mod tests {
             "got: {}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn respond_lsp_apply_edit_without_pending_token_is_a_no_op() {
+        let (svc, _dir) = services();
+        crate::dispatch(
+            "respond_lsp_apply_edit",
+            json!({ "token": 42, "applied": true, "failureReason": null }),
+            &svc,
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

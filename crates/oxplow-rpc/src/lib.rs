@@ -323,6 +323,7 @@ rpc_dispatch! {
     "list_lsp_servers" => commands::lsp::list_lsp_servers {},
     "restart_lsp_server" => commands::lsp::restart_lsp_server { stream_id: String, language_id: String },
     "remove_lsp_package" => commands::lsp::remove_lsp_package { package_name: String },
+    "respond_lsp_apply_edit" => commands::lsp::respond_lsp_apply_edit { token: u32, applied: bool, failure_reason: Option<String> },
     // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
     "send_terminal_message" => commands::terminal::send_terminal_message { session_id: String, message: String },
     "close_terminal_session" => commands::terminal::close_terminal_session { session_id: String },

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  applyTextEditsToContent,
   completionResultToMonacoList,
   definitionResultToMonacoLocations,
   documentSymbolsToMonaco,
@@ -141,6 +142,54 @@ describe("completion mapping", () => {
     );
     expect(suggestions[0].documentation).toBe("plain");
     expect(suggestions[1].documentation).toEqual({ value: "**md**" });
+  });
+});
+
+describe("applyTextEditsToContent", () => {
+  const range = (sl: number, sc: number, el: number, ec: number) => ({
+    start: { line: sl, character: sc },
+    end: { line: el, character: ec },
+  });
+
+  test("applies a single same-line replacement", () => {
+    const out = applyTextEditsToContent("let foo = 1;\n", [
+      { range: range(0, 4, 0, 7), newText: "bar" },
+    ]);
+    expect(out).toBe("let bar = 1;\n");
+  });
+
+  test("applies multiple edits without offset drift, regardless of order", () => {
+    const content = "aaa bbb\nccc aaa\n";
+    const edits = [
+      { range: range(0, 0, 0, 3), newText: "xxxxx" },
+      { range: range(1, 4, 1, 7), newText: "xxxxx" },
+    ];
+    expect(applyTextEditsToContent(content, edits)).toBe("xxxxx bbb\nccc xxxxx\n");
+    expect(applyTextEditsToContent(content, [...edits].reverse())).toBe(
+      "xxxxx bbb\nccc xxxxx\n",
+    );
+  });
+
+  test("handles multi-line ranges, insertions, and CRLF content", () => {
+    expect(
+      applyTextEditsToContent("one\ntwo\nthree\n", [
+        { range: range(0, 1, 2, 3), newText: "X" },
+      ]),
+    ).toBe("oXee\n");
+    expect(
+      applyTextEditsToContent("ab\n", [{ range: range(0, 1, 0, 1), newText: "-" }]),
+    ).toBe("a-b\n");
+    expect(
+      applyTextEditsToContent("one\r\ntwo\r\n", [
+        { range: range(1, 0, 1, 3), newText: "TWO" },
+      ]),
+    ).toBe("one\r\nTWO\r\n");
+  });
+
+  test("edit positions past the last line clamp to end of content", () => {
+    expect(
+      applyTextEditsToContent("ab", [{ range: range(5, 0, 5, 0), newText: "!" }]),
+    ).toBe("ab!");
   });
 });
 

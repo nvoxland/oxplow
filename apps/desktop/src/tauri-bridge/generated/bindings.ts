@@ -641,6 +641,11 @@ export const commands = {
 	 */
 	removeLspPackage: (packageName: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_lsp_package", { packageName })),
 	/**
+	 *  Answer a server-initiated `workspace/applyEdit` forwarded to the
+	 *  renderer as an `ApplyEditRequest` event.
+	 */
+	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
+	/**
 	 *  Open a renderer-attached terminal session.
 	 * 
 	 *  Two transports, mirroring the main-branch design:

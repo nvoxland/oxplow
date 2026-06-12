@@ -77,6 +77,19 @@ pub async fn restart_lsp_server(
     oxplow_rpc::commands::lsp::restart_lsp_server(&state, stream_id, language_id).await
 }
 
+/// Answer a server-initiated `workspace/applyEdit` forwarded to the
+/// renderer as an `ApplyEditRequest` event.
+#[tauri::command]
+#[specta::specta]
+pub async fn respond_lsp_apply_edit(
+    state: tauri::State<'_, AppState>,
+    token: u32,
+    applied: bool,
+    failure_reason: Option<String>,
+) -> Result<(), IpcError> {
+    oxplow_rpc::commands::lsp::respond_lsp_apply_edit(&state, token, applied, failure_reason).await
+}
+
 /// Uninstall a Mason package: delete its files, manifest entry, and
 /// language-server registrations.
 #[tauri::command]

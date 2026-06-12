@@ -18,7 +18,12 @@ import type { OpenFileState } from "../editor-session.js";
 import { languageForPath } from "../editor-language.js";
 import { hasLspServer, refreshLspServers } from "../lsp-servers-store.js";
 import { DocumentSyncTracker } from "../lsp-document-sync.js";
-import { LspClient, streamFileUri } from "../lsp.js";
+import { normalizeWorkspaceEdit } from "../lsp-monaco-mapping.js";
+import {
+  applyNormalizedWorkspaceEdit,
+  workspaceEditIOForStream,
+} from "../lsp-workspace-edit.js";
+import { LspClient, registerLspApplyEditHandler, streamFileUri } from "../lsp.js";
 import { getSuggestedLspPackage } from "../lspSuggestions.js";
 import { logUi } from "../logger.js";
 
@@ -234,6 +239,39 @@ export function useLspClients(opts: {
     diagnosticsDisposersRef.current.forEach((dispose) => dispose());
     diagnosticsDisposersRef.current = [];
   }, [stream.id, setLspStatus, syncTracker]);
+
+  // Server-initiated workspace/applyEdit: apply across open models and
+  // non-open files, then answer the server honestly. Declines (returns
+  // null) for other streams so their own editor can claim the request.
+  useEffect(() => {
+    return registerLspApplyEditHandler(async (request) => {
+      if (request.streamId !== streamRef.current.id) return null;
+      const monaco = monacoRef.current;
+      if (!monaco) return null;
+      const normalized = normalizeWorkspaceEdit(request.edit);
+      const result = await applyNormalizedWorkspaceEdit(
+        monaco,
+        workspaceEditIOForStream(monaco, streamRef.current),
+        normalized,
+      );
+      const label = request.label ? ` (${request.label})` : "";
+      if (result.failures.length || normalized.skippedFileOps > 0) {
+        setLspStatus(
+          `LSP edit${label}: ${result.appliedFiles} file(s) applied, ` +
+            `${result.failures.length} failed, ${normalized.skippedFileOps} file op(s) skipped`,
+        );
+        return {
+          applied: false,
+          failureReason:
+            result.failures[0] ?? "file create/rename/delete operations are not supported",
+        };
+      }
+      if (result.appliedFiles > 0) {
+        setLspStatus(`LSP edit${label}: updated ${result.appliedFiles} file(s)`);
+      }
+      return { applied: true };
+    });
+  }, [monacoRef, setLspStatus]);
 
   // Dispose everything on unmount (the editor's setup effect used to own
   // this half of the cleanup).

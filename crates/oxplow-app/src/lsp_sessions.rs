@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -114,6 +115,17 @@ pub enum LspSessionEvent {
         language: String,
         status: LspSessionStatus,
         message: Option<String>,
+    },
+    /// Server-initiated `workspace/applyEdit`. The renderer applies the
+    /// edit and answers via the `respond_lsp_apply_edit` RPC (token
+    /// correlates); if no answer arrives within the manager's timeout,
+    /// the server is unblocked with `applied: false`.
+    ApplyEditRequest {
+        stream_id: String,
+        language: String,
+        token: u32,
+        label: Option<String>,
+        edit: Value,
     },
 }
 
@@ -222,6 +234,18 @@ struct SessionEntry {
     generation: u64,
 }
 
+/// A server-initiated `workspace/applyEdit` awaiting the renderer's
+/// verdict. Removed by `respond_apply_edit` or the timeout fallback —
+/// whichever wins answers the server; the loser is a no-op.
+struct PendingApplyEdit {
+    proxy: std::sync::Weak<LspProxy>,
+    id: Value,
+}
+
+/// How long the renderer gets to answer a forwarded `workspace/applyEdit`
+/// before the manager unblocks the server with `applied: false`.
+const APPLY_EDIT_TIMEOUT: Duration = Duration::from_secs(15);
+
 #[derive(Clone)]
 pub struct LspSessionManager {
     config: Arc<std::sync::RwLock<OxplowConfig>>,
@@ -230,6 +254,9 @@ pub struct LspSessionManager {
     docs: Arc<std::sync::Mutex<HashMap<SessionKey, HashMap<String, MirrorDoc>>>>,
     events: broadcast::Sender<LspSessionEvent>,
     next_generation: Arc<std::sync::atomic::AtomicU64>,
+    pending_apply_edits: Arc<Mutex<HashMap<u32, PendingApplyEdit>>>,
+    next_apply_edit_token: Arc<std::sync::atomic::AtomicU32>,
+    apply_edit_timeout: Duration,
 }
 
 impl LspSessionManager {
@@ -242,7 +269,17 @@ impl LspSessionManager {
             docs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             events,
             next_generation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            pending_apply_edits: Arc::new(Mutex::new(HashMap::new())),
+            next_apply_edit_token: Arc::new(std::sync::atomic::AtomicU32::new(1)),
+            apply_edit_timeout: APPLY_EDIT_TIMEOUT,
         }
+    }
+
+    /// Test seam: shrink the applyEdit answer window so timeout-path
+    /// tests don't wait the real 15s.
+    #[doc(hidden)]
+    pub fn set_apply_edit_timeout_for_tests(&mut self, timeout: Duration) {
+        self.apply_edit_timeout = timeout;
     }
 
     pub fn installed_servers(&self) -> &InstalledServers {
@@ -374,6 +411,9 @@ impl LspSessionManager {
         let weak = Arc::downgrade(proxy);
         let sessions = self.sessions.clone();
         let events = self.events.clone();
+        let pending = self.pending_apply_edits.clone();
+        let next_token = self.next_apply_edit_token.clone();
+        let apply_edit_timeout = self.apply_edit_timeout;
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
@@ -387,6 +427,46 @@ impl LspSessionManager {
                     }
                     Ok(ServerEvent::Request { id, method, params }) => {
                         let Some(proxy) = weak.upgrade() else { break };
+                        if method == "workspace/applyEdit" {
+                            let token =
+                                next_token.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            pending.lock().await.insert(
+                                token,
+                                PendingApplyEdit {
+                                    proxy: Arc::downgrade(&proxy),
+                                    id: id.clone(),
+                                },
+                            );
+                            let sent = events.send(LspSessionEvent::ApplyEditRequest {
+                                stream_id: key.stream_id.clone(),
+                                language: key.language.clone(),
+                                token,
+                                label: params.get("label").and_then(Value::as_str).map(Into::into),
+                                edit: params.get("edit").cloned().unwrap_or(Value::Null),
+                            });
+                            // No renderer subscribed (headless MCP-only
+                            // run) → answer immediately; otherwise give
+                            // the renderer a bounded window.
+                            let wait = if sent.is_ok() {
+                                apply_edit_timeout
+                            } else {
+                                Duration::ZERO
+                            };
+                            let pending = pending.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(wait).await;
+                                let entry = pending.lock().await.remove(&token);
+                                if let Some(entry) = entry {
+                                    answer_apply_edit(
+                                        entry,
+                                        false,
+                                        Some("editor did not respond".into()),
+                                    )
+                                    .await;
+                                }
+                            });
+                            continue;
+                        }
                         let result = auto_answer(&method, &params);
                         if let Err(e) = proxy.respond(id, result).await {
                             warn!(?e, method, "lsp auto-answer failed");
@@ -422,6 +502,22 @@ impl LspSessionManager {
                 }
             }
         });
+    }
+
+    /// Answer a forwarded `workspace/applyEdit` (see
+    /// [`LspSessionEvent::ApplyEditRequest`]). Late or duplicate
+    /// answers — the timeout fallback already responded — are no-ops.
+    pub async fn respond_apply_edit(
+        &self,
+        token: u32,
+        applied: bool,
+        failure_reason: Option<String>,
+    ) -> Result<(), LspSessionError> {
+        let entry = self.pending_apply_edits.lock().await.remove(&token);
+        if let Some(entry) = entry {
+            answer_apply_edit(entry, applied, failure_reason).await;
+        }
+        Ok(())
     }
 
     /// Issue a JSON-RPC request on the (lazily spawned) session.
@@ -709,12 +805,26 @@ fn auto_answer(method: &str, params: &Value) -> Value {
                 .unwrap_or(0);
             Value::Array(vec![Value::Null; n])
         }
-        // We don't apply server-initiated workspace edits yet; saying
-        // so honestly lets the server surface its own failure path.
-        "workspace/applyEdit" => json!({ "applied": false }),
         // registerCapability / workDoneProgress/create / everything
         // else: null is the spec-blessed "ok, noted" for these.
+        // (workspace/applyEdit never reaches here — the pump forwards
+        // it to the renderer as an ApplyEditRequest event.)
         _ => Value::Null,
+    }
+}
+
+/// Send the `ApplyWorkspaceEditResult` for a pending applyEdit. The
+/// proxy may already be gone (session dropped) — that's fine.
+async fn answer_apply_edit(entry: PendingApplyEdit, applied: bool, failure_reason: Option<String>) {
+    let Some(proxy) = entry.proxy.upgrade() else {
+        return;
+    };
+    let mut result = json!({ "applied": applied });
+    if let Some(reason) = failure_reason {
+        result["failureReason"] = json!(reason);
+    }
+    if let Err(e) = proxy.respond(entry.id, result).await {
+        warn!(?e, "lsp applyEdit response failed");
     }
 }
 
@@ -802,6 +912,9 @@ while True:
     elif method == "askConfig":
         write_message({"jsonrpc": "2.0", "id": 7, "method": "workspace/configuration",
                        "params": {"items": [{"section": "a"}, {"section": "b"}]}})
+    elif method == "askApplyEdit":
+        write_message({"jsonrpc": "2.0", "id": 9, "method": "workspace/applyEdit",
+                       "params": {"label": "do it", "edit": {"changes": {}}}})
     elif method == "textDocument/didOpen":
         opened.append(msg["params"]["textDocument"])
     elif method == "listOpened":
@@ -986,6 +1099,97 @@ while True:
         // our response to its workspace/configuration request.
         let params = next_notification(&mut rx, "answeredConfig").await;
         assert_eq!(params, json!({"result": [null, null]}));
+    }
+
+    async fn next_apply_edit_request(
+        rx: &mut broadcast::Receiver<LspSessionEvent>,
+    ) -> (u32, Option<String>, Value) {
+        loop {
+            let evt = timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timely")
+                .expect("ok");
+            if let LspSessionEvent::ApplyEditRequest {
+                token, label, edit, ..
+            } = evt
+            {
+                return (token, label, edit);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn server_apply_edit_is_forwarded_and_answer_round_trips() {
+        let mgr = manager_with_fake("fake");
+        let mut rx = mgr.subscribe();
+        mgr.notify_session(
+            "s-1",
+            "fake",
+            std::env::temp_dir(),
+            "askApplyEdit",
+            json!({}),
+        )
+        .await
+        .expect("notify");
+        let (token, label, edit) = next_apply_edit_request(&mut rx).await;
+        assert_eq!(label.as_deref(), Some("do it"));
+        assert!(edit.get("changes").is_some(), "got: {edit}");
+        mgr.respond_apply_edit(token, true, None)
+            .await
+            .expect("respond");
+        // The fake server echoes our response back as a notification.
+        let params = next_notification(&mut rx, "answeredConfig").await;
+        assert_eq!(params.pointer("/result/applied"), Some(&json!(true)));
+    }
+
+    #[tokio::test]
+    async fn unanswered_apply_edit_times_out_to_not_applied() {
+        let mut mgr = manager_with_fake("fake");
+        mgr.set_apply_edit_timeout_for_tests(Duration::from_millis(100));
+        let mut rx = mgr.subscribe();
+        mgr.notify_session(
+            "s-1",
+            "fake",
+            std::env::temp_dir(),
+            "askApplyEdit",
+            json!({}),
+        )
+        .await
+        .expect("notify");
+        let (_token, _, _) = next_apply_edit_request(&mut rx).await;
+        // Nobody answers; the manager's fallback must unblock the server.
+        let params = next_notification(&mut rx, "answeredConfig").await;
+        assert_eq!(params.pointer("/result/applied"), Some(&json!(false)));
+    }
+
+    #[tokio::test]
+    async fn late_apply_edit_response_is_a_no_op() {
+        let mut mgr = manager_with_fake("fake");
+        mgr.set_apply_edit_timeout_for_tests(Duration::from_millis(50));
+        let mut rx = mgr.subscribe();
+        mgr.notify_session(
+            "s-1",
+            "fake",
+            std::env::temp_dir(),
+            "askApplyEdit",
+            json!({}),
+        )
+        .await
+        .expect("notify");
+        let (token, _, _) = next_apply_edit_request(&mut rx).await;
+        let params = next_notification(&mut rx, "answeredConfig").await;
+        assert_eq!(params.pointer("/result/applied"), Some(&json!(false)));
+        // Responding after the timeout already answered must not
+        // double-respond (the fake server would echo a second time).
+        mgr.respond_apply_edit(token, true, None)
+            .await
+            .expect("late respond is ok");
+        let extra = timeout(
+            Duration::from_millis(300),
+            next_notification(&mut rx, "answeredConfig"),
+        )
+        .await;
+        assert!(extra.is_err(), "late respond must not reach the server");
     }
 
     #[tokio::test]
