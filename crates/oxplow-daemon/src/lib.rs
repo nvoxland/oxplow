@@ -190,10 +190,16 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
 /// Build the daemon router. Split out so tests and the binary share
 /// the exact route table.
 pub fn router(state: DaemonState) -> Router {
+    // Permissive CORS so the frontend can run in a plain browser
+    // (Playwright, remote-dev via a served dist/). The daemon binds
+    // loopback only and SSH is the auth layer, so origin checks add
+    // nothing here; revisit alongside the bearer-token direct-expose
+    // mode.
     Router::new()
         .route("/health", get(health))
         .route("/events", get(events_ws))
         .route("/ipc/{name}", post(ipc_handler))
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
@@ -268,6 +274,44 @@ mod tests {
             .unwrap();
         assert_eq!(resp["status"], "ok");
         assert_eq!(resp["data"], "pong");
+    }
+
+    #[tokio::test]
+    async fn ipc_allows_cross_origin_browser_callers() {
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let url = format!("http://{}/ipc/ping", daemon.bind_addr);
+        let client = reqwest::Client::new();
+
+        // Preflight: browsers send OPTIONS before a cross-origin POST
+        // with a JSON content-type.
+        let preflight = client
+            .request(reqwest::Method::OPTIONS, &url)
+            .header("origin", "http://localhost:4173")
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "content-type")
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            preflight
+                .headers()
+                .contains_key("access-control-allow-origin"),
+            "preflight must be CORS-approved, got {:?}",
+            preflight.headers()
+        );
+
+        // The actual response must carry the header too.
+        let resp = client
+            .post(&url)
+            .header("origin", "http://localhost:4173")
+            .json(&serde_json::Value::Null)
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.headers().contains_key("access-control-allow-origin"));
     }
 
     #[tokio::test]

@@ -23,12 +23,21 @@ docs — this note is the developer-facing mechanics.
   payload shapes the Tauri bridges emit; the `lsp` frame carries
   `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`),
   `GET /health`. Same per-project instance lock as the shell.
+  CORS is fully permissive (`CorsLayer::permissive()`) so the
+  frontend can run in a plain browser (Playwright-driven UX testing,
+  a statically served `dist/`); loopback bind + SSH is the auth
+  layer, so origin checks add nothing. Revisit if a direct-expose
+  mode lands.
 - **`apps/desktop/src/tauri-bridge/transport.ts`** — the frontend
   switch. Local mode delegates to `@tauri-apps/api`; remote mode
   (localStorage `oxplow.remoteBase`, set by the launcher's connect
   flow; dev override `VITE_OXPLOW_REMOTE`) fetches `/ipc/:name` and
   demuxes the `/events` WS with backoff reconnect. Mode is read once
-  at module load — switching is a window reload.
+  at module load — switching is a window reload. Shell-local event
+  channels (e.g. `menu:command`) still use the Tauri bus in remote
+  mode, but go inert (`listenRoute` → `"none"`) when no Tauri host
+  exists — i.e. the frontend running in a plain browser for
+  Playwright-driven testing or a served `dist/`.
 - **Launcher connect flow** — `launcher/Launcher.tsx`
   `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
   `/ipc/ping` before committing. `Root.tsx` renders the full app

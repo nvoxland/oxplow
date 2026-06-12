@@ -15,7 +15,8 @@
 // reload-level decision, matching the process-per-project model.
 //
 // Channels that are inherently local to the shell (the native menu's
-// "menu:command") always use Tauri listen, even in remote mode.
+// "menu:command") use Tauri listen even in remote mode — except in a
+// plain-browser session (no Tauri host at all), where they're inert.
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -184,16 +185,41 @@ function ensureSocket(): void {
   };
 }
 
+/// Where a `listen(channel)` subscription routes: the daemon
+/// WebSocket ("ws"), the local Tauri event bus ("tauri"), or nowhere
+/// ("none" — a shell-local channel in a plain-browser session, where
+/// no Tauri host exists and the event can never fire). Pure; exported
+/// for tests.
+export function listenRoute(
+  channel: string,
+  base: string | null,
+  tauriAvailable: boolean,
+): "ws" | "tauri" | "none" {
+  const isMultiplexed = Object.values(REMOTE_CHANNELS).includes(channel);
+  if (base !== null && isMultiplexed) return "ws";
+  return tauriAvailable ? "tauri" : "none";
+}
+
+function tauriHostAvailable(): boolean {
+  try {
+    return "__TAURI_INTERNALS__" in window;
+  } catch {
+    return false;
+  }
+}
+
 /// Tauri-listen-compatible entry point. In remote mode the three
 /// daemon-multiplexed channels read from the shared WebSocket; any
 /// other channel (e.g. the native menu) still listens on the local
-/// Tauri event bus.
+/// Tauri event bus — unless the page isn't hosted by the shell at
+/// all (plain browser), where the subscription is inert.
 export async function listen<T>(
   channel: string,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
-  const isMultiplexed = Object.values(REMOTE_CHANNELS).includes(channel);
-  if (remoteBase === null || !isMultiplexed) {
+  const route = listenRoute(channel, remoteBase, tauriHostAvailable());
+  if (route === "none") return () => {};
+  if (route === "tauri") {
     return tauriListen<T>(channel, handler);
   }
   let handlers = channelHandlers.get(channel);
