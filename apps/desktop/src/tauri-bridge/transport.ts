@@ -20,7 +20,7 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
-import { EVENT_CHANNELS } from "./channels";
+import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -188,15 +188,15 @@ function ensureSocket(): void {
 /// Where a `listen(channel)` subscription routes: the daemon
 /// WebSocket ("ws"), the local Tauri event bus ("tauri"), or nowhere
 /// ("none" — a shell-local channel in a plain-browser session, where
-/// no Tauri host exists and the event can never fire). Pure; exported
-/// for tests.
+/// no Tauri host exists and the event can never fire). Switches on the
+/// channel's classification in CHANNEL_ROUTING (channels.ts), not on a
+/// runtime membership check. Pure; exported for tests.
 export function listenRoute(
-  channel: string,
+  channel: ListenChannel,
   base: string | null,
   tauriAvailable: boolean,
 ): "ws" | "tauri" | "none" {
-  const isMultiplexed = Object.values(REMOTE_CHANNELS).includes(channel);
-  if (base !== null && isMultiplexed) return "ws";
+  if (base !== null && CHANNEL_ROUTING[channel] === "multiplexed") return "ws";
   return tauriAvailable ? "tauri" : "none";
 }
 
@@ -214,7 +214,7 @@ function tauriHostAvailable(): boolean {
 /// Tauri event bus — unless the page isn't hosted by the shell at
 /// all (plain browser), where the subscription is inert.
 export async function listen<T>(
-  channel: string,
+  channel: ListenChannel,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
   const route = listenRoute(channel, remoteBase, tauriHostAvailable());

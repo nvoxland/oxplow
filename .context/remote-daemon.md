@@ -45,11 +45,17 @@ docs — this note is the developer-facing mechanics.
   (localStorage `oxplow.remoteBase`, set by the launcher's connect
   flow; dev override `VITE_OXPLOW_REMOTE`) fetches `/ipc/:name` and
   demuxes the `/events` WS with backoff reconnect. Mode is read once
-  at module load — switching is a window reload. Shell-local event
-  channels (e.g. `menu:command`) still use the Tauri bus in remote
-  mode, but go inert (`listenRoute` → `"none"`) when no Tauri host
-  exists — i.e. the frontend running in a plain browser for
-  Playwright-driven testing or a served `dist/`.
+  at module load — switching is a window reload. Every channel
+  `listen()` accepts is declared in `channels.ts`'s `CHANNEL_ROUTING`
+  registry with a routing class (`multiplexed` = daemon WS in remote /
+  Tauri bus locally; `shellLocal` = Tauri bus only). `listen()`'s
+  channel arg is the `ListenChannel` union of those keys, so a new
+  channel can't be subscribed without being classified (compile error),
+  and `listenRoute` switches on the class. Shell-local channels (e.g.
+  `menu:command`) still use the Tauri bus in remote mode, but go inert
+  (`listenRoute` → `"none"`) when no Tauri host exists — i.e. the
+  frontend running in a plain browser for Playwright-driven testing or
+  a served `dist/`.
 - **Launcher connect flow** — `launcher/Launcher.tsx`
   `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
   `/ipc/ping` before committing. `Root.tsx` renders the full app
