@@ -406,6 +406,44 @@ mod tests {
         assert_eq!(hits[0].stream_id.as_deref(), Some("s-b"));
     }
 
+    /// Multi-word semantics: tokens AND together (each as a quoted
+    /// prefix term), so a phrase whose words both appear in a body
+    /// matches — and a query with one absent word doesn't.
+    #[tokio::test]
+    async fn multi_word_query_ands_terms_across_a_body() {
+        let s = store().await;
+        s.upsert(
+            "wiki",
+            "architecture-overview",
+            None,
+            "Architecture Overview",
+            "the workspace isolation rule is a hard invariant",
+        )
+        .await
+        .unwrap();
+        let hits = s
+            .search("workspace isolation", None, &[], 10)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1, "both words present → match");
+        assert_eq!(hits[0].ref_id, "architecture-overview");
+        // Words may be non-adjacent too (AND, not phrase).
+        assert_eq!(
+            s.search("workspace invariant", None, &[], 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            s.search("workspace nonexistent", None, &[], 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "an absent term must fail the AND"
+        );
+    }
+
     #[tokio::test]
     async fn junk_query_does_not_error() {
         let s = store().await;

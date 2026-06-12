@@ -1,7 +1,15 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listWorkspaceFiles, subscribeWorkspaceEvents, type Stream, type WorkspaceIndexedFile } from "../api.js";
+import {
+  listWorkspaceFiles,
+  searchSite,
+  subscribeWorkspaceEvents,
+  type SearchHit,
+  type Stream,
+  type WorkspaceIndexedFile,
+} from "../api.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
+import { dedupeSiteHits } from "./quickOpenResults.js";
 import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
@@ -16,15 +24,19 @@ interface Props {
   onClose(): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
+  /** Open a body-search hit (wiki/task/comment/file content match). */
+  onOpenSearchHit(hit: SearchHit): void;
 }
 
 type Result =
   | { kind: "page"; entry: PageDirectoryEntry }
-  | { kind: "file"; file: WorkspaceIndexedFile };
+  | { kind: "file"; file: WorkspaceIndexedFile }
+  | { kind: "hit"; hit: SearchHit };
 
-export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClose, onOpenFile, onOpenPage }: Props) {
+export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
+  const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -71,10 +83,39 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
     };
   }, [open, stream?.id]);
 
+  // Body search (unified BM25 index: wiki/task/comment/note/file
+  // contents), debounced. This is what makes a multi-word phrase like
+  // "workspace isolation" surface the wiki page it appears in — the
+  // filename fuzzy-match alone can never see bodies.
+  useEffect(() => {
+    if (!open || !stream) return;
+    const q = query.trim();
+    if (!q) {
+      setSiteHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchSite(q, stream.id)
+        .then((rows) => {
+          if (!cancelled) setSiteHits(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setSiteHits([]);
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, stream?.id, query]);
+
   // Empty input = launcher mode (pages only, fixed order). With a
-  // query, search both pages and files in parallel and show pages
+  // query, search pages, file paths, and body hits and show pages
   // first — they're a finite curated list and a "plan" / "files"
   // / "git" search shouldn't have to scroll past matching file paths.
+  // Body hits come last (already BM25-ranked), minus file hits whose
+  // path matched by name above.
   const results = useMemo<Result[]>(() => {
     const q = query.trim().toLowerCase();
     if (!q) {
@@ -83,12 +124,16 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
     const matchedPages: Result[] = pages
       .filter((entry) => fuzzyMatches(entry.label.toLowerCase(), q) || fuzzyMatches(entry.id, q))
       .map((entry) => ({ kind: "page" as const, entry }));
-    const matchedFiles: Result[] = files
+    const matchedFiles = files
       .filter((file) => fuzzyMatches(file.path.toLowerCase(), q))
-      .slice(0, 80)
-      .map((file) => ({ kind: "file" as const, file }));
-    return [...matchedPages, ...matchedFiles];
-  }, [pages, files, query]);
+      .slice(0, 80);
+    const matchedFileResults: Result[] = matchedFiles.map((file) => ({ kind: "file" as const, file }));
+    const matchedPaths = new Set(matchedFiles.map((f) => f.path));
+    const bodyHits: Result[] = dedupeSiteHits(siteHits, matchedPaths)
+      .slice(0, 30)
+      .map((hit) => ({ kind: "hit" as const, hit }));
+    return [...matchedPages, ...matchedFileResults, ...bodyHits];
+  }, [pages, files, siteHits, query]);
 
   useEffect(() => {
     if (selectedIndex < results.length) return;
@@ -101,7 +146,8 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
 
   function confirm(result: Result) {
     if (result.kind === "page") onOpenPage(result.entry.ref);
-    else onOpenFile(result.file.path);
+    else if (result.kind === "file") onOpenFile(result.file.path);
+    else onOpenSearchHit(result.hit);
     onClose();
   }
 
@@ -168,6 +214,29 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
                       {result.entry.label}
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                  </button>
+                );
+              }
+              if (result.kind === "hit") {
+                return (
+                  <button type="button"
+                    key={`hit:${result.hit.kind}:${result.hit.ref_id}:${result.hit.stream_id ?? ""}`}
+                    onClick={() => confirm(result)}
+                    style={{
+                      ...resultStyle,
+                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                      <PageKindIcon kind={result.hit.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                    </span>
+                    <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {result.hit.title || result.hit.ref_id}
+                    </span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
+                      {result.hit.snippet}
+                    </span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{result.hit.kind}</span>
                   </button>
                 );
               }

@@ -1863,6 +1863,26 @@ export function App() {
     }
   }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
+  /** Navigate to a unified-search hit. Shared by the search palette and
+   *  the quick-open overlay's body-hit rows. */
+  const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
+    switch (hit.kind) {
+      case "task":
+        handleOpenPage(taskRef(hit.ref_id));
+        break;
+      case "wiki":
+        handleOpenPage(wikiPageRef(hit.ref_id));
+        break;
+      case "file":
+        void handleOpenFile(hit.ref_id);
+        break;
+      case "comment":
+        handleOpenPage(commentsRef());
+        break;
+      // notes have no standalone page — surfaced in results only.
+    }
+  }, [handleOpenPage, handleOpenFile]);
+
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
    * current id is `currentTabId` with `ref`, and pushes the prior ref
@@ -3221,6 +3241,7 @@ export function App() {
         onOpenPage={(ref) => {
           handleOpenPage(ref);
         }}
+        onOpenSearchHit={openSearchHit}
       />
       {stream && externalFilePrompt ? (
         <ExternalFileChangedDialog
@@ -3247,23 +3268,7 @@ export function App() {
         <SearchPalette
           streamId={stream?.id ?? null}
           onClose={() => setSearchOpen(false)}
-          onOpen={(hit) => {
-            switch (hit.kind) {
-              case "task":
-                handleOpenPage(taskRef(hit.ref_id));
-                break;
-              case "wiki":
-                handleOpenPage(wikiPageRef(hit.ref_id));
-                break;
-              case "file":
-                void handleOpenFile(hit.ref_id);
-                break;
-              case "comment":
-                handleOpenPage(commentsRef());
-                break;
-              // notes have no standalone page — surfaced in results only.
-            }
-          }}
+          onOpen={openSearchHit}
         />
       ) : null}
       <UndoToastStack />
