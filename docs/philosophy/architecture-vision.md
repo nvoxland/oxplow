@@ -70,7 +70,7 @@ shipped today; most is not.
   read-only-vs-writer. The richer model is: a query thread does
   research, hands a finding to the writer, the writer acts. That
   needs structured handoff, not just "you can also call MCP tools."
-- **Common control surface for non-Claude agents.** The MCP layer
+- **Common control surface for additional agents.** The MCP layer
   is the right abstraction. Anything that can speak it should be
   able to drive an oxplow stream.
 
