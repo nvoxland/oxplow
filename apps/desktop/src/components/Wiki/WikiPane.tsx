@@ -21,14 +21,6 @@ import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
 import { wikiRowTooltip } from "./wikiRowLabel.js";
 
-type FreshnessStatus = WikiPageSummary["freshness"];
-
-const FRESHNESS_COLOR: Record<FreshnessStatus, string> = {
-  "fresh": "var(--freshness-fresh)",
-  "stale": "var(--freshness-stale)",
-  "very-stale": "var(--freshness-very-stale)",
-};
-
 const SECTION_INITIAL_LIMIT = 8;
 
 interface Props {
@@ -454,7 +446,6 @@ function SearchResults({
         <SearchRow
           key={hit.slug}
           hit={hit}
-          summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
           siblings={{ entries: siblingEntries, index: i, title: "Wiki search results" }}
           onOpenWikiPage={onOpenWikiPage}
@@ -467,20 +458,17 @@ function SearchResults({
 
 function SearchRow({
   hit,
-  summary,
   selected,
   siblings,
   onOpenWikiPage,
   onOpenMenu,
 }: {
   hit: WikiPageSearchHit;
-  summary: WikiPageSummary | null;
   selected: boolean;
   siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings;
   onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect) => void;
 }) {
-  const freshness = summary?.freshness ?? "fresh";
   const { handlers } = useRouteDispatch(wikiPageRef(hit.slug), {
     onNavigate: () => onOpenWikiPage(hit.slug),
     siblings,
@@ -506,16 +494,12 @@ function SearchRow({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{
-          width: 8, height: 8, borderRadius: "50%",
-          background: FRESHNESS_COLOR[freshness], flex: "0 0 auto",
-        }} />
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {hit.title}
         </span>
       </div>
       <div
-        style={{ fontSize: 11, opacity: 0.7, paddingLeft: 14, lineHeight: 1.3 }}
+        style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.3 }}
         dangerouslySetInnerHTML={{ __html: highlightSnippet(hit.snippet) }}
       />
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -580,15 +564,6 @@ function NoteRow({
       }}
       title={wikiRowTooltip(note)}
     >
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: FRESHNESS_COLOR[note.freshness],
-          flex: "0 0 auto",
-        }}
-      />
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {note.title}
       </span>

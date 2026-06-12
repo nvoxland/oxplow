@@ -266,7 +266,6 @@ function PlanningSections({
             <RowButton
               key={note.slug}
               label={note.title || note.slug}
-              subtitle={note.freshness}
               navRef={wikiPageRef(note.slug)}
               siblings={{ entries: siblingEntries, index: i, title: "Recent Notes" }}
               onNavigate={(ref) => onOpenPage(ref)}

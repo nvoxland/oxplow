@@ -331,14 +331,10 @@ export interface WikiPageSummary {
   /** Repo-relative file paths the page references (backend `file_refs`). */
   file_refs?: string[];
   dir_refs?: string[];
-  /** Vestigial Electron-era fields — the Rust backend never sends
-   *  these. Per-page freshness comes from `list_wiki_freshness` via
-   *  `summarizeWikiFreshness` instead; don't add new readers. */
-  freshness?: "fresh" | "stale" | "very-stale";
-  changed_refs?: string[];
-  deleted_refs?: string[];
-  total_refs?: number;
-  referenced_files?: string[];
+  // The Electron-era freshness/changed_refs/deleted_refs/total_refs/
+  // referenced_files fields were removed — the Rust backend never sent
+  // them, so readers silently rendered nothing. Per-page freshness
+  // comes from `list_wiki_freshness` via `summarizeWikiFreshness`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }
