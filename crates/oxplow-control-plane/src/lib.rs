@@ -324,6 +324,26 @@ async fn handle_hook_inner(
         return hook_ack();
     }
 
+    // SessionEnd: `/clear` ends the session and Claude Code starts a
+    // fresh one WITHOUT any HTTP hook for it (SessionStart hooks are
+    // command-type only), so thread.resume_session_id keeps pointing
+    // at the cleared session until the new one's first prompt. A
+    // daemon restart inside that window would relaunch with
+    // `--resume <cleared>` and resurrect the session the user just
+    // discarded. SessionEnd IS delivered over HTTP and carries the
+    // ending session id + reason — drop the resume token when an
+    // explicit clear ends exactly the session we'd resume.
+    if event == "SessionEnd" {
+        clear_resume_on_session_end(
+            &ctx,
+            thread_id.as_ref(),
+            session_id.as_deref(),
+            body_value.as_ref(),
+        )
+        .await;
+        return hook_ack();
+    }
+
     let kind = match parse_hook_kind(&event) {
         Some(k) => k,
         None => {
@@ -694,6 +714,46 @@ async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
     updated.updated_at = oxplow_domain::Timestamp::now();
     if let Err(err) = ctx.services.thread_store.upsert(&updated).await {
         warn!(?err, "resume-tracker: thread upsert failed");
+    }
+}
+
+/// Pure decision for the SessionEnd branch: drop the thread's resume
+/// token only when an explicit `/clear` ended exactly the session the
+/// token points at. Normal exits (`other`, `prompt_input_exit`,
+/// `logout`) keep the token so a restart resumes the conversation, and
+/// a clear of a stale session must not wipe a newer token.
+fn resume_should_clear(reason: Option<&str>, ended_session: &str, current_resume: &str) -> bool {
+    reason == Some("clear") && !ended_session.is_empty() && ended_session == current_resume
+}
+
+/// Apply [`resume_should_clear`] against the thread row. Tolerant like
+/// the resume tracker — failures are logged and skipped.
+async fn clear_resume_on_session_end(
+    ctx: &AppCtx,
+    thread_id: Option<&ThreadId>,
+    session_id: Option<&str>,
+    body: Option<&serde_json::Value>,
+) {
+    let (Some(thread_id), Some(ended)) = (thread_id, session_id) else {
+        return;
+    };
+    let reason = body.and_then(|v| v.get("reason")).and_then(|r| r.as_str());
+    let thread = match ctx.services.thread_store.get(thread_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return,
+        Err(err) => {
+            warn!(?err, "resume-tracker: thread lookup failed on SessionEnd");
+            return;
+        }
+    };
+    if !resume_should_clear(reason, ended, &thread.resume_session_id) {
+        return;
+    }
+    let mut updated = thread;
+    updated.resume_session_id = String::new();
+    updated.updated_at = oxplow_domain::Timestamp::now();
+    if let Err(err) = ctx.services.thread_store.upsert(&updated).await {
+        warn!(?err, "resume-tracker: clearing resume token failed");
     }
 }
 
@@ -1141,6 +1201,20 @@ mod tests {
         // Must be 200 (not 202): Claude Code prints a "non-blocking
         // status code" warning into the terminal on any other status.
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn resume_clear_decision() {
+        // Only an explicit clear of the exact resume session drops it.
+        assert!(resume_should_clear(Some("clear"), "s1", "s1"));
+        // Other exit reasons keep the token (restart should resume).
+        assert!(!resume_should_clear(Some("other"), "s1", "s1"));
+        assert!(!resume_should_clear(Some("prompt_input_exit"), "s1", "s1"));
+        assert!(!resume_should_clear(None, "s1", "s1"));
+        // A clear of a stale session must not wipe a newer token.
+        assert!(!resume_should_clear(Some("clear"), "old", "newer"));
+        // Degenerate ids never match.
+        assert!(!resume_should_clear(Some("clear"), "", ""));
     }
 
     #[test]

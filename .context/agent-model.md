@@ -197,7 +197,16 @@ to `runtime.handleHookEnvelope`, which:
    Hook Events tool window via the `hook.recorded` EventBus event).
 2. If the normalized payload carries a session id that differs from
    `thread.resume_session_id`, persists the new id so a later oxplow restart
-   relaunches claude with `--resume <id>`.
+   relaunches claude with `--resume <id>`. The inverse runs on
+   `SessionEnd(reason=clear)`: `/clear` starts a fresh session with NO
+   HTTP hook for it (SessionStart is command-type only), so until the
+   new session's first prompt the token still points at the cleared
+   one — a restart in that window would resurrect it. The SessionEnd
+   branch (`resume_should_clear` in
+   `crates/oxplow-control-plane/src/lib.rs`) blanks the token when an
+   explicit clear ends exactly the session it points at; other end
+   reasons (`other`, `prompt_input_exit`, …) keep it so normal
+   restarts still resume.
 3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
    below). The runtime no longer tracks per-turn rows; snapshots and
    per-effort attribution are anchored to `task_effort`.

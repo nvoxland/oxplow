@@ -303,6 +303,85 @@ async fn stop_with_in_progress_task_returns_block_directive() {
     assert_eq!(resp2.status(), 200);
 }
 
+async fn set_resume_session_id(services: &Services, thread_id: ThreadId, session: &str) {
+    let mut thread = services
+        .thread_store
+        .get(&thread_id)
+        .await
+        .unwrap()
+        .unwrap();
+    thread.resume_session_id = session.to_string();
+    services.thread_store.upsert(&thread).await.unwrap();
+}
+
+async fn resume_session_id(services: &Services, thread_id: ThreadId) -> String {
+    services
+        .thread_store
+        .get(&thread_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .resume_session_id
+}
+
+#[tokio::test]
+async fn session_end_clear_drops_the_resume_token() {
+    // `/clear` ends the session and Claude Code starts a fresh one
+    // without any HTTP hook (SessionStart is command-type only), so
+    // the resume token would keep pointing at the cleared session
+    // until the first prompt. A daemon restart in that window must NOT
+    // resurrect the cleared session — SessionEnd(reason=clear) drops
+    // the token so the relaunch starts fresh.
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    set_resume_session_id(&svc, tid, "cleared-session").await;
+    let resp = post_hook(
+        &cp,
+        "SessionEnd",
+        Some(tid),
+        serde_json::json!({ "session_id": "cleared-session", "reason": "clear" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resume_session_id(&svc, tid).await, "");
+}
+
+#[tokio::test]
+async fn session_end_other_reason_keeps_the_resume_token() {
+    // Normal exits (user quit, process end) should still resume — only
+    // an explicit clear discards the session.
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    set_resume_session_id(&svc, tid, "keep-me").await;
+    let resp = post_hook(
+        &cp,
+        "SessionEnd",
+        Some(tid),
+        serde_json::json!({ "session_id": "keep-me", "reason": "other" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resume_session_id(&svc, tid).await, "keep-me");
+}
+
+#[tokio::test]
+async fn session_end_clear_for_stale_session_keeps_newer_token() {
+    // The resume token already moved on to a newer session — a clear
+    // of an older one must not wipe it.
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    set_resume_session_id(&svc, tid, "newer-session").await;
+    let resp = post_hook(
+        &cp,
+        "SessionEnd",
+        Some(tid),
+        serde_json::json!({ "session_id": "old-session", "reason": "clear" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resume_session_id(&svc, tid).await, "newer-session");
+}
+
 #[tokio::test]
 async fn post_tool_use_edit_acks_200_empty() {
     // The observed regression: every Edit's PostToolUse fell through
