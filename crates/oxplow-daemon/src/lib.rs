@@ -478,6 +478,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn events_ws_streams_terminal_events() {
+        use futures::StreamExt as _;
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let url = format!("ws://{}/events", daemon.bind_addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        // Same subscribe-race handling as the oxplow/lsp events tests.
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                svc.terminal_sessions.emit_event_for_tests(
+                    oxplow_app::terminal_sessions::TerminalBridgeEvent {
+                        session_id: "term-1".into(),
+                        message: "{\"type\":\"data\",\"base64\":\"aGk=\"}".into(),
+                    },
+                );
+                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
+                    Ok(Some(Ok(msg))) if msg.is_text() => {
+                        return msg.into_text().unwrap().to_string()
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .expect("ws frame within timeout");
+        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(v["channel"], "terminal");
+        assert_eq!(v["payload"]["sessionId"], "term-1");
+        assert!(
+            v["payload"]["message"].is_string(),
+            "terminal frame carries the JSON-encoded protocol message"
+        );
+    }
+
+    #[tokio::test]
     async fn health_route_responds() {
         let (svc, _dir) = services();
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))

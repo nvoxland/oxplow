@@ -155,6 +155,13 @@ impl TerminalSessionRegistry {
         self.events_tx.subscribe()
     }
 
+    /// Publish a bridge event without driving a real PTY. Used by the
+    /// daemon's `/events` contract test to assert the `terminal` frame
+    /// shape; mirrors `LspSessionManager::emit_event_for_tests`.
+    pub fn emit_event_for_tests(&self, event: TerminalBridgeEvent) {
+        let _ = self.events_tx.send(event);
+    }
+
     /// Result of an attach: the session id (stable across reattaches)
     /// plus a base64-encoded snapshot of the replay buffer that the
     /// renderer should write into a fresh xterm before it starts

@@ -80,6 +80,46 @@ jobs:
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # Browser-facing transport contract. The remote daemon is just
+  # HTTP + WebSocket over the shared oxplow-rpc dispatch — exercisable
+  # headless, no browser, no Tauri shell. This job pins the exact
+  # contract the renderer's transport.ts depends on in remote/browser
+  # mode: CORS preflight approval, the {status, data|error} envelope
+  # shape per /ipc/:name, and the {channel, payload} frames on /events
+  # for all three channels (oxplow | lsp | terminal). A regression in
+  # any of these fails the build here, attributably — it's the guard
+  # for the "works in Tauri, breaks in the browser" seam. The daemon is
+  # headless (no tauri dep), so this job skips the webkit2gtk deps the
+  # full build needs.
+  daemon-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # tmux for the terminal/control-plane paths; build-essential for
+      # the vendored native deps (libgit2). No webkit — daemon is headless.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential tmux
+
+      - name: Cache Cargo registry + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Daemon contract tests
+        run: cargo test -p oxplow-daemon
+
   # Dependency vulnerability scan (RustSec + npm advisories). Advisory-
   # only for now: each audit step is `continue-on-error` so a newly
   # published advisory in a transitive dep can't block unrelated PRs
