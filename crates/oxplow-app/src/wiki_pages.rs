@@ -215,6 +215,16 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     }
 }
 
+/// The file's mtime as a `Timestamp`, when the platform exposes one.
+fn file_mtime(path: &Path) -> Option<Timestamp> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let ms = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    Some(Timestamp::from_unix_ms(i64::try_from(ms).ok()?))
+}
+
 /// Read `<projectDir>/.oxplow/wiki/<slug>.md` and upsert the
 /// `wiki_page` row. Deletes the row if the file is gone. Idempotent.
 pub async fn sync_from_disk(
@@ -281,7 +291,13 @@ pub async fn sync_from_disk_with_refs_versioned(
     let refs = parse_refs(&body);
     let body_size_bytes = body.len() as i64;
     let body_excerpt = body.chars().take(280).collect::<String>();
+    // updated_at mirrors the file's mtime (read after the potential
+    // version-strip write-back), not the sync time — the boot-time
+    // full scan re-syncs every page, and stamping "now" there would
+    // reset the whole index's recency on every start. `.oxplow/` is
+    // gitignored, so checkouts can't skew these mtimes.
     let now = Timestamp::now();
+    let updated_at = file_mtime(&file_path).unwrap_or(now);
     let existing = store.get(slug).await?;
     let created_at = existing.as_ref().map(|n| n.created_at).unwrap_or(now);
     let note = WikiPage {
@@ -294,7 +310,7 @@ pub async fn sync_from_disk_with_refs_versioned(
         dir_refs: refs.dir_refs,
         related_notes: refs.related_notes,
         created_at,
-        updated_at: now,
+        updated_at,
     };
     store.upsert(&note).await?;
     if let Some(page_refs) = page_refs {
@@ -705,6 +721,42 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Re-syncing an unchanged file (e.g. the boot-time full scan on
+    /// every daemon/app start) must not bump `updated_at` — the wiki
+    /// index sorts and labels pages by it, and a boot that stamps
+    /// "now" on every row destroys the recency signal.
+    #[tokio::test]
+    async fn resync_without_change_preserves_updated_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().to_path_buf();
+        let wiki_dir = wiki_pages_dir(&project);
+        std::fs::create_dir_all(&wiki_dir).unwrap();
+        std::fs::write(wiki_dir.join("note.md"), "# Note\nbody\n").unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = oxplow_db::SqliteWikiPageStore::new(db);
+
+        sync_from_disk(&project, &store, "note").await.unwrap();
+        let first = store.get("note").await.unwrap().unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        sync_from_disk(&project, &store, "note").await.unwrap();
+        let second = store.get("note").await.unwrap().unwrap();
+        assert_eq!(
+            second.updated_at, first.updated_at,
+            "unchanged resync must not bump updated_at"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        std::fs::write(wiki_dir.join("note.md"), "# Note\nedited body\n").unwrap();
+        sync_from_disk(&project, &store, "note").await.unwrap();
+        let third = store.get("note").await.unwrap().unwrap();
+        assert!(
+            third.updated_at > first.updated_at,
+            "content change must bump updated_at"
+        );
+    }
 
     #[test]
     fn strip_version_drops_disk_and_explicit_pins_from_wikilinks() {
