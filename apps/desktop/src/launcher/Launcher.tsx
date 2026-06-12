@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 
 import { listRecentProjects, openProjectGuarded, removeRecentProject } from "../api.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { connectRemote, probeRemoteDaemon } from "../tauri-bridge/transport.js";
+import { pickFolder } from "../tauri-bridge/nativeDialog.js";
 import { Kebab } from "../components/Kebab.js";
 import { logUi } from "../logger.js";
 import {
@@ -70,12 +70,8 @@ export function Launcher() {
 
   const handleOpenFolder = useCallback(async () => {
     setError(null);
-    const selected = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Open Project",
-    });
-    if (typeof selected === "string") {
+    const selected = await pickFolder("Open Project");
+    if (selected !== null) {
       await handleOpen(selected, false);
     }
   }, [handleOpen]);

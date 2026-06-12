@@ -152,7 +152,7 @@ import {
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
 import { openProjectGuarded, listRecentProjects } from "./api.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { DISK } from "./file-version.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { SearchPalette } from "./components/SearchPalette.js";
@@ -193,12 +193,8 @@ function resolveSiblings(
 /// spawns); `true` opens an additional independent window. Shared by
 /// the File ▸ Open Project commands and Cmd+K palette.
 async function pickAndOpenProject(newWindow: boolean) {
-  const selected = await openFolderDialog({
-    directory: true,
-    multiple: false,
-    title: newWindow ? "Open Project in New Window" : "Open Project",
-  });
-  if (typeof selected !== "string") return;
+  const selected = await pickFolder(newWindow ? "Open Project in New Window" : "Open Project");
+  if (selected === null) return;
   try {
     await openProjectGuarded(selected, newWindow);
   } catch (e) {

@@ -28,6 +28,14 @@ docs — this note is the developer-facing mechanics.
   a statically served `dist/`); loopback bind + SSH is the auth
   layer, so origin checks add nothing. Revisit if a direct-expose
   mode lands.
+- **Facade guard** — `@tauri-apps/*` may only be imported under
+  `apps/desktop/src/tauri-bridge/`; everywhere else funnels native
+  access through a bridge module (e.g. `nativeDialog.ts` wraps the OS
+  folder picker). `tauri-bridge/no-tauri-imports.test.ts` fails `bun
+  test` on any violation, so a native assumption can't leak past the
+  switchable transport and break the browser path silently. (The repo
+  has no ESLint; this source-scan guard delivers the invariant in the
+  existing test step.)
 - **`apps/desktop/src/tauri-bridge/transport.ts`** — the frontend
   switch. Local mode delegates to `@tauri-apps/api`; remote mode
   (localStorage `oxplow.remoteBase`, set by the launcher's connect
