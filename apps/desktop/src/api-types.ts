@@ -328,6 +328,12 @@ export interface WikiPageSummary {
   title: string;
   excerpt: string;
   updated_at: string;
+  /** Repo-relative file paths the page references (backend `file_refs`). */
+  file_refs?: string[];
+  dir_refs?: string[];
+  /** Vestigial Electron-era fields — the Rust backend never sends
+   *  these. Per-page freshness comes from `list_wiki_freshness` via
+   *  `summarizeWikiFreshness` instead; don't add new readers. */
   freshness?: "fresh" | "stale" | "very-stale";
   changed_refs?: string[];
   deleted_refs?: string[];

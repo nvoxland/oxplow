@@ -19,6 +19,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import { deleteWikiPage } from "../../api.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
+import { wikiRowTooltip } from "./wikiRowLabel.js";
 
 type FreshnessStatus = WikiPageSummary["freshness"];
 
@@ -577,7 +578,7 @@ function NoteRow({
         alignItems: "center",
         gap: 6,
       }}
-      title={`${note.title}\n${note.slug} — ${note.total_refs} referenced file${note.total_refs === 1 ? "" : "s"}\nDrag onto agent to add to context`}
+      title={wikiRowTooltip(note)}
     >
       <span
         style={{
