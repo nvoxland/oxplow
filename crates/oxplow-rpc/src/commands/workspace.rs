@@ -81,8 +81,18 @@ pub async fn list_workspace_files(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
+    // Same exclusion rule as fs-watch/snapshots: the `generated:`
+    // config list. Keeps node_modules/dist junk out of quick-open
+    // results and bounds the walk (a vendor tree is hundreds of
+    // thousands of entries the index has no use for).
+    let filter = {
+        let cfg = svc.config.read();
+        cfg.as_ref()
+            .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+            .unwrap_or_default()
+    };
     svc.git
-        .list_workspace_files(stream_id.as_deref())
+        .list_workspace_files(stream_id.as_deref(), filter)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -176,6 +186,40 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_object(), "expected a JSON object, got {out}");
+    }
+
+    #[tokio::test]
+    async fn list_workspace_files_excludes_generated_dirs() {
+        let (svc, dir) = crate::test_support::services();
+        std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
+        std::fs::write(dir.path().join("node_modules/pkg/index.js"), "x").unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        svc.services
+            .config
+            .write()
+            .unwrap()
+            .generated
+            .push("node_modules".into());
+
+        let out = crate::dispatch(
+            "list_workspace_files",
+            serde_json::json!({ "streamId": null }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let paths: Vec<&str> = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert!(paths.contains(&"src/main.rs"), "got: {paths:?}");
+        assert!(
+            !paths.iter().any(|p| p.starts_with("node_modules")),
+            "generated dirs must be pruned from the index, got: {paths:?}"
+        );
     }
 
     #[tokio::test]

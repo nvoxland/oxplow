@@ -121,10 +121,16 @@ pub fn list_workspace_entries(
 }
 
 /// Recursive flatten — every file under `root_dir`, sorted by path.
+/// `ignore` is consulted with each entry's workspace-relative path;
+/// ignored directories are pruned (not descended), so the caller's
+/// `generated:` exclusions also bound the walk's cost — a node_modules
+/// tree is hundreds of thousands of entries the quick-open index has
+/// no use for.
 pub fn list_workspace_files(
     root_dir: &Path,
     git_statuses: &HashMap<String, GitFileStatus>,
     relative_path: &str,
+    ignore: &dyn Fn(&str) -> bool,
 ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
     let dir = resolve_workspace_path(root_dir, relative_path)?;
     let mut files = Vec::new();
@@ -135,8 +141,11 @@ pub fn list_workspace_files(
             continue;
         }
         let path = normalize_relative_path(relative_path, &name);
+        if ignore(&path) {
+            continue;
+        }
         if entry.file_type()?.is_dir() {
-            files.extend(list_workspace_files(root_dir, git_statuses, &path)?);
+            files.extend(list_workspace_files(root_dir, git_statuses, &path, ignore)?);
         } else {
             files.push(WorkspaceIndexedFile {
                 path: path.clone(),
@@ -406,9 +415,23 @@ mod tests {
         create_workspace_directory(dir.path(), "sub").unwrap();
         write_workspace_file(dir.path(), "sub/deep.txt", "").unwrap();
         write_workspace_file(dir.path(), "top.txt", "").unwrap();
-        let files = list_workspace_files(dir.path(), &HashMap::new(), "").unwrap();
+        let files = list_workspace_files(dir.path(), &HashMap::new(), "", &|_| false).unwrap();
         let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["sub/deep.txt", "top.txt"]);
+    }
+
+    #[test]
+    fn list_files_prunes_ignored_directories_and_files() {
+        let dir = tempdir().unwrap();
+        create_workspace_directory(dir.path(), "node_modules/pkg").unwrap();
+        write_workspace_file(dir.path(), "node_modules/pkg/index.js", "").unwrap();
+        create_workspace_directory(dir.path(), "src").unwrap();
+        write_workspace_file(dir.path(), "src/main.rs", "").unwrap();
+        write_workspace_file(dir.path(), "junk.log", "").unwrap();
+        let ignore = |path: &str| path.starts_with("node_modules") || path == "junk.log";
+        let files = list_workspace_files(dir.path(), &HashMap::new(), "", &ignore).unwrap();
+        let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/main.rs"]);
     }
 
     #[test]

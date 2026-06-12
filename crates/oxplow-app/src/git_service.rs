@@ -424,15 +424,23 @@ impl GitService {
         .expect("workspace entries join")
     }
 
+    /// `filter` carries the project's `generated:` exclusions (built by
+    /// the caller from config) — excluded directories are pruned from
+    /// the walk, keeping build/vendor trees out of the quick-open index.
     pub async fn list_workspace_files(
         &self,
         stream_id: Option<&str>,
+        filter: oxplow_fs_watch::WorkspaceFilter,
     ) -> Result<Vec<WorkspaceIndexedFile>, oxplow_git::WorkspaceError> {
         let root = self.resolve_repo_dir(stream_id).await;
         let statuses = self.statuses(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::list_workspace_files(&root, &statuses, ""))
-            .await
-            .expect("workspace files join")
+        tokio::task::spawn_blocking(move || {
+            oxplow_git::list_workspace_files(&root, &statuses, "", &|path| {
+                filter.ignore(std::path::Path::new(path))
+            })
+        })
+        .await
+        .expect("workspace files join")
     }
 
     pub async fn read_workspace_file(

@@ -167,8 +167,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
         <Section title="Generated Directories">
           <Hint>
-            Directory names (one per line, matched at any path segment) excluded from fs-watch and
-            snapshot tracking. Added on top of the built-in list (node_modules, dist, build, .git, etc.).
+            Directory names (one per line, matched at any path segment) excluded from fs-watch,
+            snapshot tracking, and the quick-open file index. Added on top of the built-in
+            exclusions (.git, .oxplow) — build dirs like node_modules or target are NOT excluded
+            unless listed here.
           </Hint>
           <textarea
             value={generatedText}
