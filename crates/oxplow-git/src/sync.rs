@@ -26,6 +26,11 @@ pub struct GitOpResult {
     pub stdout: String,
     pub stderr: String,
     pub status: Option<i32>,
+    /// Number of files the smart-merge pass auto-resolved after git left
+    /// them conflicted (0 for non-merge ops). Lets the UI report
+    /// "N conflicts auto-resolved".
+    #[serde(default)]
+    pub auto_resolved: u32,
 }
 
 fn run(args: &[&str], cwd: &Path) -> std::io::Result<GitOpResult> {
@@ -35,6 +40,7 @@ fn run(args: &[&str], cwd: &Path) -> std::io::Result<GitOpResult> {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         status: output.status.code(),
+        auto_resolved: 0,
     })
 }
 

@@ -676,7 +676,16 @@ impl GitService {
         source: String,
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_stream_worktree_strict(stream_id).await?;
-        let result = run_blocking(move || oxplow_git::merge(&path, &source)).await?;
+        let result = run_blocking(move || {
+            let mut r = oxplow_git::merge(&path, &source)?;
+            if !r.success {
+                // Git left conflicts (or refused) — run the smart-merge
+                // pass to clear the ones that are only line-level conflicts.
+                r.auto_resolved = oxplow_git::auto_resolve_conflicts(&path).resolved.len() as u32;
+            }
+            Ok(r)
+        })
+        .await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
@@ -687,7 +696,14 @@ impl GitService {
         onto: String,
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_stream_worktree_strict(stream_id).await?;
-        let result = run_blocking(move || oxplow_git::rebase(&path, &onto)).await?;
+        let result = run_blocking(move || {
+            let mut r = oxplow_git::rebase(&path, &onto)?;
+            if !r.success {
+                r.auto_resolved = oxplow_git::auto_resolve_conflicts(&path).resolved.len() as u32;
+            }
+            Ok(r)
+        })
+        .await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
@@ -910,5 +926,126 @@ mod tests {
         assert!(svc.rebase(Some("str999"), "main".into()).await.is_err());
         assert!(svc.commit_all(None, "msg".into()).await.is_err());
         assert!(svc.commit_all(Some("str999"), "msg".into()).await.is_err());
+    }
+
+    /// Build a primary repo on `main` + a sibling `feature` worktree where
+    /// `main` and `feature` each committed a *different* version of the
+    /// same line in `cfg.txt`. Merging main into feature makes git report a
+    /// conflict (line-level), which the smart-merge pass may or may not be
+    /// able to auto-resolve depending on whether the edits truly overlap.
+    async fn setup_conflicting_worktree(
+        base: &str,
+        main_v: &str,
+        feature_v: &str,
+    ) -> (
+        Arc<GitService>,
+        PathBuf,
+        StreamId,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
+        let primary = tempfile::tempdir().unwrap();
+        let p = primary.path();
+        run_git(p, &["init", "-q", "--initial-branch=main"]);
+        run_git(p, &["config", "user.email", "test@example.com"]);
+        run_git(p, &["config", "user.name", "test"]);
+        write_commit(p, "cfg.txt", base, "base");
+        run_git(p, &["branch", "feature"]);
+
+        let wt_parent = tempfile::tempdir().unwrap();
+        let sib = wt_parent.path().join("feature-wt");
+        run_git(
+            p,
+            &["worktree", "add", "-q", sib.to_str().unwrap(), "feature"],
+        );
+        // Divergent edits to the same line on each branch.
+        write_commit(p, "cfg.txt", main_v, "main edit");
+        write_commit(&sib, "cfg.txt", feature_v, "feature edit");
+
+        let db = Database::in_memory();
+        let store = Arc::new(SqliteStreamStore::new(db));
+        let stream_id = StreamId::new(2);
+        let now = Timestamp::now();
+        store
+            .upsert(&Stream {
+                id: stream_id,
+                kind: StreamKind::Worktree,
+                title: "feature".into(),
+                branch: "feature".into(),
+                branch_ref: "refs/heads/feature".into(),
+                branch_source: "main".into(),
+                worktree_path: sib.to_string_lossy().into_owned(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+
+        let svc = GitService::spawn(p.to_path_buf(), store, EventBus::new());
+        svc.register(&stream_id, sib.clone()).await;
+        (svc, sib, stream_id, primary, wt_parent)
+    }
+
+    #[tokio::test]
+    async fn merge_auto_resolves_same_line_different_word_conflict() {
+        // main changes the first word, feature changes the last word of the
+        // same line. Git's line-based merge conflicts; the smart-merge pass
+        // recognises the edits don't overlap and resolves them.
+        let (svc, sib, stream_id, _primary, _wt) = setup_conflicting_worktree(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        )
+        .await;
+
+        let res = svc
+            .merge(Some(&stream_id.to_string()), "main".into())
+            .await
+            .unwrap();
+
+        // Git itself reported a conflict, but we auto-resolved one file.
+        assert_eq!(res.auto_resolved, 1, "stderr: {}", res.stderr);
+
+        let merged = std::fs::read_to_string(sib.join("cfg.txt")).unwrap();
+        assert_eq!(merged, "ALPHA beta GAMMA\n");
+        assert!(
+            !merged.contains("<<<<<<<"),
+            "no conflict markers should remain: {merged:?}"
+        );
+        // No unmerged paths left in the worktree.
+        let state = oxplow_git::get_repo_conflict_state(&sib);
+        assert_eq!(state.conflicted_count, 0);
+    }
+
+    #[tokio::test]
+    async fn merge_leaves_true_overlap_conflicted() {
+        // Both branches change the *same* word differently — a real overlap
+        // the smart pass must refuse to auto-resolve.
+        let (svc, sib, stream_id, _primary, _wt) = setup_conflicting_worktree(
+            "let timeout = 10;\n",
+            "let timeout = 20;\n",
+            "let timeout = 30;\n",
+        )
+        .await;
+
+        let res = svc
+            .merge(Some(&stream_id.to_string()), "main".into())
+            .await
+            .unwrap();
+
+        assert_eq!(res.auto_resolved, 0);
+        let contents = std::fs::read_to_string(sib.join("cfg.txt")).unwrap();
+        assert!(
+            contents.contains("<<<<<<<"),
+            "git's conflict markers must be left intact: {contents:?}"
+        );
+        let state = oxplow_git::get_repo_conflict_state(&sib);
+        assert_eq!(state.conflicted_count, 1);
     }
 }

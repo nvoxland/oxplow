@@ -264,6 +264,56 @@ the guard exists for MCP/scripted/future callers. To run one of these
 ops against the primary worktree, pass the primary stream's id
 explicitly — `None` is rejected on purpose.
 
+### Smart conflict auto-resolution (the IntelliJ magic-wand pass)
+
+After `git merge` / `git rebase` leaves conflicts, `GitService::merge`
+and `rebase` run a **smart-merge pass** in the same `spawn_blocking`
+closure (only when the git op reported `!success`):
+`oxplow_git::auto_resolve_conflicts(worktree)`
+(`crates/oxplow-git/src/smart_merge.rs`). The number of files it
+cleanly resolved is folded into `GitOpResult.auto_resolved` so the UI
+can report "N conflicts auto-resolved".
+
+Why it exists: git's merge driver is **line-based**, so two edits to
+*different words on the same line* (or both sides adding a different
+import) collide in the same line-block and are reported as a conflict
+even though they don't overlap. This is exactly what IntelliJ's "magic
+wand / resolve simple conflicts" fixes by comparing at word
+granularity. We reproduce it with a **token-level diff3**:
+
+- `tokenize(s)` splits into word runs / whitespace runs / individual
+  newlines / single punctuation chars. Lossless: `tokenize(s).concat()
+  == s`.
+- `merge3(base, ours, theirs)` runs a classic diff3 over the token
+  slices (via `similar`'s Myers diff), clustering overlapping change
+  regions. It returns `Ok(tokens)` only when every region is
+  unambiguous, else `Err(Conflicted)`.
+
+`auto_resolve_conflicts` reads each unmerged path's three stages
+directly from the git2 index (`Index::conflicts()` →
+ancestor/our/their blobs — no `git show :1:` shelling), and **only
+modify/modify** conflicts (all three stages present) that are UTF-8
+text under 1 MiB are eligible. For each, it runs `merge3_str`; on `Ok`
+it writes the merged file and stages it with `add_path` (slot-0 add
+clears the unmerged stages). On `Err` — or for add/add, delete/modify,
+binary, oversized — it leaves git's markers untouched.
+
+**Safety model (never auto-resolve a true overlap).** A divergent
+region where ours and theirs both changed the same base tokens
+differently (including delete-vs-modify and add/add of different text
+at the same point) is `Err(Conflicted)`, so the file is left exactly as
+git produced it. Tokenization is lossless, and git has already failed
+its line merge by the time we run, so the pass can only ever *reduce*
+the conflict count, never introduce new content. The merge stays
+in-progress (MERGE_HEAD intact) with the resolved files staged — the
+result is a normal, reviewable working-tree change the user commits.
+`conflicted_count` (rail HUD) drops naturally as paths are staged.
+
+Tier-1 is language-agnostic (token-level). A future Tier-2 would add a
+tree-sitter AST merge (Mergiraf-style) for the highest-value commutative
+cases; note Mergiraf itself is GPLv3 vs oxplow's MIT, so it can only be
+invoked as a separate binary, never linked as a library.
+
 ## Runtime git operations
 
 All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:

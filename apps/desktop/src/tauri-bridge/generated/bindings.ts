@@ -1455,6 +1455,12 @@ export type GitOpResult = {
 	stdout: string,
 	stderr: string,
 	status: number | null,
+	/**
+	 *  Number of files the smart-merge pass auto-resolved after git left
+	 *  them conflicted (0 for non-merge ops). Lets the UI report
+	 *  "N conflicts auto-resolved".
+	 */
+	auto_resolved?: number,
 };
 
 export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";

@@ -22,7 +22,14 @@
 //! the time we run, so the worst case is identical to today's behaviour —
 //! we only ever *reduce* the conflict count, never introduce new content.
 
+use std::path::Path;
+
 use similar::{capture_diff_slices, Algorithm, DiffOp};
+
+/// Files larger than this are skipped by the conflict driver — they're
+/// likely generated/data and word-level merging buys little while risking
+/// surprise. Real source conflicts are far smaller.
+const MAX_RESOLVE_BYTES: usize = 1 << 20; // 1 MiB
 
 /// Returned by [`merge3`] when ours and theirs make incompatible changes
 /// to an overlapping region of the base. The file is left untouched so
@@ -228,6 +235,103 @@ pub fn merge3<T: Clone + Eq + std::hash::Hash + Ord>(
 pub fn merge3_str(base: &str, ours: &str, theirs: &str) -> Result<String, Conflicted> {
     let merged = merge3(&tokenize(base), &tokenize(ours), &tokenize(theirs))?;
     Ok(merged.concat())
+}
+
+/// Outcome of an [`auto_resolve_conflicts`] pass.
+#[derive(Debug, Default, Clone)]
+pub struct AutoResolveReport {
+    /// Repo-relative paths that were cleanly auto-resolved and staged.
+    pub resolved: Vec<String>,
+    /// Unmerged paths still left conflicted after the pass (genuine
+    /// overlaps, add/add, delete/modify, binary, oversized, …).
+    pub remaining: u32,
+}
+
+/// Read a blob as UTF-8 text, refusing binary / oversized content.
+fn blob_text(repo: &git2::Repository, id: git2::Oid) -> Option<String> {
+    let blob = repo.find_blob(id).ok()?;
+    let content = blob.content();
+    if content.len() > MAX_RESOLVE_BYTES {
+        return None;
+    }
+    std::str::from_utf8(content).ok().map(|s| s.to_owned())
+}
+
+/// After git has left conflicts, try to auto-resolve the ones that are
+/// only conflicts at LINE granularity by running [`merge3_str`] on each
+/// file's base/ours/theirs stages. A file is written + `git add`ed only
+/// when its token-level merge is unambiguous (`Ok`); genuine overlaps,
+/// add/add, delete/modify, binary, and oversized files are left exactly
+/// as git produced them (markers intact) for the user to resolve.
+///
+/// This is the IntelliJ-magic-wand pass: it can only *reduce* the
+/// conflict count, never introduce new content.
+pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
+    let Ok(repo) = git2::Repository::open(repo_path) else {
+        return AutoResolveReport::default();
+    };
+    let Ok(index) = repo.index() else {
+        return AutoResolveReport::default();
+    };
+
+    // Collect candidate (path, base, ours, theirs) tuples first so we
+    // don't hold the index borrow while writing files / shelling `git add`.
+    let mut candidates: Vec<(String, String, String, String)> = Vec::new();
+    if let Ok(conflicts) = index.conflicts() {
+        for conflict in conflicts.flatten() {
+            // Only modify/modify (all three stages present) is in scope.
+            let (Some(ancestor), Some(our), Some(their)) =
+                (conflict.ancestor, conflict.our, conflict.their)
+            else {
+                continue;
+            };
+            let Ok(path) = std::str::from_utf8(&our.path) else {
+                continue;
+            };
+            let (Some(base), Some(ours), Some(theirs)) = (
+                blob_text(&repo, ancestor.id),
+                blob_text(&repo, our.id),
+                blob_text(&repo, their.id),
+            ) else {
+                continue;
+            };
+            candidates.push((path.to_owned(), base, ours, theirs));
+        }
+    }
+    drop(index);
+
+    let mut resolved = Vec::new();
+    for (path, base, ours, theirs) in candidates {
+        let Ok(merged) = merge3_str(&base, &ours, &theirs) else {
+            continue; // genuine token-level conflict — leave git's markers.
+        };
+        let abs = repo_path.join(&path);
+        if std::fs::write(&abs, merged).is_err() {
+            continue;
+        }
+        // Stage at slot 0, which clears the unmerged stages for this path.
+        let staged = crate::sync::add_path(repo_path, &path)
+            .map(|r| r.success)
+            .unwrap_or(false);
+        if staged {
+            resolved.push(path);
+        }
+    }
+
+    // Recount remaining conflicts from a freshly-read index.
+    let remaining = repo
+        .index()
+        .ok()
+        .and_then(|mut idx| {
+            idx.read(true).ok()?;
+            Some(idx.conflicts().map(|c| c.count() as u32).unwrap_or(0))
+        })
+        .unwrap_or(0);
+
+    AutoResolveReport {
+        resolved,
+        remaining,
+    }
 }
 
 #[cfg(test)]
