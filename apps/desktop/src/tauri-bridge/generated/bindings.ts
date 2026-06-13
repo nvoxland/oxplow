@@ -1395,7 +1395,7 @@ export type FileSurprise = {
  *  section. Items whose timestamp is `<= finished_cleared_at` are
  *  hidden until something newer lands.
  */
-export type FinishedEntry = { kind: "task"; itemId: number; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
+export type FinishedEntry = { kind: "task"; itemId: TaskId; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
 
 export type Followup = {
 	id: string,

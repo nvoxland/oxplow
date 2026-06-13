@@ -16,6 +16,7 @@ import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { logUi } from "../logger.js";
 
 export interface TaskPageProps {
   stream: Stream | null;
@@ -94,9 +95,16 @@ export function TaskPage({
   useEffect(() => {
     let cancelled = false;
     const refetch = () => {
-      void getTask(itemId).then((row) => {
-        if (!cancelled) setFetchedItem(row);
-      });
+      // Swallow + log rather than letting a rejected fetch (e.g. a
+      // malformed task id) bubble to `window.unhandledrejection`, which
+      // reads as a silent failure with no surfaced error.
+      void getTask(itemId)
+        .then((row) => {
+          if (!cancelled) setFetchedItem(row);
+        })
+        .catch((err) => {
+          logUi("warn", "task fetch failed", { itemId, error: String(err) });
+        });
     };
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
