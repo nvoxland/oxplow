@@ -44,6 +44,27 @@ interface TestRunPayload {
 }
 
 
+/** One static-analysis finding (see collection.md / AnalysisReport). */
+export type FindingSeverity = "error" | "warning" | "info" | "note";
+export interface AnalysisFinding {
+  path: string;
+  line?: number;
+  column?: number;
+  severity: FindingSeverity;
+  rule?: string;
+  message: string;
+}
+/** Parsed `static-analysis` payload. */
+export interface StaticAnalysisPayload {
+  command?: string;
+  analyzer?: string;
+  errorCount?: number;
+  warningCount?: number;
+  infoCount?: number;
+  noteCount?: number;
+  findings?: AnalysisFinding[];
+}
+
 function parsePayload<T>(json: string | null): T | null {
   if (!json) return null;
   try {
@@ -51,6 +72,79 @@ function parsePayload<T>(json: string | null): T | null {
   } catch {
     return null;
   }
+}
+
+/** Per-severity counts: prefer the payload's explicit counts, else derive
+ *  from the findings list (older rows or command-only ran-records). */
+export function analysisCounts(p: StaticAnalysisPayload): {
+  error: number;
+  warning: number;
+  info: number;
+  note: number;
+} {
+  const has =
+    p.errorCount !== undefined ||
+    p.warningCount !== undefined ||
+    p.infoCount !== undefined ||
+    p.noteCount !== undefined;
+  if (has) {
+    return {
+      error: p.errorCount ?? 0,
+      warning: p.warningCount ?? 0,
+      info: p.infoCount ?? 0,
+      note: p.noteCount ?? 0,
+    };
+  }
+  const counts = { error: 0, warning: 0, info: 0, note: 0 };
+  for (const f of p.findings ?? []) counts[f.severity]++;
+  return counts;
+}
+
+/** Group findings by file path, preserving first-seen order. */
+export function groupFindingsByFile(findings: AnalysisFinding[]): {
+  path: string;
+  findings: AnalysisFinding[];
+}[] {
+  const order: string[] = [];
+  const byPath = new Map<string, AnalysisFinding[]>();
+  for (const f of findings) {
+    if (!byPath.has(f.path)) {
+      byPath.set(f.path, []);
+      order.push(f.path);
+    }
+    byPath.get(f.path)!.push(f);
+  }
+  return order.map((path) => ({ path, findings: byPath.get(path)! }));
+}
+
+/** Headline result line, e.g. "0 errors, 3 warnings". Errors+warnings lead;
+ *  info/note appended only when present. */
+export function analysisHeadline(c: { error: number; warning: number; info: number; note: number }): string {
+  const parts = [
+    `${c.error} error${c.error === 1 ? "" : "s"}`,
+    `${c.warning} warning${c.warning === 1 ? "" : "s"}`,
+  ];
+  if (c.info > 0) parts.push(`${c.info} info`);
+  if (c.note > 0) parts.push(`${c.note} note${c.note === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
+
+/** Green when clean, amber when only warnings/info/note, rose on any error. */
+function analysisColor(c: { error: number; warning: number; info: number; note: number }): string {
+  if (c.error > 0) return "var(--freshness-very-stale)";
+  if (c.warning + c.info + c.note > 0) return "var(--freshness-stale)";
+  return "var(--freshness-fresh)";
+}
+
+function severityColor(s: FindingSeverity): string {
+  return s === "error"
+    ? "var(--freshness-very-stale)"
+    : s === "warning"
+      ? "var(--freshness-stale)"
+      : "var(--text-muted)";
+}
+function severityGlyph(s: FindingSeverity): string {
+  return s === "error" ? "✗" : s === "warning" ? "⚠" : s === "info" ? "ℹ" : "·";
 }
 
 /** Emerald ≥80%, amber ≥50%, rose below — reusing the freshness ramp. */
@@ -208,6 +302,99 @@ function CoverageSummary({
       </div>
       <CoverageBar covered={cov.coveredLines} total={cov.changedLines} testId={`coverage-bar-${obs.effort_id}`} />
       <MostUntested cov={cov} onOpenFile={onOpenFile} />
+    </div>
+  );
+}
+
+/** Static-analysis result: analyzer ran, the high-level error/warning count,
+ *  and a drill-in findings list grouped by file. `maxFiles` caps the inline
+ *  list (the compact effort block shows a few; the detail view shows all). */
+function StaticAnalysisSummary({
+  obs,
+  onOpenFile,
+  maxFiles,
+}: {
+  obs: EffortObservation;
+  onOpenFile?: (path: string) => void;
+  maxFiles: number;
+}) {
+  const payload = parsePayload<StaticAnalysisPayload>(obs.payload_json);
+  if (!payload) return null;
+  const counts = analysisCounts(payload);
+  const label = payload.analyzer?.trim() || "Static analysis";
+  const grouped = groupFindingsByFile(payload.findings ?? []);
+  const shownGroups = grouped.slice(0, maxFiles);
+  const hiddenFiles = grouped.length - shownGroups.length;
+
+  return (
+    <div data-testid={`analysis-badge-${obs.effort_id}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+          {label}
+        </span>
+        <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: analysisColor(counts) }}>
+          {analysisHeadline(counts)}
+        </span>
+      </div>
+      {grouped.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
+          {shownGroups.map((g) => {
+            const { dir, name } = fileBasename(g.path);
+            return (
+              <div key={g.path} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <button
+                  type="button"
+                  data-testid={`analysis-file-${g.path}`}
+                  onClick={() => onOpenFile?.(g.path)}
+                  title={g.path}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    textAlign: "left",
+                    background: "transparent",
+                    border: "none",
+                    padding: "1px 0",
+                    cursor: onOpenFile ? "pointer" : "default",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--text-xs)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    minWidth: 0,
+                  }}
+                >
+                  <span style={{ color: "var(--text-muted)" }}>{dir}</span>
+                  <span style={{ color: "var(--text-secondary)" }}>{name}</span>
+                </button>
+                {g.findings.map((f, i) => (
+                  <div
+                    key={`${f.line ?? "?"}-${f.rule ?? ""}-${i}`}
+                    data-testid={`analysis-finding-${g.path}`}
+                    style={{ display: "flex", alignItems: "baseline", gap: 6, paddingLeft: 14, fontSize: "var(--text-xs)" }}
+                  >
+                    <span style={{ color: severityColor(f.severity) }}>{severityGlyph(f.severity)}</span>
+                    <span className="oxplow-tabular" style={{ color: "var(--text-muted)" }}>
+                      {f.line !== undefined ? `:${f.line}` : ""}
+                    </span>
+                    {f.rule ? <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{f.rule}</span> : null}
+                    <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                      {f.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {hiddenFiles > 0 ? (
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+              + {hiddenFiles} more file{hiddenFiles === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--freshness-fresh)" }}>No issues found.</span>
+      )}
     </div>
   );
 }
@@ -556,6 +743,7 @@ export function FullCoverageView({
 }) {
   const coverage = obs.find((o) => o.kind === "diff-coverage");
   const runs = obs.filter((o) => o.kind === "test-run");
+  const analysis = obs.find((o) => o.kind === "static-analysis");
 
   const merged = mergeTestRuns(runs);
   const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
@@ -603,6 +791,14 @@ export function FullCoverageView({
           <span style={mutedStyle}>No tests run.</span>
         )}
       </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h4 style={{ margin: 0 }}>Static analysis</h4>
+        {analysis ? (
+          <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={1000} />
+        ) : (
+          <span style={mutedStyle}>No analyzer run.</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -647,6 +843,7 @@ export function EffortObservationsBlock({
 
   const coverage = obs.find((o) => o.kind === "diff-coverage");
   const runs = obs.filter((o) => o.kind === "test-run");
+  const analysis = obs.find((o) => o.kind === "static-analysis");
   const mutedStyle: React.CSSProperties = {
     fontSize: "var(--text-xs)",
     color: "var(--text-muted)",
@@ -666,6 +863,9 @@ export function EffortObservationsBlock({
         </span>
       )}
       {runs.length > 0 ? <TestsRun effortId={effortId} runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
+      {/* Static analysis renders only when an analyzer ran for this effort,
+          keeping untracked efforts uncluttered. */}
+      {analysis ? <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={8} /> : null}
     </div>
   );
 }
