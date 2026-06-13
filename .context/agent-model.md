@@ -197,7 +197,13 @@ to `runtime.handleHookEnvelope`, which:
    Hook Events tool window via the `hook.recorded` EventBus event).
 2. If the normalized payload carries a session id that differs from
    `thread.resume_session_id`, persists the new id so a later oxplow restart
-   relaunches claude with `--resume <id>`. The inverse runs on
+   relaunches claude with `--resume <id>`. This fires on *every* hook but
+   the id changes once per session, so an in-memory per-thread cache
+   (`resume_state` in AppCtx, gated by `resume_cache_allows_skip`) lets
+   repeat hooks short-circuit before the `thread_store.get` + upsert. The
+   cache mirrors what was last persisted; a stale entry only ever costs
+   one redundant read (never a wrong write), so losing it across a daemon
+   restart is fine. The inverse runs on
    `SessionEnd(reason=clear)`: `/clear` starts a fresh session with NO
    HTTP hook for it (SessionStart is command-type only), so until the
    new session's first prompt the token still points at the cleared
@@ -214,7 +220,15 @@ to `runtime.handleHookEnvelope`, which:
    blocks the tool (read-only thread; see Write guard below) or if
    `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
    MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item; see `crates/oxplow-runtime/src/filing.rs`).
+   item; see `crates/oxplow-runtime/src/filing.rs`). Both guards bail to
+   `None` for any tool outside the four worktree-mutating edits, so
+   `pre_tool_check` short-circuits via `pre_tool_check_applies(tool_name)`
+   *before* any DB read or git-state stat — the common case (Read / Grep
+   / Bash / mcp / Task / …) does zero work here. Persistence is
+   unaffected: the event is still ingested in `handle_hook_inner`
+   regardless. (The HTTP round-trip itself still fires for every tool —
+   the plugin's `PreToolUse` matcher is `"*"`; narrowing that matcher to
+   the edit tools is a separate, sign-off-gated win.)
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
    from the stores — see `buildSessionContextBlock` in `crates/oxplow-runtime/src/lib.rs`)
@@ -1229,8 +1243,17 @@ authored work. Best-effort, never blocks the close; the existing
 `complete_task` nudge (`compute_effort_file_review`) is unaffected
 because it reads claims, not the residue table. Claiming a path later
 (`record_file`) clears its residue, so the two sets never overlap.
-Recovery-closed orphans have no end-snapshot bracket, so per-path
-reconciliation doesn't run there (a known follow-up).
+Restart-recovery orphan closes are reconciled too: `RecoveryService`
+(wired via `with_snapshot_reconcile` in `Services::new`, after the capture
+registry is built) brackets each orphaned effort that has a start snapshot
+— it drains the worktree (`enqueue_startup_diff`) and requests an
+`EffortEnd` snapshot, since the boot worktree still reflects the dead
+effort's final state, stamps it via `finish(Some(end_id), …)`, then runs
+the same `reconcile_unattributed_on_close`. So a process that died
+mid-effort records its unclaimed residue as unattributed rather than
+silently attributing it. Best-effort and never blocks recovery: an effort
+with no start snapshot (or any capture failure) keeps the legacy
+`finish(None, None)` close.
 
 Attach only fires on the `in_progress → done` and
 `in_progress → blocked` transitions, and only when an effort is

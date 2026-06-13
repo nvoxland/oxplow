@@ -425,10 +425,17 @@ MCP-only effort). **Invariant: a path is CLAIMED (`task_effort_file`) or
 UNATTRIBUTED here, never both** — `record_file` deletes any matching
 residue row, so a later `complete_task` claim moves a path back into the
 claimed set. The existing agent nudge (`compute_effort_file_review`) reads
-`task_effort_file`, not this table, so it's unaffected. Limitation:
-recovery-closed orphans (`finish(None, None)`, no end snapshot) have no
-bracket to diff, so per-path reconciliation doesn't run there — see the
-backlog follow-up.
+`task_effort_file`, not this table, so it's unaffected. Restart-recovery
+orphan closes are also reconciled: `RecoveryService` (wired with the
+capture registry + thread store via `with_snapshot_reconcile`) brackets
+each orphaned effort that has a start snapshot by draining the worktree
+(`enqueue_startup_diff`) and requesting an `EffortEnd` snapshot — the boot
+worktree still reflects the dead effort's final state — then stamps it via
+`finish(Some(end_id), …)` and calls `reconcile_unattributed_on_close`. So
+a process that died mid-effort still records its unclaimed residue as
+unattributed instead of leaving it silently attributed. Best-effort: an
+effort with no start snapshot (or any capture failure) falls back to the
+legacy `finish(None, None)` close with no reconciliation.
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 

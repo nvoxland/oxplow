@@ -522,6 +522,11 @@ impl Services {
             snapshot_captures.register(s);
         }
         snapshot_captures.set_primary(primary_stream.id);
+        // Now that the capture registry exists and its streams are
+        // registered, give recovery the wiring to bracket + reconcile
+        // orphaned efforts left open by a crash (death/restart case).
+        let recovery_svc =
+            recovery_svc.with_snapshot_reconcile(thread_store.clone(), snapshot_captures.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
