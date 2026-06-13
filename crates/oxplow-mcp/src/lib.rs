@@ -1310,7 +1310,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Reorder tasks on a thread (or backlog). The orderedItemIds array becomes \
+        description = "Reorder tasks on a thread (or backlog). The ordered_item_ids array becomes \
                        the new sort order; items not in the list keep their relative order at the end."
     )]
     async fn reorder_tasks(
@@ -1717,7 +1717,7 @@ impl OxplowMcp {
                        read 5+ files inline — offloading the reads keeps your own cached context \
                        small. Returns { prompt, provisionalNoteId }. The orchestrator then calls \
                        Agent(subagent_type='Explore', prompt=<prompt>); the prompt instructs the \
-                       subagent to call mcp__oxplow__record_query_finding({ noteId: \
+                       subagent to call mcp__oxplow__record_query_finding({ note_id: \
                        <provisionalNoteId>, body }) with its findings. Read the finding later via \
                        mcp__oxplow__list_thread_notes."
     )]
@@ -1772,7 +1772,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         if params.0.note_id.is_empty() {
             return Err(McpError::invalid_params(
-                "record_query_finding: `noteId` is required",
+                "record_query_finding: `note_id` is required",
                 None,
             ));
         }
@@ -3578,7 +3578,7 @@ fn compose_delegate_query_prompt(
         "You are an Explore subagent answering one focused exploration question for the orchestrator.".into(),
         String::new(),
         format!("threadId: {thread_id}"),
-        format!("noteId: {note_id}"),
+        format!("note_id: {note_id}"),
         String::new(),
         "## Question".into(),
         question.to_string(),
@@ -3591,7 +3591,7 @@ fn compose_delegate_query_prompt(
     parts.push(String::new());
     parts.push("## How to report".into());
     parts.push(
-        "When done, call `mcp__oxplow__record_query_finding({ noteId, body })` ONCE with your complete finding. \
+        "When done, call `mcp__oxplow__record_query_finding({ note_id, body })` ONCE with your complete finding. \
          The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. \
          Do not make code changes. Do not create tasks. Read/Grep/Glob only."
             .into(),
@@ -4492,7 +4492,7 @@ mod tests {
     fn delegate_query_prompt_contains_required_sections() {
         let s = compose_delegate_query_prompt("b-1", "Where is X?", "", "n-2");
         assert!(s.contains("threadId: b-1"));
-        assert!(s.contains("noteId: n-2"));
+        assert!(s.contains("note_id: n-2"));
         assert!(s.contains("## Question"));
         assert!(s.contains("Where is X?"));
         assert!(s.contains("record_query_finding"));
