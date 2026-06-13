@@ -187,6 +187,31 @@ pub enum CoverageIngest {
     },
 }
 
+/// Outcome of an analysis ingest (the on-demand `ingest_analysis` MCP path),
+/// so the tool can report precisely why nothing landed. Mirrors
+/// [`CoverageIngest`]'s shape.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalysisIngest {
+    NoOpenEffort,
+    NotConfigured,
+    ReportMissing(String),
+    /// The report on disk predates the open effort. Only a `skip_if_stale`
+    /// caller skips on this; the explicit MCP path passes `false`.
+    StaleReport(String),
+    ParseError(String),
+    /// The open effort has no start snapshot, so the observation can't be
+    /// pinned to a baseline (mirrors `CoverageIngest::NoBaseline`).
+    NoBaseline,
+    Stored {
+        observation_id: i64,
+        error_count: u64,
+        warning_count: u64,
+        info_count: u64,
+        note_count: u64,
+        findings: usize,
+    },
+}
+
 #[derive(Clone)]
 pub struct CollectionService {
     observations: Arc<SqliteEffortObservationStore>,
@@ -408,6 +433,98 @@ impl CollectionService {
         };
         self.store_diff_coverage(thread, &effort, &stream_id, &report, &source)
             .await
+    }
+
+    /// Ingest a SINGLE analysis report (the explicit MCP path) — the on-demand
+    /// counterpart to [`ingest_coverage`]. Resolves `format` via the collector
+    /// registry, parses the report as `CollectorKind::Analysis`, and records a
+    /// `static-analysis` observation against the thread's open effort via
+    /// `record_static_analysis` (provenance `observed`). Uses the override
+    /// path/format, or the first configured analysis report.
+    pub async fn ingest_analysis(
+        &self,
+        thread: &ThreadId,
+        report_path_override: Option<String>,
+        format_override: Option<String>,
+        skip_if_stale: bool,
+    ) -> Result<AnalysisIngest, DomainError> {
+        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+            return Ok(AnalysisIngest::NoOpenEffort);
+        };
+        let cfg = self.collection_cfg();
+        let registry = self.registry(&cfg);
+        let (report_path, format_str) = match (report_path_override, format_override) {
+            (Some(p), Some(f)) => (p, f),
+            _ => match first_analysis_report(&cfg, &registry) {
+                Some(r) => (r.path.clone(), r.format.clone()),
+                None => return Ok(AnalysisIngest::NotConfigured),
+            },
+        };
+        let Some(collector) = registry.resolve(&format_str) else {
+            return Ok(AnalysisIngest::ParseError(format!(
+                "no collector registered for format \"{format_str}\""
+            )));
+        };
+        if collector.kind() != CollectorKind::Analysis {
+            return Ok(AnalysisIngest::ParseError(format!(
+                "format \"{format_str}\" is not an analysis format"
+            )));
+        }
+        let source = analysis_source(collector);
+        let analyzer = collector
+            .name()
+            .strip_prefix("oxplow.")
+            .unwrap_or(collector.name())
+            .to_string();
+        let abs = self.project_dir.join(&report_path);
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            return Ok(AnalysisIngest::ReportMissing(report_path));
+        };
+        // Stale guard for the ride-along (skip_if_stale); the explicit MCP
+        // path passes false — the caller asked for it.
+        if skip_if_stale && report_is_stale(&abs, effort.started_at) {
+            return Ok(AnalysisIngest::StaleReport(report_path));
+        }
+        // Pin the observation to the effort's start snapshot (mirrors
+        // ingest_coverage). No baseline → can't anchor it meaningfully.
+        if effort.start_snapshot_id.is_none() {
+            return Ok(AnalysisIngest::NoBaseline);
+        }
+        let report = match collector.run(&content) {
+            Ok(CollectorOutput::Analysis(r)) => r,
+            Ok(_) => {
+                return Ok(AnalysisIngest::ParseError(
+                    "collector did not produce analysis output".into(),
+                ))
+            }
+            Err(e) => return Ok(AnalysisIngest::ParseError(e.to_string())),
+        };
+        let (mut error_count, mut warning_count, mut info_count, mut note_count) = (0u64, 0, 0, 0);
+        for f in &report.findings {
+            use oxplow_coverage::Severity::*;
+            match f.severity {
+                Error => error_count += 1,
+                Warning => warning_count += 1,
+                Info => info_count += 1,
+                Note => note_count += 1,
+            }
+        }
+        let findings = report.findings.len();
+        let command = format!("ingest_analysis {report_path}");
+        match self
+            .record_static_analysis(thread, &command, Some(&report), &[analyzer], &source)
+            .await?
+        {
+            Some(observation_id) => Ok(AnalysisIngest::Stored {
+                observation_id,
+                error_count,
+                warning_count,
+                info_count,
+                note_count,
+                findings,
+            }),
+            None => Ok(AnalysisIngest::NoOpenEffort),
+        }
     }
 
     /// Compute diff coverage from a (possibly merged) report and store a
@@ -1155,6 +1272,30 @@ fn coverage_source(collector: &Collector) -> String {
         format!("plugin-exec:{}", collector.name())
     } else {
         "coverage-report".to_string()
+    }
+}
+
+/// First configured report whose format resolves to an analysis collector —
+/// the default target for an `ingest_analysis` call with no override.
+fn first_analysis_report<'a>(
+    cfg: &'a oxplow_config::CollectionConfig,
+    registry: &CollectorRegistry,
+) -> Option<&'a oxplow_config::ReportConfig> {
+    cfg.reports.iter().find(|r| {
+        registry
+            .resolve(&r.format)
+            .is_some_and(|c| c.kind() == CollectorKind::Analysis)
+    })
+}
+
+/// Trust label for an analysis collector's output: in-process tiers are
+/// `observed` from an `analysis-report`; the external-exec escape hatch is
+/// flagged `plugin-exec:<name>` so the UI can mark it lower-trust.
+fn analysis_source(collector: &Collector) -> String {
+    if collector.runtime() == CollectorRuntime::Exec {
+        format!("plugin-exec:{}", collector.name())
+    } else {
+        "analysis-report".to_string()
     }
 }
 
@@ -2164,6 +2305,94 @@ mod tests {
             assert_eq!(merged.findings.len(), 2);
             assert_eq!(source, "analysis-report");
             assert_eq!(analyzers, vec!["clippy".to_string()]);
+        }
+
+        // `eslint -f json`: errors (severity 2) + a warning (severity 1)
+        // across two filePaths, plus one null ruleId (parser error → no rule).
+        const ESLINT_JSON: &str = r#"[
+          { "filePath": "src/a.ts", "messages": [
+            { "ruleId": "no-unused-vars", "severity": 2, "line": 3, "column": 7, "message": "x is unused" },
+            { "ruleId": "eqeqeq", "severity": 1, "line": 9, "column": 5, "message": "use ===" }
+          ] },
+          { "filePath": "src/b.ts", "messages": [
+            { "ruleId": null, "severity": 2, "line": 1, "column": 1, "message": "Parsing error" }
+          ] }
+        ]"#;
+
+        #[tokio::test]
+        async fn ingest_analysis_stores_static_analysis_from_eslint_report() {
+            // End-to-end TS path: registry-parse(eslint-json) → store, through
+            // the real service entry point (not just the golden parser test).
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
+            let outcome = h
+                .service
+                .ingest_analysis(
+                    &h.thread,
+                    Some("eslint.json".into()),
+                    Some("eslint-json".into()),
+                    false,
+                )
+                .await
+                .unwrap();
+            match outcome {
+                AnalysisIngest::Stored {
+                    error_count,
+                    warning_count,
+                    info_count,
+                    note_count,
+                    findings,
+                    ..
+                } => {
+                    assert_eq!(error_count, 2);
+                    assert_eq!(warning_count, 1);
+                    assert_eq!(info_count, 0);
+                    assert_eq!(note_count, 0);
+                    assert_eq!(findings, 3);
+                }
+                other => panic!("expected Stored, got {other:?}"),
+            }
+            // The observation landed on the open effort with the expected
+            // findings list + counts, provenance observed, analyzer label.
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("static-analysis"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].provenance, "observed");
+            assert_eq!(rows[0].source, "analysis-report");
+            // metric = error+warning count (lower = better).
+            assert_eq!(rows[0].metric_value, Some(3.0));
+            let payload: serde_json::Value =
+                serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["errorCount"], 2);
+            assert_eq!(payload["warningCount"], 1);
+            assert_eq!(payload["analyzer"], "eslint");
+            let findings = payload["findings"].as_array().unwrap();
+            assert_eq!(findings.len(), 3);
+            assert_eq!(findings[0]["path"], "src/a.ts");
+            assert_eq!(findings[0]["rule"], "no-unused-vars");
+            assert_eq!(findings[0]["severity"], "error");
+            // null ruleId → no rule on that finding.
+            assert_eq!(findings[2]["path"], "src/b.ts");
+            assert!(findings[2]["rule"].is_null());
+        }
+
+        #[tokio::test]
+        async fn ingest_analysis_reports_missing_report() {
+            let h = build(None).await;
+            let outcome = h
+                .service
+                .ingest_analysis(
+                    &h.thread,
+                    Some("nope.json".into()),
+                    Some("eslint-json".into()),
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(outcome, AnalysisIngest::ReportMissing("nope.json".into()));
         }
 
         #[tokio::test]

@@ -824,8 +824,12 @@ before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
 deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
-detector, coverage ride-along, the `ingest_coverage` / `record_test_run` /
-`list_effort_observations` MCP tools) is documented in `.context/collection.md`.
+detector, coverage + static-analysis ride-alongs, the `ingest_coverage` /
+`ingest_analysis` / `record_test_run` / `list_effort_observations` MCP tools)
+is documented in `.context/collection.md`. `ingest_analysis` is the on-demand
+counterpart to `ingest_coverage` for static-analysis reports (e.g.
+`eslint-json`, `clippy-json`) — analysis previously had only the passive
+PostToolUse path.
 Report parsing is **pluggable**: those tools resolve a report's `format`
 against a `CollectorRegistry` (`crates/oxplow-collect-plugin`) — the four
 first-party parsers ship as bundled jaq plugins and a project can add its own

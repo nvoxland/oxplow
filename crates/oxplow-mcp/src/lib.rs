@@ -148,6 +148,17 @@ pub struct IngestCoverageParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IngestAnalysisParams {
+    pub thread_id: String,
+    /// Repo-relative path to the analysis report. Omit to use the first
+    /// analysis report configured in the project's `collection` profile.
+    pub report_path: Option<String>,
+    /// Analysis format, e.g. `eslint-json` | `clippy-json`. Omit to use the
+    /// configured report's format.
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RecordTestRunParams {
     pub thread_id: String,
     pub command: String,
@@ -163,7 +174,7 @@ pub struct ListEffortObservationsParams {
     /// `thread_id`.
     pub effort_id: Option<String>,
     pub thread_id: Option<String>,
-    /// Optional kind filter: `test-run` | `diff-coverage`.
+    /// Optional kind filter: `test-run` | `diff-coverage` | `static-analysis`.
     pub kind: Option<String>,
 }
 
@@ -1450,6 +1461,37 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "Ingest a static-analysis report (linter/analyzer findings) into the \
+            thread's open effort. The on-demand counterpart to `ingest_coverage`: oxplow parses \
+            the report deterministically via the collector registry (e.g. `eslint-json` for \
+            `eslint -f json`, `clippy-json` for clippy's JSON output) and records a \
+            `static-analysis` observation (provenance `observed`) — you point at the report, you \
+            NEVER report finding counts yourself. `report_path` and `format` default to the first \
+            analysis report in the project's `collection` profile (oxplow.yaml). Returns a status: \
+            stored (with per-severity counts) or a reason nothing landed (no_open_effort / \
+            not_configured / report_missing / parse_error / no_baseline)."
+    )]
+    async fn ingest_analysis(
+        &self,
+        params: Parameters<IngestAnalysisParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "ingest_analysis",
+            "thread_id",
+            &params.0.thread_id,
+            ID_THREAD,
+        )?;
+        let tid = parse_thread_id(&params.0.thread_id)?;
+        let outcome = self
+            .services
+            .collection
+            .ingest_analysis(&tid, params.0.report_path, params.0.format, false)
+            .await
+            .map_err(internal)?;
+        json_result(&analysis_ingest_json(&outcome))
+    }
+
+    #[tool(
         description = "Record a test run against the thread's open effort with pass/fail counts \
             the Bash-hook exit code can't capture. Marked `asserted` (agent-reported). oxplow \
             already records `observed` test runs automatically from the Bash hook — use this \
@@ -1490,7 +1532,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List collection observations (test-run / diff-coverage) for an effort. \
+        description = "List collection observations (test-run / diff-coverage / static-analysis) for an effort. \
             Pass `effort_id` to read it directly, or `thread_id` to use that thread's open \
             effort. Optional `kind` filter."
     )]
@@ -3234,6 +3276,37 @@ fn ingest_outcome_json(outcome: &oxplow_app::collection::CoverageIngest) -> serd
             "summaryPct": summary_pct,
             "changedLines": changed_lines,
             "coveredLines": covered_lines,
+        }),
+    }
+}
+
+fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> serde_json::Value {
+    use oxplow_app::collection::AnalysisIngest as A;
+    match outcome {
+        A::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
+        A::NotConfigured => serde_json::json!({
+            "status": "not_configured",
+            "hint": "add an analysis report (e.g. format eslint-json / clippy-json) to collection.reports in oxplow.yaml, or pass report_path + format explicitly",
+        }),
+        A::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
+        A::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
+        A::ParseError(err) => serde_json::json!({ "status": "parse_error", "error": err }),
+        A::NoBaseline => serde_json::json!({ "status": "no_baseline" }),
+        A::Stored {
+            observation_id,
+            error_count,
+            warning_count,
+            info_count,
+            note_count,
+            findings,
+        } => serde_json::json!({
+            "status": "stored",
+            "observationId": observation_id,
+            "errorCount": error_count,
+            "warningCount": warning_count,
+            "infoCount": info_count,
+            "noteCount": note_count,
+            "findings": findings,
         }),
     }
 }

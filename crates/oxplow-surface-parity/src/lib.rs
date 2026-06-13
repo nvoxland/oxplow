@@ -179,6 +179,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("find_wiki_pages_for_wiki_page"),
     // ---- collection (effort-scoped observations) ----
     agent("ingest_coverage"),
+    agent("ingest_analysis"),
     agent("record_test_run"),
     agent("lsp_definition"),
     agent("lsp_hover"),

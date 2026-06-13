@@ -96,11 +96,24 @@ hook + MCP wiring):
   the analyzer-ran record: when an analyzer is detected but regenerated no
   parseable report, it's stored command-only (no findings, no metric), the
   same way a `test-run` records command-only when no JUnit report is fresh.
-- **Active (MCP)** — `ingest_coverage` is a thin explicit entry point (same
-  registry parse path) for on-demand or non-standard-location reports.
-  It passes `skip_if_stale = false`, so it ingests regardless of mtime — the
-  caller explicitly asked for it. `record_test_run` is the one `asserted`
-  writer, for richer pass/fail counts the exit code alone can't give.
+- **Active (MCP)** — `ingest_coverage` and `ingest_analysis` are thin
+  explicit entry points (same registry parse path) for on-demand or
+  non-standard-location reports. Both pass `skip_if_stale = false`, so they
+  ingest regardless of mtime — the caller explicitly asked. `ingest_analysis`
+  is the on-demand counterpart to `ingest_coverage`: it resolves `format` via
+  the registry, parses as `CollectorKind::Analysis`, and records a
+  `static-analysis` observation against the open effort via the same private
+  `record_static_analysis` the passive ride-along uses (provenance `observed`,
+  source `analysis-report` / `plugin-exec:<name>`). `report_path`/`format`
+  default to the first analysis report in `collection.reports`; it returns a
+  status JSON — `stored` with per-severity counts, or a reason
+  (`no_open_effort` / `not_configured` / `report_missing` / `stale_report` /
+  `parse_error` / `no_baseline`). It exists because analysis had no active
+  path — only the passive PostToolUse hook — so the eslint/TS format could
+  never be exercised end-to-end in a repo that runs no eslint; the active
+  entry closes that symmetry gap (and serves on-demand / odd-location
+  reports). `record_test_run` is the one `asserted` writer, for richer
+  pass/fail counts the exit code alone can't give.
 
 Both paths resolve `format` → collector via the registry and **classify by the
 collector's kind** (coverage vs test vs analysis), not a format-name heuristic.
