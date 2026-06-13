@@ -243,6 +243,27 @@ and emit `OxplowEvent::WorkspaceChanged` (always) plus
 Subscribers refetch on receipt; no cache is being invalidated because
 there is no cache.
 
+### Stream-scoped destructive ops require a resolvable stream
+
+Most reads resolve their worktree via `resolve_repo_dir(stream_id)`,
+which treats an absent or unparseable `stream_id` as "use the project
+root" (the primary worktree). For **destructive** stream-scoped ops —
+`commit_all`, `merge`, `rebase` — that silent fallback is a footgun:
+a caller that meant stream B but sent a field that didn't bind (e.g.
+snake_case `stream_id` where the wire field is camelCase `streamId`,
+arriving as `None`) would run the op against the PRIMARY worktree and
+get a misleading `{"success":true,"stdout":"Already up to date."}` on
+the wrong branch.
+
+So those three ops resolve via `resolve_stream_worktree_strict`
+instead, which **errors** when `stream_id` is absent, syntactically
+invalid, or names an unknown stream — never falling back to primary.
+The UI is unaffected (its `api.ts` wrappers always pass a concrete
+stream id, and the primary stream is itself a registered stream row);
+the guard exists for MCP/scripted/future callers. To run one of these
+ops against the primary worktree, pass the primary stream's id
+explicitly — `None` is rejected on purpose.
+
 ## Runtime git operations
 
 All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:

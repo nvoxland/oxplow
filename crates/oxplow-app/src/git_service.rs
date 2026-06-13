@@ -117,6 +117,56 @@ impl GitService {
         self.project_dir.clone()
     }
 
+    /// Resolve a stream id to its worktree path for a **stream-scoped
+    /// destructive op** (merge / rebase / commit_all), erroring rather
+    /// than silently falling back to the primary worktree.
+    ///
+    /// `resolve_repo_dir` treats an absent or unresolvable `stream_id`
+    /// as "use the project root". That's fine for reads and for ops
+    /// that genuinely default to primary, but for a merge/rebase/commit
+    /// it's a footgun: a caller that meant stream B but sent a field
+    /// that didn't bind (e.g. snake_case `stream_id` where the wire
+    /// field is camelCase `streamId`, so it arrives as `None`) would
+    /// run the op against the PRIMARY worktree and get a misleading
+    /// "Already up to date" success on the wrong branch. These ops must
+    /// name a stream that actually resolves; anything else is an error.
+    async fn resolve_stream_worktree_strict(
+        &self,
+        stream_id: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let Some(id_str) = stream_id else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "this git operation is stream-scoped and requires a stream id; \
+                 refusing to fall back to the primary worktree",
+            ));
+        };
+        let Some(id) = StreamId::try_from_str(id_str) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{id_str:?} is not a valid stream id"),
+            ));
+        };
+        {
+            let map = self.worktrees.read().await;
+            if let Some(p) = map.get(&id) {
+                return Ok(p.clone());
+            }
+        }
+        // Not yet registered (e.g. an IPC call landing before boot
+        // finished seeding) — look the stream up directly before giving
+        // up, mirroring `resolve_repo_dir`.
+        if let Ok(rows) = self.streams.list().await {
+            if let Some(s) = rows.into_iter().find(|s| s.id == id) {
+                return Ok(resolve_worktree(&self.project_dir, &s.worktree_path));
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no stream found for id {id_str:?}"),
+        ))
+    }
+
     /// Register a stream's worktree with the service. Idempotent.
     pub async fn register(&self, stream_id: &StreamId, worktree: PathBuf) {
         let mut map = self.worktrees.write().await;
@@ -539,7 +589,7 @@ impl GitService {
         stream_id: Option<&str>,
         message: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.resolve_stream_worktree_strict(stream_id).await?;
         let result = run_blocking(move || oxplow_git::commit_all(&path, &message)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
@@ -625,7 +675,7 @@ impl GitService {
         stream_id: Option<&str>,
         source: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.resolve_stream_worktree_strict(stream_id).await?;
         let result = run_blocking(move || oxplow_git::merge(&path, &source)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
@@ -636,7 +686,7 @@ impl GitService {
         stream_id: Option<&str>,
         onto: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.resolve_stream_worktree_strict(stream_id).await?;
         let result = run_blocking(move || oxplow_git::rebase(&path, &onto)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
@@ -727,4 +777,138 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .expect("branch op join")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_db::{Database, SqliteStreamStore};
+    use oxplow_domain::{Stream, StreamKind};
+    use std::process::Command as Cmd;
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = Cmd::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?} in {dir:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn write_commit(dir: &Path, file: &str, contents: &str, msg: &str) {
+        std::fs::write(dir.join(file), contents).unwrap();
+        run_git(dir, &["add", "-A"]);
+        run_git(dir, &["commit", "-q", "-m", msg]);
+    }
+
+    /// Build a primary repo on `main` plus a sibling worktree on
+    /// `feature` that is one commit behind `main`. Returns the service,
+    /// the sibling worktree path, the StreamId registered for it, and
+    /// the tempdirs to keep alive.
+    async fn setup_behind_worktree() -> (
+        Arc<GitService>,
+        PathBuf,
+        StreamId,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
+        let primary = tempfile::tempdir().unwrap();
+        let p = primary.path();
+        run_git(p, &["init", "-q", "--initial-branch=main"]);
+        run_git(p, &["config", "user.email", "test@example.com"]);
+        run_git(p, &["config", "user.name", "test"]);
+        write_commit(p, "base.txt", "base", "base");
+        run_git(p, &["branch", "feature"]);
+
+        // Sibling worktree checked out on `feature`, then advance main.
+        let wt_parent = tempfile::tempdir().unwrap();
+        let sib = wt_parent.path().join("feature-wt");
+        run_git(
+            p,
+            &["worktree", "add", "-q", sib.to_str().unwrap(), "feature"],
+        );
+        write_commit(p, "adv.txt", "advanced", "advance main");
+
+        let db = Database::in_memory();
+        let store = Arc::new(SqliteStreamStore::new(db));
+        let stream_id = StreamId::new(2);
+        let now = Timestamp::now();
+        store
+            .upsert(&Stream {
+                id: stream_id,
+                kind: StreamKind::Worktree,
+                title: "feature".into(),
+                branch: "feature".into(),
+                branch_ref: "refs/heads/feature".into(),
+                branch_source: "main".into(),
+                worktree_path: sib.to_string_lossy().into_owned(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+
+        let svc = GitService::spawn(p.to_path_buf(), store, EventBus::new());
+        svc.register(&stream_id, sib.clone()).await;
+        (svc, sib, stream_id, primary, wt_parent)
+    }
+
+    #[tokio::test]
+    async fn merge_for_non_primary_stream_targets_that_worktree() {
+        let (svc, sib, stream_id, _primary, _wt) = setup_behind_worktree().await;
+
+        // Sanity: the advance commit only exists on main, not yet in the
+        // feature worktree.
+        assert!(!sib.join("adv.txt").exists());
+
+        let res = svc
+            .merge(Some(&stream_id.to_string()), "main".into())
+            .await
+            .unwrap();
+        assert!(res.success, "merge failed: {}", res.stderr);
+
+        // The merge ran in the FEATURE worktree, not the primary: main's
+        // advance commit is now present there. Under the old silent-
+        // primary fallback this would have no-opped ("Already up to date")
+        // and adv.txt would still be missing.
+        assert!(
+            sib.join("adv.txt").exists(),
+            "merge should have advanced the feature worktree"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_with_unresolved_stream_errors_instead_of_no_opping_primary() {
+        let (svc, _sib, _stream_id, _primary, _wt) = setup_behind_worktree().await;
+
+        // None (omitted / field didn't bind) must error, not silently
+        // merge into the primary worktree.
+        assert!(svc.merge(None, "main".into()).await.is_err());
+        // A syntactically-invalid stream id errors.
+        assert!(svc
+            .merge(Some("not-a-stream"), "main".into())
+            .await
+            .is_err());
+        // A well-formed but unknown stream id errors.
+        assert!(svc.merge(Some("str999"), "main".into()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rebase_and_commit_all_reject_unresolved_streams() {
+        let (svc, _sib, _stream_id, _primary, _wt) = setup_behind_worktree().await;
+        assert!(svc.rebase(None, "main".into()).await.is_err());
+        assert!(svc.rebase(Some("str999"), "main".into()).await.is_err());
+        assert!(svc.commit_all(None, "msg".into()).await.is_err());
+        assert!(svc.commit_all(Some("str999"), "msg".into()).await.is_err());
+    }
 }
