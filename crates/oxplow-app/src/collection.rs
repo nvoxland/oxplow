@@ -24,6 +24,7 @@ use oxplow_collect_plugin::{
     Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRegistry, CollectorRuntime,
 };
 use oxplow_config::OxplowConfig;
+use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::observation_store::{NewEffortObservation, SqliteEffortObservationStore};
 use oxplow_db::{
     SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffort, TaskEffortStore,
@@ -212,6 +213,7 @@ pub enum AnalysisIngest {
 #[derive(Clone)]
 pub struct CollectionService {
     observations: Arc<SqliteEffortObservationStore>,
+    nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
@@ -233,6 +235,7 @@ impl CollectionService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         observations: Arc<SqliteEffortObservationStore>,
+        nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
@@ -243,6 +246,7 @@ impl CollectionService {
     ) -> Self {
         Self {
             observations,
+            nudges,
             efforts,
             threads,
             snapshots,
@@ -627,6 +631,8 @@ impl CollectionService {
         // commit. Independent of the test/analysis ride-alongs below.
         if is_commit {
             if let Some(msg) = self.check_commit_hygiene(&effort, bash.exit_code).await? {
+                self.persist_nudge(thread, Some(&effort), "commit-hygiene", &msg, &bash.command)
+                    .await;
                 return Ok(Some(msg));
             }
             // A pure commit (not also a test/analysis run) is done.
@@ -704,9 +710,47 @@ impl CollectionService {
         // from the project's own config.
         let produced_report = report.is_some() || coverage.is_some();
         if !produced_report && self.mark_nudged(&effort.id) {
-            return Ok(Some(report_nudge_message(&cfg, &bash.command)));
+            let msg = report_nudge_message(&cfg, &bash.command);
+            self.persist_nudge(
+                thread,
+                Some(&effort),
+                "report-less-run",
+                &msg,
+                &bash.command,
+            )
+            .await;
+            return Ok(Some(msg));
         }
         Ok(None)
+    }
+
+    /// Persist a fired nudge (best-effort) and emit `AgentNudgesChanged` so
+    /// the renderer's debug sub-view live-updates. Called only AFTER the
+    /// one-shot dedup gates pass, so a deduped/non-fired nudge is never
+    /// stored. Never fails the hook: a persistence error is logged and
+    /// swallowed.
+    async fn persist_nudge(
+        &self,
+        thread: &ThreadId,
+        effort: Option<&TaskEffort>,
+        kind: &str,
+        message: &str,
+        trigger: &str,
+    ) {
+        let new = NewAgentNudge {
+            thread_id: thread.to_string(),
+            effort_id: effort.map(|e| e.id.to_string()),
+            kind: kind.to_string(),
+            message: message.to_string(),
+            trigger: Some(trigger.to_string()),
+        };
+        match self.nudges.record(new).await {
+            Ok(_) => self.events.emit(OxplowEvent::AgentNudgesChanged {
+                thread_id: *thread,
+                effort_id: effort.map(|e| e.id.to_string()),
+            }),
+            Err(err) => tracing::warn!(?err, "persisting agent nudge failed"),
+        }
     }
 
     /// Record that `effort` has been nudged. Returns `true` the first
@@ -1524,6 +1568,7 @@ mod tests {
             thread: ThreadId,
             effort_id: String,
             efforts: Arc<SqliteTaskEffortStore>,
+            nudges: Arc<SqliteAgentNudgeStore>,
             tmp: tempfile::TempDir,
         }
 
@@ -1692,8 +1737,10 @@ mod tests {
                 });
             }
 
+            let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             let service = CollectionService::new(
                 Arc::new(SqliteEffortObservationStore::new(db.clone())),
+                nudges.clone(),
                 efforts.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
@@ -1707,6 +1754,7 @@ mod tests {
                 thread: thread.id,
                 effort_id: effort.id.to_string(),
                 efforts,
+                nudges,
                 tmp,
             }
         }
@@ -2105,6 +2153,71 @@ mod tests {
                 second.is_none(),
                 "second run in same effort must not nudge again"
             );
+        }
+
+        #[tokio::test]
+        async fn report_less_run_persists_one_nudge_and_dedup_doesnt_double_store() {
+            // A report-less run persists exactly one `report-less-run` nudge
+            // row tagged with kind + message + trigger; the one-shot dedup
+            // means a second run in the same effort stores nothing more.
+            let h = build(None).await;
+            {
+                let mut cfg = h.service.config.write().unwrap();
+                cfg.collection.test_command = Some("bun run test:collect".into());
+            }
+            let payload = bash_payload("bun test --watch false", 0);
+            h.service
+                .on_post_tool_use(&h.thread, &payload)
+                .await
+                .unwrap()
+                .expect("first run nudges");
+            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            assert_eq!(rows.len(), 1, "exactly one nudge persisted");
+            assert_eq!(rows[0].kind, "report-less-run");
+            assert!(rows[0].message.contains("bun run test:collect"));
+            assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
+            assert_eq!(rows[0].effort_id.as_deref(), Some(h.effort_id.as_str()));
+
+            // Second run is deduped (returns None) and stores nothing more.
+            let second = h
+                .service
+                .on_post_tool_use(&h.thread, &payload)
+                .await
+                .unwrap();
+            assert!(second.is_none(), "second run deduped");
+            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            assert_eq!(rows.len(), 1, "deduped nudge must not double-store");
+        }
+
+        #[tokio::test]
+        async fn out_of_effort_commit_persists_one_commit_hygiene_nudge() {
+            // An out-of-effort commit persists exactly one `commit-hygiene`
+            // nudge; the per-commit dedup means a repeat hook on the same
+            // commit stores nothing more.
+            let h = build_full(None, true, &[("held.txt", "held\n")]).await;
+            git_in(h.tmp.path(), &["add", "src/foo.rs", "held.txt"]);
+            git_commit(h.tmp.path(), "feature work");
+            let payload = bash_payload("git commit -m work", 0);
+            h.service
+                .on_post_tool_use(&h.thread, &payload)
+                .await
+                .unwrap()
+                .expect("out-of-effort commit nudges");
+            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            assert_eq!(rows.len(), 1, "exactly one commit-hygiene nudge persisted");
+            assert_eq!(rows[0].kind, "commit-hygiene");
+            assert!(rows[0].message.contains("held.txt"));
+            assert_eq!(rows[0].trigger.as_deref(), Some("git commit -m work"));
+
+            // Same commit, hook fires again → per-commit dedup, no new row.
+            let second = h
+                .service
+                .on_post_tool_use(&h.thread, &payload)
+                .await
+                .unwrap();
+            assert!(second.is_none(), "same commit deduped");
+            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            assert_eq!(rows.len(), 1, "deduped commit nudge must not double-store");
         }
 
         #[tokio::test]

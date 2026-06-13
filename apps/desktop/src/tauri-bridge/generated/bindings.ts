@@ -530,6 +530,17 @@ export const commands = {
 	 *  coverage badge + tests-run list on `TaskPage`.
 	 */
 	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
+	/**
+	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on
+	 *  `TaskPage`.
+	 */
+	listNudgesForEffort: (effortId: EffortId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_effort", { effortId })),
+	/**
+	 *  Persisted agent nudges for a whole thread (the thread-scoped fallback for
+	 *  nudges that fire with no open effort), newest-first.
+	 */
+	listNudgesForThread: (threadId: ThreadId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_thread", { threadId })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
@@ -731,6 +742,24 @@ export type AdoptWorktreeRequest = {
 };
 
 export type AgentKind = "claude" | "codex" | "opencode";
+
+// One persisted nudge row.
+export type AgentNudge = {
+	id: number,
+	thread_id: string,
+	/**
+	 *  Open effort the nudge fired against, if any (some nudge kinds fire
+	 *  thread-scoped with no open effort).
+	 */
+	effort_id: string | null,
+	// Well-known kind: `report-less-run` | `commit-hygiene` (open-ended).
+	kind: string,
+	// The full message text that was surfaced to the agent.
+	message: string,
+	// What caused it — the bash command (or commit sha).
+	trigger: string | null,
+	created_at: Timestamp,
+};
 
 export type AgentStatus = {
 	thread_id: ThreadId,
@@ -1807,6 +1836,12 @@ export type OxplowEvent =
  *  the effort's observation list. See `.context/collection.md`.
  */
 { kind: "effortObservationsChanged"; threadId: ThreadId; effortId: string } | 
+/**
+ *  A persisted agent nudge landed (report-less-run / commit-hygiene).
+ *  The renderer refetches the effort's (or thread's) nudge list. See
+ *  `.context/agent-model.md` (Nudge persistence).
+ */
+{ kind: "agentNudgesChanged"; threadId: ThreadId; effortId: string | null } | 
 /**
  *  `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;

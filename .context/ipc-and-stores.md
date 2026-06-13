@@ -497,6 +497,30 @@ The collection subsystem (`.context/collection.md`) follows the same
   control-plane PostToolUse hook. The store
   (`SqliteEffortObservationStore`) stays a thin typed read/write surface.
 
+## Agent nudges
+
+The persisted record of the informational nudges `CollectionService`
+surfaces to the agent from the PostToolUse hook (report-less-run +
+commit-hygiene). A standard 7-layer instance backed by
+`SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`;
+schema in [data-model.md](./data-model.md), migration `V33`).
+
+- **IPC** (UI-only — the agent never reads nudges back): two read methods,
+  `list_nudges_for_effort(effortId)` and `list_nudges_for_thread(threadId)`
+  (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
+  `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
+  `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
+  There are no write IPCs — nudges are written exclusively by the service
+  inside `on_post_tool_use`, best-effort (a persistence error is logged,
+  never fails the hook).
+- **Event**: `AgentNudgesChanged { threadId, effortId: Option<String> }`
+  (wire kind `agentNudgesChanged`) emitted by the service after a successful
+  record. The renderer's collapsed "Agent nudges" debug sub-view
+  (`EffortObservations.tsx` → `AgentNudgesBlock`) subscribes and refetches
+  per effort, alongside the coverage/tests block. Persistence happens AFTER
+  the existing one-shot dedup gates, so a deduped nudge is never stored or
+  re-emitted.
+
 ## Multi-owner stores: the `page_ref` slice pattern
 
 Most stores have a single writer per row. The unified

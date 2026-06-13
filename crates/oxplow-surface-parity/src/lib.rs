@@ -117,6 +117,8 @@ pub const MANIFEST: &[Capability] = &[
     both("add_thread_note"),
     both("list_thread_notes"),
     both("list_effort_observations"),
+    ui("list_nudges_for_effort"),
+    ui("list_nudges_for_thread"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),

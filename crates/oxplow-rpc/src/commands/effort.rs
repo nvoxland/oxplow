@@ -5,9 +5,9 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort, TaskEffortStore as _,
+    AgentNudge, EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort, TaskEffortStore as _,
 };
-use oxplow_domain::{EffortId, TaskId};
+use oxplow_domain::{EffortId, TaskId, ThreadId};
 use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::error::IpcError;
@@ -83,6 +83,32 @@ pub async fn list_effort_observations(
         .await?)
 }
 
+/// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+/// newest-first. Drives the collapsed "Agent nudges" debug sub-view on the
+/// task page. See `.context/agent-model.md` (Nudge persistence).
+pub async fn list_nudges_for_effort(
+    svc: &Services,
+    effort_id: EffortId,
+) -> Result<Vec<AgentNudge>, IpcError> {
+    Ok(svc
+        .nudge_store
+        .list_for_effort(&effort_id.to_string())
+        .await?)
+}
+
+/// Persisted agent nudges for a whole thread (effort-scoped and thread-only),
+/// newest-first. The thread-scoped fallback for nudges that fire with no open
+/// effort.
+pub async fn list_nudges_for_thread(
+    svc: &Services,
+    thread_id: ThreadId,
+) -> Result<Vec<AgentNudge>, IpcError> {
+    Ok(svc
+        .nudge_store
+        .list_for_thread(&thread_id.to_string())
+        .await?)
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -105,6 +131,32 @@ mod tests {
         let out = crate::dispatch(
             "list_effort_observations",
             serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_nudges_for_effort_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "list_nudges_for_effort",
+            serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_nudges_for_thread_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "list_nudges_for_thread",
+            serde_json::json!({"threadId": "thr999999"}),
             &svc,
         )
         .await

@@ -159,9 +159,10 @@ names comes entirely from the project's config, so it works for any
 test tool, current or future.
 
 **Anti-nag:** the nudge fires at most once per effort. `CollectionService`
-tracks nudged effort ids in an in-memory `HashSet` (not persisted — the
-nudge is ephemeral guidance, not durable state). The dedup clears if the
-daemon restarts, so the first run of a new session can nudge again.
+tracks nudged effort ids in an in-memory `HashSet` (the *dedup* is not
+persisted — it clears on daemon restart, so the first run of a new session
+can nudge again). The *fired* nudge itself is persisted for review — see
+Nudge persistence below.
 
 ## Commit-hygiene nudge (PostToolUse)
 
@@ -198,6 +199,25 @@ once per commit sha, tracked in a second in-memory `HashSet`
 (`nudged_commits`) alongside `nudged_efforts`. See also
 [git-integration.md](./git-integration.md) (commits are otherwise
 user-driven; the Stop hook emits no commit directives).
+
+## Nudge persistence
+
+Both PostToolUse nudges (report-less-run + commit-hygiene) are **persisted**
+as well as returned to the agent, so a reviewer can see "what oxplow told the
+agent this effort" after the fact — previously the nudge string was forwarded
+via `additionalContext` and then lost. When `on_post_tool_use` decides to
+return a nudge, it also calls `persist_nudge` (best-effort — a write error is
+logged via `tracing::warn!` and swallowed, never failing the hook), which
+records a row in the `agent_nudge` table tagged with `kind`
+(`report-less-run` / `commit-hygiene`), the message, and the trigger (the
+bash command) and emits `AgentNudgesChanged`. Persistence sits **after** the
+in-memory dedup gates (`mark_nudged` / `mark_commit_nudged`), so a
+deduped/non-fired nudge is never stored. The store
+(`SqliteAgentNudgeStore`), IPC (`list_nudges_for_effort` /
+`list_nudges_for_thread`), and the collapsed "Agent nudges" task-page
+sub-view are covered in [data-model.md](./data-model.md),
+[ipc-and-stores.md](./ipc-and-stores.md), and
+[agent-model.md](./agent-model.md) (Nudge persistence).
 
 ## Adding a new observation kind
 

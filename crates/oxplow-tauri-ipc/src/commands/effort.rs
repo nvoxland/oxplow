@@ -1,7 +1,7 @@
 //! task effort tracking commands.
 
-use oxplow_db::{EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort};
-use oxplow_domain::{EffortId, TaskId};
+use oxplow_db::{AgentNudge, EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort};
+use oxplow_domain::{EffortId, TaskId, ThreadId};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -59,4 +59,27 @@ pub async fn list_effort_observations(
     kind: Option<String>,
 ) -> Result<Vec<EffortObservation>, IpcError> {
     oxplow_rpc::commands::effort::list_effort_observations(&state, effort_id, kind).await
+}
+
+/// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+/// newest-first. Drives the collapsed "Agent nudges" debug sub-view on
+/// `TaskPage`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_nudges_for_effort(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<Vec<AgentNudge>, IpcError> {
+    oxplow_rpc::commands::effort::list_nudges_for_effort(&state, effort_id).await
+}
+
+/// Persisted agent nudges for a whole thread (the thread-scoped fallback for
+/// nudges that fire with no open effort), newest-first.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_nudges_for_thread(
+    state: tauri::State<'_, AppState>,
+    thread_id: ThreadId,
+) -> Result<Vec<AgentNudge>, IpcError> {
+    oxplow_rpc::commands::effort::list_nudges_for_thread(&state, thread_id).await
 }

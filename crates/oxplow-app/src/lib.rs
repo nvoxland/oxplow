@@ -72,11 +72,11 @@ use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqliteCommentStore,
-    SqliteEffortObservationStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
-    SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore, SqliteTaskEventStore,
-    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore, SqliteThreadStore, SqliteUsageStore,
-    SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
+    SqliteCommentStore, SqliteEffortObservationStore, SqlitePageRefStore, SqlitePageVisitStore,
+    SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
+    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -358,6 +358,9 @@ pub struct Services {
     pub effort_store: Arc<SqliteTaskEffortStore>,
     /// Effort-scoped collection observations (test runs + diff coverage).
     pub observation_store: Arc<SqliteEffortObservationStore>,
+    /// Persisted agent nudges (report-less-run / commit-hygiene) — the
+    /// human-facing record of what oxplow steered the agent to do.
+    pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
@@ -432,6 +435,7 @@ impl Services {
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
+        let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -519,6 +523,7 @@ impl Services {
             .with_thread_store(thread_store.clone());
         let collection = collection::CollectionService::new(
             observation_store.clone(),
+            nudge_store.clone(),
             effort_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
@@ -557,6 +562,7 @@ impl Services {
             thread_runtime,
             effort_store,
             observation_store,
+            nudge_store,
             collection,
             wiki_page_thread_updates,
             page_ref_store,

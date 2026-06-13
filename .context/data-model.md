@@ -918,6 +918,33 @@ closest_git_version, git_version_exact, created_at`. Indexes on
   prunes to keep-last-N (10) per `(effort_id, kind)` in the same
   transaction.
 
+### `agent_nudge` — `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`, migration `V33__agent_nudge.sql`)
+
+The persisted record of the informational **nudges** oxplow surfaces to the
+agent from the PostToolUse hook (`crates/oxplow-app/src/collection.rs`
+`on_post_tool_use`) — the report-less-test-run nudge and the commit-hygiene
+nudge. Previously fully ephemeral (returned as `additionalContext`, then
+lost); persisting gives a reviewer/human-facing answer to "what did oxplow
+tell the agent this effort." See `.context/agent-model.md` (Nudge
+persistence).
+
+Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
+(NULLABLE, FK task_effort ON DELETE CASCADE), kind, message, trigger
+(nullable), created_at`. Indexes on `(effort_id, created_at DESC)` and
+`(thread_id, created_at DESC)`.
+
+- **`thread_id` NOT NULL, `effort_id` nullable**: every nudge fires within a
+  thread; today both kinds fire against the open effort, but the column is
+  nullable so a future thread-scoped nudge (no open effort) has a home. The
+  effort FK cascades like `effort_observation` when present.
+- **`kind`** is open-ended (`report-less-run` | `commit-hygiene` |
+  `configure`, …) — adding a kind needs no migration.
+- **`trigger`** is the bash command (or commit sha) that caused the nudge.
+- **One-shot dedup lives in the service** (in-memory, keyed by effort for the
+  report nudge and by commit sha for hygiene), so the table only ever sees
+  nudges that *actually fired* — a deduped nudge is never stored. No
+  store-side retention prune (nudge volume per effort is tiny).
+
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
@@ -1139,6 +1166,7 @@ The runtime relays each store's changes onto the typed EventBus
 - `task.changed`, `backlog.changed`, `thread.changed`
 - `file-snapshot.created`, `agent-status.changed`
 - `hook.recorded`, `config.changed`
+- `effortObservationsChanged`, `agentNudgesChanged`
 
 UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
 like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in

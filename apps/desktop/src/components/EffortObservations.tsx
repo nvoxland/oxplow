@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
 import {
+  type AgentNudge,
   type EffortObservation,
   listEffortObservations,
+  listNudgesForEffort,
   subscribeOxplowEvents,
 } from "../api.js";
 import { effortCoverageRef } from "../tabs/pageRefs.js";
@@ -811,6 +813,10 @@ export function FullCoverageView({
  * (collection is opt-in via `/oxplow:configure`), so untracked efforts
  * stay uncluttered. When it does render, the tests portion always says
  * something — the run tree, or an explicit "No tests run."
+ *
+ * The collapsed "Agent nudges" debug sub-view renders alongside it
+ * (independently — a commit-hygiene nudge can fire with no observation),
+ * self-hiding when the effort has no fired nudges.
  */
 export function EffortObservationsBlock({
   effortId,
@@ -839,8 +845,6 @@ export function EffortObservationsBlock({
     };
   }, [effortId]);
 
-  if (obs.length === 0) return null;
-
   const coverage = obs.find((o) => o.kind === "diff-coverage");
   const runs = obs.filter((o) => o.kind === "test-run");
   const analysis = obs.find((o) => o.kind === "static-analysis");
@@ -850,22 +854,130 @@ export function EffortObservationsBlock({
   };
 
   return (
-    <div
-      data-testid={`effort-observations-${effortId}`}
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    <>
+      {obs.length > 0 ? (
+        <div
+          data-testid={`effort-observations-${effortId}`}
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <h4>Coverage &amp; tests</h4>
+          {coverage ? (
+            <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
+          ) : (
+            <span style={mutedStyle}>
+              No coverage recorded for this effort — run the configured coverage command.
+            </span>
+          )}
+          {runs.length > 0 ? <TestsRun effortId={effortId} runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
+          {/* Static analysis renders only when an analyzer ran for this effort,
+              keeping untracked efforts uncluttered. */}
+          {analysis ? <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={8} /> : null}
+        </div>
+      ) : null}
+      <AgentNudgesBlock effortId={effortId} />
+    </>
+  );
+}
+
+/** Human label for a nudge kind. Open-ended — unknown kinds fall back to
+ *  the raw kind string. */
+const NUDGE_KIND_LABEL: Record<string, string> = {
+  "report-less-run": "Report-less run",
+  "commit-hygiene": "Commit hygiene",
+  configure: "Configure",
+};
+
+function nudgeRelative(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return iso;
+  const m = Math.round(ms / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return `${d}d ago`;
+}
+
+/**
+ * Collapsed debug sub-view of the agent nudges oxplow fired for this effort
+ * — the human/reviewer-facing record of "what oxplow told the agent." Low-key
+ * by design (a `<details>` collapsed by default, native disclosure keyboard
+ * behaviour), and self-hiding when no nudge fired. Live-updates on
+ * `agentNudgesChanged` for this effort. See `.context/agent-model.md`.
+ */
+function AgentNudgesBlock({ effortId }: { effortId: string }) {
+  const [nudges, setNudges] = useState<AgentNudge[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void listNudgesForEffort(effortId).then((rows) => {
+        if (!cancelled) setNudges(rows);
+      });
+    };
+    load();
+    const unsub = subscribeOxplowEvents((event) => {
+      if (event.kind !== "agentNudgesChanged") return;
+      if (event.effortId !== effortId) return;
+      load();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [effortId]);
+
+  if (nudges.length === 0) return null;
+
+  const mutedStyle: React.CSSProperties = {
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
+  };
+
+  return (
+    <details
+      data-testid={`effort-nudges-${effortId}`}
+      style={{ marginTop: 4, fontSize: "var(--text-xs)" }}
     >
-      <h4>Coverage &amp; tests</h4>
-      {coverage ? (
-        <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
-      ) : (
-        <span style={mutedStyle}>
-          No coverage recorded for this effort — run the configured coverage command.
-        </span>
-      )}
-      {runs.length > 0 ? <TestsRun effortId={effortId} runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
-      {/* Static analysis renders only when an analyzer ran for this effort,
-          keeping untracked efforts uncluttered. */}
-      {analysis ? <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={8} /> : null}
-    </div>
+      <summary
+        style={{ cursor: "pointer", color: "var(--text-muted)", userSelect: "none" }}
+      >
+        Agent nudges ({nudges.length})
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+        {nudges.map((n) => (
+          <div
+            key={n.id}
+            data-testid={`nudge-row-${n.id}`}
+            style={{ display: "flex", flexDirection: "column", gap: 2 }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--text-xxs, 10px)",
+                  padding: "0 4px",
+                  borderRadius: 3,
+                  background: "var(--bg-tier-2, rgba(127,127,127,0.15))",
+                  color: "var(--text-secondary, var(--text-muted))",
+                }}
+              >
+                {NUDGE_KIND_LABEL[n.kind] ?? n.kind}
+              </span>
+              <span style={mutedStyle}>{nudgeRelative(n.created_at)}</span>
+            </div>
+            <span style={{ color: "var(--text-secondary, var(--text-primary))" }}>
+              {n.message}
+            </span>
+            {n.trigger ? (
+              <span style={{ ...mutedStyle, fontFamily: "var(--font-mono)" }}>
+                {n.trigger}
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }

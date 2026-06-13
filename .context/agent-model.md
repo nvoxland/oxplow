@@ -840,6 +840,27 @@ refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext
 steering the agent to the report-emitting command. See the "Report-less-run
 nudge" section in `.context/collection.md`.
 
+### Nudge persistence
+
+The PostToolUse nudges — the report-less-run nudge above and the
+commit-hygiene nudge (a `git commit` that swept in files outside the open
+effort's changed set) — are **persisted** as well as returned. The service
+(`CollectionService::on_post_tool_use`) writes each fired nudge to the
+`agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
+`.context/data-model.md`) tagged with kind (`report-less-run` /
+`commit-hygiene`), the message it surfaced, and the trigger (bash command).
+This is best-effort — a persistence error is logged and swallowed, never
+failing the hook. Persistence happens **after** the existing in-memory
+one-shot dedup gates (per-effort for the report nudge, per-commit sha for
+hygiene), so a deduped/non-fired nudge is never stored.
+
+These are surfaced UI-side only (the agent never reads them back): a
+collapsed "Agent nudges" debug sub-view on the task page (near the effort
+observations) lists them, live-updating on the `agentNudgesChanged` event.
+The point is a reviewer/human-facing record of "what oxplow told the agent
+this effort" — previously the nudges were fully ephemeral. IPC + event wiring
+is in `.context/ipc-and-stores.md` (Agent nudges).
+
 ## Write guard
 
 Non-writer threads share the writer's worktree (same checkout, separate
