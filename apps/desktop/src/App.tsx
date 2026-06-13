@@ -150,6 +150,7 @@ import {
 } from "./tabs/pageTabsPersistence.js";
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
 import { openProjectGuarded, listRecentProjects } from "./api.js";
+import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { DISK } from "./file-version.js";
@@ -310,8 +311,13 @@ export function App() {
     });
   }, []);
 
-  useEffect(() => {
-    Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
+  // Top-level state hydration: streams, the current stream + its
+  // threads, workspace context, and the selected thread's work state.
+  // Run on mount and again on a remote-daemon WS reconnect (see
+  // `onRemoteReconnect` below) so state goes live again after a drop
+  // without a manual full-page reload.
+  const loadInitialAppState = useCallback(() => {
+    return Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
       .then(async ([allStreams, current, context]) => {
         const initialThreadState = await getThreadState(current.id);
         const initialThread = initialThreadState.threads.find((thread) => thread.id === initialThreadState.selectedThreadId);
@@ -348,6 +354,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void loadInitialAppState();
+  }, [loadInitialAppState]);
+
+  // Remote-daemon WS reconnect: re-hydrate the top-level stores so the
+  // UI catches up on events missed while the socket was down. The WS
+  // itself auto-re-subscribes; this covers the snapshot the client
+  // holds. No manual reload — that's the whole point.
+  useEffect(() => {
+    return onRemoteReconnect(() => {
+      logUi("info", "remote daemon reconnected, resyncing state");
+      void loadInitialAppState();
+    });
+  }, [loadInitialAppState]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function check() {
@@ -356,8 +377,13 @@ export function App() {
       const decision = advanceDaemonProbeState(daemonProbeState.current, alive);
       daemonProbeState.current = decision.next;
       if (decision.refresh) {
-        logUi("info", "daemon recovered, refreshing ui");
-        window.location.reload();
+        // Daemon came back after an HTTP-level outage. Resync the stores
+        // in place instead of a full page reload (which drops unsaved
+        // editor drafts). triggerRemoteResync re-runs the same reconnect
+        // handlers a WS recovery would.
+        logUi("info", "daemon recovered, resyncing ui");
+        setDaemonUnavailable(false);
+        triggerRemoteResync();
         return;
       }
       setDaemonUnavailable(decision.next.unavailable);

@@ -147,6 +147,32 @@ function notifyConnectionState(state: RemoteConnectionState): void {
   for (const h of connectionStateHandlers) h(state);
 }
 
+/// Reconnect/resync handlers. Fired when the WS comes back *after* a
+/// drop (not on the initial connect). Consumers re-hydrate the stores
+/// they hold here so state goes live again with no manual page reload —
+/// the WS itself auto-re-subscribes (channelHandlers persist across the
+/// drop), this covers the events missed while it was down. Local mode
+/// never fires.
+const reconnectHandlers = new Set<() => void>();
+
+/// Register a resync callback for WS reconnect (and manual
+/// `triggerRemoteResync`). Returns an unsubscribe.
+export function onRemoteReconnect(handler: () => void): () => void {
+  reconnectHandlers.add(handler);
+  return () => reconnectHandlers.delete(handler);
+}
+
+/// Fire every reconnect handler now. Used by the daemon health-probe
+/// recovery path (App.tsx) so an HTTP-level recovery resyncs the same
+/// stores a WS reconnect would, instead of forcing a full page reload.
+export function triggerRemoteResync(): void {
+  for (const h of reconnectHandlers) h();
+}
+
+/// True once the socket has dropped; reset after the next open fires the
+/// reconnect handlers. Distinguishes a reconnect from the first connect.
+let wasDown = false;
+
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null) return;
   const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events`;
@@ -168,9 +194,17 @@ function ensureSocket(): void {
   ws.onopen = () => {
     reconnectDelayMs = 500;
     notifyConnectionState("up");
+    // A reconnect after a drop — re-hydrate the stores to catch up on
+    // events missed while the socket was down. Not fired on the first
+    // connect (App's mount loader already does the initial hydration).
+    if (wasDown) {
+      wasDown = false;
+      for (const h of reconnectHandlers) h();
+    }
   };
   ws.onclose = () => {
     socket = null;
+    wasDown = true;
     notifyConnectionState("down");
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.

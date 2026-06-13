@@ -10,11 +10,17 @@ import {
 
 /// What the banner shows. `hidden` while the connection is healthy;
 /// `down` while the WS is dropped (transport keeps retrying with
-/// backoff); `restored` once it comes back — we ask the user to reload
-/// rather than auto-reloading, because a reload drops unsaved editor
-/// drafts and the user may be mid-edit. The daemon-side work (tmux
-/// agents, watchers) ran through the gap either way.
+/// backoff); `restored` once it comes back. On recovery the transport
+/// auto-resyncs the client stores (see `onRemoteReconnect` in
+/// transport.ts), so `restored` is just a brief non-blocking
+/// confirmation — no reload prompt, and it auto-dismisses. The
+/// daemon-side work (tmux agents, watchers) ran through the gap either
+/// way.
 export type BannerState = "hidden" | "down" | "restored";
+
+/// How long the "reconnected" confirmation lingers before it
+/// auto-dismisses (ms). Non-blocking — purely informational.
+export const RESTORED_AUTO_DISMISS_MS = 4000;
 
 /// Pure transition: drop → down; recovery after a drop → restored
 /// (sticky until dismissed); an "up" with no preceding drop (the
@@ -34,6 +40,14 @@ export function RemoteConnectionBanner() {
       setState((prev) => nextBannerState(prev, event));
     });
   }, []);
+
+  // The "reconnected" confirmation is informational only — auto-dismiss
+  // it after a few seconds so it doesn't linger over the UI.
+  useEffect(() => {
+    if (state !== "restored") return;
+    const t = setTimeout(() => setState("hidden"), RESTORED_AUTO_DISMISS_MS);
+    return () => clearTimeout(t);
+  }, [state]);
 
   if (!isRemote() || state === "hidden") return null;
 
@@ -58,15 +72,7 @@ export function RemoteConnectionBanner() {
 
   return (
     <div data-testid="remote-banner-restored" style={{ ...stripStyle, ...restoredStyle }}>
-      <span>Connection restored — reload to resync state.</span>
-      <button
-        type="button"
-        data-testid="remote-banner-reload"
-        onClick={() => window.location.reload()}
-        style={buttonStyle}
-      >
-        Reload
-      </button>
+      <span>Connection restored — state resynced.</span>
       <button
         type="button"
         data-testid="remote-banner-dismiss"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { listCommentsForTarget, subscribeCommentEvents } from "../../api.js";
+import { listCommentsForTarget, onRemoteReconnect, subscribeCommentEvents } from "../../api.js";
 import type { CommentThread } from "../../tauri-bridge/generated/bindings.js";
 
 /// Fetch the comment threads anchored to one target (`wiki:<slug>`,
@@ -39,9 +39,13 @@ export function useCommentsForTarget(
     };
     void fetch();
     const unsub = subscribeCommentEvents(() => void fetch(), { targetKind, targetId });
+    // Re-fetch after a remote-daemon WS reconnect so comment threads go
+    // live again without a manual reload (events missed during the drop).
+    const unsubReconnect = onRemoteReconnect(() => void fetch());
     return () => {
       active = false;
       unsub();
+      unsubReconnect();
     };
   }, [targetKind, targetId]);
 

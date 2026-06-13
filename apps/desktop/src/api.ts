@@ -1,5 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import { listen } from "./tauri-bridge/transport.js";
+import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
+
+export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
