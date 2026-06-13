@@ -219,6 +219,12 @@ fn record_file_tx(
             if version.git_version_exact { 1 } else { 0 },
         ],
     )?;
+    // Claim-first invariant: a path is CLAIMED or UNATTRIBUTED, never both.
+    // Claiming clears any audit residue recorded for it on close.
+    conn.execute(
+        "DELETE FROM effort_unattributed_file WHERE effort_id = ?1 AND path = ?2",
+        params![id.value(), path],
+    )?;
     Ok(())
 }
 
@@ -405,6 +411,18 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         id: &EffortId,
     ) -> Result<Vec<String>, DomainError>;
+    /// Replace the effort's UNATTRIBUTED audit residue with `paths`
+    /// (delete-all-for-effort, then insert) — the claim-first
+    /// reconciliation's record of `changed_but_not_claimed` paths an
+    /// out-of-band close couldn't attribute. Idempotent. See migration
+    /// `V34__effort_unattributed_file.sql`.
+    async fn replace_unattributed_files(
+        &self,
+        id: &EffortId,
+        paths: &[String],
+    ) -> Result<(), DomainError>;
+    /// The effort's recorded unattributed/unreviewed paths.
+    async fn list_unattributed_files(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
 }
 
 #[derive(Clone)]
@@ -983,6 +1001,53 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .await
     }
 
+    async fn replace_unattributed_files(
+        &self,
+        id: &EffortId,
+        paths: &[String],
+    ) -> Result<(), DomainError> {
+        let id_clone = *id;
+        let paths = paths.to_vec();
+        self.db
+            .call_mut(move |conn| {
+                let sql_err = crate::database::map_sql_err;
+                let tx = conn.transaction().map_err(sql_err)?;
+                tx.execute(
+                    "DELETE FROM effort_unattributed_file WHERE effort_id = ?1",
+                    params![id_clone.value()],
+                )
+                .map_err(sql_err)?;
+                let now = ts_to_string(Timestamp::now());
+                for path in &paths {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO effort_unattributed_file
+                           (effort_id, path, recorded_at)
+                         VALUES (?1, ?2, ?3)",
+                        params![id_clone.value(), path, now],
+                    )
+                    .map_err(sql_err)?;
+                }
+                tx.commit().map_err(sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    async fn list_unattributed_files(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
+        let id_clone = *id;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT path FROM effort_unattributed_file \
+                     WHERE effort_id = ?1 ORDER BY path",
+                )?;
+                let rows =
+                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     async fn list_efforts_at_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
@@ -1530,6 +1595,58 @@ mod tests {
         assert!(
             wiki_back.iter().any(|e| e.source_id == tid.to_string()),
             "summary slice was clobbered by record_file: {wiki_back:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unattributed_files_replace_list_and_cascade() {
+        // replace_unattributed_files records the audit residue; list reads
+        // it back; deleting the effort cascades it away.
+        let (_, db, tid, t) = fixture_with_db().await;
+        let store = SqliteTaskEffortStore::new(db);
+        let eff = store.start(tid, &t, None).await.unwrap();
+        store
+            .replace_unattributed_files(&eff.id, &["a.rs".into(), "b.rs".into()])
+            .await
+            .unwrap();
+        let mut got = store.list_unattributed_files(&eff.id).await.unwrap();
+        got.sort();
+        assert_eq!(got, vec!["a.rs".to_string(), "b.rs".to_string()]);
+        // Replace is idempotent / overwrites the whole set.
+        store
+            .replace_unattributed_files(&eff.id, &["c.rs".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            store.list_unattributed_files(&eff.id).await.unwrap(),
+            vec!["c.rs".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn record_file_clears_unattributed_mark() {
+        // Invariant: a path is CLAIMED or UNATTRIBUTED, never both.
+        // Claiming a previously-unattributed path drops its residue row.
+        let (_, db, tid, t) = fixture_with_db().await;
+        let store = SqliteTaskEffortStore::new(db);
+        let eff = store.start(tid, &t, None).await.unwrap();
+        store
+            .replace_unattributed_files(&eff.id, &["shared.rs".into(), "other.rs".into()])
+            .await
+            .unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_git_version: None,
+            git_version_exact: false,
+        };
+        store
+            .record_file(&eff.id, "shared.rs", EffortFileChange::Updated, v)
+            .await
+            .unwrap();
+        // shared.rs is now claimed → no longer unattributed; other.rs stays.
+        assert_eq!(
+            store.list_unattributed_files(&eff.id).await.unwrap(),
+            vec!["other.rs".to_string()]
         );
     }
 

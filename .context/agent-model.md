@@ -1210,6 +1210,22 @@ via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
 paths) drop all rows, so the "assume all" fallback engages in
 `computeEffortFiles`.
 
+**Close-time reconciliation (unattributed residue).** On every
+snapshot-bracketed effort close — `TaskService::update` out of
+`in_progress`, so IPC `update_task`, MCP `update_task`, and the close
+half of `complete_task` — `reconcile_unattributed_on_close`
+(`crates/oxplow-app/src/task_service.rs`) diffs the effort's snapshot
+bracket against its claims and records the `changed_but_not_claimed`
+delta into `effort_unattributed_file` (see data-model.md). This is the
+AUDIT layer of claim-first attribution: an out-of-band close (UI, weaker
+agent) can't leave a parallel/external write looking like the agent's
+authored work. Best-effort, never blocks the close; the existing
+`complete_task` nudge (`compute_effort_file_review`) is unaffected
+because it reads claims, not the residue table. Claiming a path later
+(`record_file`) clears its residue, so the two sets never overlap.
+Recovery-closed orphans have no end-snapshot bracket, so per-path
+reconciliation doesn't run there (a known follow-up).
+
 Attach only fires on the `in_progress → done` and
 `in_progress → blocked` transitions, and only when an effort is
 currently open for the item. A `touchedFiles` payload on a plain

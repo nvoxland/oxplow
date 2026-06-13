@@ -361,6 +361,23 @@ impl TaskService {
         };
         if let Err(e) = stamp {
             tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot backfill failed");
+            return;
+        }
+        // Claim-first reconciliation: on CLOSE (now that the end snapshot
+        // pins the bracket), record any changed-but-not-claimed paths as
+        // unattributed audit residue so an out-of-band close can't leave
+        // parallel/external writes looking like the agent's authored work.
+        // Best-effort; the existing complete_task nudge is unaffected.
+        if !entering {
+            let marked =
+                reconcile_unattributed_on_close(effort_store, snapshot.store(), &effort_id).await;
+            if !marked.is_empty() {
+                tracing::debug!(
+                    task = %item.id,
+                    count = marked.len(),
+                    "effort close: recorded unattributed changes"
+                );
+            }
         }
     }
 
@@ -644,6 +661,82 @@ pub async fn recompute_effort_file_review(
         &acknowledged,
         &other_claimed,
     )
+}
+
+/// Reconcile an effort's claimed files against the snapshot diff at CLOSE
+/// time and persist the `changed_but_not_claimed` delta as **unattributed**
+/// audit residue (Child 2 of the claim-first attribution epic). Runs on
+/// every snapshot-bracketed close (`TaskService::update` out of
+/// `in_progress`, so IPC `update_task`, MCP `update_task`, and the close
+/// half of `complete_task` all flow through it). Best-effort: returns the
+/// marked paths, or an empty vec when the effort has no snapshot bracket
+/// (e.g. a recovery-closed orphan with no end snapshot) or on any error —
+/// it never blocks the close. The existing agent nudge
+/// (`compute_effort_file_review`) is unaffected; this writes a separate
+/// table so a path stays in exactly one of {claimed, unattributed}
+/// (`record_file` clears the residue when a path is later claimed).
+pub async fn reconcile_unattributed_on_close(
+    effort_store: &SqliteTaskEffortStore,
+    snapshot_store: &SqliteSnapshotStore,
+    effort_id: &EffortId,
+) -> Vec<String> {
+    let Ok(Some(effort)) = effort_store.get_effort(effort_id).await else {
+        return Vec::new();
+    };
+    let Some(changed) = effort_changed_paths(snapshot_store, &effort).await else {
+        return Vec::new();
+    };
+    let claimed: Vec<String> = effort_store
+        .list_files(effort_id)
+        .await
+        .map(|fs| fs.into_iter().map(|f| f.path).collect())
+        .unwrap_or_default();
+    let acknowledged = effort_store
+        .list_acknowledged_paths(effort_id)
+        .await
+        .unwrap_or_default();
+    let other_claimed = effort_store
+        .paths_claimed_by_intervening_efforts(effort_id)
+        .await
+        .unwrap_or_default();
+    let unattributed = unclaimed_changed_paths(&claimed, &changed, &acknowledged, &other_claimed);
+    if effort_store
+        .replace_unattributed_files(effort_id, &unattributed)
+        .await
+        .is_err()
+    {
+        return Vec::new();
+    }
+    unattributed
+}
+
+/// The `changed_but_not_claimed` set: paths the snapshot diff saw change
+/// that no one claimed (and the agent didn't acknowledge, and no
+/// intervening effort already owns). Sorted, deduped, uncapped — the
+/// shared core of the close-time reconciliation and the review.
+fn unclaimed_changed_paths(
+    claimed: &[String],
+    changed: &[String],
+    acknowledged: &[String],
+    other_claimed: &[String],
+) -> Vec<String> {
+    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
+    let acknowledged_set: std::collections::HashSet<&str> =
+        acknowledged.iter().map(|s| s.as_str()).collect();
+    let other_claimed_set: std::collections::HashSet<&str> =
+        other_claimed.iter().map(|s| s.as_str()).collect();
+    let mut out: Vec<String> = changed
+        .iter()
+        .filter(|s| {
+            !claimed_set.contains(s.as_str())
+                && !acknowledged_set.contains(s.as_str())
+                && !other_claimed_set.contains(s.as_str())
+        })
+        .cloned()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn review_from_lists(
@@ -1313,6 +1406,121 @@ mod tests {
         let files = effort_store.list_files(&open.id).await.unwrap();
         assert_eq!(files.len(), 1, "idempotent — one row");
         assert_eq!(files[0].path, "src/edited.rs");
+    }
+
+    #[tokio::test]
+    async fn out_of_band_close_marks_unclaimed_changes_unattributed() {
+        // An effort that changes a file nobody claimed, closed via a plain
+        // status transition (not complete_task), records that file as
+        // unattributed audit residue.
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let dirty = captures.primary().expect("primary capture service");
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "oob".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Seed start-snapshot content.
+        std::fs::write(project.path().join("a.rs"), "v1").unwrap();
+        dirty.mark_dirty(
+            project.path().join("a.rs"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // A parallel/unclaimed change during the effort.
+        std::fs::write(project.path().join("parallel.rs"), "x").unwrap();
+        dirty.mark_dirty(
+            project.path().join("parallel.rs"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        // Out-of-band close: a plain Done transition (no complete_task,
+        // no touched_files claim).
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let eff = &efforts[0];
+        let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
+        assert!(
+            unattributed.contains(&"parallel.rs".to_string()),
+            "unclaimed change should be marked unattributed: {unattributed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn claimed_change_is_not_marked_unattributed_on_close() {
+        // A file the agent claimed in real time (Child 1 auto-claim) is NOT
+        // marked unattributed when the effort closes.
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let dirty = captures.primary().expect("primary capture service");
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "claimed".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        std::fs::write(project.path().join("a.rs"), "v1").unwrap();
+        dirty.mark_dirty(
+            project.path().join("a.rs"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        std::fs::write(project.path().join("mine.rs"), "x").unwrap();
+        dirty.mark_dirty(
+            project.path().join("mine.rs"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        // Claim it (as the PostToolUse auto-claim would).
+        svc.claim_open_effort_file(&effort_store, &tid, "mine.rs", Some(project.path()))
+            .await
+            .unwrap();
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let eff = &efforts[0];
+        let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
+        assert!(
+            !unattributed.contains(&"mine.rs".to_string()),
+            "a claimed change must not be unattributed: {unattributed:?}"
+        );
     }
 
     #[tokio::test]

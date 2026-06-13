@@ -356,11 +356,17 @@ Re-opening a task (done → in_progress) produces a second effort. At most one o
 subagents in one thread get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `change_kind`,
 `local_snapshot_id`, `closest_git_version`, `git_version_exact`,
-primary key `(effort_id, path)`. Rows come from the `touchedFiles`
-payload on the `update_task` transition to `done`, not
-from the PostToolUse hook (the previous heuristic couldn't attribute
-writes when ≥2 efforts were in_progress). See agent-model.md's
-"Per-effort write log" for the flow. Consumed by `get_effort_files`
+primary key `(effort_id, path)`. Rows come from two claim-first
+sources: the PostToolUse hook auto-claims each structured edit
+(Edit/Write/MultiEdit/NotebookEdit) onto the thread's open effort in
+real time (`record_file`, idempotent `INSERT OR REPLACE`), and the
+`touchedFiles` payload on the `update_task`/`complete_task` transition
+to `done` confirms/amends. (Bash/codegen/formatter writes are NOT
+auto-claimed — they stay for snapshot reconciliation; the old
+unconditional active-effort heuristic was removed because it
+over-reported when ≥2 efforts were in_progress, but the per-thread
+open-effort auto-claim is reliable under V31's single-open-effort rule.)
+See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
 `EffortStore` and `SnapshotStore`: when ≥2 efforts share an end
 snapshot AND this effort has ≥1 row here, the pair-diff is filtered
@@ -397,6 +403,25 @@ present here are subtracted from `changed_but_not_claimed` before
 the Stop hook decides whether to fire the file-review directive,
 so a successful amend reconciles in one round-trip instead of
 relying on the hook's one-fire silent-agreement grace.
+
+`effort_unattributed_file` (V34) records the **unattributed/unreviewed**
+audit residue of an effort close: the `changed_but_not_claimed` paths the
+snapshot diff saw change during the effort that nothing claimed. Columns:
+`effort_id`, `path`, `recorded_at`, primary key `(effort_id, path)`,
+CASCADE on the effort. Written by `reconcile_unattributed_on_close`
+(`oxplow_app::task_service`) at every snapshot-bracketed effort close
+(`TaskService::update` out of `in_progress` — so IPC `update_task`, MCP
+`update_task`, and the close half of `complete_task`), so an out-of-band
+close can't leave a parallel/external write looking like the agent's
+authored work (the bug that mis-attributed a navigator screenshot to an
+MCP-only effort). **Invariant: a path is CLAIMED (`task_effort_file`) or
+UNATTRIBUTED here, never both** — `record_file` deletes any matching
+residue row, so a later `complete_task` claim moves a path back into the
+claimed set. The existing agent nudge (`compute_effort_file_review`) reads
+`task_effort_file`, not this table, so it's unaffected. Limitation:
+recovery-closed orphans (`finish(None, None)`, no end snapshot) have no
+bracket to diff, so per-path reconciliation doesn't run there — see the
+backlog follow-up.
 
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
