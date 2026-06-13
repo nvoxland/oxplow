@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { listenRoute } from "./transport";
+import { listenRoute, onRemoteReconnect, triggerRemoteResync } from "./transport";
 import { EVENT_CHANNELS } from "./channels";
 
 const MULTIPLEXED = Object.values(EVENT_CHANNELS)[0];
@@ -24,4 +24,33 @@ describe("listenRoute", () => {
     // local event bus would throw on __TAURI_INTERNALS__.
     expect(listenRoute("menu:command", "http://127.0.0.1:7420", false)).toBe("none");
   });
+});
+
+test("triggerRemoteResync fires every registered reconnect handler", () => {
+  let a = 0;
+  let b = 0;
+  const offA = onRemoteReconnect(() => (a += 1));
+  const offB = onRemoteReconnect(() => (b += 1));
+
+  triggerRemoteResync();
+  expect(a).toBe(1);
+  expect(b).toBe(1);
+
+  triggerRemoteResync();
+  expect(a).toBe(2);
+  expect(b).toBe(2);
+
+  offA();
+  offB();
+});
+
+test("an unsubscribed handler no longer fires", () => {
+  let count = 0;
+  const off = onRemoteReconnect(() => (count += 1));
+  triggerRemoteResync();
+  expect(count).toBe(1);
+
+  off();
+  triggerRemoteResync();
+  expect(count).toBe(1);
 });

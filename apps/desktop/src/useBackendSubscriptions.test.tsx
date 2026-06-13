@@ -9,8 +9,12 @@ import { type BackendSubscriptionApi, useBackendSubscriptions } from "./useBacke
 // other test files sharing this bun process.
 type Handler = (event: Record<string, unknown>) => void;
 let oxplowHandlers: Handler[] = [];
+let reconnectHandlers: Array<() => void> = [];
 let unsubCount = 0;
 const getThreadWorkState = mock(async () => ({}));
+const getBacklogState = mock(async () => ({}));
+const listAgentStatuses = mock(async () => []);
+const getConfig = mock(async () => ({ generated: [] }));
 
 function makeApi(): BackendSubscriptionApi {
   const noopSub = () => () => {
@@ -28,12 +32,18 @@ function makeApi(): BackendSubscriptionApi {
         unsubCount += 1;
       };
     }) as never,
-    getBacklogState: (async () => ({})) as never,
+    onRemoteReconnect: ((handler: () => void) => {
+      reconnectHandlers.push(handler);
+      return () => {
+        unsubCount += 1;
+      };
+    }) as never,
+    getBacklogState: getBacklogState as never,
     getThreadState: (async () => ({})) as never,
     getThreadWorkState: getThreadWorkState as never,
     listStreams: (async () => []) as never,
-    listAgentStatuses: (async () => []) as never,
-    getConfig: (async () => ({ generated: [] })) as never,
+    listAgentStatuses: listAgentStatuses as never,
+    getConfig: getConfig as never,
   };
 }
 
@@ -69,8 +79,12 @@ function Harness({ threadStates }: { threadStates: ThreadStates }) {
 
 beforeEach(() => {
   oxplowHandlers = [];
+  reconnectHandlers = [];
   unsubCount = 0;
   getThreadWorkState.mockClear();
+  getBacklogState.mockClear();
+  listAgentStatuses.mockClear();
+  getConfig.mockClear();
 });
 
 afterEach(cleanup);
@@ -95,8 +109,33 @@ test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness threadStates={{}} />);
   unmount();
   // 6 oxplow + workspace-context + backlog + task + agent-status +
-  // stall-alerts = 11.
-  expect(unsubCount).toBe(11);
+  // stall-alerts = 11, plus 3 reconnect handlers (backlog, config,
+  // agent-status) = 14.
+  expect(unsubCount).toBe(14);
+});
+
+test("registers reconnect handlers for the core stores", () => {
+  render(<Harness threadStates={{}} />);
+  // backlog, config, agent-status re-hydrate on a remote WS reconnect.
+  expect(reconnectHandlers.length).toBe(3);
+});
+
+test("re-hydrates core stores on a remote reconnect", async () => {
+  render(<Harness threadStates={{}} />);
+  // One fetch each on mount.
+  expect(getBacklogState).toHaveBeenCalledTimes(1);
+  expect(getConfig).toHaveBeenCalledTimes(1);
+  expect(listAgentStatuses).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    for (const handler of reconnectHandlers) handler();
+    await Promise.resolve();
+  });
+
+  // A second fetch each after the reconnect fired.
+  expect(getBacklogState).toHaveBeenCalledTimes(2);
+  expect(getConfig).toHaveBeenCalledTimes(2);
+  expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 
 test("followup.changed reads the current threadStates ref to recover the stream id", async () => {

@@ -11,6 +11,7 @@ import {
   getThreadWorkState,
   listAgentStatuses,
   listStreams,
+  onRemoteReconnect,
   type Stream,
   subscribeAgentStallAlerts,
   subscribeAgentStatus,
@@ -70,6 +71,7 @@ export interface BackendSubscriptionApi {
   subscribeAgentStallAlerts: typeof subscribeAgentStallAlerts;
   listAgentStatuses: typeof listAgentStatuses;
   getConfig: typeof getConfig;
+  onRemoteReconnect: typeof onRemoteReconnect;
 }
 
 const defaultApi: BackendSubscriptionApi = {
@@ -85,6 +87,7 @@ const defaultApi: BackendSubscriptionApi = {
   subscribeAgentStallAlerts,
   listAgentStatuses,
   getConfig,
+  onRemoteReconnect,
 };
 
 export function useBackendSubscriptions(
@@ -116,6 +119,7 @@ export function useBackendSubscriptions(
     subscribeAgentStallAlerts,
     listAgentStatuses,
     getConfig,
+    onRemoteReconnect,
   } = api;
 
   useEffect(() => {
@@ -124,19 +128,21 @@ export function useBackendSubscriptions(
 
   useEffect(() => {
     let cancelled = false;
-    void getBacklogState()
-      .then((state) => {
-        if (!cancelled) setBacklogState(state);
-      })
-      .catch((error) => logUi("warn", "failed to load backlog state", { error: String(error) }));
-    const unsubscribe = subscribeBacklogEvents(() => {
-      void getBacklogState()
-        .then((state) => setBacklogState(state))
+    const loadBacklog = () =>
+      getBacklogState()
+        .then((state) => {
+          if (!cancelled) setBacklogState(state);
+        })
         .catch((error) => logUi("warn", "failed to refresh backlog state", { error: String(error) }));
-    });
+    void loadBacklog();
+    const unsubscribe = subscribeBacklogEvents(() => void loadBacklog());
+    // Re-hydrate after a remote-daemon WS reconnect (events missed
+    // while the socket was down).
+    const unsubReconnect = onRemoteReconnect(() => void loadBacklog());
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubReconnect();
     };
   }, [setBacklogState]);
 
@@ -283,30 +289,36 @@ export function useBackendSubscriptions(
     const unsub = subscribeOxplowEvents((event) => {
       if (event.type === "config.changed") reload();
     });
+    const unsubReconnect = onRemoteReconnect(() => reload());
     return () => {
       cancelled = true;
       unsub();
+      unsubReconnect();
     };
   }, [setEnabledAgents, setGeneratedState]);
 
   useEffect(() => {
     let cancelled = false;
-    listAgentStatuses()
-      .then((entries) => {
-        if (cancelled) return;
-        const next: Record<string, AgentStatus> = {};
-        for (const entry of entries) next[entry.threadId] = entry.status;
-        setAgentStatuses(next);
-      })
-      .catch((error) => {
-        logUi("warn", "failed to seed agent statuses", { error: String(error) });
-      });
+    const seed = () =>
+      listAgentStatuses()
+        .then((entries) => {
+          if (cancelled) return;
+          const next: Record<string, AgentStatus> = {};
+          for (const entry of entries) next[entry.threadId] = entry.status;
+          setAgentStatuses(next);
+        })
+        .catch((error) => {
+          logUi("warn", "failed to seed agent statuses", { error: String(error) });
+        });
+    void seed();
     const unsubscribe = subscribeAgentStatus("all", (entry) => {
       setAgentStatuses((prev) => ({ ...prev, [entry.threadId]: entry.status }));
     });
+    const unsubReconnect = onRemoteReconnect(() => void seed());
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubReconnect();
     };
   }, [setAgentStatuses]);
 

@@ -55,16 +55,41 @@ docs — this note is the developer-facing mechanics.
   `menu:command`) still use the Tauri bus in remote mode, but go inert
   (`listenRoute` → `"none"`) when no Tauri host exists — i.e. the
   frontend running in a plain browser for Playwright-driven testing or
-  a served `dist/`.
+  a served `dist/`. The backoff loop keeps the registered channel
+  handlers across a drop, so it auto-re-subscribes
+  on reconnect. A reconnect *after* a drop (not the first connect) also
+  fires the `onRemoteReconnect` handlers, so consumers re-hydrate the
+  snapshot they hold and catch up on events missed while the socket was
+  down. `triggerRemoteResync()` fires the same handlers manually (used by
+  the daemon health-probe recovery path in `App.tsx`). The backoff loop
+  is the WS-transport half; the in-place store recovery it drives is the
+  next bullet.
+- **Auto-resync on reconnect.** Recovery re-hydrates the client stores
+  in place — *no* manual full-page reload. The top-level loader
+  (`loadInitialAppState` in `App.tsx`: streams, current stream + its
+  threads, workspace context, selected-thread work), the core-store
+  subscriptions (`useBackendSubscriptions`: backlog, config, agent
+  statuses), and comment threads (`useCommentsForTarget`) all register
+  `onRemoteReconnect` handlers. The daemon health probe (App.tsx, 2s
+  `/ipc/ping` poll) used to `window.location.reload()` on recovery;
+  it now `triggerRemoteResync()`s instead, so an HTTP-level recovery
+  takes the same in-place resync path (a reload would drop unsaved
+  editor drafts). To make a new surface live-again after a drop,
+  register an `onRemoteReconnect` re-fetch alongside its event
+  subscription.
 - **Launcher connect flow** — `launcher/Launcher.tsx`
   `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
   `/ipc/ping` before committing. `Root.tsx` renders the full app
   shell whenever a remote base is set.
 - **`components/RemoteConnectionBanner.tsx`** — fixed top strip in
   remote mode: red "reconnecting…" while the WS is down (with
-  Disconnect), accent "reload to resync" once it recovers. Reload is
-  user-initiated, not automatic — a reload drops unsaved editor
-  drafts. tmux agents on the daemon box run through the gap.
+  Disconnect). Once it recovers, state auto-resyncs (see above), so the
+  banner shows only a brief, non-blocking "Connection restored — state
+  resynced" confirmation that auto-dismisses (`RESTORED_AUTO_DISMISS_MS`)
+  — no reload prompt. tmux agents on the daemon box run through the gap.
+  (A genuine version/schema skew after a backend upgrade would still
+  warrant a reload prompt; there's no skew detection yet, so nothing
+  surfaces one today.)
 
 ## Deployment model (v1)
 
