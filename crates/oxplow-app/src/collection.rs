@@ -56,14 +56,43 @@ const DEFAULT_TEST_PATTERNS: &[&str] = &[
     "phpunit",
 ];
 
+/// Built-in command substrings that count as a static-analysis run. The
+/// collection profile's `analysisRunPatterns` extends (never replaces) this
+/// list. Tool-agnostic: no command→tool knowledge lives here, only "did an
+/// analyzer run?" — the report a run regenerates is what gets parsed.
+const DEFAULT_ANALYSIS_PATTERNS: &[&str] = &[
+    "cargo clippy",
+    "clippy-driver",
+    "eslint",
+    "ruff",
+    "golangci-lint",
+    "flake8",
+    "pylint",
+    "mypy",
+    "staticcheck",
+    "tsc --noemit",
+    "tsc --noEmit",
+];
+
 /// Does `command` look like a test run? Case-insensitive substring match
 /// against the built-in patterns plus any caller-supplied extras.
 pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
+    matches_any(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+}
+
+/// Does `command` look like a static-analysis run? Same substring matching as
+/// [`detect_test_run`], against the analysis patterns + profile extras.
+pub fn detect_analysis_run(command: &str, extra_patterns: &[String]) -> bool {
+    matches_any(command, DEFAULT_ANALYSIS_PATTERNS, extra_patterns)
+}
+
+/// Case-insensitive: does `command` contain any built-in or extra pattern?
+fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
     let lower = command.to_ascii_lowercase();
-    DEFAULT_TEST_PATTERNS
+    builtins
         .iter()
-        .map(|s| s.to_string())
-        .chain(extra_patterns.iter().map(|s| s.to_ascii_lowercase()))
+        .map(|s| s.to_ascii_lowercase())
+        .chain(extras.iter().map(|s| s.to_ascii_lowercase()))
         .any(|p| !p.trim().is_empty() && lower.contains(p.trim()))
 }
 
@@ -419,8 +448,9 @@ impl CollectionService {
         })
     }
 
-    /// PostToolUse entry point: detect a test run, record it, and ride
-    /// along to coverage. Best-effort — never fails the hook.
+    /// PostToolUse entry point: detect a test and/or static-analysis run,
+    /// record it, and ride along to coverage / findings. Best-effort — never
+    /// fails the hook.
     pub async fn on_post_tool_use(
         &self,
         thread: &ThreadId,
@@ -430,13 +460,41 @@ impl CollectionService {
             return Ok(None);
         };
         let cfg = self.collection_cfg();
-        if !detect_test_run(&bash.command, &cfg.test_run_patterns) {
+        let is_test = detect_test_run(&bash.command, &cfg.test_run_patterns);
+        let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_run_patterns);
+        if !is_test && !is_analysis {
             return Ok(None);
         }
         let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
             return Ok(None);
         };
         let registry = self.registry(&cfg);
+
+        // Static-analysis ride-along: when an analyzer ran, record a
+        // static-analysis observation — command-only (the ran-record) when no
+        // fresh analysis report exists, or carrying merged findings when one
+        // does. Classification is by collector kind, not a format heuristic.
+        if is_analysis {
+            let (report, source, analyzers) =
+                match self.merge_fresh_analysis(&effort, &cfg, &registry) {
+                    Some((r, source, analyzers)) => (Some(r), source, analyzers),
+                    None => (None, "analysis-report".to_string(), Vec::new()),
+                };
+            self.record_static_analysis(
+                thread,
+                &bash.command,
+                report.as_ref(),
+                &analyzers,
+                &source,
+            )
+            .await?;
+        }
+
+        // A pure analysis run (no test patterns matched) is done — the
+        // test-run / coverage / nudge path below is test-specific.
+        if !is_test {
+            return Ok(None);
+        }
         // Merge every test report fresher than the effort start into one
         // per-test tree (each test stack regenerates its own report; the
         // freshness guard excludes stale ones from prior efforts/runs).
@@ -602,6 +660,151 @@ impl CollectionService {
             format!("plugin-exec:{}", exec_names.join(","))
         };
         Some((merged, source))
+    }
+
+    /// Merge every configured analysis report that exists and is fresher than
+    /// the effort start into one findings list, via each format's collector.
+    /// Returns the merged report, a `source` label (lower-trust `plugin-exec:*`
+    /// when any contributing collector was an external process), and the
+    /// contributing analyzer names (collector names, `oxplow.` prefix stripped)
+    /// for the UI's "which analyzer ran" label. `None` when none contributed.
+    fn merge_fresh_analysis(
+        &self,
+        effort: &TaskEffort,
+        cfg: &oxplow_config::CollectionConfig,
+        registry: &CollectorRegistry,
+    ) -> Option<(oxplow_coverage::AnalysisReport, String, Vec<String>)> {
+        let mut merged = oxplow_coverage::AnalysisReport::default();
+        let mut exec_names: Vec<String> = Vec::new();
+        let mut analyzers: Vec<String> = Vec::new();
+        let mut any = false;
+        for r in &cfg.reports {
+            let Some(collector) = registry.resolve(&r.format) else {
+                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
+                continue;
+            };
+            if collector.kind() != CollectorKind::Analysis {
+                continue;
+            }
+            let abs = self.project_dir.join(&r.path);
+            if report_is_stale(&abs, effort.started_at) {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&abs) else {
+                continue;
+            };
+            match collector.run(&content) {
+                Ok(CollectorOutput::Analysis(parsed)) => {
+                    merged.findings.extend(parsed.findings);
+                    let label = collector
+                        .name()
+                        .strip_prefix("oxplow.")
+                        .unwrap_or(collector.name())
+                        .to_string();
+                    if !analyzers.contains(&label) {
+                        analyzers.push(label);
+                    }
+                    if collector.runtime() == CollectorRuntime::Exec {
+                        exec_names.push(collector.name().to_string());
+                    }
+                    any = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(format = %r.format, error = %e, "analysis report parse failed")
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        let source = if exec_names.is_empty() {
+            "analysis-report".to_string()
+        } else {
+            format!("plugin-exec:{}", exec_names.join(","))
+        };
+        Some((merged, source, analyzers))
+    }
+
+    /// Record a `static-analysis` observation against the thread's open
+    /// effort. This single kind is both the ran-record (when `report` is
+    /// `None` — analyzer ran but regenerated no parseable report, like a
+    /// command-only `test-run`) and the findings (when a report parsed). The
+    /// headline metric is the error+warning count (lower = better). Returns
+    /// `Ok(None)` when no effort is open.
+    async fn record_static_analysis(
+        &self,
+        thread: &ThreadId,
+        command: &str,
+        report: Option<&oxplow_coverage::AnalysisReport>,
+        analyzers: &[String],
+        source: &str,
+    ) -> Result<Option<i64>, DomainError> {
+        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+            return Ok(None);
+        };
+        let Some(stream_id) = self.stream_id_for(thread).await? else {
+            return Ok(None);
+        };
+        let mut payload = serde_json::Map::new();
+        payload.insert("command".into(), json!(command));
+        if !analyzers.is_empty() {
+            payload.insert("analyzer".into(), json!(analyzers.join(", ")));
+        }
+        let metric_value = report.map(|r| {
+            use oxplow_coverage::Severity::*;
+            let (mut errors, mut warnings, mut info, mut note) = (0u64, 0u64, 0u64, 0u64);
+            for f in &r.findings {
+                match f.severity {
+                    Error => errors += 1,
+                    Warning => warnings += 1,
+                    Info => info += 1,
+                    Note => note += 1,
+                }
+            }
+            payload.insert("errorCount".into(), json!(errors));
+            payload.insert("warningCount".into(), json!(warnings));
+            payload.insert("infoCount".into(), json!(info));
+            payload.insert("noteCount".into(), json!(note));
+            payload.insert(
+                "findings".into(),
+                serde_json::to_value(&r.findings).unwrap_or(serde_json::Value::Null),
+            );
+            (errors + warnings) as f64
+        });
+
+        // Freshness pin (mirrors diff-coverage): pin to the effort's end
+        // snapshot if present, else its start.
+        let pin = effort.end_snapshot_id.or(effort.start_snapshot_id);
+        let (local_snapshot_id, closest_git_version, git_version_exact) = match pin {
+            Some(p) => {
+                let v = file_ref_version::resolve(&self.snapshots, &self.project_dir, p).await?;
+                (
+                    Some(v.local_snapshot_id),
+                    v.closest_git_version,
+                    v.git_version_exact,
+                )
+            }
+            None => (None, None, false),
+        };
+
+        let id = self
+            .observations
+            .record(NewEffortObservation {
+                stream_id,
+                effort_id: effort.id.to_string(),
+                kind: "static-analysis".into(),
+                provenance: "observed".into(),
+                source: source.to_string(),
+                metric_value,
+                payload_json: Some(serde_json::Value::Object(payload).to_string()),
+                local_snapshot_id,
+                closest_git_version,
+                git_version_exact,
+            })
+            .await?;
+        self.emit(thread, &effort);
+        Ok(Some(id))
     }
 
     /// Observations for an effort, newest-first. Pass `kind` to filter.
@@ -889,6 +1092,17 @@ mod tests {
         assert!(detect_test_run("./run-suite.sh", &["run-suite".into()]));
         // Empty extra patterns are ignored (don't match everything).
         assert!(!detect_test_run("echo hi", &["".into(), "   ".into()]));
+    }
+
+    #[test]
+    fn detect_analysis_run_matches_builtins_and_extras() {
+        assert!(detect_analysis_run("cargo clippy --workspace", &[]));
+        assert!(detect_analysis_run("npx ESLint src/", &[]));
+        assert!(detect_analysis_run("ruff check .", &[]));
+        assert!(!detect_analysis_run("cargo build", &[]));
+        assert!(!detect_analysis_run("cargo test", &[]));
+        // Extra pattern from the profile.
+        assert!(detect_analysis_run("./lint.sh", &["./lint.sh".into()]));
     }
 
     #[test]
@@ -1504,6 +1718,150 @@ mod tests {
             );
             // Both stacks use the in-process junit collector → not exec-tagged.
             assert_eq!(source, "post-tool-bash");
+        }
+
+        const CLIPPY_JSON: &str = "{\"reason\":\"compiler-message\",\"message\":{\"message\":\"unused\",\"code\":{\"code\":\"unused_variables\"},\"level\":\"warning\",\"spans\":[{\"file_name\":\"src/foo.rs\",\"line_start\":3,\"column_start\":9,\"is_primary\":true}]}}\n{\"reason\":\"compiler-message\",\"message\":{\"message\":\"boom\",\"code\":{\"code\":\"E0308\"},\"level\":\"error\",\"spans\":[{\"file_name\":\"src/bar.rs\",\"line_start\":1,\"column_start\":1,\"is_primary\":true}]}}\n";
+
+        #[tokio::test]
+        async fn record_static_analysis_attributes_to_open_effort() {
+            let h = build(None).await;
+            let report = oxplow_coverage::AnalysisReport {
+                findings: vec![
+                    oxplow_coverage::AnalysisFinding {
+                        path: "src/a.rs".into(),
+                        line: Some(1),
+                        column: None,
+                        severity: oxplow_coverage::Severity::Error,
+                        rule: Some("E0308".into()),
+                        message: "boom".into(),
+                    },
+                    oxplow_coverage::AnalysisFinding {
+                        path: "src/a.rs".into(),
+                        line: Some(2),
+                        column: None,
+                        severity: oxplow_coverage::Severity::Warning,
+                        rule: None,
+                        message: "meh".into(),
+                    },
+                ],
+            };
+            let id = h
+                .service
+                .record_static_analysis(
+                    &h.thread,
+                    "cargo clippy",
+                    Some(&report),
+                    &["clippy".to_string()],
+                    "analysis-report",
+                )
+                .await
+                .unwrap();
+            assert!(id.is_some());
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("static-analysis"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].provenance, "observed");
+            // metric = error+warning count (lower = better).
+            assert_eq!(rows[0].metric_value, Some(2.0));
+            let payload: serde_json::Value =
+                serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["errorCount"], 1);
+            assert_eq!(payload["warningCount"], 1);
+            assert_eq!(payload["analyzer"], "clippy");
+            assert_eq!(payload["findings"][0]["rule"], "E0308");
+        }
+
+        #[tokio::test]
+        async fn record_static_analysis_command_only_when_no_report() {
+            // The ran-record: analyzer ran but produced no parseable report.
+            let h = build(None).await;
+            h.service
+                .record_static_analysis(&h.thread, "cargo clippy", None, &[], "analysis-report")
+                .await
+                .unwrap();
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("static-analysis"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            // No findings → no metric, command recorded.
+            assert_eq!(rows[0].metric_value, None);
+            let payload: serde_json::Value =
+                serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["command"], "cargo clippy");
+            assert!(payload.get("findings").is_none());
+        }
+
+        #[tokio::test]
+        async fn merge_fresh_analysis_unions_findings_from_reports() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            // Synthetic effort started at the epoch → the report is fresh.
+            let effort = TaskEffort {
+                id: EffortId::new(903),
+                task_id: TaskId::placeholder(),
+                thread_id: h.thread,
+                started_at: Timestamp::from_unix_ms(0),
+                ended_at: None,
+                start_snapshot_id: None,
+                end_snapshot_id: None,
+                summary: None,
+            };
+            let cfg = oxplow_config::CollectionConfig {
+                reports: vec![oxplow_config::ReportConfig {
+                    path: "clippy.json".into(),
+                    format: "clippy-json".into(),
+                }],
+                ..Default::default()
+            };
+            let registry = h.service.registry(&cfg);
+            let (merged, source, analyzers) = h
+                .service
+                .merge_fresh_analysis(&effort, &cfg, &registry)
+                .expect("fresh clippy report merged");
+            assert_eq!(merged.findings.len(), 2);
+            assert_eq!(source, "analysis-report");
+            assert_eq!(analyzers, vec!["clippy".to_string()]);
+        }
+
+        #[tokio::test]
+        async fn on_post_tool_use_records_static_analysis_on_analysis_command() {
+            // A clippy command with no fresh report → command-only
+            // static-analysis ran-record on the open effort (deterministic;
+            // no report-mtime dependence).
+            let h = build(None).await;
+            let result = h
+                .service
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("cargo clippy --workspace --all-targets", 0),
+                )
+                .await
+                .unwrap();
+            // No test patterns matched → no test nudge.
+            assert!(result.is_none());
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("static-analysis"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert!(rows[0]
+                .payload_json
+                .as_deref()
+                .unwrap()
+                .contains("cargo clippy"));
+            // A pure analysis command records no test-run.
+            assert!(h
+                .service
+                .list_for_effort(&h.effort_id, Some("test-run"))
+                .await
+                .unwrap()
+                .is_empty());
         }
     }
 }

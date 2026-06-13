@@ -1043,6 +1043,12 @@ export type CollectionConfig = {
 	 */
 	testRunPatterns: string[],
 	/**
+	 *  Extra command substrings that count as a static-analysis run, on top
+	 *  of the built-in defaults (cargo clippy, eslint, ruff, …). Mirrors
+	 *  `test_run_patterns` for the analysis ride-along.
+	 */
+	analysisRunPatterns: string[],
+	/**
 	 *  Free-form hint injected verbatim into every agent system prompt.
 	 *  Use it to tell the agent which test command to run, what coverage
 	 *  threshold to meet, etc. — anything project-specific the agent

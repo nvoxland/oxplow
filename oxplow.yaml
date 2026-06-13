@@ -21,6 +21,10 @@ collection:
   - { path: target/nextest/default/junit.xml, format: junit }
   # Frontend (bun run --cwd apps/desktop test:junit)
   - { path: apps/desktop/test-report.xml, format: junit }
+  # Rust static analysis (clippy). Dogfoods the analysis collector: run
+  # `cargo clippy --workspace --all-targets --message-format=json > target/clippy.json`
+  # and oxplow ingests it into a `static-analysis` observation on the effort.
+  - { path: target/clippy.json, format: clippy-json }
   # Distinctive substrings so the hook recognizes a test run regardless of
   # which stack/command was invoked (built-ins already cover `bun test`).
   testRunPatterns:
@@ -30,3 +34,7 @@ collection:
   - bun test
   - test:collect
   - test:junit
+  # Substrings that mark a static-analysis run (built-ins already cover
+  # `cargo clippy` / `eslint`); this repo emits clippy JSON explicitly.
+  analysisRunPatterns:
+  - clippy --message-format=json

@@ -115,6 +115,11 @@ pub struct CollectionConfig {
     /// built-in defaults (pytest, cargo test, jest, …).
     #[serde(rename = "testRunPatterns")]
     pub test_run_patterns: Vec<String>,
+    /// Extra command substrings that count as a static-analysis run, on top
+    /// of the built-in defaults (cargo clippy, eslint, ruff, …). Mirrors
+    /// `test_run_patterns` for the analysis ride-along.
+    #[serde(rename = "analysisRunPatterns")]
+    pub analysis_run_patterns: Vec<String>,
     /// Free-form hint injected verbatim into every agent system prompt.
     /// Use it to tell the agent which test command to run, what coverage
     /// threshold to meet, etc. — anything project-specific the agent
@@ -277,6 +282,8 @@ struct RawCollectionBlock {
     test_report_format: Option<String>,
     #[serde(rename = "testRunPatterns", default)]
     test_run_patterns: Option<Vec<String>>,
+    #[serde(rename = "analysisRunPatterns", default)]
+    analysis_run_patterns: Option<Vec<String>>,
     #[serde(rename = "agentHint", default)]
     agent_hint: Option<String>,
     #[serde(default)]
@@ -466,6 +473,7 @@ pub fn write_project_config(
     if c.test_command.is_some()
         || !c.reports.is_empty()
         || !c.test_run_patterns.is_empty()
+        || !c.analysis_run_patterns.is_empty()
         || c.agent_hint.is_some()
         || !c.plugins.is_empty()
     {
@@ -490,6 +498,12 @@ pub fn write_project_config(
             col.insert(
                 "testRunPatterns".into(),
                 serde_yaml::to_value(&c.test_run_patterns).expect("patterns serialize"),
+            );
+        }
+        if !c.analysis_run_patterns.is_empty() {
+            col.insert(
+                "analysisRunPatterns".into(),
+                serde_yaml::to_value(&c.analysis_run_patterns).expect("patterns serialize"),
             );
         }
         if let Some(v) = &c.agent_hint {
@@ -880,27 +894,28 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
         reports.push(ReportConfig { path, format });
     }
 
-    let test_run_patterns = match raw.test_run_patterns {
-        Some(list) => {
-            let mut out = Vec::with_capacity(list.len());
-            for (i, p) in list.into_iter().enumerate() {
-                let trimmed = p.trim().to_string();
-                if trimmed.is_empty() {
-                    return Err(ConfigError::Invalid(format!(
-                        "collection.testRunPatterns[{i}] must be a non-empty string"
-                    )));
-                }
-                out.push(trimmed);
+    let validate_patterns = |field: &str, list: Option<Vec<String>>| {
+        let mut out = Vec::new();
+        for (i, p) in list.into_iter().flatten().enumerate() {
+            let trimmed = p.trim().to_string();
+            if trimmed.is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "collection.{field}[{i}] must be a non-empty string"
+                )));
             }
-            out
+            out.push(trimmed);
         }
-        None => Vec::new(),
+        Ok(out)
     };
+    let test_run_patterns = validate_patterns("testRunPatterns", raw.test_run_patterns)?;
+    let analysis_run_patterns =
+        validate_patterns("analysisRunPatterns", raw.analysis_run_patterns)?;
     let plugins = validate_plugins(raw.plugins)?;
     Ok(CollectionConfig {
         test_command: opt_trimmed(raw.test_command),
         reports,
         test_run_patterns,
+        analysis_run_patterns,
         agent_hint: opt_trimmed(raw.agent_hint),
         plugins,
     })
@@ -1413,6 +1428,7 @@ collection:
                     },
                 ],
                 test_run_patterns: vec!["tox".into()],
+                analysis_run_patterns: vec!["cargo clippy".into()],
                 agent_hint: Some("Run pytest, not bare python -m pytest".into()),
                 plugins: vec![PluginConfig {
                     name: "acme.clover".into(),
