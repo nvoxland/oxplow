@@ -16,38 +16,32 @@ you want to:
 
 ## Task vs epic
 
-Pick by structure, not by whether the work was planned first. Plenty
-of plan-mode outputs describe a single task.
+Pick by structure, not by whether the work was planned first (plan-mode
+outputs often describe a single task). The decision test runs once and
+covers all three call sites:
 
-- **`create_task`** — one coherent change, even if it touches a few
-  files. Rename, bug fix, small feature in one subsystem. Sequential
-  chores (edit → typecheck → test) are still one task, not sub-steps.
-- **`file_epic_with_children`** — ≥3 sub-steps a reviewer would
-  naturally check off independently: distinct phases, clear handoffs,
-  or separable subsystems (e.g. schema → runtime → IPC → UI → docs).
-  Each child closes to `done` on its own as it ships.
-- Decision test: could a single child close to `done` and
-  have the user meaningfully inspect just that piece? If yes, epic.
-  If no, it's a task and the bullets are just an execution outline.
-- Don't retroactively wrap a task in an epic mid-execution if it turns
-  out to be small — just finish it.
+> Could a single child close to `done` and let the user meaningfully
+> inspect just that piece? If yes → epic. If no → one task.
+
+- **`create_task`** — one coherent change, even across a few files.
+  Sequential chores (edit → typecheck → test) are one task, not
+  sub-steps.
+- **`file_epic_with_children`** — ≥3 sub-steps that each pass the test:
+  distinct phases, handoffs, or separable subsystems (e.g. schema →
+  runtime → IPC → UI → docs). Each child closes on its own as it ships.
+- Don't retroactively wrap a task in an epic if it turns out small —
+  just finish it.
 
 ## Shaping the row
 
 - `title`: imperative, ≤60 chars (`Fix login redirect loop`).
-- `description`: what and why; keep it terse. Put acceptance
-  criteria inline as a `## Acceptance criteria` subsection (one
-  observable criterion per line) — there is no separate field.
+- `description`: what and why, terse. Put acceptance criteria inline
+  as a `## Acceptance criteria` subsection (one observable criterion
+  per line) — there is no separate field.
 - `priority`: `medium` unless the user signalled otherwise.
-- Use `file_epic_with_children` (not `create_task`) when the work
-  should land as a parent + children — an "epic" is just any task
-  that ends up with children.
-
-## One QA-separate concern per row
-
-Siblings under an epic still need to be independently reviewable:
-two things a reviewer would accept/reject separately go in two child
-tasks, not one "misc" child. Same rule as top-level items.
+- **One reviewable concern per row** — at top level AND among epic
+  siblings. Two things a reviewer would accept/reject separately go in
+  two rows, never one "misc" child.
 
 # task transitions
 
@@ -61,44 +55,21 @@ user. Call `complete_task` the moment the code change lands —
 don't wait for a later turn.
 
 **Pass `touched_files` when you close.** `complete_task`,
-`update_task`, and `create_task` all accept an optional
-`touched_files: string[]` of repo-relative paths you edited for this
-effort. The runtime attaches them to the closing effort so Local
-History can attribute writes to this specific item when multiple
-items ran in parallel. Skip only if you edited >100 files (the
-assume-all fallback handles big change sets).
+`update_task`, and `create_task` accept `touched_files: string[]`
+(repo-relative paths edited for this effort) so Local History can
+attribute writes to this item when several ran in parallel. Skip only
+if you edited >100 files (assume-all fallback handles big sets). Filing
+straight into `done`/`blocked` *without* `touched_files` opens no
+effort, so attribution is impossible — pass it there too for "file and
+close in one call" rows.
 
-**Declare `impacts` for non-file outcomes.** `complete_task` also
-accepts `impacts: { kind, id, action? }[]` — one row per
-cross-page outcome of this effort beyond raw file edits. Use it
-to record:
-
-- A wiki page you created/updated/deleted (`kind: "wiki", id:
-  "<slug>"`)
-- Another task you completed, blocked, or reopened
-  (`kind: "task", id: "<id>"`)
-- A commit you referenced or rolled back
-  (`kind: "git_commit", id: "<sha>"`)
-- A finding you resolved (`kind: "finding", id: "<id>"`)
-- A directory you reorganized (`kind: "directory", id: "<path>"`)
-
-The runtime projects each row into the unified `page_ref` graph
-under `ref_type=impact` with the `action` carried in
-`source_extra`, so the target page's backlinks list this task as
-the cause — without anyone parsing the summary body to find it.
-The wiki-capture skill leans on this: when you file or update a
-wiki page mid-turn, name it in `impacts` so the page's
-"referenced by" list points back here.
-
-For retroactive splits or "file and close in one call" rows (where
-the edits already shipped and you just want a durable row with
-attribution), pass `touched_files` directly into `create_task`
-along with `status: "done"` (or `"blocked"`) — the server
-synthesizes the `in_progress → target` transition so attribution
-lands exactly as it would for a normal close. Without
-`touched_files`, items filed directly into `done` never open
-an effort, so attribution is impossible; the Local History panel
-falls back to "assume all" for that item.
+**Declare `impacts` for non-file outcomes.** `complete_task` accepts
+`impacts: { kind, id, action? }[]` — one per cross-page outcome beyond
+raw edits: a wiki page (`kind:"wiki"`), task (`"task"`), commit
+(`"git_commit"`), finding (`"finding"`), or directory (`"directory"`)
+you created/updated/completed/resolved. Each becomes a `page_ref`
+backlink so the target lists this task as the cause without parsing the
+summary body. In particular, name any wiki page you touched mid-turn.
 
 Legitimate reasons to *stay* `in_progress` across a stop boundary:
 
@@ -111,73 +82,41 @@ items the agent didn't touch during the turn.
 
 ## Talking about items in chat
 
-When you mention a task to the user, refer to it by its **quoted
-title** — not by id, not by "#N", not by "the last task", not by
-"the in_progress one". The id is an internal handle for tool
-calls; users don't see ids in their UI and can't map "#14" to
-anything they recognize.
+Refer to a task by its **quoted title**, never by id / "#N" / "the
+last task" / "the in_progress one". Ids are internal tool-call handles;
+users can't map "#14" to anything they see.
 
-- ❌ `Shipped task #14.`
-- ❌ `Task 14 is now in_progress.`
-- ❌ `Closing the previous one.`
+- ❌ `Shipped task #14.` / `Closing the previous one.`
 - ✅ `Shipped task "Surface hidden tabs from the overflow dropdown".`
-- ✅ `Task "Fix login redirect loop" is now in_progress.`
-- ✅ `Closing task "Render wiki page links by title".`
 
-This rule applies everywhere you reference a task in user-facing
-prose: confirming a fix, asking whether to proceed, summarizing
-what shipped, naming the item you just reopened, commit body
-prose, status updates, follow-up prompts. The only place `#N` /
-ids are appropriate is in tool-call arguments and code identifiers
-— never in the conversation surface.
-
-If you slip and use `#N`, restate with the title in the same turn;
-don't leave a half-anonymous reference for the user to decode.
+This holds everywhere you name a task in user-facing prose (fix
+confirmations, summaries, commit bodies, status updates). `#N`/ids
+belong only in tool-call arguments. If you slip, restate with the
+title in the same turn.
 
 ## Wikilink every reference in body text
 
 Task descriptions, acceptance criteria, effort summaries, thread
-notes, and wiki pages all render through the same markdown
-pipeline. Anywhere you name a real entity that has a page, write
-it as a `[[…]]` wikilink instead of inline code or a bare path —
-the renderer turns wikilinks into clickable, icon-bearing links
-with proper navigation, and the unified `page_ref` graph picks
-them up as outbound references so the target's backlinks list
-this item without needing summary-body parsing.
+notes, and wiki pages render through the same markdown pipeline.
+Anywhere you name a real entity that has a page, write it as a `[[…]]`
+wikilink instead of inline code or a bare path — the renderer makes it
+clickable and the `page_ref` graph records it as an outbound reference,
+so the target's backlinks list this item.
 
-Cheat sheet (every form is `[[…]]`; supply `|label` to override
-display text):
+Cheat sheet (every form is `[[…]]`; add `|label` to override text):
 
-- `[[src/foo.ts]]` — file by repo-relative path
-- `[[src/foo.ts:42]]` — file + line
-- `[[src/foo.ts@HEAD]]` / `[[src/foo.ts@<sha>]]` / `[[src/foo.ts@disk]]`
-  — pin a version (required inside wiki page bodies; optional
-  elsewhere)
-- `[[dir:src/components]]` — directory (the `dir:` prefix is what
-  distinguishes a directory from a file — without it, a path
-  with no extension would be parsed as a wiki slug)
-- `[[some-slug]]` — wiki page by slug; renderer displays the
-  page's title, not the slug
+- `[[src/foo.ts]]` — file by repo-relative path (`:42` for a line)
+- `[[dir:src/components]]` — directory (the `dir:` prefix is required;
+  an extensionless path would otherwise parse as a wiki slug)
+- `[[some-slug]]` — wiki page by slug (renderer shows its title)
 - `[[abc1234]]` or `[[git:abc1234]]` — git commit by SHA
-- `[[#42]]` — another task by id (when supported by the renderer)
+- `[[#42]]` — another task by id
 
-What this replaces:
-
-- ❌ `` `.context/data-model.md` `` (inline code — not clickable,
-  not in the graph)
-- ❌ ``See `src/foo.ts` for the helper`` (same problem)
-- ✅ `[[.context/data-model.md]]`
-- ✅ `See [[src/foo.ts|the foo helper]] for the helper.`
-
-Reserve inline code (`` `…` ``) for things that aren't real
-entities: identifiers, snippets, command fragments, env vars.
-If it has a page in oxplow, it deserves a wikilink.
-
-The [[oxplow-wiki-capture]] skill has the full version-pinning
-rules for file wikilinks inside wiki page bodies — those are
-stricter (every file wikilink must declare `@version`). In task
-summaries and descriptions the bare `[[path]]` form is fine; the
-renderer falls back to working-tree.
+Reserve inline code (`` `…` ``) for non-entities: identifiers,
+snippets, command fragments, env vars. If it has a page, wikilink it.
+The bare `[[path]]` form is correct in task summaries/descriptions
+*and* in wiki page bodies — never write `@version` literals; freshness
+is tracked in the DB (see [[oxplow-wiki-capture]]).
 
 ## Redos on a just-shipped item
 
