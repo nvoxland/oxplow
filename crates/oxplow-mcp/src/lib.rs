@@ -63,7 +63,9 @@ pub struct ThreadIdParams {
 struct ListTasksParams {
     /// Task status to filter by — one of "ready", "in_progress", "blocked",
     /// "done", "canceled", "archived", or "backlog" (thread-detached tasks).
-    status: String,
+    /// Optional in the wire shape so a missing value yields a readable
+    /// error naming the choices rather than a raw transport -32602.
+    status: Option<String>,
     /// Required for all status values except "backlog".
     thread_id: Option<String>,
 }
@@ -192,10 +194,11 @@ pub struct DeleteNoteParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListCommentsParams {
-    /// `"thread"` (id = `b-…`) or `"stream"` (id = `s-…`).
-    pub scope: String,
-    /// The thread or stream id matching `scope`.
-    pub id: String,
+    /// `"thread"` (id = `thr…`) or `"stream"` (id = `str…`). Optional —
+    /// when omitted it's inferred from `id`'s prefix.
+    pub scope: Option<String>,
+    /// The thread (`thr…`) or stream (`str…`) id whose comments to list.
+    pub id: Option<String>,
     /// Filter: `"all"` (default), `"open"`, or `"needs_response"`.
     pub status: Option<String>,
 }
@@ -1248,6 +1251,14 @@ impl OxplowMcp {
         params: Parameters<ListTasksParams>,
     ) -> Result<CallToolResult, McpError> {
         let ListTasksParams { status, thread_id } = params.0;
+        let status = status.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let status = status.ok_or_else(|| {
+            McpError::invalid_params(
+                "list_tasks: pass `status` — one of \"ready\", \"in_progress\", \"blocked\", \
+                 \"done\", \"canceled\", \"archived\", or \"backlog\"",
+                None,
+            )
+        })?;
         let list = if status == "backlog" {
             self.services
                 .task_store
@@ -1255,7 +1266,7 @@ impl OxplowMcp {
                 .await
                 .map_err(internal)?
         } else {
-            let task_status = str_to_task_status(&status)?;
+            let task_status = str_to_task_status(status)?;
             let tid = thread_id.ok_or_else(|| {
                 McpError::invalid_params("thread_id is required for non-backlog status", None)
             })?;
@@ -1583,8 +1594,10 @@ impl OxplowMcp {
 
     #[tool(
         description = "List comments — threaded annotations the user anchored to a text selection \
-                       in a page (wiki body, code file line, task detail). `scope` is \"thread\" \
-                       (id = b-…) or \"stream\" (id = s-…, every page in the workspace). `status` \
+                       in a page (wiki body, code file line, task detail). `id` is a thread id \
+                       (`thr…`) or stream id (`str…`, every page in the workspace). `scope` is \
+                       optional: \"thread\" or \"stream\" — when omitted it's inferred from `id`'s \
+                       prefix, so usually you only need to pass `id`. `status` \
                        filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups \
                        whose latest message isn't yours — i.e. what the user wants you to act on). \
                        Each result carries the anchored `quote`, the message thread, and `intent` \
@@ -1594,34 +1607,21 @@ impl OxplowMcp {
         &self,
         params: Parameters<ListCommentsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let threads = match params.0.scope.as_str() {
-            "thread" => {
-                expect_id_kind("list_comments", "id", &params.0.id, ID_THREAD)?;
-                let id = parse_thread_id(&params.0.id)?;
-                self.services
+        let threads =
+            match resolve_comment_scope(params.0.scope.as_deref(), params.0.id.as_deref())? {
+                CommentScope::Thread(id) => self
+                    .services
                     .comment_store
                     .list_for_thread(&id)
                     .await
-                    .map_err(internal)?
-            }
-            "stream" => {
-                expect_id_kind("list_comments", "id", &params.0.id, ID_STREAM)?;
-                let id = parse_stream_id(&params.0.id)?;
-                self.services
+                    .map_err(internal)?,
+                CommentScope::Stream(id) => self
+                    .services
                     .comment_store
                     .list_for_stream(&id)
                     .await
-                    .map_err(internal)?
-            }
-            other => {
-                return Err(McpError::invalid_params(
-                    format!(
-                        "list_comments: `scope` must be \"thread\" or \"stream\", got `{other}`"
-                    ),
-                    None,
-                ));
-            }
-        };
+                    .map_err(internal)?,
+            };
         let status = params.0.status.as_deref().unwrap_or("all");
         let filtered: Vec<_> = threads
             .into_iter()
@@ -3320,6 +3320,79 @@ fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpE
     }
 }
 
+/// The resolved target of a `list_comments` call — either a single
+/// thread or a whole stream (workspace).
+#[derive(Debug, PartialEq, Eq)]
+enum CommentScope {
+    Thread(ThreadId),
+    Stream(StreamId),
+}
+
+/// Resolve the `(scope, id)` pair `list_comments` was called with into a
+/// concrete [`CommentScope`].
+///
+/// `scope` is optional: when omitted it's inferred from `id`'s prefix
+/// (`thr…` → thread, `str…` → stream). This keeps weaker models from
+/// thrashing on a `missing field "scope"` transport error when the id
+/// alone already determines the scope. When `scope` *is* given it's
+/// honored and the id must match it. Every failure path returns an
+/// agent-readable [`McpError`] naming the fix rather than a raw -32602.
+fn resolve_comment_scope(scope: Option<&str>, id: Option<&str>) -> Result<CommentScope, McpError> {
+    let id = id.map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| {
+        McpError::invalid_params(
+            "list_comments: pass `id` — a thread id (`thr…`) or stream id (`str…`)",
+            None,
+        )
+    })?;
+
+    // Normalize an explicit scope up front so an unknown string is caught
+    // before we look at the id.
+    let scope = scope.map(str::trim).filter(|s| !s.is_empty());
+    let want = match scope {
+        Some("thread") => Some(ID_THREAD),
+        Some("stream") => Some(ID_STREAM),
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!(
+                    "list_comments: `scope` must be \"thread\" or \"stream\", got `{other}` \
+                     (or omit it and I'll infer it from `id`)"
+                ),
+                None,
+            ));
+        }
+        None => None,
+    };
+
+    match want {
+        // Explicit scope: validate the id matches, then build it.
+        Some(ID_THREAD) => {
+            expect_id_kind("list_comments", "id", id, ID_THREAD)?;
+            Ok(CommentScope::Thread(parse_thread_id(id)?))
+        }
+        Some(ID_STREAM) => {
+            expect_id_kind("list_comments", "id", id, ID_STREAM)?;
+            Ok(CommentScope::Stream(parse_stream_id(id)?))
+        }
+        Some(_) => unreachable!("want is only ever ID_THREAD/ID_STREAM/None"),
+        // No scope: infer it from the id's prefix.
+        None => match id.parse::<oxplow_domain::AnyId>() {
+            Ok(any) if any.kind.prefix() == ID_THREAD.prefix => {
+                Ok(CommentScope::Thread(parse_thread_id(id)?))
+            }
+            Ok(any) if any.kind.prefix() == ID_STREAM.prefix => {
+                Ok(CommentScope::Stream(parse_stream_id(id)?))
+            }
+            _ => Err(McpError::invalid_params(
+                format!(
+                    "list_comments: couldn't infer `scope` from id `{id}` — pass scope \
+                     \"thread\" (with a `thr…` id) or \"stream\" (with a `str…` id)"
+                ),
+                None,
+            )),
+        },
+    }
+}
+
 /// Parse a `note`/`followup` string into a `CommentIntent`.
 fn parse_comment_intent(tool: &str, value: &str) -> Result<oxplow_domain::CommentIntent, McpError> {
     match value.to_ascii_lowercase().as_str() {
@@ -3698,8 +3771,8 @@ mod tests {
 
         let r = server
             .list_comments(Parameters(ListCommentsParams {
-                scope: "stream".into(),
-                id: stream.to_string(),
+                scope: Some("stream".into()),
+                id: Some(stream.to_string()),
                 status: None,
             }))
             .await
@@ -3794,7 +3867,7 @@ mod tests {
 
         let r = server
             .list_tasks(Parameters(ListTasksParams {
-                status: "backlog".to_string(),
+                status: Some("backlog".to_string()),
                 thread_id: None,
             }))
             .await
@@ -3835,7 +3908,7 @@ mod tests {
         // Soft-deleted: list_tasks(backlog) should no longer include it.
         let r = server
             .list_tasks(Parameters(ListTasksParams {
-                status: "backlog".to_string(),
+                status: Some("backlog".to_string()),
                 thread_id: None,
             }))
             .await
@@ -4344,6 +4417,73 @@ mod tests {
         let err = expect_id_kind("tool", "id", "no-prefix-shape", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
         assert!(msg.contains("no-prefix-shape"), "value missing: {msg}");
+    }
+
+    // ---- resolve_comment_scope ----
+
+    #[test]
+    fn resolve_comment_scope_infers_thread_from_id() {
+        let scope = resolve_comment_scope(None, Some("thr7")).unwrap();
+        assert_eq!(scope, CommentScope::Thread(ThreadId::new(7)));
+    }
+
+    #[test]
+    fn resolve_comment_scope_infers_stream_from_id() {
+        let scope = resolve_comment_scope(None, Some("str3")).unwrap();
+        assert_eq!(scope, CommentScope::Stream(StreamId::new(3)));
+    }
+
+    #[test]
+    fn resolve_comment_scope_honors_explicit_scope() {
+        assert_eq!(
+            resolve_comment_scope(Some("thread"), Some("thr1")).unwrap(),
+            CommentScope::Thread(ThreadId::new(1))
+        );
+        assert_eq!(
+            resolve_comment_scope(Some("stream"), Some("str1")).unwrap(),
+            CommentScope::Stream(StreamId::new(1))
+        );
+    }
+
+    #[test]
+    fn resolve_comment_scope_explicit_scope_rejects_mismatched_id() {
+        // scope says thread but a stream id was passed → friendly error.
+        let err = resolve_comment_scope(Some("thread"), Some("str1")).unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("list_comments"), "tool name missing: {msg}");
+        assert!(msg.contains("thread id"), "expected kind missing: {msg}");
+    }
+
+    #[test]
+    fn resolve_comment_scope_missing_id_is_friendly() {
+        let err = resolve_comment_scope(Some("thread"), None).unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("list_comments"), "tool name missing: {msg}");
+        assert!(msg.contains("`id`"), "names the missing param: {msg}");
+        // Blank/whitespace id is treated the same as missing.
+        assert!(resolve_comment_scope(None, Some("   ")).is_err());
+    }
+
+    #[test]
+    fn resolve_comment_scope_uninferable_id_is_friendly() {
+        // A valid-but-wrong-kind id (task) can't pick a scope.
+        let err = resolve_comment_scope(None, Some("tsk9")).unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("infer"), "explains it couldn't infer: {msg}");
+        assert!(msg.contains("scope"), "names scope as the fix: {msg}");
+        // A garbage id is likewise uninferable, not a transport error.
+        assert!(resolve_comment_scope(None, Some("nonsense")).is_err());
+    }
+
+    #[test]
+    fn resolve_comment_scope_unknown_scope_string_is_friendly() {
+        let err = resolve_comment_scope(Some("workspace"), Some("str1")).unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("workspace"), "echoes the bad value: {msg}");
+        assert!(
+            msg.contains("\"thread\"") && msg.contains("\"stream\""),
+            "lists valid scopes: {msg}"
+        );
     }
 
     // ---- compose_delegate_query_prompt ----

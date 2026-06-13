@@ -673,12 +673,18 @@ intermediate `ready` step.
   "fork_thread" above. Creates a new queued thread on the same stream,
   seeds a note item, optionally moves ready / blocked items across in
   one transaction.
-- `list_comments({ scope, id, status? })` / `respond_to_comment({
+- `list_comments({ id, scope?, status? })` / `respond_to_comment({
   comment_id, body })` / `resolve_comment({ comment_id })` — the user's
   threaded annotations anchored to text in pages (wiki / file / task).
-  `scope` is `"thread"` (id = `b-…`) or `"stream"` (id = `s-…`, the
-  whole workspace); `status` filters `"all"` / `"open"` /
-  `"needs_response"`. `respond_to_comment` appends a message authored
+  `id` is a thread id (`thr…`) or stream id (`str…`, the whole
+  workspace). `scope` (`"thread"` / `"stream"`) is **optional** — when
+  omitted it's inferred from `id`'s prefix; pass it explicitly only to
+  assert the kind (a mismatch then returns an agent-readable error
+  rather than silently inferring). A missing/blank `id`, an
+  uninferable id, or a bogus `scope` string all return a clear
+  in-handler `McpError` naming the fix, not a raw transport -32602 —
+  see `resolve_comment_scope` in `crates/oxplow-mcp/src/lib.rs`.
+  `status` filters `"all"` / `"open"` / `"needs_response"`. `respond_to_comment` appends a message authored
   `"agent"` (which clears `needs_response` until the user replies
   again); `resolve_comment` marks the thread resolved. **The runtime
   never force-triggers any of this — there is no Stop-hook branch and
