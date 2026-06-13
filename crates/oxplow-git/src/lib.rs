@@ -15,6 +15,7 @@ pub mod log;
 pub mod refs;
 mod refs_watch;
 mod repo;
+pub mod smart_merge;
 pub mod status;
 pub mod sync;
 pub mod tree;

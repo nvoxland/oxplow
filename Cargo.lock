@@ -3836,6 +3836,7 @@ dependencies = [
  "oxplow-fs-watch",
  "serde",
  "serde_json",
+ "similar",
  "specta",
  "tempfile",
  "thiserror 2.0.18",
