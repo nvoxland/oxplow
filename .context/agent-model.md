@@ -214,7 +214,15 @@ to `runtime.handleHookEnvelope`, which:
    blocks the tool (read-only thread; see Write guard below) or if
    `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
    MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item; see `crates/oxplow-runtime/src/filing.rs`).
+   item; see `crates/oxplow-runtime/src/filing.rs`). Both guards bail to
+   `None` for any tool outside the four worktree-mutating edits, so
+   `pre_tool_check` short-circuits via `pre_tool_check_applies(tool_name)`
+   *before* any DB read or git-state stat — the common case (Read / Grep
+   / Bash / mcp / Task / …) does zero work here. Persistence is
+   unaffected: the event is still ingested in `handle_hook_inner`
+   regardless. (The HTTP round-trip itself still fires for every tool —
+   the plugin's `PreToolUse` matcher is `"*"`; narrowing that matcher to
+   the edit tools is a separate, sign-off-gated win.)
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
    from the stores — see `buildSessionContextBlock` in `crates/oxplow-runtime/src/lib.rs`)

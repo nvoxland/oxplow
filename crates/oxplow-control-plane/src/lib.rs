@@ -558,6 +558,21 @@ fn hook_ack() -> Response {
     (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
+/// Whether `pre_tool_check` could possibly produce a deny for this tool.
+/// Both guards bail to `None` for any tool outside the worktree-mutating
+/// set: write_guard checks `WORKTREE_MUTATING_TOOLS`, filing checks
+/// `ALWAYS_WRITE_INTENT_TOOL_NAMES` — identical sets. So for everything
+/// else (Read / Grep / Bash / mcp / Task / WebFetch / …) the full check
+/// is provably a no-op, and the runtime can skip the thread + task-list
+/// DB reads and the git-state stat syscalls entirely. Kept as a pure fn
+/// so the equivalence is unit-testable against the canonical lists.
+fn pre_tool_check_applies(tool_name: &str) -> bool {
+    use oxplow_runtime::filing::ALWAYS_WRITE_INTENT_TOOL_NAMES;
+    use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
+    WORKTREE_MUTATING_TOOLS.contains(&tool_name)
+        || ALWAYS_WRITE_INTENT_TOOL_NAMES.contains(&tool_name)
+}
+
 /// Run write_guard then filing_enforcement against the PreToolUse
 /// payload. Returns the first deny body that fires, or None to allow.
 async fn pre_tool_check(
@@ -568,7 +583,12 @@ async fn pre_tool_check(
     let thread_id = thread_id?;
     let body = body?;
     let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    if tool_name.is_empty() {
+    // Fast path: neither guard can ever deny a tool that isn't a
+    // worktree-mutating edit, so skip the DB reads + git-state stats for
+    // the common case (Read / Grep / Bash / mcp / Task / …). Persistence
+    // is unaffected — `handle_hook_inner` ingests the event regardless of
+    // what this returns. See `pre_tool_check_applies`.
+    if !pre_tool_check_applies(tool_name) {
         return None;
     }
     let tool_input = body.get("tool_input");
@@ -1506,6 +1526,46 @@ mod tests {
         let a = generate_token();
         let b = generate_token();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn pre_tool_check_applies_only_to_worktree_mutating_tools() {
+        // The four structured-edit tools are the only ones either guard
+        // can deny — pre_tool_check must run for them.
+        for t in ["Write", "Edit", "MultiEdit", "NotebookEdit"] {
+            assert!(pre_tool_check_applies(t), "{t} must run the full check");
+        }
+        // Everything else short-circuits: both guards provably return None,
+        // so the DB reads + git stats are skipped.
+        for t in [
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash",
+            "Task",
+            "WebFetch",
+            "WebSearch",
+            "TodoWrite",
+            "mcp__oxplow__create_task",
+            "",
+        ] {
+            assert!(!pre_tool_check_applies(t), "{t} must short-circuit");
+        }
+    }
+
+    #[test]
+    fn pre_tool_check_gate_matches_canonical_guard_lists() {
+        // Equivalence guard: the gate must admit exactly the union of the
+        // two guards' tool sets, so narrowing the gate can never silently
+        // drop a tool a guard would have denied.
+        use oxplow_runtime::filing::ALWAYS_WRITE_INTENT_TOOL_NAMES;
+        use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
+        for t in WORKTREE_MUTATING_TOOLS
+            .iter()
+            .chain(ALWAYS_WRITE_INTENT_TOOL_NAMES.iter())
+        {
+            assert!(pre_tool_check_applies(t), "gate must admit guarded {t}");
+        }
     }
 
     #[test]
