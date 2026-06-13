@@ -443,6 +443,20 @@ impl CollectorRegistry {
             CollectorInput::Xml,
             include_str!("plugins/junit.jq"),
         ));
+        reg.register(Collector::jaq(
+            "oxplow.clippy",
+            CollectorKind::Analysis,
+            ["clippy-json"],
+            CollectorInput::Lines,
+            include_str!("plugins/clippy.jq"),
+        ));
+        reg.register(Collector::jaq(
+            "oxplow.eslint",
+            CollectorKind::Analysis,
+            ["eslint-json"],
+            CollectorInput::Json,
+            include_str!("plugins/eslint.jq"),
+        ));
         reg
     }
 
@@ -872,5 +886,134 @@ mod tests {
         let reg = CollectorRegistry::with_builtins();
         assert!(reg.run("cobertura", "<coverage><class").is_err());
         assert!(reg.run("junit", "<testsuites><testcase").is_err());
+    }
+
+    // ---- golden: bundled clippy / eslint analysis plugins ----
+
+    use oxplow_coverage::{AnalysisFinding, AnalysisReport, Severity};
+
+    fn finding(
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+        severity: Severity,
+        rule: Option<&str>,
+        message: &str,
+    ) -> AnalysisFinding {
+        AnalysisFinding {
+            path: path.into(),
+            line,
+            column,
+            severity,
+            rule: rule.map(Into::into),
+            message: message.into(),
+        }
+    }
+
+    // A realistic `cargo clippy --message-format=json` line stream: a
+    // compiler-artifact line (skipped), a warning + an error with primary
+    // spans, a message whose primary span is the second one, a span-less
+    // summary ("N warnings emitted", skipped), and a plain non-JSON line.
+    const GOLD_CLIPPY: &str = r#"{"reason":"compiler-artifact","target":{"name":"oxplow"}}
+{"reason":"compiler-message","message":{"message":"unused variable: `y`","code":{"code":"unused_variables"},"level":"warning","spans":[{"file_name":"src/foo.rs","line_start":3,"column_start":9,"is_primary":true}]}}
+{"reason":"compiler-message","message":{"message":"mismatched types","code":{"code":"E0308"},"level":"error","spans":[{"file_name":"src/bar.rs","line_start":10,"column_start":5,"is_primary":true}]}}
+{"reason":"compiler-message","message":{"message":"needless return","code":{"code":"clippy::needless_return"},"level":"note","spans":[{"file_name":"a.rs","line_start":1,"column_start":1,"is_primary":false},{"file_name":"b.rs","line_start":2,"column_start":2,"is_primary":true}]}}
+{"reason":"compiler-message","message":{"message":"1 warning emitted","code":null,"level":"warning","spans":[]}}
+some plain text rustc emitted to the stream"#;
+
+    #[test]
+    fn builtin_clippy_plugin_produces_expected_findings() {
+        let out = CollectorRegistry::with_builtins()
+            .run("clippy-json", GOLD_CLIPPY)
+            .expect("plugin runs");
+        let expected = AnalysisReport {
+            findings: vec![
+                finding(
+                    "src/foo.rs",
+                    Some(3),
+                    Some(9),
+                    Severity::Warning,
+                    Some("unused_variables"),
+                    "unused variable: `y`",
+                ),
+                finding(
+                    "src/bar.rs",
+                    Some(10),
+                    Some(5),
+                    Severity::Error,
+                    Some("E0308"),
+                    "mismatched types",
+                ),
+                // Primary span (b.rs) is selected over the first (a.rs);
+                // level "note" maps to Severity::Note.
+                finding(
+                    "b.rs",
+                    Some(2),
+                    Some(2),
+                    Severity::Note,
+                    Some("clippy::needless_return"),
+                    "needless return",
+                ),
+            ],
+        };
+        assert_eq!(out.as_analysis().unwrap(), &expected);
+    }
+
+    const GOLD_ESLINT: &str = r#"[
+      { "filePath": "src/a.js", "messages": [
+        { "ruleId": "no-unused-vars", "severity": 2, "line": 1, "column": 7, "message": "x is unused" },
+        { "ruleId": "eqeqeq", "severity": 1, "line": 5, "column": 3, "message": "use ===" }
+      ] },
+      { "filePath": "src/b.js", "messages": [
+        { "ruleId": null, "severity": 2, "line": 2, "column": 1, "message": "Parsing error" }
+      ] },
+      { "filePath": "src/clean.js", "messages": [] }
+    ]"#;
+
+    #[test]
+    fn builtin_eslint_plugin_produces_expected_findings() {
+        let out = CollectorRegistry::with_builtins()
+            .run("eslint-json", GOLD_ESLINT)
+            .expect("plugin runs");
+        let expected = AnalysisReport {
+            findings: vec![
+                finding(
+                    "src/a.js",
+                    Some(1),
+                    Some(7),
+                    Severity::Error,
+                    Some("no-unused-vars"),
+                    "x is unused",
+                ),
+                finding(
+                    "src/a.js",
+                    Some(5),
+                    Some(3),
+                    Severity::Warning,
+                    Some("eqeqeq"),
+                    "use ===",
+                ),
+                // ruleId null → a finding with no rule.
+                finding(
+                    "src/b.js",
+                    Some(2),
+                    Some(1),
+                    Severity::Error,
+                    None,
+                    "Parsing error",
+                ),
+            ],
+        };
+        assert_eq!(out.as_analysis().unwrap(), &expected);
+    }
+
+    #[test]
+    fn builtin_analysis_plugins_register_under_analysis_kind() {
+        let reg = CollectorRegistry::with_builtins();
+        for fmt in ["clippy-json", "eslint-json"] {
+            let c = reg.resolve(fmt).expect("analysis format registered");
+            assert_eq!(c.kind(), CollectorKind::Analysis, "{fmt}");
+            assert_eq!(c.runtime(), CollectorRuntime::Jaq);
+        }
     }
 }
