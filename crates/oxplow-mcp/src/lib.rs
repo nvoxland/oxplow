@@ -1444,12 +1444,12 @@ impl OxplowMcp {
 
     #[tool(
         description = "Ingest a coverage report into the thread's open effort as diff coverage \
-            over the lines that effort changed. oxplow parses the report deterministically \
-            (cobertura / lcov / jacoco-xml) — you only point at it, you NEVER report coverage \
-            numbers yourself (that keeps the result trustworthy/`observed`). `report_path` and \
-            `format` default to the project's `collection` profile in oxplow.yaml. Returns a \
-            status: stored (with summaryPct over changed lines) or a reason nothing landed \
-            (no_open_effort / not_configured / report_missing / no_baseline / no_changed_coverage)."
+            over the lines that effort changed. oxplow parses it deterministically (cobertura / \
+            lcov / jacoco-xml) — point at the report, NEVER report numbers yourself (keeps the \
+            result `observed`/trustworthy). `report_path`/`format` default to the project's \
+            `collection` profile (oxplow.yaml). Returns a status: stored (with summaryPct) or \
+            why nothing landed (no_open_effort / not_configured / report_missing / no_baseline / \
+            no_changed_coverage)."
     )]
     async fn ingest_coverage(
         &self,
@@ -1473,15 +1473,13 @@ impl OxplowMcp {
 
     #[tool(
         description = "Ingest a static-analysis report (linter/analyzer findings) into the \
-            thread's open effort. The on-demand counterpart to `ingest_coverage`: oxplow parses \
-            the report deterministically via the collector registry (e.g. `eslint-json` for \
-            `eslint -f json`, `clippy-json` for clippy's JSON output) and records a \
-            `static-analysis` observation (provenance `observed`) — you point at the report, you \
-            NEVER report finding counts yourself. `report_path` and `format` default to the first \
-            analysis report in the project's `collection` profile (oxplow.yaml). Returns a status: \
-            stored (with per-severity counts) or a reason nothing landed (no_open_effort / \
-            not_configured / report_missing / parse_error). Unlike coverage, analysis findings \
-            are absolute, so no start-snapshot baseline is required."
+            thread's open effort — the on-demand counterpart to `ingest_coverage`. oxplow parses \
+            it deterministically via the collector registry (e.g. `eslint-json`, `clippy-json`) \
+            and records a `static-analysis` observation (`observed`) — point at the report, NEVER \
+            report counts yourself. `report_path`/`format` default to the first analysis report \
+            in the `collection` profile (oxplow.yaml). Returns a status: stored (per-severity \
+            counts) or why nothing landed (no_open_effort / not_configured / report_missing / \
+            parse_error). Findings are absolute, so no baseline is needed."
     )]
     async fn ingest_analysis(
         &self,
@@ -1594,14 +1592,13 @@ impl OxplowMcp {
 
     #[tool(
         description = "List comments — threaded annotations the user anchored to a text selection \
-                       in a page (wiki body, code file line, task detail). `id` is a thread id \
-                       (`thr…`) or stream id (`str…`, every page in the workspace). `scope` is \
-                       optional: \"thread\" or \"stream\" — when omitted it's inferred from `id`'s \
-                       prefix, so usually you only need to pass `id`. `status` \
-                       filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups \
-                       whose latest message isn't yours — i.e. what the user wants you to act on). \
-                       Each result carries the anchored `quote`, the message thread, and `intent` \
-                       (note vs followup). Respond with respond_to_comment; close with resolve_comment."
+                       in a page (wiki body, code file line, task detail). `id` is a thread \
+                       (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so \
+                       usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \
+                       \"needs_response\" (open follow-ups whose latest message isn't yours — what \
+                       the user wants you to act on). Each result carries the anchored `quote`, \
+                       the message thread, and `intent` (note vs followup). Respond with \
+                       respond_to_comment; close with resolve_comment."
     )]
     async fn list_comments(
         &self,
@@ -1712,14 +1709,13 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Prepare an exploration query for an Explore subagent. Use when you need to \
-                       understand a codebase area before dispatching real work and would otherwise \
-                       read 5+ files inline — offloading the reads keeps your own cached context \
-                       small. Returns { prompt, provisionalNoteId }. The orchestrator then calls \
-                       Agent(subagent_type='Explore', prompt=<prompt>); the prompt instructs the \
-                       subagent to call mcp__oxplow__record_query_finding({ note_id: \
-                       <provisionalNoteId>, body }) with its findings. Read the finding later via \
-                       mcp__oxplow__list_thread_notes."
+        description = "Prepare an exploration query for an Explore subagent. Use to understand a \
+                       codebase area before dispatching real work when you'd otherwise read 5+ \
+                       files inline — offloading the reads keeps your cached context small. \
+                       Returns { prompt, provisionalNoteId }; call Agent(subagent_type='Explore', \
+                       prompt=<prompt>) — the prompt tells the subagent to record findings via \
+                       record_query_finding({ note_id: <provisionalNoteId>, body }), which you \
+                       read later via list_thread_notes."
     )]
     async fn delegate_query(
         &self,
@@ -1847,15 +1843,13 @@ impl OxplowMcp {
         json_result(&hits)
     }
 
-    #[tool(description = "Get one wiki page's metadata by slug, enriched with \
-                       `stale_refs` — the file refs whose pinned snapshot \
-                       is older than the file's latest snapshot. That \
-                       freshness detail is the one thing `list_wiki_pages` \
-                       does NOT carry; for the bulk fields (title, refs, \
-                       excerpt, timestamps) `list_wiki_pages` already \
-                       returns everything this does, so don't follow a \
-                       `list` with per-page `get` calls unless you need \
-                       `stale_refs`. Returns null for an unknown slug.")]
+    #[tool(
+        description = "Get one wiki page's metadata by slug, enriched with `stale_refs` — the \
+                       file refs whose pinned snapshot is older than the file's latest snapshot. \
+                       That's the only field `list_wiki_pages` doesn't already carry, so don't \
+                       follow a `list` with per-page `get` calls unless you need `stale_refs`. \
+                       Returns null for an unknown slug."
+    )]
     async fn get_wiki_page_metadata(
         &self,
         params: Parameters<SlugParams>,
@@ -2026,15 +2020,10 @@ impl OxplowMcp {
     // ---------- task orchestration ----------
 
     #[tool(
-        description = "Create a new task. Allocates id + sort_index, fires creation event. \
-                       `thread_id` is required unless `backlog: true` is set (a thread-detached \
-                       row trips filing-enforcement on the next edit, so backlog filing must be \
-                       an explicit choice). Pass `status: \"in_progress\"` to start the work in \
-                       the same call (filing-enforcement requires an in_progress row to exist \
-                       before edits land). Pass `status: \"done\"` (or `blocked`) with \
-                       `touched_files` to file a row for already-shipped work — the runtime \
-                       synthesizes the in_progress→target effort so Local History attributes \
-                       the writes."
+        description = "Create a new task (allocates id + sort_index, fires creation event). See \
+                       param docs for `thread_id`/`backlog`, and the `status` shortcuts for \
+                       starting work (`in_progress`) or filing already-shipped work \
+                       (`done`/`blocked` + `touched_files`) in one call."
     )]
     async fn create_task(
         &self,
@@ -2199,23 +2188,14 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Append a summary note to a task then mark it `done`. Pass \
-                       `touched_files` (repo-relative paths edited for this effort) to attribute \
-                       the writes via Local History — skip only if you edited >100 files. Pass \
-                       `impacts` to declare what else this effort changed: wiki pages you \
-                       created/updated/deleted, tasks you completed/reopened, commits you \
-                       referenced, findings you resolved. Each is projected into the cross-page \
-                       backlink graph so e.g. a new wiki page lists this task as its origin \
-                       without relying on summary-body text parsing. \
-                       \n\nReturns `{ task, file_review }`. When `file_review` is non-null \
-                       the snapshot bracket diff disagreed with `touched_files`: \
-                       `claimed_but_not_changed` lists files you said you edited but the \
-                       worktree didn't change, and `changed_but_not_claimed` lists files \
-                       that did change but you didn't list. Inspect both, then call \
-                       `amend_effort(effort_id, add_files, remove_files)` to correct the \
-                       attribution. If you genuinely meant your original list (e.g. you \
-                       edited then reverted, or another actor changed those files), no \
-                       amend is needed."
+        description = "Append `summary` to a task and mark it `done`. Pass `touched_files` and \
+                       `impacts` (see param docs) to attribute writes and cross-page outcomes. \
+                       Returns `{ task, file_review }`: when `file_review` is non-null the \
+                       snapshot diff disagreed with your `touched_files` — \
+                       `claimed_but_not_changed` / `changed_but_not_claimed` list the \
+                       mismatches; call `amend_effort(effort_id, add_files, remove_files)` to \
+                       fix, or leave it if your list was right (edited then reverted, or \
+                       another actor changed them)."
     )]
     async fn complete_task(
         &self,
@@ -2318,13 +2298,10 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Adjust an effort's `task_effort_file` rows after the fact. Use to \
-                       reconcile the file-attribution list when the auto-diff disagreed \
-                       with your declared `touched_files` on `complete_task`. \
-                       `add_files` claims paths the diff thought weren't yours; \
-                       `remove_files` disclaims paths the diff thought were yours but \
-                       actually came from another actor (formatter, parallel effort, the \
-                       user). Either list may be empty/omitted; passing both empty is a no-op."
+        description = "Adjust an effort's `task_effort_file` rows after the fact — reconcile the \
+                       file-attribution list when the auto-diff disagreed with your \
+                       `touched_files` on `complete_task`. See param docs for \
+                       `add_files`/`remove_files`; passing both empty is a no-op."
     )]
     async fn amend_effort(
         &self,
@@ -2605,13 +2582,12 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Compose a ready-to-paste dispatch brief for a task and transition it \
-                       to in_progress in one atomic call. When `item_id` is given, dispatches that \
-                       specific item; otherwise picks the first ready non-epic item on the thread \
-                       (mirrors main's /work-next composition shortcut). Returns \
+        description = "Compose a ready-to-paste dispatch brief for a task and transition it to \
+                       in_progress in one atomic call. With `item_id`, dispatches that item; \
+                       otherwise picks the first ready non-epic item on the thread. Returns \
                        `{ ok, prompt, itemId }` — pass `prompt` to the general-purpose Agent tool. \
                        The brief carries the item fields, AC, recent notes, and the subagent \
-                       protocol preamble so the orchestrator brief stays slim."
+                       protocol preamble."
     )]
     async fn dispatch_task(
         &self,
@@ -2946,26 +2922,16 @@ impl OxplowMcp {
         json_result(&note)
     }
 
-    #[tool(description = "Record a wiki page edit's freshness bookkeeping. \
-                       Call this AFTER editing a `.oxplow/wiki/<slug>.md` \
-                       file. \
-                       Both `verified_refs` and `removed_refs` are \
-                       REQUIRED: pass `[]` if nothing applies, but be \
-                       explicit so the freshness signal stays honest. \
-                       `verified_refs` lists repo-relative file paths you \
-                       re-read against the new body during this edit \
-                       (those refs get their snapshot pin advanced to \
-                       current). A verified path may be a file the body \
-                       cites directly OR a file under a directory the \
-                       body cites via `[[dir:…]]` — verifying a fact \
-                       against `crates/x/src/lib.rs` when the page only \
-                       cites `[[dir:crates/x]]` now records a precise \
-                       pin for that file. `removed_refs` lists paths you \
-                       intentionally removed from the page (validated to \
-                       no longer appear in the body). Refs left in place \
-                       without re-checking should appear in NEITHER list \
-                       — they keep their existing pin so 'this content \
-                       relies on stale sources' surfaces accurately.")]
+    #[tool(
+        description = "Record a wiki page edit's freshness bookkeeping — call AFTER writing \
+                       a `.oxplow/wiki/<slug>.md` file. `verified_refs` = paths you re-read \
+                       against the new body (their freshness pin advances to current); \
+                       `removed_refs` = paths you deleted from it. Both REQUIRED (`[]` if none). \
+                       A verified path may be a file under a directory the body cites via \
+                       `[[dir:…]]` — list the specific file to give it a precise pin. Refs left \
+                       in place without re-checking go in NEITHER list, keeping their existing \
+                       pin so the staleness signal stays honest."
+    )]
     async fn record_wiki_page_update(
         &self,
         params: Parameters<RecordWikiPageUpdateParams>,
