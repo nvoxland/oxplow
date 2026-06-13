@@ -523,7 +523,7 @@ export const commands = {
 	 *  alongside the canonical `task_effort_file` list on
 	 *  `SnapshotDetailPage`.
 	 */
-	listChangedPathsForEffort: (effortId: EffortId) => typedError<string[], IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
+	listChangedPathsForEffort: (effortId: EffortId) => typedError<EffortChangedPaths, IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
 	/**
 	 *  Collection observations (test-run / diff-coverage) for an effort,
 	 *  newest-first. Optional `kind` filter. Drives the effort-review
@@ -1267,6 +1267,20 @@ export type CreateWorktreeRequest = {
 export type EffortAtSnapshot = {
 	snapshot_id: number,
 	effort: TaskEffort,
+};
+
+/**
+ *  The snapshot-bracket changed paths for an effort, split by whether the
+ *  effort CLAIMED each one (via `task_effort_file`). Mirrors the
+ *  claimed/unclaimed attribution of the history view
+ *  (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
+ *  changed-during-the-bracket AND claimed by this effort; `unclaimed` =
+ *  changed but never claimed (parallel/external writes, formatters, capture
+ *  gaps). Claim-first attribution, Child 3.
+ */
+export type EffortChangedPaths = {
+	claimed: string[],
+	unclaimed: string[],
 };
 
 export type EffortFile = {

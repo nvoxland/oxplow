@@ -1870,14 +1870,19 @@ export async function listWikiSlugsForSnapshots(
   return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
 }
 
-/** All distinct file paths whose `file_snapshot` rows fall inside
- *  this effort's snapshot bracket — the auto-diff "all changes
- *  during this effort" reference list. Returns empty when the
- *  effort has no start/end snapshot pin yet. */
+export type { EffortChangedPaths } from "./tauri-bridge/index.js";
+
+/** Snapshot-bracket changed paths for an effort, split into the paths the
+ *  effort CLAIMED (task_effort_file) vs the `unclaimed` rest (parallel/
+ *  external writes, formatters, capture gaps) — the claim-aware view that
+ *  matches the history grouping. Both empty when the effort has no
+ *  start/end snapshot pin yet. */
 export async function listChangedPathsForEffort(
   effortId: string,
-): Promise<string[]> {
-  return unwrap(await commands.listChangedPathsForEffort(effortId)) as string[];
+): Promise<import("./tauri-bridge/index.js").EffortChangedPaths> {
+  return unwrap(
+    await commands.listChangedPathsForEffort(effortId),
+  ) as unknown as import("./tauri-bridge/index.js").EffortChangedPaths;
 }
 
 export async function listEffortsAtSnapshots(

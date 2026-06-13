@@ -383,6 +383,13 @@ the local-blame overlay described in `.context/editor-and-monaco.md`).
 per-effort rows with pre-joined start/end snapshot metadata and the
 list of changed paths (computed from the pair diff).
 
+`list_changed_paths_for_effort` returns a **claimed/unclaimed split**
+(`EffortChangedPaths { claimed, unclaimed }`) rather than a flat list:
+the snapshot-bracket changed paths partitioned by whether this effort
+claimed each one (`task_effort_file`), matching the history view's
+attribution (`apps/desktop/src/snapshot-effort-grouping.ts`). Claim-first
+attribution, Child 3.
+
 **Commit↔item attribution is intentionally NOT tracked.** A
 `task_commit` junction existed briefly (migration v27) but was
 removed in v28. Users commit outside oxplow all the time (IDE buttons,

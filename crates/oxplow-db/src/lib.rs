@@ -31,8 +31,8 @@ pub use analytics_stores::{
 pub use comment_store::SqliteCommentStore;
 pub use database::{Database, DbInitError};
 pub use effort_store::{
-    EffortAtSnapshot, EffortFile, EffortFileChange, FileRefVersion, OwnedFileRefVersion,
-    RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
+    EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
+    OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use observation_store::{
     EffortObservation, NewEffortObservation, SqliteEffortObservationStore,

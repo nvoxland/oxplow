@@ -182,16 +182,21 @@ the site via `.github/workflows/docs.yml`, so a push would have published
 held content. When any out-of-effort file sits under `docs/`, the nudge
 appends a stronger auto-deploy warning.
 
-**"Changed set" = start-snapshot vs working-tree**, the same notion
-diff-coverage uses (`path_changed_in_effort`, the path-granularity sibling
-of `changed_lines_for`): a path is in the effort's changed set when its
-working-tree content differs from its effort-start-snapshot content
-(absent-side-as-empty, so adds and deletes both count). This works for an
-*open* effort, where `list_changed_paths_for_effort` can't (it needs an
-end snapshot). A pre-staged file that existed unchanged at effort start
-reads as out-of-effort — exactly the drift signal. HEAD sha + committed
-file list come from `oxplow_git::head_commit_sha` / `get_commit_detail`
-via `spawn_blocking`.
+**"In-effort" is claim-aware** (claim-first attribution, Child 3): when
+the effort has CLAIMED files (`task_effort_file` — populated in real time
+by the PostToolUse auto-claim and at completion by `touched_files`), the
+guard prefers that set. A committed file the effort never claimed is
+out-of-effort **even if it changed during the window**, and a claimed file
+is never falsely flagged. Only when the effort is UNREVIEWED (no claims at
+all — legacy or non-structured-edit efforts) does the guard fall back to
+the raw snapshot diff: **"changed set" = start-snapshot vs working-tree**,
+the same notion diff-coverage uses (`path_changed_in_effort`, the
+path-granularity sibling of `changed_lines_for`): a path is in the changed
+set when its working-tree content differs from its effort-start-snapshot
+content (absent-side-as-empty, so adds and deletes both count). This
+fallback works for an *open* effort, where `list_changed_paths_for_effort`
+can't (it needs an end snapshot). HEAD sha + committed file list come from
+`oxplow_git::head_commit_sha` / `get_commit_detail` via `spawn_blocking`.
 
 **Skips cleanly** when the commit didn't succeed (non-zero exit), there's
 no open effort, or the effort has no start snapshot yet. **Anti-nag:**

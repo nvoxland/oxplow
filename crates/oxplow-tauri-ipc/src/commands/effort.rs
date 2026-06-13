@@ -1,6 +1,8 @@
 //! task effort tracking commands.
 
-use oxplow_db::{AgentNudge, EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort};
+use oxplow_db::{
+    AgentNudge, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortObservation, TaskEffort,
+};
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 
 use crate::error::IpcError;
@@ -44,7 +46,7 @@ pub async fn list_efforts_at_snapshots(
 pub async fn list_changed_paths_for_effort(
     state: tauri::State<'_, AppState>,
     effort_id: EffortId,
-) -> Result<Vec<String>, IpcError> {
+) -> Result<EffortChangedPaths, IpcError> {
     oxplow_rpc::commands::effort::list_changed_paths_for_effort(&state, effort_id).await
 }
 

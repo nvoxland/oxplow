@@ -821,12 +821,13 @@ async fn effort_reads_empty_for_unknown_ids() {
             .unwrap()
             .is_empty()
     );
-    assert!(
-        commands::effort::list_changed_paths_for_effort(app.state(), EffortId::new(999))
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    {
+        let split =
+            commands::effort::list_changed_paths_for_effort(app.state(), EffortId::new(999))
+                .await
+                .unwrap();
+        assert!(split.claimed.is_empty() && split.unclaimed.is_empty());
+    }
     assert!(
         commands::effort::list_effort_observations(app.state(), EffortId::new(999), None)
             .await

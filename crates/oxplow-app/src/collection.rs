@@ -822,11 +822,33 @@ impl CollectionService {
             _ => return Ok(None),
         };
         let start_tree = self.snapshots.tree_at(start).await?;
+        // Claim-aware "in-effort" test (claim-first attribution, Child 3):
+        // when the effort has CLAIMED files, prefer that set — a committed
+        // file the effort never claimed is out-of-effort even if it changed
+        // during the window, and a claimed file is never falsely flagged.
+        // Only when the effort is UNREVIEWED (no claims at all — legacy /
+        // non-structured-edit efforts) do we fall back to the raw snapshot
+        // diff (the prior behavior).
+        let claimed: std::collections::HashSet<String> = self
+            .efforts
+            .list_files(&effort.id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        let claim_first_active = !claimed.is_empty();
         let mut out_of_effort: Vec<String> = detail
             .files
             .iter()
             .map(|f| f.path.clone())
-            .filter(|path| !self.path_changed_in_effort(path, &start_tree))
+            .filter(|path| {
+                if claim_first_active {
+                    !claimed.contains(path)
+                } else {
+                    !self.path_changed_in_effort(path, &start_tree)
+                }
+            })
             .collect();
         if out_of_effort.is_empty() {
             return Ok(None);
@@ -2039,6 +2061,83 @@ mod tests {
             assert!(nudge.contains("docs/blog/posts/held.md"), "{nudge}");
             assert!(nudge.contains("auto-deploys the site"), "{nudge}");
             assert!(nudge.contains(".github/workflows/docs.yml"), "{nudge}");
+        }
+
+        #[tokio::test]
+        async fn commit_hygiene_is_claim_aware() {
+            // Claim-first (Child 3): when the effort has claims, the
+            // commit-hygiene "in-effort" test prefers the CLAIMED set.
+            // - A committed file the effort never claimed is flagged EVEN
+            //   though it changed during the window (old snapshot logic
+            //   would have cleared it).
+            // - A claimed file is NOT flagged.
+            let h = build_full(None, true, &[]).await;
+            // extra.rs changed during the window (not in start snapshot)
+            // but is never claimed.
+            std::fs::write(h.tmp.path().join("extra.rs"), "x\n").unwrap();
+            // Claim only src/foo.rs onto the open effort (as the real-time
+            // auto-claim would).
+            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            h.efforts
+                .record_file(
+                    &effort_id,
+                    "src/foo.rs",
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+            git_in(h.tmp.path(), &["add", "src/foo.rs", "extra.rs"]);
+            git_commit(h.tmp.path(), "claimed + unclaimed");
+            let nudge = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
+                .await
+                .unwrap()
+                .expect("unclaimed committed file should nudge");
+            assert!(
+                nudge.contains("extra.rs"),
+                "a committed-but-never-claimed file must be flagged: {nudge}"
+            );
+            assert!(
+                !nudge.contains("src/foo.rs"),
+                "a claimed file must NOT be flagged: {nudge}"
+            );
+        }
+
+        #[tokio::test]
+        async fn commit_hygiene_no_nudge_when_only_claimed_file_committed() {
+            // Effort claims src/foo.rs and commits only it → clean, no nudge.
+            let h = build_full(None, true, &[]).await;
+            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            h.efforts
+                .record_file(
+                    &effort_id,
+                    "src/foo.rs",
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+            git_in(h.tmp.path(), &["add", "src/foo.rs"]);
+            git_commit(h.tmp.path(), "just the claimed file");
+            let result = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
+                .await
+                .unwrap();
+            assert!(
+                result.is_none(),
+                "committing only the claimed file must not nudge: {result:?}"
+            );
         }
 
         #[tokio::test]

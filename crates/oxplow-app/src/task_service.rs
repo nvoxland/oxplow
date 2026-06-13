@@ -2118,17 +2118,52 @@ mod tests {
         assert!(closed.start_snapshot_id.is_some());
         assert!(closed.end_snapshot_id.is_some());
 
+        // Nothing claimed → the worktree edit lands in the `unclaimed`
+        // half of the split; the primary-stream edit appears in neither.
         let changed =
             oxplow_db::TaskEffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
                 .await
                 .unwrap();
         assert!(
-            changed.iter().any(|p| p == "changed.txt"),
+            changed.unclaimed.iter().any(|p| p == "changed.txt"),
             "worktree edit must be visible in the bracket diff; got {changed:?}",
         );
         assert!(
-            !changed.iter().any(|p| p == "other.txt"),
+            !changed.claimed.iter().any(|p| p == "changed.txt"),
+            "nothing was claimed, so it must not be in the claimed half; got {changed:?}",
+        );
+        assert!(
+            !changed.unclaimed.iter().any(|p| p == "other.txt")
+                && !changed.claimed.iter().any(|p| p == "other.txt"),
             "primary-stream edit must NOT bleed into the worktree's effort; got {changed:?}",
+        );
+
+        // Claiming the path moves it from `unclaimed` to `claimed`.
+        let v = crate::file_ref_version::ResolvedFileVersion {
+            local_snapshot_id: 0,
+            closest_git_version: None,
+            git_version_exact: false,
+        };
+        oxplow_db::TaskEffortStore::record_file(
+            &*effort_store,
+            &closed.id,
+            "changed.txt",
+            oxplow_db::EffortFileChange::Updated,
+            v.as_ref(),
+        )
+        .await
+        .unwrap();
+        let split =
+            oxplow_db::TaskEffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
+                .await
+                .unwrap();
+        assert!(
+            split.claimed.iter().any(|p| p == "changed.txt"),
+            "a claimed change must appear in the claimed half; got {split:?}",
+        );
+        assert!(
+            !split.unclaimed.iter().any(|p| p == "changed.txt"),
+            "a claimed change must not also be unclaimed; got {split:?}",
         );
     }
 }

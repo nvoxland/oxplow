@@ -5,7 +5,8 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    AgentNudge, EffortAtSnapshot, EffortFile, EffortObservation, TaskEffort, TaskEffortStore as _,
+    AgentNudge, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortObservation, TaskEffort,
+    TaskEffortStore as _,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -57,16 +58,22 @@ pub async fn list_efforts_at_snapshots(
 pub async fn list_changed_paths_for_effort(
     svc: &Services,
     effort_id: EffortId,
-) -> Result<Vec<String>, IpcError> {
+) -> Result<EffortChangedPaths, IpcError> {
     let filter = current_filter(svc);
-    let paths = svc
+    let split = svc
         .effort_store
         .list_changed_paths_for_effort(&effort_id)
         .await?;
-    Ok(paths
-        .into_iter()
-        .filter(|p| !filter.ignore(Path::new(p)))
-        .collect())
+    let keep = |paths: Vec<String>| -> Vec<String> {
+        paths
+            .into_iter()
+            .filter(|p| !filter.ignore(Path::new(p)))
+            .collect()
+    };
+    Ok(EffortChangedPaths {
+        claimed: keep(split.claimed),
+        unclaimed: keep(split.unclaimed),
+    })
 }
 
 /// Collection observations (test-run / diff-coverage) for an effort,

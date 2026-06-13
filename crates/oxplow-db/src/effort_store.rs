@@ -61,6 +61,19 @@ pub struct EffortFile {
     pub git_version_exact: bool,
 }
 
+/// The snapshot-bracket changed paths for an effort, split by whether the
+/// effort CLAIMED each one (via `task_effort_file`). Mirrors the
+/// claimed/unclaimed attribution of the history view
+/// (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
+/// changed-during-the-bracket AND claimed by this effort; `unclaimed` =
+/// changed but never claimed (parallel/external writes, formatters, capture
+/// gaps). Claim-first attribution, Child 3.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct EffortChangedPaths {
+    pub claimed: Vec<String>,
+    pub unclaimed: Vec<String>,
+}
+
 /// Snapshot-pinned version data for a file reference. The
 /// store/service layer computes this from a snapshot id at capture
 /// time and stamps it onto every per-file ref row.
@@ -379,7 +392,7 @@ pub trait TaskEffortStore: Send + Sync {
     async fn list_changed_paths_for_effort(
         &self,
         id: &EffortId,
-    ) -> Result<Vec<String>, DomainError>;
+    ) -> Result<EffortChangedPaths, DomainError>;
     /// Remove specific `task_effort_file` rows. Companion to
     /// `record_file`. Used by the `amend_effort` MCP tool when the
     /// agent disclaims a path that the auto-diff thought was theirs.
@@ -871,9 +884,11 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     async fn list_changed_paths_for_effort(
         &self,
         id: &EffortId,
-    ) -> Result<Vec<String>, DomainError> {
+    ) -> Result<EffortChangedPaths, DomainError> {
         let id_clone = *id;
-        self.db
+        // Raw snapshot-bracket changed paths …
+        let changed: Vec<String> = self
+            .db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT DISTINCT fs.path
@@ -891,7 +906,17 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-            .await
+            .await?;
+        // … partitioned by whether this effort CLAIMED each one.
+        let claimed_set: std::collections::HashSet<String> = self
+            .list_files(id)
+            .await?
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        let (claimed, unclaimed): (Vec<String>, Vec<String>) =
+            changed.into_iter().partition(|p| claimed_set.contains(p));
+        Ok(EffortChangedPaths { claimed, unclaimed })
     }
 
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
