@@ -60,9 +60,12 @@ selectors; screenshot when looks matter, and read the image.
    brief a SINGLE paragraph** — multi-paragraph (blank-line) pastes get
    their paragraphs REORDERED over the web→PTY path (known bug). Ignore
    the greyed *ghost autosuggest* text in the prompt; it isn't in the
-   buffer and won't submit. Most reliable of all: skip the xterm and
-   inject with the `send_terminal_message(session_id, message)` IPC.
-   Write real briefs: scope, constraints, file-the-task-first, tests +
+   buffer and won't submit. You are a HUMAN at the keyboard: drive by
+   typing/pasting into the terminal — never call oxplow's terminal I/O
+   transport (`send_terminal_message`) directly to inject a prompt, and
+   never script oxplow to generate agent input. oxplow must not automate
+   the agent; the agent only ever receives human keystrokes (and makes
+   its own tool calls). Write real briefs: scope, constraints, file-the-task-first, tests +
    fmt + clippy, commit per concern, update `.context/` docs.
 2. **Wait without burning context.** Done-signal = idle AND stopped.
    `list_hook_events {"threadId":...}` is **newest-first** — check
@@ -102,11 +105,15 @@ selectors; screenshot when looks matter, and read the image.
 
 ## Driving agents efficiently (hard-won navigator tricks)
 
-- **Reliable prompt injection beats the xterm.** The web terminal is
-  flaky (focus theft, ghost autosuggest, paste reordering, newline
-  mis-fires). Preference order: `send_terminal_message` IPC >
-  `fill()`+Enter+Enter with a **single-paragraph** brief >
-  `keyboard.type` (single line only). Re-`focus()` right before sending.
+- **Type like a human; never automate the agent.** Drive only by
+  simulating keystrokes into the web terminal (Playwright `keyboard.type`
+  / `fill()`+Enter+Enter, single-paragraph briefs, re-`focus()` first).
+  Do NOT call `send_terminal_message` (oxplow's terminal *I/O transport*
+  for human keystrokes/paste) directly to inject a prompt, and never have
+  oxplow generate agent input — that would be automating the agent and
+  risks violating the agent tool's license. The terminal is flaky (focus
+  theft, ghost autosuggest, paste reordering); work around it as a human
+  would, don't bypass the human-input path.
 - **Real clicks, not synthetic.** `page.evaluate(() => el.click())`
   often doesn't fire React handlers, so UI buttons silently no-op. Use
   a real `page.mouse.click(x, y)` (coords from `getBoundingClientRect`)
