@@ -1183,18 +1183,32 @@ union. To attribute writes correctly the agent declares its touched
 files on the status transition that closes the effort; the runtime
 stores them in `task_effort_file` (see data-model.md).
 
-**Agent-declared payload.** When calling `update_task` or
-`complete_task` to close an effort, the agent passes
+**Claim-first auto-attribution (PostToolUse).** Every structured write
+tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — auto-claims the
+file it just wrote onto the thread's OPEN effort in real time, from the
+same PostToolUse path that attributes wiki edits
+(`attribute_effort_file_edit` → `effort_claim_path_from_edit` in
+`crates/oxplow-control-plane/src/lib.rs`, delegating to
+`TaskService::claim_open_effort_file` in `crates/oxplow-app/src/task_service.rs`).
+The claim is best-effort (never fails the hook), idempotent (`record_file`
+is `INSERT OR REPLACE` keyed on `(effort_id, path)`), and resolves the
+open effort **per thread** via `find_open_for_thread` — so it's reliable
+under the single-open-effort-per-thread rule (migration V31), unlike the
+old global active-effort heuristic that was removed for over-reporting
+when ≥2 efforts were in_progress. `Bash` / codegen / formatter writes are
+intentionally NOT auto-claimed — they stay for snapshot reconciliation.
+
+**Agent-declared payload (now confirm/amend).** When calling
+`update_task` or `complete_task` to close an effort, the agent passes
 `touchedFiles: string[]` — the repo-relative paths it wrote or edited
-during this effort. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
+during this effort. Because structured edits already auto-claimed in
+real time, this payload now merely confirms/amends rather than
+enumerating from scratch. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
 the open effort id, flushes the task-end snapshot, closes the effort,
 and then inserts `task_effort_file` rows for each deduped path
 via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
 paths) drop all rows, so the "assume all" fallback engages in
-`computeEffortFiles`. The PostToolUse hook no longer writes to
-`task_effort_file`; the previous active-effort heuristic was
-unreliable whenever ≥2 efforts were in_progress (the common case the
-log is meant to cover).
+`computeEffortFiles`.
 
 Attach only fires on the `in_progress → done` and
 `in_progress → blocked` transitions, and only when an effort is

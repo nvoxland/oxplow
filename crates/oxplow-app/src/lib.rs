@@ -64,6 +64,11 @@ pub use background_task::{
     BackgroundTaskStatus, BackgroundTaskStore, StartInput, UpdateInput,
 };
 pub use followup::{Followup, FollowupStore};
+// Re-export the effort store trait + row type so downstream crates that
+// hold a `Services` (e.g. oxplow-control-plane, which doesn't depend on
+// oxplow-db directly) can call the trait methods its public
+// `effort_store` field exposes.
+pub use oxplow_db::{EffortFile, TaskEffortStore};
 
 use thiserror::Error;
 use tracing::info;

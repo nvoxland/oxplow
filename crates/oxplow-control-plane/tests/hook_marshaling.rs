@@ -409,6 +409,59 @@ async fn post_tool_use_edit_acks_200_empty() {
 }
 
 #[tokio::test]
+async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
+    // Child 1 of the claim-first attribution epic: a structured Edit's
+    // PostToolUse auto-claims the file onto the thread's OPEN effort in
+    // real time, so the agent's touched_files at completion merely
+    // confirms/amends rather than enumerating from scratch.
+    use oxplow_app::TaskEffortStore as _;
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    // Insert a task and open an effort on the thread.
+    let now = Timestamp::from_unix_ms(1);
+    let task_id = svc
+        .task_store
+        .insert(&Task {
+            id: TaskId::placeholder(),
+            thread_id: Some(tid),
+            parent_id: None,
+            title: "ship".into(),
+            description: "d".into(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: None,
+        })
+        .await
+        .unwrap();
+    let effort = svc.effort_store.start(task_id, &tid, None).await.unwrap();
+
+    let target = root.join("src/x.rs");
+    let resp = post_hook(
+        &cp,
+        "PostToolUse",
+        Some(tid),
+        serde_json::json!({
+            "tool_name": "Edit",
+            "tool_input": { "file_path": target.to_string_lossy() },
+            "session_id": "s1",
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let files = svc.effort_store.list_files(&effort.id).await.unwrap();
+    assert_eq!(files.len(), 1, "the edit should auto-claim one file");
+    assert_eq!(files[0].path, "src/x.rs");
+}
+
+#[tokio::test]
 async fn ingest_failure_still_acks_200() {
     // An unknown thread id makes agent_turn's thread FK fail inside
     // ingest. The agent can't do anything useful with a 500 — it just

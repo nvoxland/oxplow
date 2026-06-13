@@ -428,6 +428,9 @@ async fn handle_hook_inner(
             (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
         {
             attribute_wiki_page_edit(&ctx, thread_id, body).await;
+            // Auto-claim structured edits onto the thread's open effort in
+            // real time (claim-first attribution) — best-effort.
+            attribute_effort_file_edit(&ctx, thread_id, body).await;
 
             // Collection: detect a test-run Bash command, record it
             // (observed), and ride along to coverage if configured.
@@ -654,6 +657,65 @@ async fn attribute_wiki_page_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &ser
         .await
     {
         warn!(?err, slug, "wiki-page attribution failed");
+    }
+}
+
+/// Auto-claim the file a structured edit tool just wrote onto the thread's
+/// OPEN effort, in real time (Child 1 of the claim-first attribution epic).
+/// Mirrors `attribute_wiki_page_edit`'s tool gating: only Edit / Write /
+/// MultiEdit / NotebookEdit are auto-claimed — Bash / codegen / formatter
+/// writes are intentionally excluded (they stay for snapshot
+/// reconciliation). Best-effort: any failure is logged and skipped so the
+/// hook never fails.
+async fn attribute_effort_file_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &serde_json::Value) {
+    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+    let project_dir = &ctx.services.layout.project_dir;
+    let Some(rel) = effort_claim_path_from_edit(tool_name, body.get("tool_input"), project_dir)
+    else {
+        return;
+    };
+    if let Err(err) = ctx
+        .services
+        .tasks
+        .claim_open_effort_file(
+            &ctx.services.effort_store,
+            thread_id,
+            &rel,
+            Some(project_dir),
+        )
+        .await
+    {
+        warn!(?err, path = rel, "effort file auto-claim failed");
+    }
+}
+
+/// Repo-relative path to auto-claim from a structured edit tool, or `None`
+/// when the tool isn't a structured write, no path is present, or the path
+/// is an absolute path outside the project (not an effort file). Stored
+/// `task_effort_file` paths are repo-relative, so an absolute path inside
+/// the project is normalized against `project_dir`.
+fn effort_claim_path_from_edit(
+    tool_name: &str,
+    tool_input: Option<&serde_json::Value>,
+    project_dir: &Path,
+) -> Option<String> {
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
+        return None;
+    }
+    let raw = tool_input?
+        .get("file_path")
+        .or_else(|| tool_input?.get("notebook_path"))
+        .or_else(|| tool_input?.get("path"))
+        .and_then(|v| v.as_str())?;
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        // Absolute inside the project → repo-relative; outside → not an
+        // effort file (strip_prefix fails → None).
+        path.strip_prefix(project_dir)
+            .ok()
+            .map(|r| r.to_string_lossy().into_owned())
+    } else {
+        Some(raw.to_string())
     }
 }
 
@@ -1356,6 +1418,44 @@ mod tests {
         assert!(wiki_page_slug_from_path("README.md", tmp.path()).is_none());
         assert!(wiki_page_slug_from_path(".oxplow/other/foo.md", tmp.path()).is_none());
         assert!(wiki_page_slug_from_path("/etc/hosts", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn effort_claim_path_extracts_repo_relative_for_structured_tools() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Relative file_path → returned as-is (already repo-relative).
+        let ti = serde_json::json!({ "file_path": "src/edited.rs" });
+        assert_eq!(
+            effort_claim_path_from_edit("Edit", Some(&ti), tmp.path()).as_deref(),
+            Some("src/edited.rs")
+        );
+        // Absolute path inside the project → normalized to repo-relative.
+        let abs = tmp.path().join("crates/x/lib.rs");
+        let ti_abs = serde_json::json!({ "file_path": abs.to_string_lossy() });
+        assert_eq!(
+            effort_claim_path_from_edit("Write", Some(&ti_abs), tmp.path()).as_deref(),
+            Some("crates/x/lib.rs")
+        );
+        // NotebookEdit uses notebook_path.
+        let ti_nb = serde_json::json!({ "notebook_path": "nb/run.ipynb" });
+        assert_eq!(
+            effort_claim_path_from_edit("NotebookEdit", Some(&ti_nb), tmp.path()).as_deref(),
+            Some("nb/run.ipynb")
+        );
+    }
+
+    #[test]
+    fn effort_claim_path_excludes_bash_and_outside_project() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Bash (and any non-structured tool) is intentionally NOT auto-claimed.
+        let ti = serde_json::json!({ "command": "echo hi > out.txt" });
+        assert!(effort_claim_path_from_edit("Bash", Some(&ti), tmp.path()).is_none());
+        // An absolute path outside the project is not an effort file.
+        let ti_out = serde_json::json!({ "file_path": "/etc/hosts" });
+        assert!(effort_claim_path_from_edit("Edit", Some(&ti_out), tmp.path()).is_none());
+        // Missing path → None.
+        let ti_empty = serde_json::json!({});
+        assert!(effort_claim_path_from_edit("Edit", Some(&ti_empty), tmp.path()).is_none());
     }
 
     #[test]

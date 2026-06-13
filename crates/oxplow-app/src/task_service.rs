@@ -470,6 +470,35 @@ impl TaskService {
         Ok(())
     }
 
+    /// Auto-claim a single file the agent just edited onto the thread's
+    /// OPEN effort, in real time from the PostToolUse hook (Child 1 of the
+    /// claim-first attribution epic). Idempotent — `record_file` is
+    /// `INSERT OR REPLACE` keyed on `(effort_id, path)`, so the agent's
+    /// `touched_files` at completion merely confirms/amends rather than
+    /// enumerating from scratch. Returns `Ok(true)` when a claim was
+    /// recorded, `Ok(false)` when no effort is open (no-op). Best-effort:
+    /// the PostToolUse caller swallows errors so the hook never fails.
+    pub async fn claim_open_effort_file(
+        &self,
+        effort_store: &SqliteTaskEffortStore,
+        thread: &ThreadId,
+        path: &str,
+        worktree_root: Option<&Path>,
+    ) -> Result<bool, TaskServiceError> {
+        if path.is_empty() {
+            return Ok(false);
+        }
+        let Some(effort) = effort_store.find_open_for_thread(thread).await? else {
+            return Ok(false);
+        };
+        let version = self.resolve_effort_file_version(&effort).await;
+        let change = classify_change(worktree_root, path);
+        effort_store
+            .record_file(&effort.id, path, change, version.as_ref())
+            .await?;
+        Ok(true)
+    }
+
     pub async fn list_backlog(&self) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_backlog().await?)
     }
@@ -1245,6 +1274,57 @@ mod tests {
         assert_eq!(efforts.len(), 1);
         assert!(efforts[0].ended_at.is_some());
         assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
+    }
+
+    #[tokio::test]
+    async fn claim_open_effort_file_claims_on_open_effort_and_is_idempotent() {
+        // Auto-claim (PostToolUse path) records a task_effort_file on the
+        // thread's open effort, and a repeat claim of the same path is
+        // idempotent (INSERT OR REPLACE → still one row).
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "claim".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let open = effort_store
+            .find_open_for_task(item.id)
+            .await
+            .unwrap()
+            .expect("effort open");
+
+        let claimed = svc
+            .claim_open_effort_file(&effort_store, &tid, "src/edited.rs", None)
+            .await
+            .unwrap();
+        assert!(claimed, "a claim should be recorded on the open effort");
+        // Idempotent: claiming the same path again doesn't duplicate.
+        let again = svc
+            .claim_open_effort_file(&effort_store, &tid, "src/edited.rs", None)
+            .await
+            .unwrap();
+        assert!(again);
+        let files = effort_store.list_files(&open.id).await.unwrap();
+        assert_eq!(files.len(), 1, "idempotent — one row");
+        assert_eq!(files[0].path, "src/edited.rs");
+    }
+
+    #[tokio::test]
+    async fn claim_open_effort_file_no_open_effort_is_noop() {
+        // No open effort on the thread → the auto-claim is a no-op
+        // (returns false, records nothing).
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let claimed = svc
+            .claim_open_effort_file(&effort_store, &tid, "src/edited.rs", None)
+            .await
+            .unwrap();
+        assert!(!claimed, "no open effort → no claim");
     }
 
     #[tokio::test]
