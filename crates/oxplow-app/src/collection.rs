@@ -199,9 +199,6 @@ pub enum AnalysisIngest {
     /// caller skips on this; the explicit MCP path passes `false`.
     StaleReport(String),
     ParseError(String),
-    /// The open effort has no start snapshot, so the observation can't be
-    /// pinned to a baseline (mirrors `CoverageIngest::NoBaseline`).
-    NoBaseline,
     Stored {
         observation_id: i64,
         error_count: u64,
@@ -485,11 +482,10 @@ impl CollectionService {
         if skip_if_stale && report_is_stale(&abs, effort.started_at) {
             return Ok(AnalysisIngest::StaleReport(report_path));
         }
-        // Pin the observation to the effort's start snapshot (mirrors
-        // ingest_coverage). No baseline → can't anchor it meaningfully.
-        if effort.start_snapshot_id.is_none() {
-            return Ok(AnalysisIngest::NoBaseline);
-        }
+        // No baseline gate: findings are ABSOLUTE (current-file), not
+        // diff-relative like coverage, so they don't need a start snapshot to
+        // be meaningful. `record_static_analysis` stores with pin = None when
+        // there's no snapshot — matching the passive ride-along path. (tsk86)
         let report = match collector.run(&content) {
             Ok(CollectorOutput::Analysis(r)) => r,
             Ok(_) => {
@@ -2377,6 +2373,53 @@ mod tests {
             // null ruleId → no rule on that finding.
             assert_eq!(findings[2]["path"], "src/b.ts");
             assert!(findings[2]["rule"].is_null());
+        }
+
+        #[tokio::test]
+        async fn ingest_analysis_stores_with_no_baseline() {
+            // Findings are ABSOLUTE (current-file), not diff-relative like
+            // coverage — so an effort with no start snapshot must still store
+            // (pin = None), matching the passive ride-along. Regression guard
+            // for the dropped baseline gate (tsk86).
+            let h = build(None).await;
+            // Re-open the effort with no start snapshot.
+            let open = h
+                .efforts
+                .find_open_for_thread(&h.thread)
+                .await
+                .unwrap()
+                .unwrap();
+            h.efforts.finish(&open.id, None, None).await.unwrap();
+            let no_base = h
+                .efforts
+                .start(open.task_id, &h.thread, None)
+                .await
+                .unwrap();
+            assert!(no_base.start_snapshot_id.is_none());
+
+            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
+            let outcome = h
+                .service
+                .ingest_analysis(
+                    &h.thread,
+                    Some("eslint.json".into()),
+                    Some("eslint-json".into()),
+                    false,
+                )
+                .await
+                .unwrap();
+            match outcome {
+                AnalysisIngest::Stored { findings, .. } => assert_eq!(findings, 3),
+                other => panic!("expected Stored with no baseline, got {other:?}"),
+            }
+            // The observation landed, pinned to no local snapshot.
+            let rows = h
+                .service
+                .list_for_effort(&no_base.id.to_string(), Some("static-analysis"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].local_snapshot_id, None);
         }
 
         #[tokio::test]

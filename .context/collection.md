@@ -108,7 +108,13 @@ hook + MCP wiring):
   default to the first analysis report in `collection.reports`; it returns a
   status JSON — `stored` with per-severity counts, or a reason
   (`no_open_effort` / `not_configured` / `report_missing` / `stale_report` /
-  `parse_error` / `no_baseline`). It exists because analysis had no active
+  `parse_error`). **No baseline gate**: unlike coverage (which intersects with
+  the effort's changed lines and therefore *needs* a start snapshot),
+  analysis findings are *absolute* — current-file findings, not diff-relative —
+  so `ingest_analysis` stores even when the open effort has no start snapshot
+  (pin = `None`). This keeps the active MCP path in agreement with the passive
+  ride-along, which already records with no baseline (tsk86). It exists because
+  analysis had no active
   path — only the passive PostToolUse hook — so the eslint/TS format could
   never be exercised end-to-end in a repo that runs no eslint; the active
   entry closes that symmetry gap (and serves on-demand / odd-location

@@ -1469,7 +1469,8 @@ impl OxplowMcp {
             NEVER report finding counts yourself. `report_path` and `format` default to the first \
             analysis report in the project's `collection` profile (oxplow.yaml). Returns a status: \
             stored (with per-severity counts) or a reason nothing landed (no_open_effort / \
-            not_configured / report_missing / parse_error / no_baseline)."
+            not_configured / report_missing / parse_error). Unlike coverage, analysis findings \
+            are absolute, so no start-snapshot baseline is required."
     )]
     async fn ingest_analysis(
         &self,
@@ -3291,7 +3292,6 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
         A::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
         A::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
         A::ParseError(err) => serde_json::json!({ "status": "parse_error", "error": err }),
-        A::NoBaseline => serde_json::json!({ "status": "no_baseline" }),
         A::Stored {
             observation_id,
             error_count,
