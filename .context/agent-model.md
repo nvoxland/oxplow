@@ -1223,8 +1223,17 @@ authored work. Best-effort, never blocks the close; the existing
 `complete_task` nudge (`compute_effort_file_review`) is unaffected
 because it reads claims, not the residue table. Claiming a path later
 (`record_file`) clears its residue, so the two sets never overlap.
-Recovery-closed orphans have no end-snapshot bracket, so per-path
-reconciliation doesn't run there (a known follow-up).
+Restart-recovery orphan closes are reconciled too: `RecoveryService`
+(wired via `with_snapshot_reconcile` in `Services::new`, after the capture
+registry is built) brackets each orphaned effort that has a start snapshot
+— it drains the worktree (`enqueue_startup_diff`) and requests an
+`EffortEnd` snapshot, since the boot worktree still reflects the dead
+effort's final state, stamps it via `finish(Some(end_id), …)`, then runs
+the same `reconcile_unattributed_on_close`. So a process that died
+mid-effort records its unclaimed residue as unattributed rather than
+silently attributing it. Best-effort and never blocks recovery: an effort
+with no start snapshot (or any capture failure) keeps the legacy
+`finish(None, None)` close.
 
 Attach only fires on the `in_progress → done` and
 `in_progress → blocked` transitions, and only when an effort is
