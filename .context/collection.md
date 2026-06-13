@@ -144,6 +144,42 @@ tracks nudged effort ids in an in-memory `HashSet` (not persisted — the
 nudge is ephemeral guidance, not durable state). The dedup clears if the
 daemon restarts, so the first run of a new session can nudge again.
 
+## Commit-hygiene nudge (PostToolUse)
+
+The same `on_post_tool_use` hook also guards commits. When the Bash
+command is a successful `git commit` (`detect_git_commit` — token-aware,
+so `git -c user.email=… commit` and `git commit --amend` match, `git add`
+/ `git log --grep commit` don't), `check_commit_hygiene` compares the
+files in the new HEAD commit against the open effort's **changed set** and
+returns a one-shot nudge naming any committed file that falls *outside*
+it. Informational only — it never blocks the commit (a legitimate
+cross-cutting commit is fine; the agent just gets a conscious heads-up).
+
+This came out of the tsk80 incident: a deliberately-held blog post under
+`docs/` was already `git add`ed from a prior session and rode along
+silently into a feature commit; committing `docs/` to main auto-deploys
+the site via `.github/workflows/docs.yml`, so a push would have published
+held content. When any out-of-effort file sits under `docs/`, the nudge
+appends a stronger auto-deploy warning.
+
+**"Changed set" = start-snapshot vs working-tree**, the same notion
+diff-coverage uses (`path_changed_in_effort`, the path-granularity sibling
+of `changed_lines_for`): a path is in the effort's changed set when its
+working-tree content differs from its effort-start-snapshot content
+(absent-side-as-empty, so adds and deletes both count). This works for an
+*open* effort, where `list_changed_paths_for_effort` can't (it needs an
+end snapshot). A pre-staged file that existed unchanged at effort start
+reads as out-of-effort — exactly the drift signal. HEAD sha + committed
+file list come from `oxplow_git::head_commit_sha` / `get_commit_detail`
+via `spawn_blocking`.
+
+**Skips cleanly** when the commit didn't succeed (non-zero exit), there's
+no open effort, or the effort has no start snapshot yet. **Anti-nag:**
+once per commit sha, tracked in a second in-memory `HashSet`
+(`nudged_commits`) alongside `nudged_efforts`. See also
+[git-integration.md](./git-integration.md) (commits are otherwise
+user-driven; the Stop hook emits no commit directives).
+
 ## Adding a new observation kind
 
 1. Pick a `kind` string and a `payload_json` shape (parsed in TS / by the

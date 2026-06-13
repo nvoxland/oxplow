@@ -345,6 +345,20 @@ Button carries `data-testid="files-commit"`; the dialog's message
 textarea is `files-commit-message` and the submit button is
 `files-commit-submit`.
 
+### Commit-hygiene nudge (PostToolUse, not a Stop directive)
+
+The Stop hook emits no commit directives, but the **PostToolUse** Bash
+hook watches commits passively: when the agent runs a successful
+`git commit`, `CollectionService::check_commit_hygiene` compares the new
+HEAD commit's files against the open effort's changed set and, if any
+fall outside it, returns a one-shot informational nudge (it never blocks
+the commit) — with a stronger warning when an out-of-effort file is
+under `docs/`, since committing `docs/` to main auto-deploys the site.
+This is the guard that would have caught the held-blog-post incident
+(tsk80). It reads HEAD via `oxplow_git::head_commit_sha` /
+`get_commit_detail`. Mechanics live in
+[collection.md](./collection.md) → "Commit-hygiene nudge".
+
 ### Non-writer threads still cannot call git
 
 `NON_WRITER_PROMPT_BLOCK` (`crates/oxplow-runtime/src/write_guard.rs`) explicitly
