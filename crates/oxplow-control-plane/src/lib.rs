@@ -118,6 +118,13 @@ struct AppCtx {
     hook_token: Arc<String>,
     stop_state: Arc<Mutex<StopState>>,
     role_state: Arc<Mutex<RoleState>>,
+    /// Last resume session_id the runtime believes is persisted per
+    /// thread. The resume tracker fires on EVERY hook but the session
+    /// id only changes once per session, so this lets repeated hooks
+    /// skip the `thread_store.get` + upsert entirely. A stale entry only
+    /// ever costs one extra DB read (never wrong behavior), so losing it
+    /// across a daemon restart is fine.
+    resume_state: Arc<Mutex<HashMap<ThreadId, String>>>,
 }
 
 /// Boot the control plane. Picks an ephemeral port on 127.0.0.1 and
@@ -132,6 +139,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
         hook_token: Arc::new(token.clone()),
         stop_state: Arc::new(Mutex::new(StopState::default())),
         role_state: Arc::new(Mutex::new(RoleState::default())),
+        resume_state: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let mcp_services = services.clone();
@@ -770,6 +778,14 @@ fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
 /// differs from the current value. Mirrors `decideResumeUpdate` from
 /// `src/session/resume-tracker.ts`. Tolerant: any failure is logged
 /// and skipped — resume tracking is best-effort.
+/// Pure dedup decision: skip the resume tracker's DB work when the
+/// in-memory cache already records this exact session id as persisted
+/// for the thread. An empty / mismatched / absent cache entry means we
+/// must hit the store to be sure.
+fn resume_cache_allows_skip(cached: Option<&str>, observed: &str) -> bool {
+    cached == Some(observed)
+}
+
 async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
     let Some(observed) = env.session_id.as_deref() else {
         return;
@@ -780,6 +796,16 @@ async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
     let Some(thread_id) = env.thread_id.as_ref() else {
         return;
     };
+    // Fast path: the resume id only changes once per session, so once a
+    // thread's id is cached every later hook short-circuits before the
+    // DB. (The cache mirrors what we last persisted; a stale entry only
+    // ever causes one redundant read, never a wrong write.)
+    {
+        let cache = ctx.resume_state.lock();
+        if resume_cache_allows_skip(cache.get(thread_id).map(|s| s.as_str()), observed) {
+            return;
+        }
+    }
     let thread = match ctx.services.thread_store.get(thread_id).await {
         Ok(Some(t)) => t,
         Ok(None) => return,
@@ -789,6 +815,11 @@ async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
         }
     };
     if thread.resume_session_id == observed {
+        // DB already in sync — seed the cache so the next hook skips
+        // this read (cold cache after restart hits this branch once).
+        ctx.resume_state
+            .lock()
+            .insert(*thread_id, observed.to_string());
         return;
     }
     let mut updated = thread;
@@ -796,7 +827,12 @@ async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
     updated.updated_at = oxplow_domain::Timestamp::now();
     if let Err(err) = ctx.services.thread_store.upsert(&updated).await {
         warn!(?err, "resume-tracker: thread upsert failed");
+        return;
     }
+    // Record what we just persisted so repeat hooks short-circuit.
+    ctx.resume_state
+        .lock()
+        .insert(*thread_id, observed.to_string());
 }
 
 /// Pure decision for the SessionEnd branch: drop the thread's resume
@@ -1526,6 +1562,18 @@ mod tests {
         let a = generate_token();
         let b = generate_token();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn resume_cache_skips_only_on_exact_match() {
+        // Cache hit: the thread already has this session id persisted →
+        // skip the DB round-trip entirely.
+        assert!(resume_cache_allows_skip(Some("s1"), "s1"));
+        // Cache miss / changed / first-seen → must hit the DB.
+        assert!(!resume_cache_allows_skip(None, "s1"));
+        assert!(!resume_cache_allows_skip(Some("s0"), "s1"));
+        // Degenerate empty cached value never matches a real id.
+        assert!(!resume_cache_allows_skip(Some(""), "s1"));
     }
 
     #[test]

@@ -197,7 +197,13 @@ to `runtime.handleHookEnvelope`, which:
    Hook Events tool window via the `hook.recorded` EventBus event).
 2. If the normalized payload carries a session id that differs from
    `thread.resume_session_id`, persists the new id so a later oxplow restart
-   relaunches claude with `--resume <id>`. The inverse runs on
+   relaunches claude with `--resume <id>`. This fires on *every* hook but
+   the id changes once per session, so an in-memory per-thread cache
+   (`resume_state` in AppCtx, gated by `resume_cache_allows_skip`) lets
+   repeat hooks short-circuit before the `thread_store.get` + upsert. The
+   cache mirrors what was last persisted; a stale entry only ever costs
+   one redundant read (never a wrong write), so losing it across a daemon
+   restart is fine. The inverse runs on
    `SessionEnd(reason=clear)`: `/clear` starts a fresh session with NO
    HTTP hook for it (SessionStart is command-type only), so until the
    new session's first prompt the token still points at the cleared
