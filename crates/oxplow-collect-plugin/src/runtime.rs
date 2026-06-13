@@ -22,7 +22,10 @@ use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use oxplow_coverage::{CoverageReport, FileCoverage, TestCase, TestReport, TestStatus, TestSuite};
+use oxplow_coverage::{
+    AnalysisFinding, AnalysisReport, CoverageReport, FileCoverage, Severity, TestCase, TestReport,
+    TestStatus, TestSuite,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -273,6 +276,11 @@ pub fn value_to_output(kind: CollectorKind, value: Value) -> Result<CollectorOut
                 serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
             Ok(CollectorOutput::Test(parsed.into()))
         }
+        CollectorKind::Analysis => {
+            let parsed: AnalysisReportJson =
+                serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
+            Ok(CollectorOutput::Analysis(parsed.into()))
+        }
     }
 }
 
@@ -349,6 +357,65 @@ impl From<TestStatusJson> for TestStatus {
             TestStatusJson::Failed => TestStatus::Failed,
             TestStatusJson::Skipped => TestStatus::Skipped,
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct AnalysisReportJson {
+    #[serde(default)]
+    findings: Vec<AnalysisFindingJson>,
+}
+
+#[derive(Deserialize)]
+struct AnalysisFindingJson {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    line: Option<u32>,
+    #[serde(default)]
+    column: Option<u32>,
+    severity: SeverityJson,
+    #[serde(default)]
+    rule: Option<String>,
+    #[serde(default)]
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SeverityJson {
+    Error,
+    Warning,
+    Info,
+    Note,
+}
+
+impl From<SeverityJson> for Severity {
+    fn from(s: SeverityJson) -> Self {
+        match s {
+            SeverityJson::Error => Severity::Error,
+            SeverityJson::Warning => Severity::Warning,
+            SeverityJson::Info => Severity::Info,
+            SeverityJson::Note => Severity::Note,
+        }
+    }
+}
+
+impl From<AnalysisReportJson> for AnalysisReport {
+    fn from(j: AnalysisReportJson) -> Self {
+        let findings = j
+            .findings
+            .into_iter()
+            .map(|f| AnalysisFinding {
+                path: f.path,
+                line: f.line,
+                column: f.column,
+                severity: f.severity.into(),
+                rule: f.rule,
+                message: f.message,
+            })
+            .collect();
+        AnalysisReport { findings }
     }
 }
 
@@ -508,6 +575,40 @@ def transform(input):
         let input = json!(null);
         let result = run_sandboxed(&budget, move || run_jaq(&program, &input));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn jaq_maps_input_to_analysis_output() {
+        // Reshape a list of raw diagnostics into the analysis output shape.
+        let input = json!([
+            { "file": "src/a.rs", "ln": 12, "col": 5, "lvl": "warning", "lint": "needless_return", "msg": "x" }
+        ]);
+        let program = r#"{ findings: [ .[] | { path: .file, line: .ln, column: .col, severity: .lvl, rule: .lint, message: .msg } ] }"#;
+        let out = run_jaq(program, &input).expect("jaq runs");
+        let typed = value_to_output(CollectorKind::Analysis, out).expect("typed");
+        let report = typed.as_analysis().expect("analysis");
+        assert_eq!(report.findings.len(), 1);
+        let f = &report.findings[0];
+        assert_eq!(f.path, "src/a.rs");
+        assert_eq!(f.line, Some(12));
+        assert_eq!(f.column, Some(5));
+        assert_eq!(f.severity, Severity::Warning);
+        assert_eq!(f.rule.as_deref(), Some("needless_return"));
+    }
+
+    #[test]
+    fn analysis_json_deserializes_with_defaults() {
+        // Optional line/column/rule absent → None; missing findings → empty.
+        let v = json!({ "findings": [ { "path": "x", "severity": "error", "message": "boom" } ] });
+        let out = value_to_output(CollectorKind::Analysis, v).expect("typed");
+        let report = out.as_analysis().unwrap();
+        assert_eq!(report.findings.len(), 1);
+        let f = &report.findings[0];
+        assert_eq!(f.severity, Severity::Error);
+        assert!(f.line.is_none() && f.column.is_none() && f.rule.is_none());
+
+        let empty = value_to_output(CollectorKind::Analysis, json!({})).expect("typed");
+        assert!(empty.as_analysis().unwrap().findings.is_empty());
     }
 
     #[test]

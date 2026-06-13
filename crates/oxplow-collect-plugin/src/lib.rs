@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use oxplow_coverage::{CoverageReport, TestReport};
+use oxplow_coverage::{AnalysisReport, CoverageReport, TestReport};
 use serde::{Deserialize, Serialize};
 
 pub mod helpers;
@@ -43,6 +43,8 @@ pub enum CollectorKind {
     Coverage,
     /// A suite/case tree of individual test outcomes.
     Test,
+    /// A flat list of linter/analyzer findings.
+    Analysis,
 }
 
 /// Which engine runs a collector's field-mapping step.
@@ -67,6 +69,7 @@ pub enum CollectorRuntime {
 pub enum CollectorOutput {
     Coverage(CoverageReport),
     Test(TestReport),
+    Analysis(AnalysisReport),
 }
 
 impl CollectorOutput {
@@ -75,6 +78,7 @@ impl CollectorOutput {
         match self {
             CollectorOutput::Coverage(_) => CollectorKind::Coverage,
             CollectorOutput::Test(_) => CollectorKind::Test,
+            CollectorOutput::Analysis(_) => CollectorKind::Analysis,
         }
     }
 
@@ -90,6 +94,14 @@ impl CollectorOutput {
     pub fn as_test(&self) -> Option<&TestReport> {
         match self {
             CollectorOutput::Test(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Borrow the analysis report, if this is an analysis output.
+    pub fn as_analysis(&self) -> Option<&AnalysisReport> {
+        match self {
+            CollectorOutput::Analysis(r) => Some(r),
             _ => None,
         }
     }
@@ -588,6 +600,30 @@ mod tests {
         let f = cov.files.get("src/a.rs").expect("file");
         assert_eq!(f.instrumented.len(), 2);
         assert!(f.covered.contains(&1));
+    }
+
+    #[test]
+    fn jaq_analysis_collector_runs_end_to_end() {
+        // A jaq analysis collector over JSON input → typed AnalysisReport.
+        let program = r#"{ findings: [ .[] | { path: .file, line: .ln, severity: .lvl, rule: .lint, message: .msg } ] }"#;
+        let c = Collector::jaq(
+            "lint",
+            CollectorKind::Analysis,
+            ["lint"],
+            CollectorInput::Json,
+            program,
+        );
+        let out = c
+            .run(r#"[{"file":"src/a.rs","ln":3,"lvl":"error","lint":"E1","msg":"boom"}]"#)
+            .expect("runs");
+        assert_eq!(out.kind(), CollectorKind::Analysis);
+        let report = out.as_analysis().expect("analysis");
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].path, "src/a.rs");
+        assert_eq!(
+            report.findings[0].severity,
+            oxplow_coverage::Severity::Error
+        );
     }
 
     #[test]

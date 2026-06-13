@@ -725,6 +725,7 @@ fn plugin_to_collector(
     let kind = match p.kind.as_str() {
         "coverage" => CollectorKind::Coverage,
         "test" => CollectorKind::Test,
+        "analysis" => CollectorKind::Analysis,
         other => return Err(format!("unknown kind \"{other}\"")),
     };
     let input = match p.input.as_deref().unwrap_or("text") {

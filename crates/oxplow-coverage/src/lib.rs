@@ -64,6 +64,44 @@ pub struct TestReport {
     pub suites: Vec<TestSuite>,
 }
 
+/// Severity of a single static-analysis finding, in descending order of
+/// concern. Maps from a linter's native levels (clippy `error`/`warning`,
+/// eslint `2`/`1`, …) so findings stay tech-agnostic and `observed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Error,
+    Warning,
+    Info,
+    Note,
+}
+
+/// One static-analysis finding — a single diagnostic a linter/analyzer
+/// emitted. `path` is verbatim from the report (the caller maps it to
+/// repo-relative); `line`/`column` are 1-based and optional (some findings
+/// are file- or project-level); `rule` is the lint name (clippy `code.code`,
+/// eslint `ruleId`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AnalysisFinding {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+    pub severity: Severity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    pub message: String,
+}
+
+/// A parsed static-analysis report: a flat list of findings. Tech-agnostic —
+/// every analyzer whose output a collector maps here (clippy, eslint, ruff,
+/// golangci-lint, …) lands in this shape, so the result stays `observed`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct AnalysisReport {
+    pub findings: Vec<AnalysisFinding>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +132,38 @@ mod tests {
         assert_eq!(json["suites"][0]["cases"][0]["timeMs"], 12);
         // `time_ms` is omitted when absent.
         assert!(json["suites"][0]["cases"][1].get("timeMs").is_none());
+    }
+
+    #[test]
+    fn analysis_report_serializes_in_the_ui_wire_shape() {
+        let report = AnalysisReport {
+            findings: vec![
+                AnalysisFinding {
+                    path: "src/a.rs".into(),
+                    line: Some(12),
+                    column: Some(5),
+                    severity: Severity::Warning,
+                    rule: Some("clippy::needless_return".into()),
+                    message: "unneeded return".into(),
+                },
+                AnalysisFinding {
+                    path: "src/b.rs".into(),
+                    line: None,
+                    column: None,
+                    severity: Severity::Error,
+                    rule: None,
+                    message: "file-level problem".into(),
+                },
+            ],
+        };
+        let json = serde_json::to_value(&report).expect("serialize");
+        assert_eq!(json["findings"][0]["severity"], "warning");
+        assert_eq!(json["findings"][0]["line"], 12);
+        assert_eq!(json["findings"][0]["rule"], "clippy::needless_return");
+        assert_eq!(json["findings"][1]["severity"], "error");
+        // Optional line/column/rule are omitted when absent.
+        assert!(json["findings"][1].get("line").is_none());
+        assert!(json["findings"][1].get("column").is_none());
+        assert!(json["findings"][1].get("rule").is_none());
     }
 }

@@ -716,7 +716,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 /// intentionally excluded — those are first-party, registered in code.
 const PLUGIN_RUNTIMES: &[&str] = &["jaq", "starlark", "exec"];
 /// Collector kinds a project plugin may target.
-const PLUGIN_KINDS: &[&str] = &["coverage", "test"];
+const PLUGIN_KINDS: &[&str] = &["coverage", "test", "analysis"];
 /// Container pre-parsers a plugin may select for its input.
 const PLUGIN_INPUTS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
 
@@ -776,7 +776,7 @@ fn validate_plugins(raw: Option<Vec<RawPlugin>>) -> Result<Vec<PluginConfig>, Co
         let kind = p.kind.trim().to_ascii_lowercase();
         if !PLUGIN_KINDS.contains(&kind.as_str()) {
             return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].kind must be coverage | test (got \"{}\")",
+                "collection.plugins[{i}].kind must be coverage | test | analysis (got \"{}\")",
                 p.kind
             )));
         }
