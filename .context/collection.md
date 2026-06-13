@@ -2,18 +2,19 @@
 
 What this doc covers: oxplow's **collection** subsystem — structured,
 provenance-tagged facts attached to a task effort (which tests ran, diff
-coverage on the effort's changed lines). The first vertical slice; the same
-plumbing is meant to grow to perf deltas, structure maps, etc.
+coverage on the effort's changed lines, and static-analysis findings from
+linters/analyzers). The same plumbing is meant to grow to perf deltas,
+structure maps, etc.
 
 ## Why it exists
 
 Everything else oxplow knows is either **computed by oxplow** (snapshots,
 blame, code-quality scans) or **free text the agent wrote** (wiki). Test
-results and coverage are neither: they're *structured* but
-language/framework-specific, so oxplow can't compute them generically. The
-bet is to split at the **standard-format seam** — the agent does the
-language-specific part (configure the test tool to emit a standard report),
-oxplow does the generic part (parse it, attribute it, store it).
+results, coverage, and static-analysis findings are neither: they're
+*structured* but language/framework/tool-specific, so oxplow can't compute
+them generically. The bet is to split at the **standard-format seam** — the
+agent does the language-specific part (configure the tool to emit a standard
+report), oxplow does the generic part (parse it, attribute it, store it).
 
 ## Provenance is the spine
 
@@ -28,8 +29,8 @@ section for the column.
 
 - **`effort_observation` store** (`crates/oxplow-db/src/observation_store.rs`,
   migration `V26`). Generic effort-scoped fact: `kind` + `metric_value` +
-  `payload_json` + `provenance` + a `page_ref`-style freshness pin. Two
-  `kind`s in the slice: `test-run`, `diff-coverage`. Effort-scoped and
+  `payload_json` + `provenance` + a `page_ref`-style freshness pin. Three
+  `kind`s today: `test-run`, `diff-coverage`, `static-analysis`. Effort-scoped and
   CASCADE-deleted with its effort (an observation is meaningless outside its
   effort's snapshot bracket). Full schema in
   [data-model.md](./data-model.md).
@@ -37,19 +38,21 @@ section for the column.
   Report parsing is **not baked in**: a `CollectorRegistry` maps a `format`
   string → a *collector* that turns report text into a **typed output** for its
   kind (coverage = per-file `{ instrumented, covered }` line-sets; test =
-  `TestReport { suites → cases }`). The typed shapes live in `oxplow-coverage`,
-  which is now just a pure-types crate (+ legacy Rust parsers kept only as the
-  golden-test oracle). The four first-party parsers (cobertura, lcov, jacoco,
-  junit) ship as **bundled jaq plugins** (`src/plugins/*.jq`) registered by
-  `CollectorRegistry::with_builtins()` — same behavior as before, just no longer
-  a closed `match`. Projects add formats via `collection.plugins` (below) with
+  `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
+  each finding `{ path, line?, column?, severity, rule?, message }`). The typed
+  shapes live in `oxplow-coverage`, which is now just a pure-types crate
+  (+ legacy Rust parsers kept only as the golden-test oracle). The six
+  first-party parsers (cobertura, lcov, jacoco coverage; junit tests; clippy,
+  eslint analysis) ship as **bundled jaq plugins** (`src/plugins/*.jq`)
+  registered by `CollectorRegistry::with_builtins()` — same behavior as before,
+  just no longer a closed `match`. Projects add formats via `collection.plugins` (below) with
   no change to oxplow. See **Pluggable parsers** below for the model + how to
   author one. Paths/classnames are verbatim from the report; the caller maps
   paths to repo-relative and the UI builds the test tree from `classname`+`name`.
 - **Collection profile** (`collection:` block in `oxplow.yaml`, parsed by
   `crates/oxplow-config/src/lib.rs`): `testCommand`, `reports: [{ path,
-  format }]`, `testRunPatterns`, and `plugins: [...]` (project-defined
-  parsers — see below). `format` is no longer gate-kept against a hardcoded
+  format }]`, `testRunPatterns`, `analysisRunPatterns`, and `plugins: [...]`
+  (project-defined parsers — see below). `format` is no longer gate-kept against a hardcoded
   list; it's resolved against the collector registry at collection time, so a
   plugin-provided format works and an unknown one is a *warning*, not a config
   error. The `reports` list is what makes a **polyglot repo** work — list every
@@ -73,19 +76,26 @@ Two paths feed the store (see [agent-model.md](./agent-model.md) for the
 hook + MCP wiring):
 
 - **Passive** — the PostToolUse Bash hook detects a test run (built-in
-  patterns + the profile's `testRunPatterns`) and records a `test-run`
-  observation against the open effort. It then walks **every** entry in
-  `collection.reports` and ingests the ones fresher than the effort start
-  (`merge_fresh_test_reports` / `merge_fresh_coverage` in `collection.rs`):
-  JUnit reports merge into one suite/case tree embedded in the `test-run`
-  payload (`suites`); coverage reports merge into one `diff-coverage`
-  observation over the effort's changed lines. All `observed`, no agent
-  step. **Staleness is the router:** a run only regenerates its own stack's
+  patterns + the profile's `testRunPatterns`) and/or a static-analysis run
+  (built-in patterns + `analysisRunPatterns`, via `detect_analysis_run`) and
+  records the matching observation(s) against the open effort. It then walks
+  **every** entry in `collection.reports` and ingests the ones fresher than
+  the effort start (`merge_fresh_test_reports` / `merge_fresh_coverage` /
+  `merge_fresh_analysis` in `collection.rs`): JUnit reports merge into one
+  suite/case tree embedded in the `test-run` payload (`suites`); coverage
+  reports merge into one `diff-coverage` observation over the effort's changed
+  lines; analysis reports merge into one `static-analysis` observation
+  (findings + per-severity counts). All `observed`, no agent step.
+  **Staleness is the router:** a run only regenerates its own stack's/tool's
   report(s), so the mtime guard (`report_is_stale`, floor = effort start)
   naturally excludes the other stacks' stale reports — a `bun test` run
-  picks up the frontend reports, a `cargo cov` run the Rust ones, and both
-  accrue within one effort. The UI builds a tech-natural tree by splitting
-  each case's `classname`+`name` on `::`/`.`.
+  picks up the frontend reports, a `cargo cov` run the Rust ones, a
+  `cargo clippy` run the clippy findings, and all accrue within one effort.
+  The UI builds a tech-natural tree by splitting each case's
+  `classname`+`name` on `::`/`.`. A `static-analysis` observation doubles as
+  the analyzer-ran record: when an analyzer is detected but regenerated no
+  parseable report, it's stored command-only (no findings, no metric), the
+  same way a `test-run` records command-only when no JUnit report is fresh.
 - **Active (MCP)** — `ingest_coverage` is a thin explicit entry point (same
   registry parse path) for on-demand or non-standard-location reports.
   It passes `skip_if_stale = false`, so it ingests regardless of mtime — the
@@ -93,12 +103,23 @@ hook + MCP wiring):
   writer, for richer pass/fail counts the exit code alone can't give.
 
 Both paths resolve `format` → collector via the registry and **classify by the
-collector's kind** (coverage vs test), not a `== "junit"` heuristic. An
-unknown format is `tracing::warn!`-logged and skipped (not silently dropped).
+collector's kind** (coverage vs test vs analysis), not a format-name heuristic.
+An unknown format is `tracing::warn!`-logged and skipped (not silently dropped).
 Trust tier rides in `source`: in-process tiers (jaq/Starlark) are deterministic
-and do no I/O → `observed` / `coverage-report`; the external-exec escape hatch
-can do I/O, so its output is tagged `plugin-exec:<name>` so the UI can mark it
-lower-trust. The `provenance` column stays `observed` vs `asserted`.
+and do no I/O → `observed` / `coverage-report` / `analysis-report`; the
+external-exec escape hatch can do I/O, so its output is tagged
+`plugin-exec:<name>` so the UI can mark it lower-trust. The `provenance` column
+stays `observed` vs `asserted`.
+
+The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
+errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
+error+warning count (**lower is better**, unlike coverage where higher is
+better). The effort-review UI (`EffortObservations.tsx`) shows a *Static
+analysis* section next to *Coverage & tests*: the analyzer label + a high-level
+headline (e.g. `clippy: 0 errors, 3 warnings`, green clean / amber
+warnings-only / rose on any error) with a findings drill-in grouped by file
+(`path:line — rule — message`), each row opening the file. The analysis
+ride-along has **no nudge** — the report-less nudge is test-specific.
 
 ## Report-less-run nudge (PostToolUse)
 
@@ -146,10 +167,13 @@ script, never a Rust change (`crates/oxplow-collect-plugin/`):
    keeps an in-process parse deterministic and `observed`-eligible.
 2. **Field mapping (plugin-owned).** A *collector* maps that value into its
    kind's typed output. There is **never a formless observation** — every
-   collector declares a `kind` (`coverage` | `test`) with a fixed output
-   schema. The genericity is in this uniform definition mechanism over typed
-   kinds, so a future kind (perf, structure-map, …) is a new `CollectorKind`
-   plus plugins that target it — not a new subsystem.
+   collector declares a `kind` (`coverage` | `test` | `analysis`) with a fixed
+   output schema. The genericity is in this uniform definition mechanism over
+   typed kinds, so a future kind (perf, structure-map, …) is a new
+   `CollectorKind` plus plugins that target it — not a new subsystem.
+   (`analysis` was added exactly this way: a new `CollectorKind`, the
+   `AnalysisReport` typed output, and bundled clippy/eslint jaq plugins — no
+   new store, IPC, or subsystem.)
 
 **Transform tiers** (trust/preference order): `jaq` (jq, pure Rust — primary,
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
@@ -177,6 +201,13 @@ easier fit.)
 **Output schemas** the transform must produce:
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
+- analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
+
+The two bundled analysis plugins are the canonical templates: `clippy.jq`
+(`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
+`reason=="compiler-message"`, picks the primary span, maps `level` →
+severity) and `eslint.jq` (`input: json`; severity `2`→error / `1`→warning,
+null `ruleId` → no rule).
 
 ### Authoring a parser plugin
 
@@ -191,7 +222,7 @@ collection:
     - { path: target/clover.xml, format: clover }
   plugins:
     - name: acme.clover     # namespaced; "oxplow." is reserved for built-ins
-      kind: coverage          # coverage | test
+      kind: coverage          # coverage | test | analysis
       formats: [clover]       # format name(s) this plugin claims
       runtime: jaq            # jaq | starlark | exec
       input: xml              # text | json | xml | lcov | lines (jaq/starlark only)

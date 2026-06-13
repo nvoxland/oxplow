@@ -870,9 +870,11 @@ refetches.
 Structured, agent-or-tool-reported facts attached to a `task_effort` — the
 foundation of the **collection** subsystem (see `.context/collection.md`).
 Modeled on `code_quality_finding` (kind + `metric_value` + payload) plus the
-`page_ref` freshness-pin columns. The slice ships two `kind`s: `test-run`
-(which tests ran) and `diff-coverage` (coverage over the effort's changed
-lines).
+`page_ref` freshness-pin columns. Three `kind`s today: `test-run`
+(which tests ran), `diff-coverage` (coverage over the effort's changed
+lines), and `static-analysis` (linter/analyzer findings). `kind` is an
+open-ended string, so adding one needs **no migration** — `static-analysis`
+was added without one.
 
 Columns: `id, stream_id (NOT NULL, FK streams ON DELETE CASCADE), effort_id
 (NOT NULL, FK task_effort ON DELETE CASCADE), kind, provenance, source,
@@ -888,11 +890,12 @@ closest_git_version, git_version_exact, created_at`. Indexes on
   `source` carries the trust tier: deterministic in-process parses are
   `coverage-report`/`post-tool-bash`; the external-exec plugin escape hatch is
   `plugin-exec:<name>` (lower-trust — it can do I/O).
-- **`kind` is a *typed* collector kind, not a formless blob.** The two shipped
-  kinds (`test-run`, `diff-coverage`) each have a fixed `payload_json` schema
-  produced by a registered collector (`crates/oxplow-collect-plugin`); parsers
-  are pluggable but every observation is still a known, typed thing. A new kind
-  is a new `CollectorKind` + plugins, not an arbitrary payload.
+- **`kind` is a *typed* collector kind, not a formless blob.** The shipped
+  kinds (`test-run`, `diff-coverage`, `static-analysis`) each have a fixed
+  `payload_json` schema produced by a registered collector
+  (`crates/oxplow-collect-plugin`); parsers are pluggable but every observation
+  is still a known, typed thing. A new kind is a new `CollectorKind` + plugins,
+  not an arbitrary payload.
 - **`effort_id` is NOT NULL + CASCADE** (a deliberate tightening of the
   original plan's nullable column): an observation only has meaning inside
   its effort's start/end snapshot bracket — `diff-coverage` intersects
@@ -907,7 +910,10 @@ closest_git_version, git_version_exact, created_at`. Indexes on
   (opaque to Rust, so enriching it needs no migration): `test-run` carries
   `{ command, exitCode?, passed?, failed?, total?, durationMs? }`;
   `diff-coverage` carries `{ summaryPct, changedLines, coveredLines, files:
-  [{ path, uncoveredChangedLines }] }`.
+  [{ path, uncoveredChangedLines }] }`; `static-analysis` carries
+  `{ command?, analyzer?, findings: [{ path, line?, column?, severity, rule?,
+  message }], errorCount, warningCount, infoCount, noteCount }` with
+  `metric_value` = error+warning count (lower is better).
 - **Retention** is store-driven like `CodeQualityStore`: each `record()`
   prunes to keep-last-N (10) per `(effort_id, kind)` in the same
   transaction.

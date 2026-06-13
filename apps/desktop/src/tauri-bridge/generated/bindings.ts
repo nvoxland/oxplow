@@ -1273,7 +1273,10 @@ export type EffortObservation = {
 	id: number,
 	stream_id: string,
 	effort_id: string,
-	// Well-known kind: `test-run` | `diff-coverage` (open-ended).
+	/**
+	 *  Well-known kind: `test-run` | `diff-coverage` | `static-analysis`
+	 *  (open-ended).
+	 */
 	kind: string,
 	// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
 	provenance: string,

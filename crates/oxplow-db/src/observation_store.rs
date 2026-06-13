@@ -37,7 +37,8 @@ pub struct EffortObservation {
     pub id: i64,
     pub stream_id: String,
     pub effort_id: String,
-    /// Well-known kind: `test-run` | `diff-coverage` (open-ended).
+    /// Well-known kind: `test-run` | `diff-coverage` | `static-analysis`
+    /// (open-ended).
     pub kind: String,
     /// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
     pub provenance: String,
