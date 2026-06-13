@@ -360,6 +360,20 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
 - `getCommitsAheadOf(projectDir, base, head, limit=50)` — wraps
   `git log base..head` with the same parser used by `getGitLog`, for
   pairwise commit-diff displays.
+- `compute_divergence(repo_path, base, head)` (`src/divergence.rs`) —
+  cross-stream merge-readiness. Returns `Divergence { ahead, behind,
+  overlapping_files, readiness }`. `ahead`/`behind` come from
+  `graph_ahead_behind(head, base)`; `overlapping_files` is the set of
+  paths changed on **both** sides since `merge_base(base, head)` (a
+  file-overlap heuristic — it names the files a line-level merge could
+  collide on, without running a trial merge). `readiness` is
+  `AlreadyIntegrated` (head has no commits beyond base), `Clean` (ahead,
+  no overlap), or `Conflict` (ahead, overlap). Any lookup failure
+  (unresolvable branch, etc.) degrades to `AlreadyIntegrated` zeros so a
+  bad row never breaks the dashboard. Exposed via
+  `GitService::divergence` → the `list_stream_divergences` command (one
+  row per stream vs the detected default branch), consumed by the Git
+  Dashboard's "Merge readiness" card.
 - `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
   (`src/tree.rs`) — a libgit2 tree walk that yields `path -> blob oid`
   and runs it through the **shared** `oxplow_domain::diff_trees`

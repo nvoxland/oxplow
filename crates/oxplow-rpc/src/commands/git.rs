@@ -251,6 +251,64 @@ pub async fn read_file_at_ref(
     Ok(svc.git.read_file_at_ref(r#ref, path).await)
 }
 
+/// One stream's divergence row for the Git Dashboard "Streams" panel.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct StreamDivergenceRow {
+    pub stream_id: String,
+    pub title: String,
+    pub branch: String,
+    pub is_primary: bool,
+    pub ahead: u32,
+    pub behind: u32,
+    pub overlapping_files: Vec<String>,
+    pub readiness: oxplow_git::MergeReadiness,
+}
+
+/// Cross-stream divergence report: each stream/worktree's ahead/behind
+/// and merge-readiness vs the integration branch `base`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct StreamDivergenceReport {
+    pub base: String,
+    pub rows: Vec<StreamDivergenceRow>,
+}
+
+/// Compute divergence + merge-readiness for every stream against the
+/// integration branch. `base` defaults to the detected default branch
+/// (`main`/`master`), then `"main"` if detection fails.
+pub async fn list_stream_divergences(
+    svc: &Services,
+    base: Option<String>,
+) -> Result<StreamDivergenceReport, IpcError> {
+    let base = match base {
+        Some(b) if !b.trim().is_empty() => b,
+        _ => svc
+            .git
+            .detect_default_branch()
+            .await
+            .unwrap_or_else(|| "main".to_string()),
+    };
+
+    let streams = svc.streams.list_streams().await?;
+    let mut rows = Vec::with_capacity(streams.len());
+    for s in streams {
+        let d = svc
+            .git
+            .divergence(None, base.clone(), s.branch.clone())
+            .await;
+        rows.push(StreamDivergenceRow {
+            stream_id: s.id.to_string(),
+            title: s.title,
+            branch: s.branch,
+            is_primary: matches!(s.kind, oxplow_domain::StreamKind::Primary),
+            ahead: d.ahead,
+            behind: d.behind,
+            overlapping_files: d.overlapping_files,
+            readiness: d.readiness,
+        });
+    }
+    Ok(StreamDivergenceReport { base, rows })
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -264,6 +322,26 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_object(), "expected a JSON object, got {out}");
+    }
+
+    #[tokio::test]
+    async fn list_stream_divergences_dispatches_and_returns_report() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "list_stream_divergences",
+            serde_json::json!({ "base": null }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(
+            out.get("base").is_some(),
+            "expected a base field, got {out}"
+        );
+        assert!(
+            out.get("rows").unwrap().is_array(),
+            "rows should be an array"
+        );
     }
 
     #[tokio::test]

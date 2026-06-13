@@ -463,6 +463,7 @@ export const commands = {
 	listLocalBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_local_branches")),
 	getRepoConflictState: (streamId: string | null) => typedError<RepoConflictState, IpcError>(__TAURI_INVOKE("get_repo_conflict_state", { streamId })),
 	getAheadBehind: (streamId: string | null, base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { streamId, base, head })),
+	listStreamDivergences: (base: string | null) => typedError<StreamDivergenceReport, IpcError>(__TAURI_INVOKE("list_stream_divergences", { base })),
 	appendToGitignore: (streamId: string | null, entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { streamId, entry })),
 	restorePath: (streamId: string | null, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { streamId, path })),
 	gitFetch: (streamId: string | null, remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { streamId, remote })),
@@ -1705,6 +1706,21 @@ export type MenuItemSnapshot = {
 	submenu?: MenuItemSnapshot[] | null,
 };
 
+// Whether merging `head` into `base` looks safe.
+export type MergeReadiness = 
+// `head` has no commits beyond `base` — nothing to merge.
+"already-integrated" | 
+/**
+ *  `head` is ahead and no file was touched on both sides since the
+ *  merge-base — a merge should apply cleanly.
+ */
+"clean" | 
+/**
+ *  `head` is ahead and at least one file was touched on both sides —
+ *  a merge will likely conflict (see `overlapping_files`).
+ */
+"conflict";
+
 export type MoveTaskRequest = {
 	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
@@ -2194,6 +2210,27 @@ export type Stream = {
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
+};
+
+/**
+ *  Cross-stream divergence report: each stream/worktree's ahead/behind
+ *  and merge-readiness vs the integration branch `base`.
+ */
+export type StreamDivergenceReport = {
+	base: string,
+	rows: StreamDivergenceRow[],
+};
+
+// One stream's divergence row for the Git Dashboard "Streams" panel.
+export type StreamDivergenceRow = {
+	stream_id: string,
+	title: string,
+	branch: string,
+	is_primary: boolean,
+	ahead: number,
+	behind: number,
+	overlapping_files: string[],
+	readiness: MergeReadiness,
 };
 
 export type StreamId = string;

@@ -238,6 +238,9 @@ export type {
   GitLogCommit,
   CommitDetail,
   BlameLine,
+  StreamDivergenceReport,
+  StreamDivergenceRow,
+  MergeReadiness,
 } from "./tauri-bridge/index.js";
 // The remaining legacy types still come from api-types because
 // their consumers read fields that don't exist on the bindings
@@ -1046,6 +1049,12 @@ export async function getAheadBehind(
 ): Promise<{ ahead: number; behind: number }> {
   const ab = unwrap(await commands.getAheadBehind(streamId, base, head ?? "HEAD"));
   return { ahead: ab.ahead, behind: ab.behind };
+}
+
+export async function listStreamDivergences(
+  base?: string,
+): Promise<import("./tauri-bridge/index.js").StreamDivergenceReport> {
+  return unwrap(await commands.listStreamDivergences(base ?? null));
 }
 
 export async function getCommitsAheadOf(

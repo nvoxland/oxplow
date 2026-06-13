@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitLogCommit, GitLogResult, GitOpResult, RemoteBranchEntry, Stream, WorkspaceStatusSummary } from "../api.js";
+import type { GitLogCommit, GitLogResult, GitOpResult, RemoteBranchEntry, Stream, StreamDivergenceReport, StreamDivergenceRow, WorkspaceStatusSummary } from "../api.js";
 import {
   getAheadBehind,
+  listStreamDivergences,
   getCommitDetail,
   getCommitsAheadOf,
   getGitLog,
@@ -51,6 +52,7 @@ interface DashboardData {
   recentLog: GitLogResult;
   streams: StreamRow[];
   remoteBranches: RemoteBranchEntry[];
+  divergence: StreamDivergenceReport;
 }
 
 interface StreamRow {
@@ -109,11 +111,12 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const [statusSummary, log, remoteBranches, streams] = await Promise.all([
+      const [statusSummary, log, remoteBranches, streams, divergence] = await Promise.all([
         getWorkspaceStatusSummary(streamId),
         getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
+        listStreamDivergences(),
       ]);
       const branch = stream?.branch ?? log.currentBranch ?? null;
       const headCommit = log.commits[0] ?? null;
@@ -164,6 +167,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         recentLog: log,
         streams: streamRows,
         remoteBranches,
+        divergence,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -408,6 +412,19 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Rebase current onto ${branch}`,
                   `git rebase ${branch}`,
                   () => gitRebaseOnto(streamId, branch),
+                )
+              }
+              isPending={isPending}
+            />
+
+            <MergeReadinessCard
+              report={data.divergence}
+              currentBranch={data.branchHeader.branch}
+              onMerge={(branch) =>
+                runOp(
+                  `Merge ${branch} into ${data.branchHeader.branch ?? "current"}`,
+                  `git merge ${branch}`,
+                  () => gitMergeInto(streamId, branch),
                 )
               }
               isPending={isPending}
@@ -773,6 +790,132 @@ function AheadBehindBadge({
   );
 }
 
+
+const READINESS_STYLE: Record<
+  StreamDivergenceRow["readiness"],
+  { label: string; color: string; bg: string }
+> = {
+  clean: { label: "Clean to merge", color: "#3fb950", bg: "rgba(63,185,80,0.12)" },
+  conflict: { label: "Will conflict", color: "#d29922", bg: "rgba(210,153,34,0.12)" },
+  "already-integrated": { label: "Integrated", color: "var(--text-muted)", bg: "transparent" },
+};
+
+function ReadinessBadge({ readiness }: { readiness: StreamDivergenceRow["readiness"] }) {
+  const s = READINESS_STYLE[readiness];
+  return (
+    <span
+      data-testid="git-dashboard-divergence-readiness"
+      data-readiness={readiness}
+      style={{
+        display: "inline-block",
+        padding: "1px 8px",
+        borderRadius: 999,
+        fontSize: "var(--text-xs)",
+        fontWeight: "var(--weight-medium)",
+        color: s.color,
+        background: s.bg,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+/// Cross-stream divergence vs the integration branch. Each row shows a
+/// stream's ahead/behind + merge-readiness; a clean stream can be merged
+/// in one click, but only while you're viewing the integration branch
+/// itself (the merge runs into the current stream's branch).
+function MergeReadinessCard({
+  report,
+  currentBranch,
+  onMerge,
+  isPending,
+}: {
+  report: StreamDivergenceReport;
+  currentBranch: string | null;
+  onMerge(branch: string): void;
+  isPending(label: string): boolean;
+}) {
+  // Only the streams that actually diverge from the base are worth
+  // listing — the integration branch itself and fully-merged streams
+  // would just be noise.
+  const rows = report.rows.filter((r) => r.branch !== report.base && r.ahead > 0);
+  const onBase = currentBranch === report.base;
+  return (
+    <Card
+      testId="git-dashboard-divergence"
+      title={`Merge readiness vs ${report.base}`}
+    >
+      {rows.length === 0 ? (
+        <div style={subtle}>Every stream is integrated with {report.base}.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {rows.map((row) => {
+            const mergeLabel = `Merge ${row.branch} into ${currentBranch ?? "current"}`;
+            const canMerge = onBase && row.readiness === "clean";
+            return (
+              <div
+                key={row.stream_id}
+                data-testid="git-dashboard-divergence-row"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: "var(--weight-medium)" }}>{row.title}</span>
+                  <code style={{ fontSize: "var(--text-xs)" }}>{row.branch}</code>
+                  <AheadBehindBadge
+                    ahead={row.ahead}
+                    behind={row.behind}
+                    context={report.base}
+                    testId="git-dashboard-divergence-aheadbehind"
+                  />
+                  <ReadinessBadge readiness={row.readiness} />
+                  <span style={{ flex: 1 }} />
+                  {canMerge ? (
+                    <button
+                      type="button"
+                      data-testid="git-dashboard-divergence-merge"
+                      onClick={() => onMerge(row.branch)}
+                      disabled={isPending(mergeLabel)}
+                      style={primaryButton}
+                    >
+                      {isPending(mergeLabel) ? "Merging…" : `Merge into ${report.base}`}
+                    </button>
+                  ) : null}
+                </div>
+                {row.readiness === "conflict" ? (
+                  <div style={subtle} data-testid="git-dashboard-divergence-overlap">
+                    Overlapping {row.overlapping_files.length === 1 ? "file" : "files"}:{" "}
+                    {row.overlapping_files.slice(0, 8).map((f, i) => (
+                      <span key={f}>
+                        {i > 0 ? ", " : ""}
+                        <code>{f}</code>
+                      </span>
+                    ))}
+                    {row.overlapping_files.length > 8
+                      ? ` +${row.overlapping_files.length - 8} more`
+                      : ""}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {!onBase ? (
+            <div style={{ ...subtle, paddingTop: 8 }}>
+              Switch to the <code>{report.base}</code> stream to merge a clean stream in.
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 type MergeRebaseMode = "merge" | "rebase";
 

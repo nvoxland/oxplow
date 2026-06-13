@@ -30,6 +30,15 @@ pub async fn get_ahead_behind(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_stream_divergences(
+    state: tauri::State<'_, AppState>,
+    base: Option<String>,
+) -> Result<oxplow_rpc::commands::git::StreamDivergenceReport, IpcError> {
+    oxplow_rpc::commands::git::list_stream_divergences(&state, base).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn append_to_gitignore(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,

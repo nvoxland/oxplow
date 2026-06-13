@@ -155,6 +155,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // git
             commands::git::get_repo_conflict_state,
             commands::git::get_ahead_behind,
+            commands::git::list_stream_divergences,
             commands::git::append_to_gitignore,
             commands::git::restore_path,
             commands::git::git_fetch,

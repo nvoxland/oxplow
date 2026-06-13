@@ -11,6 +11,7 @@ mod branch_changes;
 mod branch_ops;
 pub mod co_change;
 mod conflict;
+pub mod divergence;
 pub mod log;
 pub mod refs;
 mod refs_watch;
@@ -35,6 +36,7 @@ pub use branch_ops::{
     get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,
 };
 pub use conflict::{get_repo_conflict_state, GitOperationKind, RepoConflictState};
+pub use divergence::{compute_divergence, Divergence, MergeReadiness};
 pub use log::{
     get_commit_detail, get_git_log, CommitDetail, CommitDetailFile, GitLogCommit, GitLogOptions,
     GitLogResult,
