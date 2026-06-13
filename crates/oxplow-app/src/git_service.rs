@@ -28,10 +28,10 @@ use oxplow_domain::stores::StreamStore;
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_git::{
     detect_current_branch, AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes,
-    CommitDetail, CommitRefLabel, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult,
-    GitOpResult, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry,
-    RepoConflictState, TextSearchHit, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile,
-    WorkspaceStatusSummary,
+    CommitDetail, CommitRefLabel, Divergence, GitFileStatus, GitLogCommit, GitLogOptions,
+    GitLogResult, GitOpResult, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry,
+    RemoteBranchEntry, RepoConflictState, TextSearchHit, WorkspaceEntry, WorkspaceFile,
+    WorkspaceIndexedFile, WorkspaceStatusSummary,
 };
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -296,6 +296,21 @@ impl GitService {
         tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
             .await
             .expect("ahead_behind join")
+    }
+
+    /// Divergence + merge-readiness of `head` vs `base`, resolved
+    /// against `stream_id`'s repo (defaults to the project root, where
+    /// every worktree branch is visible since they share `.git`).
+    pub async fn divergence(
+        &self,
+        stream_id: Option<&str>,
+        base: String,
+        head: String,
+    ) -> Divergence {
+        let path = self.resolve_repo_dir(stream_id).await;
+        tokio::task::spawn_blocking(move || oxplow_git::compute_divergence(&path, &base, &head))
+            .await
+            .expect("divergence join")
     }
 
     /// Resolved 40-char sha for HEAD in `stream_id`'s worktree.

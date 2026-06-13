@@ -269,6 +269,7 @@ rpc_dispatch! {
     // git
     "get_repo_conflict_state" => commands::git::get_repo_conflict_state { stream_id: Option<String> },
     "get_ahead_behind" => commands::git::get_ahead_behind { stream_id: Option<String>, base: String, head: String },
+    "list_stream_divergences" => commands::git::list_stream_divergences { base: Option<String> },
     "append_to_gitignore" => commands::git::append_to_gitignore { stream_id: Option<String>, entry: String },
     "restore_path" => commands::git::restore_path { stream_id: Option<String>, path: String },
     "git_fetch" => commands::git::git_fetch { stream_id: Option<String>, remote: Option<String> },

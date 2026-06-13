@@ -200,6 +200,7 @@ pub const MANIFEST: &[Capability] = &[
     todo("get_commit_detail"),
     todo("get_commits_ahead_of"),
     todo("get_ahead_behind"),
+    todo("list_stream_divergences"),
     todo("list_file_commits"),
     todo("search_workspace_text"),
     todo("list_local_branches"),
