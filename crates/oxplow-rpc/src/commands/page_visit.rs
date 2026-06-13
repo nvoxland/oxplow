@@ -5,7 +5,7 @@ use oxplow_app::{OxplowEvent, Services};
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
 use oxplow_domain::stores::TaskStore as _;
-use oxplow_domain::{TaskStatus, ThreadId, Timestamp};
+use oxplow_domain::{TaskId, TaskStatus, ThreadId, Timestamp};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -119,8 +119,12 @@ pub async fn list_currently_open_usage(
 pub enum FinishedEntry {
     #[serde(rename = "task")]
     Task {
+        // A prefixed `TaskId` ("tsk42"), not a raw rowid: the renderer
+        // feeds `itemId` straight into `taskRef(...)` → `get_task`, whose
+        // backend arg deserializes as a `TaskId` and rejects a bare JSON
+        // number ("invalid type: number, expected a string").
         #[serde(rename = "itemId")]
-        item_id: i64,
+        item_id: TaskId,
         title: String,
         t: Timestamp,
     },
@@ -168,7 +172,7 @@ pub async fn list_recently_finished(
             }
             let Some(t) = item.completed_at else { continue };
             entries.push(FinishedEntry::Task {
-                item_id: item.id.value(),
+                item_id: item.id,
                 title: item.title,
                 t,
             });
@@ -197,7 +201,7 @@ pub async fn list_recently_finished(
         for item in done {
             let Some(t) = item.completed_at else { continue };
             entries.push(FinishedEntry::Task {
-                item_id: item.id.value(),
+                item_id: item.id,
                 title: item.title,
                 t,
             });
@@ -275,5 +279,23 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
+    }
+
+    /// Regression: a finished task entry must carry its id as the
+    /// prefixed string ("tsk42"), not a raw integer. The renderer feeds
+    /// `itemId` straight into `taskRef(...)` → `get_task`, whose backend
+    /// arg is a `TaskId` and rejects a JSON number with
+    /// "invalid type: number, expected a string". Serializing the raw
+    /// rowid here is what produced the silent unhandled-rejection in the
+    /// rail's Finished section.
+    #[test]
+    fn finished_task_serializes_item_id_as_prefixed_string() {
+        let entry = super::FinishedEntry::Task {
+            item_id: oxplow_domain::TaskId::new(42),
+            title: "demo".into(),
+            t: oxplow_domain::Timestamp::now(),
+        };
+        let v = serde_json::to_value(&entry).unwrap();
+        assert_eq!(v["itemId"], serde_json::json!("tsk42"));
     }
 }

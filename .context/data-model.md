@@ -1009,6 +1009,13 @@ globally). `listRecentlyFinished` filters out rows whose timestamp is
 ≤ the matching watermark; `clearRecentlyFinished` upserts both scopes
 to `now()`.
 
+`FinishedEntry::Task.item_id` must be a `TaskId` (serializes to the
+prefixed `"tsk42"`), **not** a raw rowid (`item.id.value()`). The
+renderer feeds `itemId` straight into `taskRef(...)` → `get_task`,
+whose backend arg deserializes as a `TaskId` and rejects a bare JSON
+number with "invalid type: number, expected a string" — a silent
+unhandled-rejection when a finished task is opened from the rail.
+
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 
 Threaded annotations the user anchors to a text selection on any page
