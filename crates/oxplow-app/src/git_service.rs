@@ -676,16 +676,9 @@ impl GitService {
         source: String,
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_stream_worktree_strict(stream_id).await?;
-        let result = run_blocking(move || {
-            let mut r = oxplow_git::merge(&path, &source)?;
-            if !r.success {
-                // Git left conflicts (or refused) — run the smart-merge
-                // pass to clear the ones that are only line-level conflicts.
-                r.auto_resolved = oxplow_git::auto_resolve_conflicts(&path).resolved.len() as u32;
-            }
-            Ok(r)
-        })
-        .await?;
+        let result =
+            run_blocking(move || Ok(with_auto_resolve(oxplow_git::merge(&path, &source)?, &path)))
+                .await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
@@ -696,12 +689,47 @@ impl GitService {
         onto: String,
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let result =
+            run_blocking(move || Ok(with_auto_resolve(oxplow_git::rebase(&path, &onto)?, &path)))
+                .await?;
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
+        Ok(result)
+    }
+
+    /// Cherry-pick `commit` into the stream's worktree, then run the
+    /// smart-merge pass over any conflicts git leaves. Stream-scoped and
+    /// destructive, so it resolves the worktree strictly (no primary
+    /// fallback).
+    pub async fn cherry_pick(
+        &self,
+        stream_id: Option<&str>,
+        commit: String,
+    ) -> std::io::Result<GitOpResult> {
+        let path = self.resolve_stream_worktree_strict(stream_id).await?;
         let result = run_blocking(move || {
-            let mut r = oxplow_git::rebase(&path, &onto)?;
-            if !r.success {
-                r.auto_resolved = oxplow_git::auto_resolve_conflicts(&path).resolved.len() as u32;
-            }
-            Ok(r)
+            Ok(with_auto_resolve(
+                oxplow_git::cherry_pick(&path, &commit)?,
+                &path,
+            ))
+        })
+        .await?;
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
+        Ok(result)
+    }
+
+    /// Revert `commit` in the stream's worktree, then run the smart-merge
+    /// pass over any conflicts git leaves.
+    pub async fn revert(
+        &self,
+        stream_id: Option<&str>,
+        commit: String,
+    ) -> std::io::Result<GitOpResult> {
+        let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let result = run_blocking(move || {
+            Ok(with_auto_resolve(
+                oxplow_git::revert(&path, &commit)?,
+                &path,
+            ))
         })
         .await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
@@ -769,6 +797,20 @@ fn resolve_worktree(project_dir: &Path, recorded: &str) -> PathBuf {
     }
 }
 
+/// After a long-running git op (merge / rebase / cherry-pick / revert)
+/// leaves conflicts, run the token-level smart-merge pass and record how
+/// many files it cleanly auto-resolved. A no-op when the op succeeded.
+/// Operation-agnostic: it reads whatever unmerged paths sit in the index,
+/// regardless of which op produced them, and only resolves the current
+/// step's conflicts (it never `--continue`s a paused rebase/cherry-pick —
+/// the user/UI drives continuation).
+fn with_auto_resolve(mut result: GitOpResult, path: &Path) -> GitOpResult {
+    if !result.success {
+        result.auto_resolved = oxplow_git::auto_resolve_conflicts(path).resolved.len() as u32;
+    }
+    result
+}
+
 async fn run_blocking<R>(
     f: impl FnOnce() -> std::io::Result<R> + Send + 'static,
 ) -> std::io::Result<R>
@@ -819,6 +861,15 @@ mod tests {
         std::fs::write(dir.join(file), contents).unwrap();
         run_git(dir, &["add", "-A"]);
         run_git(dir, &["commit", "-q", "-m", msg]);
+    }
+
+    fn git_sha(dir: &Path, rev: &str) -> String {
+        let out = Cmd::new("git")
+            .args(["rev-parse", rev])
+            .current_dir(dir)
+            .output()
+            .expect("rev-parse");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
     /// Build a primary repo on `main` plus a sibling worktree on
@@ -1047,5 +1098,55 @@ mod tests {
         );
         let state = oxplow_git::get_repo_conflict_state(&sib);
         assert_eq!(state.conflicted_count, 1);
+    }
+
+    #[tokio::test]
+    async fn rebase_auto_resolves_same_line_different_word_conflict() {
+        // The auto-resolve pass is operation-agnostic: a rebase that git
+        // leaves conflicted on a same-line/different-word edit resolves the
+        // same way a merge does.
+        let (svc, sib, stream_id, _primary, _wt) = setup_conflicting_worktree(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        )
+        .await;
+
+        let res = svc
+            .rebase(Some(&stream_id.to_string()), "main".into())
+            .await
+            .unwrap();
+
+        assert_eq!(res.auto_resolved, 1, "stderr: {}", res.stderr);
+        let merged = std::fs::read_to_string(sib.join("cfg.txt")).unwrap();
+        assert_eq!(merged, "ALPHA beta GAMMA\n");
+        assert!(!merged.contains("<<<<<<<"));
+        let state = oxplow_git::get_repo_conflict_state(&sib);
+        assert_eq!(state.conflicted_count, 0);
+    }
+
+    #[tokio::test]
+    async fn cherry_pick_auto_resolves_same_line_different_word_conflict() {
+        // Cherry-pick main's edit onto feature, which touched a different
+        // word of the same line — git conflicts, the smart pass resolves.
+        let (svc, sib, stream_id, primary, _wt) = setup_conflicting_worktree(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        )
+        .await;
+        let main_sha = git_sha(primary.path(), "main");
+
+        let res = svc
+            .cherry_pick(Some(&stream_id.to_string()), main_sha)
+            .await
+            .unwrap();
+
+        assert_eq!(res.auto_resolved, 1, "stderr: {}", res.stderr);
+        let merged = std::fs::read_to_string(sib.join("cfg.txt")).unwrap();
+        assert_eq!(merged, "ALPHA beta GAMMA\n");
+        assert!(!merged.contains("<<<<<<<"));
+        let state = oxplow_git::get_repo_conflict_state(&sib);
+        assert_eq!(state.conflicted_count, 0);
     }
 }

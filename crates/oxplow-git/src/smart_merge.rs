@@ -467,4 +467,61 @@ mod tests {
             vec!["a", "B", "C", "Z", "d"]
         );
     }
+
+    // --- End-to-end against a real git index -----------------------------
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn commit(dir: &Path, contents: &str, msg: &str) {
+        std::fs::write(dir.join("cfg.txt"), contents).unwrap();
+        run_git(dir, &["add", "-A"]);
+        run_git(dir, &["commit", "-q", "-m", msg]);
+    }
+
+    /// `git revert` leaving a line-level conflict (the reverted commit and
+    /// HEAD touched different words of the same line) is cleared by the
+    /// op-agnostic auto-resolve pass.
+    #[test]
+    fn auto_resolve_clears_revert_conflict_with_disjoint_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        run_git(p, &["init", "-q", "--initial-branch=main"]);
+        run_git(p, &["config", "user.email", "t@example.com"]);
+        run_git(p, &["config", "user.name", "t"]);
+        commit(p, "alpha beta gamma\n", "base");
+        commit(p, "alpha beta GAMMA\n", "c2: word3"); // the commit we revert
+        let c2 = crate::status::head_commit_sha(p).unwrap();
+        commit(p, "ALPHA beta GAMMA\n", "c3: word1");
+
+        // Reverting c2 wants GAMMA→gamma, but HEAD changed word1 → git
+        // reports a conflict.
+        let r = crate::sync::revert(p, &c2).unwrap();
+        assert!(!r.success, "expected git revert to conflict");
+        assert_eq!(count_unmerged(p), 1);
+
+        let report = auto_resolve_conflicts(p);
+        assert_eq!(report.resolved.len(), 1);
+        assert_eq!(report.remaining, 0);
+        assert_eq!(
+            std::fs::read_to_string(p.join("cfg.txt")).unwrap(),
+            "ALPHA beta gamma\n"
+        );
+    }
+
+    fn count_unmerged(p: &Path) -> u32 {
+        let repo = git2::Repository::open(p).unwrap();
+        let idx = repo.index().unwrap();
+        idx.conflicts().map(|c| c.count() as u32).unwrap_or(0)
+    }
 }

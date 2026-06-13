@@ -77,6 +77,14 @@ pub fn rebase(repo: &Path, onto: &str) -> std::io::Result<GitOpResult> {
     run(&["rebase", onto], repo)
 }
 
+pub fn cherry_pick(repo: &Path, commit: &str) -> std::io::Result<GitOpResult> {
+    run(&["cherry-pick", commit], repo)
+}
+
+pub fn revert(repo: &Path, commit: &str) -> std::io::Result<GitOpResult> {
+    run(&["revert", "--no-edit", commit], repo)
+}
+
 pub fn commit_all(repo: &Path, message: &str) -> std::io::Result<GitOpResult> {
     let staged = run(&["add", "-A"], repo)?;
     if !staged.success {

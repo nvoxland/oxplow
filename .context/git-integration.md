@@ -266,13 +266,20 @@ explicitly — `None` is rejected on purpose.
 
 ### Smart conflict auto-resolution (the IntelliJ magic-wand pass)
 
-After `git merge` / `git rebase` leaves conflicts, `GitService::merge`
-and `rebase` run a **smart-merge pass** in the same `spawn_blocking`
-closure (only when the git op reported `!success`):
-`oxplow_git::auto_resolve_conflicts(worktree)`
+After a long-running git op leaves conflicts, `GitService::merge`,
+`rebase`, `cherry_pick`, and `revert` run a **smart-merge pass** via the
+shared `with_auto_resolve` helper (only when the git op reported
+`!success`): `oxplow_git::auto_resolve_conflicts(worktree)`
 (`crates/oxplow-git/src/smart_merge.rs`). The number of files it
 cleanly resolved is folded into `GitOpResult.auto_resolved` so the UI
-can report "N conflicts auto-resolved".
+can report "N conflicts auto-resolved". The pass is
+**operation-agnostic** — it reads whatever unmerged paths sit in the
+index regardless of which op produced them, and only resolves the
+current step's conflicts; it never `--continue`s a paused
+rebase/cherry-pick (the user/UI drives continuation, per the usability
+rules). `cherry_pick` / `revert` have `oxplow_git` + `GitService`
+methods but no IPC command / UI entry point yet (tracked as a
+follow-up); `merge` / `rebase` are the wired-up paths.
 
 Why it exists: git's merge driver is **line-based**, so two edits to
 *different words on the same line* (or both sides adding a different
