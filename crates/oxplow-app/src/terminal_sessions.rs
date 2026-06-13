@@ -502,6 +502,7 @@ fn read_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn parse_window_target_round_trip() {
@@ -514,5 +515,130 @@ mod tests {
         assert!(parse_window_target("nopeartf").is_none());
         assert!(parse_window_target(":x").is_none());
         assert!(parse_window_target("x:").is_none());
+    }
+
+    /// Build an `{type:"input", bytes:<base64>}` message the way the
+    /// renderer's `sendTerminalMessage` does for a paste.
+    fn input_message(raw: &[u8]) -> String {
+        let b64 = B64.encode(raw);
+        serde_json::json!({ "type": "input", "bytes": b64 }).to_string()
+    }
+
+    /// Poll `path` until every `needle` is present in its bytes (lossy
+    /// UTF-8) or the deadline elapses. Returns the captured contents.
+    ///
+    /// We capture what the PTY *child* actually received on stdin (via
+    /// `cat > file`) rather than reading the renderer event stream: the
+    /// PTY line-discipline ECHO would otherwise mix a second, racing copy
+    /// of the input into the output, which tests the wrong direction.
+    async fn read_capture_until(path: &std::path::Path, needles: &[&str]) -> String {
+        for _ in 0..200 {
+            if let Ok(bytes) = std::fs::read(path) {
+                let s = String::from_utf8_lossy(&bytes);
+                if needles.iter().all(|n| s.contains(n)) {
+                    return s.into_owned();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        std::fs::read(path)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default()
+    }
+
+    /// Assert each marker appears in `haystack` in the given order.
+    fn assert_marker_order(haystack: &str, markers: &[&str]) {
+        let mut last: Option<usize> = None;
+        for m in markers {
+            let pos = haystack.find(m);
+            assert!(
+                pos.is_some(),
+                "marker {m} missing from capture: {haystack:?}"
+            );
+            if let (Some(prev), Some(cur)) = (last, pos) {
+                assert!(
+                    prev < cur,
+                    "markers out of order at {m}: prev {prev} >= cur {cur} in {haystack:?}"
+                );
+            }
+            last = pos;
+        }
+    }
+
+    /// Spawn a `cat > <capture-file>` session and return (registry,
+    /// session_id, capture_path). The capture file records the exact
+    /// byte stream the child read from its PTY stdin, in order.
+    async fn spawn_capture(label: &str) -> (TerminalSessionRegistry, String, std::path::PathBuf) {
+        let reg =
+            TerminalSessionRegistry::new(PtyManager::spawn(), Arc::new(oxplow_tmux::SystemTmux));
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "oxplow-paste-{label}-{}.capture",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let command = format!("cat > '{}'", path.display());
+        let session_id = reg
+            .open_command(format!("test-{label}"), command, dir, 80, 24)
+            .await
+            .expect("spawn capture shell");
+        (reg, session_id, path)
+    }
+
+    /// Regression for tsk93: a multi-paragraph paste (blank-line
+    /// separated, framed as a single bracketed paste the way xterm.js
+    /// emits it) must reach the PTY child as one contiguous, in-order
+    /// byte sequence — never scrambled. Guards the web→PTY write path
+    /// (`send` → one `pty.write`) against chunk-reordering regressions.
+    #[tokio::test]
+    async fn multi_paragraph_paste_reaches_pty_in_order() {
+        let (reg, session_id, path) = spawn_capture("small").await;
+
+        // The exact shape xterm.js produces for a 3-paragraph paste with
+        // bracketed-paste mode on: ESC[200~ <text, \n→\r normalized> ESC[201~.
+        let payload = b"\x1b[200~PARA_ALPHA\r\rPARA_BRAVO\r\rPARA_CHARLIE\r\x1b[201~";
+        reg.send(&session_id, &input_message(payload))
+            .await
+            .expect("send paste");
+
+        let captured =
+            read_capture_until(&path, &["PARA_ALPHA", "PARA_BRAVO", "PARA_CHARLIE"]).await;
+        assert_marker_order(&captured, &["PARA_ALPHA", "PARA_BRAVO", "PARA_CHARLIE"]);
+
+        let _ = reg.close(&session_id).await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Larger-scale variant: a paste big enough to span multiple PTY
+    /// reads must still arrive with its ordered markers in order. This
+    /// is the regime the dogfooded bug was reported at (~1.2 KB, three
+    /// paragraphs) — it catches a reassembly/chunk-reorder regression a
+    /// tiny single-read payload could miss.
+    #[tokio::test]
+    async fn large_multi_chunk_paste_preserves_marker_order() {
+        let (reg, session_id, path) = spawn_capture("large").await;
+
+        // 24 ordered markers separated by filler + blank lines, wrapped
+        // as one bracketed paste — well over a single small read.
+        let markers: Vec<String> = (0..24).map(|i| format!("MK{i:02}")).collect();
+        let mut body = String::new();
+        for (i, m) in markers.iter().enumerate() {
+            if i > 0 {
+                body.push_str("\r\r");
+            }
+            body.push_str(m);
+            body.push_str(" lorem ipsum dolor sit amet consectetur adipiscing");
+        }
+        let payload = format!("\x1b[200~{body}\r\x1b[201~");
+        reg.send(&session_id, &input_message(payload.as_bytes()))
+            .await
+            .expect("send large paste");
+
+        let needles: Vec<&str> = markers.iter().map(|s| s.as_str()).collect();
+        let captured = read_capture_until(&path, &needles).await;
+        assert_marker_order(&captured, &needles);
+
+        let _ = reg.close(&session_id).await;
+        let _ = std::fs::remove_file(&path);
     }
 }

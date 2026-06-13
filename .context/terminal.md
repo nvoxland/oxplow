@@ -52,6 +52,43 @@ The component owns:
   `.context/usability.md` for the convention).
 - The file-path link provider (see below).
 
+## Paste path and input ordering
+
+All paste gestures (Cmd+V, the native `paste` event, drag-drop "Add to
+context") funnel through xterm's `term.paste(text)`. xterm's clipboard
+helper does two things: normalizes `\r?\n` → `\r`, and — when the
+program has bracketed-paste mode on (`\x1b[?2004h`, tracked by xterm
+from the PTY output stream) — wraps the text in `\x1b[200~`…`\x1b[201~`.
+It then fires **one** `onData` event with the whole payload (verified in
+`@xterm/xterm`'s `triggerDataEvent`, which calls `_onData.fire(e)` once).
+`TerminalPane`'s `onData` ships that as a single
+`sendTerminalMessage({type:"input", bytes:base64})`. In remote/daemon
+mode this is one `POST /ipc/send_terminal_message`; the backend
+`TerminalSessionRegistry::send` does a single `pty.write` → one
+`write_all` on the PTY owner task's FIFO mpsc.
+
+**A single paste is therefore one contiguous, in-order write to the PTY
+child — there is no oxplow-side chunking or reordering.** This is
+locked by `multi_paragraph_paste_reaches_pty_in_order` and
+`large_multi_chunk_paste_preserves_marker_order` in
+`crates/oxplow-app/src/terminal_sessions.rs`, which spawn `cat > file`,
+send a bracketed multi-paragraph paste through the real `send` path, and
+assert the child received the paragraph markers in order (the tests
+capture the *child's stdin*, not the renderer event stream — the PTY's
+ECHO would otherwise mix a second racing copy of the input into the
+output, testing the wrong direction).
+
+> **tsk93 finding (multi-paragraph paste paragraphs reorder in the web
+> UI).** The reorder is **not** in oxplow's web→PTY path (proven by the
+> tests above). It surfaces downstream in the embedded agent CLI's
+> handling of the bracketed paste — the paragraph separators arrive as
+> `\r` (xterm's `\n→\r` normalization), and the agent reassembles them
+> into one prompt with scrambled order. Confirming/fixing that needs the
+> live remote flow with a shim capturing the agent process's stdin
+> (info not obtainable statically). A possible oxplow-side mitigation —
+> delivering agent-pane pastes with `\n` separators instead of `\r` — is
+> tracked as a follow-up but unverified, so it was not shipped.
+
 ## Multiple terminals (Terminal page)
 
 `TerminalPage` owns a per-stream list of terminals and renders one
