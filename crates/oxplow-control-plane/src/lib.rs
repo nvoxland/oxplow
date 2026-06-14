@@ -42,7 +42,7 @@ use oxplow_app::{
     build_session_context_block_with_role, role_change_banner, HookEnvelope, RoleMode, Services,
 };
 use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore};
-use oxplow_domain::{HookKind, StreamId, TaskStatus, ThreadId};
+use oxplow_domain::{HookKind, StreamId, TaskStatus, Thread, ThreadId};
 use oxplow_runtime::filing::{build_filing_enforcement_pre_tool_deny, FilingEnforcementContext};
 use oxplow_runtime::stop_hook::{
     decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopHookSideEffect,
@@ -645,13 +645,7 @@ async fn pre_tool_check(
     }
 
     // Layer 2: filing_enforcement for the writer thread.
-    let has_in_progress_task = ctx
-        .services
-        .task_store
-        .list_for_thread(thread_id)
-        .await
-        .map(|items| items.iter().any(|i| i.status == TaskStatus::InProgress))
-        .unwrap_or(false);
+    let has_in_progress_task = stream_has_in_progress_claim(ctx, &thread).await;
 
     let file_path = tool_input
         .and_then(|t| {
@@ -674,6 +668,46 @@ async fn pre_tool_check(
     }
 
     None
+}
+
+/// Whether the stream's active writer has a claimed (`in_progress`) task
+/// that satisfies filing enforcement.
+///
+/// Scoped to the whole STREAM, not just the literal thread the task was
+/// filed on (tsk133). A stream has exactly one active writer (enforced by
+/// the `idx_threads_one_active_per_stream` unique index + the write
+/// guard), so any `in_progress` task on *any* thread in that stream is a
+/// legitimate claim for the writer. This is what makes cross-thread
+/// dispatch work: a task filed on a sibling thread and routed to the
+/// stream's writer no longer needs a manual `move_task` first. The core
+/// invariant is untouched — queued/closed threads still can't write
+/// (the write guard runs first); only which thread's `in_progress` row
+/// counts as the writer's claim changes.
+async fn stream_has_in_progress_claim(ctx: &AppCtx, thread: &Thread) -> bool {
+    let threads = match ctx
+        .services
+        .thread_store
+        .list_for_stream(&thread.stream_id)
+        .await
+    {
+        Ok(threads) => threads,
+        // On a lookup failure, fall back to the literal thread so the
+        // guard still works for the common (same-thread) case.
+        Err(_) => vec![thread.clone()],
+    };
+    for t in &threads {
+        let claimed = ctx
+            .services
+            .task_store
+            .list_for_thread(&t.id)
+            .await
+            .map(|items| items.iter().any(|i| i.status == TaskStatus::InProgress))
+            .unwrap_or(false);
+        if claimed {
+            return true;
+        }
+    }
+    false
 }
 
 /// When a PostToolUse hook reports an Edit/Write/MultiEdit/NotebookEdit
@@ -1318,6 +1352,184 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::{
+        AgentKind, Stream, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, ThreadStatus,
+        Timestamp,
+    };
+
+    /// Build an `AppCtx` over an in-memory DB for filing-claim tests.
+    /// The session layer refuses non-git dirs, so init a repo first.
+    fn test_ctx() -> (AppCtx, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        let services = Arc::new(Services::in_memory(dir.path()).unwrap());
+        let ctx = AppCtx {
+            services,
+            hook_token: Arc::new("t".into()),
+            stop_state: Arc::new(Mutex::new(StopState::default())),
+            role_state: Arc::new(Mutex::new(RoleState::default())),
+            resume_state: Arc::new(Mutex::new(HashMap::new())),
+        };
+        (ctx, dir)
+    }
+
+    fn test_stream() -> Stream {
+        Stream {
+            id: StreamId::placeholder(),
+            kind: StreamKind::Worktree,
+            title: "feat".into(),
+            branch: "feat".into(),
+            branch_ref: "refs/heads/feat".into(),
+            branch_source: "main".into(),
+            worktree_path: "/repo/wt".into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        }
+    }
+
+    fn test_thread(stream_id: StreamId, status: ThreadStatus) -> Thread {
+        Thread {
+            id: ThreadId::placeholder(),
+            stream_id,
+            title: "thread".into(),
+            status,
+            sort_index: 0,
+            pane_target: "working".into(),
+            agent: AgentKind::Claude,
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: Timestamp::now(),
+            updated_at: Timestamp::now(),
+            archived_at: None,
+        }
+    }
+
+    fn in_progress_task(thread_id: ThreadId) -> Task {
+        Task {
+            id: TaskId::placeholder(),
+            thread_id: Some(thread_id),
+            parent_id: None,
+            title: "work".into(),
+            description: String::new(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: Timestamp::now(),
+            updated_at: Timestamp::now(),
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: None,
+        }
+    }
+
+    /// The primary stream and its seeded active (writer) thread, which
+    /// `Services::in_memory` creates via `ensure_primary` at boot.
+    async fn primary_writer(ctx: &AppCtx) -> (Stream, Thread) {
+        let stream = ctx.services.stream_store.primary().await.unwrap().unwrap();
+        let writer = ctx
+            .services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|t| t.status == ThreadStatus::Active)
+            .expect("primary stream has a seeded active writer thread");
+        (stream, writer)
+    }
+
+    #[tokio::test]
+    async fn claim_filed_on_sibling_thread_satisfies_writer() {
+        // tsk133: a task filed on a sibling thread A (queued) but
+        // dispatched to the stream's active writer thread B must satisfy
+        // filing enforcement for B — no manual move_task required.
+        // Cross-thread dispatch within a stream just works because a
+        // stream has exactly one active writer.
+        let (ctx, _dir) = test_ctx();
+        let (stream, writer_b) = primary_writer(&ctx).await;
+        // Sibling queued thread A in the same stream.
+        let sibling_a_id = ctx
+            .services
+            .thread_store
+            .upsert(&test_thread(stream.id, ThreadStatus::Queued))
+            .await
+            .unwrap();
+        // The in_progress claim lives on the SIBLING thread A, not B.
+        ctx.services
+            .task_store
+            .insert(&in_progress_task(sibling_a_id))
+            .await
+            .unwrap();
+
+        assert!(
+            stream_has_in_progress_claim(&ctx, &writer_b).await,
+            "an in_progress task on a sibling thread in the same stream must \
+             satisfy the writer's filing guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_in_another_stream_does_not_satisfy() {
+        // Scoping is per-stream, not global: an in_progress task in a
+        // DIFFERENT stream must NOT unblock this stream's writer.
+        let (ctx, _dir) = test_ctx();
+        let (_stream, writer) = primary_writer(&ctx).await;
+        let other_stream_id = ctx
+            .services
+            .stream_store
+            .upsert(&test_stream())
+            .await
+            .unwrap();
+        let other_thread_id = ctx
+            .services
+            .thread_store
+            .upsert(&test_thread(other_stream_id, ThreadStatus::Active))
+            .await
+            .unwrap();
+        ctx.services
+            .task_store
+            .insert(&in_progress_task(other_thread_id))
+            .await
+            .unwrap();
+
+        assert!(
+            !stream_has_in_progress_claim(&ctx, &writer).await,
+            "an in_progress task in another stream must not satisfy this writer"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_claim_anywhere_does_not_satisfy() {
+        let (ctx, _dir) = test_ctx();
+        let (_stream, writer) = primary_writer(&ctx).await;
+        assert!(
+            !stream_has_in_progress_claim(&ctx, &writer).await,
+            "no in_progress task anywhere → guard not satisfied"
+        );
+    }
 
     #[tokio::test]
     async fn bounded_hook_response_passes_through_fast_futures() {
