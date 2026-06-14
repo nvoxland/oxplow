@@ -30,16 +30,32 @@ use oxplow_domain::{AgentStatusState, HookEvent, HookKind, Timestamp};
 /// deaths quickly.
 pub const AGENT_STALL_AFTER_MS: i64 = 15 * 60 * 1000;
 
+/// Shorter death threshold for the case where the agent is NOT inside
+/// an open tool call (tsk130). When a turn dies between steps — a
+/// model-unavailable error ("Claude Fable 5 is currently unavailable")
+/// or a transient API death right after a prompt or between tool calls
+/// — Claude Code emits no hook and the log goes silent with no
+/// PreToolUse left open. There's no long-running Bash to wait out, so
+/// the only reason for silence is death: catch it in 5 minutes instead
+/// of the full [`AGENT_STALL_AFTER_MS`]. The longer threshold still
+/// governs the open-tool case (a single Bash can legitimately run up to
+/// its 10-minute max with no intervening hook).
+pub const AGENT_DEAD_AFTER_MS: i64 = 5 * 60 * 1000;
+
 /// Replay `events` (which may arrive in any order) and return the
 /// status the thread should currently show *as of `now`*. Sorts by
 /// `received_at` ascending internally so callers can hand in
 /// DESC-ordered store results without flipping them first.
 ///
-/// Time-awareness: a derived `Running` whose newest event is older
-/// than [`AGENT_STALL_AFTER_MS`] degrades to `Stalled` — the agent
-/// process almost certainly died (or errored back to its prompt)
-/// without emitting a Stop hook. `AwaitingUser` is exempt: waiting on
-/// the user indefinitely is legitimate.
+/// Time-awareness: a derived `Running` whose newest event is older than
+/// its silence threshold degrades to `Stalled` — the agent process
+/// almost certainly died (or errored back to its prompt) without
+/// emitting a Stop hook. The threshold depends on whether a tool call
+/// is still open: [`AGENT_STALL_AFTER_MS`] when one is (a long Bash can
+/// run silently up to its max), the shorter [`AGENT_DEAD_AFTER_MS`]
+/// when nothing is open (silence between steps means death, caught
+/// promptly — tsk130). `AwaitingUser` is exempt: waiting on the user
+/// indefinitely is legitimate.
 pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatusState {
     let mut sorted: Vec<&HookEvent> = events.iter().collect();
     sorted.sort_by_key(|e| e.received_at);
@@ -61,6 +77,12 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
     // AskUserQuestion stayed Running and degraded to Stalled — read as
     // a death and mis-triggering a re-dispatch.
     let mut pending_user_input: i32 = 0;
+    // Count of currently-open tool calls (any PreToolUse without its
+    // matching PostToolUse). Distinguishes "the agent is inside a tool
+    // that may legitimately run long (a 10-min Bash)" from "the agent
+    // is between steps with nothing running" — the two get different
+    // silence thresholds below (tsk130).
+    let mut open_tools: i32 = 0;
 
     for ev in &sorted {
         match ev.kind {
@@ -69,6 +91,7 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
             }
             HookKind::PreToolUse => {
                 state = AgentStatusState::Running;
+                open_tools += 1;
                 match payload_tool_name(&ev.payload_json).as_deref() {
                     Some("Task") => pending_tasks += 1,
                     Some(t) if is_user_input_tool(t) => pending_user_input += 1,
@@ -77,6 +100,9 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
             }
             HookKind::PostToolUse => {
                 state = AgentStatusState::Running;
+                if open_tools > 0 {
+                    open_tools -= 1;
+                }
                 match payload_tool_name(&ev.payload_json).as_deref() {
                     Some("Task") if pending_tasks > 0 => pending_tasks -= 1,
                     Some(t) if is_user_input_tool(t) && pending_user_input > 0 => {
@@ -106,11 +132,13 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
                 pending_user_input = 0;
+                open_tools = 0;
             }
             HookKind::AgentBoot => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
                 pending_user_input = 0;
+                open_tools = 0;
             }
         }
     }
@@ -120,7 +148,16 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
     }
     if state == AgentStatusState::Running {
         if let Some(last) = sorted.last() {
-            if now.unix_ms() - last.received_at.unix_ms() > AGENT_STALL_AFTER_MS {
+            // An open tool call (e.g. a long Bash) may legitimately run
+            // silently up to its max; a turn with nothing open that goes
+            // silent has almost certainly died between steps. Pick the
+            // threshold accordingly (tsk130).
+            let threshold = if open_tools > 0 {
+                AGENT_STALL_AFTER_MS
+            } else {
+                AGENT_DEAD_AFTER_MS
+            };
+            if now.unix_ms() - last.received_at.unix_ms() > threshold {
                 return AgentStatusState::Stalled;
             }
         }
@@ -304,6 +341,70 @@ mod tests {
         assert_eq!(
             derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS)),
             AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn dead_with_no_open_tool_stalls_at_short_threshold() {
+        // tsk130: the genuinely-dead turn. A model-unavailable / API
+        // death right after the prompt leaves the log silent with NO
+        // open tool call (nothing to wait out). It must surface as
+        // Stalled at the SHORT threshold, well before the 15-min stall
+        // window — the user once watched this sit "Working" for ~1h.
+        let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
+        assert_eq!(
+            derive_thread_status(&events, at(1 + AGENT_DEAD_AFTER_MS + 1)),
+            AgentStatusState::Stalled
+        );
+    }
+
+    #[test]
+    fn dead_between_tool_calls_stalls_at_short_threshold() {
+        // Death between steps: the last tool returned (Pre+Post pair,
+        // nothing open), then the next model call died. No open tool
+        // to wait out → short threshold applies.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(3 + AGENT_DEAD_AFTER_MS + 1)),
+            AgentStatusState::Stalled
+        );
+    }
+
+    #[test]
+    fn no_open_tool_within_short_threshold_stays_running() {
+        // Just below the short threshold the agent is presumed alive
+        // (the model is composing the next step).
+        let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
+        assert_eq!(
+            derive_thread_status(&events, at(1 + AGENT_DEAD_AFTER_MS)),
+            AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn open_tool_call_uses_long_threshold_not_short() {
+        // A single Bash can legitimately run up to its 10-min max with
+        // no intervening hook. While a tool call is OPEN (PreToolUse
+        // with no matching PostToolUse), silence past the SHORT
+        // threshold must NOT be read as death — only the long stall
+        // window applies.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Bash"}"#),
+        ];
+        // Past the short death threshold, but under the long stall one.
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_DEAD_AFTER_MS + 1)),
+            AgentStatusState::Running
+        );
+        // Past the long stall threshold it finally degrades.
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
+            AgentStatusState::Stalled
         );
     }
 

@@ -1161,30 +1161,43 @@ currently `working` so a user idly tapping Escape at a prompt is a
 no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
 filtered out — only the bare interrupt byte counts. See the original ticket history.
 
-**Stall detection (API-error deaths).** Claude Code emits *no* hook at
-all when a turn dies on a transient API error (socket closed
-mid-stream) and the process drops back to its prompt — observed live as
-a dot stuck on `working` for hours while the queue silently stalled.
+**Stall / death detection (API-error deaths).** Claude Code emits *no*
+hook at all when a turn dies on a transient API error (socket closed
+mid-stream) or a model-unavailable error ("Claude Fable 5 is currently
+unavailable") and the process drops back to its prompt — observed live
+as a dot stuck on `working` for ~1h while the queue silently stalled.
 Nothing event-driven can catch that, so the derivation is time-aware:
 `derive_thread_status(events, now)` degrades a derived `Running` whose
-newest hook event is older than `AGENT_STALL_AFTER_MS` (15 min — clears
-a max-timeout 10-min Bash call with margin) to a derived-only
+newest hook event is older than its silence threshold to a derived-only
 `AgentStatusState::Stalled` (never persisted to the agent_status
-table). The ExitPlanMode `AwaitingUser` override is exempt — waiting on
-the user indefinitely is legitimate. Because no hook will ever arrive
-to trigger a re-derive, `AgentStallWatch`
+table). **Two thresholds (tsk130),** chosen by whether a tool call is
+still open (any `PreToolUse` without its matching `PostToolUse`):
+
+- `AGENT_STALL_AFTER_MS` (15 min) when a tool is open — a single Bash
+  can legitimately run silently up to its 10-min max, so wait it out.
+- `AGENT_DEAD_AFTER_MS` (5 min) when nothing is open — silence right
+  after a prompt or between tool calls means the next model call died,
+  caught promptly instead of the old uniform 15 min.
+
+The `AwaitingUser` override (ExitPlanMode / AskUserQuestion — see the
+user-input-pending carve-out) is exempt from both: waiting on the user
+indefinitely is legitimate. Because no hook will ever arrive to trigger
+a re-derive, `AgentStallWatch`
 (`crates/oxplow-app/src/agent_stall_watch.rs`, spawned from `boot.rs`)
 re-derives every thread once a minute and pushes
 `AgentStatusChanged { state: Stalled }` so the renderer's dot recovers
 on its own. The same watchdog emits `AgentStallAlert { thread_id,
 in_progress_count, waiting_ms }` — once per stall episode, re-armed
 when the agent runs again or the in_progress bucket empties — whenever
-a thread holds in_progress tasks but its agent has not been running
-past the threshold (covers both the died-mid-turn case and "stopped
-cleanly, never resumed"). The renderer collapses status as running →
-`working`, stalled → `stalled` (red pulsing dot), everything else →
-`waiting`, and surfaces the alert as a toast
-(`useBackendSubscriptions.ts` → `formatAgentStallAlert`).
+a thread holds in_progress tasks but its agent is not working. A
+**Stalled** derivation alerts immediately (its silence threshold has
+already elapsed), so a genuine death surfaces stranded uncommitted work
+within ~5 min; an **Idle** thread (clean Stop, never resumed) waits the
+full `AGENT_STALL_ALERT_AFTER_MS` window first; **AwaitingUser** never
+alerts. The renderer collapses status as running → `working`, stalled →
+`stalled` (red pulsing dot, labeled "agent exited or errored mid-turn —
+re-run"), everything else → `waiting`, and surfaces the alert as a
+toast (`useBackendSubscriptions.ts` → `formatAgentStallAlert`).
 
 ## Snapshot tracking
 

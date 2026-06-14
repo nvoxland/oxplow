@@ -17,7 +17,7 @@ const COLORS: Record<AgentStatusDotState, string> = {
 const LABELS: Record<AgentStatusDotState, string> = {
   working: "Working",
   waiting: "Waiting for input",
-  stalled: "Stalled — agent stopped responding mid-turn",
+  stalled: "Agent exited or errored mid-turn — re-run (uncommitted work may be unsaved)",
 };
 
 export function AgentStatusDot({

@@ -113,7 +113,15 @@ impl AgentStallWatch {
             });
         }
 
-        if derived == AgentStatusState::Running {
+        // Running (actively working) or AwaitingUser (legitimately
+        // parked on the user — AskUserQuestion / plan approval) are
+        // both non-stall states: clear any latch and stay quiet. Only
+        // Stalled (dead) and Idle (clean Stop, never resumed) can strand
+        // in_progress work.
+        if matches!(
+            derived,
+            AgentStatusState::Running | AgentStatusState::AwaitingUser
+        ) {
             self.alerted.lock().await.remove(&thread_id);
             return Ok(());
         }
@@ -135,7 +143,16 @@ impl AgentStallWatch {
             .max()
             .unwrap_or(status.updated_at);
         let waiting_ms = now.unix_ms() - waiting_since.unix_ms();
-        if waiting_ms <= AGENT_STALL_ALERT_AFTER_MS {
+
+        // A Stalled derivation has already cleared its silence threshold
+        // (short for a genuine death, long for an open tool — see
+        // `derive_thread_status`), so the stranded-work alert fires
+        // immediately, surfacing uncommitted work promptly (tsk130). An
+        // Idle thread instead waits the full alert window — it stopped
+        // cleanly and may just be paused between user prompts.
+        let ready_to_alert =
+            derived == AgentStatusState::Stalled || waiting_ms > AGENT_STALL_ALERT_AFTER_MS;
+        if !ready_to_alert {
             return Ok(());
         }
 
@@ -153,6 +170,7 @@ impl AgentStallWatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_status_derive::AGENT_DEAD_AFTER_MS;
     use crate::thread_runtime::ThreadRuntimeRegistry;
     use oxplow_db::{Database, SqliteStreamStore, SqliteTaskStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
@@ -377,6 +395,59 @@ mod tests {
             !evs.iter()
                 .any(|e| matches!(e, OxplowEvent::AgentStallAlert { .. })),
             "no alert without in_progress work, got {evs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn awaiting_user_with_in_progress_does_not_alert() {
+        // tsk130/tsk128: an agent parked on AskUserQuestion derives
+        // AwaitingUser. Waiting on the user is legitimate — even with
+        // in_progress work and a long wait, it must NOT raise a stall
+        // alert (that would be the very false alarm tsk128 was about).
+        let f = fixture().await;
+        seed_status(&f, AgentStatusState::Running).await;
+        append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
+        append(
+            &f,
+            HookKind::PreToolUse,
+            2,
+            r#"{"tool_name":"AskUserQuestion"}"#,
+        )
+        .await;
+        seed_in_progress_task(&f).await;
+        let mut rx = f.bus.subscribe();
+        f.watch
+            .check_once(Timestamp::from_unix_ms(2 + AGENT_STALL_ALERT_AFTER_MS * 10))
+            .await;
+        let evs = drain(&mut rx);
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, OxplowEvent::AgentStallAlert { .. })),
+            "waiting-on-user must not alert, got {evs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dead_thread_with_in_progress_alerts_at_short_threshold() {
+        // tsk130: a genuinely-dead turn (no open tool call) is detected
+        // by the derivation at the short threshold. The stranded-work
+        // alert must fire then — not wait the full 15-min alert window —
+        // so uncommitted in_progress work surfaces promptly.
+        let f = fixture().await;
+        seed_status(&f, AgentStatusState::Running).await;
+        append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
+        seed_in_progress_task(&f).await;
+        let mut rx = f.bus.subscribe();
+        // Past the short death threshold but well under the long alert
+        // window — the old code stayed quiet here.
+        let dead_at = Timestamp::from_unix_ms(1 + AGENT_DEAD_AFTER_MS + 1);
+        assert!(dead_at.unix_ms() < 1 + AGENT_STALL_ALERT_AFTER_MS);
+        f.watch.check_once(dead_at).await;
+        let evs = drain(&mut rx);
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, OxplowEvent::AgentStallAlert { .. })),
+            "dead thread must alert promptly, got {evs:?}"
         );
     }
 
