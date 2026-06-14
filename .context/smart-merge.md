@@ -24,23 +24,41 @@ writing + `git add`ing the file **only when `merge3` returns `Ok`**
 oversized files are left exactly as git produced them. This is wired
 into `GitService` merge/rebase/cherry-pick/revert.
 
-## Tier 2 — AST structural merge (front half BUILT — tsk134; merge not yet wired)
+## Tier 2 — AST structural merge (core BUILT — tsk134+tsk135; not yet wired)
 
-**Status:** the language-neutral *parse → top-level-items* front half now
-ships as production code in `crates/oxplow-git/src/ast_merge.rs`
-(`parse_top_level_items(src, Language) -> Option<Vec<Item>>` +
-`language_for_path` + the per-language `MergeSpec` kind tables). tree-sitter
-and the 6 first-slice grammars (rust, typescript, tsx, javascript, python,
-go) are now real `oxplow-git` deps (promoted from the spike's dev-deps).
-Each `Item` carries `{ key, text, byte_span }`: the key is the import's
-normalized text or a named decl's `kind+name` (Go methods + receiver);
-the byte span includes any directly-attached leading doc-comment so a
-moved decl carries it. Parse failure (any error/missing node) → `None`,
-so we never operate on an untrusted tree. **No merge/reconstruction yet —
-that's the next task (tsk136); the per-item classify still lives only in
-the spike.** Const/var/Go-type decls fall back to text identity for now
-(safe: add still commutes, same-item edit just refuses) — a tsk136
-refinement. The text below is the original scoped design.
+**Status:** the language-neutral core now ships as production code in
+`crates/oxplow-git/src/ast_merge.rs`, in two layers:
+
+- **Parse → items (tsk134):** `parse_top_level_items(src, Language) ->
+  Option<Vec<Item>>` + `language_for_path` + the per-language `MergeSpec`
+  kind tables. tree-sitter and the 6 first-slice grammars (rust,
+  typescript, tsx, javascript, python, go) are real `oxplow-git` deps
+  now. Each `Item` carries `{ key, text, byte_span }`: key = import's
+  normalized text or a named decl's `kind+name` (Go methods + receiver);
+  the byte span includes any directly-attached leading doc-comment. Parse
+  failure (error/missing node) → `None` (never operate on an untrusted
+  tree). Const/var/Go-type decls fall back to text identity (safe: add
+  still commutes, same-item edit just refuses).
+- **3-way merge (tsk135):** `merge_top_level(base, ours, theirs, Language)
+  -> AstMerge` where `AstMerge` is `Resolved(String)` | `Conflict(keys)`
+  | `Bail(BailReason)`. Per-key classify lifts the spike's rule (take the
+  changed side, take agreement, refuse on divergent same-key edit /
+  delete-vs-edit / add-add-different). **Ordering** is conservative +
+  deterministic: base order for surviving base items, each side's
+  additions inserted after their nearest surviving base anchor (ours
+  before theirs; pre-anchor additions go to a front bucket, ours first).
+  Reconstruction reuses each item's verbatim span text (no reflow), joins
+  with single newlines, and is gated by a **re-parse guard** —
+  reconstructed source that doesn't re-parse → `Bail(ReparseFailed)`. A
+  side that doesn't parse → `Bail(SideParseFailed)`; a duplicate identity
+  key within one side → `Bail(DuplicateKeys)`.
+
+**Still not wired into `auto_resolve_conflicts` — that's tsk136.** Note a
+useful invariant the ordering relies on: because we preserve each side's
+relative order and only interleave *independent* additions, a
+reconstruction is essentially always valid when the inputs are — the
+re-parse guard is a belt-and-suspenders backstop. The text below is the
+original scoped design.
 
 ## Tier 2 — AST structural merge (SCOPED — tsk121)
 
@@ -135,7 +153,7 @@ and the external-`mergiraf` escape hatch.
 |---|---|
 | ✅ `LanguageSpec`-style top-level-item kind tables (reuse metrics pattern) for rust/ts/tsx/js/py/go (tsk134) | done |
 | ✅ Generic parse → ordered-items extractor + identity keys (tsk134) | done |
-| `merge_items` 3-way classify + ordering/reconstruction + re-parse guard | ~2 days (ordering is the hard part) |
+| ✅ `merge_items` 3-way classify + ordering/reconstruction + re-parse guard (tsk135) | done |
 | Wire into `auto_resolve_conflicts` behind the per-language gate + report counts | ~0.5 day |
 | Tests (per language: commutative-win, divergence-refusal, parse-fail-bail, ordering) | ~1.5 days |
 | **Total first slice (6 languages)** | **~1 week** |
@@ -161,6 +179,6 @@ and the external-`mergiraf` escape hatch.
 
 - Integration point + conflict-state plumbing: `.context/git-integration.md`.
 - Tier-1 source + tests: `crates/oxplow-git/src/smart_merge.rs`.
-- Tier-2 front half (parse→items + kind tables): `crates/oxplow-git/src/ast_merge.rs`.
+- Tier-2 core (parse→items + kind tables + 3-way merge/reconstruct/guard): `crates/oxplow-git/src/ast_merge.rs`.
 - Spike (per-item 3-way classify, not yet productionized): `crates/oxplow-git/tests/ast_merge_spike.rs`.
 - Parser/grammar reuse: `crates/oxplow-code-metrics/src/spec.rs`.

@@ -1,20 +1,24 @@
-//! Tier-2 AST structural merge — parse → top-level-items front half (tsk134).
+//! Tier-2 AST structural merge — parse + per-item 3-way merge (tsk134, tsk135).
 //!
-//! This is the language-neutral *foundation* of the AST merge designed
-//! in `.context/smart-merge.md` (Tier 2). It does **one** thing: parse a
-//! file's bytes with the right tree-sitter grammar and reduce it to its
-//! ordered list of top-level items, each carrying
+//! The language-neutral core of the AST merge designed in
+//! `.context/smart-merge.md` (Tier 2), in two layers:
 //!
-//! - a **stable identity key** for later 3-way matching (an import is
-//!   keyed by its normalized text; a named declaration by `kind + name`;
-//!   anything unnamed falls back to `kind + normalized-text`), and
-//! - its **original byte span** (so reconstruction can splice exact
-//!   source back, including a declaration's attached leading doc-comments).
+//! 1. **Parse → items** ([`parse_top_level_items`], tsk134): parse a
+//!    file's bytes with the right tree-sitter grammar and reduce it to
+//!    its ordered top-level items, each carrying
+//!    - a **stable identity key** for 3-way matching (an import is keyed
+//!      by its normalized text; a named declaration by `kind + name`;
+//!      anything unnamed falls back to `kind + normalized-text`), and
+//!    - its **original byte span** (so reconstruction reuses exact
+//!      source, including a declaration's attached leading doc-comments).
+//! 2. **3-way merge** ([`merge_top_level`], tsk135): per-item classify
+//!    (take-the-changed-side / take-agreement / refuse on overlap),
+//!    deterministic ordering + verbatim reconstruction, and a re-parse
+//!    guard that discards any reconstruction that doesn't parse cleanly.
 //!
-//! It deliberately does **not** merge or reconstruct anything — the
-//! per-item 3-way classify, ordering policy, and `auto_resolve_conflicts`
-//! wiring are the next task (tsk136). The spike that proved this is
-//! tractable lives at `crates/oxplow-git/tests/ast_merge_spike.rs`.
+//! Still **not** wired into `auto_resolve_conflicts` — that's tsk136.
+//! The original feasibility spike lives at
+//! `crates/oxplow-git/tests/ast_merge_spike.rs`.
 //!
 //! ## Safety
 //!
@@ -37,6 +41,7 @@
 //! mis-merges — when both sides *edit the same* one. Tightening those to
 //! declarator-name identity is a tsk136 refinement.
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use tree_sitter::{Language as TsLanguage, Node, Parser};
@@ -308,6 +313,250 @@ static GO: MergeSpec = MergeSpec {
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
+// ===================================================================
+// Per-item 3-way merge: classify + ordering/reconstruction + re-parse
+// guard. Built on `parse_top_level_items`. Pure; no merge is wired into
+// `auto_resolve_conflicts` yet (that's tsk136).
+// ===================================================================
+
+/// Outcome of a top-level structural 3-way merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AstMerge {
+    /// Every item was independently resolvable. The `String` is the
+    /// reconstructed, re-parse-validated file content.
+    Resolved(String),
+    /// At least one item is a true semantic overlap (a divergent same-key
+    /// edit, a delete-vs-edit, or an add/add with different text). The
+    /// keys are the offending items, sorted. The caller leaves git's
+    /// conflict markers — we only ever *reduce* the conflict count.
+    Conflict(Vec<String>),
+    /// We could not produce a result we trust. The caller also leaves
+    /// git's markers. See [`BailReason`].
+    Bail(BailReason),
+}
+
+/// Why a structural merge declined to produce a resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BailReason {
+    /// One of base/ours/theirs failed to parse (error/missing node) — we
+    /// never operate on an untrusted tree.
+    SideParseFailed,
+    /// A side had two top-level items with the same identity key, so the
+    /// per-key 3-way classify would be ambiguous. Conservatively refuse.
+    DuplicateKeys,
+    /// The reconstructed source did not parse cleanly — discard it rather
+    /// than emit a tree we can't trust.
+    ReparseFailed,
+}
+
+/// Structural 3-way merge of the top-level items of `base`/`ours`/`theirs`
+/// (all the same `lang`). Pure. See [`AstMerge`] for the outcomes.
+///
+/// Resolution rule (per the spike, lifted to production): per identity
+/// key, take the side that changed, take agreement, and refuse the whole
+/// file on any divergent same-key edit, delete-vs-edit, or add/add with
+/// different text. Ordering is conservative and deterministic: base order
+/// for surviving items, with each side's additions inserted after their
+/// nearest surviving base anchor (ours before theirs on ties). The
+/// reconstruction reuses each item's verbatim byte-span text (no reflow)
+/// and is re-parsed as a guard before being returned.
+pub fn merge_top_level(base: &str, ours: &str, theirs: &str, lang: Language) -> AstMerge {
+    merge_with_reconstruct(base, ours, theirs, lang, reconstruct)
+}
+
+/// Inner pipeline parameterized on the reconstruction function so the
+/// re-parse guard's discard path is directly testable (inject a
+/// reconstructor that emits broken source and assert `Bail(ReparseFailed)`).
+fn merge_with_reconstruct(
+    base: &str,
+    ours: &str,
+    theirs: &str,
+    lang: Language,
+    reconstruct_fn: impl Fn(&[Item]) -> String,
+) -> AstMerge {
+    let (Some(b_items), Some(o_items), Some(t_items)) = (
+        parse_top_level_items(base, lang),
+        parse_top_level_items(ours, lang),
+        parse_top_level_items(theirs, lang),
+    ) else {
+        return AstMerge::Bail(BailReason::SideParseFailed);
+    };
+
+    let (Some(bmap), Some(omap), Some(tmap)) = (
+        index_by_key(&b_items),
+        index_by_key(&o_items),
+        index_by_key(&t_items),
+    ) else {
+        return AstMerge::Bail(BailReason::DuplicateKeys);
+    };
+
+    // Classify every key once. `resolved` holds the winning item per
+    // surviving key; dropped keys are simply absent.
+    let mut all_keys: Vec<&str> = bmap
+        .keys()
+        .chain(omap.keys())
+        .chain(tmap.keys())
+        .copied()
+        .collect();
+    all_keys.sort_unstable();
+    all_keys.dedup();
+
+    let mut resolved: BTreeMap<&str, &Item> = BTreeMap::new();
+    let mut conflicts: Vec<String> = Vec::new();
+    for &key in &all_keys {
+        match classify(
+            bmap.get(key).copied(),
+            omap.get(key).copied(),
+            tmap.get(key).copied(),
+        ) {
+            Ok(Some(item)) => {
+                resolved.insert(key, item);
+            }
+            Ok(None) => {}
+            Err(()) => conflicts.push(key.to_string()),
+        }
+    }
+    if !conflicts.is_empty() {
+        return AstMerge::Conflict(conflicts);
+    }
+
+    let merged = order_items(&b_items, &o_items, &t_items, &bmap, &omap, &resolved);
+    let text = reconstruct_fn(&merged);
+
+    // Re-parse guard: never hand back a tree we can't re-parse.
+    if parse_top_level_items(&text, lang).is_none() {
+        return AstMerge::Bail(BailReason::ReparseFailed);
+    }
+    AstMerge::Resolved(text)
+}
+
+/// Index items by identity key. `None` if a key repeats within one side
+/// (ambiguous — the caller bails).
+fn index_by_key(items: &[Item]) -> Option<BTreeMap<&str, &Item>> {
+    let mut map = BTreeMap::new();
+    for it in items {
+        if map.insert(it.key.as_str(), it).is_some() {
+            return None;
+        }
+    }
+    Some(map)
+}
+
+/// Per-key 3-way classify. `Ok(Some)` ⇒ keep that item; `Ok(None)` ⇒
+/// drop (deleted); `Err(())` ⇒ true overlap (refuse the file).
+fn classify<'a>(
+    b: Option<&'a Item>,
+    o: Option<&'a Item>,
+    t: Option<&'a Item>,
+) -> Result<Option<&'a Item>, ()> {
+    match (b, o, t) {
+        // Present everywhere: classic 3-way on the verbatim item text.
+        (Some(b), Some(o), Some(t)) => {
+            if o.text == t.text {
+                Ok(Some(o)) // both agree (incl. both-made-same-edit)
+            } else if o.text == b.text {
+                Ok(Some(t)) // only theirs changed
+            } else if t.text == b.text {
+                Ok(Some(o)) // only ours changed
+            } else {
+                Err(()) // divergent same-key edit
+            }
+        }
+        // Deleted by one side, untouched by the other → drop.
+        (Some(b), None, Some(t)) if t.text == b.text => Ok(None),
+        (Some(b), Some(o), None) if o.text == b.text => Ok(None),
+        // Delete vs edit — true overlap.
+        (Some(_), None, Some(_)) | (Some(_), Some(_), None) => Err(()),
+        // Deleted by both → drop.
+        (Some(_), None, None) => Ok(None),
+        // Added by exactly one side → the commutative win.
+        (None, Some(o), None) => Ok(Some(o)),
+        (None, None, Some(t)) => Ok(Some(t)),
+        // Added by both: fine iff identical, else add/add overlap.
+        (None, Some(o), Some(t)) => {
+            if o.text == t.text {
+                Ok(Some(o))
+            } else {
+                Err(())
+            }
+        }
+        (None, None, None) => unreachable!("key came from some side"),
+    }
+}
+
+/// Build the merged item list in a deterministic, conservative order:
+/// base order for surviving base items, with each side's new items
+/// inserted after their nearest surviving base anchor (ours before
+/// theirs; items before any base anchor go to the front, ours first).
+fn order_items<'a>(
+    b_items: &'a [Item],
+    o_items: &'a [Item],
+    t_items: &'a [Item],
+    bmap: &BTreeMap<&str, &Item>,
+    omap: &BTreeMap<&str, &Item>,
+    resolved: &BTreeMap<&str, &'a Item>,
+) -> Vec<Item> {
+    let base_keys: HashSet<&str> = bmap.keys().copied().collect();
+
+    // Front bucket (no surviving base anchor precedes them) and
+    // anchor → items inserted directly after that base key.
+    let mut front: Vec<&Item> = Vec::new();
+    let mut after: HashMap<&str, Vec<&Item>> = HashMap::new();
+
+    let mut place = |side: &'a [Item], skip_both_add: bool| {
+        let mut anchor: Option<&str> = None;
+        for it in side {
+            let k = it.key.as_str();
+            if base_keys.contains(k) {
+                // Only a *surviving* base item is a valid anchor.
+                if resolved.contains_key(k) {
+                    anchor = Some(k);
+                }
+                continue;
+            }
+            // An addition from this side. Skip both-add keys on the
+            // theirs pass — ours already placed them.
+            if skip_both_add && omap.contains_key(k) {
+                continue;
+            }
+            if let Some(&item) = resolved.get(k) {
+                match anchor {
+                    Some(a) => after.entry(a).or_default().push(item),
+                    None => front.push(item),
+                }
+            }
+        }
+    };
+    place(o_items, false);
+    place(t_items, true);
+
+    let mut ordered: Vec<&Item> = Vec::new();
+    ordered.extend(front);
+    for it in b_items {
+        let k = it.key.as_str();
+        if let Some(&winner) = resolved.get(k) {
+            ordered.push(winner);
+            if let Some(extra) = after.get(k) {
+                ordered.extend(extra.iter().copied());
+            }
+        }
+    }
+
+    ordered.into_iter().cloned().collect()
+}
+
+/// Reconstruct file text from ordered items. Each item's verbatim span
+/// text is reused unchanged (no reflow); only the inter-item joins (a
+/// single newline) are synthesized. Trailing newline included.
+fn reconstruct(items: &[Item]) -> String {
+    let mut out = String::new();
+    for it in items {
+        out.push_str(it.text.trim_end());
+        out.push('\n');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +760,219 @@ mod tests {
                 "function_item::third"
             ]
         );
+    }
+
+    // ---- per-item 3-way merge ----
+
+    fn resolved_text(m: AstMerge) -> String {
+        match m {
+            AstMerge::Resolved(s) => s,
+            other => panic!("expected Resolved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rust_both_add_different_imports_resolves_in_order() {
+        // The flagship Tier-2 case: two new `use`s, order-insensitive.
+        let base = "use std::fmt;\n";
+        let ours = "use std::collections::HashMap;\nuse std::fmt;\n";
+        let theirs = "use std::fmt;\nuse std::io;\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        // ours-add (front) → base survivor → theirs-add (anchored after).
+        assert_eq!(
+            text,
+            "use std::collections::HashMap;\nuse std::fmt;\nuse std::io;\n"
+        );
+    }
+
+    #[test]
+    fn rust_independently_added_fns_resolve() {
+        let base = "fn shared() {}\n";
+        let ours = "fn shared() {}\nfn from_ours() {}\n";
+        let theirs = "fn shared() {}\nfn from_theirs() {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        assert!(text.contains("fn from_ours"), "{text}");
+        assert!(text.contains("fn from_theirs"), "{text}");
+        // Both new fns anchor after the surviving `shared`, ours first.
+        let o = text.find("from_ours").unwrap();
+        let t = text.find("from_theirs").unwrap();
+        let s = text.find("fn shared").unwrap();
+        assert!(
+            s < o && o < t,
+            "order ours-before-theirs after anchor: {text}"
+        );
+    }
+
+    #[test]
+    fn rust_body_edit_on_one_side_add_on_other_resolves() {
+        let base = "fn a() { 1 }\n";
+        let ours = "fn a() { 2 }\n"; // body edit
+        let theirs = "fn a() { 1 }\nfn b() {}\n"; // new fn
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        assert!(text.contains("fn a() { 2 }"), "edited body wins: {text}");
+        assert!(text.contains("fn b()"), "{text}");
+    }
+
+    #[test]
+    fn rust_both_delete_same_item_resolves() {
+        let base = "fn a() {}\nfn b() {}\n";
+        let ours = "fn b() {}\n";
+        let theirs = "fn b() {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        assert!(!text.contains("fn a()"), "a deleted by both: {text}");
+        assert!(text.contains("fn b()"), "{text}");
+    }
+
+    #[test]
+    fn rust_same_item_edited_differently_refuses() {
+        let base = "fn calc() { a() }\n";
+        let ours = "fn calc() { b() }\n";
+        let theirs = "fn calc() { c() }\n";
+        match merge_top_level(base, ours, theirs, Language::Rust) {
+            AstMerge::Conflict(keys) => {
+                assert!(
+                    keys.iter().any(|k| k.starts_with("function_item::calc")),
+                    "{keys:?}"
+                )
+            }
+            other => panic!("must refuse divergent same-item edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rust_add_add_with_different_bodies_refuses() {
+        let base = "fn keep() {}\n";
+        let ours = "fn keep() {}\nfn n() { 1 }\n";
+        let theirs = "fn keep() {}\nfn n() { 2 }\n";
+        match merge_top_level(base, ours, theirs, Language::Rust) {
+            AstMerge::Conflict(keys) => {
+                assert!(
+                    keys.iter().any(|k| k.starts_with("function_item::n")),
+                    "{keys:?}"
+                )
+            }
+            other => panic!("must refuse add/add divergence, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rust_delete_vs_edit_refuses() {
+        let base = "fn a() { 1 }\n";
+        let ours = "\n"; // a deleted
+        let theirs = "fn a() { 2 }\n"; // a edited
+        match merge_top_level(base, ours, theirs, Language::Rust) {
+            AstMerge::Conflict(keys) => {
+                assert!(
+                    keys.iter().any(|k| k.starts_with("function_item::a")),
+                    "{keys:?}"
+                )
+            }
+            other => panic!("must refuse delete-vs-edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordering_front_additions_are_deterministic_ours_then_theirs() {
+        // Both sides add a fn *before* the surviving base item → both land
+        // in the front bucket, ours first, deterministically.
+        let base = "fn base() {}\n";
+        let ours = "fn o_new() {}\nfn base() {}\n";
+        let theirs = "fn t_new() {}\nfn base() {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Rust));
+        assert_eq!(text, "fn o_new() {}\nfn t_new() {}\nfn base() {}\n");
+    }
+
+    #[test]
+    fn reparse_guard_discards_broken_reconstruction() {
+        // Inject a reconstructor that emits un-parseable source; even
+        // though the classify is clean, the guard must bail.
+        let base = "use std::fmt;\n";
+        let ours = "use std::io;\nuse std::fmt;\n";
+        let theirs = "use std::fmt;\nuse std::cmp;\n";
+        let out = merge_with_reconstruct(base, ours, theirs, Language::Rust, |_| {
+            "fn broken( {\n".to_string()
+        });
+        assert_eq!(out, AstMerge::Bail(BailReason::ReparseFailed));
+        // Sanity: the real reconstructor resolves the same inputs.
+        assert!(matches!(
+            merge_top_level(base, ours, theirs, Language::Rust),
+            AstMerge::Resolved(_)
+        ));
+    }
+
+    #[test]
+    fn unparseable_side_bails() {
+        let base = "fn a() {}\n";
+        let ours = "fn a() { "; // unbalanced → parse error
+        let theirs = "fn a() {}\nfn b() {}\n";
+        assert_eq!(
+            merge_top_level(base, ours, theirs, Language::Rust),
+            AstMerge::Bail(BailReason::SideParseFailed)
+        );
+    }
+
+    #[test]
+    fn typescript_both_add_imports_resolve() {
+        let base = "import a from 'a';\n";
+        let ours = "import b from 'b';\nimport a from 'a';\n";
+        let theirs = "import a from 'a';\nimport c from 'c';\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::TypeScript));
+        assert_eq!(
+            text,
+            "import b from 'b';\nimport a from 'a';\nimport c from 'c';\n"
+        );
+    }
+
+    #[test]
+    fn javascript_body_edit_vs_add_resolves() {
+        let base = "function a() { return 1; }\n";
+        let ours = "function a() { return 2; }\n";
+        let theirs = "function a() { return 1; }\nfunction b() {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::JavaScript));
+        assert!(text.contains("return 2"), "edited body wins: {text}");
+        assert!(text.contains("function b()"), "{text}");
+    }
+
+    #[test]
+    fn python_both_add_functions_resolve() {
+        let base = "def shared():\n    pass\n";
+        let ours = "def shared():\n    pass\ndef o():\n    pass\n";
+        let theirs = "def shared():\n    pass\ndef t():\n    pass\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Python));
+        assert!(text.contains("def o():"), "{text}");
+        assert!(text.contains("def t():"), "{text}");
+        // Reconstruction must itself be valid Python (re-parse guard passed).
+        assert!(parse_top_level_items(&text, Language::Python).is_some());
+    }
+
+    #[test]
+    fn python_same_def_edited_differently_refuses() {
+        let base = "def f():\n    return 1\n";
+        let ours = "def f():\n    return 2\n";
+        let theirs = "def f():\n    return 3\n";
+        match merge_top_level(base, ours, theirs, Language::Python) {
+            AstMerge::Conflict(keys) => {
+                assert!(
+                    keys.iter().any(|k| k.starts_with("function_definition::f")),
+                    "{keys:?}"
+                )
+            }
+            other => panic!("must refuse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn go_both_add_functions_resolve_keeping_package_first() {
+        let base = "package main\nfunc S() {}\n";
+        let ours = "package main\nfunc S() {}\nfunc O() {}\n";
+        let theirs = "package main\nfunc S() {}\nfunc T() {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Go));
+        assert!(
+            text.starts_with("package main"),
+            "package stays first: {text}"
+        );
+        assert!(text.contains("func O()"), "{text}");
+        assert!(text.contains("func T()"), "{text}");
+        assert!(parse_top_level_items(&text, Language::Go).is_some());
     }
 }

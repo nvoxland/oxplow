@@ -25,8 +25,8 @@ pub mod workspace;
 mod worktree;
 
 pub use ast_merge::{
-    language_for_path as merge_language_for_path, parse_top_level_items, Item,
-    Language as MergeLanguage,
+    language_for_path as merge_language_for_path, merge_top_level, parse_top_level_items, AstMerge,
+    BailReason, Item, Language as MergeLanguage,
 };
 pub use blame::{
     git_blame, local_blame, parse_porcelain, BlameLine, LocalBlameEntry, BLAME_ZERO_SHA,
