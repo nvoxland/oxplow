@@ -24,10 +24,12 @@ writing + `git add`ing the file **only when `merge3` returns `Ok`**
 oversized files are left exactly as git produced them. This is wired
 into `GitService` merge/rebase/cherry-pick/revert.
 
-## Tier 2 — AST structural merge (core BUILT — tsk134+tsk135; not yet wired)
+## Tier 2 — AST structural merge (WIRED — tsk134+tsk135+tsk136)
 
-**Status:** the language-neutral core now ships as production code in
-`crates/oxplow-git/src/ast_merge.rs`, in two layers:
+**Status:** the language-neutral core ships as production code in
+`crates/oxplow-git/src/ast_merge.rs` and is now wired into the
+auto-resolve path as a Tier-1.5 fallback (tsk136 — see "Wiring" below).
+Two layers:
 
 - **Parse → items (tsk134):** `parse_top_level_items(src, Language) ->
   Option<Vec<Item>>` + `language_for_path` + the per-language `MergeSpec`
@@ -53,12 +55,33 @@ into `GitService` merge/rebase/cherry-pick/revert.
   side that doesn't parse → `Bail(SideParseFailed)`; a duplicate identity
   key within one side → `Bail(DuplicateKeys)`.
 
-**Still not wired into `auto_resolve_conflicts` — that's tsk136.** Note a
-useful invariant the ordering relies on: because we preserve each side's
-relative order and only interleave *independent* additions, a
+Note a useful invariant the ordering relies on: because we preserve each
+side's relative order and only interleave *independent* additions, a
 reconstruction is essentially always valid when the inputs are — the
 re-parse guard is a belt-and-suspenders backstop. The text below is the
 original scoped design.
+
+### Wiring (tsk136)
+
+`auto_resolve_conflicts` (`smart_merge.rs`) now runs the AST pass as a
+**Tier-1.5 fallback, per file**: when Tier-1's `merge3_str` returns
+`Err(Conflicted)`, it calls `ast_merge_resolve(path, base, ours, theirs)`,
+which gates on `ast_merge::language_for_path` (the six first-slice
+grammars) and accepts the result **only** when `merge_top_level` returns
+`AstMerge::Resolved` — i.e. the re-parse guard has already passed. Any
+`Conflict`, `Bail` (parse-fail / duplicate-keys / reparse-fail), or
+unsupported extension → `None`, leaving git's markers untouched. Same
+write + `git add`-only-on-clean discipline as Tier-1, so the pass can
+still only *reduce* the conflict count.
+
+`AutoResolveReport` gained an `ast_resolved: u32` counter: AST-resolved
+paths go into the same `resolved` Vec (so `GitOpResult.auto_resolved =
+resolved.len()` already surfaces them in the toast/HUD — no parallel
+path), and `ast_resolved` records how many of those came from the AST
+tier specifically. The flagship case the wiring unlocks: both sides add a
+*different* import at the *same gap* (adjacent lines), which Tier-1 sees
+as an ambiguous add/add but the AST tier unions. End-to-end test:
+`auto_resolve_clears_ast_only_import_conflict` in `smart_merge.rs`.
 
 ## Tier 2 — AST structural merge (SCOPED — tsk121)
 

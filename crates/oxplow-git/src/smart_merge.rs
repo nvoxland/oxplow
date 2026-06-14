@@ -240,8 +240,13 @@ pub fn merge3_str(base: &str, ours: &str, theirs: &str) -> Result<String, Confli
 /// Outcome of an [`auto_resolve_conflicts`] pass.
 #[derive(Debug, Default, Clone)]
 pub struct AutoResolveReport {
-    /// Repo-relative paths that were cleanly auto-resolved and staged.
+    /// Repo-relative paths that were cleanly auto-resolved and staged —
+    /// across *both* tiers (token diff3 and the AST structural pass).
     pub resolved: Vec<String>,
+    /// How many of `resolved` were cleared by the Tier-2 AST structural
+    /// pass (the rest came from Tier-1's token diff3). Lets the UI/tests
+    /// distinguish the two without a parallel code path.
+    pub ast_resolved: u32,
     /// Unmerged paths still left conflicted after the pass (genuine
     /// overlaps, add/add, delete/modify, binary, oversized, …).
     pub remaining: u32,
@@ -301,9 +306,18 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
     drop(index);
 
     let mut resolved = Vec::new();
+    let mut ast_resolved = 0u32;
     for (path, base, ours, theirs) in candidates {
-        let Ok(merged) = merge3_str(&base, &ours, &theirs) else {
-            continue; // genuine token-level conflict — leave git's markers.
+        // Tier-1: language-agnostic token diff3. Tier-2 (AST structural):
+        // only when Tier-1 leaves a conflict *and* the path maps to a
+        // supported grammar whose 3-way merge reconstructs + re-parses
+        // cleanly. Both tiers can only ever *reduce* the conflict count.
+        let merged = match merge3_str(&base, &ours, &theirs) {
+            Ok(m) => Some((m, false)),
+            Err(_) => ast_merge_resolve(&path, &base, &ours, &theirs).map(|m| (m, true)),
+        };
+        let Some((merged, via_ast)) = merged else {
+            continue; // neither tier could resolve — leave git's markers.
         };
         let abs = repo_path.join(&path);
         if std::fs::write(&abs, merged).is_err() {
@@ -314,6 +328,9 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
             .map(|r| r.success)
             .unwrap_or(false);
         if staged {
+            if via_ast {
+                ast_resolved += 1;
+            }
             resolved.push(path);
         }
     }
@@ -330,7 +347,24 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
 
     AutoResolveReport {
         resolved,
+        ast_resolved,
         remaining,
+    }
+}
+
+/// Tier-2 fallback: when Tier-1 can't merge a file, try the AST
+/// structural pass iff the path maps to a supported grammar. Returns the
+/// reconstructed content only when [`merge_top_level`] resolves cleanly
+/// (which already requires the re-parse guard to pass); any conflict,
+/// bail, parse failure, or unsupported extension yields `None`, leaving
+/// git's markers. Preserves the reduce-only invariant.
+///
+/// [`merge_top_level`]: crate::ast_merge::merge_top_level
+fn ast_merge_resolve(path: &str, base: &str, ours: &str, theirs: &str) -> Option<String> {
+    let lang = crate::ast_merge::language_for_path(path)?;
+    match crate::ast_merge::merge_top_level(base, ours, theirs, lang) {
+        crate::ast_merge::AstMerge::Resolved(text) => Some(text),
+        crate::ast_merge::AstMerge::Conflict(_) | crate::ast_merge::AstMerge::Bail(_) => None,
     }
 }
 
@@ -523,5 +557,106 @@ mod tests {
         let repo = git2::Repository::open(p).unwrap();
         let idx = repo.index().unwrap();
         idx.conflicts().map(|c| c.count() as u32).unwrap_or(0)
+    }
+
+    fn init_repo(p: &Path) {
+        run_git(p, &["init", "-q", "--initial-branch=main"]);
+        run_git(p, &["config", "user.email", "t@example.com"]);
+        run_git(p, &["config", "user.name", "t"]);
+    }
+
+    /// Commit `contents` to `file`, staging everything.
+    fn commit_file(p: &Path, file: &str, contents: &str, msg: &str) {
+        std::fs::write(p.join(file), contents).unwrap();
+        run_git(p, &["add", "-A"]);
+        run_git(p, &["commit", "-q", "-m", msg]);
+    }
+
+    /// Both sides add a *different* import at the same gap (adjacent lines)
+    /// — git conflicts and Tier-1's token diff3 sees an ambiguous add/add,
+    /// but the AST structural tier recognizes two independent imports and
+    /// unions them. The report attributes the win to the AST tier.
+    #[test]
+    fn auto_resolve_clears_ast_only_import_conflict() {
+        let base = "use std::fmt;\nfn main() {}\n";
+        let ours = "use std::fmt;\nuse std::io;\nfn main() {}\n";
+        let theirs = "use std::fmt;\nuse std::cmp;\nfn main() {}\n";
+
+        // Precondition: Tier-1 genuinely can't merge this (adjacent add/add).
+        assert_eq!(
+            merge3_str(base, ours, theirs),
+            Err(Conflicted),
+            "Tier-1 must leave this conflicted for the test to exercise Tier-2"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        commit_file(p, "lib.rs", base, "base");
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        commit_file(p, "lib.rs", ours, "ours: add io");
+        run_git(p, &["checkout", "-q", "main"]);
+        commit_file(p, "lib.rs", theirs, "theirs: add cmp");
+
+        let out = std::process::Command::new("git")
+            .args(["merge", "--no-edit", "feature"])
+            .current_dir(p)
+            .output()
+            .expect("spawn git merge");
+        assert!(!out.status.success(), "expected git merge to conflict");
+        assert_eq!(count_unmerged(p), 1);
+
+        let report = auto_resolve_conflicts(p);
+        assert_eq!(report.resolved.len(), 1, "{report:?}");
+        assert_eq!(report.ast_resolved, 1, "AST tier should own the win");
+        assert_eq!(report.remaining, 0);
+
+        let merged = std::fs::read_to_string(p.join("lib.rs")).unwrap();
+        assert!(merged.contains("use std::io;"), "{merged}");
+        assert!(merged.contains("use std::cmp;"), "{merged}");
+        assert!(merged.contains("use std::fmt;"), "{merged}");
+        assert!(merged.contains("fn main()"), "{merged}");
+        // The reconstruction must itself parse.
+        assert!(
+            crate::ast_merge::parse_top_level_items(&merged, crate::ast_merge::Language::Rust)
+                .is_some(),
+            "AST reconstruction must re-parse: {merged}"
+        );
+    }
+
+    /// An unsupported extension gets no AST tier: an add/add conflict
+    /// Tier-1 also can't resolve is left exactly as git produced it.
+    #[test]
+    fn auto_resolve_leaves_unsupported_extension_conflict() {
+        let base = "line one\nline two\n";
+        let ours = "line one\nadded by ours\nline two\n";
+        let theirs = "line one\nadded by theirs\nline two\n";
+        assert_eq!(
+            merge3_str(base, ours, theirs),
+            Err(Conflicted),
+            "precondition: Tier-1 can't resolve adjacent add/add"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        commit_file(p, "notes.txt", base, "base");
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        commit_file(p, "notes.txt", ours, "ours");
+        run_git(p, &["checkout", "-q", "main"]);
+        commit_file(p, "notes.txt", theirs, "theirs");
+
+        let out = std::process::Command::new("git")
+            .args(["merge", "--no-edit", "feature"])
+            .current_dir(p)
+            .output()
+            .expect("spawn git merge");
+        assert!(!out.status.success(), "expected git merge to conflict");
+        assert_eq!(count_unmerged(p), 1);
+
+        let report = auto_resolve_conflicts(p);
+        assert!(report.resolved.is_empty(), "{report:?}");
+        assert_eq!(report.ast_resolved, 0);
+        assert_eq!(report.remaining, 1, "unsupported ext left for the user");
     }
 }
