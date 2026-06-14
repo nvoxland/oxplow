@@ -5,8 +5,8 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    AgentNudge, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortObservation, TaskEffort,
-    TaskEffortStore as _,
+    AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile,
+    EffortObservation, TaskEffort, TaskEffortStore as _, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -116,6 +116,40 @@ pub async fn list_nudges_for_thread(
         .await?)
 }
 
+/// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
+/// Drives the per-effort token panel on the task page.
+pub async fn list_token_usage_for_effort(
+    svc: &Services,
+    effort_id: EffortId,
+) -> Result<Vec<AgentTokenUsage>, IpcError> {
+    Ok(svc
+        .token_usage_store
+        .list_for_effort(&effort_id.to_string())
+        .await?)
+}
+
+/// Summed token totals for one effort.
+pub async fn get_effort_token_totals(
+    svc: &Services,
+    effort_id: EffortId,
+) -> Result<TokenUsageTotals, IpcError> {
+    Ok(svc
+        .token_usage_store
+        .totals_for_effort(&effort_id.to_string())
+        .await?)
+}
+
+/// Summed token totals for a whole thread (the Work panel running total).
+pub async fn get_thread_token_totals(
+    svc: &Services,
+    thread_id: ThreadId,
+) -> Result<TokenUsageTotals, IpcError> {
+    Ok(svc
+        .token_usage_store
+        .totals_for_thread(&thread_id.to_string())
+        .await?)
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -169,5 +203,39 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_token_usage_for_effort_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "list_token_usage_for_effort",
+            serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn token_totals_dispatch_to_zeroed_totals() {
+        let (svc, _dir) = crate::test_support::services();
+        let eff = crate::dispatch(
+            "get_effort_token_totals",
+            serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(eff["total_tokens"], 0);
+        let thread = crate::dispatch(
+            "get_thread_token_totals",
+            serde_json::json!({"threadId": "thr999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(thread["turns"], 0);
     }
 }

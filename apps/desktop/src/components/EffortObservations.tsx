@@ -9,6 +9,7 @@ import {
 } from "../api.js";
 import { effortCoverageRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { EffortTokenUsageBlock } from "./EffortTokenUsage.js";
 
 /** Parsed `diff-coverage` payload (see collection.md / observation_store). */
 interface DiffCoveragePayload {
@@ -874,6 +875,7 @@ export function EffortObservationsBlock({
           {analysis ? <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={8} /> : null}
         </div>
       ) : null}
+      <EffortTokenUsageBlock effortId={effortId} />
       <AgentNudgesBlock effortId={effortId} />
     </>
   );

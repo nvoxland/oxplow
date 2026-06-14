@@ -926,6 +926,45 @@ The point is a reviewer/human-facing record of "what oxplow told the agent
 this effort" — previously the nudges were fully ephemeral. IPC + event wiring
 is in `.context/ipc-and-stores.md` (Agent nudges).
 
+## Token usage capture (from the hook transcript_path)
+
+The PTY is opaque, but the hook payload oxplow already receives carries
+`transcript_path` (the agent's session JSONL). oxplow parses it to give
+per-effort + per-thread token visibility — the one place agent token
+counts are observable. (tsk104; `crates/oxplow-app/src/token_usage.rs`.)
+
+**Hook payload fields used.** From the raw Stop `payload_json`:
+`transcript_path` (the JSONL file) and `session_id` (the cursor key).
+For Claude, each `type=="assistant"` line carries
+`message.usage.{input_tokens, output_tokens,
+cache_creation_input_tokens, cache_read_input_tokens}` and
+`message.model`.
+
+**Flow (`TokenUsageService::on_stop`, called from the control-plane Stop
+branch after ingest, best-effort).**
+1. Pull `transcript_path` from the payload; resolve the thread's
+   `AgentKind` + stream.
+2. Read the persisted per-session cursor (`agent_token_cursor`), seek to
+   it, and read only the COMPLETE lines of the tail (everything up to the
+   last newline — a half-written final line is left for next time).
+3. `parse_usage_delta(kind, tail)` sums the new usage. **Pluggable per
+   agent kind:** Claude implemented; Codex/Opencode return `None` (their
+   transcript formats differ — opencode surfaces its own `$cost` — and
+   are wired later).
+4. Attribute to the thread's open effort (`find_open_for_thread`, nullable
+   — a Stop can land with no open effort) and persist one
+   `agent_token_usage` row (provenance `observed`, with the actual
+   per-turn `model`).
+5. Advance the cursor to the new offset and emit
+   `AgentTokenUsageChanged { thread_id, effort_id }`.
+
+The cursor is **persisted** (not in-memory) so a daemon restart never
+re-sums already-recorded usage. Display is **tokens-only** for now; the
+stored `model` lets cost be layered on later. Surfaced UI-side: per-effort
+totals on the task page (next to coverage/observations) and a running
+per-thread total in the Work panel header. Tables + IPC: see
+`.context/data-model.md` (`agent_token_usage` / `agent_token_cursor`).
+
 ## Write guard
 
 Non-writer threads share the writer's worktree (same checkout, separate

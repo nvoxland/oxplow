@@ -428,6 +428,27 @@ async fn handle_hook_inner(
     // left off (without this, every re-attach starts a fresh session).
     update_resume_session_id(&ctx, &envelope_for_resume).await;
 
+    // Token usage (tsk104): on Stop, parse the transcript tail referenced
+    // by the hook payload and record this turn's token delta against the
+    // thread's open effort. Best-effort — never fail the hook on a parse
+    // or IO error. See `.context/agent-model.md` (Token usage capture).
+    if kind == HookKind::Stop {
+        if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
+            if let Err(err) = ctx
+                .services
+                .token_usage
+                .on_stop(
+                    thread_id,
+                    envelope_for_resume.session_id.as_deref(),
+                    &envelope_for_resume.payload_json,
+                )
+                .await
+            {
+                warn!(?err, "token-usage capture failed");
+            }
+        }
+    }
+
     // PostToolUse: attribute wiki-page edits to the originating thread
     // so the rail's "Finished" list can surface only the pages this
     // thread authored or revised.

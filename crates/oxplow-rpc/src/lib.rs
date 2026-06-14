@@ -212,6 +212,9 @@ rpc_dispatch! {
     "list_effort_observations" => commands::effort::list_effort_observations { effort_id: oxplow_domain::EffortId, kind: Option<String> },
     "list_nudges_for_effort" => commands::effort::list_nudges_for_effort { effort_id: oxplow_domain::EffortId },
     "list_nudges_for_thread" => commands::effort::list_nudges_for_thread { thread_id: oxplow_domain::ThreadId },
+    "list_token_usage_for_effort" => commands::effort::list_token_usage_for_effort { effort_id: oxplow_domain::EffortId },
+    "get_effort_token_totals" => commands::effort::get_effort_token_totals { effort_id: oxplow_domain::EffortId },
+    "get_thread_token_totals" => commands::effort::get_thread_token_totals { thread_id: oxplow_domain::ThreadId },
     // followup
     "list_followups" => commands::followup::list_followups { thread_id: oxplow_domain::ThreadId },
     "add_followup" => commands::followup::add_followup { thread_id: oxplow_domain::ThreadId, body: String },
