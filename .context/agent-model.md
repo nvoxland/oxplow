@@ -350,7 +350,17 @@ row and quietly edit against it without ever transitioning. The
 `hasInProgressItem` predicate is now computed live from the
 task store on each PreToolUse, so a `create_task` /
 `update_task` / `transition_tasks` that lands at
-`in_progress` is reflected immediately. Bash is **excluded** — shell
+`in_progress` is reflected immediately. **The claim is scoped to the
+whole STREAM, not just the literal thread the task was filed on**
+(`stream_has_in_progress_claim` in `crates/oxplow-control-plane/src/lib.rs`,
+tsk133): a stream has exactly one active writer, so an `in_progress`
+task on *any* thread in the writer's stream satisfies the guard. This
+makes cross-thread dispatch work — a task filed on a sibling thread and
+routed to the stream's writer no longer needs a manual `move_task`
+first. This does **not** weaken the one-writer invariant: queued/closed
+threads still can't write at all (the write guard runs first); only
+which thread's `in_progress` row counts as the writer's claim widened.
+Bash is **excluded** — shell
 commands routinely mutate the worktree as a side effect (`git
 merge`, `git pull`, codegen, formatters) without representing
 authored change worth filing. The Stop-hook in-progress audit still
