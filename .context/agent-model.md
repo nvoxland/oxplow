@@ -1001,6 +1001,20 @@ branch after ingest, best-effort).**
 5. Advance the cursor to the new offset and emit
    `AgentTokenUsageChanged { thread_id, effort_id }`.
 
+**Bootstrap (first capture for a session).** When `cursor()` returns
+`None` — a fresh daemon, or the first Stop after attaching to an
+already-long transcript — `on_stop` does NOT ingest from offset 0.
+Reading from 0 would lump the entire prior transcript into one
+`turns:1` row attributed to whatever effort happened to be open
+(tsk142). Instead it **seeds** the cursor to `complete_offset()` (just
+past the last complete line currently in the file) and records nothing,
+returning `Ok(None)`. Only turns appended *after* oxplow started
+watching are attributed — the deliberate tradeoff is that the single
+turn in flight at the very first Stop is not counted (we have no record
+of the pre-turn offset to isolate it). A genuine `Some(0)` cursor (a
+session oxplow tracked from byte 0) still takes the normal ingest path,
+so this is purely a `None`-vs-`Some(0)` distinction.
+
 The cursor is **persisted** (not in-memory) so a daemon restart never
 re-sums already-recorded usage. Display is **tokens-only** for now; the
 stored `model` lets cost be layered on later. Surfaced UI-side: per-effort

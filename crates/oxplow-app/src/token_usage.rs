@@ -136,6 +136,26 @@ fn read_complete_tail(path: &Path, offset: u64) -> Option<(String, u64)> {
     Some((complete, start + last_nl as u64 + 1))
 }
 
+/// Byte offset just past the last complete (newline-terminated) line in
+/// `path` — the cursor position that skips all currently-written history
+/// while leaving any in-flight partial tail for the next read. Returns 0
+/// when the file has no complete line yet or can't be opened. Used to SEED
+/// the cursor on the first capture for a session so the prior transcript is
+/// never ingested as one lump (tsk142).
+fn complete_offset(path: &Path) -> u64 {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return 0;
+    };
+    let mut buf = Vec::new();
+    if file.read_to_end(&mut buf).is_err() {
+        return 0;
+    }
+    match buf.iter().rposition(|&b| b == b'\n') {
+        Some(pos) => pos as u64 + 1,
+        None => 0,
+    }
+}
+
 /// Captures per-turn token usage from the agent transcript on Stop.
 #[derive(Clone)]
 pub struct TokenUsageService {
@@ -187,7 +207,21 @@ impl TokenUsageService {
             .map(str::to_string)
             .unwrap_or_else(|| transcript_path.to_string_lossy().into_owned());
 
-        let offset = self.usage.cursor(&session_key).await?.unwrap_or(0);
+        // First capture for this session (fresh daemon, or first Stop after
+        // attaching to an already-long transcript): there is no stored cursor.
+        // SEED it to the current end-of-history WITHOUT ingesting the prior
+        // transcript — otherwise the whole file lands as one giant turns:1
+        // lump. We only attribute tokens spent while oxplow was watching
+        // (tsk142). A real `Some(0)` cursor (a session we genuinely started
+        // at byte 0) still takes the normal ingest path.
+        let offset = match self.usage.cursor(&session_key).await? {
+            Some(offset) => offset,
+            None => {
+                let seed = complete_offset(&transcript_path);
+                self.usage.set_cursor(&session_key, seed).await?;
+                return Ok(None);
+            }
+        };
         let Some((tail, new_offset)) = read_complete_tail(&transcript_path, offset) else {
             return Ok(None);
         };
@@ -329,8 +363,35 @@ mod tests {
             path.to_string_lossy()
         );
 
-        // First turn: one assistant message.
+        // Bootstrap Stop: the session already has one assistant message when
+        // oxplow first sees it. The first capture seeds the cursor to the end
+        // WITHOUT recording (history isn't attributed; tsk142).
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        let id0 = svc
+            .token_usage
+            .on_stop(&thread, Some("sess-1"), &payload)
+            .await
+            .unwrap();
+        assert!(id0.is_none(), "bootstrap Stop seeds, records nothing");
+        assert_eq!(
+            svc.token_usage_store
+                .totals_for_thread(&thread_key)
+                .await
+                .unwrap()
+                .turns,
+            0
+        );
+
+        // First watched turn: append one assistant message. The new row must
+        // reflect ONLY the appended delta, not the whole file.
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            f.write_all(format!("{ASSISTANT_LINE}\n").as_bytes())
+                .unwrap();
+        }
         let id1 = svc
             .token_usage
             .on_stop(&thread, Some("sess-1"), &payload)
@@ -346,8 +407,8 @@ mod tests {
         assert_eq!(t.input_tokens, 100);
         assert_eq!(t.message_count, 1);
 
-        // Second turn: append one more assistant message. The new row must
-        // reflect ONLY the appended delta, not the whole file.
+        // Second watched turn: append one more assistant message — again only
+        // the appended delta is recorded.
         {
             let mut f = std::fs::OpenOptions::new()
                 .append(true)
@@ -362,7 +423,6 @@ mod tests {
             .await
             .unwrap();
         assert!(id2.is_some());
-        // Each turn wrote a single-message delta of 100 input tokens.
         let t = svc
             .token_usage_store
             .totals_for_thread(&thread_key)
@@ -372,7 +432,7 @@ mod tests {
         assert_eq!(t.input_tokens, 200);
         assert_eq!(t.message_count, 2);
 
-        // Third Stop with no new bytes → nothing recorded.
+        // Stop with no new bytes → nothing recorded.
         let id3 = svc
             .token_usage
             .on_stop(&thread, Some("sess-1"), &payload)
@@ -387,6 +447,72 @@ mod tests {
                 .turns,
             2
         );
+    }
+
+    #[tokio::test]
+    async fn first_capture_seeds_cursor_without_ingesting_history() {
+        // tsk142: on a fresh daemon attaching to an already-long session,
+        // the first Stop has no stored cursor. It must SEED the cursor to the
+        // current transcript end WITHOUT ingesting the prior history as one
+        // giant turns:1 lump — we only attribute tokens spent while watching.
+        let (svc, _dir, thread) = service_fixture().await;
+        let tdir = tempfile::tempdir().unwrap();
+        let path = tdir.path().join("session.jsonl");
+        let thread_key = thread.to_string();
+        let payload = format!(
+            "{{\"transcript_path\":{:?},\"session_id\":\"sess-boot\"}}",
+            path.to_string_lossy()
+        );
+
+        // Five prior assistant turns sat in the transcript before oxplow
+        // attached.
+        let mut history = String::new();
+        for _ in 0..5 {
+            history.push_str(ASSISTANT_LINE);
+            history.push('\n');
+        }
+        std::fs::write(&path, &history).unwrap();
+
+        // First Stop (no stored cursor): records nothing, just seeds.
+        let id = svc
+            .token_usage
+            .on_stop(&thread, Some("sess-boot"), &payload)
+            .await
+            .unwrap();
+        assert!(id.is_none(), "first capture must seed, not ingest history");
+        let t = svc
+            .token_usage_store
+            .totals_for_thread(&thread_key)
+            .await
+            .unwrap();
+        assert_eq!(t.turns, 0, "prior history must not be attributed");
+        assert_eq!(t.input_tokens, 0);
+        assert_eq!(t.message_count, 0);
+
+        // A genuinely-new turn after we started watching IS recorded, and only
+        // the new delta (one message), not the five prior.
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            f.write_all(format!("{ASSISTANT_LINE}\n").as_bytes())
+                .unwrap();
+        }
+        let id2 = svc
+            .token_usage
+            .on_stop(&thread, Some("sess-boot"), &payload)
+            .await
+            .unwrap();
+        assert!(id2.is_some());
+        let t = svc
+            .token_usage_store
+            .totals_for_thread(&thread_key)
+            .await
+            .unwrap();
+        assert_eq!(t.turns, 1, "only the new turn counts");
+        assert_eq!(t.input_tokens, 100);
+        assert_eq!(t.message_count, 1);
     }
 
     #[tokio::test]
