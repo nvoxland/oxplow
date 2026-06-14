@@ -89,3 +89,18 @@ pub async fn terminate_terminal_session(
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::terminal::terminate_terminal_session(&state, session_id).await
 }
+
+/// Read-only lookup of the live agent session id for `thread_id`'s pane,
+/// **without spawning**. Returns `null` when no live session exists. Lets
+/// a second client resolve a thread's agent PTY to `forward_terminal_input`
+/// without going through the spawn-capable `open_terminal_session`. `pane`
+/// defaults to `"working"`.
+#[tauri::command]
+#[specta::specta]
+pub async fn lookup_terminal_session(
+    state: tauri::State<'_, AppState>,
+    thread_id: oxplow_domain::ThreadId,
+    pane: Option<String>,
+) -> Result<Option<String>, IpcError> {
+    oxplow_rpc::commands::terminal::lookup_terminal_session(&state, thread_id, pane).await
+}

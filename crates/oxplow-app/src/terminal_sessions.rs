@@ -231,6 +231,23 @@ impl TerminalSessionRegistry {
         Ok(Self::build_attach_result(session_id, Vec::new()))
     }
 
+    /// Read-only: the live session id indexed under external `key`, or
+    /// `None` when none is registered (or the indexed session was
+    /// already killed, leaving a stale `by_key` entry). **Never
+    /// spawns** — it only reads the index, so a caller can resolve a
+    /// thread's agent PTY to `forward_terminal_input` without going
+    /// through the spawn-capable `attach_or_create` path (tsk139).
+    pub async fn session_id_for_key(&self, key: &str) -> Option<String> {
+        let session_id = self.by_key.lock().await.get(key).cloned()?;
+        // Validate the session is still live; a stale by_key entry
+        // (its PTY was killed) must read as "no live session".
+        if self.inner.lock().await.contains_key(&session_id) {
+            Some(session_id)
+        } else {
+            None
+        }
+    }
+
     /// Open a new session. Spawns `tmux attach-session -t <pane_target>`
     /// via the PtyManager and starts forwarding bytes back as `data`
     /// messages. Returns the new session_id.
@@ -602,6 +619,49 @@ mod tests {
             }
             last = pos;
         }
+    }
+
+    /// Read-only key lookup must never create a session, must find a
+    /// live one, and must read as `None` once that session is gone.
+    /// Backs the spawn-free `lookup_terminal_session` IPC (tsk139).
+    #[tokio::test]
+    async fn session_id_for_key_reads_without_spawning() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            Arc::new(oxplow_tmux::SystemTmux),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let key = "s-1|thr3|claude|working".to_string();
+        // Nothing registered yet — a read must never spawn or create.
+        assert_eq!(reg.session_id_for_key(&key).await, None);
+
+        // Register a session under the key via the normal attach path.
+        let dir = std::env::temp_dir();
+        let result = reg
+            .attach_or_create(key.clone(), "working".into(), 80, 24, |c, r| SpawnRequest {
+                command: "cat".into(),
+                args: vec![],
+                cwd: dir,
+                env: vec![],
+                cols: c,
+                rows: r,
+            })
+            .await
+            .expect("spawn session");
+
+        // The read-only lookup finds the live id; an unknown key is None.
+        assert_eq!(
+            reg.session_id_for_key(&key).await.as_deref(),
+            Some(result.session_id.as_str())
+        );
+        assert_eq!(
+            reg.session_id_for_key("s-1|thr3|claude|talking").await,
+            None
+        );
+
+        // Once killed, the key reads as None again (no stale id leaks).
+        let _ = reg.close(&result.session_id).await;
+        assert_eq!(reg.session_id_for_key(&key).await, None);
     }
 
     /// Spawn a `cat > <capture-file>` session and return (registry,

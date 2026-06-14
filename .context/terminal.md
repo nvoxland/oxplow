@@ -46,6 +46,23 @@ legitimately differ by transport.) Agent-specific runtime files are
 generated under `.oxplow/runtime/` by `oxplow-plugin`; shell terminals skip
 that path entirely.
 
+**Read-only session lookup (tsk139).** `lookup_terminal_session({ threadId,
+pane? })` (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
+`bindings.ts` `lookupTerminalSession`) returns the live agent `sessionId` for
+a thread's pane **without spawning** — `pane` defaults to `"working"`, only
+`working`/`talking` are valid. It rebuilds the same `agent_session_key`
+`open_terminal_session` uses (resolving the thread's stream + agent from
+`thread_store.get`), then calls the registry's read-only
+`TerminalSessionRegistry::session_id_for_key` (reads `by_key`, validates the
+id still lives in `inner`; a killed-but-stale entry reads as `None`). Returns
+`None` when no live session exists (or the thread is unknown). This is the
+spawn-free path a second client / automation uses to resolve a thread's agent
+PTY before `forward_terminal_input` (the human-keystroke transport), instead
+of the spawn-capable `open_terminal_session` — which, since tsk138, is safe to
+call twice but still *can* spawn. Like `forward_terminal_input`, the lookup is
+UI/second-client only (`ui(...)` in the surface-parity manifest); it is **not**
+exposed to the agent (no-automation guard, see `.context/agent-model.md`).
+
 The component owns:
 
 - The xterm `Terminal` instance + `FitAddon`.
