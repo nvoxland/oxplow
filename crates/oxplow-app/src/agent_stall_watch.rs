@@ -28,8 +28,9 @@ use tokio::sync::Mutex;
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore, TaskStore};
 use oxplow_domain::{AgentStatusState, TaskStatus, ThreadId, Timestamp};
 
-use crate::agent_status_derive::{derive_thread_status, AGENT_STALL_AFTER_MS};
+use crate::agent_status_derive::{derive_thread_status_with_activity, AGENT_STALL_AFTER_MS};
 use crate::events::{EventBus, OxplowEvent};
+use crate::output_activity::OutputActivity;
 
 /// How often the watchdog re-derives. Coarse on purpose — the stall
 /// threshold is minutes, so a minute of detection latency is noise.
@@ -47,6 +48,9 @@ pub struct AgentStallWatch {
     hooks: Arc<dyn HookEventStore>,
     tasks: Arc<dyn TaskStore>,
     events: EventBus,
+    /// Per-thread PTY liveness. Folded into the derive so a long turn
+    /// still streaming output isn't misread as a stall (tsk141).
+    activity: OutputActivity,
     /// Threads already alerted this stall episode.
     alerted: Arc<Mutex<HashSet<ThreadId>>>,
 }
@@ -56,6 +60,7 @@ impl AgentStallWatch {
         statuses: Arc<dyn AgentStatusStore>,
         hooks: Arc<dyn HookEventStore>,
         tasks: Arc<dyn TaskStore>,
+        activity: OutputActivity,
         events: EventBus,
     ) -> Self {
         Self {
@@ -63,6 +68,7 @@ impl AgentStallWatch {
             hooks,
             tasks,
             events,
+            activity,
             alerted: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -101,7 +107,8 @@ impl AgentStallWatch {
     ) -> Result<(), oxplow_domain::DomainError> {
         let thread_id = status.thread_id;
         let events = self.hooks.list_recent(Some(&thread_id), 200).await?;
-        let derived = derive_thread_status(&events, now);
+        let last_output = self.activity.last(&thread_id);
+        let derived = derive_thread_status_with_activity(&events, last_output, now);
 
         if derived == AgentStatusState::Stalled {
             // Push the recovered state to the renderer — no hook will
@@ -183,6 +190,7 @@ mod tests {
         watch: AgentStallWatch,
         registry: Arc<ThreadRuntimeRegistry>,
         tasks: Arc<SqliteTaskStore>,
+        activity: OutputActivity,
         bus: EventBus,
         thread: ThreadId,
     }
@@ -231,16 +239,19 @@ mod tests {
         let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
         let tasks = Arc::new(SqliteTaskStore::new(db));
         let bus = EventBus::new();
+        let activity = OutputActivity::new();
         let watch = AgentStallWatch::new(
             registry.clone(),
             registry.clone(),
             tasks.clone(),
+            activity.clone(),
             bus.clone(),
         );
         Fixture {
             watch,
             registry,
             tasks,
+            activity,
             bus,
             thread: ThreadId::new(1),
         }
@@ -448,6 +459,62 @@ mod tests {
             evs.iter()
                 .any(|e| matches!(e, OxplowEvent::AgentStallAlert { .. })),
             "dead thread must alert promptly, got {evs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn long_turn_with_live_output_does_not_stall_or_alert() {
+        // tsk141: the hook log is frozen at turn start (well past the
+        // threshold) but the agent's PTY is still streaming. Recorded
+        // output liveness must keep it Running — no Stalled status push,
+        // no stranded-work alert — even with in_progress work.
+        let f = fixture().await;
+        seed_status(&f, AgentStatusState::Running).await;
+        append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
+        seed_in_progress_task(&f).await;
+        let mut rx = f.bus.subscribe();
+        let now = Timestamp::from_unix_ms(1 + AGENT_STALL_ALERT_AFTER_MS + 1);
+        // Output advancing right up to `now`.
+        f.activity
+            .record(f.thread, Timestamp::from_unix_ms(now.unix_ms() - 1000));
+        f.watch.check_once(now).await;
+        let evs = drain(&mut rx);
+        assert!(
+            !evs.iter().any(|e| matches!(
+                e,
+                OxplowEvent::AgentStatusChanged {
+                    state: AgentStatusState::Stalled,
+                    ..
+                } | OxplowEvent::AgentStallAlert { .. }
+            )),
+            "live output must keep the long turn Working, got {evs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_output_still_lets_a_dead_turn_stall() {
+        // Guard: liveness older than the threshold must NOT mask a real
+        // death — the Stalled push and alert still fire (tsk130 intact).
+        let f = fixture().await;
+        seed_status(&f, AgentStatusState::Running).await;
+        append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
+        seed_in_progress_task(&f).await;
+        // Output went quiet long ago, same as the hook log.
+        f.activity.record(f.thread, Timestamp::from_unix_ms(2));
+        let mut rx = f.bus.subscribe();
+        f.watch
+            .check_once(Timestamp::from_unix_ms(2 + AGENT_STALL_AFTER_MS + 1))
+            .await;
+        let evs = drain(&mut rx);
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                OxplowEvent::AgentStatusChanged {
+                    state: AgentStatusState::Stalled,
+                    ..
+                }
+            )),
+            "stale output must not revive a dead turn, got {evs:?}"
         );
     }
 

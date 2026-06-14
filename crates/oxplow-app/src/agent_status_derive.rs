@@ -56,7 +56,39 @@ pub const AGENT_DEAD_AFTER_MS: i64 = 5 * 60 * 1000;
 /// when nothing is open (silence between steps means death, caught
 /// promptly — tsk130). `AwaitingUser` is exempt: waiting on the user
 /// indefinitely is legitimate.
+///
+/// This is the hook-only entry point — it has no view of PTY output,
+/// so a single long turn that emits no hooks between tool calls (just
+/// streaming tokens) would wrongly degrade to `Stalled`. Callers that
+/// can observe terminal liveness should prefer
+/// [`derive_thread_status_with_activity`].
 pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatusState {
+    derive_thread_status_with_activity(events, None, now)
+}
+
+/// Like [`derive_thread_status`], but folds in the thread's most recent
+/// PTY output timestamp (`last_output_at`) when deciding whether a
+/// `Running` turn has gone silent.
+///
+/// Hooks are sparse *within* a turn: a single long turn streams tokens
+/// to the terminal for many minutes while emitting no Pre/PostToolUse
+/// between tool calls, so a frozen hook log alone reads as death even
+/// though the agent is plainly working (tsk141). Output bytes are the
+/// missing cadence signal — an agent still writing to its PTY is alive
+/// regardless of how stale its last hook is.
+///
+/// The stall decision therefore measures silence from the *later* of
+/// the newest hook event and `last_output_at`. Genuine death stays
+/// detected because a dead turn stops emitting output too: once both
+/// signals are quiet past the threshold (short or long per the
+/// open-tool rule), the turn degrades to `Stalled` exactly as before
+/// (tsk130 intact). `last_output_at = None` reproduces the old
+/// hook-only behavior.
+pub fn derive_thread_status_with_activity(
+    events: &[HookEvent],
+    last_output_at: Option<Timestamp>,
+    now: Timestamp,
+) -> AgentStatusState {
     let mut sorted: Vec<&HookEvent> = events.iter().collect();
     sorted.sort_by_key(|e| e.received_at);
 
@@ -157,7 +189,15 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
             } else {
                 AGENT_DEAD_AFTER_MS
             };
-            if now.unix_ms() - last.received_at.unix_ms() > threshold {
+            // Silence is measured from the LATER of the last hook and
+            // the last PTY output: a long turn streaming tokens with no
+            // intervening hook is alive (tsk141), while a genuinely-dead
+            // turn goes quiet on both signals and still degrades (tsk130).
+            let last_activity_ms = last
+                .received_at
+                .unix_ms()
+                .max(last_output_at.map(|t| t.unix_ms()).unwrap_or(i64::MIN));
+            if now.unix_ms() - last_activity_ms > threshold {
                 return AgentStatusState::Stalled;
             }
         }
@@ -497,6 +537,77 @@ mod tests {
         assert_eq!(
             derive_thread_status(&events, at(10)),
             AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn long_turn_with_ongoing_output_is_working_not_stalled() {
+        // tsk141: a single ~1h turn streams tokens to the terminal but
+        // emits NO hook between tool calls. The hook log is frozen at
+        // turn start (well past the short death threshold with nothing
+        // open), yet the PTY is still advancing — that's Working, not
+        // Stalled. A frozen updated_at alone must not flip it.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+        ];
+        let now = at(3 + AGENT_STALL_AFTER_MS + 1);
+        // Hook-only view (no output): would wrongly read as Stalled.
+        assert_eq!(
+            derive_thread_status(&events, now),
+            AgentStatusState::Stalled
+        );
+        // With output advancing right up to `now`, it stays Running.
+        let last_output = at(now.unix_ms() - 1000);
+        assert_eq!(
+            derive_thread_status_with_activity(&events, Some(last_output), now),
+            AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn quiescent_output_past_threshold_flips_to_stalled() {
+        // The inverse: output WAS flowing but has now gone quiet past
+        // the threshold (and so has the hook log). With nothing open,
+        // the short death threshold applies — degrade to Stalled.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+        ];
+        let last_output = at(100);
+        let now = at(last_output.unix_ms() + AGENT_DEAD_AFTER_MS + 1);
+        assert_eq!(
+            derive_thread_status_with_activity(&events, Some(last_output), now),
+            AgentStatusState::Stalled
+        );
+    }
+
+    #[test]
+    fn recent_output_uses_short_threshold_window_correctly() {
+        // Output within the short window keeps a no-open-tool turn alive
+        // even though the last hook is older than the death threshold.
+        let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
+        let last_output = at(1 + AGENT_DEAD_AFTER_MS); // hook is stale by now
+        let now = at(last_output.unix_ms() + AGENT_DEAD_AFTER_MS); // exactly at threshold
+        assert_eq!(
+            derive_thread_status_with_activity(&events, Some(last_output), now),
+            AgentStatusState::Running
+        );
+    }
+
+    #[test]
+    fn stale_output_does_not_revive_a_dead_turn() {
+        // Genuine-death guard (tsk130 intact): if the last output is
+        // ALSO older than the threshold, the activity signal can't mask
+        // the death — it still degrades to Stalled.
+        let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
+        let stale_output = at(50);
+        let now = at(stale_output.unix_ms() + AGENT_DEAD_AFTER_MS + 1);
+        assert_eq!(
+            derive_thread_status_with_activity(&events, Some(stale_output), now),
+            AgentStatusState::Stalled
         );
     }
 

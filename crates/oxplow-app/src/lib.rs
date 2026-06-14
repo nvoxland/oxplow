@@ -29,6 +29,7 @@ pub mod hook_ingest;
 pub mod indexer;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod recovery;
 pub mod ref_resolver;
@@ -391,6 +392,9 @@ pub struct Services {
     pub lsp_sessions: lsp_sessions::LspSessionManager,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
+    /// Shared per-thread PTY liveness, written by the terminal forwarder
+    /// and read by the agent stall watchdog (tsk141).
+    pub output_activity: output_activity::OutputActivity,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
     /// Singleton git access surface — every read of git state and
@@ -480,8 +484,14 @@ impl Services {
         if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
             tracing::warn!(?e, "lsp installer manifest replay failed");
         }
-        let terminal_sessions =
-            terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
+        // Shared PTY liveness — the terminal forwarder stamps it, the
+        // stall watchdog reads it (tsk141).
+        let output_activity = output_activity::OutputActivity::new();
+        let terminal_sessions = terminal_sessions::TerminalSessionRegistry::new(
+            pty.clone(),
+            tmux.clone(),
+            output_activity.clone(),
+        );
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
         let git = git_service::GitService::spawn(
             layout.project_dir.clone(),
@@ -602,6 +612,7 @@ impl Services {
             lsp_sessions: lsp,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
+            output_activity,
             recovery: recovery_svc,
             events: event_bus,
             git,

@@ -337,8 +337,13 @@ pub async fn open_terminal_session(
                 .map_err(|e| IpcError::internal(e.to_string()))?;
             let target_label = outcome.target.as_str().to_string();
             ctx.terminal_sessions
-                .attach_or_create(session_key, target_label.clone(), cols, rows, |c, r| {
-                    SpawnRequest {
+                .attach_or_create_for_thread(
+                    session_key,
+                    target_label.clone(),
+                    thread_id,
+                    cols,
+                    rows,
+                    |c, r| SpawnRequest {
                         command: "tmux".into(),
                         args: vec!["attach-session".into(), "-t".into(), target_label.clone()],
                         cwd: std::env::current_dir()
@@ -349,8 +354,8 @@ pub async fn open_terminal_session(
                         ],
                         cols: c,
                         rows: r,
-                    }
-                })
+                    },
+                )
                 .await?
         }
         // Default to direct.
@@ -372,8 +377,13 @@ pub async fn open_terminal_session(
             );
             let cwd = std::path::PathBuf::from(&stream.worktree_path);
             ctx.terminal_sessions
-                .attach_or_create(session_key, pane_target.clone(), cols, rows, |c, r| {
-                    SpawnRequest {
+                .attach_or_create_for_thread(
+                    session_key,
+                    pane_target.clone(),
+                    thread_id,
+                    cols,
+                    rows,
+                    |c, r| SpawnRequest {
                         command: "sh".into(),
                         args: vec!["-lc".into(), command],
                         cwd,
@@ -383,8 +393,8 @@ pub async fn open_terminal_session(
                         ],
                         cols: c,
                         rows: r,
-                    }
-                })
+                    },
+                )
                 .await?
         }
     };

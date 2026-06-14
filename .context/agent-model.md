@@ -1244,6 +1244,30 @@ still open (any `PreToolUse` without its matching `PostToolUse`):
   after a prompt or between tool calls means the next model call died,
   caught promptly instead of the old uniform 15 min.
 
+**PTY output is a second liveness signal (tsk141).** Hooks are sparse
+*within* a turn: a single long turn (observed live at ~1h5m) streams
+tokens to the terminal for many minutes while emitting **no**
+Pre/PostToolUse between tool calls, so a frozen hook log alone reads as
+death even though the agent is plainly working — the inverse of the
+tsk130 death case. `derive_thread_status_with_activity(events,
+last_output_at, now)` therefore measures silence from the *later* of
+the newest hook event and `last_output_at` (the thread's most recent
+PTY output). An agent still writing to its PTY stays `Running`
+regardless of how stale its last hook is; only when **both** signals go
+quiet past the threshold does the turn degrade to `Stalled` — so tsk130
+death detection is intact (a dead turn stops emitting output too, and
+output older than the threshold can't revive it). `derive_thread_status`
+is the hook-only wrapper (`last_output_at = None`), used where a hook
+just arrived (so the log is fresh by construction); the watchdog uses
+the activity-aware form. Liveness is tracked by
+`output_activity::OutputActivity` (a per-`ThreadId` last-output
+timestamp, never persisted): the terminal forwarder
+(`terminal_sessions.rs`) stamps it on every output burst for sessions
+spawned with a known thread id (agent panes via
+`attach_or_create_for_thread`; shell panes are not thread-scoped and
+contribute none), and `AgentStallWatch` reads it. The single shared
+instance lives on `Services::output_activity`.
+
 The `AwaitingUser` override (ExitPlanMode / AskUserQuestion — see the
 user-input-pending carve-out) is exempt from both: waiting on the user
 indefinitely is legitimate. Because no hook will ever arrive to trigger

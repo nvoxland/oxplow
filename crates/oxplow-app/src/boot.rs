@@ -230,6 +230,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         state.agent_status_store.clone(),
         state.hook_event_store.clone(),
         state.task_store.clone(),
+        state.output_activity.clone(),
         event_bus.clone(),
     )
     .spawn();

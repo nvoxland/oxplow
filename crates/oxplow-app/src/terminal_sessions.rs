@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use bytes::Bytes;
+use oxplow_domain::{ThreadId, Timestamp};
 pub use oxplow_pty::SpawnRequest;
 use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 use oxplow_tmux::{ScrollDirection, TmuxRunner, WindowTarget};
@@ -137,10 +138,19 @@ pub struct TerminalSessionRegistry {
     /// pane, transport) tuple in O(1).
     by_key: Arc<Mutex<HashMap<SessionKey, String>>>,
     events_tx: broadcast::Sender<TerminalBridgeEvent>,
+    /// Per-thread PTY liveness. The forwarder stamps it on every output
+    /// burst (for sessions spawned with a known thread id) so the stall
+    /// watchdog can tell a busy long turn from a dead one — see
+    /// [`crate::output_activity`] and tsk141.
+    activity: crate::output_activity::OutputActivity,
 }
 
 impl TerminalSessionRegistry {
-    pub fn new(pty: PtyManager, tmux: Arc<dyn TmuxRunner>) -> Self {
+    pub fn new(
+        pty: PtyManager,
+        tmux: Arc<dyn TmuxRunner>,
+        activity: crate::output_activity::OutputActivity,
+    ) -> Self {
         let (events_tx, _) = broadcast::channel(1024);
         Self {
             pty,
@@ -148,6 +158,7 @@ impl TerminalSessionRegistry {
             inner: Arc::new(Mutex::new(HashMap::new())),
             by_key: Arc::new(Mutex::new(HashMap::new())),
             events_tx,
+            activity,
         }
     }
 
@@ -186,6 +197,23 @@ impl TerminalSessionRegistry {
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
+        self.attach_or_create_for_thread(key, pane_target, None, cols, rows, make_request)
+            .await
+    }
+
+    /// As [`attach_or_create`], but binds the session's PTY output to a
+    /// thread so the forwarder records liveness for the stall watchdog
+    /// (tsk141). Agent panes pass `Some(thread)`; shell panes (which are
+    /// not thread-scoped) pass `None` and contribute no liveness.
+    pub async fn attach_or_create_for_thread(
+        &self,
+        key: SessionKey,
+        pane_target: String,
+        activity_thread: Option<ThreadId>,
+        cols: u16,
+        rows: u16,
+        make_request: impl FnOnce(u16, u16) -> SpawnRequest,
+    ) -> Result<AttachResult, TerminalSessionError> {
         // Fast path: existing session for this key — replay its buffer.
         if let Some(existing_id) = self.by_key.lock().await.get(&key).cloned() {
             let map = self.inner.lock().await;
@@ -197,7 +225,9 @@ impl TerminalSessionRegistry {
             // create a fresh session.
         }
         let req = make_request(cols, rows);
-        let session_id = self.spawn_with(pane_target, req, key.clone()).await?;
+        let session_id = self
+            .spawn_with(pane_target, req, key.clone(), activity_thread)
+            .await?;
         Ok(Self::build_attach_result(session_id, Vec::new()))
     }
 
@@ -225,7 +255,7 @@ impl TerminalSessionRegistry {
             rows,
         };
         let key = format!("legacy:{}", uuid::Uuid::new_v4().simple());
-        self.spawn_with(pane_target, req, key).await
+        self.spawn_with(pane_target, req, key, None).await
     }
 
     /// Direct-mode open: spawn a shell command in a fresh PTY (no
@@ -253,7 +283,7 @@ impl TerminalSessionRegistry {
             rows,
         };
         let key = format!("legacy:{}", uuid::Uuid::new_v4().simple());
-        self.spawn_with(pane_target, req, key).await
+        self.spawn_with(pane_target, req, key, None).await
     }
 
     async fn spawn_with(
@@ -261,6 +291,7 @@ impl TerminalSessionRegistry {
         pane_target: String,
         req: SpawnRequest,
         key: SessionKey,
+        activity_thread: Option<ThreadId>,
     ) -> Result<String, TerminalSessionError> {
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();
@@ -279,10 +310,18 @@ impl TerminalSessionRegistry {
         let events = self.events_tx.clone();
         let ring = Arc::new(Mutex::new(RingBuffer::new()));
         let ring_for_task = Arc::clone(&ring);
+        let activity = self.activity.clone();
         let forwarder = tokio::spawn(async move {
             loop {
                 match handle.events.recv().await {
                     Ok(PaneEvent::Output(bytes)) => {
+                        // Stamp PTY liveness for the stall watchdog. Only
+                        // thread-bound (agent) panes record; the cadence
+                        // distinguishes a busy long turn from a dead one
+                        // (tsk141).
+                        if let Some(tid) = activity_thread {
+                            activity.record(tid, Timestamp::now());
+                        }
                         ring_for_task.lock().await.push(bytes.clone());
                         let msg = serde_json::json!({
                             "type": "data",
@@ -569,8 +608,11 @@ mod tests {
     /// session_id, capture_path). The capture file records the exact
     /// byte stream the child read from its PTY stdin, in order.
     async fn spawn_capture(label: &str) -> (TerminalSessionRegistry, String, std::path::PathBuf) {
-        let reg =
-            TerminalSessionRegistry::new(PtyManager::spawn(), Arc::new(oxplow_tmux::SystemTmux));
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            Arc::new(oxplow_tmux::SystemTmux),
+            crate::output_activity::OutputActivity::new(),
+        );
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
             "oxplow-paste-{label}-{}.capture",
