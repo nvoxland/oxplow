@@ -24,7 +24,25 @@ writing + `git add`ing the file **only when `merge3` returns `Ok`**
 oversized files are left exactly as git produced them. This is wired
 into `GitService` merge/rebase/cherry-pick/revert.
 
-## Tier 2 — AST structural merge (SCOPED, not built — tsk121)
+## Tier 2 — AST structural merge (front half BUILT — tsk134; merge not yet wired)
+
+**Status:** the language-neutral *parse → top-level-items* front half now
+ships as production code in `crates/oxplow-git/src/ast_merge.rs`
+(`parse_top_level_items(src, Language) -> Option<Vec<Item>>` +
+`language_for_path` + the per-language `MergeSpec` kind tables). tree-sitter
+and the 6 first-slice grammars (rust, typescript, tsx, javascript, python,
+go) are now real `oxplow-git` deps (promoted from the spike's dev-deps).
+Each `Item` carries `{ key, text, byte_span }`: the key is the import's
+normalized text or a named decl's `kind+name` (Go methods + receiver);
+the byte span includes any directly-attached leading doc-comment so a
+moved decl carries it. Parse failure (any error/missing node) → `None`,
+so we never operate on an untrusted tree. **No merge/reconstruction yet —
+that's the next task (tsk136); the per-item classify still lives only in
+the spike.** Const/var/Go-type decls fall back to text identity for now
+(safe: add still commutes, same-item edit just refuses) — a tsk136
+refinement. The text below is the original scoped design.
+
+## Tier 2 — AST structural merge (SCOPED — tsk121)
 
 Where Tier-1 still leaves a conflict that is actually *commutative at the
 syntax level* — both sides added different `use`/`import`s, or
@@ -115,8 +133,8 @@ and the external-`mergiraf` escape hatch.
 
 | Piece | Est. |
 |---|---|
-| `LanguageSpec`-style top-level-item kind tables (reuse metrics pattern) for rust/ts/tsx/js/py/go | ~1 day |
-| Generic parse → ordered-items extractor + identity keys | ~1 day |
+| ✅ `LanguageSpec`-style top-level-item kind tables (reuse metrics pattern) for rust/ts/tsx/js/py/go (tsk134) | done |
+| ✅ Generic parse → ordered-items extractor + identity keys (tsk134) | done |
 | `merge_items` 3-way classify + ordering/reconstruction + re-parse guard | ~2 days (ordering is the hard part) |
 | Wire into `auto_resolve_conflicts` behind the per-language gate + report counts | ~0.5 day |
 | Tests (per language: commutative-win, divergence-refusal, parse-fail-bail, ordering) | ~1.5 days |
@@ -143,5 +161,6 @@ and the external-`mergiraf` escape hatch.
 
 - Integration point + conflict-state plumbing: `.context/git-integration.md`.
 - Tier-1 source + tests: `crates/oxplow-git/src/smart_merge.rs`.
-- Spike: `crates/oxplow-git/tests/ast_merge_spike.rs`.
+- Tier-2 front half (parse→items + kind tables): `crates/oxplow-git/src/ast_merge.rs`.
+- Spike (per-item 3-way classify, not yet productionized): `crates/oxplow-git/tests/ast_merge_spike.rs`.
 - Parser/grammar reuse: `crates/oxplow-code-metrics/src/spec.rs`.

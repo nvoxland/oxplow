@@ -18,6 +18,16 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
 time = { workspace = true }
+# Tier-2 AST structural merge (tsk134): parse→top-level-items front half.
+# tree-sitter + the 6 first-slice grammars (rust/ts+tsx/js/python/go),
+# promoted from dev-deps now that production code uses them.
+# See .context/smart-merge.md.
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-go = { workspace = true }
 
 [dependencies.serde_json]
 workspace = true
@@ -25,11 +35,6 @@ workspace = true
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true }
-# Tier-2 AST-merge spike (tsk121): proves a tree-sitter structural
-# 3-way merge is tractable on existing workspace deps. Dev-only — no
-# production AST-merge code ships in this epic. See .context/smart-merge.md.
-tree-sitter = { workspace = true }
-tree-sitter-rust = { workspace = true }
 
 [lints]
 workspace = true

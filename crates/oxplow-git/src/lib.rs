@@ -5,6 +5,7 @@
 //! falling back to `Command::new("git")` for cases libgit2 doesn't
 //! cover well (e.g. `git worktree add`).
 
+pub mod ast_merge;
 pub mod blame;
 mod branch;
 mod branch_changes;
@@ -23,6 +24,10 @@ pub mod tree;
 pub mod workspace;
 mod worktree;
 
+pub use ast_merge::{
+    language_for_path as merge_language_for_path, parse_top_level_items, Item,
+    Language as MergeLanguage,
+};
 pub use blame::{
     git_blame, local_blame, parse_porcelain, BlameLine, LocalBlameEntry, BLAME_ZERO_SHA,
 };
