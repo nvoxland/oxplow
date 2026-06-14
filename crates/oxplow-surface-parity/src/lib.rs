@@ -394,6 +394,10 @@ pub const MANIFEST: &[Capability] = &[
     ui("close_terminal_session"),
     ui("terminate_terminal_session"),
     ui("terminal_session_cwd"),
+    // Read-only sessionId lookup (no spawn). UI/second-client only —
+    // it feeds `forward_terminal_input`, which is itself UI-only by the
+    // no-automation guard, so the agent has no use for it either.
+    ui("lookup_terminal_session"),
     // ---- ui-only: menu ----
     ui("set_native_menu"),
     // ---- ui-only: launcher / multi-window ----

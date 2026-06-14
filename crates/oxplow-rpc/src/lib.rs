@@ -340,6 +340,7 @@ rpc_dispatch! {
     "close_terminal_session" => commands::terminal::close_terminal_session { session_id: String },
     "terminal_session_cwd" => commands::terminal::terminal_session_cwd { session_id: String },
     "terminate_terminal_session" => commands::terminal::terminate_terminal_session { session_id: String },
+    "lookup_terminal_session" => commands::terminal::lookup_terminal_session { thread_id: oxplow_domain::ThreadId, pane: Option<String> },
     // snapshot
     "list_snapshots" => commands::snapshot::list_snapshots { path: String },
     "list_file_snapshots_for_stream" => commands::snapshot::list_file_snapshots_for_stream { stream_id: oxplow_domain::StreamId, limit: Option<usize> },

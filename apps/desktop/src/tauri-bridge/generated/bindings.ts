@@ -708,6 +708,14 @@ export const commands = {
 	 */
 	terminateTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("terminate_terminal_session", { sessionId })),
 	/**
+	 *  Read-only lookup of the live agent session id for `thread_id`'s pane,
+	 *  **without spawning**. Returns `null` when no live session exists. Lets
+	 *  a second client resolve a thread's agent PTY to `forward_terminal_input`
+	 *  without going through the spawn-capable `open_terminal_session`. `pane`
+	 *  defaults to `"working"`.
+	 */
+	lookupTerminalSession: (threadId: ThreadId, pane: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { threadId, pane })),
+	/**
 	 *  Replace the app's native menu with the supplied snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` to
 	 *  the renderer.

@@ -418,6 +418,46 @@ pub async fn forward_terminal_input(
     Ok(())
 }
 
+/// Read-only lookup of the live agent session id for `thread_id`'s
+/// pane, **without any spawn side effect**. Rebuilds the same
+/// `(stream, thread, agent, pane)` key `open_terminal_session` uses for
+/// an agent PTY, then reads the registry index — returning `None` when
+/// no live session exists (the thread was never opened, or its PTY was
+/// terminated; an unknown `thread_id` likewise reads as `None`).
+///
+/// This is the spawn-free path a second client / automation uses to
+/// resolve a thread's agent PTY before `forward_terminal_input`
+/// (delivering the human's keystrokes), instead of going through the
+/// spawn-capable `open_terminal_session` (tsk139). `pane` defaults to
+/// `"working"`; only the agent panes (`working` / `talking`) are valid.
+pub async fn lookup_terminal_session(
+    svc: &Services,
+    thread_id: oxplow_domain::ThreadId,
+    pane: Option<String>,
+) -> Result<Option<String>, IpcError> {
+    let pane_target = pane.unwrap_or_else(|| "working".to_string());
+    // Agent panes only — shells aren't agent sessions and key
+    // differently (transport is in the shell key, not the agent key).
+    match pane_target.as_str() {
+        "working" | "talking" => {}
+        other => return Err(IpcError::invalid(format!("unknown pane target: {other}"))),
+    }
+
+    // Resolve the thread's stream + agent so the rebuilt key matches the
+    // one the spawn path registered. A missing thread has no session.
+    let thread = match svc.thread_store.get(&thread_id).await? {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    let key = agent_session_key(
+        &thread.stream_id.to_string(),
+        Some(&thread_id.to_string()),
+        thread.agent,
+        &pane_target,
+    );
+    Ok(svc.terminal_sessions.session_id_for_key(&key).await)
+}
+
 /// Detach the renderer from `session_id` without killing the PTY —
 /// the agent keeps running in the background so the user can navigate
 /// away and come back. Use `terminate_terminal_session` to actually
@@ -715,6 +755,96 @@ mod tests {
             "unexpected callers of the terminal-input registry method: {offenders:?} \
              — agent terminal input must flow only through forward_terminal_input"
         );
+    }
+
+    #[tokio::test]
+    async fn lookup_terminal_session_returns_none_without_spawning() {
+        // Read-only: a thread with no open agent PTY resolves to null,
+        // and the lookup never spawns (it runs on the svc path with no
+        // plugin runtime — an agent spawn would be impossible anyway).
+        let (ctx, _dir) = services();
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let thread_id = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("primary stream has a writer thread");
+        let out = crate::dispatch(
+            "lookup_terminal_session",
+            json!({ "threadId": thread_id.to_string(), "pane": "working" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_null(), "expected null, got {out}");
+    }
+
+    #[tokio::test]
+    async fn lookup_terminal_session_finds_live_agent_session() {
+        // Open an agent PTY, then resolve its session id by thread id +
+        // pane through the read-only lookup — the id must match.
+        let (mut ctx, _dir) = services();
+        ctx.plugin_runtime = Some(crate::PluginRuntime {
+            hook_base_url: "http://127.0.0.1:9/hook".into(),
+            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            hook_token: "test-token".into(),
+        });
+        let opened = crate::dispatch(
+            "open_terminal_session",
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let opened_id = opened["sessionId"].as_str().expect("opened sessionId");
+
+        // The open path resolves the stream via current()-or-ensure_primary;
+        // with no switch_stream it took the ensure_primary fallback.
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let thread_id = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("a thread backs the opened session");
+
+        // `pane` omitted → defaults to "working", the pane we opened.
+        let out = crate::dispatch(
+            "lookup_terminal_session",
+            json!({ "threadId": thread_id.to_string() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out.as_str(),
+            Some(opened_id),
+            "lookup must find the live agent PTY"
+        );
+
+        let _ = ctx.terminal_sessions.close(opened_id).await;
+    }
+
+    #[tokio::test]
+    async fn lookup_terminal_session_rejects_non_agent_pane() {
+        let (ctx, _dir) = services();
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let thread_id = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("primary stream has a writer thread");
+        let err = crate::dispatch(
+            "lookup_terminal_session",
+            json!({ "threadId": thread_id.to_string(), "pane": "shell" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(err.message.contains("pane"), "msg: {}", err.message);
     }
 
     #[tokio::test]
