@@ -659,4 +659,97 @@ mod tests {
         assert_eq!(report.ast_resolved, 0);
         assert_eq!(report.remaining, 1, "unsupported ext left for the user");
     }
+
+    /// Drive a real git merge where ours/theirs each add a *different*
+    /// top-level item at the same gap (so git + Tier-1 both conflict),
+    /// then run the auto-resolve pass. Returns the report + merged content.
+    fn run_ast_only_merge(
+        file: &str,
+        base: &str,
+        ours: &str,
+        theirs: &str,
+    ) -> (AutoResolveReport, String) {
+        assert_eq!(
+            merge3_str(base, ours, theirs),
+            Err(Conflicted),
+            "Tier-1 must leave {file} conflicted to exercise the AST tier"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        commit_file(p, file, base, "base");
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        commit_file(p, file, ours, "ours");
+        run_git(p, &["checkout", "-q", "main"]);
+        commit_file(p, file, theirs, "theirs");
+        let out = std::process::Command::new("git")
+            .args(["merge", "--no-edit", "feature"])
+            .current_dir(p)
+            .output()
+            .expect("spawn git merge");
+        assert!(
+            !out.status.success(),
+            "expected git merge to conflict for {file}"
+        );
+        assert_eq!(count_unmerged(p), 1);
+        let report = auto_resolve_conflicts(p);
+        let merged = std::fs::read_to_string(p.join(file)).unwrap();
+        (report, merged)
+    }
+
+    #[test]
+    fn auto_resolve_clears_java_ast_only_conflict() {
+        let (report, merged) = run_ast_only_merge(
+            "C.java",
+            "import a.A;\nclass C {}\n",
+            "import a.A;\nimport a.B;\nclass C {}\n",
+            "import a.A;\nimport a.C;\nclass C {}\n",
+        );
+        assert_eq!(report.ast_resolved, 1, "{report:?}");
+        assert_eq!(report.remaining, 0);
+        assert!(merged.contains("import a.B;"), "{merged}");
+        assert!(merged.contains("import a.C;"), "{merged}");
+    }
+
+    #[test]
+    fn auto_resolve_clears_c_ast_only_conflict() {
+        let (report, merged) = run_ast_only_merge(
+            "main.c",
+            "#include <a.h>\nint main(void) { return 0; }\n",
+            "#include <a.h>\n#include <b.h>\nint main(void) { return 0; }\n",
+            "#include <a.h>\n#include <c.h>\nint main(void) { return 0; }\n",
+        );
+        assert_eq!(report.ast_resolved, 1, "{report:?}");
+        assert_eq!(report.remaining, 0);
+        assert!(merged.contains("#include <b.h>"), "{merged}");
+        assert!(merged.contains("#include <c.h>"), "{merged}");
+    }
+
+    #[test]
+    fn auto_resolve_clears_cpp_ast_only_conflict() {
+        let (report, merged) = run_ast_only_merge(
+            "main.cpp",
+            "#include <a>\nint main() { return 0; }\n",
+            "#include <a>\n#include <b>\nint main() { return 0; }\n",
+            "#include <a>\n#include <c>\nint main() { return 0; }\n",
+        );
+        assert_eq!(report.ast_resolved, 1, "{report:?}");
+        assert_eq!(report.remaining, 0);
+        assert!(merged.contains("#include <b>"), "{merged}");
+        assert!(merged.contains("#include <c>"), "{merged}");
+    }
+
+    #[test]
+    fn auto_resolve_clears_clojure_ast_only_conflict() {
+        let (report, merged) = run_ast_only_merge(
+            "core.clj",
+            "(ns app)\n(defn shared [] 0)\n",
+            "(ns app)\n(defn ours [] 1)\n(defn shared [] 0)\n",
+            "(ns app)\n(defn theirs [] 2)\n(defn shared [] 0)\n",
+        );
+        assert_eq!(report.ast_resolved, 1, "{report:?}");
+        assert_eq!(report.remaining, 0);
+        assert!(merged.contains("(defn ours"), "{merged}");
+        assert!(merged.contains("(defn theirs"), "{merged}");
+    }
 }

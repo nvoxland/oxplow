@@ -1,4 +1,6 @@
-//! Tier-2 AST structural merge — parse + per-item 3-way merge (tsk134, tsk135).
+//! Tier-2 AST structural merge — parse + per-item 3-way merge
+//! (tsk134, tsk135; wired into auto-resolve in tsk136; second-slice
+//! languages added in tsk137).
 //!
 //! The language-neutral core of the AST merge designed in
 //! `.context/smart-merge.md` (Tier 2), in two layers:
@@ -16,8 +18,8 @@
 //!    deterministic ordering + verbatim reconstruction, and a re-parse
 //!    guard that discards any reconstruction that doesn't parse cleanly.
 //!
-//! Still **not** wired into `auto_resolve_conflicts` — that's tsk136.
-//! The original feasibility spike lives at
+//! Wired into `auto_resolve_conflicts` as a Tier-1.5 fallback in tsk136
+//! (see `smart_merge.rs`). The original feasibility spike lives at
 //! `crates/oxplow-git/tests/ast_merge_spike.rs`.
 //!
 //! ## Safety
@@ -27,30 +29,43 @@
 //! we never operate on an untrusted tree. Callers treat `None` as "leave
 //! git's conflict markers", preserving Tier-2's reduce-only invariant.
 //!
-//! ## Identity-key fidelity (first slice)
+//! ## Supported languages
+//!
+//! First slice (tsk134): rust, typescript, tsx, javascript, python, go.
+//! Second slice (tsk137): java, c, cpp, clojure. C/C++ and Clojure use
+//! bespoke key resolvers (see [`KeyStrategy`]); the rest share the generic
+//! `name_fields` path.
+//!
+//! ## Identity-key fidelity
 //!
 //! Imports and the high-value named declarations (`fn`/function, `struct`,
-//! `class`/`interface`/`enum`, `type` alias, `trait`, …) get precise
-//! `kind+name` keys, which is what the flagship commutative cases need
-//! (both sides add a different import / a different top-level decl). Go
-//! methods are additionally disambiguated by their receiver. Declarations
-//! whose name sits under a declarator list (Rust/TS `const`/`let`/`var`,
-//! Go `type`/`var`/`const` groups) currently fall back to text identity:
-//! that still merges correctly when one side *adds* such an item (add is
-//! key-independent) and is merely conservative — it refuses rather than
-//! mis-merges — when both sides *edit the same* one. Tightening those to
-//! declarator-name identity is a tsk136 refinement.
+//! `class`/`interface`/`enum`, `type` alias, `trait`, Java type decls, …)
+//! get precise `kind+name` keys, which is what the flagship commutative
+//! cases need (both sides add a different import / a different top-level
+//! decl). Go methods are disambiguated by their receiver; C/C++ functions
+//! by their declarator (name + signature, so overloads stay distinct);
+//! Clojure forms by their head symbol + defined name.
+//!
+//! Declarations whose name sits under a declarator list and that take the
+//! `Generic` strategy (Rust/TS `const`/`let`/`var`, Go `type`/`var`/`const`
+//! groups) fall back to text identity. That merges correctly when one side
+//! *adds* such an item (add is key-independent), but because a text key
+//! changes when its body changes, two sides editing the *same* such item
+//! differently are mis-classified as two independent adds rather than a
+//! conflict — see the `text-identity divergent-edit` note in
+//! `.context/smart-merge.md` (tracked as a separate hardening task).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use tree_sitter::{Language as TsLanguage, Node, Parser};
 
-/// A supported source language for the AST merge front half. A subset of
+/// A supported source language for the AST merge front half. Mirrors
 /// `oxplow-code-metrics`'s language set: the six first-slice languages
 /// from `.context/smart-merge.md` (rust, typescript, tsx, javascript,
-/// python, go). Others are intentionally absent — the merge tier simply
-/// won't engage for them.
+/// python, go) plus the second-slice languages (java, c, cpp, clojure —
+/// tsk137). Others are intentionally absent — the merge tier simply won't
+/// engage for them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
     Rust,
@@ -59,6 +74,10 @@ pub enum Language {
     JavaScript,
     Python,
     Go,
+    Java,
+    C,
+    Cpp,
+    Clojure,
 }
 
 /// Map a repo-relative (or any) path to its merge language by extension.
@@ -76,6 +95,10 @@ pub fn language_for_path(path: &str) -> Option<Language> {
         "js" | "mjs" | "cjs" | "jsx" => Language::JavaScript,
         "py" => Language::Python,
         "go" => Language::Go,
+        "java" => Language::Java,
+        "c" | "h" => Language::C,
+        "cc" | "cxx" | "cpp" | "hpp" | "hxx" => Language::Cpp,
+        "clj" | "cljs" | "cljc" => Language::Clojure,
         _ => return None,
     })
 }
@@ -99,8 +122,31 @@ pub struct MergeSpec {
     pub inner_decl_fields: &'static [&'static str],
     /// Field names tried (in order) to find a declaration's identifier.
     pub name_fields: &'static [&'static str],
+    /// How a non-import item's identity key is computed. Most languages
+    /// use [`KeyStrategy::Generic`] (the `name_fields` path); the C family
+    /// and Clojure need bespoke resolvers. See [`KeyStrategy`].
+    pub key_strategy: KeyStrategy,
     /// Loader for the bundled tree-sitter grammar.
     grammar: fn() -> TsLanguage,
+}
+
+/// Per-language identity-key resolution strategy for non-import items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyStrategy {
+    /// `transparent_kinds` see-through + `name_fields` lookup + Go-receiver
+    /// disambiguation, falling back to `kind + normalized-text`. Used by
+    /// rust/ts/tsx/js/python/go/java.
+    Generic,
+    /// C/C++: functions keyed by their declarator (name + signature, so
+    /// overloads stay distinct), structs/unions/enums/classes/namespaces
+    /// by name, typedefs and globals by their declarator's leaf
+    /// identifier; `template_declaration` is seen through to the wrapped
+    /// declaration. Everything else falls back to `kind + normalized-text`.
+    CFamily,
+    /// Clojure: top-level `(def…/defn…/ns …)` forms keyed by
+    /// `head-symbol + defined-name`; any other form by `kind +
+    /// normalized-text`.
+    Clojure,
 }
 
 impl MergeSpec {
@@ -118,6 +164,10 @@ impl Language {
             Language::JavaScript => &JAVASCRIPT,
             Language::Python => &PYTHON,
             Language::Go => &GO,
+            Language::Java => &JAVA,
+            Language::C => &C,
+            Language::Cpp => &CPP,
+            Language::Clojure => &CLOJURE,
         }
     }
 }
@@ -189,10 +239,22 @@ pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
 fn item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
     let kind = node.kind();
 
-    // Imports/use: identity is the normalized text.
+    // Imports/use: identity is the normalized text (all strategies).
     if spec.import_kinds.contains(&kind) {
         return format!("import::{}", normalize_ws(&node_text(node, src)));
     }
+
+    match spec.key_strategy {
+        KeyStrategy::Generic => generic_item_key(node, src, spec),
+        KeyStrategy::CFamily => c_family_item_key(node, src),
+        KeyStrategy::Clojure => clojure_item_key(node, src),
+    }
+}
+
+/// The default key: see-through wrappers + `name_fields` + Go-receiver
+/// disambiguation, falling back to `kind + normalized-text`.
+fn generic_item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
+    let kind = node.kind();
 
     // See through wrappers (export/decorated) to the inner declaration
     // for naming, but key off the *inner* kind+name.
@@ -220,6 +282,113 @@ fn item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
     // divergent ones stay distinct.
     format!("{kind}::{}", normalize_ws(&node_text(node, src)))
 }
+
+/// C/C++ identity key. Functions key by their declarator (name +
+/// signature, so overloads stay distinct); structs/unions/enums/classes/
+/// namespaces by name; typedefs and globals by their declarator's leaf
+/// identifier. `template_declaration` is seen through to the wrapped
+/// declaration. Anything else → `kind + normalized-text`.
+fn c_family_item_key(node: Node, src: &str) -> String {
+    // See through a `template<…>` wrapper to the declaration it templates.
+    let inner = if node.kind() == "template_declaration" {
+        c_template_inner(node).unwrap_or(node)
+    } else {
+        node
+    };
+    let kind = inner.kind();
+    match kind {
+        // Name + signature: the declarator text covers both, and is stable
+        // across body edits while keeping overloads distinct.
+        "function_definition" => {
+            if let Some(d) = inner.child_by_field_name("declarator") {
+                return format!("function_definition::{}", normalize_ws(&node_text(d, src)));
+            }
+        }
+        "struct_specifier"
+        | "union_specifier"
+        | "enum_specifier"
+        | "class_specifier"
+        | "namespace_definition" => {
+            if let Some(n) = inner.child_by_field_name("name") {
+                return format!("{kind}::{}", node_text(n, src));
+            }
+        }
+        // typedef alias name / global variable name: the declarator's leaf
+        // identifier (a value edit must not change identity).
+        "type_definition" | "declaration" => {
+            if let Some(name) = c_declarator_leaf_name(inner) {
+                return format!("{kind}::{}", node_text(name, src));
+            }
+        }
+        _ => {}
+    }
+    format!("{}::{}", node.kind(), normalize_ws(&node_text(node, src)))
+}
+
+/// First `function_definition`/`*_specifier`/`declaration` child of a C++
+/// `template_declaration` (the declaration it templates).
+fn c_template_inner(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).find(|c| {
+        matches!(
+            c.kind(),
+            "function_definition"
+                | "struct_specifier"
+                | "union_specifier"
+                | "enum_specifier"
+                | "class_specifier"
+                | "declaration"
+        )
+    });
+    found
+}
+
+/// Descend a node's `declarator` field chain to its leaf identifier.
+fn c_declarator_leaf_name(node: Node) -> Option<Node> {
+    let mut cur = node.child_by_field_name("declarator")?;
+    loop {
+        match cur.kind() {
+            "identifier" | "type_identifier" | "field_identifier" | "qualified_identifier" => {
+                return Some(cur)
+            }
+            _ => cur = cur.child_by_field_name("declarator")?,
+        }
+    }
+}
+
+/// Clojure identity key. A top-level `(head name …)` form whose head is a
+/// recognized `def…`/`ns` symbol keys by `head::name`; any other form by
+/// `kind + normalized-text`. Two `defmethod`s on the same multifn collapse
+/// to one key and conservatively bail (DuplicateKeys) — safe, not wrong.
+fn clojure_item_key(node: Node, src: &str) -> String {
+    if node.kind() == "list_lit" {
+        let mut cursor = node.walk();
+        let values: Vec<Node> = node.children_by_field_name("value", &mut cursor).collect();
+        if let (Some(head), Some(name)) = (values.first(), values.get(1)) {
+            let head_txt = node_text(*head, src);
+            if CLOJURE_DEF_HEADS.contains(&head_txt.as_str()) {
+                return format!("{head_txt}::{}", normalize_ws(&node_text(*name, src)));
+            }
+        }
+    }
+    format!("{}::{}", node.kind(), normalize_ws(&node_text(node, src)))
+}
+
+/// Clojure head symbols whose form defines a top-level named entity.
+static CLOJURE_DEF_HEADS: &[&str] = &[
+    "def",
+    "defn",
+    "defn-",
+    "defmacro",
+    "defmulti",
+    "defmethod",
+    "defprotocol",
+    "defrecord",
+    "deftype",
+    "definterface",
+    "defonce",
+    "ns",
+];
 
 /// First child reachable through the spec's `inner_decl_fields`.
 fn inner_decl<'a>(node: Node<'a>, spec: &MergeSpec) -> Option<Node<'a>> {
@@ -256,6 +425,7 @@ static RUST: MergeSpec = MergeSpec {
     transparent_kinds: &[],
     inner_decl_fields: &[],
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_rust::LANGUAGE.into(),
 };
 
@@ -272,6 +442,7 @@ static TYPESCRIPT: MergeSpec = MergeSpec {
     transparent_kinds: TS_TRANSPARENT_KINDS,
     inner_decl_fields: TS_INNER_DECL_FIELDS,
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
 };
 
@@ -280,6 +451,7 @@ static TSX: MergeSpec = MergeSpec {
     transparent_kinds: TS_TRANSPARENT_KINDS,
     inner_decl_fields: TS_INNER_DECL_FIELDS,
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
 };
 
@@ -288,6 +460,7 @@ static JAVASCRIPT: MergeSpec = MergeSpec {
     transparent_kinds: TS_TRANSPARENT_KINDS,
     inner_decl_fields: TS_INNER_DECL_FIELDS,
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
 
@@ -302,6 +475,7 @@ static PYTHON: MergeSpec = MergeSpec {
     transparent_kinds: &["decorated_definition"],
     inner_decl_fields: &["definition"],
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_python::LANGUAGE.into(),
 };
 
@@ -310,7 +484,57 @@ static GO: MergeSpec = MergeSpec {
     transparent_kinds: &[],
     inner_decl_fields: &[],
     name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
     grammar: || tree_sitter_go::LANGUAGE.into(),
+};
+
+// ---- Second-slice languages (tsk137) ----
+
+// Java top-level items are imports + type declarations (methods/fields are
+// nested in a class body — intra-body merge is Tier-1's job, per the
+// design). The generic `name_fields=["name"]` path keys each
+// class/interface/enum/record by its identifier; `package_declaration`
+// falls back to text.
+static JAVA: MergeSpec = MergeSpec {
+    import_kinds: &["import_declaration"],
+    transparent_kinds: &[],
+    inner_decl_fields: &[],
+    name_fields: &["name"],
+    key_strategy: KeyStrategy::Generic,
+    grammar: || tree_sitter_java::LANGUAGE.into(),
+};
+
+// C / C++ use the bespoke `CFamily` key resolver (declarator-based names +
+// signatures). `import_kinds` covers `#include`; everything else is keyed
+// by `c_family_item_key`.
+static C: MergeSpec = MergeSpec {
+    import_kinds: &["preproc_include"],
+    transparent_kinds: &[],
+    inner_decl_fields: &[],
+    name_fields: &[],
+    key_strategy: KeyStrategy::CFamily,
+    grammar: || tree_sitter_c::LANGUAGE.into(),
+};
+
+static CPP: MergeSpec = MergeSpec {
+    import_kinds: &["preproc_include"],
+    transparent_kinds: &[],
+    inner_decl_fields: &[],
+    name_fields: &[],
+    key_strategy: KeyStrategy::CFamily,
+    grammar: || tree_sitter_cpp::LANGUAGE.into(),
+};
+
+// Clojure flattens every parenthesized form to `list_lit`; the bespoke
+// `Clojure` resolver reads the head symbol + defined name. There is no
+// distinct import node (requires live in `ns`), so `import_kinds` is empty.
+static CLOJURE: MergeSpec = MergeSpec {
+    import_kinds: &[],
+    transparent_kinds: &[],
+    inner_decl_fields: &[],
+    name_fields: &[],
+    key_strategy: KeyStrategy::Clojure,
+    grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
 };
 
 // ===================================================================
@@ -588,8 +812,15 @@ mod tests {
         assert_eq!(language_for_path("x.jsx"), Some(Language::JavaScript));
         assert_eq!(language_for_path("x.py"), Some(Language::Python));
         assert_eq!(language_for_path("x.go"), Some(Language::Go));
-        // Unsupported (or grammar exists in metrics but not the merge slice).
-        assert_eq!(language_for_path("x.java"), None);
+        // Second-slice languages (tsk137).
+        assert_eq!(language_for_path("x.java"), Some(Language::Java));
+        assert_eq!(language_for_path("x.c"), Some(Language::C));
+        assert_eq!(language_for_path("x.h"), Some(Language::C));
+        assert_eq!(language_for_path("x.cpp"), Some(Language::Cpp));
+        assert_eq!(language_for_path("x.hpp"), Some(Language::Cpp));
+        assert_eq!(language_for_path("x.clj"), Some(Language::Clojure));
+        assert_eq!(language_for_path("x.cljs"), Some(Language::Clojure));
+        // Genuinely unsupported.
         assert_eq!(language_for_path("x.txt"), None);
         assert_eq!(language_for_path("noext"), None);
     }
@@ -735,6 +966,146 @@ mod tests {
         // package clause and grouped type/const land on text fallback.
         assert!(k.iter().any(|s| s.starts_with("package_clause::")));
         assert!(k.iter().any(|s| s.starts_with("type_declaration::")));
+    }
+
+    #[test]
+    fn java_imports_and_type_declarations() {
+        let src = "package p;\nimport java.util.List;\n\
+                   class C { int x; void m(int a) {} }\n\
+                   interface I {}\nenum E { A }\nrecord R(int a) {}\n";
+        let items = parse_top_level_items(src, Language::Java).unwrap();
+        assert_spans_match(src, &items);
+        let k = keys(&items);
+        assert!(k.contains(&"import::import java.util.List;"));
+        assert!(k.contains(&"class_declaration::C"));
+        assert!(k.contains(&"interface_declaration::I"));
+        assert!(k.contains(&"enum_declaration::E"));
+        assert!(k.contains(&"record_declaration::R"));
+        // package clause has no name field → text fallback.
+        assert!(k.iter().any(|s| s.starts_with("package_declaration::")));
+    }
+
+    #[test]
+    fn c_includes_functions_structs_typedefs_globals() {
+        let src = "#include <stdio.h>\nint g = 1;\ntypedef int myint;\n\
+                   struct S { int a; };\nint main(void) { return 0; }\n\
+                   void foo(int x) {}\n";
+        let items = parse_top_level_items(src, Language::C).unwrap();
+        assert_spans_match(src, &items);
+        let k = keys(&items);
+        assert!(k.contains(&"import::#include <stdio.h>"));
+        assert!(k.contains(&"declaration::g"));
+        assert!(k.contains(&"type_definition::myint"));
+        assert!(k.contains(&"struct_specifier::S"));
+        // Functions keyed by declarator (name + signature).
+        assert!(k.contains(&"function_definition::main(void)"));
+        assert!(k.contains(&"function_definition::foo(int x)"));
+    }
+
+    #[test]
+    fn cpp_overloads_stay_distinct_and_template_seen_through() {
+        let src = "#include <vector>\nnamespace ns { int v; }\n\
+                   class C {};\nstruct S {};\n\
+                   template<typename T> T id(T x) { return x; }\n\
+                   void f(int a) {}\nvoid f(double a) {}\n";
+        let items = parse_top_level_items(src, Language::Cpp).unwrap();
+        assert_spans_match(src, &items);
+        let k = keys(&items);
+        assert!(k.contains(&"import::#include <vector>"));
+        assert!(k.contains(&"namespace_definition::ns"));
+        assert!(k.contains(&"class_specifier::C"));
+        assert!(k.contains(&"struct_specifier::S"));
+        // Overloads keyed by signature stay distinct.
+        assert!(k.contains(&"function_definition::f(int a)"));
+        assert!(k.contains(&"function_definition::f(double a)"));
+        // template_declaration is seen through to the wrapped function.
+        assert!(k.contains(&"function_definition::id(T x)"));
+    }
+
+    #[test]
+    fn clojure_def_forms_keyed_by_head_and_name() {
+        let src = "(ns my.app)\n(def x 1)\n(defn foo [a] a)\n\
+                   (defn- bar [] 2)\n(defmacro m [] nil)\n";
+        let items = parse_top_level_items(src, Language::Clojure).unwrap();
+        assert_spans_match(src, &items);
+        let k = keys(&items);
+        assert!(k.contains(&"ns::my.app"));
+        assert!(k.contains(&"def::x"));
+        assert!(k.contains(&"defn::foo"));
+        assert!(k.contains(&"defn-::bar"));
+        assert!(k.contains(&"defmacro::m"));
+    }
+
+    #[test]
+    fn java_both_add_classes_resolve() {
+        let base = "import a.A;\nclass Base {}\n";
+        let ours = "import a.A;\nclass Base {}\nclass Ours {}\n";
+        let theirs = "import a.A;\nclass Base {}\nclass Theirs {}\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Java));
+        assert!(text.contains("class Ours"), "{text}");
+        assert!(text.contains("class Theirs"), "{text}");
+        assert!(parse_top_level_items(&text, Language::Java).is_some());
+    }
+
+    #[test]
+    fn c_both_add_functions_resolve() {
+        let base = "int shared(void) { return 0; }\n";
+        let ours = "int shared(void) { return 0; }\nint ours(void) { return 1; }\n";
+        let theirs = "int shared(void) { return 0; }\nint theirs(void) { return 2; }\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::C));
+        assert!(text.contains("int ours"), "{text}");
+        assert!(text.contains("int theirs"), "{text}");
+        assert!(parse_top_level_items(&text, Language::C).is_some());
+    }
+
+    #[test]
+    fn c_same_function_edited_differently_refuses() {
+        let base = "int f(void) { return 1; }\n";
+        let ours = "int f(void) { return 2; }\n";
+        let theirs = "int f(void) { return 3; }\n";
+        match merge_top_level(base, ours, theirs, Language::C) {
+            AstMerge::Conflict(keys) => assert!(
+                keys.iter()
+                    .any(|k| k.starts_with("function_definition::f(void)")),
+                "{keys:?}"
+            ),
+            other => panic!("must refuse divergent body edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cpp_both_add_imports_resolve() {
+        let base = "#include <a>\nint main() { return 0; }\n";
+        let ours = "#include <a>\n#include <b>\nint main() { return 0; }\n";
+        let theirs = "#include <a>\n#include <c>\nint main() { return 0; }\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Cpp));
+        assert!(text.contains("#include <b>"), "{text}");
+        assert!(text.contains("#include <c>"), "{text}");
+        assert!(parse_top_level_items(&text, Language::Cpp).is_some());
+    }
+
+    #[test]
+    fn clojure_both_add_defns_resolve() {
+        let base = "(ns app)\n(defn shared [] 0)\n";
+        let ours = "(ns app)\n(defn shared [] 0)\n(defn ours [] 1)\n";
+        let theirs = "(ns app)\n(defn shared [] 0)\n(defn theirs [] 2)\n";
+        let text = resolved_text(merge_top_level(base, ours, theirs, Language::Clojure));
+        assert!(text.contains("(defn ours"), "{text}");
+        assert!(text.contains("(defn theirs"), "{text}");
+        assert!(parse_top_level_items(&text, Language::Clojure).is_some());
+    }
+
+    #[test]
+    fn clojure_same_defn_edited_differently_refuses() {
+        let base = "(defn f [] 1)\n";
+        let ours = "(defn f [] 2)\n";
+        let theirs = "(defn f [] 3)\n";
+        match merge_top_level(base, ours, theirs, Language::Clojure) {
+            AstMerge::Conflict(keys) => {
+                assert!(keys.iter().any(|k| k == "defn::f"), "{keys:?}")
+            }
+            other => panic!("must refuse, got {other:?}"),
+        }
     }
 
     #[test]

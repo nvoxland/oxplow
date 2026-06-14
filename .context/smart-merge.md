@@ -24,23 +24,39 @@ writing + `git add`ing the file **only when `merge3` returns `Ok`**
 oversized files are left exactly as git produced them. This is wired
 into `GitService` merge/rebase/cherry-pick/revert.
 
-## Tier 2 — AST structural merge (WIRED — tsk134+tsk135+tsk136)
+## Tier 2 — AST structural merge (WIRED — tsk134+tsk135+tsk136+tsk137)
 
 **Status:** the language-neutral core ships as production code in
-`crates/oxplow-git/src/ast_merge.rs` and is now wired into the
-auto-resolve path as a Tier-1.5 fallback (tsk136 — see "Wiring" below).
-Two layers:
+`crates/oxplow-git/src/ast_merge.rs` and is wired into the auto-resolve
+path as a Tier-1.5 fallback (tsk136 — see "Wiring" below). Two layers:
 
-- **Parse → items (tsk134):** `parse_top_level_items(src, Language) ->
-  Option<Vec<Item>>` + `language_for_path` + the per-language `MergeSpec`
-  kind tables. tree-sitter and the 6 first-slice grammars (rust,
-  typescript, tsx, javascript, python, go) are real `oxplow-git` deps
-  now. Each `Item` carries `{ key, text, byte_span }`: key = import's
-  normalized text or a named decl's `kind+name` (Go methods + receiver);
-  the byte span includes any directly-attached leading doc-comment. Parse
+- **Parse → items (tsk134, languages extended in tsk137):**
+  `parse_top_level_items(src, Language) -> Option<Vec<Item>>` +
+  `language_for_path` + the per-language `MergeSpec` kind tables.
+  tree-sitter and **ten grammars** are real `oxplow-git` deps now: the 6
+  first-slice (rust, typescript, tsx, javascript, python, go) plus the 4
+  second-slice (java, c, cpp, clojure — tsk137). Each `Item` carries `{
+  key, text, byte_span }`. Identity key depends on the language's
+  `KeyStrategy`:
+  - **Generic** (rust/ts/tsx/js/python/go/java): import normalized text,
+    else a named decl's `kind+name` (Go methods + receiver; Java
+    class/interface/enum/record by name), else `kind + normalized-text`.
+  - **CFamily** (c/cpp): `#include` by text; functions by their
+    declarator (name + signature, so overloads stay distinct);
+    structs/unions/enums/classes/namespaces by name; typedefs + globals by
+    their declarator's leaf identifier; `template_declaration` seen
+    through to the wrapped decl.
+  - **Clojure**: top-level `(def…/defn…/ns …)` forms by `head-symbol +
+    defined-name`; any other form by `kind + normalized-text`. (Two
+    `defmethod`s on one multifn collapse to one key → `DuplicateKeys`
+    bail — safe, not wrong.)
+
+  The byte span includes any directly-attached leading doc-comment. Parse
   failure (error/missing node) → `None` (never operate on an untrusted
-  tree). Const/var/Go-type decls fall back to text identity (safe: add
-  still commutes, same-item edit just refuses).
+  tree). Items on the **Generic text fallback** (Rust/TS `const`/`let`/
+  `var`, Go grouped `type`/`var`/`const`, unnamed items) commute on *add*
+  but have a known soundness gap on *divergent same-item edit* — see
+  "Text-identity divergent-edit gap" below (tracked as **tsk140**).
 - **3-way merge (tsk135):** `merge_top_level(base, ours, theirs, Language)
   -> AstMerge` where `AstMerge` is `Resolved(String)` | `Conflict(keys)`
   | `Bail(BailReason)`. Per-key classify lifts the spike's rule (take the
@@ -81,7 +97,42 @@ path), and `ast_resolved` records how many of those came from the AST
 tier specifically. The flagship case the wiring unlocks: both sides add a
 *different* import at the *same gap* (adjacent lines), which Tier-1 sees
 as an ambiguous add/add but the AST tier unions. End-to-end test:
-`auto_resolve_clears_ast_only_import_conflict` in `smart_merge.rs`.
+`auto_resolve_clears_ast_only_import_conflict` in `smart_merge.rs`; one
+e2e auto-resolve test per second-slice language
+(`auto_resolve_clears_{java,c,cpp,clojure}_ast_only_conflict`).
+
+### Second-slice languages (tsk137)
+
+java, c, cpp, clojure are now supported (grammars were already workspace
+deps, promoted into `oxplow-git`). Each got top-level-item kind tables +
+identity keys (see `KeyStrategy` above), per-language parse/key/merge unit
+tests, and an end-to-end auto-resolve test. **Java caveat:** methods and
+fields are *nested in a class body*, not top-level, so the AST tier
+matches at type-declaration granularity — intra-class method/field merges
+are Tier-1's (textual) job, consistent with the rest of the design.
+
+### Mergiraf escape hatch — intentionally dropped
+
+The original tsk137 also proposed an *optional, opt-in, off-by-default*
+external `mergiraf` subprocess as an escape hatch. **This half is
+intentionally not built.** Mergiraf is GPLv3 and oxplow is MIT; even the
+"mere aggregation" subprocess route adds a runtime dependency on a
+copyleft tool we'd have to document, gate, and support, for marginal value
+over our own AST tier. The project decision (this doc's "Licensing
+constraint (hard)" section) is to **build our own and stop there** — no
+mergiraf integration, library *or* subprocess. If a future need arises,
+re-open it as a fresh decision rather than reviving the dropped task half.
+
+### Text-identity divergent-edit gap (tsk140)
+
+Items on the `Generic` **text-fallback** key (`kind + normalized-text`)
+encode their body into the key. When *both* sides edit the same such item
+differently, `classify` reads it as base-deleted-by-both + two independent
+adds and keeps **both** divergent versions rather than refusing — the
+re-parse guard misses it (duplicate decls parse fine). This violates the
+reduce-only "never silently resolve a true overlap" invariant for those
+items only (named decls, C-family declarator keys, and Clojure head+name
+keys are safe). Pre-existing since tsk135; tracked + scoped in **tsk140**.
 
 ## Tier 2 — AST structural merge (SCOPED — tsk121)
 
@@ -167,8 +218,9 @@ per-language item-kind tables exist (model them like
 
 **Explicitly out of the first slice:** sub-item / intra-body merge
 (that's what Tier-1 already does textually inside each unchanged-vs-
-changed item), GumTree tree-edit-distance matching, rename detection,
-and the external-`mergiraf` escape hatch.
+changed item), GumTree tree-edit-distance matching, and rename detection.
+The external-`mergiraf` escape hatch is **dropped entirely** (not merely
+deferred) — see "Mergiraf escape hatch — intentionally dropped" above.
 
 ### Build estimate
 
@@ -177,11 +229,11 @@ and the external-`mergiraf` escape hatch.
 | ✅ `LanguageSpec`-style top-level-item kind tables (reuse metrics pattern) for rust/ts/tsx/js/py/go (tsk134) | done |
 | ✅ Generic parse → ordered-items extractor + identity keys (tsk134) | done |
 | ✅ `merge_items` 3-way classify + ordering/reconstruction + re-parse guard (tsk135) | done |
-| Wire into `auto_resolve_conflicts` behind the per-language gate + report counts | ~0.5 day |
-| Tests (per language: commutative-win, divergence-refusal, parse-fail-bail, ordering) | ~1.5 days |
-| **Total first slice (6 languages)** | **~1 week** |
-| java/c/cpp/clojure kind tables + tests (follow-up) | ~1–2 days |
-| Optional opt-in external `mergiraf` subprocess (off by default, config-gated, never bundled) | ~1 day |
+| ✅ Wire into `auto_resolve_conflicts` behind the per-language gate + report counts (tsk136) | done |
+| ✅ Tests (per language: commutative-win, divergence-refusal, parse-fail-bail, ordering) | done |
+| **Total first slice (6 languages)** | **shipped** |
+| ✅ java/c/cpp/clojure kind tables + tests (tsk137) | done |
+| ~~Optional opt-in external `mergiraf` subprocess~~ | **dropped** — GPL boundary, see "Mergiraf escape hatch — intentionally dropped" above |
 
 ### Risks / open questions
 

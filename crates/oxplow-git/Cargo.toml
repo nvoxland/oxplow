@@ -19,8 +19,9 @@ serde = { workspace = true }
 specta = { workspace = true }
 time = { workspace = true }
 # Tier-2 AST structural merge (tsk134): parse→top-level-items front half.
-# tree-sitter + the 6 first-slice grammars (rust/ts+tsx/js/python/go),
-# promoted from dev-deps now that production code uses them.
+# tree-sitter + the first-slice grammars (rust/ts+tsx/js/python/go), plus
+# the second-slice grammars (java/c/cpp/clojure, tsk137), promoted from
+# dev-deps now that production code uses them.
 # See .context/smart-merge.md.
 tree-sitter = { workspace = true }
 tree-sitter-rust = { workspace = true }
@@ -28,6 +29,10 @@ tree-sitter-typescript = { workspace = true }
 tree-sitter-javascript = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-go = { workspace = true }
+tree-sitter-java = { workspace = true }
+tree-sitter-c = { workspace = true }
+tree-sitter-cpp = { workspace = true }
+tree-sitter-clojure-orchard = { workspace = true }
 
 [dependencies.serde_json]
 workspace = true
