@@ -186,6 +186,11 @@ pub struct ListEffortObservationsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GetOpenEffortParams {
+    pub thread_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddThreadNoteParams {
     pub thread_id: String,
     pub body: String,
@@ -1548,6 +1553,48 @@ impl OxplowMcp {
             "recorded": id.is_some(),
             "observationId": id,
         }))
+    }
+
+    #[tool(
+        description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
+            taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
+            is open. Use this to find the `effortId` for `amend_effort`, to confirm an effort is \
+            open before `ingest_coverage` / `ingest_analysis` / `record_test_run`, and to debug a \
+            `no_open_effort` / `no_baseline` outcome (`hasStartSnapshot:false` ⇒ no baseline)."
+    )]
+    async fn get_open_effort(
+        &self,
+        params: Parameters<GetOpenEffortParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_db::TaskEffortStore as _;
+        expect_id_kind(
+            "get_open_effort",
+            "thread_id",
+            &params.0.thread_id,
+            ID_THREAD,
+        )?;
+        let tid = parse_thread_id(&params.0.thread_id)?;
+        let effort = self
+            .services
+            .effort_store
+            .find_open_for_thread(&tid)
+            .await
+            .map_err(internal)?;
+        let payload = match effort {
+            Some(e) => serde_json::json!({
+                "open": true,
+                "effortId": e.id.to_string(),
+                "taskId": e.task_id.to_string(),
+                "startedAt": e.started_at,
+                "hasStartSnapshot": e.start_snapshot_id.is_some(),
+            }),
+            None => serde_json::json!({
+                "open": false,
+                "effortId": serde_json::Value::Null,
+                "taskId": serde_json::Value::Null,
+            }),
+        };
+        json_result(&payload)
     }
 
     #[tool(
@@ -4049,6 +4096,84 @@ mod tests {
             acks_after.is_empty(),
             "re-claiming the path should clear its acknowledgement, got {acks_after:?}",
         );
+    }
+
+    #[tokio::test]
+    async fn get_open_effort_reports_open_effort() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let task_id = services
+            .task_store
+            .insert(&make_task(Some(thread.id), "open effort task"))
+            .await
+            .unwrap();
+        let effort = services
+            .effort_store
+            .start(task_id, &thread.id, None)
+            .await
+            .unwrap();
+
+        let r = server
+            .get_open_effort(Parameters(GetOpenEffortParams {
+                thread_id: thread.id.to_string(),
+            }))
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(parsed["open"], true);
+        assert_eq!(parsed["effortId"], effort.id.to_string());
+        assert_eq!(parsed["taskId"], task_id.to_string());
+        assert!(parsed["startedAt"].is_string());
+        // start() with None records no start snapshot.
+        assert_eq!(parsed["hasStartSnapshot"], false);
+    }
+
+    #[tokio::test]
+    async fn get_open_effort_reports_none_when_no_open_effort() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let r = server
+            .get_open_effort(Parameters(GetOpenEffortParams {
+                thread_id: thread.id.to_string(),
+            }))
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(parsed["open"], false);
+        assert!(parsed["effortId"].is_null());
+    }
+
+    #[tokio::test]
+    async fn get_open_effort_rejects_non_thread_id() {
+        let (_proj, _svc, server) = boot();
+        let err = server
+            .get_open_effort(Parameters(GetOpenEffortParams {
+                thread_id: "str1".into(),
+            }))
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("thread_id"), "got: {msg}");
     }
 
     /// Helper to write a wiki body to disk.

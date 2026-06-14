@@ -186,6 +186,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("ingest_coverage"),
     agent("ingest_analysis"),
     agent("record_test_run"),
+    agent("get_open_effort"),
     agent("lsp_definition"),
     agent("lsp_hover"),
     agent("lsp_references"),
