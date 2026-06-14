@@ -331,7 +331,7 @@ rpc_dispatch! {
     "remove_lsp_package" => commands::lsp::remove_lsp_package { package_name: String },
     "respond_lsp_apply_edit" => commands::lsp::respond_lsp_apply_edit { token: u32, applied: bool, failure_reason: Option<String> },
     // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
-    "send_terminal_message" => commands::terminal::send_terminal_message { session_id: String, message: String },
+    "forward_terminal_input" => commands::terminal::forward_terminal_input { session_id: String, message: String },
     "close_terminal_session" => commands::terminal::close_terminal_session { session_id: String },
     "terminal_session_cwd" => commands::terminal::terminal_session_cwd { session_id: String },
     "terminate_terminal_session" => commands::terminal::terminate_terminal_session { session_id: String },

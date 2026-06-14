@@ -27,7 +27,7 @@ change that flips a row.
 |---|---|---|
 | File-session state (open files / dirty tabs / LRU) | ✅ working | `apps/desktop/src/editor-session.ts` — restored from `main` with 9 unit tests. |
 | Editor pane (Monaco + LSP markers + blame) | ✅ working | Reads bindings shapes directly: `BlameLine.author_time`, `LocalBlameEntry.git`. |
-| Terminal pane (xterm + tmux attach) | ✅ working | `open_terminal_session` / `send_terminal_message` / `close_terminal_session` Tauri commands; `terminal:event` channel. Tmux history-mode messages dispatch through `oxplow-tmux::copy_mode_*`. |
+| Terminal pane (xterm + tmux attach) | ✅ working | `open_terminal_session` / `forward_terminal_input` / `close_terminal_session` Tauri commands; `terminal:event` channel. Tmux history-mode messages dispatch through `oxplow-tmux::copy_mode_*`. |
 | LSP bridge (per-language client) | ✅ working | `open_lsp_client` / `send_lsp_message` / `close_lsp_client` Tauri commands; `lsp:event` channel. Echo-server round-trip test in `oxplow-app::lsp_clients`. |
 | Native menu (macOS/Windows) | ✅ working | `set_native_menu` translates `MenuGroupSnapshot[]` → `tauri::menu::Menu`; `menu:command` event re-emits activations to renderer. |
 | External-URL tabs | ✅ working | `WebviewWindow` spawn via `open_external_url`; sandboxed by the `external-url` capability with **zero** oxplow commands and zero plugin permissions. |

@@ -671,11 +671,14 @@ export const commands = {
 	 */
 	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
 	/**
-	 *  Forward a JSON-encoded protocol message from the renderer to the
-	 *  session backing `session_id`. See
-	 *  `oxplow_app::terminal_sessions` for the message shapes.
+	 *  Forward a terminal-input protocol message from the renderer to the
+	 *  PTY backing `session_id`. Plumbing for **human input only** (xterm
+	 *  keystrokes / paste / scroll / resize from `TerminalPane.tsx`); not an
+	 *  agent-messaging or automation API. See the no-automation invariant in
+	 *  `.context/agent-model.md`. Message shapes live in
+	 *  `oxplow_app::terminal_sessions`.
 	 */
-	sendTerminalMessage: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_terminal_message", { sessionId, message })),
+	forwardTerminalInput: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("forward_terminal_input", { sessionId, message })),
 	/**
 	 *  Detach the renderer from `session_id` without killing the PTY —
 	 *  the agent keeps running in the background so the user can navigate

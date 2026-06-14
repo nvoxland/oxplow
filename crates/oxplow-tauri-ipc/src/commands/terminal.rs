@@ -36,17 +36,20 @@ pub async fn open_terminal_session(
     .await
 }
 
-/// Forward a JSON-encoded protocol message from the renderer to the
-/// session backing `session_id`. See
-/// `oxplow_app::terminal_sessions` for the message shapes.
+/// Forward a terminal-input protocol message from the renderer to the
+/// PTY backing `session_id`. Plumbing for **human input only** (xterm
+/// keystrokes / paste / scroll / resize from `TerminalPane.tsx`); not an
+/// agent-messaging or automation API. See the no-automation invariant in
+/// `.context/agent-model.md`. Message shapes live in
+/// `oxplow_app::terminal_sessions`.
 #[tauri::command]
 #[specta::specta]
-pub async fn send_terminal_message(
+pub async fn forward_terminal_input(
     state: tauri::State<'_, AppState>,
     session_id: String,
     message: String,
 ) -> Result<(), IpcError> {
-    oxplow_rpc::commands::terminal::send_terminal_message(&state, session_id, message).await
+    oxplow_rpc::commands::terminal::forward_terminal_input(&state, session_id, message).await
 }
 
 /// Detach the renderer from `session_id` without killing the PTY —

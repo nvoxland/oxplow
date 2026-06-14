@@ -518,7 +518,7 @@ mod tests {
     }
 
     /// Build an `{type:"input", bytes:<base64>}` message the way the
-    /// renderer's `sendTerminalMessage` does for a paste.
+    /// renderer's `forwardTerminalInput` does for a paste.
     fn input_message(raw: &[u8]) -> String {
         let b64 = B64.encode(raw);
         serde_json::json!({ "type": "input", "bytes": b64 }).to_string()

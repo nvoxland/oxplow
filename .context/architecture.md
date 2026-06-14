@@ -23,6 +23,19 @@ don't organize the product around an editor.
 This note is the default guidance for future implementation decisions
 unless a later design explicitly replaces it.
 
+## No agent automation
+
+Oxplow steers the agent; it never *drives* it. The agent does its own
+typing and makes its own tool calls — **the only source of agent
+terminal input is human keystrokes / paste via the UI.** oxplow must
+never programmatically generate, inject, or auto-respond with agent
+terminal input (automating the agent CLI would risk violating its
+license/ToS). Steering happens through hook responses the agent's own
+harness injects, not by oxplow synthesizing input. This is a hard
+invariant, guarded by tests — the mechanics and the human-input
+transport (`forward_terminal_input`) live in
+[agent-model.md](./agent-model.md#no-synthesized-agent-terminal-input-no-automation).
+
 ## Current app shape
 
 - Custom React shell for layout and UI state

@@ -173,8 +173,12 @@ function buildBridge() {
         // Idempotent terminate.
       }
     },
-    sendTerminalMessage: async (sessionId: string, message: string): Promise<void> => {
-      unwrap(await commands.sendTerminalMessage(sessionId, message));
+    // Plumbing for HUMAN terminal input only — the xterm in TerminalPane
+    // pipes the user's keystrokes / paste / scroll / resize through here.
+    // NOT an agent-messaging or automation API; never synthesize
+    // `{type:"input"}` from non-UI code (see .context/agent-model.md).
+    forwardTerminalInput: async (sessionId: string, message: string): Promise<void> => {
+      unwrap(await commands.forwardTerminalInput(sessionId, message));
     },
     /// Best-effort live cwd of the session's child (the shell, for the Terminal
     /// page). null when undeterminable; callers fall back to the worktree root.

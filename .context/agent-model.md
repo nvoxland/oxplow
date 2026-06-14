@@ -30,6 +30,51 @@ the agent are:
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
 
+### No synthesized agent terminal input (no automation)
+
+**The agent's terminal input has exactly one source: human keystrokes /
+paste via the UI.** oxplow must NEVER programmatically generate, inject,
+or auto-respond with agent terminal input. The agent makes its own tool
+calls and is always driven by a human — never by oxplow typing at it.
+Concretely:
+
+- The renderer's xterm (`TerminalPane.tsx`) pipes the user's own
+  keystrokes / paste / scroll / resize to the PTY via the
+  `forward_terminal_input` IPC/RPC command
+  (→ `terminal_sessions.send` → `pty.write`). That command is the
+  human-input transport, **not** an agent-messaging API — it's named
+  `forward_terminal_input` (not the old `send_terminal_message`)
+  precisely so it can't be mistaken for one. It must stay: in
+  remote/daemon mode the PTY is server-side and browser keystrokes can
+  only reach it through this client→server call, so removing it makes
+  the remote terminal read-only.
+- `forward_terminal_input` is **UI-only** — it is never on the MCP
+  (agent) surface, so the agent cannot call it to type at itself or a
+  peer. Enforced by `oxplow-surface-parity`'s
+  `ui("forward_terminal_input")` row.
+- The drag/drop + "add to context" path (`agent-input-bus.ts`) is also
+  human-initiated: a user gesture publishes text the visible
+  `TerminalPane` pastes. oxplow synthesizes nothing on its own.
+- Steering (nudges, `<session-context>`, the Stop-hook "keep going")
+  reaches the agent through **hook responses** that the agent's OWN
+  harness injects (the invariant above), never by oxplow writing to the
+  terminal.
+
+**Why it matters.** Synthesizing `{type:"input"}` to "type at" the agent
+would be automating the agent CLI, which risks violating its
+(Claude Code / Codex / opencode) license/ToS.
+
+**Guards** (fail the build if violated):
+- Frontend source-scan
+  (`apps/desktop/src/no-agent-input-automation.test.ts`): confines
+  `forwardTerminalInput` calls and `{type:"input"}` message construction
+  to the human-input files (`TerminalPane.tsx`, the `api.ts` facade,
+  generated bindings).
+- Rust source-scan (in
+  `crates/oxplow-rpc/src/commands/terminal.rs` tests): asserts the only
+  production caller of `terminal_sessions.send(` is the
+  `forward_terminal_input` command core.
+
 ### What we can't do from oxplow hooks
 
 Claude Code inserts its own `<system-reminder>` blocks into user

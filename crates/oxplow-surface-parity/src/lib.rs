@@ -379,8 +379,12 @@ pub const MANIFEST: &[Capability] = &[
     ui("remove_lsp_package"),
     ui("respond_lsp_apply_edit"),
     // ---- ui-only: terminal ----
+    // `forward_terminal_input` is UI-ONLY by design and must never reach
+    // the MCP (agent) surface: it is the human keystroke/paste transport,
+    // not an automation API. Keeping it `ui(...)` here is part of the
+    // no-automation guard (see `.context/agent-model.md`).
     ui("open_terminal_session"),
-    ui("send_terminal_message"),
+    ui("forward_terminal_input"),
     ui("close_terminal_session"),
     ui("terminate_terminal_session"),
     ui("terminal_session_cwd"),

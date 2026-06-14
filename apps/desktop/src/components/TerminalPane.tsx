@@ -184,7 +184,7 @@ export function TerminalPane({
     if (!visible) return;
     termRef.current?.focus();
     if (transportMode === "tmux" && sessionIdRef.current) {
-      void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+      void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
     }
     setInteractionMode("live");
   }, [paneTarget, transportMode, visible]);
@@ -332,7 +332,7 @@ export function TerminalPane({
       if (event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         if (sessionIdRef.current) {
-          void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({
+          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({
             type: "input",
             bytes: btoa("\x1b\r"),
           }));
@@ -349,7 +349,7 @@ export function TerminalPane({
 
         if (routeToTmuxHistory) {
           if (sessionIdRef.current) {
-            void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({
+            void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({
               type: "history-page",
               direction: event.key === "PageUp" ? "up" : "down",
             }));
@@ -368,7 +368,7 @@ export function TerminalPane({
 
         if (transportMode === "tmux" && modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
         if (sessionIdRef.current) {
-          void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
@@ -414,7 +414,7 @@ export function TerminalPane({
       }
 
       if (sessionIdRef.current) {
-        void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
+        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
       }
       setInteractionMode("history");
       event.preventDefault();
@@ -425,12 +425,12 @@ export function TerminalPane({
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
       if (sessionIdRef.current) {
-        void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: utf8ToBase64(data) }));
+        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "input", bytes: utf8ToBase64(data) }));
       }
     });
     const binaryDisp = term.onBinary((data) => {
       if (sessionIdRef.current) {
-        void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
+        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
       }
     });
 
@@ -453,7 +453,7 @@ export function TerminalPane({
       }
       const handleMouseDown = () => {
         if (sessionIdRef.current) {
-          void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         term.focus();
@@ -528,7 +528,7 @@ export function TerminalPane({
         pendingEvents.length = 0;
         term.focus();
         if (transportMode === "tmux") {
-          void desktopBridge().sendTerminalMessage(sessionId, JSON.stringify({ type: "history-exit" }));
+          void desktopBridge().forwardTerminalInput(sessionId, JSON.stringify({ type: "history-exit" }));
         }
         setInteractionMode("live");
         logUi("info", "terminal session opened", { paneTarget, sessionId, transportMode });
@@ -551,7 +551,7 @@ export function TerminalPane({
             fit.fit();
             if (term.cols < 2 || term.rows < 2) return;
             if (sessionIdRef.current) {
-              void desktopBridge().sendTerminalMessage(
+              void desktopBridge().forwardTerminalInput(
                 sessionIdRef.current,
                 JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
               );

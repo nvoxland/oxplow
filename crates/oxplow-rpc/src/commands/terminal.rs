@@ -368,10 +368,15 @@ pub async fn open_terminal_session(
     Ok(result)
 }
 
-/// Forward a JSON-encoded protocol message from the renderer to the
-/// session backing `session_id`. See
-/// `oxplow_app::terminal_sessions` for the message shapes.
-pub async fn send_terminal_message(
+/// Forward a terminal-input protocol message from the renderer to the
+/// PTY backing `session_id`. This is **plumbing for human input only**:
+/// the renderer's xterm pipes the user's own keystrokes / paste / scroll
+/// / resize through here (see `TerminalPane.tsx`). It is NOT an
+/// agent-messaging or automation API — nothing in oxplow may synthesize
+/// `{type:"input"}` here to "type at" the agent. See the no-automation
+/// invariant in `.context/agent-model.md`. Message shapes live in
+/// `oxplow_app::terminal_sessions`.
+pub async fn forward_terminal_input(
     svc: &Services,
     session_id: String,
     message: String,
@@ -548,6 +553,56 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_null());
+    }
+
+    #[test]
+    fn terminal_sessions_send_has_single_production_caller() {
+        // No-automation guard (see .context/agent-model.md → "No
+        // synthesized agent terminal input"). The terminal-input registry
+        // method `terminal_sessions.send(` is the path that turns a
+        // protocol message into a PTY write — i.e. the only way to put
+        // bytes in front of the agent. It may have EXACTLY ONE production
+        // caller: `forward_terminal_input` in this file, which carries
+        // the human's own keystrokes/paste. Any other crate-source caller
+        // would be a way for oxplow to synthesize agent input and must
+        // fail the build. (Test/`reg.send(` call sites in
+        // oxplow-app use a different receiver and don't match.)
+        let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir");
+        let allowed = "oxplow-rpc/src/commands/terminal.rs";
+        let needle = "terminal_sessions.send(";
+        let mut offenders: Vec<String> = Vec::new();
+        let mut stack = vec![crates_dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read crates dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                        continue;
+                    }
+                    stack.push(path);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let text = std::fs::read_to_string(&path).expect("read rs file");
+                    if text.contains(needle) {
+                        let rel = path
+                            .strip_prefix(crates_dir)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        if rel != allowed {
+                            offenders.push(rel);
+                        }
+                    }
+                }
+            }
+        }
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "unexpected callers of the terminal-input registry method: {offenders:?} \
+             — agent terminal input must flow only through forward_terminal_input"
+        );
     }
 
     #[tokio::test]

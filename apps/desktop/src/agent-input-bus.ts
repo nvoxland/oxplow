@@ -4,7 +4,10 @@
  * Drag-drop and right-click "Add to agent context" handlers anywhere in
  * the UI publish text via `insertIntoAgent`; the visible TerminalPane
  * subscribes while mounted and writes the text into the agent's stdin
- * (`term.paste` for direct mode, `sendTerminalMessage` for tmux).
+ * (`term.paste` for direct mode, the terminal-input transport for tmux).
+ * This is still HUMAN input — a user gesture (drag/drop or "add to
+ * context") is the only thing that publishes here; oxplow never
+ * synthesizes agent input on its own (see .context/agent-model.md).
  *
  * Multiple TerminalPanes may exist (one per stream/thread) but only the
  * one whose `visible` prop is true subscribes — so a publish naturally

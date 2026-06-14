@@ -247,7 +247,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::lsp::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,
-            commands::terminal::send_terminal_message,
+            commands::terminal::forward_terminal_input,
             commands::terminal::close_terminal_session,
             commands::terminal::terminal_session_cwd,
             commands::terminal::terminate_terminal_session,
