@@ -67,6 +67,7 @@ or exact mechanics.
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
+| Smart conflict auto-resolution (Tier-1 token diff3; Tier-2 AST scoped) | `.context/smart-merge.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |
 | `RichTextField`, Tiptap surface, MermaidBlock + InternalLink extensions, mermaidRender helper | `.context/rich-text-editor.md` |
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |

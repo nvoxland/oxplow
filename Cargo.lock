@@ -3843,6 +3843,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-rust",
 ]
 
 [[package]]
