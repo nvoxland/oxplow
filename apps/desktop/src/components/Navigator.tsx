@@ -40,7 +40,12 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  * right that re-renders the same rows with full titles — y-positions
  * are identical between the strip and the overlay so items don't move
  * when switching modes. The overlay closes when the pointer leaves
- * the wrapper (with a short grace delay) or on Escape.
+ * the wrapper (with a short grace delay), on Escape, or on any
+ * pointerdown outside the overlay. That last rule matters: the expanded
+ * overlay covers the rail HUD to its right, and because it's part of the
+ * wrapper's DOM subtree the `mouseleave` path can't fire while the
+ * pointer sits over the rail-covered region — so an outward pointerdown
+ * is what frees a click meant for the rail beneath it (tsk131).
  *
  * Visual hierarchy:
  *   - Stream rows: two-letter glyph, weight 700, with a subtle
@@ -143,16 +148,40 @@ export function Navigator({
     });
   }, [streams]);
 
-  // Close overlay on Escape. Click-outside is no longer needed —
-  // mouseleave on the wrapper handles dismissal.
+  // Dismissal while the overlay is open. `mouseleave` on the wrapper is
+  // NOT sufficient on its own: the expanded overlay is absolutely
+  // positioned and ~280px wide, so it covers the rail HUD to its right.
+  // Because the overlay is part of the wrapper's DOM subtree, the
+  // pointer never "leaves" the wrapper while it's parked over the
+  // rail-covered region — so the overlay lingers and swallows clicks
+  // meant for the rail beneath it (tsk131). We therefore also dismiss on
+  // any outward pointer interaction:
+  //   - Escape, and
+  //   - a pointerdown anywhere outside the overlay element. A press on
+  //     the still-visible rail / center / tab bar collapses the overlay
+  //     immediately, so the very next click lands on the rail instead of
+  //     being intercepted. (Presses on the overlay's own interactive
+  //     rows are inside `overlayRef` and keep working.)
   useEffect(() => {
     if (!overlayOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOverlayOpen(false);
     };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      // The kebab popover (ContextMenu) renders inline as a descendant of
+      // the overlay row, so `contains` already covers menu presses.
+      if (target && overlayRef.current?.contains(target)) return;
+      cancelClose();
+      setOverlayOpen(false);
+    };
     document.addEventListener("keydown", onKey);
+    // Capture phase so we collapse before the press reaches (and is
+    // consumed by) whatever is beneath the overlay.
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [overlayOpen]);
 
