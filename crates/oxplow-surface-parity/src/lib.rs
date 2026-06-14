@@ -216,6 +216,8 @@ pub const MANIFEST: &[Capability] = &[
     todo("git_push_current_to"),
     todo("git_merge_into"),
     todo("git_rebase_onto"),
+    todo("git_cherry_pick"),
+    todo("git_revert"),
     todo("git_commit_all"),
     todo("git_add_path"),
     // ---- snapshots / local history: reads + restore mirrored to MCP (Child 3) ----

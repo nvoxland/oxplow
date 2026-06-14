@@ -277,9 +277,20 @@ can report "N conflicts auto-resolved". The pass is
 index regardless of which op produced them, and only resolves the
 current step's conflicts; it never `--continue`s a paused
 rebase/cherry-pick (the user/UI drives continuation, per the usability
-rules). `cherry_pick` / `revert` have `oxplow_git` + `GitService`
-methods but no IPC command / UI entry point yet (tracked as a
-follow-up); `merge` / `rebase` are the wired-up paths.
+rules). All four — `merge` / `rebase` / `cherry_pick` / `revert` — are
+now fully wired: each has an `oxplow_git` op, a `GitService` method, an
+`oxplow-rpc` core (`git_merge_into` / `git_rebase_onto` /
+`git_cherry_pick` / `git_revert`) registered in the `rpc_dispatch!`
+registry, a one-line Tauri adapter, and a generated FE binding. The
+cherry-pick / revert UI entry point lives on the **commit page**
+(`GitCommitPage`): two `InlineConfirm` action buttons in the commit
+metadata card (`data-testid` `commit-actions`, triggers
+`commit-cherry-pick` / `commit-revert`) run against the active stream's
+worktree and fold the `auto_resolved` count into the success toast via
+`gitOpOutcomeMessage` (`apps/desktop/src/git-op.ts`). Both are
+destructive working-tree mutations, so they confirm inline per
+[usability.md](./usability.md); failures record an op-error and offer a
+"Show details" toast.
 
 Why it exists: git's merge driver is **line-based**, so two edits to
 *different words on the same line* (or both sides adding a different

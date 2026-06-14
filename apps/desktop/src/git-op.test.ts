@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { awaitGitOp, gitOpErrorMessage, normalizeGitOpResult } from "./git-op.js";
+import {
+  awaitGitOp,
+  gitOpErrorMessage,
+  gitOpOutcomeMessage,
+  normalizeGitOpResult,
+} from "./git-op.js";
 import type { BackgroundTask, GitOpKickoff } from "./api.js";
 
 function task(over: Partial<BackgroundTask>): BackgroundTask {
@@ -62,5 +67,48 @@ describe("gitOpErrorMessage", () => {
 
   test("trims whitespace", () => {
     expect(gitOpErrorMessage({ success: false, stdout: "", stderr: "  oops\n", status: 1 }, "fb")).toBe("oops");
+  });
+});
+
+describe("gitOpOutcomeMessage", () => {
+  test("plain success has no auto-resolve suffix", () => {
+    expect(
+      gitOpOutcomeMessage("Cherry-pick a1b2c3d", { success: true, stdout: "", stderr: "", status: 0 }),
+    ).toBe("Cherry-pick a1b2c3d succeeded");
+  });
+
+  test("success reports a singular auto-resolved conflict", () => {
+    expect(
+      gitOpOutcomeMessage("Revert a1b2c3d", {
+        success: true,
+        stdout: "",
+        stderr: "",
+        status: 0,
+        auto_resolved: 1,
+      }),
+    ).toBe("Revert a1b2c3d succeeded — 1 conflict auto-resolved");
+  });
+
+  test("success pluralizes multiple auto-resolved conflicts", () => {
+    expect(
+      gitOpOutcomeMessage("Cherry-pick a1b2c3d", {
+        success: true,
+        stdout: "",
+        stderr: "",
+        status: 0,
+        auto_resolved: 3,
+      }),
+    ).toBe("Cherry-pick a1b2c3d succeeded — 3 conflicts auto-resolved");
+  });
+
+  test("failure reports the op as failed", () => {
+    expect(
+      gitOpOutcomeMessage("Cherry-pick a1b2c3d", {
+        success: false,
+        stdout: "",
+        stderr: "conflict",
+        status: 1,
+      }),
+    ).toBe("Cherry-pick a1b2c3d failed");
   });
 });

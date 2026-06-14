@@ -650,6 +650,20 @@ export async function gitRebaseOnto(streamId: string, onto: string): Promise<Git
   );
 }
 
+export async function gitCherryPick(streamId: string, commit: string): Promise<GitOpKickoff> {
+  const short = commit.slice(0, 7);
+  return runAsBackgroundTask(`Cherry-pick ${short}`, "git", `cherry-pick ${short}`, async () =>
+    unwrap(await commands.gitCherryPick(streamId, commit)),
+  );
+}
+
+export async function gitRevert(streamId: string, commit: string): Promise<GitOpKickoff> {
+  const short = commit.slice(0, 7);
+  return runAsBackgroundTask(`Revert ${short}`, "git", `revert ${short}`, async () =>
+    unwrap(await commands.gitRevert(streamId, commit)),
+  );
+}
+
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   const ctx = unwrap(await commands.getWorkspaceContext());
   return { gitEnabled: ctx.is_git_repo };

@@ -1,11 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CommitDetail, Stream, ThreadWorkState } from "../api.js";
-import { getCommitDetail } from "../api.js";
+import { getCommitDetail, gitCherryPick, gitRevert } from "../api.js";
+import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage } from "../git-op.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
+import { InlineConfirm } from "../components/InlineConfirm.js";
+import { recordOpError } from "../components/opErrorsStore.js";
+import { showToast } from "../components/toastStore.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
-import { gitCommitRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
+import { gitCommitRef, opErrorRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
@@ -125,6 +129,39 @@ export function GitCommitPage({
     return () => { cancelled = true; };
   }, [sha, stream?.id]);
 
+  // Apply this commit to the current branch (cherry-pick) or undo it
+  // (revert). Both fold the smart-merge auto-resolve count into the
+  // success toast; failures record an op-error the user can open.
+  const runCommitOp = useCallback(
+    async (op: "cherry-pick" | "revert") => {
+      if (!stream) return;
+      const short = sha.slice(0, 7);
+      const label = `${op === "cherry-pick" ? "Cherry-pick" : "Revert"} ${short}`;
+      const command = `git ${op === "cherry-pick" ? "cherry-pick" : "revert --no-edit"} ${short}`;
+      const kickoff =
+        op === "cherry-pick" ? await gitCherryPick(stream.id, sha) : await gitRevert(stream.id, sha);
+      const result = await awaitGitOp(kickoff);
+      if (result.success) {
+        showToast({ message: gitOpOutcomeMessage(label, result) });
+        return;
+      }
+      const errorId = recordOpError({
+        label,
+        command,
+        stderr: result.stderr,
+        stdout: result.stdout,
+        exitCode: result.status,
+        message: gitOpErrorMessage(result, `${label} failed`),
+      });
+      showToast({
+        message: `${label} failed`,
+        actionLabel: "Show details",
+        onUndo: () => onOpenPage(opErrorRef(errorId), { newTab: true }),
+      });
+    },
+    [stream, sha, onOpenPage],
+  );
+
   const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
 
   return (
@@ -152,7 +189,11 @@ export function GitCommitPage({
             ) : !detail ? (
               <div style={muted}>Commit not found.</div>
             ) : (
-              <CommitMeta detail={detail} collapsedMaxHeight={summaryHeight} />
+              <CommitMeta
+                detail={detail}
+                collapsedMaxHeight={summaryHeight}
+                onRunOp={stream ? runCommitOp : undefined}
+              />
             )}
           </div>
           <div style={{ minWidth: 0 }} ref={summaryRef}>
@@ -194,9 +235,12 @@ interface CommitMetaProps {
    *  toggle when the message body would overflow. `null` means "let
    *  it grow" (e.g. before the summary mounts). */
   collapsedMaxHeight: number | null;
+  /** Run cherry-pick / revert of this commit against the current
+   *  stream's worktree. Absent when no stream is selected. */
+  onRunOp?(op: "cherry-pick" | "revert"): void;
 }
 
-function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
+function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
   const date = formatAbsolute(new Date(detail.timestamp_secs * 1000).toISOString());
   const author = detail.email ? `${detail.author} <${detail.email}>` : detail.author;
   const sectionRef = useRef<HTMLElement>(null);
@@ -252,6 +296,29 @@ function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
             {detail.sha}
           </span>
         </div>
+        {onRunOp ? (
+          <div
+            data-testid="commit-actions"
+            style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}
+          >
+            <InlineConfirm
+              triggerLabel="Cherry-pick"
+              confirmLabel="Cherry-pick"
+              title="Apply this commit's changes onto the current branch"
+              testIdPrefix="commit-cherry-pick"
+              triggerStyle={actionButton}
+              onConfirm={() => onRunOp("cherry-pick")}
+            />
+            <InlineConfirm
+              triggerLabel="Revert"
+              confirmLabel="Revert"
+              title="Create a new commit that undoes this commit's changes"
+              testIdPrefix="commit-revert"
+              triggerStyle={actionButton}
+              onConfirm={() => onRunOp("revert")}
+            />
+          </div>
+        ) : null}
       </div>
       {overflowing ? (
         <button
@@ -290,4 +357,13 @@ const card: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderRadius: 6,
   padding: 12,
+};
+const actionButton: React.CSSProperties = {
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 4,
+  padding: "3px 10px",
+  color: "var(--text-primary)",
+  cursor: "pointer",
+  fontSize: 11,
 };

@@ -45,3 +45,17 @@ export async function awaitGitOp(kickoff: GitOpKickoff): Promise<GitOpResult> {
 export function gitOpErrorMessage(result: GitOpResult, fallback: string): string {
   return (result.stderr || result.stdout || fallback).trim();
 }
+
+/// Human-readable toast summary for a finished git op. On success it
+/// appends the smart-merge auto-resolved count when the pass cleaned up
+/// any conflicts ("… — 2 conflicts auto-resolved"); on failure it reports
+/// the op as failed (the caller surfaces the stderr separately). `label`
+/// is the verb phrase, e.g. "Cherry-pick a1b2c3d".
+export function gitOpOutcomeMessage(label: string, result: GitOpResult): string {
+  if (!result.success) return `${label} failed`;
+  const resolved = result.auto_resolved ?? 0;
+  if (resolved > 0) {
+    return `${label} succeeded — ${resolved} conflict${resolved === 1 ? "" : "s"} auto-resolved`;
+  }
+  return `${label} succeeded`;
+}

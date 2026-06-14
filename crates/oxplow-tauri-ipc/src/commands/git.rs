@@ -134,6 +134,26 @@ pub async fn git_rebase_onto(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn git_cherry_pick(
+    state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
+    commit: String,
+) -> Result<GitOpResult, IpcError> {
+    oxplow_rpc::commands::git::git_cherry_pick(&state, stream_id, commit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn git_revert(
+    state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
+    commit: String,
+) -> Result<GitOpResult, IpcError> {
+    oxplow_rpc::commands::git::git_revert(&state, stream_id, commit).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn git_commit_all(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,

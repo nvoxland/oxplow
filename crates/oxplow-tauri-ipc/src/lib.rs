@@ -165,6 +165,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::git::git_push_current_to,
             commands::git::git_merge_into,
             commands::git::git_rebase_onto,
+            commands::git::git_cherry_pick,
+            commands::git::git_revert,
             commands::git::git_commit_all,
             commands::git::git_add_path,
             commands::git::list_all_refs,

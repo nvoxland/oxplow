@@ -282,6 +282,8 @@ rpc_dispatch! {
     "git_push_current_to" => commands::git::git_push_current_to { stream_id: Option<String>, remote: String, branch: String },
     "git_merge_into" => commands::git::git_merge_into { stream_id: Option<String>, source: String },
     "git_rebase_onto" => commands::git::git_rebase_onto { stream_id: Option<String>, onto: String },
+    "git_cherry_pick" => commands::git::git_cherry_pick { stream_id: Option<String>, commit: String },
+    "git_revert" => commands::git::git_revert { stream_id: Option<String>, commit: String },
     "git_commit_all" => commands::git::git_commit_all { stream_id: Option<String>, message: String },
     "git_add_path" => commands::git::git_add_path { stream_id: Option<String>, path: String },
     "list_all_refs" => commands::git::list_all_refs {},

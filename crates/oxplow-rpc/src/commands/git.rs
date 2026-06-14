@@ -122,6 +122,28 @@ pub async fn git_rebase_onto(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
+pub async fn git_cherry_pick(
+    svc: &Services,
+    stream_id: Option<String>,
+    commit: String,
+) -> Result<GitOpResult, IpcError> {
+    svc.git
+        .cherry_pick(stream_id.as_deref(), commit)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
+}
+
+pub async fn git_revert(
+    svc: &Services,
+    stream_id: Option<String>,
+    commit: String,
+) -> Result<GitOpResult, IpcError> {
+    svc.git
+        .revert(stream_id.as_deref(), commit)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
+}
+
 pub async fn git_commit_all(
     svc: &Services,
     stream_id: Option<String>,
@@ -341,6 +363,53 @@ mod tests {
         assert!(
             out.get("rows").unwrap().is_array(),
             "rows should be an array"
+        );
+    }
+
+    #[tokio::test]
+    async fn git_cherry_pick_dispatches_and_returns_op_result() {
+        let (svc, _dir) = crate::test_support::services();
+        let primary = svc.streams.list_streams().await.unwrap();
+        let stream_id = primary.first().expect("primary stream").id.to_string();
+        // A bogus commit can't be picked, but routing through the strict
+        // stream resolution + service still yields a GitOpResult (failure),
+        // proving the command is registered and wired.
+        let out = crate::dispatch(
+            "git_cherry_pick",
+            serde_json::json!({ "streamId": stream_id, "commit": "0000000000000000000000000000000000000000" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(
+            out.get("success").is_some(),
+            "expected GitOpResult, got {out}"
+        );
+        assert!(
+            out.get("auto_resolved").is_some(),
+            "expected auto_resolved field, got {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn git_revert_dispatches_and_returns_op_result() {
+        let (svc, _dir) = crate::test_support::services();
+        let primary = svc.streams.list_streams().await.unwrap();
+        let stream_id = primary.first().expect("primary stream").id.to_string();
+        let out = crate::dispatch(
+            "git_revert",
+            serde_json::json!({ "streamId": stream_id, "commit": "0000000000000000000000000000000000000000" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(
+            out.get("success").is_some(),
+            "expected GitOpResult, got {out}"
+        );
+        assert!(
+            out.get("auto_resolved").is_some(),
+            "expected auto_resolved field, got {out}"
         );
     }
 
