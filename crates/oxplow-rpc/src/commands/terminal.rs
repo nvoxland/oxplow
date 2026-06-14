@@ -117,6 +117,30 @@ fn shell_session_key(stream_id: &str, pane_target: &str, transport_mode: &str) -
     }
 }
 
+/// Build the dedup key for an *agent* PTY session.
+///
+/// Keyed on (stream, thread, agent, pane) ONLY — deliberately **not**
+/// the transport mode. A re-attach that negotiated a different transport
+/// (e.g. a second daemon/browser client) must resume the one live agent
+/// PTY for this (stream, thread, pane), not spawn a duplicate agent in
+/// the same worktree (tsk138). The shell path keeps transport in its key
+/// (`shell_session_key`) because shell sessions may legitimately differ
+/// by transport.
+fn agent_session_key(
+    stream_id: &str,
+    thread_id: Option<&str>,
+    agent: AgentKind,
+    pane_target: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        stream_id,
+        thread_id.unwrap_or_default(),
+        agent.as_str(),
+        pane_target,
+    )
+}
+
 /// Open a renderer-attached terminal session.
 ///
 /// Two transports, mirroring the main-branch design:
@@ -210,17 +234,16 @@ pub async fn open_terminal_session(
 
     // Identity used to deduplicate sessions so re-attaches resume the
     // same PTY instead of spawning a new one. Includes the thread id
-    // when known so per-thread state is isolated.
-    let session_key = format!(
-        "{}|{}|{}|{}|{}",
-        stream.id,
-        thread_id
-            .as_ref()
-            .map(|t| t.to_string())
-            .unwrap_or_default(),
-        agent.as_str(),
-        pane_target,
-        transport_mode,
+    // when known so per-thread state is isolated. Transport mode is
+    // intentionally excluded so a re-attach over a different transport
+    // resumes the one live agent rather than spawning a duplicate
+    // (tsk138).
+    let thread_id_str = thread_id.as_ref().map(|t| t.to_string());
+    let session_key = agent_session_key(
+        &stream.id.to_string(),
+        thread_id_str.as_deref(),
+        agent,
+        &pane_target,
     );
 
     // Materialize the agent-specific runtime on every spawn. Claude
@@ -425,8 +448,46 @@ mod tests {
     use serde_json::json;
     use std::path::Path;
 
-    use super::{codex_hook_command, opencode_config_content, shell_session_key};
+    use super::{
+        agent_session_key, codex_hook_command, opencode_config_content, shell_session_key,
+    };
     use crate::test_support::services;
+    use oxplow_domain::AgentKind;
+
+    #[test]
+    fn agent_key_ignores_transport_mode() {
+        // The agent key is (stream, thread, agent, pane) only — the same
+        // tuple must produce the same key regardless of the transport a
+        // client negotiated, so a re-attach resumes the one live PTY
+        // instead of spawning a duplicate (tsk138).
+        let key = agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "working");
+        assert_eq!(key, "s-1|thr3|claude|working");
+        // No transport segment appears anywhere in the key.
+        assert!(!key.contains("direct"));
+        assert!(!key.contains("tmux"));
+    }
+
+    #[test]
+    fn agent_key_distinguishes_thread_agent_and_pane() {
+        let base = agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "working");
+        assert_ne!(
+            base,
+            agent_session_key("s-1", Some("thr4"), AgentKind::Claude, "working")
+        );
+        assert_ne!(
+            base,
+            agent_session_key("s-1", Some("thr3"), AgentKind::Codex, "working")
+        );
+        assert_ne!(
+            base,
+            agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "talking")
+        );
+        // Missing thread id falls back to an empty segment.
+        assert_eq!(
+            agent_session_key("s-1", None, AgentKind::Claude, "working"),
+            "s-1||claude|working"
+        );
+    }
 
     #[test]
     fn codex_hook_command_is_stable_and_url_independent() {
@@ -526,6 +587,47 @@ mod tests {
             "msg: {}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn agent_session_dedupes_across_transport_modes() {
+        // Regression for tsk138: transport_mode must NOT be part of the
+        // agent session key. Opening the same (stream, thread, pane)
+        // twice with two different transports must reattach the ONE
+        // existing PTY, not spawn a second agent. Both "direct" and
+        // "pipe" land on the non-tmux spawn branch, so this exercises the
+        // real dedup path without requiring tmux.
+        let (mut ctx, _dir) = services();
+        ctx.plugin_runtime = Some(crate::PluginRuntime {
+            hook_base_url: "http://127.0.0.1:9/hook".into(),
+            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            hook_token: "test-token".into(),
+        });
+
+        let first = crate::dispatch(
+            "open_terminal_session",
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let second = crate::dispatch(
+            "open_terminal_session",
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "pipe" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+        let first_id = first["sessionId"].as_str().expect("first sessionId");
+        let second_id = second["sessionId"].as_str().expect("second sessionId");
+        assert_eq!(
+            first_id, second_id,
+            "different transports must reattach the same agent PTY, not spawn a duplicate"
+        );
+
+        // Clean up the spawned PTY so the test doesn't leak a child.
+        let _ = ctx.terminal_sessions.close(first_id).await;
     }
 
     #[tokio::test]

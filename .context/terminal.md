@@ -34,10 +34,17 @@ consumer. It's mounted by two page renderers:
 Both go through the same component; only the `paneTarget` (and thus the
 server-side spawn) differs.
 
-Agent sessions include the thread's `agent` in their backend session key, so
-Claude and Codex threads on the same stream/pane never reattach to the same
-PTY. Agent-specific runtime files are generated under `.oxplow/runtime/` by
-`oxplow-plugin`; shell terminals skip that path entirely.
+Agent sessions key their backend PTY on `(stream, thread, agent, pane)`
+only — see `agent_session_key` in `commands/terminal.rs`. The thread's
+`agent` is in the key, so Claude and Codex threads on the same stream/pane
+never reattach to the same PTY. The **transport mode is deliberately NOT in
+the agent key** (tsk138): a re-attach that negotiated a different transport
+(e.g. a second daemon/browser client) must resume the one live agent PTY,
+not spawn a duplicate `claude` in the same worktree. (The shell path keeps
+transport in its key via `shell_session_key` — shell sessions may
+legitimately differ by transport.) Agent-specific runtime files are
+generated under `.oxplow/runtime/` by `oxplow-plugin`; shell terminals skip
+that path entirely.
 
 The component owns:
 
