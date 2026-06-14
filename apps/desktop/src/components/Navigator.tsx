@@ -410,18 +410,28 @@ export function Navigator({
               const isSelected =
                 row.stream.id === currentStreamId &&
                 threadStates[row.stream.id]?.selectedThreadId === row.thread.id;
-              const threadMenu: MenuItem[] = [
+              const threadMenu: MenuItem[] = [];
+              // "Make writer" is the headline action for a read-only thread:
+              // only the stream's single active thread can edit files, so a
+              // queued thread is "edits blocked" until promoted. Show it
+              // FIRST, and only when this thread isn't already the writer —
+              // the writer's accent pill already signals its state, so a
+              // disabled "already the writer" item would just be noise
+              // (tsk132). Promotes via the promote_thread IPC.
+              if (!row.isWriter) {
+                threadMenu.push({
+                  id: "thread.promote",
+                  label: "Make writer",
+                  enabled: !!onPromoteThread,
+                  run: () => onPromoteThread?.(row.thread.id),
+                });
+              }
+              threadMenu.push(
                 {
                   id: "thread.rename",
                   label: "Rename…",
                   enabled: !!onRenameThread,
                   run: () => setRenaming({ kind: "thread", id: row.thread.id }),
-                },
-                {
-                  id: "thread.promote",
-                  label: row.isWriter ? "Already the writer" : "Make writer",
-                  enabled: !!onPromoteThread && !row.isWriter,
-                  run: () => onPromoteThread?.(row.thread.id),
                 },
                 {
                   id: "thread.settings",
@@ -435,7 +445,7 @@ export function Navigator({
                   enabled: !!onCloseThread,
                   run: () => onCloseThread?.(row.thread.id),
                 },
-              ];
+              );
               return (
                 <OverlayRow
                   key={`o-t-${row.thread.id}`}
