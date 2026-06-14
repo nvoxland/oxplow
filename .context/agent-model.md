@@ -558,6 +558,32 @@ namespace on top, the agent calls `mcp__oxplow__create_task` —
 not the legacy `mcp__oxplow__oxplow__create_task`. The long form
 still resolves on `tools/call` for back-compat.
 
+### Param casing is lenient (camelCase aliases tolerated)
+
+Param structs are snake_case (`thread_id`, `touched_files`) and that
+stays the **canonical/advertised** form — the JSON schema is derived
+unchanged from each struct. But tool *outputs* are camelCase
+(`itemId`, …) and weak models (opencode / GPT-5-mini) carry camelCase
+priors from training, so they'd send `touchedFiles` / `threadId` and
+hit an opaque `-32602 missing field "touched_files"` they can't act on.
+
+`lenient_params::Parameters` (in `crates/oxplow-mcp/src/lib.rs`) is a
+drop-in replacement for rmcp's `Parameters<T>` — same name, so the
+`#[tool]` macro still recognizes it in handler signatures and derives
+the schema from `T`. Before deserializing it **additively** inserts a
+snake_case copy of any camelCase/kebab key (never removing the
+original), recursing into nested objects/arrays, so snake_case input is
+untouched, a camelCase call just works, and a genuinely missing field
+yields a clear self-describing `McpError` (not a raw transport error).
+This is global — every tool and nested param struct gets it for free,
+including future ones. See `lenient_from_object` + `to_snake_case`.
+
+Complementary hardening: required-but-inferable fields are made
+optional and inferred in-handler where safe (e.g. `list_comments`
+infers `scope` from `id`'s prefix; `dispatch_task` infers the thread
+from `item_id`, so `thread_id` is only needed when no `item_id` is
+given). The goal is the same — a reasonable call shouldn't 32602.
+
 ### Surface parity with the IPC adapter
 
 The MCP tool surface (agent) and the Tauri IPC command surface (UI,

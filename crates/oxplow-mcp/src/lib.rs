@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use schemars::JsonSchema;
@@ -27,6 +26,12 @@ use oxplow_domain::{
     CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
     TaskStatus, ThreadId,
 };
+
+mod lenient_params;
+// Drop-in for rmcp's `Parameters` that tolerates camelCase/kebab aliases
+// of our snake_case param fields, so weak models stop tripping on
+// `-32602 missing field`. See `lenient_params` for the rationale.
+use lenient_params::Parameters;
 
 /// A comment thread plus the typed context it was anchored in, resolved
 /// for the agent. `primary` is the comment's target (the nearest region
@@ -402,9 +407,13 @@ pub struct EpicChildSpec {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DispatchTaskParams {
-    pub thread_id: String,
+    /// Thread to dispatch from. Required only when `item_id` is
+    /// omitted (it's the thread whose first ready item we pick).
+    /// When `item_id` is given the thread is inferred from that
+    /// task, so this may be left out.
+    pub thread_id: Option<String>,
     /// The specific task to dispatch. When omitted, picks the
-    /// first ready item on the thread (mirrors main's
+    /// first ready item on `thread_id` (mirrors main's
     /// dispatch-without-id shortcut for /work-next composition).
     pub item_id: Option<String>,
     /// Optional extra context appended to the brief — usually
@@ -2593,13 +2602,14 @@ impl OxplowMcp {
         &self,
         params: Parameters<DispatchTaskParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("dispatch_task", "thread_id", &params.0.thread_id, ID_THREAD)?;
         let parsed_item_id = match params.0.item_id.as_deref() {
             Some(raw) => Some(parse_task_id("dispatch_task", "item_id", raw)?),
             None => None,
         };
-        let thread_id = parse_thread_id(&params.0.thread_id)?;
         let target = match parsed_item_id {
+            // An explicit item id fully determines the work, so the
+            // thread is inferred from the task itself — `thread_id` is
+            // not needed in this path.
             Some(id) => self
                 .services
                 .task_store
@@ -2612,7 +2622,21 @@ impl OxplowMcp {
                         None,
                     )
                 })?,
+            // Without an item id we need a thread to pick the first
+            // ready item from. Require it here with a corrective error
+            // rather than up front, so the item-id-only call works.
             None => {
+                let Some(raw_thread) = params.0.thread_id.as_deref() else {
+                    return Err(McpError::invalid_params(
+                        "dispatch_task: provide either `item_id` (the specific task to \
+                         dispatch) or `thread_id` (to dispatch the first ready item on that \
+                         thread)"
+                            .to_string(),
+                        None,
+                    ));
+                };
+                expect_id_kind("dispatch_task", "thread_id", raw_thread, ID_THREAD)?;
+                let thread_id = parse_thread_id(raw_thread)?;
                 let items = self
                     .services
                     .task_store
@@ -3631,7 +3655,6 @@ mod tests {
     use oxplow_domain::stores::TaskStore;
     use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
     use oxplow_domain::time::Timestamp;
-    use rmcp::handler::server::wrapper::Parameters;
 
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         let project = tempfile::tempdir().unwrap();
@@ -3883,6 +3906,61 @@ mod tests {
         assert!(
             !body.contains(&format!("\"id\":{}", id.value())),
             "soft-deleted item should not appear in backlog: {body}",
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_task_infers_thread_from_item_id() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let id = services
+            .task_store
+            .insert(&make_task(Some(thread.id), "dispatch me"))
+            .await
+            .unwrap();
+
+        // Only item_id — thread_id is inferred from the task, so a
+        // weak model that omits it still succeeds (no -32602).
+        let r = server
+            .dispatch_task(Parameters(DispatchTaskParams {
+                thread_id: None,
+                item_id: Some(id.to_string()),
+                extra_context: None,
+            }))
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(parsed["ok"], true);
+        assert!(
+            parsed["prompt"].as_str().unwrap().contains("dispatch me"),
+            "brief should target the item: {parsed}",
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_task_requires_thread_or_item() {
+        let (_proj, _services, server) = boot();
+        let err = server
+            .dispatch_task(Parameters(DispatchTaskParams {
+                thread_id: None,
+                item_id: None,
+                extra_context: None,
+            }))
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("item_id") && msg.contains("thread_id"),
+            "error should name both ways to dispatch: {msg}",
         );
     }
 
