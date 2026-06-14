@@ -50,12 +50,17 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
     // flip status back to waiting — the parent is genuinely still
     // working. Mirrors main's `pendingTasks`.
     let mut pending_tasks: i32 = 0;
-    // ExitPlanMode is Claude Code's built-in plan-approval prompt.
-    // PreToolUse fires when the agent invokes it; PostToolUse only
-    // arrives once the user approves or rejects. While that gap is
-    // open the agent is genuinely waiting on the user, so override
-    // the derived state at the end.
-    let mut pending_exit_plan_mode: i32 = 0;
+    // User-input tools: PreToolUse fires when the agent asks the user
+    // something; the matching PostToolUse only arrives once the user
+    // answers. While that gap is open the agent is genuinely waiting on
+    // the user (no Stop hook fires either), so override the derived
+    // state at the end and exempt it from the stall threshold. Two such
+    // tools exist: ExitPlanMode (the built-in plan-approval prompt) and
+    // AskUserQuestion (the built-in clarifying-question prompt). Before
+    // tsk128 only ExitPlanMode was tracked, so an agent blocked on
+    // AskUserQuestion stayed Running and degraded to Stalled — read as
+    // a death and mis-triggering a re-dispatch.
+    let mut pending_user_input: i32 = 0;
 
     for ev in &sorted {
         match ev.kind {
@@ -66,7 +71,7 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
                 state = AgentStatusState::Running;
                 match payload_tool_name(&ev.payload_json).as_deref() {
                     Some("Task") => pending_tasks += 1,
-                    Some("ExitPlanMode") => pending_exit_plan_mode += 1,
+                    Some(t) if is_user_input_tool(t) => pending_user_input += 1,
                     _ => {}
                 }
             }
@@ -74,8 +79,8 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
                 state = AgentStatusState::Running;
                 match payload_tool_name(&ev.payload_json).as_deref() {
                     Some("Task") if pending_tasks > 0 => pending_tasks -= 1,
-                    Some("ExitPlanMode") if pending_exit_plan_mode > 0 => {
-                        pending_exit_plan_mode -= 1;
+                    Some(t) if is_user_input_tool(t) && pending_user_input > 0 => {
+                        pending_user_input -= 1;
                     }
                     _ => {}
                 }
@@ -100,17 +105,17 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
             HookKind::Interrupt => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
-                pending_exit_plan_mode = 0;
+                pending_user_input = 0;
             }
             HookKind::AgentBoot => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
-                pending_exit_plan_mode = 0;
+                pending_user_input = 0;
             }
         }
     }
 
-    if pending_exit_plan_mode > 0 {
+    if pending_user_input > 0 {
         return AgentStatusState::AwaitingUser;
     }
     if state == AgentStatusState::Running {
@@ -121,6 +126,13 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
         }
     }
     state
+}
+
+/// Built-in tools that block the turn waiting on a human answer. A
+/// PreToolUse for one of these with no matching PostToolUse means the
+/// agent is parked on the user, not working and not dead.
+fn is_user_input_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "ExitPlanMode" | "AskUserQuestion")
 }
 
 fn payload_tool_name(payload: &str) -> Option<String> {
@@ -320,6 +332,70 @@ mod tests {
         assert_eq!(
             derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
             AgentStatusState::AwaitingUser
+        );
+    }
+
+    #[test]
+    fn ask_user_question_pending_shows_awaiting_user() {
+        // tsk128: the dogfooding bug. AskUserQuestion is a built-in
+        // tool whose PreToolUse fires when the agent asks the user a
+        // question; the matching PostToolUse only lands once the user
+        // answers. Until then the agent is WAITING ON THE USER — it
+        // must surface AwaitingUser, never Running (and never Stalled).
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(
+                HookKind::PreToolUse,
+                2,
+                r#"{"tool_name":"AskUserQuestion"}"#,
+            ),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::AwaitingUser
+        );
+    }
+
+    #[test]
+    fn stale_ask_user_question_stays_awaiting_user_not_stalled() {
+        // The crux of the bug: two agents blocked on AskUserQuestion
+        // were shown as "Stalled — agent stopped responding mid-turn"
+        // and misread as dead. Waiting on the user indefinitely is
+        // legitimate, so the stall threshold must NOT degrade it.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(
+                HookKind::PreToolUse,
+                2,
+                r#"{"tool_name":"AskUserQuestion"}"#,
+            ),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            AgentStatusState::AwaitingUser
+        );
+    }
+
+    #[test]
+    fn ask_user_question_answered_no_longer_awaiting_user() {
+        // After PostToolUse(AskUserQuestion) the user has answered;
+        // status falls back to Running like any other completed tool.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(
+                HookKind::PreToolUse,
+                2,
+                r#"{"tool_name":"AskUserQuestion"}"#,
+            ),
+            ev(
+                HookKind::PostToolUse,
+                3,
+                r#"{"tool_name":"AskUserQuestion"}"#,
+            ),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Running
         );
     }
 

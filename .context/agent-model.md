@@ -1129,16 +1129,22 @@ paused for a subagent, even though the subagent was still doing real
 work. The status flips to `waiting` once the final `Task` PostToolUse
 returns and a subsequent `stop` lands. See the original ticket history.
 
-**ExitPlanMode-pending carve-out.** Claude Code's built-in
-`ExitPlanMode` tool fires `PreToolUse` when the agent asks the user
-"should I implement this plan?", but the matching `PostToolUse` only
-arrives once the user approves or rejects. Until then no `Stop` hook
-fires either — the agent is genuinely waiting on the user. The
-reducer counts unreturned `ExitPlanMode` calls and, if the count is
->0 at the end of replay, overrides the derived state to
-`AwaitingUser` so the dot turns red instead of staying yellow. See
-`agent_status_derive::derive_thread_status` in
-`crates/oxplow-app/src/agent_status_derive.rs`.
+**User-input-pending carve-out.** Two Claude Code built-in tools block
+the turn waiting on a human answer: `ExitPlanMode` (the plan-approval
+prompt — "should I implement this plan?") and `AskUserQuestion` (the
+clarifying-question prompt). Each fires `PreToolUse` when the agent
+invokes it, but the matching `PostToolUse` only arrives once the user
+answers. Until then no `Stop` hook fires either — the agent is
+genuinely waiting on the user. `derive_thread_status` counts unreturned
+calls to either tool (`is_user_input_tool` in
+`crates/oxplow-app/src/agent_status_derive.rs`) and, if the count is >0
+at the end of replay, overrides the derived state to `AwaitingUser` so
+the dot shows "Waiting for input" instead of staying yellow — and the
+stall threshold is exempted (waiting indefinitely is legitimate).
+**tsk128:** `AskUserQuestion` was previously *not* tracked, so an agent
+parked on a clarifying question stayed `Running` and degraded to
+`Stalled` ("agent stopped responding mid-turn") — read as a death and
+mis-triggering a re-dispatch. Both tools are now handled identically.
 
 **User-interrupt synthetic event.** Claude Code does not reliably fire
 the `Stop` hook when the user cancels a turn with Escape (or `Ctrl-C`):
