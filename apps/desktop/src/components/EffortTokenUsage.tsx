@@ -7,14 +7,19 @@ import {
 } from "../api.js";
 import { formatTokens } from "../tokens.js";
 
+/** Prompts longer than this are truncated until the row is expanded. */
+const PROMPT_PREVIEW_LEN = 140;
+
 /**
- * Per-effort agent token usage (tsk104): one row per turn parsed from the
- * agent transcript on Stop, with summed totals. Tokens-only for now — the
- * actual per-turn model is captured so cost can be layered on later.
+ * Per-effort agent token usage (tsk104 + tsk143): one row per agent TURN
+ * parsed from the transcript on Stop. Each turn carries the human-authored
+ * prompt that opened it (pure observation — read from the transcript, never
+ * generated), the model, and the turn's token usage. The panel is a per-turn
+ * LOG so an effort review can see what was ASKED next to what it cost.
  *
  * Self-hides when the effort has no usage rows (no Claude Stop captured yet,
  * or a non-Claude agent). Live-updates on `agentTokenUsageChanged` for this
- * effort. Mirrors the AgentNudgesBlock disclosure pattern.
+ * effort. Long prompts are collapsible so the log stays scannable.
  */
 export function EffortTokenUsageBlock({ effortId }: { effortId: string }) {
   const [rows, setRows] = useState<AgentTokenUsage[]>([]);
@@ -91,6 +96,75 @@ export function EffortTokenUsageBlock({ effortId }: { effortId: string }) {
         <span title="Cache-write (creation) tokens">cache-w {formatTokens(sum.cacheW)}</span>
         <span title="Cache-read tokens">cache-r {formatTokens(sum.cacheR)}</span>
       </div>
+      <ol
+        data-testid={`effort-turn-log-${effortId}`}
+        style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}
+      >
+        {rows.map((row) => (
+          <TurnRow key={row.id} row={row} />
+        ))}
+      </ol>
     </div>
+  );
+}
+
+/** One turn in the log: collapsible prompt + model + token total. */
+export function TurnRow({ row }: { row: AgentTokenUsage }) {
+  const [expanded, setExpanded] = useState(false);
+  const prompt = row.prompt?.trim() ?? "";
+  const isLong = prompt.length > PROMPT_PREVIEW_LEN;
+  const shown = !isLong || expanded ? prompt : `${prompt.slice(0, PROMPT_PREVIEW_LEN)}…`;
+  const turnTotal =
+    row.input_tokens + row.output_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
+
+  const metaStyle: React.CSSProperties = {
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
+    display: "flex",
+    gap: 8,
+    flexShrink: 0,
+  };
+
+  return (
+    <li
+      data-testid={`effort-turn-${row.id}`}
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 8,
+        padding: "4px 0",
+        borderTop: "1px solid var(--border-subtle)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+        {prompt ? (
+          <button
+            type="button"
+            data-testid={`effort-turn-prompt-${row.id}`}
+            onClick={isLong ? () => setExpanded((v) => !v) : undefined}
+            title={isLong ? (expanded ? "Collapse prompt" : "Expand prompt") : undefined}
+            style={{
+              all: "unset",
+              cursor: isLong ? "pointer" : "default",
+              fontSize: "var(--text-sm)",
+              color: "var(--text-secondary)",
+              whiteSpace: expanded ? "pre-wrap" : "normal",
+              wordBreak: "break-word",
+            }}
+          >
+            {shown}
+          </button>
+        ) : (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontStyle: "italic" }}>
+            (no prompt)
+          </span>
+        )}
+      </div>
+      <span className="oxplow-tabular" style={metaStyle}>
+        {row.model ? <span style={{ fontFamily: "var(--font-mono)" }}>{row.model}</span> : null}
+        <span title="Total tokens this turn">{formatTokens(turnTotal)}</span>
+      </span>
+    </li>
   );
 }

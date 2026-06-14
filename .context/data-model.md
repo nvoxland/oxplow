@@ -984,21 +984,21 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   nudges that *actually fired* — a deduped nudge is never stored. No
   store-side retention prune (nudge volume per effort is tiny).
 
-### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migration `V35__agent_token_usage.sql`)
+### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migrations `V35__agent_token_usage.sql`, `V36__agent_token_usage_prompt.sql`)
 
 Per-turn agent token accounting parsed from the session transcript
 (tsk104). On Stop the runtime reads `transcript_path` from the hook
-payload, sums the NEW usage records since the last Stop, and writes one
-row here. See `.context/agent-model.md` (Token usage capture) for the
-capture flow.
+payload, splits the NEW tail into one row per agent turn, and writes them
+here. See `.context/agent-model.md` (Token usage capture) for the capture
+flow.
 
 `agent_token_usage` columns: `id, stream_id (NOT NULL, FK streams ON
 DELETE CASCADE), thread_id (NOT NULL, FK threads ON DELETE CASCADE),
 effort_id (NULLABLE, FK task_effort ON DELETE CASCADE), session_id,
-agent_kind, model (nullable), input_tokens, output_tokens,
-cache_creation_input_tokens, cache_read_input_tokens, message_count,
-provenance (CHECK `observed`), recorded_at`. Indexes on `(effort_id,
-recorded_at DESC)` and `(thread_id, recorded_at DESC)`.
+agent_kind, model (nullable), prompt (nullable), input_tokens,
+output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+message_count, provenance (CHECK `observed`), recorded_at`. Indexes on
+`(effort_id, recorded_at DESC)` and `(thread_id, recorded_at DESC)`.
 
 - **`effort_id` nullable** for the same reason as `agent_nudge`: a Stop
   can land with no open effort, so the turn is still attributed to the
@@ -1008,6 +1008,12 @@ recorded_at DESC)` and `(thread_id, recorded_at DESC)`.
   directly (no agent-asserted path). **`model`** is the actual per-turn
   model (e.g. `claude-opus-4-8`) so $ cost can be layered on later;
   display is tokens-only today.
+- **`prompt` (nullable, tsk143)** is the human-authored user prompt that
+  OPENED the turn — pure observation read from the transcript, never
+  generated or sent (no new input surface). Nullable: a turn can be an
+  assistant continuation with no fresh prompt at the head of the chunk.
+  Stored locally like every other effort artifact (same privacy posture
+  as the token counts).
 - **`agent_kind`** records who ran the turn. Only Claude is parsed today;
   Codex/Opencode rows aren't written yet (their transcript formats
   differ) — the parser is pluggable per kind.

@@ -40,6 +40,11 @@ pub struct AgentTokenUsage {
     pub agent_kind: String,
     /// Actual model the turn ran on (e.g. `claude-opus-4-8`), for later cost.
     pub model: Option<String>,
+    /// The human-authored user prompt that OPENED this turn (tsk143).
+    /// Nullable — a turn can be an assistant continuation with no opening
+    /// prompt, or an agent kind whose transcript text we don't parse. Pure
+    /// observation: read from the transcript, never generated.
+    pub prompt: Option<String>,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cache_creation_input_tokens: i64,
@@ -60,6 +65,7 @@ pub struct NewAgentTokenUsage {
     pub session_id: String,
     pub agent_kind: String,
     pub model: Option<String>,
+    pub prompt: Option<String>,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cache_creation_input_tokens: i64,
@@ -82,11 +88,11 @@ pub struct TokenUsageTotals {
 }
 
 const SELECT_COLS: &str = "id, stream_id, thread_id, effort_id, session_id, agent_kind, \
-     model, input_tokens, output_tokens, cache_creation_input_tokens, \
+     model, prompt, input_tokens, output_tokens, cache_creation_input_tokens, \
      cache_read_input_tokens, message_count, provenance, recorded_at";
 
 fn row_to_usage(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenUsage> {
-    let recorded_at: String = row.get(13)?;
+    let recorded_at: String = row.get(14)?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -100,12 +106,13 @@ fn row_to_usage(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenUsage> {
         session_id: row.get(4)?,
         agent_kind: row.get(5)?,
         model: row.get(6)?,
-        input_tokens: row.get(7)?,
-        output_tokens: row.get(8)?,
-        cache_creation_input_tokens: row.get(9)?,
-        cache_read_input_tokens: row.get(10)?,
-        message_count: row.get(11)?,
-        provenance: row.get(12)?,
+        prompt: row.get(7)?,
+        input_tokens: row.get(8)?,
+        output_tokens: row.get(9)?,
+        cache_creation_input_tokens: row.get(10)?,
+        cache_read_input_tokens: row.get(11)?,
+        message_count: row.get(12)?,
+        provenance: row.get(13)?,
         recorded_at: string_to_ts(&recorded_at).map_err(map_err)?,
     })
 }
@@ -146,10 +153,10 @@ impl SqliteTokenUsageStore {
                 let now = ts_to_string(Timestamp::now());
                 conn.execute(
                     "INSERT INTO agent_token_usage
-                       (stream_id, thread_id, effort_id, session_id, agent_kind, model,
+                       (stream_id, thread_id, effort_id, session_id, agent_kind, model, prompt,
                         input_tokens, output_tokens, cache_creation_input_tokens,
                         cache_read_input_tokens, message_count, provenance, recorded_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'observed', ?12)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'observed', ?13)",
                     params![
                         stream_val,
                         thread_val,
@@ -157,6 +164,7 @@ impl SqliteTokenUsageStore {
                         usage.session_id,
                         usage.agent_kind,
                         usage.model,
+                        usage.prompt,
                         usage.input_tokens,
                         usage.output_tokens,
                         usage.cache_creation_input_tokens,
@@ -349,6 +357,7 @@ mod tests {
             session_id: "sess-1".into(),
             agent_kind: "claude".into(),
             model: Some("claude-opus-4-8".into()),
+            prompt: Some("fix the parser".into()),
             input_tokens: 100,
             output_tokens: 20,
             cache_creation_input_tokens: 50,
@@ -369,6 +378,7 @@ mod tests {
         assert_eq!(u.thread_id, "thr1");
         assert_eq!(u.agent_kind, "claude");
         assert_eq!(u.model.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(u.prompt.as_deref(), Some("fix the parser"));
         assert_eq!(u.input_tokens, 100);
         assert_eq!(u.output_tokens, 20);
         assert_eq!(u.cache_creation_input_tokens, 50);

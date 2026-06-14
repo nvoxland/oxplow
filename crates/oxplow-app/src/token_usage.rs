@@ -100,6 +100,121 @@ pub fn parse_usage_delta(kind: AgentKind, content: &str) -> Option<UsageDelta> {
     }
 }
 
+/// One agent turn within a transcript chunk: the human-authored prompt that
+/// opened it (when present) plus the summed usage of the assistant messages
+/// that answered it (tsk143). A "turn" begins at a genuine user prompt and
+/// runs until the next one; assistant lines accumulate into the current turn.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Turn {
+    /// The opening user prompt text, or `None` for an assistant continuation
+    /// with no fresh prompt at the head of the chunk.
+    pub prompt: Option<String>,
+    pub usage: UsageDelta,
+}
+
+impl Turn {
+    /// A turn is worth recording if it captured either a prompt or usage.
+    fn is_recordable(&self) -> bool {
+        self.prompt.is_some() || !self.usage.is_empty()
+    }
+}
+
+/// Extract the human-authored prompt text from a Claude `type=="user"`
+/// message, or `None` when the line is not a genuine user prompt. Claude
+/// transcripts reuse `type=="user"` for two things: the actual prompt the
+/// human typed, and tool-result continuations the harness injects. We only
+/// want the former — so a user message whose content is exclusively
+/// tool_result blocks (no text) is NOT a prompt and returns `None`. String
+/// content is taken verbatim; array content joins its `text` blocks.
+fn extract_user_prompt(msg: &serde_json::Value) -> Option<String> {
+    let content = msg.get("content")?;
+    if let Some(s) = content.as_str() {
+        let s = s.trim();
+        return (!s.is_empty()).then(|| s.to_string());
+    }
+    let arr = content.as_array()?;
+    let mut parts = Vec::new();
+    for block in arr {
+        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                let t = t.trim();
+                if !t.is_empty() {
+                    parts.push(t.to_string());
+                }
+            }
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// Split a Claude transcript chunk into per-turn rows. Each genuine user
+/// prompt opens a new turn; assistant `usage` blocks accumulate into the
+/// current turn; tool-result user messages are folded into the current turn
+/// (they are not fresh prompts). Assistant lines that precede any prompt in
+/// the chunk form a leading prompt-less turn.
+pub fn parse_claude_turns(content: &str) -> Vec<Turn> {
+    let mut turns: Vec<Turn> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let kind = v.get("type").and_then(|t| t.as_str());
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
+        match kind {
+            Some("user") => {
+                if let Some(prompt) = extract_user_prompt(msg) {
+                    turns.push(Turn {
+                        prompt: Some(prompt),
+                        usage: UsageDelta::default(),
+                    });
+                }
+                // tool_result-only user message → not a fresh turn; skip.
+            }
+            Some("assistant") => {
+                let Some(usage) = msg.get("usage") else {
+                    continue;
+                };
+                if turns.is_empty() {
+                    turns.push(Turn::default());
+                }
+                let d = &mut turns.last_mut().expect("just pushed").usage;
+                let get = |k: &str| usage.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
+                d.input_tokens += get("input_tokens");
+                d.output_tokens += get("output_tokens");
+                d.cache_creation_input_tokens += get("cache_creation_input_tokens");
+                d.cache_read_input_tokens += get("cache_read_input_tokens");
+                d.message_count += 1;
+                if let Some(m) = msg.get("model").and_then(|m| m.as_str()) {
+                    d.model = Some(m.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    turns
+}
+
+/// Pluggable per-agent-kind turn parser (tsk143). Returns the recordable
+/// turns in this chunk — empty when there is nothing to persist (no usage
+/// and no prompt, or an agent kind whose transcript format isn't parsed).
+pub fn parse_turns(kind: AgentKind, content: &str) -> Vec<Turn> {
+    match kind {
+        AgentKind::Claude => parse_claude_turns(content)
+            .into_iter()
+            .filter(Turn::is_recordable)
+            .collect(),
+        // Codex / opencode session formats differ. Stubbed until their
+        // parsers land (mirrors `parse_usage_delta`).
+        AgentKind::Codex | AgentKind::Opencode => Vec::new(),
+    }
+}
+
 /// Pull `transcript_path` out of a raw hook payload body, expanding a
 /// leading `~/`.
 fn extract_transcript_path(payload_json: &str) -> Option<PathBuf> {
@@ -226,13 +341,14 @@ impl TokenUsageService {
             return Ok(None);
         };
 
-        let Some(delta) = parse_usage_delta(kind, &tail) else {
-            // Nothing to record from this chunk (no usage / unsupported
-            // agent), but the bytes are consumed — advance so we don't
-            // re-scan them every Stop.
+        let turns = parse_turns(kind, &tail);
+        if turns.is_empty() {
+            // Nothing to record from this chunk (no usage / no prompt /
+            // unsupported agent), but the bytes are consumed — advance so we
+            // don't re-scan them every Stop.
             self.usage.set_cursor(&session_key, new_offset).await?;
             return Ok(None);
-        };
+        }
 
         let effort_id = self
             .efforts
@@ -240,28 +356,35 @@ impl TokenUsageService {
             .await?
             .map(|e| e.id.to_string());
 
-        let id = self
-            .usage
-            .record(NewAgentTokenUsage {
-                stream_id,
-                thread_id: thread.to_string(),
-                effort_id: effort_id.clone(),
-                session_id: session_key.clone(),
-                agent_kind: kind.as_str().to_string(),
-                model: delta.model,
-                input_tokens: delta.input_tokens,
-                output_tokens: delta.output_tokens,
-                cache_creation_input_tokens: delta.cache_creation_input_tokens,
-                cache_read_input_tokens: delta.cache_read_input_tokens,
-                message_count: delta.message_count,
-            })
-            .await?;
+        // One row per turn — each carrying its opening prompt, model, and the
+        // usage of the assistant messages that answered it (tsk143).
+        let mut last_id = None;
+        for turn in turns {
+            let id = self
+                .usage
+                .record(NewAgentTokenUsage {
+                    stream_id: stream_id.clone(),
+                    thread_id: thread.to_string(),
+                    effort_id: effort_id.clone(),
+                    session_id: session_key.clone(),
+                    agent_kind: kind.as_str().to_string(),
+                    model: turn.usage.model,
+                    prompt: turn.prompt,
+                    input_tokens: turn.usage.input_tokens,
+                    output_tokens: turn.usage.output_tokens,
+                    cache_creation_input_tokens: turn.usage.cache_creation_input_tokens,
+                    cache_read_input_tokens: turn.usage.cache_read_input_tokens,
+                    message_count: turn.usage.message_count,
+                })
+                .await?;
+            last_id = Some(id);
+        }
         self.usage.set_cursor(&session_key, new_offset).await?;
         self.events.emit(OxplowEvent::AgentTokenUsageChanged {
             thread_id: *thread,
             effort_id,
         });
-        Ok(Some(id))
+        Ok(last_id)
     }
 }
 
@@ -287,6 +410,78 @@ mod tests {
         assert_eq!(d.cache_creation_input_tokens, 100);
         assert_eq!(d.cache_read_input_tokens, 400);
         assert_eq!(d.model.as_deref(), Some("claude-opus-4-8"));
+    }
+
+    // A genuine user prompt line (string content).
+    fn user_line(text: &str) -> String {
+        serde_json::json!({"type": "user", "message": {"content": text}}).to_string()
+    }
+
+    #[test]
+    fn parse_claude_turns_splits_one_turn_per_user_prompt() {
+        // [prompt A → assistant turn][prompt B → assistant turn]
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\n{}\n{ASSISTANT_LINE}\n",
+            user_line("prompt A"),
+            user_line("prompt B"),
+        );
+        let turns = parse_claude_turns(&content);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].prompt.as_deref(), Some("prompt A"));
+        assert_eq!(turns[0].usage.message_count, 1);
+        assert_eq!(turns[0].usage.input_tokens, 100);
+        assert_eq!(turns[1].prompt.as_deref(), Some("prompt B"));
+        assert_eq!(turns[1].usage.message_count, 1);
+        assert_eq!(turns[1].usage.model.as_deref(), Some("claude-opus-4-8"));
+    }
+
+    #[test]
+    fn parse_turns_via_kind_carries_each_prompt() {
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\n{}\n{ASSISTANT_LINE}\n",
+            user_line("prompt A"),
+            user_line("prompt B"),
+        );
+        let turns = parse_turns(AgentKind::Claude, &content);
+        let prompts: Vec<_> = turns.iter().map(|t| t.prompt.as_deref()).collect();
+        assert_eq!(prompts, vec![Some("prompt A"), Some("prompt B")]);
+        // Non-Claude agents are stubbed.
+        assert!(parse_turns(AgentKind::Codex, &content).is_empty());
+    }
+
+    #[test]
+    fn tool_result_user_messages_do_not_open_a_turn() {
+        // A real prompt, then an assistant message, then a tool_result user
+        // message (the harness continuation), then another assistant message.
+        // The tool_result must NOT start a second turn — both assistant
+        // messages fold into the single real-prompt turn.
+        let tool_result = serde_json::json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "content": "ok"}]}
+        })
+        .to_string();
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\n{tool_result}\n{ASSISTANT_LINE}\n",
+            user_line("real prompt"),
+        );
+        let turns = parse_claude_turns(&content);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].prompt.as_deref(), Some("real prompt"));
+        assert_eq!(turns[0].usage.message_count, 2);
+    }
+
+    #[test]
+    fn extract_user_prompt_joins_text_blocks_and_skips_tool_results() {
+        let arr = serde_json::json!({"content": [
+            {"type": "text", "text": "hello"},
+            {"type": "tool_result", "content": "ignored"},
+            {"type": "text", "text": "world"},
+        ]});
+        assert_eq!(extract_user_prompt(&arr).as_deref(), Some("hello\nworld"));
+        let only_tool = serde_json::json!({"content": [{"type": "tool_result"}]});
+        assert!(extract_user_prompt(&only_tool).is_none());
+        let empty = serde_json::json!({"content": "   "});
+        assert!(extract_user_prompt(&empty).is_none());
     }
 
     #[test]
@@ -513,6 +708,58 @@ mod tests {
         assert_eq!(t.turns, 1, "only the new turn counts");
         assert_eq!(t.input_tokens, 100);
         assert_eq!(t.message_count, 1);
+    }
+
+    #[tokio::test]
+    async fn on_stop_splits_a_multi_prompt_chunk_into_one_row_per_turn() {
+        // tsk143: an effort spanning two prompts in a single Stop chunk must
+        // yield two turn rows. (Bootstrap seeds first, so we land the prompts
+        // on the second Stop.)
+        let (svc, _dir, thread) = service_fixture().await;
+        let tdir = tempfile::tempdir().unwrap();
+        let path = tdir.path().join("session.jsonl");
+        let thread_key = thread.to_string();
+        let payload = format!(
+            "{{\"transcript_path\":{:?},\"session_id\":\"sess-2p\"}}",
+            path.to_string_lossy()
+        );
+        let user_a = serde_json::json!({"type":"user","message":{"content":"prompt A"}});
+        let user_b = serde_json::json!({"type":"user","message":{"content":"prompt B"}});
+
+        // Bootstrap: one assistant line already present; first Stop seeds only.
+        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        assert!(svc
+            .token_usage
+            .on_stop(&thread, Some("sess-2p"), &payload)
+            .await
+            .unwrap()
+            .is_none());
+
+        // Append two full turns, then Stop once: [A → turn][B → turn].
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            f.write_all(
+                format!("{user_a}\n{ASSISTANT_LINE}\n{user_b}\n{ASSISTANT_LINE}\n").as_bytes(),
+            )
+            .unwrap();
+        }
+        assert!(svc
+            .token_usage
+            .on_stop(&thread, Some("sess-2p"), &payload)
+            .await
+            .unwrap()
+            .is_some());
+
+        let t = svc
+            .token_usage_store
+            .totals_for_thread(&thread_key)
+            .await
+            .unwrap();
+        assert_eq!(t.turns, 2, "two prompts → two turn rows");
+        assert_eq!(t.message_count, 2);
     }
 
     #[tokio::test]

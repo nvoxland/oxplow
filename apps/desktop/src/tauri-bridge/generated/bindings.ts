@@ -818,6 +818,13 @@ export type AgentTokenUsage = {
 	agent_kind: string,
 	// Actual model the turn ran on (e.g. `claude-opus-4-8`), for later cost.
 	model: string | null,
+	/**
+	 *  The human-authored user prompt that OPENED this turn (tsk143).
+	 *  Nullable — a turn can be an assistant continuation with no opening
+	 *  prompt, or an agent kind whose transcript text we don't parse. Pure
+	 *  observation: read from the transcript, never generated.
+	 */
+	prompt: string | null,
 	input_tokens: number,
 	output_tokens: number,
 	cache_creation_input_tokens: number,

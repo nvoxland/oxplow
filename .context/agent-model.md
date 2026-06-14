@@ -990,16 +990,42 @@ branch after ingest, best-effort).**
 2. Read the persisted per-session cursor (`agent_token_cursor`), seek to
    it, and read only the COMPLETE lines of the tail (everything up to the
    last newline — a half-written final line is left for next time).
-3. `parse_usage_delta(kind, tail)` sums the new usage. **Pluggable per
-   agent kind:** Claude implemented; Codex/Opencode return `None` (their
-   transcript formats differ — opencode surfaces its own `$cost` — and
-   are wired later).
-4. Attribute to the thread's open effort (`find_open_for_thread`, nullable
-   — a Stop can land with no open effort) and persist one
-   `agent_token_usage` row (provenance `observed`, with the actual
-   per-turn `model`).
-5. Advance the cursor to the new offset and emit
-   `AgentTokenUsageChanged { thread_id, effort_id }`.
+3. `parse_turns(kind, tail)` splits the new tail into one `Turn` per agent
+   turn — each carrying the human-authored **prompt** that opened it plus
+   the summed usage + `model` of the assistant messages that answered it
+   (tsk143). A turn begins at a genuine user prompt and runs until the next
+   one; tool-result user messages (the harness's continuation lines) fold
+   into the current turn rather than opening a new one. **Pluggable per
+   agent kind:** Claude implemented; Codex/Opencode return `[]` (their
+   transcript formats differ — opencode surfaces its own `$cost` — and are
+   wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
+   but `on_stop` records per-turn.)
+4. Attribute each turn to the thread's open effort (`find_open_for_thread`,
+   nullable — a Stop can land with no open effort) and persist one
+   `agent_token_usage` row per turn (provenance `observed`, with the actual
+   per-turn `model` and `prompt`). A chunk spanning several prompts (a brief
+   plus follow-up nudges, or an interrupt-and-re-prompt) yields one row per
+   prompt — so an effort review shows *every* thing that was asked, not just
+   the first.
+5. Advance the cursor to the new offset (once, after all turns are written)
+   and emit `AgentTokenUsageChanged { thread_id, effort_id }`.
+
+**Prompt capture is pure OBSERVATION (tsk143).** The prompt text is read
+out of the same transcript walk oxplow already does — it is the exact thing
+the human typed into the real `claude`/`codex`/`opencode` CLI. There is NO
+second input box, NO agent-input path, and NO MCP "send prompt" tool; we
+only RECORD the user-authored prompt, never generate or send one (the same
+boundary as `forward_terminal_input`, which stays human-keystrokes-only and
+non-MCP). The prompt is stored locally in the effort DB (`agent_token_usage.
+prompt`) like every other effort artifact — same privacy posture as the
+token counts, file lists, and coverage already kept there.
+
+**Live capture (optional follow-up).** v1 sources prompts from the at-Stop
+transcript walk — a single capture path with the exact stored text, but the
+prompt only appears once the turn finishes. A `UserPromptSubmit` hook could
+surface the prompt LIVE as the user types, at the cost of a second capture
+path to reconcile against the transcript walk. Left out of v1 unless it
+turns out trivial.
 
 **Bootstrap (first capture for a session).** When `cursor()` returns
 `None` — a fresh daemon, or the first Stop after attaching to an
@@ -1017,10 +1043,13 @@ so this is purely a `None`-vs-`Some(0)` distinction.
 
 The cursor is **persisted** (not in-memory) so a daemon restart never
 re-sums already-recorded usage. Display is **tokens-only** for now; the
-stored `model` lets cost be layered on later. Surfaced UI-side: per-effort
-totals on the task page (next to coverage/observations) and a running
-per-thread total in the Work panel header. Tables + IPC: see
-`.context/data-model.md` (`agent_token_usage` / `agent_token_cursor`).
+stored `model` lets cost be layered on later. Surfaced UI-side: a per-turn
+LOG on the task page (`EffortTokenUsageBlock`) — each row shows the opening
+prompt (truncated, click to expand long ones), the model, and the turn's
+token total, above the effort summary; plus a running per-thread total in
+the Work panel header. `list_token_usage_for_effort` returns each row with
+its `prompt` (camelCase wire). Tables + IPC: see `.context/data-model.md`
+(`agent_token_usage` / `agent_token_cursor`).
 
 ## Write guard
 
