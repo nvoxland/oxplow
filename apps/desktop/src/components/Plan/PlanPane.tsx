@@ -24,6 +24,7 @@ import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { requestCommentCompose } from "../../comment-compose-bus.js";
 import { composeForElement } from "../Comments/useDomAnnotations.js";
+import { ThreadTokenTotal } from "../ThreadTokenTotal.js";
 import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, TaskGroupList } from "./TaskGroupList.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
@@ -483,6 +484,7 @@ export function PlanPane({
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {mode === "thread" && threadId ? <ThreadTokenTotal threadId={threadId} /> : null}
         {(() => {
           const allItems = groups.flatMap((g) => [
             ...g.items,

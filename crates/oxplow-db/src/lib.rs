@@ -18,6 +18,7 @@ mod stream_store;
 pub mod task_satellite;
 pub mod task_store;
 mod thread_store;
+pub mod token_usage_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 
@@ -43,5 +44,8 @@ pub use stream_store::SqliteStreamStore;
 pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};
 pub use thread_store::SqliteThreadStore;
+pub use token_usage_store::{
+    AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,
+};
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

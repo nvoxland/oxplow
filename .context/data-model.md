@@ -984,6 +984,45 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   nudges that *actually fired* — a deduped nudge is never stored. No
   store-side retention prune (nudge volume per effort is tiny).
 
+### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migration `V35__agent_token_usage.sql`)
+
+Per-turn agent token accounting parsed from the session transcript
+(tsk104). On Stop the runtime reads `transcript_path` from the hook
+payload, sums the NEW usage records since the last Stop, and writes one
+row here. See `.context/agent-model.md` (Token usage capture) for the
+capture flow.
+
+`agent_token_usage` columns: `id, stream_id (NOT NULL, FK streams ON
+DELETE CASCADE), thread_id (NOT NULL, FK threads ON DELETE CASCADE),
+effort_id (NULLABLE, FK task_effort ON DELETE CASCADE), session_id,
+agent_kind, model (nullable), input_tokens, output_tokens,
+cache_creation_input_tokens, cache_read_input_tokens, message_count,
+provenance (CHECK `observed`), recorded_at`. Indexes on `(effort_id,
+recorded_at DESC)` and `(thread_id, recorded_at DESC)`.
+
+- **`effort_id` nullable** for the same reason as `agent_nudge`: a Stop
+  can land with no open effort, so the turn is still attributed to the
+  thread. Per-effort totals only count attributed rows; per-thread totals
+  include effort-less turns.
+- **`provenance` is always `observed`** — oxplow read the transcript
+  directly (no agent-asserted path). **`model`** is the actual per-turn
+  model (e.g. `claude-opus-4-8`) so $ cost can be layered on later;
+  display is tokens-only today.
+- **`agent_kind`** records who ran the turn. Only Claude is parsed today;
+  Codex/Opencode rows aren't written yet (their transcript formats
+  differ) — the parser is pluggable per kind.
+
+`agent_token_cursor` columns: `session_id (PK), byte_offset, updated_at`.
+The persisted read offset into each session's transcript so successive
+Stops only sum the new tail — and a daemon restart never re-sums
+already-recorded usage. No FK (the transcript outlives any single row).
+
+Store methods: `record`, `list_for_effort`, `totals_for_effort`,
+`totals_for_thread`, `cursor`/`set_cursor`. Reads exposed over IPC as
+`list_token_usage_for_effort` / `get_effort_token_totals` /
+`get_thread_token_totals` (UI-only); mutations emit
+`AgentTokenUsageChanged { thread_id, effort_id }`.
+
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
@@ -1212,7 +1251,7 @@ The runtime relays each store's changes onto the typed EventBus
 - `task.changed`, `backlog.changed`, `thread.changed`
 - `file-snapshot.created`, `agent-status.changed`
 - `hook.recorded`, `config.changed`
-- `effortObservationsChanged`, `agentNudgesChanged`
+- `effortObservationsChanged`, `agentNudgesChanged`, `agentTokenUsageChanged`
 
 UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
 like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in

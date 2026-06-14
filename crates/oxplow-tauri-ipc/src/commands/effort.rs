@@ -1,7 +1,8 @@
 //! task effort tracking commands.
 
 use oxplow_db::{
-    AgentNudge, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortObservation, TaskEffort,
+    AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile,
+    EffortObservation, TaskEffort, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 
@@ -84,4 +85,34 @@ pub async fn list_nudges_for_thread(
     thread_id: ThreadId,
 ) -> Result<Vec<AgentNudge>, IpcError> {
     oxplow_rpc::commands::effort::list_nudges_for_thread(&state, thread_id).await
+}
+
+/// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_token_usage_for_effort(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<Vec<AgentTokenUsage>, IpcError> {
+    oxplow_rpc::commands::effort::list_token_usage_for_effort(&state, effort_id).await
+}
+
+/// Summed token totals for one effort.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_effort_token_totals(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<TokenUsageTotals, IpcError> {
+    oxplow_rpc::commands::effort::get_effort_token_totals(&state, effort_id).await
+}
+
+/// Summed token totals for a whole thread (Work panel running total).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_thread_token_totals(
+    state: tauri::State<'_, AppState>,
+    thread_id: ThreadId,
+) -> Result<TokenUsageTotals, IpcError> {
+    oxplow_rpc::commands::effort::get_thread_token_totals(&state, thread_id).await
 }

@@ -203,6 +203,14 @@ pub enum OxplowEvent {
         thread_id: ThreadId,
         effort_id: Option<String>,
     },
+    /// A per-turn agent token-usage row landed (parsed on Stop from the
+    /// hook transcript). The renderer refetches the effort's usage list +
+    /// the thread's running total. `effort_id` is absent when the Stop had
+    /// no open effort. See `.context/agent-model.md` (Token usage capture).
+    AgentTokenUsageChanged {
+        thread_id: ThreadId,
+        effort_id: Option<String>,
+    },
     /// `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.

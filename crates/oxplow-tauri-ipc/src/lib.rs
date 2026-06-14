@@ -206,6 +206,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::effort::list_effort_observations,
             commands::effort::list_nudges_for_effort,
             commands::effort::list_nudges_for_thread,
+            commands::effort::list_token_usage_for_effort,
+            commands::effort::get_effort_token_totals,
+            commands::effort::get_thread_token_totals,
             // log
             commands::log::get_git_log,
             commands::log::get_commit_detail,

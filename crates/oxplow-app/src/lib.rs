@@ -37,6 +37,7 @@ pub mod snapshot_capture_registry;
 pub mod task_service;
 pub mod terminal_sessions;
 pub mod thread_runtime;
+pub mod token_usage;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
@@ -81,7 +82,8 @@ use oxplow_db::{
     SqliteCommentStore, SqliteEffortObservationStore, SqlitePageRefStore, SqlitePageVisitStore,
     SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
     SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
-    SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
+    SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -368,6 +370,10 @@ pub struct Services {
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
+    /// Per-turn agent token usage parsed from the hook transcript (tsk104).
+    pub token_usage_store: Arc<SqliteTokenUsageStore>,
+    /// Captures token usage on Stop from the agent transcript.
+    pub token_usage: token_usage::TokenUsageService,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
     /// `source_kind` slice mirrors its outbound refs into this store
@@ -542,6 +548,13 @@ impl Services {
             layout.project_dir.clone(),
             event_bus.clone(),
         );
+        let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
+        let token_usage = token_usage::TokenUsageService::new(
+            token_usage_store.clone(),
+            effort_store.clone(),
+            thread_store.clone(),
+            event_bus.clone(),
+        );
 
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
@@ -574,6 +587,8 @@ impl Services {
             observation_store,
             nudge_store,
             collection,
+            token_usage_store,
+            token_usage,
             wiki_page_thread_updates,
             page_ref_store,
             comment_store,
