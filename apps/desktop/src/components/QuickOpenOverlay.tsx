@@ -8,8 +8,8 @@ import {
   type Stream,
   type WorkspaceIndexedFile,
 } from "../api.js";
-import { fuzzyMatches } from "../fuzzy-match.js";
-import { dedupeSiteHits } from "./quickOpenResults.js";
+import type { MenuGroup } from "../commands.js";
+import { buildQuickOpenResults, flattenCommands, type QuickOpenResult } from "./quickOpenResults.js";
 import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
@@ -21,6 +21,9 @@ interface Props {
   /** Top-level pages/apps surfaced as launcher entries when the input
    *  is empty, and mixed into search results when the user types. */
   pages: PageDirectoryEntry[];
+  /** Menu commands flattened into the launcher so actions (Commit,
+   *  New Task, …) are discoverable here too — this is the only palette. */
+  menuGroups: MenuGroup[];
   onClose(): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
@@ -28,12 +31,9 @@ interface Props {
   onOpenSearchHit(hit: SearchHit): void;
 }
 
-type Result =
-  | { kind: "page"; entry: PageDirectoryEntry }
-  | { kind: "file"; file: WorkspaceIndexedFile }
-  | { kind: "hit"; hit: SearchHit };
+type Result = QuickOpenResult;
 
-export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGroups, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -110,30 +110,18 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
     };
   }, [open, stream?.id, query]);
 
-  // Empty input = launcher mode (pages only, fixed order). With a
-  // query, search pages, file paths, and body hits and show pages
-  // first — they're a finite curated list and a "plan" / "files"
-  // / "git" search shouldn't have to scroll past matching file paths.
-  // Body hits come last (already BM25-ranked), minus file hits whose
-  // path matched by name above.
-  const results = useMemo<Result[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
-      return pages.map((entry) => ({ kind: "page" as const, entry }));
-    }
-    const matchedPages: Result[] = pages
-      .filter((entry) => fuzzyMatches(entry.label.toLowerCase(), q) || fuzzyMatches(entry.id, q))
-      .map((entry) => ({ kind: "page" as const, entry }));
-    const matchedFiles = files
-      .filter((file) => fuzzyMatches(file.path.toLowerCase(), q))
-      .slice(0, 80);
-    const matchedFileResults: Result[] = matchedFiles.map((file) => ({ kind: "file" as const, file }));
-    const matchedPaths = new Set(matchedFiles.map((f) => f.path));
-    const bodyHits: Result[] = dedupeSiteHits(siteHits, matchedPaths)
-      .slice(0, 30)
-      .map((hit) => ({ kind: "hit" as const, hit }));
-    return [...matchedPages, ...matchedFileResults, ...bodyHits];
-  }, [pages, files, siteHits, query]);
+  // The launcher's commands — the retired CommandPalette's entries now
+  // live here so this overlay is the single discovery surface.
+  const commands = useMemo(() => flattenCommands(menuGroups), [menuGroups]);
+
+  // Empty input = launcher mode (pages only, grouped by category in the
+  // render below). With a query, rank pages → commands → files → body
+  // hits. The ordering lives in a pure helper so it's unit-testable.
+  const results = useMemo<Result[]>(
+    () => buildQuickOpenResults({ query, pages, commands, files, siteHits }),
+    [pages, commands, files, siteHits, query],
+  );
+  const launcherMode = query.trim() === "";
 
   useEffect(() => {
     if (selectedIndex < results.length) return;
@@ -146,7 +134,13 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
 
   function confirm(result: Result) {
     if (result.kind === "page") onOpenPage(result.entry.ref);
-    else if (result.kind === "file") onOpenFile(result.file.path);
+    else if (result.kind === "command") {
+      onClose();
+      // Defer so the overlay's unmount doesn't race any focus
+      // restoration the command performs.
+      setTimeout(result.entry.run, 0);
+      return;
+    } else if (result.kind === "file") onOpenFile(result.file.path);
     else onOpenSearchHit(result.hit);
     onClose();
   }
@@ -183,7 +177,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
               if (selected) confirm(selected);
             }
           }}
-          placeholder="Search pages and files…"
+          placeholder="Search everything — pages, files, commands, content…"
           style={inputStyle}
         />
         <div style={metaStyle}>
@@ -198,22 +192,61 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
             results.map((result, index) => {
               const active = index === selectedIndex;
               if (result.kind === "page") {
+                // In launcher mode (empty query) all results are pages;
+                // print a category heading whenever the section changes
+                // so the empty state reads like a start menu. With a
+                // query the list is ranked flat, so no headings.
+                const prev = results[index - 1];
+                const showHeading =
+                  launcherMode && (index === 0 || (prev?.kind === "page" && prev.entry.category !== result.entry.category));
+                return (
+                  <div key={`page:${result.entry.id}`}>
+                    {showHeading ? (
+                      <div style={categoryHeadingStyle}>{result.entry.category}</div>
+                    ) : null}
+                    <button type="button"
+                      onClick={() => confirm(result)}
+                      style={{
+                        ...resultStyle,
+                        background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                      }}
+                    >
+                      <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                        <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                      </span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {result.entry.label}
+                      </span>
+                      {result.entry.badge ? (
+                        <span style={badgeStyle}>{result.entry.badge}</span>
+                      ) : null}
+                      <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                    </button>
+                  </div>
+                );
+              }
+              if (result.kind === "command") {
                 return (
                   <button type="button"
-                    key={`page:${result.entry.id}`}
+                    key={`command:${result.entry.id}`}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
                       background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
                     }}
                   >
-                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 11 }}>
+                      ⌘
                     </span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 11 }}>{result.entry.group}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>›</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {result.entry.label}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                    {result.entry.shortcut ? (
+                      <span style={{ color: "var(--muted)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{result.entry.shortcut}</span>
+                    ) : null}
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>command</span>
                   </button>
                 );
               }
@@ -354,4 +387,20 @@ const emptyStyle: CSSProperties = {
   color: "var(--muted)",
   padding: "8px 10px",
   fontSize: "var(--text-xs)",
+};
+
+const categoryHeadingStyle: CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 10,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  padding: "8px 10px 2px",
+};
+
+const badgeStyle: CSSProperties = {
+  fontSize: 10,
+  color: "var(--text-secondary)",
+  background: "var(--surface-tab-inactive)",
+  padding: "1px 6px",
+  borderRadius: 999,
 };

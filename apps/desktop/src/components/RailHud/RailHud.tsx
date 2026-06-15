@@ -1,10 +1,9 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BacklogState, FinishedEntry, ThreadWorkState, Task } from "../../api.js";
+import type { FinishedEntry, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId } from "../../tabs/pageRefs.js";
-import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
@@ -45,7 +44,6 @@ export interface RailHudProps {
   /** Current stream — scopes the open-comments section. */
   streamId?: string | null;
   threadWork: ThreadWorkState | null;
-  backlog: BacklogState | null;
   recentFiles: RecentFileEntry[];
   bookmarks?: BookmarkRailEntry[];
   /** Most recently finished work — closed tasks efforts merged
@@ -71,18 +69,17 @@ export interface RailHudProps {
  * Heads-up display rail. Always visible on the left; passive by design —
  * never auto-opens tabs. Sections only render when they have content.
  *
- * - Search button (placeholder for ⌘K palette)
+ * - Search button (opens the launcher — the single discovery surface)
  * - Active item summary
  * - Since you last looked  (TBD; placeholder for now)
  * - Ready
  * - Recent files
- * - Pages directory
+ * - Bookmarks (the user-curated pinned set; replaced the old Pages list)
  */
 export function RailHud({
   threadId,
   streamId,
   threadWork,
-  backlog,
   recentFiles,
   bookmarks,
   recentlyFinished,
@@ -98,7 +95,6 @@ export function RailHud({
   const activeEpic = useMemo(() => computeActiveEpicContext(threadWork, activeItem), [threadWork, activeItem]);
   const upNext = useMemo(() => computeUpNext(threadWork, 3), [threadWork]);
   const recents = useMemo(() => sortRecentFiles(recentFiles, 6), [recentFiles]);
-  const backlogReadyCount = backlog?.items.filter((i) => i.status === "ready").length ?? 0;
   const width = useRailWidth();
 
   return (
@@ -168,8 +164,6 @@ export function RailHud({
       ) : null}
 
       <HistorySection onOpenPage={onOpenPage} threadId={threadId} />
-
-      <PagesDirectory onOpenPage={onOpenPage} backlogReadyCount={backlogReadyCount} />
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
@@ -1193,51 +1187,6 @@ function HistorySection({
             {expanded ? "show less" : `show more (${Math.min(10, source.length)})`}
           </button>
         ) : null}
-      </div>
-    </>
-  );
-}
-
-function PagesDirectory({
-  onOpenPage,
-  backlogReadyCount,
-}: {
-  onOpenPage(ref: TabRef): void;
-  backlogReadyCount: number;
-}) {
-  const entries = computePagesDirectory({ backlogReadyCount }).filter((e) => RAIL_PAGE_IDS.has(e.id));
-  return (
-    <>
-      <SectionHeading>Pages</SectionHeading>
-      <div data-testid="rail-pages" style={{ paddingBottom: 12 }}>
-        {entries.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            data-testid={`rail-page-${entry.id}`}
-            title={entry.label}
-            onClick={() => onOpenPage(entry.ref)}
-            style={rowHoverStyle()}
-          >
-            <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {entry.label}
-            </span>
-            {entry.badge ? (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-secondary)",
-                  background: "var(--surface-tab-inactive)",
-                  padding: "1px 6px",
-                  borderRadius: 999,
-                }}
-              >
-                {entry.badge}
-              </span>
-            ) : null}
-          </button>
-        ))}
       </div>
     </>
   );

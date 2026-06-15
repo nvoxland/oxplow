@@ -155,8 +155,6 @@ import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { DISK } from "./file-version.js";
-import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
-import { SearchPalette } from "./components/SearchPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi, setUiLogContext } from "./logger.js";
@@ -1247,8 +1245,6 @@ export function App() {
   // route through the same page-tab opener used by every other caller.
   // The ref is populated in a useEffect after handleOpenPage is defined.
   const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const commandState = useMemo(
     () => ({
       hasStream: !!stream,
@@ -1382,44 +1378,29 @@ export function App() {
   );
 
   useEffect(() => {
-    // Palette shortcut lives OUTSIDE the menu system (no associated
-    // CommandId) so it works in both Electron and browser modes identically.
-    // Native-menu accelerators can't intercept Cmd+K because there's no menu
-    // item for it — keeping the shortcut here means Electron and browser
-    // users get the same behaviour without a round-trip through main.ts.
-    function handlePaletteShortcut(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
-      if (event.key.toLowerCase() !== "k") return;
+    // The launcher (QuickOpen) is the single discovery surface — pages,
+    // files, commands, and body search in one box. Cmd+P is its menu
+    // command; Cmd+K and Cmd+Shift+F are kept as aliases so the old
+    // command-palette / find-in-files reflexes land on the one search
+    // instead of doing nothing. These two live OUTSIDE the menu system
+    // (no CommandId) so they behave identically in Electron and browser.
+    function handleLauncherShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      // Cmd+K (no shift) or Cmd+Shift+F.
+      const isCmdK = key === "k" && !event.shiftKey;
+      const isCmdShiftF = key === "f" && event.shiftKey;
+      if (!isCmdK && !isCmdShiftF) return;
       event.preventDefault();
-      // stopImmediatePropagation so Monaco's own keydown listener doesn't also
-      // see Cmd+K (it otherwise runs its default "trigger editor command"
-      // keybinding flow and eats the event before the bubble-phase handler).
+      // stopImmediatePropagation so Monaco's own keydown handlers (command
+      // palette / find-in-files) don't also fire and eat the event.
       event.stopImmediatePropagation();
-      setPaletteOpen((prev) => !prev);
+      setQuickOpenVisible((prev) => !prev);
     }
-    // capture:true so the shortcut fires during the capture phase, BEFORE any
-    // focused descendant (Monaco, a textarea, a <select>) can call
-    // stopPropagation or call preventDefault on its own Cmd+K handling.
-    window.addEventListener("keydown", handlePaletteShortcut, { capture: true });
-    return () => window.removeEventListener("keydown", handlePaletteShortcut, { capture: true } as EventListenerOptions);
-  }, []);
-
-  useEffect(() => {
-    // Site-wide search overlay: Cmd/Ctrl+Shift+F. Capture-phase +
-    // stopImmediatePropagation for the same reason as the Cmd+K palette —
-    // so Monaco's own find-in-files binding doesn't eat the event first.
-    function handleSearchShortcut(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "f") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setSearchOpen((prev) => !prev);
-    }
-    window.addEventListener("keydown", handleSearchShortcut, { capture: true });
-    return () =>
-      window.removeEventListener("keydown", handleSearchShortcut, {
-        capture: true,
-      } as EventListenerOptions);
+    // capture:true so the shortcut fires BEFORE any focused descendant
+    // (Monaco, a textarea, a <select>) can stop or preempt it.
+    window.addEventListener("keydown", handleLauncherShortcut, { capture: true });
+    return () => window.removeEventListener("keydown", handleLauncherShortcut, { capture: true } as EventListenerOptions);
   }, []);
 
   useEffect(() => {
@@ -3143,7 +3124,6 @@ export function App() {
           threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
           threadWork={selectedThreadWork}
-          backlog={backlogState}
           recentFiles={recentFileEntries}
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
@@ -3257,6 +3237,7 @@ export function App() {
         pages={computePagesDirectory({
           backlogReadyCount: backlogState?.items.filter((i) => i.status === "ready").length ?? 0,
         })}
+        menuGroups={menuGroups}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);
@@ -3284,16 +3265,6 @@ export function App() {
         />
       ) : null}
       {daemonUnavailable ? <DaemonDownDialog /> : null}
-      {paletteOpen ? (
-        <CommandPalette menuGroups={menuGroups} onClose={() => setPaletteOpen(false)} />
-      ) : null}
-      {searchOpen ? (
-        <SearchPalette
-          streamId={stream?.id ?? null}
-          onClose={() => setSearchOpen(false)}
-          onOpen={openSearchHit}
-        />
-      ) : null}
       <UndoToastStack />
       <RemoteConnectionBanner />
     </div>

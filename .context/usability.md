@@ -268,19 +268,28 @@ declaring *what it is* and mounting the generic layer.
   no-op — to change status, the user drags (which changes status as
   a side effect). Plain ↑/↓ just moves selection; Enter toggles the
   detail pane; `s`/`p` opens the status/priority pickers.
-- **Cmd+K palette listener uses `capture: true`.** Monaco and other
+- **One launcher is the single discovery surface.** There is exactly
+  one way to find pages, commands, files, and content: the launcher
+  (`QuickOpenOverlay`), opened by **Cmd+P** and the rail **Search…**
+  button. There is no separate command palette or find-in-files overlay
+  — Cmd+K and Cmd+Shift+F are only aliases that open the same launcher
+  (kept so old reflexes land somewhere useful). Do **not** add a new
+  modal/overlay for discovery; extend the launcher. See
+  `.context/pages-and-tabs.md` → "One Search".
+- **Launcher shortcut listener uses `capture: true`.** Monaco and other
   focused inputs run their own keydown handlers in the bubble phase;
-  capture lets the palette fire before any of them. If you add
+  capture lets the launcher fire before any of them (so Monaco's command
+  palette / find-in-files don't eat Cmd+K / Cmd+Shift+F). If you add
   another global shortcut that needs to beat an editor, copy that
   pattern.
-- **Palette is the main keyboard lever — keep it populated.** Every
-  new menu command in `commands.ts` flows into Cmd+K automatically
-  (the palette reads from the same `buildMenuGroups` registry). When
-  adding a user-visible action, prefer wiring it as a CommandId over
-  a bespoke button so it stays keyboard-reachable. Current entries
-  include `stream.new`, `thread.new`, `history.open`, `git.dashboard`,
-  `git.commit`, `git.pull`, `git.push`, `tasks.dashboard` alongside
-  save/find/quick-open/new-task.
+- **The launcher is the main keyboard lever — keep it populated.** Every
+  enabled menu command in `commands.ts` flows into the launcher's typed
+  results automatically (it flattens the same `buildMenuGroups` registry
+  via `flattenCommands`), and every page in `computePagesDirectory` shows
+  in its empty-state start menu. When adding a user-visible action, prefer
+  wiring it as a CommandId over a bespoke button so it stays keyboard-
+  reachable; a new *page* needs no CommandId — adding it to
+  `computePagesDirectory` (with a `category`) is enough.
 
 ## Test-driveability
 
@@ -294,7 +303,9 @@ declaring *what it is* and mounting the generic layer.
   - `plan-new-task`, `task-title`, `task-priority`,
     `task-description`, `task-acceptance`, `task-save`,
     `task-save-another`, `task-cancel`
-  - `command-palette-input`
+  - `rail-search` (the always-visible launcher trigger). The launcher
+    overlay is `QuickOpenOverlay`; the old `command-palette-input`
+    testid is gone (the command palette was removed).
   - `plan-pane` (the keydown-listening wrapper — focus this before
     dispatching keyboard probes, otherwise the listener misses them)
   - `plan-add-points-bar` (now a single ⋯ menu — only "New task" lives
@@ -320,15 +331,14 @@ declaring *what it is* and mounting the generic layer.
     stable aliases `undo-toast`, `undo-toast-undo`, and
     `undo-toast-dismiss` (no id suffix) so probes can target "the
     toast that just appeared" without chasing the random toast id.
-  - `rail-page-<entry-id>` on every Pages-section button in
-    the left rail HUD (e.g. `rail-page-git-history`,
-    `rail-page-local-history`, `rail-page-code-quality`,
-    `rail-page-hook-events`). Click these to open the Page-wrapped
-    renderer as a center tab; assert via `page-<kind>` on the body
-    (e.g. `page-git-history`, `page-local-history`, etc.). The
-    `dock-tab-history` / `dock-tab-snapshots` / `dock-tab-code-quality`
-    / `dock-tab-hook-events` testids no longer exist — the bottom
-    drawer was removed in the IA cleanup.
+  - To open a page in a test, drive the launcher: click `rail-search`
+    (or open it via Cmd+P), type the page name into the overlay input,
+    and Enter / click the result; assert via `page-<kind>` on the body
+    (e.g. `page-git-history`, `page-local-history`, etc.). The old
+    `rail-page-<entry-id>` / `rail-pages` testids are gone — the rail no
+    longer has a "Pages" section (Bookmarks is the pinned set; `rail-
+    bookmark-<refId>` opens a bookmarked page). The `dock-tab-*` testids
+    were likewise removed earlier in the IA cleanup.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
     `center-tab-close-<id>` on the × close button

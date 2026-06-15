@@ -4,6 +4,7 @@ import {
   archivedRef,
   backlogRef,
   changeAnalysisRef,
+  closedThreadsRef,
   dashboardRef,
   doneWorkRef,
   gitDashboardRef,
@@ -12,61 +13,71 @@ import {
   uncommittedChangesRef,
 } from "../../tabs/pageRefs.js";
 
+/**
+ * Sections the launcher's "start menu" empty state groups pages under.
+ * `PAGE_CATEGORY_ORDER` is the render order for those headings.
+ */
+export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "System";
+
+export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
+  "Work",
+  "Code",
+  "Git",
+  "Activity",
+  "Knowledge",
+  "System",
+];
+
 export interface PageDirectoryEntry {
   id: string;
   label: string;
   ref: TabRef;
+  category: PageCategory;
   badge?: number;
 }
 
 /**
- * Ids in `computePagesDirectory` that the rail's "Pages" section
- * actually renders. The full directory remains the discovery surface
- * for QuickOpen; the rail keeps a curated subset so it doesn't sprawl.
- */
-export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
-  "tasks",
-  "wiki-index",
-  "files",
-  "git-dashboard",
-]);
-
-/**
- * Static directory of top-level pages. Used by QuickOpen as the
- * "launcher" surface (every page is discoverable there) and filtered
- * down to `RAIL_PAGE_IDS` for the rail's compact "Pages" section.
- * Pure helper so it can be unit-tested without mounting the React
- * component. `backlogReadyCount` controls the badge on "Backlog".
+ * Static directory of every top-level page. This is the single discovery
+ * surface: the launcher (QuickOpen) shows it grouped by `category` in its
+ * empty state and mixes it into ranked results when the user types. The
+ * rail no longer renders a "Pages" section — users pin what they want via
+ * Bookmarks instead. Entries are listed grouped by category so the flat
+ * launcher order already reads top-to-bottom by section. Pure helper so it
+ * can be unit-tested without mounting React. `backlogReadyCount` controls
+ * the badge on "Backlog".
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
     // Labels are emoji-free — `PageKindIcon` resolves the leading
     // glyph from the entry's ref kind at render time.
-    { id: "tasks", label: "Tasks", ref: tasksRef() },
-    { id: "done-work", label: "Done Work", ref: doneWorkRef() },
+    { id: "tasks", label: "Tasks", ref: tasksRef(), category: "Work" },
+    { id: "done-work", label: "Done Work", ref: doneWorkRef(), category: "Work" },
     {
       id: "backlog",
       label: "Backlog",
       ref: backlogRef(),
+      category: "Work",
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
-    { id: "archived", label: "Archived", ref: archivedRef() },
-    { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index") },
-    { id: "files", label: "Files", ref: indexRef("files") },
-    { id: "comments", label: "Comments Dashboard", ref: indexRef("comments") },
-    { id: "terminal", label: "Terminal", ref: indexRef("terminal") },
-    { id: "code-quality", label: "Code Quality", ref: indexRef("code-quality") },
-    { id: "local-history", label: "Local History", ref: indexRef("local-history") },
-    { id: "git-dashboard", label: "Git", ref: gitDashboardRef() },
-    { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef() },
-    { id: "change-analysis", label: "Change Analysis", ref: changeAnalysisRef("working") },
-    { id: "hook-events", label: "Hook Events", ref: indexRef("hook-events") },
-    { id: "subsystem-docs", label: "Subsystem Docs", ref: indexRef("subsystem-docs") },
-    { id: "settings", label: "Settings", ref: indexRef("settings") },
-    { id: "dashboard-planning", label: "Planning", ref: dashboardRef("planning") },
-    { id: "dashboard-review", label: "Review", ref: dashboardRef("review") },
-    { id: "dashboard-quality", label: "Quality", ref: dashboardRef("quality") },
-    { id: "dashboard-visits", label: "Visits", ref: dashboardRef("visits") },
+    { id: "archived", label: "Archived", ref: archivedRef(), category: "Work" },
+    { id: "files", label: "Files", ref: indexRef("files"), category: "Code" },
+    { id: "code-quality", label: "Code Quality", ref: indexRef("code-quality"), category: "Code" },
+    { id: "subsystem-docs", label: "Subsystem Docs", ref: indexRef("subsystem-docs"), category: "Code" },
+    { id: "git-dashboard", label: "Git", ref: gitDashboardRef(), category: "Git" },
+    { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },
+    { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },
+    { id: "change-analysis", label: "Change Analysis", ref: changeAnalysisRef("working"), category: "Git" },
+    { id: "local-history", label: "Local History", ref: indexRef("local-history"), category: "Activity" },
+    { id: "hook-events", label: "Hook Events", ref: indexRef("hook-events"), category: "Activity" },
+    { id: "comments", label: "Comments Dashboard", ref: indexRef("comments"), category: "Activity" },
+    { id: "dashboard-planning", label: "Planning", ref: dashboardRef("planning"), category: "Activity" },
+    { id: "dashboard-review", label: "Review", ref: dashboardRef("review"), category: "Activity" },
+    { id: "dashboard-quality", label: "Quality", ref: dashboardRef("quality"), category: "Activity" },
+    { id: "dashboard-visits", label: "Visits", ref: dashboardRef("visits"), category: "Activity" },
+    { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },
+    { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
+    { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },
+    { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },
   ];
 }
 

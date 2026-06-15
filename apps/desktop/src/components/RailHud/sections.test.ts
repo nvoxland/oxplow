@@ -139,9 +139,28 @@ describe("computePagesDirectory", () => {
     expect(ids.indexOf("git-dashboard")).toBeLessThan(ids.indexOf("uncommitted-changes"));
   });
 
-  test("Git history is not a top-level rail entry", () => {
+  test("Git history is discoverable in the launcher directory", () => {
+    // The rail no longer has a curated "Pages" subset — the launcher is
+    // the single discovery surface, so every page (incl. Git History)
+    // appears here.
     const entries = computePagesDirectory({ backlogReadyCount: 0 });
-    expect(entries.find((e) => e.id === "git-history")).toBeUndefined();
+    expect(entries.find((e) => e.id === "git-history")).toBeDefined();
+  });
+
+  test("every entry is tagged with a category, grouped in category order", () => {
+    const entries = computePagesDirectory({ backlogReadyCount: 0 });
+    expect(entries.every((e) => typeof e.category === "string" && e.category.length > 0)).toBe(true);
+    // Entries are listed grouped by category so the flat launcher order
+    // reads top-to-bottom by section; assert no category is interleaved.
+    const seen = new Set<string>();
+    let prev = "";
+    for (const e of entries) {
+      if (e.category !== prev) {
+        expect(seen.has(e.category)).toBe(false);
+        seen.add(e.category);
+        prev = e.category;
+      }
+    }
   });
 
   test("Backlog badge surfaces only when backlogReadyCount is > 0", () => {

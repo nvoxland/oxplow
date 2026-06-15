@@ -147,19 +147,23 @@ Every rail click goes through a single `onOpenPage(ref: TabRef)` callback
 that the host wires to its own routing. Sections appear only when they
 have content:
 
-1. **Search trigger** — opens the ⌘K palette. Always visible.
+1. **Search trigger** — opens the launcher (`QuickOpenOverlay`), the
+   single discovery surface. Always visible.
 2. **Active item** — lowest-`sort_index` non-epic item in `in_progress`
    for the current thread. Shows live `AgentStatusDot` + status label.
 3. **Up next** — top 5 `ready` non-epic items.
 4. **Recent files** — top 6 file paths recently opened/touched in this
    thread (today derived from `currentSession.openOrder`; eventually
    should include agent-touched files).
-5. **Pages** — directory entries (computed in `computePagesDirectory`,
-   exposed for unit testing): Start, Plan work, Done work, Backlog,
-   Archived, Notes, Files, Comments, Terminal, Code quality, Local history, Git dashboard,
-   Uncommitted, Git history, Hook events, Subsystem docs, Settings,
-   plus Dashboards (Planning, Review, Quality). The backlog ready
-   count surfaces as a badge on the **Backlog** entry.
+5. **Bookmarks** — the user-curated pinned set. There is **no longer a
+   "Pages" section** in the rail: the launcher is the one discovery
+   surface for all pages, and users pin the ones they want always-visible
+   by starring them (the ☆ on each page's nav bar, scoped thread /
+   stream / global). `computePagesDirectory` still exists — it's the
+   launcher's page list, no longer filtered to a rail subset (the old
+   `RAIL_PAGE_IDS` set is gone). Every page is tagged with a `category`
+   (Work / Code / Git / Activity / Knowledge / System) so the launcher's
+   empty state reads like a start menu.
 
 In addition to the numbered sections, `CommentsSection` renders (when
 non-empty) between Uncommitted and the rest: it self-fetches
@@ -243,7 +247,9 @@ The full IA redesign ships in phases (see plan
   is dark-only). See `.context/theming.md` Density section.
 
 Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
-tabs.
+tabs. (The rail "Pages" section itself was later removed — see
+"One Search" below — but the underlying page-as-tab routing is unchanged;
+the launcher and Bookmarks now drive navigation instead.)
 
 **Left dock removed.** The left-side `DockShell` that previously
 carried four toolwindows (HUD / Work / Files / Notes) is gone.
@@ -257,11 +263,39 @@ the work pages (`TasksPage` / `DoneWorkPage` / `BacklogPage` /
 been deleted along with the `leftDockActivate` plumbing. Menu
 commands that used to flip the dock (`commitFiles`, edit-task)
 now route through `handleOpenPage(indexRef("files"))` /
-`handleOpenPage(indexRef("tasks"))`. E2e probes that previously
-relied on `dock-tab-plan` / `dock-tab-project` / `dock-panel-*`
-testids now click `rail-page-tasks` / `rail-page-files` and
-assert on `page-tasks` / `page-files`. The harness startup gate
+`handleOpenPage(indexRef("tasks"))`. The harness startup gate
 (`waitForOxplowReady`) polls for `rail-hud`.
+
+## One Search — the single discovery surface
+
+There is exactly **one** way to discover and reach pages: the launcher
+(`QuickOpenOverlay`). It is opened by **Cmd+P** (the `file.quickOpen`
+menu command) and the rail **Search…** button (`rail-search`). Cmd+K and
+Cmd+Shift+F are kept only as **aliases** that open the same launcher, so
+the old command-palette / find-in-files reflexes still land somewhere
+useful — there is no separate command palette or search overlay anymore
+(`CommandPalette.tsx` and `SearchPalette.tsx` were deleted).
+
+The launcher does everything in one box:
+- **Empty input** → start-menu: every page from `computePagesDirectory`,
+  grouped by `category` heading.
+- **Typing** → ranked results, pages → **commands** → files → body hits.
+  Commands come from `buildMenuGroups` (passed in as `menuGroups`) and are
+  flattened by `flattenCommands`; the same registry still feeds the native
+  menu. Body hits come from `searchSite` (BM25 over tasks / comments /
+  wiki / notes / file contents). The ordering is a pure helper —
+  `buildQuickOpenResults` in `components/quickOpenResults.ts` — so it's
+  unit-tested without mounting React.
+
+Because the launcher lists every page (including Code Quality, Hook
+Events, Local History, Subsystem Docs), no page needs a bespoke
+`CommandId` to be reachable — that supersedes the old "wire each page as a
+menu command" approach (tsk147).
+
+The rail no longer has a "Pages" section (the `rail-page-*` / `rail-pages`
+testids are gone); **Bookmarks** is the always-visible curated nav. E2e
+probes that used to click `rail-page-*` should drive `rail-search` → the
+launcher (type, then assert `page-<kind>` on the body).
 
 **Work pages split (post-Phase-3).** The single `AllWorkPage` was
 replaced by four focused pages so each has one job:
