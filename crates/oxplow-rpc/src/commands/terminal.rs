@@ -365,14 +365,47 @@ pub async fn open_terminal_session(
             // stream's working_session_id. Each thread runs an
             // independent Claude session even though they share the
             // working pane slot.
-            let resume_session_id = thread
+            let mut resume_session_id = thread
                 .as_ref()
-                .map(|t| t.resume_session_id.as_str())
-                .unwrap_or("");
+                .map(|t| t.resume_session_id.clone())
+                .unwrap_or_default();
+
+            // Proactively drop a stale Claude resume pointer. If the
+            // session transcript is gone, `claude --resume <id>` prints a
+            // raw "No conversation found" error before the shell `||` net
+            // falls back to fresh, and the dead id lingers in the DB until
+            // the next prompt self-heals it (Claude Code drops HTTP hooks
+            // for SessionStart, so nothing fires sooner). Clearing it here
+            // launches fresh with no `--resume` and no raw error. Claude-
+            // only: codex/opencode use different on-disk session schemes
+            // and keep the shell net. See `.context/agent-model.md`.
+            if matches!(agent, AgentKind::Claude) && !resume_session_id.is_empty() {
+                if let Ok(home) = std::env::var("HOME") {
+                    let state = oxplow_app::resume_check::claude_resume_state(
+                        std::path::Path::new(&home),
+                        &stream.worktree_path,
+                        &resume_session_id,
+                    );
+                    if state == oxplow_app::resume_check::ResumeState::Missing {
+                        if let Some(t) = thread.as_ref() {
+                            let mut updated = t.clone();
+                            updated.resume_session_id.clear();
+                            if let Err(err) = ctx.thread_store.upsert(&updated).await {
+                                tracing::warn!(
+                                    ?err,
+                                    "resume-check: clearing stale resume pointer failed"
+                                );
+                            }
+                        }
+                        resume_session_id.clear();
+                    }
+                }
+            }
+
             let command = build_agent_command_for_session(
                 agent,
                 &stream.worktree_path,
-                resume_session_id,
+                &resume_session_id,
                 &opts,
             );
             let cwd = std::path::PathBuf::from(&stream.worktree_path);

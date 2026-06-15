@@ -33,6 +33,7 @@ pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod recovery;
 pub mod ref_resolver;
+pub mod resume_check;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod task_service;

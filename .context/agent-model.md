@@ -258,6 +258,20 @@ to `runtime.handleHookEnvelope`, which:
    explicit clear ends exactly the session it points at; other end
    reasons (`other`, `prompt_input_exit`, …) keep it so normal
    restarts still resume.
+   A second cleanup runs at **launch** for a token that's stale for any
+   other reason (transcript pruned, machine moved, id rotted). Before
+   passing `--resume`, `open_terminal_session`'s direct branch probes the
+   session file via `resume_check::claude_resume_state`
+   (`crates/oxplow-app/src/resume_check.rs`): it maps the cwd to Claude's
+   `$HOME/.claude/projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` and, if
+   the project dir exists but the `.jsonl` is gone (`Missing`), blanks the
+   thread's pointer and launches fresh — so `claude --resume <stale>`
+   never runs and its raw "No conversation found" error never reaches the
+   terminal. Conservative by design: an absent project dir reads as
+   `Unknown` (never clears), so an encoding drift can't wrongly wipe a
+   valid pointer, and the shell `||` net in `agent_command.rs` still
+   covers the file-vanishes-between-check-and-exec race. Claude-only;
+   codex/opencode keep just the shell net.
 3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
    below). The runtime no longer tracks per-turn rows; snapshots and
    per-effort attribution are anchored to `task_effort`.
