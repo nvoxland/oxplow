@@ -274,12 +274,6 @@ function PlanningSections({
           ));
         })()}
       </Section>
-      <Section title="Subsystem Docs">
-        <RowButton
-          label="Open subsystem docs index"
-          onClick={() => onOpenPage(indexRef("subsystem-docs"))}
-        />
-      </Section>
     </>
   );
 }

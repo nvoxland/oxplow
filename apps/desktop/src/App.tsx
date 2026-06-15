@@ -117,7 +117,6 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
-import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
 import { EffortCoveragePage } from "./pages/EffortCoveragePage.js";
@@ -1842,7 +1841,6 @@ export function App() {
       case "done-work":
       case "backlog":
       case "archived":
-      case "subsystem-docs":
       case "stream-settings":
       case "thread-settings":
       case "new-stream":
@@ -2693,13 +2691,6 @@ export function App() {
                 return null;
             }
           },
-        });
-      } else if (ref.kind === "subsystem-docs") {
-        tabs.push({
-          id: ref.id,
-          label: "Subsystem Docs",
-          closable: true,
-          render: () => <SubsystemDocsPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "closed-threads") {
         tabs.push({

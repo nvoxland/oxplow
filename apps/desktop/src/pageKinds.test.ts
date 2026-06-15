@@ -63,7 +63,6 @@ describe("pageKindIconComponent", () => {
       "git-history",
       "git-dashboard",
       "hook-events",
-      "subsystem-docs",
       "new-stream",
       "new-task",
       "closed-threads",

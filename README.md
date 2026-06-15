@@ -51,7 +51,9 @@ points, snapshots, efforts), and an MCP server + hook endpoint that
 Claude Code or Codex connects to per thread. The React/Monaco/xterm frontend
 subscribes to store events and renders the rail HUD + pages UI (work
 queue, file browser, editor/diff pages, terminal, Local History).
-Detailed subsystem docs live under [.context/](./.context/).
+This repo keeps its own internal architecture notes under
+[.context/](./.context/) (a convention for *this* codebase, not an oxplow
+feature).
 
 ## Running
 

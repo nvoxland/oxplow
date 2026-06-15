@@ -18,7 +18,7 @@
 //!   menus, terminals, LSP-client lifecycle, telemetry, background tasks,
 //!   launcher, workspace file I/O the agent does via its own Read/Write tools).
 //! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch, await_user,
-//!   delegate_query, subsystem-doc reads, batch/orchestration affordances).
+//!   delegate_query, batch/orchestration affordances).
 //! - [`Exposure::AgentTodo`] — *should* be on both; the MCP tool is not built
 //!   yet. A tracked, reviewed gap. `ipc` is set, `mcp` is `None`.
 //!
@@ -176,7 +176,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("record_query_finding"),
     agent("await_user"),
     agent("fork_thread"),
-    agent("get_subsystem_doc"),
     agent("list_stale_wiki_pages"),
     agent("wiki_ref_drift"),
     agent("resync_wiki_page"),

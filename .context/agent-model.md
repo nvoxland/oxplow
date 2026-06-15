@@ -757,13 +757,6 @@ intermediate `ready` step.
   left alone. Callers pass the returned `prompt` directly to Agent(prompt=…).
   Pure composition lives in `composeDispatchBrief` (same file) so tests can
   exercise it without spinning up MCP.
-- `get_subsystem_doc({ threadId, name })` — returns
-  `{ name, path, content, exists }` for `.context/<name>.md` in the
-  thread's stream worktree. Cheap alternative to `Read` when you only
-  need the doc body — saves the model from re-reading the same
-  `.context/` doc 20+ times per session and never hard-errors on a
-  missing doc (returns `exists: false` instead). Path-traversal
-  characters in `name` are rejected.
 - `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
   `list_followups({ threadId })` — orchestrator-only, in-memory transient
   follow-up reminders. No DB row, lost on runtime restart. Surfaces as

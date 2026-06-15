@@ -36,7 +36,6 @@ export type PageKind =
   | "snapshot"
   | "uncommitted-changes"
   | "hook-events"
-  | "subsystem-docs"
   | "terminal"
   | "settings"
   | "dashboard"

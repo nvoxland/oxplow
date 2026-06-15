@@ -66,7 +66,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | "tasks" | "done-work" | "backlog" | "archived"
 | "wiki-index" | "files" | "comments" | "code-quality" | "terminal"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
-| "uncommitted-changes" | "change-analysis" | "hook-events" | "subsystem-docs"
+| "uncommitted-changes" | "change-analysis" | "hook-events"
 | "settings" | "start" | "dashboard"
 | "new-stream" | "new-task"
 | "stream-settings" | "thread-settings"
@@ -185,7 +185,7 @@ The full IA redesign ships in phases (see plan
 - ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
   a Page-wrapped renderer in `apps/desktop/src/pages/`:
   Start, Settings, Code quality, Local history, Git history, Files,
-  Notes, All work, Subsystem docs. Both docks have since been removed
+  Notes, All work. Both docks have since been removed
   — the rail HUD is THE left chrome and pages are THE center surface
   (see "Left dock removed" / "Bottom dock removed" notes below).
 - ✅ Phase 4 — New pages + backlinks indexer:
@@ -288,9 +288,9 @@ The launcher does everything in one box:
   unit-tested without mounting React.
 
 Because the launcher lists every page (including Code Quality, Hook
-Events, Local History, Subsystem Docs), no page needs a bespoke
-`CommandId` to be reachable — that supersedes the old "wire each page as a
-menu command" approach (tsk147).
+Events, Local History), no page needs a bespoke `CommandId` to be
+reachable — that supersedes the old "wire each page as a menu command"
+approach (tsk147).
 
 The rail no longer has a "Pages" section (the `rail-page-*` / `rail-pages`
 testids are gone); **Bookmarks** is the always-visible curated nav. E2e

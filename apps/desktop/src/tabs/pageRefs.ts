@@ -98,7 +98,7 @@ export function effortCoverageRef(effortId: string): TabRef {
   return { id: `effort-coverage:${effortId}`, kind: "effort-coverage", payload: { effortId } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "code-quality" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "subsystem-docs" | "terminal" | "settings"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "code-quality" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
 }
 

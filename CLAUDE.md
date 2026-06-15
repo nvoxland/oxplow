@@ -11,9 +11,9 @@ home for project decisions, system mechanics, gotchas, and conventions.
    non-obvious decision, a recurring gotcha, an undocumented convention
    → write it into the matching doc.
 
-Prefer `mcp__oxplow__get_subsystem_doc({ threadId, name })` to read a doc
-body cheaply (returns `{ content, exists }`, no hard error when absent).
-The "concrete update triggers" checklist lives in the full guide below.
+Read the relevant `.context/<name>.md` with the `Read` tool before
+touching its subsystem. The "concrete update triggers" checklist lives in
+the full guide below.
 
 **Full contributor guide: `.context/working-in-this-repo.md`** — repo
 layout, test/lint policy, and the complete task-filing discipline. The

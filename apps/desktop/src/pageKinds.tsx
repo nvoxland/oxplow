@@ -22,7 +22,6 @@ import {
   CheckSquare,
   Copy,
   ExternalLink,
-  FileCode,
   FileText,
   Folder,
   FolderTree,
@@ -128,8 +127,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitBranch;
     case "hook-events":
       return Activity;
-    case "subsystem-docs":
-      return FileCode;
     case "terminal":
       return Terminal;
     case "new-stream":
@@ -208,8 +205,6 @@ export function pageKindLabel(kind: string): string {
       return "git";
     case "hook-events":
       return "hook events";
-    case "subsystem-docs":
-      return "subsystem docs";
     case "duplicate-block":
       return "duplicate";
     case "external-url":
@@ -247,7 +242,6 @@ const INDEX_KINDS = new Set<string>([
   "git-history",
   "git-dashboard",
   "hook-events",
-  "subsystem-docs",
   "terminal",
   "settings",
   "new-stream",
@@ -271,7 +265,7 @@ const INDEX_KINDS = new Set<string>([
  * `uncommitted-changes`, `stream-settings`, `thread-settings`,
  * `op-error`, `duplicate-block`, `external-url`, `done-work`,
  * `wiki-index`, `code-quality`, `local-history`, `git-history`,
- * `git-dashboard`, `hook-events`, `subsystem-docs`, `new-stream`,
+ * `git-dashboard`, `hook-events`, `new-stream`,
  * `new-task`, `closed-threads`) are hyphenated — the colon split
  * still works for those because the hyphen comes before any `:`.
  */

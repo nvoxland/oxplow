@@ -143,8 +143,8 @@ selectors; screenshot when looks matter, and read the image.
   file while an agent is mid-merge/commit in the same worktree, it can
   get swept into their commit. Sequence your edits for after they land,
   or write to /tmp and `cp` into place once the worktree is clean.
-- **Cheap reads.** Prefer `get_subsystem_doc` / targeted source greps
-  over re-`Read`ing whole files; you're juggling many threads' context.
+- **Cheap reads.** Prefer targeted source greps over re-`Read`ing whole
+  files; you're juggling many threads' context.
 
 ## How real users actually use oxplow (surfaces to exercise)
 

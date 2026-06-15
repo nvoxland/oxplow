@@ -22,10 +22,7 @@ it this way" notes.
    convention, or something you'd want to remember next session — write
    it into the matching doc.
 
-Prefer `mcp__oxplow__get_subsystem_doc({ threadId, name })` over a raw
-`Read` when you only need the doc body — it's cheap, returns
-`{ content, exists }`, and avoids hard-erroring when the doc doesn't
-exist yet.
+`Read` the matching `.context/<name>.md` before touching a subsystem.
 
 When you finish a change that alters how a subsystem works, **update
 the matching `.context/` doc in the same commit**. Concrete triggers:

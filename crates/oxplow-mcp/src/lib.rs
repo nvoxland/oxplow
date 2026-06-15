@@ -262,11 +262,6 @@ pub struct FollowupIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SubsystemDocParams {
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CreateTaskMcpParams {
     /// Thread to attach the new item to. Required unless `backlog`
     /// is set to `true` — filing onto the project-wide backlog must
@@ -2046,31 +2041,6 @@ impl OxplowMcp {
         expect_id_kind("remove_followup", "id", &params.0.id, ID_FOLLOWUP)?;
         self.services.followups.remove(&params.0.id);
         Ok(CallToolResult::success(vec![Content::text("removed")]))
-    }
-
-    // ---------- subsystem docs ----------
-
-    #[tool(description = "Read a `.context/<name>.md` subsystem doc; returns body + exists flag.")]
-    async fn get_subsystem_doc(
-        &self,
-        params: Parameters<SubsystemDocParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let path = self
-            .services
-            .layout
-            .project_dir
-            .join(".context")
-            .join(format!("{}.md", params.0.name));
-        let exists = path.exists();
-        let content = if exists {
-            std::fs::read_to_string(&path).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let body = serde_json::json!({ "exists": exists, "content": content });
-        Ok(CallToolResult::success(vec![Content::text(
-            body.to_string(),
-        )]))
     }
 
     // ---------- task orchestration ----------
