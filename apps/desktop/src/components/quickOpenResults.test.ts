@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { MenuGroup } from "../commands.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
-import { buildQuickOpenResults, dedupeSiteHits, flattenCommands } from "./quickOpenResults.js";
+import type { PageCategory } from "./RailHud/sections.js";
+import { buildLauncherTree, buildQuickOpenResults, dedupeSiteHits, flattenCommands } from "./quickOpenResults.js";
 
 function hit(kind: string, refId: string): SearchHit {
   return {
@@ -16,8 +17,8 @@ function hit(kind: string, refId: string): SearchHit {
   };
 }
 
-function page(id: string, label: string): PageDirectoryEntry {
-  return { id, label, category: "Work", ref: { id, kind: id, payload: null } as PageDirectoryEntry["ref"] };
+function page(id: string, label: string, category: PageCategory = "Work"): PageDirectoryEntry {
+  return { id, label, category, ref: { id, kind: id, payload: null } as PageDirectoryEntry["ref"] };
 }
 
 function file(path: string): WorkspaceIndexedFile {
@@ -102,5 +103,35 @@ describe("buildQuickOpenResults", () => {
   test("multi-token query matches group+label of a command in any order", () => {
     const out = buildQuickOpenResults({ query: "commit git", pages, commands, files, siteHits: [] });
     expect(out.some((r) => r.kind === "command" && r.entry.id === "git.commit")).toBe(true);
+  });
+});
+
+describe("buildLauncherTree", () => {
+  const treePages = [
+    page("tasks", "Tasks", "Work"),
+    page("backlog", "Backlog", "Work"),
+    page("files", "Files", "Code"),
+    page("git", "Git", "Git"),
+  ];
+
+  test("collapsed by default — only category headers, in first-seen order", () => {
+    const rows = buildLauncherTree(treePages, new Set());
+    expect(rows.map((r) => (r.kind === "category" ? r.category : `page:${r.entry.id}`))).toEqual([
+      "Work",
+      "Code",
+      "Git",
+    ]);
+    expect(rows.every((r) => r.kind === "category" && !r.expanded)).toBe(true);
+  });
+
+  test("expanding a category reveals its pages beneath its header", () => {
+    const rows = buildLauncherTree(treePages, new Set<PageCategory>(["Work"]));
+    expect(rows.map((r) => (r.kind === "category" ? `${r.category}${r.expanded ? "▾" : "▸"}` : `· ${r.entry.id}`))).toEqual([
+      "Work▾",
+      "· tasks",
+      "· backlog",
+      "Code▸",
+      "Git▸",
+    ]);
   });
 });

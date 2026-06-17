@@ -9,10 +9,10 @@ import {
   type WorkspaceIndexedFile,
 } from "../api.js";
 import type { MenuGroup } from "../commands.js";
-import { buildQuickOpenResults, flattenCommands, type QuickOpenResult } from "./quickOpenResults.js";
+import { buildLauncherTree, buildQuickOpenResults, flattenCommands, type QuickOpenResult } from "./quickOpenResults.js";
 import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { PageDirectoryEntry } from "./RailHud/sections.js";
+import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 
 interface Props {
   open: boolean;
@@ -33,6 +33,33 @@ interface Props {
 
 type Result = QuickOpenResult;
 
+/** A navigable row: the launcher's collapsible category headers plus the
+ *  page/command/file/hit results. Category rows only appear in the
+ *  empty-query "start menu". */
+type Row = { kind: "category"; category: PageCategory; expanded: boolean } | Result;
+
+const EXPANDED_CATEGORIES_KEY = "oxplow.launcher.expandedCategories";
+
+function loadExpandedCategories(): Set<PageCategory> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_CATEGORIES_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed as PageCategory[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function persistExpandedCategories(set: ReadonlySet<PageCategory>): void {
+  try {
+    localStorage.setItem(EXPANDED_CATEGORIES_KEY, JSON.stringify([...set]));
+  } catch {
+    // localStorage unavailable (private mode / SSR) — expansion just
+    // won't persist across opens; the in-session state still works.
+  }
+}
+
 export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGroups, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
@@ -40,7 +67,18 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedCategories, setExpandedCategories] = useState<Set<PageCategory>>(loadExpandedCategories);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  function toggleCategory(category: PageCategory) {
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      persistExpandedCategories(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -123,16 +161,28 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
   );
   const launcherMode = query.trim() === "";
 
+  // Navigable rows: the collapsible category tree in launcher mode,
+  // the flat ranked list while searching. One array drives both the
+  // keyboard cursor and the render so they can't drift apart.
+  const rows = useMemo<Row[]>(
+    () => (launcherMode ? buildLauncherTree(pages, expandedCategories) : results),
+    [launcherMode, pages, expandedCategories, results],
+  );
+
   useEffect(() => {
-    if (selectedIndex < results.length) return;
-    setSelectedIndex(results.length === 0 ? 0 : results.length - 1);
-  }, [results, selectedIndex]);
+    if (selectedIndex < rows.length) return;
+    setSelectedIndex(rows.length === 0 ? 0 : rows.length - 1);
+  }, [rows, selectedIndex]);
 
   if (!open || !stream) {
     return null;
   }
 
-  function confirm(result: Result) {
+  function confirm(result: Row) {
+    if (result.kind === "category") {
+      toggleCategory(result.category);
+      return;
+    }
     if (result.kind === "page") onOpenPage(result.entry.ref);
     else if (result.kind === "command") {
       onClose();
@@ -163,7 +213,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
             }
             if (event.key === "ArrowDown") {
               event.preventDefault();
-              setSelectedIndex((current) => Math.min(current + 1, Math.max(results.length - 1, 0)));
+              setSelectedIndex((current) => Math.min(current + 1, Math.max(rows.length - 1, 0)));
               return;
             }
             if (event.key === "ArrowUp") {
@@ -173,7 +223,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
             }
             if (event.key === "Enter") {
               event.preventDefault();
-              const selected = results[selectedIndex];
+              const selected = rows[selectedIndex];
               if (selected) confirm(selected);
             }
           }}
@@ -186,43 +236,57 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
         </div>
         {error ? <div style={errorStyle}>{error}</div> : null}
         <div style={resultsStyle}>
-          {results.length === 0 && !loading ? (
+          {rows.length === 0 && !loading ? (
             <div style={emptyStyle}>No matches.</div>
           ) : (
-            results.map((result, index) => {
+            rows.map((result, index) => {
               const active = index === selectedIndex;
-              if (result.kind === "page") {
-                // In launcher mode (empty query) all results are pages;
-                // print a category heading whenever the section changes
-                // so the empty state reads like a start menu. With a
-                // query the list is ranked flat, so no headings.
-                const prev = results[index - 1];
-                const showHeading =
-                  launcherMode && (index === 0 || (prev?.kind === "page" && prev.entry.category !== result.entry.category));
+              if (result.kind === "category") {
+                // Collapsible "start menu" section header. Collapsed by
+                // default so the empty launcher is a short list of
+                // sections, not all ~21 pages at once.
                 return (
-                  <div key={`page:${result.entry.id}`}>
-                    {showHeading ? (
-                      <div style={categoryHeadingStyle}>{result.entry.category}</div>
+                  <button type="button"
+                    key={`category:${result.category}`}
+                    data-testid={`launcher-category-${result.category}`}
+                    onClick={() => confirm(result)}
+                    style={{
+                      ...categoryRowStyle,
+                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)" }}>
+                      {result.expanded ? "▾" : "▸"}
+                    </span>
+                    <span style={{ flex: 1 }}>{result.category}</span>
+                  </button>
+                );
+              }
+              if (result.kind === "page") {
+                // Page beneath an expanded category (launcher) or a
+                // ranked match (search). Indented under its category in
+                // launcher mode so the tree structure reads clearly.
+                return (
+                  <button type="button"
+                    key={`page:${result.entry.id}`}
+                    onClick={() => confirm(result)}
+                    style={{
+                      ...resultStyle,
+                      paddingLeft: launcherMode ? 28 : 10,
+                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                      <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                    </span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {result.entry.label}
+                    </span>
+                    {result.entry.badge ? (
+                      <span style={badgeStyle}>{result.entry.badge}</span>
                     ) : null}
-                    <button type="button"
-                      onClick={() => confirm(result)}
-                      style={{
-                        ...resultStyle,
-                        background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
-                      }}
-                    >
-                      <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                        <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
-                      </span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {result.entry.label}
-                      </span>
-                      {result.entry.badge ? (
-                        <span style={badgeStyle}>{result.entry.badge}</span>
-                      ) : null}
-                      <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
-                    </button>
-                  </div>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
+                  </button>
                 );
               }
               if (result.kind === "command") {
@@ -389,12 +453,21 @@ const emptyStyle: CSSProperties = {
   fontSize: "var(--text-xs)",
 };
 
-const categoryHeadingStyle: CSSProperties = {
-  color: "var(--muted)",
-  fontSize: 10,
+const categoryRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  width: "100%",
+  border: "none",
+  borderRadius: 4,
+  padding: "8px 10px",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  textAlign: "left",
+  color: "var(--text-secondary)",
+  fontSize: 11,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
-  padding: "8px 10px 2px",
 };
 
 const badgeStyle: CSSProperties = {

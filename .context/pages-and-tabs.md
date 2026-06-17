@@ -277,8 +277,15 @@ useful — there is no separate command palette or search overlay anymore
 (`CommandPalette.tsx` and `SearchPalette.tsx` were deleted).
 
 The launcher does everything in one box:
-- **Empty input** → start-menu: every page from `computePagesDirectory`,
-  grouped by `category` heading.
+- **Empty input** → start-menu: a **collapsible tree** of the page
+  `category` headers (Work / Code / Git / Activity / Knowledge / System),
+  **collapsed by default** so the empty launcher is a short list of
+  sections rather than all ~21 pages. Expanding a category reveals its
+  pages (indented). Expansion state persists per user in `localStorage`
+  (`oxplow.launcher.expandedCategories`). The tree assembly is the pure
+  helper `buildLauncherTree(pages, expanded)` in `quickOpenResults.ts`;
+  category rows and page rows share one navigable `Row[]` so the keyboard
+  cursor and render can't drift (Enter toggles a category, opens a page).
 - **Typing** → ranked results, pages → **commands** → files → body hits.
   Commands come from `buildMenuGroups` (passed in as `menuGroups`) and are
   flattened by `flattenCommands`; the same registry still feeds the native

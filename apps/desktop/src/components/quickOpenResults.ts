@@ -1,7 +1,7 @@
 import type { MenuGroup } from "../commands.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
-import type { PageDirectoryEntry } from "./RailHud/sections.js";
+import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 
 /// A runnable menu command flattened for the launcher. Mirrors the
 /// shape the retired CommandPalette used: `searchKey = "group label"`.
@@ -96,4 +96,35 @@ export function buildQuickOpenResults(input: {
     .slice(0, 30)
     .map((hit) => ({ kind: "hit", hit }));
   return [...matchedPages, ...matchedCommands, ...matchedFileResults, ...bodyHits];
+}
+
+/// A row in the empty-query launcher's collapsible "start menu" tree:
+/// either a category header (toggles its section) or a page beneath an
+/// expanded category. Pure of React so the keyboard/render contract is
+/// unit-testable.
+export type LauncherRow =
+  | { kind: "category"; category: PageCategory; expanded: boolean }
+  | { kind: "page"; entry: PageDirectoryEntry };
+
+/// Assemble the launcher tree from the (already category-grouped) page
+/// directory. Categories appear in first-seen order — which the curated
+/// directory keeps aligned with `PAGE_CATEGORY_ORDER`. A category's page
+/// rows are emitted only when it's in `expanded`; default-collapsed means
+/// an empty set, so the launcher opens to just the category headers.
+export function buildLauncherTree(
+  pages: PageDirectoryEntry[],
+  expanded: ReadonlySet<PageCategory>,
+): LauncherRow[] {
+  const rows: LauncherRow[] = [];
+  let current: PageCategory | null = null;
+  for (const entry of pages) {
+    if (entry.category !== current) {
+      current = entry.category;
+      rows.push({ kind: "category", category: current, expanded: expanded.has(current) });
+    }
+    if (expanded.has(entry.category)) {
+      rows.push({ kind: "page", entry });
+    }
+  }
+  return rows;
 }
