@@ -105,9 +105,12 @@ release flow — see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV
 
 ## After install
 
-1. Launch oxplow from the directory you want to work in
-   (`./bin/oxplow` from the repo if you built from source — it
-   treats the current working directory as the project root).
+1. Launch oxplow and open the directory you want to work in. The
+   prebuilt app prompts you to pick a project on first launch; from
+   source, run `bun run tauri:dev` in that directory (it opens
+   `$PWD`). See
+   [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md)
+   for other run modes.
 2. The opened directory **is** the workspace. Oxplow does not
    climb upward looking for an enclosing repo (workspace
    isolation rule).

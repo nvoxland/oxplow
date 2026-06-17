@@ -5,12 +5,14 @@ send a prompt, watch what oxplow does, accept the work.
 
 ## 1. Open the project
 
-Launch oxplow from the directory you want to work in. The launcher
-(`bin/oxplow` if you're building from source) treats the current
-working directory as the project root, and the prebuilt app
-prompts you to pick one on first launch. Oxplow scopes itself to
-that directory — it will not climb upward looking for an enclosing
-repo. Whatever you opened *is* the workspace.
+Launch oxplow and pick the directory you want to work in — the
+prebuilt app prompts you to choose a project on first launch.
+(Building from source? `bun run tauri:dev` opens the current
+directory; see
+[DEV.md](https://github.com/nvoxland/oxplow/blob/main/DEV.md).)
+Oxplow scopes itself to that directory — it will not climb upward
+looking for an enclosing repo. Whatever you opened *is* the
+workspace.
 
 The first time you open a project, oxplow creates `.oxplow/`
 inside it:

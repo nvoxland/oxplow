@@ -30,53 +30,66 @@ This installs only the frontend deps (React, Monaco, xterm,
 
 ## Run from source
 
-```
-./bin/oxplow
-```
-
-`bin/oxplow` treats the current working directory as the project
-root. Oxplow's workspace isolation rule (see
-[.context/architecture.md](./.context/architecture.md)) keeps it
+Three ways to run, by what you're doing. To open a project, pass its
+directory as the **first positional arg** (`oxplow <dir>`) or set
+`OXPLOW_PROJECT_DIR`; a bare launch shows the project picker (there is
+no cwd fallback, and flag-style args like `--project` are ignored).
+The workspace-isolation rule (see
+[.context/architecture.md](./.context/architecture.md)) keeps a project
 from climbing into a parent repo.
 
-The launcher dispatches by what's already built:
+**Which frontend a binary serves is decided by the `custom-protocol`
+Cargo feature, not the build profile.** Tauri compiles
+`cfg(dev) = !custom-protocol`: without the feature the binary loads
+`devUrl` (Vite on `http://localhost:5173`); with it, the binary serves
+`frontendDist` (`apps/desktop/dist`) embedded at build time and needs
+no Vite. The `tauri` CLI turns the feature on; a plain `cargo build`
+does not — so a plain `cargo build` binary, **debug _or_ `--release`,
+always needs Vite.**
 
-1. `target/release/oxplow` if present — production binary, embedded
-   frontend, no Vite needed.
-2. `target/debug/oxplow` if present — debug binary; **expects Vite
-   running on `http://localhost:5173`** (Tauri reads `devUrl` for
-   debug profile and only embeds `frontendDist` in release builds).
-3. Falls back to `cargo tauri dev` from `apps/desktop/` (requires
-   `cargo install tauri-cli`).
-
-### Recommended dev loop (rapid iteration)
-
-The fastest loop avoids rebuilding the Rust shell unless Rust code
-changed. Run two long-lived processes:
+### Option A (default): tauri-cli dev
 
 ```
-  # Option A (default): tauri-cli dev. One command, one terminal.
-  # Starts Vite, builds + runs the debug binary, watches Rust and TS,
-  # auto-restarts the window on Rust changes. Use this unless you have
-  # a reason not to.
-  bun run tauri:dev                       # from repo root (defined in top-level package.json)
+bun run tauri:dev          # repo root; passes OXPLOW_PROJECT_DIR=$PWD
+```
 
-  # Option B: split-process dev — escape hatch when A's auto-rebuild
-  # is in your way (e.g. you want to decide when Rust rebuilds, or
-  # tauri-cli's watcher is misbehaving). Same debug binary, same Vite,
-  # just driven manually.
-  #
-  # terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
-  cd apps/desktop && bun run dev          # vite on :5173
+One command, one terminal: starts Vite, builds + runs the debug
+binary, watches Rust and TS, auto-restarts the window on Rust changes.
+Use this unless you have a reason not to.
 
-  # terminal 2 — debug binary; talks to the running vite server above
-  cargo build -p oxplow-desktop && ./bin/oxplow
+### Option B: split-process dev
 
-  # Option C: production-style binary (no Vite running; embeds dist/).
-  # Requires --release because debug Tauri builds always use devUrl —
-  # plain `cargo build` + ./bin/oxplow gives a blank window.
-  bun run --cwd apps/desktop build
-  cargo build --release -p oxplow-desktop && ./bin/oxplow
+Escape hatch when A's auto-rebuild is in your way (you want to decide
+when Rust rebuilds, or tauri-cli's watcher is misbehaving). Same debug
+binary, same Vite, driven manually.
+
+```
+# terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
+cd apps/desktop && bun run dev          # vite on :5173
+
+# terminal 2 — debug binary; loads the Vite server above
+cargo build -p oxplow-desktop && ./target/debug/oxplow .
+```
+
+### Option C: embedded binary (no Vite)
+
+For a faster *debug*-profile embedded binary:
+`bun run --cwd apps/desktop build && cargo build -p oxplow-desktop --features tauri/custom-protocol`
+run as `./target/debug/oxplow .`.
+
+
+For **release*-profile embedded binary:
+`bun run tauri:build` builds the frontend **and** the Rust shell with
+`custom-protocol` in one command, so the binary serves `dist/`
+standalone — no Vite, no manual feature flag. It also emits the
+installer bundle (see "Build installers"); add `--no-bundle` to skip
+that and just produce the runnable binary:
+
+```
+bun run tauri:build                          # frontend + binary + installers
+# …or skip installers, binary only:
+( cd apps/desktop && cargo tauri build --no-bundle )
+./target/release/oxplow .                    # run it — no Vite needed
 ```
 
 Then iterate:
@@ -85,8 +98,8 @@ Then iterate:
   Vite HMR pushes it into the running window. No rebuild, no restart.
 - **Rust crate change (`crates/**` or `apps/desktop/src-tauri/**`)**:
   `cargo build -p oxplow-desktop` in terminal 2, then quit the app
-  window and re-run `./bin/oxplow`. Cargo's incremental builds make
-  this ~5–15s for typical edits.
+  window and re-run `./target/debug/oxplow .`. Cargo's incremental
+  builds make this ~5–15s for typical edits.
 - **`tauri.conf.json` / capability JSON change**: same as Rust —
   `tauri-build` only re-embeds config when its build script reruns.
   A `cargo clean -p oxplow-desktop` + rebuild forces it.
@@ -101,8 +114,8 @@ Then iterate:
   Vite. Confirm `curl -sI http://localhost:5173/` returns 200; if
   not, start `bun run dev` first.
 - **`tauri-build` doesn't re-embed `frontendDist` automatically** —
-  it caches across debug builds. If a release-mode build picks up
-  stale assets, `cargo clean -p oxplow-desktop` and rebuild.
+  it caches across builds. If an embedded (`custom-protocol`) build
+  picks up stale assets, `cargo clean -p oxplow-desktop` and rebuild.
 - **Bare-DB boot** (no streams / threads) is normal on a fresh clone.
   The desktop shell auto-creates the primary stream and seeds a
   default thread on first launch.
