@@ -65,7 +65,7 @@ binary, same Vite, driven manually.
 
 ```
 # terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
-cd apps/desktop && bun run dev          # vite on :5173
+bun run --cwd apps/desktop dev          # vite on :5173
 
 # terminal 2 — debug binary; loads the Vite server above
 cargo build -p oxplow-desktop && ./target/debug/oxplow .
