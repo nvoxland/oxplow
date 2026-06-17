@@ -1,4 +1,4 @@
-//! `oxplow-daemon --project <dir> [--bind 127.0.0.1:7420]`
+//! `oxplow-daemon --project <dir> [--bind 127.0.0.1:7420] [--init]`
 //!
 //! Headless backend entrypoint. See lib.rs for the HTTP surface and
 //! the crate docs for the SSH-tunnel deployment model.
@@ -16,7 +16,11 @@ const DEFAULT_BIND: &str = "127.0.0.1:7420";
 
 fn usage() -> ! {
     eprintln!(
-        "usage: oxplow-daemon --project <dir> [--bind 127.0.0.1:7420]\n\
+        "usage: oxplow-daemon --project <dir> [--bind 127.0.0.1:7420] [--init]\n\
+         \n\
+         --init creates the project (`.oxplow/`) if it doesn't exist yet,\n\
+         instead of refusing — handy for scripting / profiling a fresh\n\
+         project without opening the desktop setup flow first.\n\
          \n\
          The project dir may also come from OXPLOW_PROJECT_DIR. The\n\
          daemon binds loopback only — reach it from another machine\n\
@@ -28,17 +32,21 @@ fn usage() -> ! {
 struct Args {
     project_dir: PathBuf,
     bind: SocketAddr,
+    /// Create `.oxplow/` if the target dir isn't a project yet.
+    init: bool,
 }
 
-/// Hand-rolled arg parsing (two flags) — not worth a clap dependency.
+/// Hand-rolled arg parsing — not worth a clap dependency.
 fn parse_args() -> Args {
     let mut project: Option<PathBuf> = None;
     let mut bind: Option<String> = None;
+    let mut init = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--project" => project = it.next().map(PathBuf::from),
             "--bind" => bind = it.next(),
+            "--init" => init = true,
             "--help" | "-h" => usage(),
             other => {
                 eprintln!("unknown argument: {other}");
@@ -56,7 +64,11 @@ fn parse_args() -> Args {
             eprintln!("invalid --bind address: {e}");
             usage();
         });
-    Args { project_dir, bind }
+    Args {
+        project_dir,
+        bind,
+        init,
+    }
 }
 
 #[tokio::main]
@@ -77,12 +89,26 @@ async fn main() {
         std::process::exit(1);
     });
     if !project_dir.join(".oxplow").is_dir() {
-        eprintln!(
-            "oxplow-daemon: {} is not an oxplow project (no .oxplow/). \
-             Open it once in the desktop app to set it up.",
-            project_dir.display()
-        );
-        std::process::exit(1);
+        if args.init {
+            if let Err(e) = std::fs::create_dir_all(project_dir.join(".oxplow")) {
+                eprintln!(
+                    "oxplow-daemon: could not create .oxplow/ in {}: {e}",
+                    project_dir.display()
+                );
+                std::process::exit(1);
+            }
+            tracing::info!(
+                project = %project_dir.display(),
+                "created new oxplow project (.oxplow/) via --init",
+            );
+        } else {
+            eprintln!(
+                "oxplow-daemon: {} is not an oxplow project (no .oxplow/). \
+                 Pass --init to create it, or open it once in the desktop app.",
+                project_dir.display()
+            );
+            std::process::exit(1);
+        }
     }
 
     let layout = AppLayout::for_project(&project_dir);

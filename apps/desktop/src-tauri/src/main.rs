@@ -32,9 +32,18 @@ fn main() {
     // project, chosen at launch. A bare launch (Finder/Spotlight/dock,
     // no arg + no env) has no project and boots the launcher instead.
     // A dir that isn't an Oxplow project yet (no `.oxplow/`) boots the
-    // setup-confirmation screen rather than silently initializing.
+    // setup-confirmation screen rather than silently initializing —
+    // unless `--init` was passed, which creates the project and boots
+    // straight in (scripting / profiling a fresh dir).
     match resolve_project_dir() {
         Some(dir) if dir.join(".oxplow").is_dir() => run_project(dir, ctx),
+        Some(dir) if init_flag() => {
+            if let Err(e) = std::fs::create_dir_all(dir.join(".oxplow")) {
+                eprintln!("oxplow: could not create .oxplow/ in {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            run_project(dir, ctx)
+        }
         Some(dir) => run_setup(dir, ctx),
         // Bare launch: reopen the windows that were open at last exit;
         // if there were none, show the launcher.
@@ -49,6 +58,12 @@ fn hook_event_arg() -> Option<String> {
         (Some("hook"), Some(event), None) => Some(event),
         _ => None,
     }
+}
+
+/// `--init`: create `.oxplow/` for a fresh project dir and boot straight
+/// in, instead of showing the setup-confirmation screen.
+fn init_flag() -> bool {
+    std::env::args().skip(1).any(|a| a == "--init")
 }
 
 fn run_hook_command(event: &str) {
