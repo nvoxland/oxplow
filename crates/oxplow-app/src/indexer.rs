@@ -33,6 +33,21 @@ pub const KIND_FILE: &str = "file";
 /// copy of the text; bound it so a few huge files can't bloat the DB).
 const MAX_INDEX_FILE_BYTES: i64 = 512 * 1024;
 
+/// Skip indexing a file whose longest line exceeds this — a single very
+/// long line means minified/bundled output or a source map, which is
+/// useless for search and bloats the index. Hand-written source rarely
+/// exceeds a few hundred bytes per line.
+const MAX_INDEX_LINE_BYTES: usize = 5_000;
+
+/// Length (bytes) of the longest `\n`-delimited line in `bytes`.
+fn longest_line_bytes(bytes: &[u8]) -> usize {
+    bytes
+        .split(|&b| b == b'\n')
+        .map(|line| line.len())
+        .max()
+        .unwrap_or(0)
+}
+
 #[derive(Clone)]
 pub struct Indexer {
     services: Arc<Services>,
@@ -299,6 +314,11 @@ impl Indexer {
             if bytes.contains(&0) {
                 continue;
             }
+            // Skip minified / bundled output + source maps — a single
+            // very long line is the tell; useless for search, bloats FTS.
+            if longest_line_bytes(&bytes) > MAX_INDEX_LINE_BYTES {
+                continue;
+            }
             let content = String::from_utf8_lossy(&bytes);
             let _ = self
                 .services
@@ -331,6 +351,18 @@ mod tests {
         git2::Repository::init(dir.path()).unwrap();
         let svc = Arc::new(Services::in_memory(dir.path()).expect("in-memory services"));
         (svc, dir)
+    }
+
+    #[test]
+    fn longest_line_bytes_flags_minified() {
+        assert_eq!(longest_line_bytes(b"abc\nde\nfghij"), 5);
+        assert_eq!(longest_line_bytes(b""), 0);
+        // A minified/bundled blob (one giant line) trips the threshold...
+        let minified = vec![b'x'; MAX_INDEX_LINE_BYTES + 1000];
+        assert!(longest_line_bytes(&minified) > MAX_INDEX_LINE_BYTES);
+        // ...but ordinary multi-line source does not.
+        let normal = b"fn main() { println!(\"hi\"); }\n".repeat(200);
+        assert!(longest_line_bytes(&normal) <= MAX_INDEX_LINE_BYTES);
     }
 
     #[tokio::test]

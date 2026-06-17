@@ -346,6 +346,14 @@ impl TaskService {
         } else {
             crate::events::SnapshotSourceKind::EffortEnd
         };
+        // An effort's start baseline must reflect the full pre-edit tree.
+        // If the initial startup sweep is still in flight, wait for it so
+        // `start_snapshot_id` pins a complete baseline rather than a
+        // half-captured one. No-op once the sweep is done (or for streams
+        // that never sweep).
+        if entering {
+            snapshot.await_initial_ready().await;
+        }
         let snap_id = match snapshot.request_snapshot(source).await {
             Ok(Some(id)) => id,
             Ok(None) => return,

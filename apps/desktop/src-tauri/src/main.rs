@@ -39,7 +39,10 @@ fn main() {
         Some(dir) if dir.join(".oxplow").is_dir() => run_project(dir, ctx),
         Some(dir) if init_flag() => {
             if let Err(e) = std::fs::create_dir_all(dir.join(".oxplow")) {
-                eprintln!("oxplow: could not create .oxplow/ in {}: {e}", dir.display());
+                eprintln!(
+                    "oxplow: could not create .oxplow/ in {}: {e}",
+                    dir.display()
+                );
                 std::process::exit(1);
             }
             run_project(dir, ctx)

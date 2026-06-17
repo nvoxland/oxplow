@@ -56,6 +56,22 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// [`SnapshotCaptureService::with_predrain_delay`].
 pub const DEFAULT_PREDRAIN_DELAY: Duration = Duration::from_millis(300);
 
+/// A capped rayon pool for the startup sweep's read+hash+blob fan-out,
+/// so hashing a large worktree doesn't peg every core — the sweep is
+/// one-time background work and the UI/agents need headroom. Leaves a
+/// couple of cores free (never fewer than 2 threads). `None` ⇒ caller
+/// falls back to the global rayon pool.
+fn sweep_thread_pool() -> Option<rayon::ThreadPool> {
+    let cores = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4);
+    let threads = cores.saturating_sub(2).max(2);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .ok()
+}
+
 /// Extract `mtime` from a `Metadata` and convert to unix
 /// milliseconds. Returns `None` when the platform / filesystem
 /// doesn't expose mtime (rare) — callers fall back to hashing.
@@ -169,6 +185,15 @@ struct Inner {
     /// permit when no waiter is parked yet, so a shutdown that races
     /// ahead of the watcher's first poll is not lost.
     shutdown: tokio::sync::Notify,
+    /// `true` once this stream's initial startup sweep has completed (or
+    /// there was nothing to sweep). Starts `true` so a service that
+    /// never runs a startup sweep (non-primary streams) never gates;
+    /// boot flips it `false` for the duration of the primary's sweep via
+    /// [`SnapshotCaptureService::begin_initial_sweep`]. Effort-start
+    /// awaits this ([`SnapshotCaptureService::await_initial_ready`]) so
+    /// an effort's baseline reflects the whole pre-edit tree, not a
+    /// half-swept one.
+    initial_ready: tokio::sync::watch::Sender<bool>,
 }
 
 impl SnapshotCaptureService {
@@ -194,8 +219,31 @@ impl SnapshotCaptureService {
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
                 in_flight: Mutex::new(None),
                 shutdown: tokio::sync::Notify::new(),
+                initial_ready: tokio::sync::watch::channel(true).0,
             }),
         }
+    }
+
+    /// Mark that a startup sweep is about to run for this stream —
+    /// [`await_initial_ready`] will block until [`mark_initial_complete`].
+    pub fn begin_initial_sweep(&self) {
+        let _ = self.inner.initial_ready.send_replace(false);
+    }
+
+    /// Signal that the initial sweep finished (or had nothing to do),
+    /// releasing any effort-start waiters.
+    pub fn mark_initial_complete(&self) {
+        let _ = self.inner.initial_ready.send_replace(true);
+    }
+
+    /// Wait until this stream's initial startup snapshot is complete —
+    /// returns immediately when it already is (or when this stream never
+    /// sweeps). Effort-start awaits this so the baseline is whole.
+    pub async fn await_initial_ready(&self) {
+        let mut rx = self.inner.initial_ready.subscribe();
+        // Err only if the sender dropped (it lives in `inner`'s Arc, so
+        // that won't happen while we hold a handle) — treat as ready.
+        let _ = rx.wait_for(|&ready| ready).await;
     }
 
     /// Swap the workspace path filter at runtime. Called when the
@@ -715,41 +763,50 @@ impl SnapshotCaptureService {
             let bytes_read = AtomicU64::new(0);
             let blobs_written = AtomicU64::new(0);
             let phase2_started = Instant::now();
-            let hashed: Vec<(PathBuf, CaptureStaging)> = needs_hash
-                .into_par_iter()
-                .filter_map(|(path, size, mtime_ms, prior_hash)| {
-                    let bytes = std::fs::read(&path).ok()?;
-                    bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                    let hash = BlobStore::hash(&bytes);
-                    if let Some(prior) = prior_hash.as_ref() {
-                        if *prior == hash {
-                            return None;
+            let run_phase2 = || -> Vec<(PathBuf, CaptureStaging)> {
+                needs_hash
+                    .into_par_iter()
+                    .filter_map(|(path, size, mtime_ms, prior_hash)| {
+                        let bytes = std::fs::read(&path).ok()?;
+                        bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                        let hash = BlobStore::hash(&bytes);
+                        if let Some(prior) = prior_hash.as_ref() {
+                            if *prior == hash {
+                                return None;
+                            }
                         }
-                    }
-                    // Persist the blob now — we already have the
-                    // bytes in memory. The serial capture path
-                    // would otherwise re-read the same bytes off
-                    // disk a moment later.
-                    match blobs.write(&bytes) {
-                        Ok(_) => {
-                            blobs_written.fetch_add(1, Ordering::Relaxed);
+                        // Persist the blob now — we already have the
+                        // bytes in memory. The serial capture path
+                        // would otherwise re-read the same bytes off
+                        // disk a moment later.
+                        match blobs.write(&bytes) {
+                            Ok(_) => {
+                                blobs_written.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) => {
+                                warn!(?path, error = %e, "snapshot sweep: blob write failed");
+                                return None;
+                            }
                         }
-                        Err(e) => {
-                            warn!(?path, error = %e, "snapshot sweep: blob write failed");
-                            return None;
-                        }
-                    }
-                    Some((
-                        path,
-                        CaptureStaging {
-                            size_bytes: size,
-                            mtime_ms,
-                            blob_hash: Some(hash),
-                            oversize: false,
-                        },
-                    ))
-                })
-                .collect();
+                        Some((
+                            path,
+                            CaptureStaging {
+                                size_bytes: size,
+                                mtime_ms,
+                                blob_hash: Some(hash),
+                                oversize: false,
+                            },
+                        ))
+                    })
+                    .collect()
+            };
+            // Run the read+hash+blob fan-out on a capped pool so a large
+            // worktree sweep leaves cores for the UI / agents instead of
+            // pegging the machine (it's one-time background work).
+            let hashed: Vec<(PathBuf, CaptureStaging)> = match sweep_thread_pool() {
+                Some(pool) => pool.install(run_phase2),
+                None => run_phase2(),
+            };
             let phase2_ms = phase2_started.elapsed().as_millis() as u64;
             let phase2_bytes = bytes_read.load(Ordering::Relaxed);
             info!(
@@ -1704,6 +1761,51 @@ mod tests {
         assert!(snap.is_none(), "transient should not create a parent");
         let rows = store.list_for_path("transient.txt").await.unwrap();
         assert!(rows.is_empty(), "no row for a path that came and went");
+    }
+
+    async fn bare_service(project: &std::path::Path) -> SnapshotCaptureService {
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let blobs = BlobStore::new(project.join(".oxplow/snapshots"));
+        SnapshotCaptureService::new(
+            store,
+            blobs,
+            project.to_path_buf(),
+            TEST_STREAM,
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn initial_ready_gate_blocks_until_complete() {
+        let project = tempdir().unwrap();
+        let svc = bare_service(project.path()).await;
+        svc.begin_initial_sweep();
+        let s2 = svc.clone();
+        let waiter = tokio::spawn(async move { s2.await_initial_ready().await });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            !waiter.is_finished(),
+            "effort-start gate must block while the initial sweep is in flight",
+        );
+        svc.mark_initial_complete();
+        tokio::time::timeout(Duration::from_millis(500), waiter)
+            .await
+            .expect("gate should release after mark_initial_complete")
+            .expect("waiter task panicked");
+    }
+
+    #[tokio::test]
+    async fn initial_ready_default_does_not_gate() {
+        let project = tempdir().unwrap();
+        let svc = bare_service(project.path()).await;
+        // No begin_initial_sweep → ready by default (a stream that never
+        // sweeps must not block effort-start forever).
+        tokio::time::timeout(Duration::from_millis(200), svc.await_initial_ready())
+            .await
+            .expect("an un-swept service must not gate");
     }
 
     #[tokio::test]

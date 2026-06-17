@@ -58,6 +58,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         .primary()
         .expect("primary snapshot capture registered at boot");
 
+    // Hold the effort-start gate closed until the initial sweep below
+    // completes, so an agent dispatched during the sweep can't open an
+    // effort whose start snapshot reflects a half-captured tree. Set
+    // synchronously here (before the spawn) so the gate is up the
+    // instant boot returns.
+    snapshot_svc.begin_initial_sweep();
+
     // Startup sweep: any file whose current content doesn't match the
     // latest snapshot row (or was never snapshotted) gets queued +
     // captured now. Backfills changes that landed while the daemon
@@ -115,6 +122,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                     bts.fail(&task_id, e.to_string(), None);
                 }
             }
+            // Release the effort-start gate on every path — including
+            // failure. A failed sweep leaves a best-effort baseline;
+            // blocking efforts forever would be worse than a partial one.
+            svc.mark_initial_complete();
         });
     }
 
