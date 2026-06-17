@@ -2,8 +2,9 @@
 //! shared `EventBus`.
 //!
 //! Spawned at boot. Iterates the stream list, opens an `FsWatcher`
-//! against each worktree (excluding `.git`, `node_modules`, etc. via
-//! path filtering inside the bridge loop) and a `GitRefsWatcher`
+//! against each worktree (ignored paths — `.git`/`.oxplow` +
+//! `.gitignore` + the project's `generated.exclude` — are pruned via
+//! the shared [`oxplow_fs_watch::WorkspaceFilter`]) and a `GitRefsWatcher`
 //! against `<worktree>/.git/refs`. Translates the per-watcher
 //! broadcasts into `OxplowEvent::WorkspaceChanged` /
 //! `OxplowEvent::GitRefsChanged` so the renderer's existing
@@ -24,13 +25,6 @@ use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent, WatchEventKind};
 use oxplow_git::GitRefsWatcher;
 use oxplow_session::StreamService;
 use tracing::{debug, warn};
-
-/// Top-level worktree entries we never want to watch — they're noisy
-/// and the renderer never reacts to changes inside them. Skipping them
-/// at registration time (rather than just filtering events afterwards)
-/// keeps event volume down: these dirs churn constantly (build output,
-/// dependency installs) and would otherwise flood the watcher.
-const EXCLUDED_TOP_LEVEL: &[&str] = &[".git", ".oxplow", "target", "node_modules"];
 
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 
@@ -57,7 +51,12 @@ impl WorkspaceWatchRegistry {
     /// renderer can toast. The primary stream is exempt — it points at
     /// the project root itself and a missing project root is a
     /// different failure mode.
-    pub async fn spawn(streams: StreamService, events: EventBus, project_dir: PathBuf) -> Self {
+    pub async fn spawn(
+        streams: StreamService,
+        events: EventBus,
+        project_dir: PathBuf,
+        filter: oxplow_fs_watch::WorkspaceFilter,
+    ) -> Self {
         let stream_rows = streams.list_streams().await.unwrap_or_default();
         let mut watchers = Vec::new();
         for s in stream_rows {
@@ -80,9 +79,14 @@ impl WorkspaceWatchRegistry {
                 })
             };
             let is_worktree = matches!(s.kind, StreamKind::Worktree);
-            if let Some(w) =
-                spawn_for_stream(s.id, worktree, events.clone(), is_worktree, on_orphan)
-            {
+            if let Some(w) = spawn_for_stream(
+                s.id,
+                worktree,
+                events.clone(),
+                is_worktree,
+                on_orphan,
+                filter.clone(),
+            ) {
                 watchers.push(w);
             }
         }
@@ -129,6 +133,7 @@ fn spawn_for_stream(
     events: EventBus,
     is_worktree: bool,
     on_orphan: OnOrphan,
+    filter: oxplow_fs_watch::WorkspaceFilter,
 ) -> Option<StreamWatchers> {
     if !worktree.exists() {
         debug!(?worktree, %stream_id, "skipping watcher — worktree missing");
@@ -148,7 +153,10 @@ fn spawn_for_stream(
                     continue;
                 }
                 let name = entry.file_name();
-                if EXCLUDED_TOP_LEVEL.iter().any(|ex| name == *ex) {
+                // Never register a recursive watch on an ignored
+                // top-level dir (the central filter: `.git`/`.oxplow`
+                // + `.gitignore` + the project's `generated.exclude`).
+                if filter.ignore(Path::new(&name), true) {
                     continue;
                 }
                 paths.push((entry.path(), RecursiveMode::Recursive));
@@ -192,14 +200,11 @@ fn spawn_for_stream(
                             }
                             break;
                         }
-                        if is_uninteresting(&path) {
+                        let rel_path = path.strip_prefix(&root).unwrap_or(&path);
+                        if filter.ignore(rel_path, path.is_dir()) || is_swap_file(&path) {
                             continue;
                         }
-                        let rel = path
-                            .strip_prefix(&root)
-                            .unwrap_or(&path)
-                            .to_string_lossy()
-                            .into_owned();
+                        let rel = rel_path.to_string_lossy().into_owned();
                         bus.emit(OxplowEvent::WorkspaceChanged {
                             stream_id: id,
                             change_kind: classify(&kind),
@@ -298,23 +303,14 @@ fn classify(k: &WatchEventKind) -> WorkspaceChangeKind {
     }
 }
 
-/// Drop noisy paths the renderer never needs to react to. Mirrors the
-/// `chokidar` ignore list from the renderer-era `WorkspaceWatcher`:
-/// `.git/`, `node_modules/`, `target/`, `.oxplow/`, and editor swap
-/// files.
-fn is_uninteresting(path: &Path) -> bool {
+/// Editor swap / temp files the renderer never needs to react to.
+/// Path-based ignores (`.git`, `.oxplow`, `.gitignore`, the project's
+/// `generated.exclude`) are the central [`oxplow_fs_watch::WorkspaceFilter`]'s
+/// job — this only catches the editor-noise suffixes the filter
+/// doesn't model.
+fn is_swap_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    for ex in EXCLUDED_TOP_LEVEL {
-        let mid = format!("/{ex}/");
-        let trail = format!("/{ex}");
-        if s.contains(&*mid) || s.ends_with(&*trail) {
-            return true;
-        }
-    }
-    if s.ends_with('~') || s.ends_with(".swp") || s.ends_with(".tmp") {
-        return true;
-    }
-    false
+    s.ends_with('~') || s.ends_with(".swp") || s.ends_with(".tmp")
 }
 
 #[cfg(test)]
@@ -338,8 +334,19 @@ mod tests {
         let mut rx = bus.subscribe();
         let stream_id = oxplow_domain::StreamId::new(1);
         let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
-        let _watchers = spawn_for_stream(stream_id, root.clone(), bus.clone(), false, on_orphan)
-            .expect("watchers");
+        // No .gitignore in the tempdir, so exclude the build dirs via the
+        // filter's exclude list (mirrors how a real project gitignores them).
+        let filter =
+            oxplow_fs_watch::WorkspaceFilter::with_user_entries(["target", "node_modules"]);
+        let _watchers = spawn_for_stream(
+            stream_id,
+            root.clone(),
+            bus.clone(),
+            false,
+            on_orphan,
+            filter,
+        )
+        .expect("watchers");
 
         // Give notify a moment to settle the cache walk before writing.
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -426,8 +433,13 @@ mod tests {
 
         let bus = EventBus::new();
         let mut rx = bus.subscribe();
-        let _registry =
-            WorkspaceWatchRegistry::spawn(svc.clone(), bus.clone(), project.clone()).await;
+        let _registry = WorkspaceWatchRegistry::spawn(
+            svc.clone(),
+            bus.clone(),
+            project.clone(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await;
 
         // Drain events until we see StreamOrphaned for the right id.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -504,8 +516,13 @@ mod tests {
 
         let bus = EventBus::new();
         let mut rx = bus.subscribe();
-        let _registry =
-            WorkspaceWatchRegistry::spawn(svc.clone(), bus.clone(), project.clone()).await;
+        let _registry = WorkspaceWatchRegistry::spawn(
+            svc.clone(),
+            bus.clone(),
+            project.clone(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await;
 
         // Let notify settle its initial cache walk before the delete.
         tokio::time::sleep(Duration::from_millis(300)).await;

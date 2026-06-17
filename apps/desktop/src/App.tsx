@@ -285,7 +285,10 @@ export function App() {
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
-  const [generated, setGeneratedState] = useState<string[]>([]);
+  const [generated, setGeneratedState] = useState<{ exclude: string[]; include: string[] }>({
+    exclude: [],
+    include: [],
+  });
   const opErrorsStore = getOpErrorsStore();
   const opErrorsAll = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
@@ -1164,11 +1167,13 @@ export function App() {
   }, [threadStates]);
 
   const handleToggleGenerated = async (entry: string, mark: boolean) => {
-    const next = mark
-      ? Array.from(new Set([...generated, entry])).sort()
-      : generated.filter((e) => e !== entry);
+    // The "mark as generated" toggle edits the `exclude` list (extra
+    // ignores beyond .gitignore); `include` is left untouched.
+    const exclude = mark
+      ? Array.from(new Set([...generated.exclude, entry])).sort()
+      : generated.exclude.filter((e) => e !== entry);
     try {
-      const cfg = await setGenerated(next);
+      const cfg = await setGenerated({ exclude, include: generated.include });
       setGeneratedState(cfg.generated);
     } catch (err) {
       setError(`Failed to update generated paths: ${String(err)}`);
@@ -2610,7 +2615,7 @@ export function App() {
               stream={stream}
               gitEnabled={workspaceContext.gitEnabled}
               selectedFilePath={selectedFilePath}
-              generated={generated}
+              generated={generated.exclude}
               onOpenFile={navOpenFile}
               onOpenDiff={navOpenDiff}
               onCreateFile={handleCreateFile}

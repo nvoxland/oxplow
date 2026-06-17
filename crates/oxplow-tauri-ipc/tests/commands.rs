@@ -586,9 +586,15 @@ async fn config_setters_round_trip() {
     commands::config::set_snapshot_max_file_bytes(app.state(), 1_000_000)
         .await
         .unwrap();
-    commands::config::set_generated(app.state(), vec!["generated/".into()])
-        .await
-        .unwrap();
+    commands::config::set_generated(
+        app.state(),
+        oxplow_config::GeneratedConfig {
+            exclude: vec!["generated/".into()],
+            include: vec![],
+        },
+    )
+    .await
+    .unwrap();
     let _ = commands::config::get_workspace_context(app.state()).await;
 }
 

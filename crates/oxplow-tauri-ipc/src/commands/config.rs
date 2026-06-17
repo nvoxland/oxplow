@@ -51,9 +51,9 @@ pub async fn set_snapshot_max_file_bytes(
 #[specta::specta]
 pub async fn set_generated(
     state: tauri::State<'_, AppState>,
-    entries: Vec<String>,
+    generated: oxplow_config::GeneratedConfig,
 ) -> Result<OxplowConfig, IpcError> {
-    oxplow_rpc::commands::config::set_generated(&state, entries).await
+    oxplow_rpc::commands::config::set_generated(&state, generated).await
 }
 
 #[tauri::command]

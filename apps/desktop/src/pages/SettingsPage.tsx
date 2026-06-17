@@ -32,6 +32,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [retentionDays, setRetentionDays] = useState("7");
   const [maxFileMiB, setMaxFileMiB] = useState("5");
   const [generatedText, setGeneratedText] = useState("");
+  // The textarea edits `generated.exclude`; preserve any `include`
+  // overrides set in oxplow.yaml across a save.
+  const [generatedInclude, setGeneratedInclude] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +51,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         setOpencodeModel(config.agentModels?.opencode ?? "");
         setRetentionDays(String(config.snapshotRetentionDays));
         setMaxFileMiB((config.snapshotMaxFileBytes / (1024 * 1024)).toString());
-        setGeneratedText((config.generated ?? []).join("\n"));
+        setGeneratedText((config.generated?.exclude ?? []).join("\n"));
+        setGeneratedInclude(config.generated?.include ?? []);
         setLoaded(true);
       })
       .catch((e) => {
@@ -87,7 +91,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       await setAgentPromptAppend(promptAppend);
       await setSnapshotRetentionDays(days);
       await setSnapshotMaxFileBytes(bytes);
-      await setGenerated(entries);
+      await setGenerated({ exclude: entries, include: generatedInclude });
       setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));

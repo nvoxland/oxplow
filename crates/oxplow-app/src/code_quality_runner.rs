@@ -113,7 +113,7 @@ fn collect_supported_files(
                 return false;
             }
             let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
-            !filter.ignore(rel)
+            !filter.ignore(rel, e.file_type().is_dir())
         })
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
@@ -353,7 +353,8 @@ impl FileFilter for WorkspaceFileFilter {
         if !self.inner.keep(path) {
             return false;
         }
-        !self.workspace.ignore(Path::new(path))
+        // Code-quality only ever feeds file paths here.
+        !self.workspace.ignore(Path::new(path), false)
     }
 }
 
@@ -430,7 +431,13 @@ impl crate::Services {
         let workspace_filter = {
             let cfg = self.config.read();
             cfg.as_ref()
-                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+                .map(|c| {
+                    oxplow_fs_watch::WorkspaceFilter::for_project(
+                        &project,
+                        &c.generated.exclude,
+                        &c.generated.include,
+                    )
+                })
                 .unwrap_or_default()
         };
         let findings_result = match tool.as_str() {

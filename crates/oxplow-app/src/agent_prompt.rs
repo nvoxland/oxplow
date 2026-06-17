@@ -179,7 +179,7 @@ mod tests {
             lsp_servers: vec![],
             agent_prompt_append: "be precise".into(),
             snapshot_retention_days: 7,
-            generated: vec![],
+            generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 1_000_000,
             inject_session_context: true,
             collection: Default::default(),

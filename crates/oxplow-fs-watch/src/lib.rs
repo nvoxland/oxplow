@@ -188,26 +188,44 @@ fn classify(event: &notify::Event) -> WatchEventKind {
 /// segment list.
 const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 
-/// Workspace-relative path filter. Constructed once at app startup
-/// from the project's `generated` config and shared (by value clone —
-/// the entry vec is short) across snapshot capture, code-quality
-/// scans, fs-watch consumers, etc.
+/// The single source of truth for "is this workspace path ignored?".
+/// Built once per project ([`WorkspaceFilter::for_project`]) and shared
+/// by cheap clone across snapshot capture, code-quality scans, fs-watch
+/// consumers, and the indexer — no consumer keeps its own skip-list.
 ///
-/// Match semantics:
-/// - A **single-segment entry** (no `/`) matches if any path component
-///   equals it. So `target` filters `target/`, `crates/foo/target/`,
-///   etc. Mirrors the legacy hardcoded behavior for build dirs.
-/// - A **multi-segment entry** (contains `/`) matches the path exactly
-///   OR as a prefix (`apps/desktop/dist` filters that directory and
-///   everything under it, but NOT `crates/foo/apps/desktop/dist`).
+/// A path is ignored when, in precedence order:
+/// 1. it is under `.git` or `.oxplow` (except `.oxplow/wiki/`) —
+///    absolute, never overridable;
+/// 2. otherwise, if it matches an **`include`** entry it is **kept**
+///    (force-track something `.gitignore` would otherwise drop);
+/// 3. otherwise, if it matches an **`exclude`** entry it is ignored;
+/// 4. otherwise, if `.gitignore` (the repo root `.gitignore` +
+///    `.git/info/exclude`) ignores it, it is ignored;
+/// 5. otherwise it is kept.
 ///
-/// The always-on `.git` ignore and `.oxplow/` (with `.oxplow/wiki/`
-/// carve-out) handling apply regardless of user config; everything
-/// else — build outputs, IDE state, language caches — must be
-/// listed in `generated` explicitly.
-#[derive(Debug, Clone, Default)]
+/// Root-level `.gitignore` patterns are matched at every depth (git
+/// semantics), so `node_modules` / `target` / build caches are pruned
+/// throughout the tree. Per-subdirectory `.gitignore` *additions* are
+/// not loaded here yet (that needs `ignore::WalkBuilder`).
+///
+/// `exclude`/`include` entries are either a single segment (matches any
+/// path component — `target` matches every `target/`) or a repo-relative
+/// path (matches that path exactly or as a prefix — `apps/desktop/dist`).
+#[derive(Clone, Default)]
 pub struct WorkspaceFilter {
-    user_entries: Vec<FilterEntry>,
+    exclude: Vec<FilterEntry>,
+    include: Vec<FilterEntry>,
+    gitignore: Option<std::sync::Arc<ignore::gitignore::Gitignore>>,
+}
+
+impl std::fmt::Debug for WorkspaceFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkspaceFilter")
+            .field("exclude", &self.exclude)
+            .field("include", &self.include)
+            .field("gitignore", &self.gitignore.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -217,38 +235,47 @@ enum FilterEntry {
 }
 
 impl WorkspaceFilter {
-    /// Build a filter from the user's `generated` config list.
-    /// Entries may be a single dir/file name (matches anywhere) or a
-    /// repo-relative path (matches that exact path + everything
-    /// under it).
+    /// Exclude-only filter with no `.gitignore` awareness — for tests
+    /// and callers that have no project root. Equivalent to
+    /// `for_project` with an empty include list and no repo.
     pub fn with_user_entries<I, S>(entries: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let user_entries = entries
-            .into_iter()
-            .filter_map(|raw| {
-                let trimmed = raw.as_ref().trim().trim_matches('/');
-                if trimmed.is_empty() {
-                    return None;
-                }
-                if trimmed.contains('/') {
-                    Some(FilterEntry::Path(PathBuf::from(trimmed)))
-                } else {
-                    Some(FilterEntry::Segment(trimmed.to_string()))
-                }
-            })
-            .collect();
-        Self { user_entries }
+        Self {
+            exclude: parse_filter_entries(entries),
+            include: Vec::new(),
+            gitignore: None,
+        }
     }
 
-    /// True if `path` (workspace-relative) should be ignored.
-    pub fn ignore(&self, path: &Path) -> bool {
+    /// Build the project filter: `.gitignore`-aware (root `.gitignore` +
+    /// `.git/info/exclude`), plus the project's `generated.exclude` and
+    /// `generated.include` lists. `root` is the worktree directory.
+    pub fn for_project<E, S, I, T>(root: &Path, exclude: E, include: I) -> Self
+    where
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        Self {
+            exclude: parse_filter_entries(exclude),
+            include: parse_filter_entries(include),
+            gitignore: build_gitignore(root).map(std::sync::Arc::new),
+        }
+    }
+
+    /// True if `path` (workspace-relative) should be ignored. `is_dir`
+    /// lets `.gitignore` directory-only patterns (`build/`) prune a
+    /// whole subtree without descending into it — pass the real value
+    /// at walk sites; `false` is a safe default for file events.
+    pub fn ignore(&self, path: &Path, is_dir: bool) -> bool {
         use std::path::Component;
 
-        // Always-on defaults: walk components, match by segment with
-        // the `.oxplow/wiki/` carve-out.
+        // 1. Absolute defaults: `.git` anywhere, `.oxplow` (except
+        //    `.oxplow/wiki/`). Not overridable by include/exclude.
         let mut comps = path.components().peekable();
         while let Some(c) = comps.next() {
             if let Component::Normal(seg) = c {
@@ -261,10 +288,7 @@ impl WorkspaceFilter {
                         Component::Normal(n) => n.to_str(),
                         _ => None,
                     });
-                    if next == Some("wiki") {
-                        return false;
-                    }
-                    return true;
+                    return next != Some("wiki");
                 }
                 if DEFAULT_IGNORED_SEGMENTS.contains(&s) {
                     return true;
@@ -272,35 +296,93 @@ impl WorkspaceFilter {
             }
         }
 
-        // User entries: segments match any component, paths match
-        // exact-or-prefix.
-        for entry in &self.user_entries {
-            match entry {
-                FilterEntry::Segment(seg) => {
-                    if path.components().any(
-                        |c| matches!(c, Component::Normal(n) if n.to_str() == Some(seg.as_str())),
-                    ) {
-                        return true;
-                    }
-                }
-                FilterEntry::Path(p) => {
-                    if path == p.as_path() || path.starts_with(p) {
-                        return true;
-                    }
-                }
+        // 2. `include` forces a path back in (overrides exclude + gitignore).
+        if matches_filter_entries(&self.include, path) {
+            return false;
+        }
+        // 3. Explicit excludes.
+        if matches_filter_entries(&self.exclude, path) {
+            return true;
+        }
+        // 4. `.gitignore`. `_or_any_parents` so a file under a
+        //    gitignored directory is caught even when the directory
+        //    itself wasn't pruned first (i.e. point queries, not just
+        //    the pruning walk). Relative, non-empty paths only — which
+        //    is what every workspace-relative caller passes.
+        if let Some(gi) = &self.gitignore {
+            if !path.as_os_str().is_empty()
+                && gi.matched_path_or_any_parents(path, is_dir).is_ignore()
+            {
+                return true;
             }
         }
-
         false
     }
 }
 
+fn parse_filter_entries<I, S>(entries: I) -> Vec<FilterEntry>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    entries
+        .into_iter()
+        .filter_map(|raw| {
+            let trimmed = raw.as_ref().trim().trim_matches('/');
+            if trimmed.is_empty() {
+                None
+            } else if trimmed.contains('/') {
+                Some(FilterEntry::Path(PathBuf::from(trimmed)))
+            } else {
+                Some(FilterEntry::Segment(trimmed.to_string()))
+            }
+        })
+        .collect()
+}
+
+fn matches_filter_entries(entries: &[FilterEntry], path: &Path) -> bool {
+    use std::path::Component;
+    for entry in entries {
+        match entry {
+            FilterEntry::Segment(seg) => {
+                if path
+                    .components()
+                    .any(|c| matches!(c, Component::Normal(n) if n.to_str() == Some(seg.as_str())))
+                {
+                    return true;
+                }
+            }
+            FilterEntry::Path(p) => {
+                if path == p.as_path() || path.starts_with(p) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Build the repo-root `.gitignore` matcher: the root `.gitignore` plus
+/// `.git/info/exclude`. Returns `None` when neither exists (so a
+/// non-repo project simply has no gitignore layer). Root-level patterns
+/// match at every depth, matching git's own behavior.
+fn build_gitignore(root: &Path) -> Option<ignore::gitignore::Gitignore> {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    // `.git/info/exclude` first, then the tracked root `.gitignore`.
+    let _ = builder.add(root.join(".git").join("info").join("exclude"));
+    let _ = builder.add(root.join(".gitignore"));
+    match builder.build() {
+        Ok(gi) if gi.num_ignores() > 0 => Some(gi),
+        _ => None,
+    }
+}
+
 /// Default-only shorthand for callers that don't have a configured
-/// filter handy (e.g. the snapshot-sweep example binary). Equivalent
-/// to `WorkspaceFilter::default().ignore(path)` — applies the always-
-/// on defaults only, no user entries.
+/// filter handy (e.g. the snapshot-sweep example binary). Applies the
+/// always-on `.git` / `.oxplow` defaults only — no gitignore, no user
+/// entries.
 pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
-    WorkspaceFilter::default().ignore(path)
+    WorkspaceFilter::default().ignore(path, false)
 }
 
 #[cfg(test)]
@@ -509,9 +591,9 @@ mod tests {
     #[test]
     fn workspace_filter_user_segment_matches_anywhere() {
         let f = WorkspaceFilter::with_user_entries([".idea"]);
-        assert!(f.ignore(Path::new(".idea/workspace.xml")));
-        assert!(f.ignore(Path::new("nested/.idea/foo")));
-        assert!(!f.ignore(Path::new("src/main.rs")));
+        assert!(f.ignore(Path::new(".idea/workspace.xml"), false));
+        assert!(f.ignore(Path::new("nested/.idea/foo"), false));
+        assert!(!f.ignore(Path::new("src/main.rs"), false));
     }
 
     #[test]
@@ -520,18 +602,18 @@ mod tests {
         // always-on defaults (no `dist`, `target`, etc.). That lets
         // us isolate the "matches prefix only" semantics.
         let f = WorkspaceFilter::with_user_entries(["apps/desktop/generated"]);
-        assert!(f.ignore(Path::new("apps/desktop/generated")));
-        assert!(f.ignore(Path::new("apps/desktop/generated/index.js")));
-        assert!(!f.ignore(Path::new("apps/desktop")));
+        assert!(f.ignore(Path::new("apps/desktop/generated"), false));
+        assert!(f.ignore(Path::new("apps/desktop/generated/index.js"), false));
+        assert!(!f.ignore(Path::new("apps/desktop"), false));
         // Not a free-floating match — only the exact prefix counts.
-        assert!(!f.ignore(Path::new("crates/foo/apps/desktop/generated/x")));
+        assert!(!f.ignore(Path::new("crates/foo/apps/desktop/generated/x"), false));
     }
 
     #[test]
     fn workspace_filter_user_file_path_matches_exact() {
         let f = WorkspaceFilter::with_user_entries(["docs/generated/output.txt"]);
-        assert!(f.ignore(Path::new("docs/generated/output.txt")));
-        assert!(!f.ignore(Path::new("docs/generated/other.txt")));
+        assert!(f.ignore(Path::new("docs/generated/output.txt"), false));
+        assert!(!f.ignore(Path::new("docs/generated/other.txt"), false));
     }
 
     #[test]
@@ -540,24 +622,88 @@ mod tests {
         // `.oxplow/wiki/` carve-out). Build dirs are NOT defaults —
         // they require the user to add them to `generated`.
         let f = WorkspaceFilter::default();
-        assert!(f.ignore(Path::new(".git/HEAD")));
-        assert!(f.ignore(Path::new("crates/foo/.git/HEAD")));
-        assert!(!f.ignore(Path::new("node_modules/x")));
-        assert!(!f.ignore(Path::new("target/debug")));
-        assert!(!f.ignore(Path::new("src/main.rs")));
+        assert!(f.ignore(Path::new(".git/HEAD"), false));
+        assert!(f.ignore(Path::new("crates/foo/.git/HEAD"), false));
+        assert!(!f.ignore(Path::new("node_modules/x"), false));
+        assert!(!f.ignore(Path::new("target/debug"), false));
+        assert!(!f.ignore(Path::new("src/main.rs"), false));
     }
 
     #[test]
     fn workspace_filter_oxplow_wiki_passes_through() {
         let f = WorkspaceFilter::default();
-        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md")));
-        assert!(f.ignore(Path::new(".oxplow/state.sqlite")));
+        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
+        assert!(f.ignore(Path::new(".oxplow/state.sqlite"), false));
     }
 
     #[test]
     fn workspace_filter_empty_entries_are_dropped() {
         let f = WorkspaceFilter::with_user_entries(["", "  ", "/"]);
-        assert!(!f.ignore(Path::new("foo.txt")));
+        assert!(!f.ignore(Path::new("foo.txt"), false));
+    }
+
+    fn empty() -> Vec<String> {
+        Vec::new()
+    }
+
+    #[test]
+    fn for_project_respects_root_gitignore_at_every_depth() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".gitignore"),
+            "node_modules/\n*.log\ndist/\n",
+        )
+        .unwrap();
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
+        // Root-level pattern, matched at every depth (git semantics).
+        assert!(f.ignore(Path::new("node_modules"), true));
+        assert!(f.ignore(Path::new("node_modules/pkg/index.js"), false));
+        assert!(f.ignore(Path::new("crates/foo/node_modules/x"), false));
+        assert!(f.ignore(Path::new("build.log"), false));
+        assert!(f.ignore(Path::new("dist/app.js"), false));
+        // Tracked sources pass through.
+        assert!(!f.ignore(Path::new("src/main.rs"), false));
+        assert!(!f.ignore(Path::new("README.md"), false));
+    }
+
+    #[test]
+    fn for_project_include_overrides_gitignore() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "dist/\n").unwrap();
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), ["dist/keep.json"]);
+        assert!(f.ignore(Path::new("dist/other.js"), false)); // still ignored
+        assert!(!f.ignore(Path::new("dist/keep.json"), false)); // forced back in
+    }
+
+    #[test]
+    fn for_project_exclude_adds_beyond_gitignore() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "node_modules/\n").unwrap();
+        // A noisy dir that isn't in .gitignore but we still don't want.
+        let f = WorkspaceFilter::for_project(dir.path(), ["snapshots-out"], empty());
+        assert!(f.ignore(Path::new("snapshots-out/big.json"), false));
+        assert!(f.ignore(Path::new("node_modules/x"), false));
+        assert!(!f.ignore(Path::new("src/main.rs"), false));
+    }
+
+    #[test]
+    fn for_project_dir_only_pattern_uses_is_dir() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "build/\n").unwrap();
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
+        // `build/` is dir-only: a directory named `build` is pruned...
+        assert!(f.ignore(Path::new("build"), true));
+        // ...but a *file* literally named `build` is not matched by `build/`.
+        assert!(!f.ignore(Path::new("build"), false));
+    }
+
+    #[test]
+    fn for_project_without_gitignore_is_defaults_only() {
+        let dir = tempdir().unwrap(); // no .gitignore written
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
+        assert!(f.ignore(Path::new(".git/HEAD"), false));
+        assert!(!f.ignore(Path::new("node_modules/x"), false));
+        assert!(!f.ignore(Path::new("src/main.rs"), false));
     }
 
     #[tokio::test]

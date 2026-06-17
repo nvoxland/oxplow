@@ -92,6 +92,7 @@ refinery = { version = "0.9", features = ["rusqlite"] }
 notify = "8.2"
 notify-debouncer-full = "0.6"
 tempfile = "3.27"
+ignore = "0.4"
 
 # Git
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }

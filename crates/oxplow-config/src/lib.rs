@@ -153,6 +153,27 @@ pub fn is_test_report_format(format: &str) -> bool {
     format.eq_ignore_ascii_case("junit")
 }
 
+/// What oxplow watches / snapshots / indexes, on top of the always-on
+/// `.git`/`.oxplow` ignores and the repo's `.gitignore`.
+///
+/// - `exclude`: extra paths to ignore even when `.gitignore` doesn't
+///   (e.g. a tracked-but-noisy generated file).
+/// - `include`: gitignored paths to force back in (override
+///   `.gitignore` for something oxplow should still see).
+///
+/// Each entry is a single segment (matches any path component —
+/// `target` matches every `target/`) or a repo-relative path (matches
+/// that path exactly or as a prefix — `apps/desktop/dist`).
+// No `skip_serializing_if`: specta's unified-mode TS export forbids it
+// (the whole `generated` key is only written when non-empty anyway).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct GeneratedConfig {
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub include: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
     /// Enabled agent implementations for this project, in priority order.
@@ -171,15 +192,13 @@ pub struct OxplowConfig {
     /// File-snapshot retention window in days. 0 disables pruning.
     #[serde(rename = "snapshotRetentionDays")]
     pub snapshot_retention_days: u32,
-    /// Generated paths excluded from fs-watch / snapshot capture /
-    /// code-quality scans. Entries are either a single segment name
-    /// (matched anywhere — e.g. `target` filters every `target/`) or
-    /// a repo-relative path (matched exactly or as a directory
-    /// prefix — e.g. `apps/desktop/dist`, `docs/generated/out.txt`).
-    /// Defaults like `.git`, `node_modules`, `target` apply
-    /// automatically; this list extends them.
+    /// Extra `exclude`/`include` paths layered on top of `.gitignore`
+    /// for fs-watch / snapshot capture / code-quality scans. `.git`,
+    /// `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
+    /// are ignored automatically — this only adds extras or forces
+    /// gitignored paths back in. See [`GeneratedConfig`].
     #[serde(rename = "generated")]
-    pub generated: Vec<String>,
+    pub generated: GeneratedConfig,
     /// Maximum blob size for content-addressed snapshotting; larger
     /// files get a stat-only entry. Default 5 MiB.
     #[serde(rename = "snapshotMaxFileBytes")]
@@ -209,6 +228,16 @@ pub enum ConfigError {
     Invalid(String),
 }
 
+/// Raw `generated:` block — `{ exclude: [...], include: [...] }`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawGenerated {
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    include: Vec<String>,
+}
+
 /// Internal raw shape, used to validate before promoting to
 /// `OxplowConfig`. Mirrors the TS `ParsedOxplowConfig` interface.
 #[derive(Debug, Default, Deserialize)]
@@ -226,10 +255,8 @@ struct RawConfig {
     agent_prompt_append: Option<String>,
     #[serde(rename = "snapshotRetentionDays", default)]
     snapshot_retention_days: Option<f64>,
-    // Accept the canonical `generated` key AND the legacy
-    // `generatedDirs` alias on read. We always write `generated`.
-    #[serde(rename = "generated", default, alias = "generatedDirs")]
-    generated: Option<Vec<String>>,
+    #[serde(rename = "generated", default)]
+    generated: Option<RawGenerated>,
     #[serde(rename = "snapshotMaxFileBytes", default)]
     snapshot_max_file_bytes: Option<f64>,
     #[serde(rename = "injectSessionContext", default)]
@@ -366,10 +393,6 @@ pub fn write_project_config(
     // Schema-managed keys we own. Anything outside this set found
     // in an existing file is copied through verbatim (best-effort,
     // since YAML→serde_yaml::Value→YAML is still lossy on style).
-    // Both `generated` (canonical) and `generatedDirs` (legacy alias)
-    // are managed — we strip either form from existing-extras so a
-    // user upgrading from the old key doesn't end up with both
-    // sitting in the file.
     const MANAGED_KEYS: &[&str] = &[
         "agent",
         "agents",
@@ -377,7 +400,6 @@ pub fn write_project_config(
         "agentPromptAppend",
         "snapshotRetentionDays",
         "generated",
-        "generatedDirs",
         "snapshotMaxFileBytes",
         "injectSessionContext",
         "lsp",
@@ -425,7 +447,7 @@ pub fn write_project_config(
             config.snapshot_retention_days.into(),
         );
     }
-    if !config.generated.is_empty() {
+    if !config.generated.exclude.is_empty() || !config.generated.include.is_empty() {
         doc.insert(
             "generated".into(),
             serde_yaml::to_value(&config.generated).expect("generated paths serialize"),
@@ -567,7 +589,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
         snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
-        generated: Vec::new(),
+        generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         collection: CollectionConfig::default(),
@@ -613,32 +635,11 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     };
 
     let generated = match raw.generated {
-        Some(list) => {
-            let mut out = Vec::with_capacity(list.len());
-            for (i, entry) in list.into_iter().enumerate() {
-                let trimmed = entry.trim().trim_matches('/').to_string();
-                if trimmed.is_empty() {
-                    return Err(ConfigError::Invalid(format!(
-                        "generated[{i}] must be a non-empty string"
-                    )));
-                }
-                // Reject absolute paths and parent-escape sequences —
-                // entries must be repo-relative.
-                if entry.trim().starts_with('/') {
-                    return Err(ConfigError::Invalid(format!(
-                        "generated[{i}] must be a repo-relative path, not absolute (got \"{entry}\")"
-                    )));
-                }
-                if trimmed.split('/').any(|seg| seg == "..") {
-                    return Err(ConfigError::Invalid(format!(
-                        "generated[{i}] must not contain `..` (got \"{entry}\")"
-                    )));
-                }
-                out.push(trimmed);
-            }
-            out
-        }
-        None => Vec::new(),
+        Some(g) => GeneratedConfig {
+            exclude: validate_generated_list(g.exclude, "generated.exclude")?,
+            include: validate_generated_list(g.include, "generated.include")?,
+        },
+        None => GeneratedConfig::default(),
     };
 
     let snapshot_max_file_bytes = match raw.snapshot_max_file_bytes {
@@ -724,6 +725,33 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         collection,
         agent_models,
     })
+}
+
+/// Validate one `generated.exclude` / `generated.include` list: each
+/// entry must be a non-empty, repo-relative path (no leading `/`, no
+/// `..`). Returns the trimmed entries.
+fn validate_generated_list(list: Vec<String>, label: &str) -> Result<Vec<String>, ConfigError> {
+    let mut out = Vec::with_capacity(list.len());
+    for (i, entry) in list.into_iter().enumerate() {
+        let trimmed = entry.trim().trim_matches('/').to_string();
+        if trimmed.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "{label}[{i}] must be a non-empty string"
+            )));
+        }
+        if entry.trim().starts_with('/') {
+            return Err(ConfigError::Invalid(format!(
+                "{label}[{i}] must be a repo-relative path, not absolute (got \"{entry}\")"
+            )));
+        }
+        if trimmed.split('/').any(|seg| seg == "..") {
+            return Err(ConfigError::Invalid(format!(
+                "{label}[{i}] must not contain `..` (got \"{entry}\")"
+            )));
+        }
+        out.push(trimmed);
+    }
+    Ok(out)
 }
 
 /// Transform tiers a project plugin may declare. `builtin-rust` is
@@ -1094,38 +1122,28 @@ lsp:
     }
 
     #[test]
-    fn generated_accepts_segment_and_path_entries() {
+    fn generated_accepts_exclude_and_include_entries() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "generated:\n  - target\n  - .idea\n  - apps/desktop/dist\n  - docs/generated/out.txt\n",
+            "generated:\n  exclude:\n    - target\n    - apps/desktop/dist\n  include:\n    - dist/keep.json\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            cfg.generated,
-            vec![
-                "target".to_string(),
-                ".idea".to_string(),
-                "apps/desktop/dist".to_string(),
-                "docs/generated/out.txt".to_string(),
-            ]
+            cfg.generated.exclude,
+            vec!["target".to_string(), "apps/desktop/dist".to_string()]
         );
+        assert_eq!(cfg.generated.include, vec!["dist/keep.json".to_string()]);
     }
 
     #[test]
-    fn generated_accepts_legacy_generated_dirs_key() {
+    fn generated_defaults_to_empty_when_absent() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "generatedDirs:\n  - target\n  - .idea\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: [claude]\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(
-            cfg.generated,
-            vec!["target".to_string(), ".idea".to_string()]
-        );
+        assert!(cfg.generated.exclude.is_empty());
+        assert!(cfg.generated.include.is_empty());
     }
 
     #[test]
@@ -1133,7 +1151,7 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "generated: [\"/etc/passwd\"]\n",
+            "generated:\n  exclude: [\"/etc/passwd\"]\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1141,11 +1159,11 @@ lsp:
     }
 
     #[test]
-    fn rejects_generated_parent_escape() {
+    fn rejects_generated_include_parent_escape() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "generated: [\"../sibling\"]\n",
+            "generated:\n  include: [\"../sibling\"]\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -1153,25 +1171,20 @@ lsp:
     }
 
     #[test]
-    fn write_emits_generated_key_not_legacy_alias() {
+    fn write_round_trips_generated_exclude_include() {
         let dir = tempdir().unwrap();
-        // Pre-populate with the legacy key so we exercise the
-        // "rewrite on save" path.
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "generatedDirs: [target, .idea]\n",
+            "generated:\n  exclude: [target]\n  include: [dist/keep.json]\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         write_project_config(dir.path(), &cfg).unwrap();
-        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
-        assert!(
-            raw.contains("generated:"),
-            "expected canonical `generated:` key on write, got:\n{raw}"
-        );
-        assert!(
-            !raw.contains("generatedDirs"),
-            "legacy alias must not survive a round-trip, got:\n{raw}"
+        let reloaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(reloaded.generated.exclude, vec!["target".to_string()]);
+        assert_eq!(
+            reloaded.generated.include,
+            vec!["dist/keep.json".to_string()]
         );
     }
 

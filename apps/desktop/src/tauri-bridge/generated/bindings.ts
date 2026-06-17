@@ -510,7 +510,7 @@ export const commands = {
 	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
 	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
-	setGenerated: (entries: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { entries })),
+	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { generated })),
 	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
@@ -1454,6 +1454,24 @@ export type Followup = {
 	created_at: number,
 };
 
+/**
+ *  What oxplow watches / snapshots / indexes, on top of the always-on
+ *  `.git`/`.oxplow` ignores and the repo's `.gitignore`.
+ * 
+ *  - `exclude`: extra paths to ignore even when `.gitignore` doesn't
+ *    (e.g. a tracked-but-noisy generated file).
+ *  - `include`: gitignored paths to force back in (override
+ *    `.gitignore` for something oxplow should still see).
+ * 
+ *  Each entry is a single segment (matches any path component —
+ *  `target` matches every `target/`) or a repo-relative path (matches
+ *  that path exactly or as a prefix — `apps/desktop/dist`).
+ */
+export type GeneratedConfig = {
+	exclude?: string[],
+	include?: string[],
+};
+
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 export type GitLogCommit = {
@@ -1796,15 +1814,13 @@ export type OxplowConfig = {
 	// File-snapshot retention window in days. 0 disables pruning.
 	snapshotRetentionDays: number,
 	/**
-	 *  Generated paths excluded from fs-watch / snapshot capture /
-	 *  code-quality scans. Entries are either a single segment name
-	 *  (matched anywhere — e.g. `target` filters every `target/`) or
-	 *  a repo-relative path (matched exactly or as a directory
-	 *  prefix — e.g. `apps/desktop/dist`, `docs/generated/out.txt`).
-	 *  Defaults like `.git`, `node_modules`, `target` apply
-	 *  automatically; this list extends them.
+	 *  Extra `exclude`/`include` paths layered on top of `.gitignore`
+	 *  for fs-watch / snapshot capture / code-quality scans. `.git`,
+	 *  `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
+	 *  are ignored automatically — this only adds extras or forces
+	 *  gitignored paths back in. See [`GeneratedConfig`].
 	 */
-	generated: string[],
+	generated: GeneratedConfig,
 	/**
 	 *  Maximum blob size for content-addressed snapshotting; larger
 	 *  files get a stat-only entry. Default 5 MiB.

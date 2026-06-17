@@ -2,13 +2,16 @@ agents:
 - claude
 - codex
 - opencode
-generated:
-- target
-- .idea
-- node_modules
-- site
-- oxplow.iml
-- apps/desktop/test-report.xml
+# What oxplow watches / snapshots / indexes is now driven by `.gitignore`
+# (+ `.git/info/exclude`) plus the always-on `.git`/`.oxplow` ignores, so
+# the old `generated:` list (target, node_modules, .idea, site, *.iml,
+# test-report.xml) is redundant — all of it is already gitignored.
+# Re-add only for the two override cases:
+#   generated:
+#     exclude:            # ignore something .gitignore does NOT
+#       - some/tracked/generated.json
+#     include:            # force-track something .gitignore DOES ignore
+#       - dist/keep-this.json
 collection:
   # `bun run test:collect` runs both stacks and emits all three reports:
   # `cargo cov` (= llvm-cov nextest) writes the Rust lcov + JUnit, then the

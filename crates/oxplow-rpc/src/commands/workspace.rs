@@ -89,7 +89,13 @@ pub async fn list_workspace_files(
     let filter = {
         let cfg = svc.config.read();
         cfg.as_ref()
-            .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+            .map(|c| {
+                oxplow_fs_watch::WorkspaceFilter::for_project(
+                    &svc.layout.project_dir,
+                    &c.generated.exclude,
+                    &c.generated.include,
+                )
+            })
             .unwrap_or_default()
     };
     svc.git
@@ -201,6 +207,7 @@ mod tests {
             .write()
             .unwrap()
             .generated
+            .exclude
             .push("node_modules".into());
 
         let out = crate::dispatch(

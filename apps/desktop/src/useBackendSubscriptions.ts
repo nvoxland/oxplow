@@ -48,7 +48,7 @@ export interface BackendSubscriptionHandlers {
   setStreams: Dispatch<SetStateAction<Stream[]>>;
   setStream: Dispatch<SetStateAction<Stream | null>>;
   setAgentStatuses: Dispatch<SetStateAction<Record<string, AgentStatus>>>;
-  setGeneratedState: (next: string[]) => void;
+  setGeneratedState: (next: { exclude: string[]; include: string[] }) => void;
   setEnabledAgents: (next: AgentKind[]) => void;
 }
 

@@ -16,7 +16,13 @@ use crate::error::IpcError;
 fn current_filter(svc: &Services) -> WorkspaceFilter {
     let cfg = svc.config.read();
     cfg.as_ref()
-        .map(|c| WorkspaceFilter::with_user_entries(&c.generated))
+        .map(|c| {
+            WorkspaceFilter::for_project(
+                &svc.layout.project_dir,
+                &c.generated.exclude,
+                &c.generated.include,
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -35,7 +41,7 @@ pub async fn get_effort_files(
     let rows = svc.effort_store.list_files(&effort_id).await?;
     Ok(rows
         .into_iter()
-        .filter(|f| !filter.ignore(Path::new(&f.path)))
+        .filter(|f| !filter.ignore(Path::new(&f.path), false))
         .collect())
 }
 
@@ -67,7 +73,7 @@ pub async fn list_changed_paths_for_effort(
     let keep = |paths: Vec<String>| -> Vec<String> {
         paths
             .into_iter()
-            .filter(|p| !filter.ignore(Path::new(p)))
+            .filter(|p| !filter.ignore(Path::new(p), false))
             .collect()
     };
     Ok(EffortChangedPaths {

@@ -501,7 +501,7 @@ impl GitService {
         let statuses = self.statuses(stream_id).await;
         tokio::task::spawn_blocking(move || {
             oxplow_git::list_workspace_files(&root, &statuses, "", &|path| {
-                filter.ignore(std::path::Path::new(path))
+                filter.ignore(std::path::Path::new(path), false)
             })
         })
         .await

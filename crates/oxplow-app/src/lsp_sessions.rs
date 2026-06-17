@@ -855,7 +855,7 @@ mod tests {
             lsp_servers: vec![],
             agent_prompt_append: String::new(),
             snapshot_retention_days: 7,
-            generated: vec![],
+            generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
             inject_session_context: true,
             collection: Default::default(),

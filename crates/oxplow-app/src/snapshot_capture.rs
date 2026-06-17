@@ -424,7 +424,7 @@ impl SnapshotCaptureService {
                             .workspace_filter
                             .read()
                             .unwrap_or_else(|e| e.into_inner())
-                            .ignore(rel)
+                            .ignore(rel, path.is_dir())
                         {
                             continue;
                         }
@@ -635,7 +635,7 @@ impl SnapshotCaptureService {
                         return true;
                     }
                     let rel = e.path().strip_prefix(&project_dir).unwrap_or(e.path());
-                    !filter.ignore(rel)
+                    !filter.ignore(rel, e.file_type().is_dir())
                 })
                 .filter_map(Result::ok)
             {
@@ -1278,7 +1278,7 @@ mod tests {
 
         // Default filter doesn't ignore a "build" dir.
         assert!(
-            !svc.inner.workspace_filter.read().unwrap().ignore(rel),
+            !svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
             "precondition: default filter should not ignore build/",
         );
 
@@ -1288,7 +1288,7 @@ mod tests {
             "build",
         ]));
         assert!(
-            svc.inner.workspace_filter.read().unwrap().ignore(rel),
+            svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
             "set_workspace_filter must swap the live filter without a restart",
         );
     }

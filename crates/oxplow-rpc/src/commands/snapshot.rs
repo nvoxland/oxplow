@@ -23,7 +23,13 @@ use crate::error::IpcError;
 fn current_filter(svc: &Services) -> WorkspaceFilter {
     let cfg = svc.config.read();
     cfg.as_ref()
-        .map(|c| WorkspaceFilter::with_user_entries(&c.generated))
+        .map(|c| {
+            WorkspaceFilter::for_project(
+                &svc.layout.project_dir,
+                &c.generated.exclude,
+                &c.generated.include,
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -33,7 +39,7 @@ pub async fn list_snapshots(svc: &Services, path: String) -> Result<Vec<FileSnap
     // pre-config captures. The UI shouldn't surface a "history" view
     // for a path the user has declared they don't care about.
     let filter = current_filter(svc);
-    if filter.ignore(Path::new(&path)) {
+    if filter.ignore(Path::new(&path), false) {
         return Ok(Vec::new());
     }
     Ok(svc.snapshot_store.list_for_path(&path).await?)
@@ -51,7 +57,7 @@ pub async fn list_file_snapshots_for_stream(
         .await?;
     Ok(rows
         .into_iter()
-        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .filter(|r| !filter.ignore(Path::new(&r.path), false))
         .collect())
 }
 
@@ -92,7 +98,7 @@ pub async fn list_snapshot_change_entries(
         .await?;
     Ok(rows
         .into_iter()
-        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .filter(|r| !filter.ignore(Path::new(&r.path), false))
         .collect())
 }
 
@@ -162,7 +168,7 @@ pub async fn list_files_for_snapshot(
         .await?;
     Ok(rows
         .into_iter()
-        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .filter(|r| !filter.ignore(Path::new(&r.path), false))
         .collect())
 }
 

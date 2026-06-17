@@ -495,8 +495,10 @@ export async function setAgentPromptAppend(text: string): Promise<import("./api-
   return unwrap(await commands.setAgentPromptAppend(text)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
-export async function setGenerated(entries: string[]): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setGenerated(entries)) as unknown as import("./api-types.js").OxplowConfig;
+export async function setGenerated(
+  generated: { exclude: string[]; include: string[] },
+): Promise<import("./api-types.js").OxplowConfig> {
+  return unwrap(await commands.setGenerated(generated)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 /// Set (or clear, with null/blank) the launch-model override for one

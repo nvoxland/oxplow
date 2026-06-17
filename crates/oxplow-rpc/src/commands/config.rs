@@ -82,16 +82,22 @@ pub async fn set_agent_model(
     .map_err(|e| IpcError::internal(e.to_string()))
 }
 
-pub async fn set_generated(svc: &Services, entries: Vec<String>) -> Result<OxplowConfig, IpcError> {
+pub async fn set_generated(
+    svc: &Services,
+    generated: oxplow_config::GeneratedConfig,
+) -> Result<OxplowConfig, IpcError> {
     let project = svc.layout.project_dir.clone();
-    let updated = mutate_config(&svc.config, &project, |c| c.generated = entries)
+    let updated = mutate_config(&svc.config, &project, |c| c.generated = generated.clone())
         .map_err(|e| IpcError::internal(e.to_string()))?;
     // Push the new filter into every live snapshot capture so the
     // include/exclude change takes effect immediately — without this
     // the toggle would silently no-op until the app restarts.
-    svc.snapshot_captures.set_workspace_filter(
-        oxplow_fs_watch::WorkspaceFilter::with_user_entries(&updated.generated),
-    );
+    svc.snapshot_captures
+        .set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
+            &project,
+            &updated.generated.exclude,
+            &updated.generated.include,
+        ));
     Ok(updated)
 }
 

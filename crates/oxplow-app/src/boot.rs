@@ -156,6 +156,14 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let stream_service = state.streams.clone();
         let watch_bus = event_bus.clone();
         let watch_project_dir = state.layout.project_dir.clone();
+        let watch_filter = {
+            let cfg = crate::config_service::read_config(&state.config);
+            oxplow_fs_watch::WorkspaceFilter::for_project(
+                &watch_project_dir,
+                &cfg.generated.exclude,
+                &cfg.generated.include,
+            )
+        };
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
             kind: BackgroundTaskKind::Git,
@@ -168,6 +176,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 stream_service,
                 watch_bus,
                 watch_project_dir,
+                watch_filter,
             )
             .await;
             Box::leak(Box::new(registry));

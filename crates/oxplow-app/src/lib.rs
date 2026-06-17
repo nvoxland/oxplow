@@ -513,7 +513,13 @@ impl Services {
                 .unwrap_or(5 * 1024 * 1024);
             let filter = g
                 .as_ref()
-                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+                .map(|c| {
+                    oxplow_fs_watch::WorkspaceFilter::for_project(
+                        &layout.project_dir,
+                        &c.generated.exclude,
+                        &c.generated.include,
+                    )
+                })
                 .unwrap_or_default();
             (max_bytes, filter)
         };
@@ -647,7 +653,11 @@ impl Services {
     /// plus defaults (the same thing boot computes).
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
         let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
-        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(&fresh.generated);
+        let filter = oxplow_fs_watch::WorkspaceFilter::for_project(
+            &self.layout.project_dir,
+            &fresh.generated.exclude,
+            &fresh.generated.include,
+        );
         {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
             *guard = fresh;

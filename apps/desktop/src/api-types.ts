@@ -365,7 +365,10 @@ export interface OxplowConfig {
   agentPromptAppend: string;
   snapshotRetentionDays: number;
   snapshotMaxFileBytes: number;
-  generated: string[];
+  /** Extra ignore (`exclude`) / force-track (`include`) paths layered on
+   *  top of `.gitignore`. `.git`/`.oxplow` and everything gitignored are
+   *  ignored automatically. */
+  generated: { exclude: string[]; include: string[] };
   injectSessionContext: boolean;
   /** Per-agent launch model overrides (`agentModels:` in oxplow.yaml).
    *  Only opencode consumes its entry today. */

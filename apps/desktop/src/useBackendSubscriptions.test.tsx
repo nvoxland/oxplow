@@ -14,7 +14,7 @@ let unsubCount = 0;
 const getThreadWorkState = mock(async () => ({}));
 const getBacklogState = mock(async () => ({}));
 const listAgentStatuses = mock(async () => []);
-const getConfig = mock(async () => ({ generated: [] }));
+const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
 
 function makeApi(): BackendSubscriptionApi {
   const noopSub = () => () => {

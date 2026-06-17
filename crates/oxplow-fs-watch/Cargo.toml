@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 oxplow-domain = { workspace = true }
 notify = { workspace = true }
+ignore = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
