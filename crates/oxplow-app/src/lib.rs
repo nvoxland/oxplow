@@ -36,6 +36,7 @@ pub mod ref_resolver;
 pub mod resume_check;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
+pub mod snapshot_content;
 pub mod task_service;
 pub mod terminal_sessions;
 pub mod thread_runtime;

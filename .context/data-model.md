@@ -437,12 +437,22 @@ unattributed instead of leaving it silently attributed. Best-effort: an
 effort with no start snapshot (or any capture failure) falls back to the
 legacy `finish(None, None)` close with no reconciliation.
 
-### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
+### `snapshot` + `file_snapshot` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
-Time-ordered, self-contained snapshots. `file_snapshot` columns:
-`id, stream_id, worktree_path, version_hash, source, created_at,
-effort_id`. `snapshot_entry` holds the per-path rows: `path, hash,
-mtime_ms, size, state`.
+Time-ordered snapshots in two tables (the actual schema; an earlier
+draft of this doc described a single `snapshot_entry` table with a
+`version_hash`/`source` manifest — that pre-V13 shape is gone):
+
+- **`snapshot`** (V13/V16) — the grouping row, one per
+  `request_snapshot()` call that had dirty files. Columns: `id,
+  stream_id, created_at, git_commit`. `git_commit` is the 40-char sha
+  the worktree was clean against (else NULL); it's re-stamped in place
+  when HEAD moves but the tree didn't change.
+- **`file_snapshot`** — the per-path rows: `id, stream_id, path,
+  blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms`.
+  Each points back at its `snapshot_id`. `storage` (V37) is the
+  explicit class telling you where the bytes live and how to read
+  `blob_hash` back — see "Storage classes" below.
 
 **`stream_id` is NOT NULL** (V16). Every captured row belongs to a
 specific stream's worktree — different streams have independent
@@ -474,32 +484,21 @@ task-local — dropping the registry's `Arc` alone never wakes the
 task, so without the signal an archived stream's watcher would
 linger until process exit.
 
-`effort_id` (nullable, FK → `task_effort.id` ON DELETE SET NULL)
-ties `task-start` / `task-end` rows back to the effort that produced
-them. `startup` snapshots leave it null. The mirror columns on the
-effort row — `task_effort.start_snapshot_id` and
-`task_effort.end_snapshot_id` — are the canonical lookup path for
-"the snapshots that bracket this effort"; `file_snapshot.effort_id` is
-the reverse pointer. The 5-minute minimum gap rule in
-`applyStatusTransition` may leave the effort's `end_snapshot_id`
-null — when the most recent snapshot is fresher than
-`END_SNAPSHOT_MIN_GAP_MS`, the close path skips flushing a new row to
-avoid spamming history with near-identical states.
+**Effort↔snapshot linkage lives on the effort row.** There is no
+`effort_id` or `source` column on `snapshot` / `file_snapshot`
+themselves — the bracket is recorded by `task_effort.start_snapshot_id`
+and `task_effort.end_snapshot_id`, each pointing at a `snapshot.id`.
+The 5-minute minimum gap rule in the status-transition path may leave
+the effort's `end_snapshot_id` null — when the most recent snapshot is
+fresher than `END_SNAPSHOT_MIN_GAP_MS`, the close path skips flushing a
+new row to avoid spamming history with near-identical states.
 
-`source` is one of `task-start | task-end | startup | external`.
-`version_hash` is a SHA-256 over the canonical
-`(path, hash, size, state)` entry set — `mtime_ms` is deliberately
-excluded so touching a file without changing its bytes doesn't produce
-a new snapshot. Deleted files have no `snapshot_entry` row at all (the
-"entry missing" case is the deletion signal); readers collapse
-"absent" and the old `state="deleted"` cases into one branch.
-
-**Dedup on flush.** `flushSnapshot()` computes the next snapshot's
-`version_hash` (reusing the most recent snapshot's entries for any path
-not listed in `dirtyPaths`), and if that hash matches the newest
-existing snapshot for the stream, it returns `{ created: false, id:
-<existing> }` instead of inserting a new row. `dirtyPaths` is an
-optimizer hint — when null the entire worktree is walked.
+**Change detection.** The startup sweep short-circuits on
+`(size_bytes, mtime_ms)`: a file whose stat matches its latest row is
+presumed unchanged and isn't re-read. A change otherwise produces a new
+`file_snapshot` row; the per-path content identity used for diffing is
+the `blob_hash` (xxh3-128 or git OID), so touching a file without
+changing its bytes doesn't shift its identity.
 
 **No ancestry link.** Snapshots have no parent/child column — each
 is independent. The "previous" snapshot for diff purposes is just
@@ -521,26 +520,55 @@ UI list skips it.
 against `task_effort` to populate `label` + `label_kind` on each
 `FileSnapshot` (task title + " — start"/" — end"); effort-end wins
 over effort-start when the same snapshot is both. Unlinked snapshots
-get `label: null` and the UI falls back to the `source` column.
+get `label: null` and the UI falls back to a generic label.
 
-Blobs live on disk at `.oxplow/snapshots/objects/xx/yyyy…` (sha256
-addressed, shared across streams for dedup).
+**Storage classes (`file_snapshot.storage`, V37).** The explicit
+discriminator for where a row's bytes live; `blob_hash` is read
+differently per class. Replaces the old implicit `(blob_hash NULL?,
+oversize?)` 2-bit encoding (the dropped `oversize` boolean):
 
-Entry states:
-- `present`: file captured, `hash` points at a real blob.
-- `oversize`: file existed but exceeded `snapshotMaxFileBytes`; no blob,
-  but `mtime_ms` and `size` are tracked.
+- `oxplow` — `blob_hash` is an **xxh3-128**; bytes live in oxplow's
+  content-addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`
+  (shared across streams for dedup). xxh3-128 (not SHA-256/blake3) was
+  chosen because it's a local non-adversarial cache and ~30–50× faster
+  on Apple silicon (`crates/oxplow-app/src/blob_store.rs`).
+- `git` — `blob_hash` is a **git blob OID**; the bytes are *not* copied
+  into the blob store — they're recovered on demand from the git object
+  db via libgit2 `find_blob`. This is the **git-sourced baseline**: the
+  startup sweep records clean tracked files (working-tree-identical to
+  HEAD) by their OID instead of reading + hashing + blobbing them, so a
+  clean checkout of a large repo boots without re-blobbing the tree.
+  Detection + read live in `oxplow_git::{clean_head_blob_oids,
+  read_blob}`; the capture path is the sweep's phase 2.
+- `oversize` — `blob_hash` NULL; the file exceeded
+  `snapshotMaxFileBytes`, so only `size_bytes` + `mtime_ms` are tracked.
+- `deleted` — `blob_hash` NULL; a **tombstone** row marking the path
+  gone as of this snapshot (the per-snapshot deleted-count and diff
+  status depend on this row existing — deletions are NOT absent rows).
 
-A deleted file has no `snapshot_entry` row — readers treat a missing
-entry as the deletion signal. Migration v24 drops any legacy
-`state='deleted'` tombstones.
+**The read seam.** Every consumer that wants a captured file's bytes
+(workspace file view, snapshot restore, search indexer, MCP/diff
+readers) goes through `oxplow_app::snapshot_content::read_snapshot_content`,
+which switches on `storage` so none of them can forget the git
+fallback. `SnapshotStore::content_ref_for_path` returns a
+`SnapshotContentRef { storage, hash }` for the same routing.
+
+**Durability tradeoff of `git` rows.** A git-backed row is only as
+recoverable as its blob's reachability. If history is rewritten
+(rebase/squash that orphans the commit) and git GCs the object, those
+bytes are gone — we deliberately never copied them. `read_blob` returns
+`None` and the read seam surfaces `GitUnavailable` rather than panicking.
+Uncommitted working-tree content always takes the `oxplow` path and is
+never at this risk.
 
 **Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
 deletes snapshots older than the cutoff (default 7 days, configurable
 via `oxplow.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
 most recent snapshot per stream is always kept. `gcBlobs()` then sweeps
-`.oxplow/snapshots/objects/` and removes any blob whose sha isn't
-referenced by a surviving manifest. The blob store is shared across all
+`.oxplow/snapshots/objects/` and removes any blob whose hash isn't
+referenced by a surviving `file_snapshot` row (only `oxplow`-class rows
+hold blob-store hashes; `git` rows reference the git odb, which GC never
+touches). The blob store is shared across all
 streams (`.oxplow/snapshots/objects/`), so GC runs at the project level
 and dedupes identical content across branches.
 

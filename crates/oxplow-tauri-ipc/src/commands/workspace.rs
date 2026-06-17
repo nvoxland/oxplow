@@ -9,7 +9,7 @@ use crate::state::AppState;
 /// Versioned file read. Dispatches on `version`:
 /// - `Disk` → `read_workspace_file` (working tree, possibly dirty).
 /// - `Ref { ref }` → `read_file_at_ref` (committed blob).
-/// - `Snapshot { id }` → `snapshot_store.blob_hash_for_path` + blob read.
+/// - `Snapshot { id }` → `snapshot_store.content_ref_for_path` + read seam.
 ///
 /// Returns `Ok(None)` if the path doesn't exist at that version.
 /// Callers MUST pass an explicit version — there is no implicit

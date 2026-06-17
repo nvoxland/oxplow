@@ -924,11 +924,17 @@ impl OxplowMcp {
             .get(params.0.snapshot_id)
             .await
             .map_err(internal)?
-            .and_then(|snap| snap.blob_hash)
         {
-            Some(hash) => match self.services.blobs.read(&hash) {
-                Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-                Err(_) => None,
+            Some(snap) => match snap.blob_hash.clone() {
+                Some(hash) => oxplow_app::snapshot_content::read_snapshot_content(
+                    snap.storage,
+                    &hash,
+                    &self.services.layout.project_dir,
+                    &self.services.blobs,
+                )
+                .ok()
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+                None => None,
             },
             None => None,
         };
@@ -951,9 +957,15 @@ impl OxplowMcp {
             .map_err(internal)?
             .ok_or_else(|| McpError::invalid_params("snapshot row not found", None))?;
         let hash = snap.blob_hash.clone().ok_or_else(|| {
-            McpError::invalid_params("snapshot has no blob (oversize or pre-blob-store)", None)
+            McpError::invalid_params("snapshot has no blob (oversize or deleted)", None)
         })?;
-        let bytes = self.services.blobs.read(&hash).map_err(internal)?;
+        let bytes = oxplow_app::snapshot_content::read_snapshot_content(
+            snap.storage,
+            &hash,
+            &self.services.layout.project_dir,
+            &self.services.blobs,
+        )
+        .map_err(internal)?;
         let target = self.services.layout.project_dir.join(&snap.path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(internal)?;

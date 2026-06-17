@@ -26,8 +26,9 @@ pub use agent_nudge_store::{AgentNudge, NewAgentNudge, SqliteAgentNudgeStore};
 pub use agent_stores::SqliteAgentTurnStore;
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
-    PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotStats, SqliteCodeQualityStore,
-    SqlitePageVisitStore, SqliteSnapshotStore, SqliteUsageStore, UsageEvent, UsageRollup,
+    PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotStats,
+    SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
+    SqliteUsageStore, UsageEvent, UsageRollup,
 };
 pub use comment_store::SqliteCommentStore;
 pub use database::{Database, DbInitError};

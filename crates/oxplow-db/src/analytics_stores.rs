@@ -818,6 +818,80 @@ impl SqliteCodeQualityStore {
 
 // ---------------- File snapshots ----------------
 
+/// Where a captured file's bytes live — the explicit `file_snapshot.storage`
+/// discriminator (V37). Replaces the old implicit `(blob_hash NULL?,
+/// oversize?)` 2-bit encoding. The `blob_hash` column means different
+/// things per variant:
+/// - [`Oxplow`](SnapshotStorage::Oxplow): `blob_hash` is an xxh3-128, bytes
+///   in `.oxplow/snapshots/objects/`.
+/// - [`Git`](SnapshotStorage::Git): `blob_hash` is a **git blob OID**, bytes
+///   recovered on demand from the git object db (`git cat-file` / libgit2
+///   `find_blob`). The capture path never copied them — a clean checkout
+///   reuses git's own storage.
+/// - [`Oversize`](SnapshotStorage::Oversize): `blob_hash` is NULL; the file
+///   was too big to hash, only `size_bytes` + `mtime_ms` are tracked.
+/// - [`Deleted`](SnapshotStorage::Deleted): `blob_hash` is NULL; a tombstone
+///   row marking the path gone as of this snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum SnapshotStorage {
+    Oxplow,
+    Git,
+    Oversize,
+    Deleted,
+}
+
+impl SnapshotStorage {
+    /// The TEXT value persisted in `file_snapshot.storage`.
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            SnapshotStorage::Oxplow => "oxplow",
+            SnapshotStorage::Git => "git",
+            SnapshotStorage::Oversize => "oversize",
+            SnapshotStorage::Deleted => "deleted",
+        }
+    }
+
+    /// Parse the persisted TEXT value. Unknown values fall back to
+    /// `Oxplow` (the historical default) so a forward-incompatible row
+    /// never panics a read.
+    pub fn from_db_str(s: &str) -> SnapshotStorage {
+        match s {
+            "git" => SnapshotStorage::Git,
+            "oversize" => SnapshotStorage::Oversize,
+            "deleted" => SnapshotStorage::Deleted,
+            _ => SnapshotStorage::Oxplow,
+        }
+    }
+
+    /// True when `blob_hash` addresses real bytes (oxplow blob store or
+    /// git odb) — i.e. the content can be read back.
+    pub fn has_bytes(self) -> bool {
+        matches!(self, SnapshotStorage::Oxplow | SnapshotStorage::Git)
+    }
+
+    /// True for the oversize metadata-only class.
+    pub fn is_oversize(self) -> bool {
+        matches!(self, SnapshotStorage::Oversize)
+    }
+
+    /// True for a deletion tombstone (path absent as of this snapshot).
+    pub fn is_deleted(self) -> bool {
+        matches!(self, SnapshotStorage::Deleted)
+    }
+}
+
+/// A readable handle to a captured file's bytes: the storage class plus
+/// the `blob_hash` that addresses the content under it. Only produced
+/// for rows whose storage [`has_bytes`](SnapshotStorage::has_bytes)
+/// (oxplow / git). The read seam (`oxplow_app`) switches on `storage`
+/// to fetch from the blob store or the git odb.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotContentRef {
+    pub storage: SnapshotStorage,
+    pub hash: String,
+}
+
 fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let id: i64 = row.get(0)?;
     let stream_id: i64 = row.get(1)?;
@@ -825,7 +899,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let blob_hash: Option<String> = row.get(3)?;
     let size_bytes: i64 = row.get(4)?;
     let captured_at: String = row.get(5)?;
-    let oversize: i32 = row.get(6)?;
+    let storage: String = row.get(6)?;
     // snapshot_id / mtime_ms only present when the SELECT asks for
     // them (V13 / V15+); older 7-column callers see them as missing
     // and we treat that as None.
@@ -841,7 +915,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
         blob_hash,
         size_bytes,
         captured_at: string_to_ts(&captured_at).map_err(map_err)?,
-        oversize: oversize != 0,
+        storage: SnapshotStorage::from_db_str(&storage),
         snapshot_id,
         mtime_ms,
     })
@@ -912,10 +986,15 @@ pub struct FileSnapshot {
     pub id: i64,
     pub stream_id: StreamId,
     pub path: String,
+    /// xxh3-128 (storage = oxplow) or git blob OID (storage = git);
+    /// NULL for oversize / deleted rows.
     pub blob_hash: Option<String>,
     pub size_bytes: i64,
     pub captured_at: Timestamp,
-    pub oversize: bool,
+    /// Where the bytes live — see [`SnapshotStorage`]. Replaces the old
+    /// `oversize: bool` field; deletion tombstones are
+    /// `SnapshotStorage::Deleted`.
+    pub storage: SnapshotStorage,
     /// `snapshot.id` this row was captured under, or `None` for
     /// pre-V13 rows that predate the snapshot grouping table.
     pub snapshot_id: Option<i64>,
@@ -959,7 +1038,7 @@ impl SqliteSnapshotStore {
                     let mut stmt = tx
                         .prepare(
                             "INSERT INTO file_snapshot
-                           (stream_id, path, blob_hash, size_bytes, captured_at, oversize,
+                           (stream_id, path, blob_hash, size_bytes, captured_at, storage,
                             snapshot_id, mtime_ms)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         )
@@ -971,7 +1050,7 @@ impl SqliteSnapshotStore {
                             snap.blob_hash,
                             snap.size_bytes,
                             ts_to_string(snap.captured_at),
-                            if snap.oversize { 1 } else { 0 },
+                            snap.storage.as_db_str(),
                             snap.snapshot_id,
                             snap.mtime_ms,
                         ])
@@ -1177,7 +1256,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT
-                       f.id, f.path, f.blob_hash, f.oversize,
+                       f.id, f.path, f.blob_hash, f.storage,
                        (SELECT p.id FROM file_snapshot p
                         WHERE p.stream_id = f.stream_id
                           AND p.path = f.path
@@ -1196,7 +1275,7 @@ impl SqliteSnapshotStore {
                     let current_file_id: i64 = row.get(0)?;
                     let path: String = row.get(1)?;
                     let blob_hash: Option<String> = row.get(2)?;
-                    let oversize: i32 = row.get(3)?;
+                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(3)?);
                     let prior_file_id: Option<i64> = row.get(4)?;
                     let prior_hash: Option<String> = row.get(5)?;
                     let status = match (&blob_hash, &prior_hash) {
@@ -1210,7 +1289,7 @@ impl SqliteSnapshotStore {
                         status,
                         current_file_id,
                         prior_file_id,
-                        oversize: oversize != 0,
+                        oversize: storage.is_oversize(),
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1239,8 +1318,8 @@ impl SqliteSnapshotStore {
                     return Ok(BTreeMap::new());
                 };
                 let mut stmt = conn.prepare(
-                    "SELECT path, blob_hash, oversize, size_bytes, mtime_ms FROM (
-                        SELECT path, blob_hash, oversize, size_bytes, mtime_ms,
+                    "SELECT path, blob_hash, storage, size_bytes, mtime_ms FROM (
+                        SELECT path, blob_hash, storage, size_bytes, mtime_ms,
                                ROW_NUMBER() OVER (
                                  PARTITION BY path ORDER BY snapshot_id DESC, id DESC
                                ) AS rn
@@ -1253,22 +1332,26 @@ impl SqliteSnapshotStore {
                 let rows = stmt.query_map(params![stream_id, snapshot_id], |row| {
                     let path: String = row.get(0)?;
                     let blob_hash: Option<String> = row.get(1)?;
-                    let oversize: i32 = row.get(2)?;
+                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(2)?);
                     let size_bytes: i64 = row.get(3)?;
                     let mtime_ms: Option<i64> = row.get(4)?;
-                    Ok((path, blob_hash, oversize != 0, size_bytes, mtime_ms))
+                    Ok((path, blob_hash, storage, size_bytes, mtime_ms))
                 })?;
                 let mut tree = BTreeMap::new();
                 for r in rows {
-                    let (path, blob_hash, oversize, size_bytes, mtime_ms) = r?;
+                    let (path, blob_hash, storage, size_bytes, mtime_ms) = r?;
                     let id = match blob_hash {
+                        // oxplow → xxh3, git → blob OID. Both uniquely
+                        // identify content, so either works as the diff
+                        // identity (a file can't be git-backed and
+                        // oxplow-backed with the same bytes).
                         Some(h) => h,
                         // Oversize: content exists but isn't hashed —
                         // use size+mtime as a best-effort identity.
-                        None if oversize => {
+                        None if storage.is_oversize() => {
                             format!("oversize:{}:{}", size_bytes, mtime_ms.unwrap_or(0))
                         }
-                        // Deletion row: the path is absent at this point.
+                        // Deletion tombstone: the path is absent here.
                         None => continue,
                     };
                     tree.insert(path, id);
@@ -1342,7 +1425,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize,
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
                             snapshot_id
                      FROM file_snapshot WHERE snapshot_id = ?1 ORDER BY id ASC",
                 )?;
@@ -1356,7 +1439,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE id = ?1",
                 )?;
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
@@ -1373,7 +1456,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC LIMIT ?2",
                 )?;
@@ -1486,7 +1569,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
                 )?;
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
@@ -1495,15 +1578,17 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Return the blob hash for `path` as it existed at `snapshot_id`:
-    /// the most-recent `file_snapshot` row for that path whose
-    /// `snapshot_id <= given`. Returns `Ok(None)` when the file was
-    /// absent, deleted, or oversize (no readable blob) at that point.
-    pub async fn blob_hash_for_path(
+    /// Return a readable content handle for `path` as it existed at
+    /// `snapshot_id`: the most-recent `file_snapshot` row for that path
+    /// whose `snapshot_id <= given`. Returns `Ok(None)` when the file
+    /// was absent, deleted, or oversize (no readable bytes) at that
+    /// point. The [`SnapshotContentRef::storage`] tells the caller where
+    /// to read the bytes from (oxplow blob store vs git odb).
+    pub async fn content_ref_for_path(
         &self,
         snapshot_id: i64,
         path: &str,
-    ) -> Result<Option<String>, DomainError> {
+    ) -> Result<Option<SnapshotContentRef>, DomainError> {
         let path = path.to_string();
         self.db
             .call(move |conn| {
@@ -1518,9 +1603,10 @@ impl SqliteSnapshotStore {
                     return Ok(None);
                 };
                 // Latest file_snapshot for this path at or before snapshot_id.
-                // A NULL blob_hash with oversize=0 is a deletion row — return None.
+                // Only oxplow/git rows carry readable bytes; oversize and
+                // deletion tombstones resolve to None.
                 conn.query_row(
-                    "SELECT blob_hash, oversize FROM file_snapshot
+                    "SELECT blob_hash, storage FROM file_snapshot
                      WHERE stream_id = ?1
                        AND path = ?2
                        AND snapshot_id IS NOT NULL
@@ -1528,10 +1614,18 @@ impl SqliteSnapshotStore {
                      ORDER BY snapshot_id DESC, id DESC
                      LIMIT 1",
                     params![stream_id, path, snapshot_id],
-                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i32>(1)?)),
+                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
                 )
                 .optional()
-                .map(|opt| opt.and_then(|(hash, oversize)| if oversize != 0 { None } else { hash }))
+                .map(|opt| {
+                    opt.and_then(|(hash, storage)| {
+                        let storage = SnapshotStorage::from_db_str(&storage);
+                        match (storage.has_bytes(), hash) {
+                            (true, Some(hash)) => Some(SnapshotContentRef { storage, hash }),
+                            _ => None,
+                        }
+                    })
+                })
             })
             .await
     }
@@ -1569,12 +1663,22 @@ mod tests {
                 )?;
             }
             for (sid, path, hash, oversize) in &rows {
+                // Map the legacy (oversize bool, hash) test tuple onto the
+                // explicit storage class: oversize → oversize; no-hash →
+                // deletion tombstone; otherwise oxplow.
+                let storage = if *oversize {
+                    "oversize"
+                } else if hash.is_none() {
+                    "deleted"
+                } else {
+                    "oxplow"
+                };
                 conn.execute(
                     "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at,
-                            oversize, snapshot_id, mtime_ms)
+                            storage, snapshot_id, mtime_ms)
                          VALUES (1, ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
-                    params![path, hash, *oversize as i32, sid],
+                    params![path, hash, storage, sid],
                 )?;
             }
             Ok(())
@@ -1584,7 +1688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn blob_hash_for_path_returns_latest_at_or_before_snapshot() {
+    async fn content_ref_for_path_returns_latest_at_or_before_snapshot() {
         let db = Database::in_memory();
         let store = SqliteSnapshotStore::new(db.clone());
         // snap 1: a.txt=hA, b.txt=hB
@@ -1604,47 +1708,102 @@ mod tests {
 
         // At snap 1: a.txt has hA, b.txt has hB, c.txt absent
         assert_eq!(
-            store.blob_hash_for_path(1, "a.txt").await.unwrap(),
+            store
+                .content_ref_for_path(1, "a.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
             Some("hA".into())
         );
         assert_eq!(
-            store.blob_hash_for_path(1, "b.txt").await.unwrap(),
+            store
+                .content_ref_for_path(1, "b.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
             Some("hB".into())
         );
-        assert_eq!(store.blob_hash_for_path(1, "c.txt").await.unwrap(), None);
+        assert_eq!(
+            store
+                .content_ref_for_path(1, "c.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
+            None
+        );
 
         // At snap 2: a.txt updated, b.txt deleted, c.txt still absent
         assert_eq!(
-            store.blob_hash_for_path(2, "a.txt").await.unwrap(),
+            store
+                .content_ref_for_path(2, "a.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
             Some("hA2".into())
         );
-        assert_eq!(store.blob_hash_for_path(2, "b.txt").await.unwrap(), None);
-        assert_eq!(store.blob_hash_for_path(2, "c.txt").await.unwrap(), None);
+        assert_eq!(
+            store
+                .content_ref_for_path(2, "b.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
+            None
+        );
+        assert_eq!(
+            store
+                .content_ref_for_path(2, "c.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
+            None
+        );
 
         // At snap 3: c.txt now present, a.txt still hA2 from snap 2
         assert_eq!(
-            store.blob_hash_for_path(3, "a.txt").await.unwrap(),
+            store
+                .content_ref_for_path(3, "a.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
             Some("hA2".into())
         );
         assert_eq!(
-            store.blob_hash_for_path(3, "c.txt").await.unwrap(),
+            store
+                .content_ref_for_path(3, "c.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
             Some("hC".into())
         );
     }
 
     #[tokio::test]
-    async fn blob_hash_for_path_returns_none_for_oversize() {
+    async fn content_ref_for_path_returns_none_for_oversize() {
         let db = Database::in_memory();
         let store = SqliteSnapshotStore::new(db.clone());
         seed_snapshots(&db, &[(1, "big.bin", None, true)]).await;
-        assert_eq!(store.blob_hash_for_path(1, "big.bin").await.unwrap(), None);
+        assert_eq!(
+            store
+                .content_ref_for_path(1, "big.bin")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
+            None
+        );
     }
 
     #[tokio::test]
-    async fn blob_hash_for_path_returns_none_for_unknown_snapshot() {
+    async fn content_ref_for_path_returns_none_for_unknown_snapshot() {
         let db = Database::in_memory();
         let store = SqliteSnapshotStore::new(db);
-        assert_eq!(store.blob_hash_for_path(999, "a.txt").await.unwrap(), None);
+        assert_eq!(
+            store
+                .content_ref_for_path(999, "a.txt")
+                .await
+                .unwrap()
+                .map(|r| r.hash),
+            None
+        );
     }
 
     #[tokio::test]
@@ -2040,7 +2199,7 @@ mod tests {
                 blob_hash: Some("abc".into()),
                 size_bytes: 42,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: None,
                 mtime_ms: None,
             })
@@ -2049,6 +2208,52 @@ mod tests {
         let list = store.list_for_path("src/foo.rs").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].size_bytes, 42);
+    }
+
+    #[tokio::test]
+    async fn capture_round_trips_storage_class() {
+        let db = Database::in_memory();
+        // file_snapshot.stream_id FK → seed a stream first.
+        seed_snapshots(&db, &[(1, "seed.txt", Some("h0"), false)]).await;
+        let store = SqliteSnapshotStore::new(db);
+        // A git-backed row: blob_hash holds the git OID, storage = Git.
+        let id = store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: StreamId::new(1),
+                path: "src/clean.rs".into(),
+                blob_hash: Some("deadbeefcafe".into()),
+                size_bytes: 10,
+                captured_at: Timestamp::now(),
+                storage: SnapshotStorage::Git,
+                snapshot_id: None,
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        let got = store.get(id).await.unwrap().unwrap();
+        assert_eq!(got.storage, SnapshotStorage::Git);
+        assert_eq!(got.blob_hash.as_deref(), Some("deadbeefcafe"));
+        assert!(got.storage.has_bytes());
+
+        // A deletion tombstone: NULL hash, storage = Deleted.
+        let del = store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: StreamId::new(1),
+                path: "src/clean.rs".into(),
+                blob_hash: None,
+                size_bytes: 0,
+                captured_at: Timestamp::now(),
+                storage: SnapshotStorage::Deleted,
+                snapshot_id: None,
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        let got = store.get(del).await.unwrap().unwrap();
+        assert_eq!(got.storage, SnapshotStorage::Deleted);
+        assert!(!got.storage.has_bytes());
     }
 
     #[tokio::test]
@@ -2069,7 +2274,7 @@ mod tests {
                     blob_hash: Some(format!("h-{path}-v1")),
                     size_bytes: 10,
                     captured_at: Timestamp::now(),
-                    oversize: false,
+                    storage: SnapshotStorage::Oxplow,
                     snapshot_id: Some(p1),
                     mtime_ms: None,
                 })
@@ -2088,7 +2293,7 @@ mod tests {
                 blob_hash: Some("h-a.txt-v2".into()),
                 size_bytes: 20,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             })
@@ -2102,7 +2307,7 @@ mod tests {
                 blob_hash: None,
                 size_bytes: 0,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             })
@@ -2116,7 +2321,7 @@ mod tests {
                 blob_hash: Some("h-d.txt-v1".into()),
                 size_bytes: 5,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             })
@@ -2154,7 +2359,7 @@ mod tests {
                 blob_hash: Some("h-a-v1".into()),
                 size_bytes: 1,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
             })
@@ -2168,7 +2373,7 @@ mod tests {
                 blob_hash: Some("h-b-v1".into()),
                 size_bytes: 1,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
             })
@@ -2185,7 +2390,7 @@ mod tests {
                 blob_hash: Some("h-a-v2".into()),
                 size_bytes: 1,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             },
@@ -2196,7 +2401,7 @@ mod tests {
                 blob_hash: Some("h-c-v1".into()),
                 size_bytes: 1,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             },
@@ -2207,7 +2412,7 @@ mod tests {
                 blob_hash: None,
                 size_bytes: 0,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
             },

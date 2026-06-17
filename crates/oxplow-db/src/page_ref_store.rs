@@ -700,9 +700,9 @@ mod tests {
                 }
                 conn.execute(
                     "INSERT INTO file_snapshot
-                       (stream_id, path, size_bytes, captured_at, oversize, snapshot_id)
-                     VALUES (1,'stale.rs',0,'2026-01-01T00:00:00Z',0,200),
-                            (1,'fresh.rs',0,'2026-01-01T00:00:00Z',0,100)",
+                       (stream_id, path, size_bytes, captured_at, storage, snapshot_id)
+                     VALUES (1,'stale.rs',0,'2026-01-01T00:00:00Z','oxplow',200),
+                            (1,'fresh.rs',0,'2026-01-01T00:00:00Z','oxplow',100)",
                     [],
                 )?;
                 Ok(())

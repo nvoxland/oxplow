@@ -383,10 +383,19 @@ export const commands = {
 	id: number,
 	stream_id: StreamId,
 	path: string,
+	/**
+	 *  xxh3-128 (storage = oxplow) or git blob OID (storage = git);
+	 *  NULL for oversize / deleted rows.
+	 */
 	blob_hash: string | null,
 	size_bytes: number,
 	captured_at: Timestamp,
-	oversize: boolean,
+	/**
+	 *  Where the bytes live — see [`SnapshotStorage`]. Replaces the old
+	 *  `oversize: bool` field; deletion tombstones are
+	 *  `SnapshotStorage::Deleted`.
+	 */
+	storage: SnapshotStorage,
 	/**
 	 *  `snapshot.id` this row was captured under, or `None` for
 	 *  pre-V13 rows that predate the snapshot grouping table.
@@ -570,7 +579,7 @@ export const commands = {
 	 *  Versioned file read. Dispatches on `version`:
 	 *  - `Disk` → `read_workspace_file` (working tree, possibly dirty).
 	 *  - `Ref { ref }` → `read_file_at_ref` (committed blob).
-	 *  - `Snapshot { id }` → `snapshot_store.blob_hash_for_path` + blob read.
+	 *  - `Snapshot { id }` → `snapshot_store.content_ref_for_path` + read seam.
 	 * 
 	 *  Returns `Ok(None)` if the path doesn't exist at that version.
 	 *  Callers MUST pass an explicit version — there is no implicit
@@ -1414,10 +1423,19 @@ export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
 	path: string,
+	/**
+	 *  xxh3-128 (storage = oxplow) or git blob OID (storage = git);
+	 *  NULL for oversize / deleted rows.
+	 */
 	blob_hash: string | null,
 	size_bytes: number,
 	captured_at: Timestamp,
-	oversize: boolean,
+	/**
+	 *  Where the bytes live — see [`SnapshotStorage`]. Replaces the old
+	 *  `oversize: bool` field; deletion tombstones are
+	 *  `SnapshotStorage::Deleted`.
+	 */
+	storage: SnapshotStorage,
 	/**
 	 *  `snapshot.id` this row was captured under, or `None` for
 	 *  pre-V13 rows that predate the snapshot grouping table.
@@ -2241,6 +2259,24 @@ export type SnapshotStats = {
 	deleted: number,
 	total: number,
 };
+
+/**
+ *  Where a captured file's bytes live — the explicit `file_snapshot.storage`
+ *  discriminator (V37). Replaces the old implicit `(blob_hash NULL?,
+ *  oversize?)` 2-bit encoding. The `blob_hash` column means different
+ *  things per variant:
+ *  - [`Oxplow`](SnapshotStorage::Oxplow): `blob_hash` is an xxh3-128, bytes
+ *    in `.oxplow/snapshots/objects/`.
+ *  - [`Git`](SnapshotStorage::Git): `blob_hash` is a **git blob OID**, bytes
+ *    recovered on demand from the git object db (`git cat-file` / libgit2
+ *    `find_blob`). The capture path never copied them — a clean checkout
+ *    reuses git's own storage.
+ *  - [`Oversize`](SnapshotStorage::Oversize): `blob_hash` is NULL; the file
+ *    was too big to hash, only `size_bytes` + `mtime_ms` are tracked.
+ *  - [`Deleted`](SnapshotStorage::Deleted): `blob_hash` is NULL; a tombstone
+ *    row marking the path gone as of this snapshot.
+ */
+export type SnapshotStorage = "oxplow" | "git" | "oversize" | "deleted";
 
 export type SnapshotSummary = {
 	snapshot: FileSnapshot,

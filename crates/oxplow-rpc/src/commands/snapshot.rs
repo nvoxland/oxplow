@@ -121,9 +121,13 @@ pub async fn read_snapshot_file_content(
         return Ok(None);
     };
     let blobs = svc.blobs.clone();
-    let bytes = tokio::task::spawn_blocking(move || blobs.read(&hash))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let project_dir = svc.layout.project_dir.clone();
+    let storage = snap.storage;
+    let bytes = tokio::task::spawn_blocking(move || {
+        oxplow_app::snapshot_content::read_snapshot_content(storage, &hash, &project_dir, &blobs)
+    })
+    .await
+    .map_err(|e| IpcError::internal(e.to_string()))?;
     match bytes {
         Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
         Err(_) => Ok(None),
@@ -280,7 +284,11 @@ pub async fn get_snapshot_summary(
         (Some(cur), Some(prev_hash)) if *cur == prev_hash => "updated",
         (Some(_), Some(_)) => "updated",
     };
-    let state_label = if snap.oversize { "oversize" } else { "present" };
+    let state_label = if snap.storage.is_oversize() {
+        "oversize"
+    } else {
+        "present"
+    };
     let entry = SnapshotEntry {
         hash: snap.blob_hash.clone().unwrap_or_default(),
         mtime_ms: 0,
@@ -322,11 +330,16 @@ pub async fn restore_file_from_snapshot(svc: &Services, snapshot_id: i64) -> Res
     let hash = snap
         .blob_hash
         .clone()
-        .ok_or_else(|| IpcError::invalid("snapshot has no blob (oversize or pre-blob-store)"))?;
-    let bytes = svc
-        .blobs
-        .read(&hash)
-        .map_err(|e| IpcError::internal(e.to_string()))?;
+        .ok_or_else(|| IpcError::invalid("snapshot has no blob (oversize or deleted)"))?;
+    // Route through the read seam so a git-backed row recovers its bytes
+    // from the git odb instead of the (absent) blob store.
+    let bytes = oxplow_app::snapshot_content::read_snapshot_content(
+        snap.storage,
+        &hash,
+        &svc.layout.project_dir,
+        &svc.blobs,
+    )
+    .map_err(|e| IpcError::internal(e.to_string()))?;
     let target = svc.layout.project_dir.join(&snap.path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| IpcError::internal(e.to_string()))?;

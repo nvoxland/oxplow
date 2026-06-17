@@ -33,7 +33,7 @@ use tracing::{debug, info, warn};
 
 use std::time::UNIX_EPOCH;
 
-use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
+use oxplow_db::{FileSnapshot, SnapshotStorage, SqliteSnapshotStore};
 
 /// How long a path must persist on disk after we first hear about it
 /// before we'll write a content row. Editor atomic-write temp files
@@ -93,14 +93,15 @@ use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
 /// When attached to a dirty-set entry, the capture loop skips re-stat
 /// / re-read / re-hash / re-write and builds the DB row directly.
 ///
-/// `blob_hash = None` means either an oversize row (metadata only) or
-/// a deletion row — distinguish via `oversize`.
+/// `blob_hash` is an xxh3-128 (`storage = Oxplow`), a git blob OID
+/// (`storage = Git`), or `None` for `Oversize` / `Deleted` rows — the
+/// `storage` field is the discriminator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaptureStaging {
     pub size_bytes: i64,
     pub mtime_ms: Option<i64>,
     pub blob_hash: Option<String>,
-    pub oversize: bool,
+    pub storage: SnapshotStorage,
 }
 
 /// State per path tracked in the dirty set between snapshot drains.
@@ -663,6 +664,17 @@ impl SnapshotCaptureService {
         let queued = tokio::task::spawn_blocking(move || -> Vec<(PathBuf, CaptureStaging)> {
             use rayon::prelude::*;
 
+            // Git baseline: every working-tree-clean tracked file mapped
+            // to its HEAD blob OID. Phase 2 backs these by the git odb
+            // (`storage = 'git'`) instead of reading + hashing + copying
+            // the bytes — so a clean checkout of a large repo writes
+            // almost no blobs. Built once; empty when not a git repo.
+            let clean_oids = oxplow_git::clean_head_blob_oids(&project_dir);
+            info!(
+                clean_tracked = clean_oids.len(),
+                "snapshot startup sweep: git baseline ready",
+            );
+
             // Phase 1 (sequential): walk, stat each file, decide
             // which paths fall through to read+hash. Outputs:
             //   - `staged`: oversize-new (already known) +
@@ -729,7 +741,7 @@ impl SnapshotCaptureService {
                                 size_bytes: size,
                                 mtime_ms,
                                 blob_hash: None,
-                                oversize: true,
+                                storage: SnapshotStorage::Oversize,
                             },
                         ));
                     }
@@ -767,6 +779,29 @@ impl SnapshotCaptureService {
                 needs_hash
                     .into_par_iter()
                     .filter_map(|(path, size, mtime_ms, prior_hash)| {
+                        // Git-sourced baseline: if this file is clean vs
+                        // HEAD, record its git blob OID and skip the
+                        // read/hash/blob-write entirely — the bytes are
+                        // already in the git odb.
+                        let rel = path
+                            .strip_prefix(&project_dir)
+                            .unwrap_or(&path)
+                            .to_string_lossy();
+                        if let Some(oid) = clean_oids.get(rel.as_ref()) {
+                            // Already git-backed at this OID → unchanged.
+                            if prior_hash.as_deref() == Some(oid.as_str()) {
+                                return None;
+                            }
+                            return Some((
+                                path,
+                                CaptureStaging {
+                                    size_bytes: size,
+                                    mtime_ms,
+                                    blob_hash: Some(oid.clone()),
+                                    storage: SnapshotStorage::Git,
+                                },
+                            ));
+                        }
                         let bytes = std::fs::read(&path).ok()?;
                         bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         let hash = BlobStore::hash(&bytes);
@@ -794,7 +829,7 @@ impl SnapshotCaptureService {
                                 size_bytes: size,
                                 mtime_ms,
                                 blob_hash: Some(hash),
-                                oversize: false,
+                                storage: SnapshotStorage::Oxplow,
                             },
                         ))
                     })
@@ -835,7 +870,7 @@ impl SnapshotCaptureService {
                             size_bytes: 0,
                             mtime_ms: None,
                             blob_hash: None,
-                            oversize: false,
+                            storage: SnapshotStorage::Deleted,
                         },
                     ));
                 }
@@ -1028,7 +1063,7 @@ impl SnapshotCaptureService {
                         blob_hash: s.blob_hash,
                         size_bytes: s.size_bytes,
                         captured_at: now,
-                        oversize: s.oversize,
+                        storage: s.storage,
                         snapshot_id: None,
                         mtime_ms: s.mtime_ms,
                     });
@@ -1062,7 +1097,7 @@ impl SnapshotCaptureService {
                                 blob_hash: None,
                                 size_bytes: 0,
                                 captured_at: now,
-                                oversize: false,
+                                storage: SnapshotStorage::Deleted,
                                 snapshot_id: None,
                                 mtime_ms: None,
                             })),
@@ -1105,7 +1140,11 @@ impl SnapshotCaptureService {
                                     blob_hash,
                                     size_bytes: size as i64,
                                     captured_at: now,
-                                    oversize,
+                                    storage: if oversize {
+                                        SnapshotStorage::Oversize
+                                    } else {
+                                        SnapshotStorage::Oxplow
+                                    },
                                     snapshot_id: None,
                                     mtime_ms,
                                 }))
@@ -1308,6 +1347,74 @@ mod tests {
         .with_settle_duration(Duration::ZERO)
         .with_predrain_delay(Duration::ZERO);
         (svc, store)
+    }
+
+    /// Init a git repo at `dir` and commit `files` so they're clean
+    /// tracked content (eligible for git-backed snapshot storage).
+    fn init_git_repo_with(dir: &std::path::Path, files: &[(&str, &str)]) {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@e.com").unwrap();
+        let mut idx = repo.index().unwrap();
+        for (p, c) in files {
+            let full = dir.join(p);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&full, c).unwrap();
+            idx.add_path(std::path::Path::new(p)).unwrap();
+        }
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_git_backs_clean_tracked_files() {
+        let project = tempdir().unwrap();
+        init_git_repo_with(project.path(), &[("tracked.txt", "hello world\n")]);
+        // An untracked, uncommitted file — must take the oxplow path.
+        std::fs::write(project.path().join("dirty.txt"), "scratch").unwrap();
+
+        let (svc, store) = svc_for(project.path()).await;
+        let queued = svc.enqueue_startup_diff().await.unwrap();
+        assert!(queued >= 2, "both files should queue, got {queued}");
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        // Clean tracked file → git-backed: blob_hash is the HEAD OID and
+        // NO blob was copied into the oxplow store.
+        let tracked = store.list_for_path("tracked.txt").await.unwrap();
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].storage, SnapshotStorage::Git);
+        let oid = tracked[0].blob_hash.clone().unwrap();
+        let expect = oxplow_git::clean_head_blob_oids(project.path())
+            .remove("tracked.txt")
+            .unwrap();
+        assert_eq!(oid, expect, "blob_hash must be the git blob OID");
+        assert!(
+            !svc.inner.blobs.has(&oid),
+            "git-backed file must not write a blob",
+        );
+        // And it reads back through the seam from the git odb.
+        let bytes = crate::snapshot_content::read_snapshot_content(
+            SnapshotStorage::Git,
+            &oid,
+            project.path(),
+            &svc.inner.blobs,
+        )
+        .unwrap();
+        assert_eq!(bytes, b"hello world\n");
+
+        // Untracked file → oxplow-backed with a real blob on disk.
+        let dirty = store.list_for_path("dirty.txt").await.unwrap();
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0].storage, SnapshotStorage::Oxplow);
+        assert!(svc.inner.blobs.has(dirty[0].blob_hash.as_ref().unwrap()));
     }
 
     #[tokio::test]
@@ -1932,7 +2039,7 @@ mod tests {
                 size_bytes: 42,
                 mtime_ms: Some(1_700_000_000_000),
                 blob_hash: Some("deadbeef".repeat(4)),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
             },
         );
         let _parent = svc
@@ -1951,7 +2058,7 @@ mod tests {
             rows[0].blob_hash.as_deref(),
             Some("deadbeefdeadbeefdeadbeefdeadbeef"),
         );
-        assert!(!rows[0].oversize);
+        assert!(!rows[0].storage.is_oversize());
     }
 
     #[tokio::test]
@@ -1972,7 +2079,7 @@ mod tests {
                 size_bytes: staged_bytes.len() as i64,
                 mtime_ms: Some(42),
                 blob_hash: Some(staged_hash.clone()),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
             },
         );
 
@@ -2015,7 +2122,7 @@ mod tests {
                 blob_hash: Some(format!("{:032x}", i)),
                 size_bytes: i as i64,
                 captured_at: Timestamp::now(),
-                oversize: false,
+                storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(parent),
                 mtime_ms: Some(1000 + i as i64),
             })
@@ -2103,7 +2210,7 @@ mod tests {
             .unwrap();
         let rows = store.list_for_path("big.bin").await.unwrap();
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].oversize);
+        assert!(rows[0].storage.is_oversize());
         assert!(rows[0].blob_hash.is_none());
     }
 }

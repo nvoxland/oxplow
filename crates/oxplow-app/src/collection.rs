@@ -867,8 +867,9 @@ impl CollectionService {
     fn path_changed_in_effort(&self, path: &str, start_tree: &BTreeMap<String, String>) -> bool {
         let old = start_tree
             .get(path)
-            .filter(|h| !h.starts_with("oversize:"))
-            .and_then(|hash| self.blobs.read(hash).ok())
+            .and_then(|id| {
+                crate::snapshot_content::read_tree_identity(id, &self.project_dir, &self.blobs)
+            })
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
         let new = std::fs::read(self.project_dir.join(path))
@@ -1149,8 +1150,9 @@ impl CollectionService {
     ) -> BTreeSet<u32> {
         let old = start_tree
             .get(path)
-            .filter(|h| !h.starts_with("oversize:"))
-            .and_then(|hash| self.blobs.read(hash).ok())
+            .and_then(|id| {
+                crate::snapshot_content::read_tree_identity(id, &self.project_dir, &self.blobs)
+            })
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
         let Ok(new_bytes) = std::fs::read(self.project_dir.join(path)) else {
@@ -1697,7 +1699,7 @@ mod tests {
                     blob_hash: Some(old_hash),
                     size_bytes: 6,
                     captured_at: now,
-                    oversize: false,
+                    storage: oxplow_db::SnapshotStorage::Oxplow,
                     snapshot_id: Some(snap_id),
                     mtime_ms: None,
                 })
@@ -1717,7 +1719,7 @@ mod tests {
                         blob_hash: Some(hash),
                         size_bytes: content.len() as i64,
                         captured_at: now,
-                        oversize: false,
+                        storage: oxplow_db::SnapshotStorage::Oxplow,
                         snapshot_id: Some(snap_id),
                         mtime_ms: None,
                     })

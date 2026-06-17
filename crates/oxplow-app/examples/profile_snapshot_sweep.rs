@@ -311,7 +311,11 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
     for (rel, metadata, hash) in entries {
         let size = metadata.len() as i64;
         let mtime_ms = mtime_to_unix_ms(&metadata);
-        let oversize = hash.is_none();
+        let storage = if hash.is_none() {
+            oxplow_db::SnapshotStorage::Oversize
+        } else {
+            oxplow_db::SnapshotStorage::Oxplow
+        };
         let _ = store
             .capture(FileSnapshot {
                 id: 0,
@@ -320,7 +324,7 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
                 blob_hash: hash,
                 size_bytes: size,
                 captured_at: Timestamp::now(),
-                oversize,
+                storage,
                 snapshot_id: None,
                 mtime_ms,
             })

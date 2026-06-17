@@ -209,7 +209,7 @@ mod tests {
                 blob_hash: Some(hash),
                 size_bytes: pinned.len() as i64,
                 captured_at: oxplow_domain::Timestamp::from_unix_ms(0),
-                oversize: false,
+                storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(snap),
                 mtime_ms: None,
             })

@@ -304,10 +304,17 @@ impl Indexer {
                     .await;
                 continue;
             };
-            if f.oversize || f.size_bytes > MAX_INDEX_FILE_BYTES {
+            if f.storage.is_oversize() || f.size_bytes > MAX_INDEX_FILE_BYTES {
                 continue;
             }
-            let Ok(bytes) = self.services.blobs.read(hash) else {
+            // Route through the read seam so git-backed rows resolve via
+            // the git odb (their `blob_hash` is an OID, not a blob-store key).
+            let Ok(bytes) = crate::snapshot_content::read_snapshot_content(
+                f.storage,
+                hash,
+                &self.services.layout.project_dir,
+                &self.services.blobs,
+            ) else {
                 continue;
             };
             // Skip binary: a NUL byte is the cheap, reliable heuristic.
@@ -457,7 +464,7 @@ mod tests {
                 blob_hash,
                 size_bytes: size,
                 captured_at: Timestamp::from_unix_ms(0),
-                oversize: false,
+                storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(snap_id),
                 mtime_ms: Some(0),
             })

@@ -1771,7 +1771,7 @@ export async function listFileSnapshotsForPath(
     blob_hash: string | null;
     size_bytes: number;
     captured_at: string;
-    oversize: boolean;
+    storage: "oxplow" | "git" | "oversize" | "deleted";
     snapshot_id: number | null;
     mtime_ms: number | null;
   }>;
@@ -1782,7 +1782,7 @@ export async function listFileSnapshotsForPath(
     blobHash: r.blob_hash,
     sizeBytes: r.size_bytes,
     capturedAt: r.captured_at,
-    oversize: r.oversize,
+    oversize: r.storage === "oversize",
     snapshotId: r.snapshot_id,
     mtimeMs: r.mtime_ms,
   }));
@@ -1848,7 +1848,7 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
     path: string;
     blob_hash: string | null;
     size_bytes: number;
-    oversize: boolean;
+    storage: "oxplow" | "git" | "oversize" | "deleted";
     mtime_ms: number | null;
   }>;
   return rows.map((r) => ({
@@ -1856,7 +1856,7 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
     path: r.path,
     blobHash: r.blob_hash,
     sizeBytes: r.size_bytes,
-    oversize: r.oversize,
+    oversize: r.storage === "oversize",
     mtimeMs: r.mtime_ms,
   }));
 }
