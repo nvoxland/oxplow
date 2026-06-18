@@ -89,12 +89,38 @@ pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
         }
         git2::TreeWalkResult::Ok
     });
-    // Drop any path git reports as changed/untracked — only files whose
-    // working-tree bytes still match HEAD are safe to back by their OID.
-    for dirty in list_git_statuses(repo_path).keys() {
-        out.remove(dirty.as_str());
+    // Drop any *tracked* path that differs from HEAD on disk. We
+    // deliberately do NOT enumerate untracked files: they're never in the
+    // HEAD tree (so never in `out`), and `include_untracked(true)` would
+    // force libgit2 to scan the entire untracked working tree — on a big
+    // repo that's hundreds of thousands of files of pure overhead. With
+    // untracked+ignored off, status only diffs tracked entries, which is
+    // all we need to know "is this committed file still byte-clean."
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false)
+        .include_ignored(false)
+        .renames_head_to_index(false)
+        .renames_index_to_workdir(false);
+    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+        for entry in statuses.iter() {
+            if let Some(path) = entry.path() {
+                out.remove(path);
+            }
+        }
     }
     out
+}
+
+thread_local! {
+    /// Per-thread cache of opened repositories keyed by repo path. A loop
+    /// reader — chiefly the search indexer materializing thousands of
+    /// git-backed snapshot rows — would otherwise pay a fresh
+    /// `Repository::open` (config read + repo discovery) per file. The
+    /// handle is only ever borrowed *within* a single synchronous
+    /// `read_blob` call, never held across an `.await`, so it stays off
+    /// the `Send` futures and never crosses threads.
+    static REPO_CACHE: std::cell::RefCell<HashMap<std::path::PathBuf, git2::Repository>> =
+        std::cell::RefCell::new(HashMap::new());
 }
 
 /// Read the raw bytes of a git blob by its OID (40-char hex). `None`
@@ -103,11 +129,21 @@ pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
 /// the bytes are genuinely unrecoverable, which the caller surfaces as
 /// "content unavailable"). The object db is shared across all worktrees
 /// of a repo, so any worktree's `repo_path` resolves a committed blob.
+///
+/// The opened repository is cached per thread (see `REPO_CACHE`) so
+/// repeated reads against the same repo don't re-open it. Git-backed
+/// snapshot rows only ever reference boot-era committed blobs, so a
+/// repo opened during the session always sees them.
 pub fn read_blob(repo_path: &Path, oid_hex: &str) -> Option<Vec<u8>> {
-    let repo = git2::Repository::open(repo_path).ok()?;
     let oid = git2::Oid::from_str(oid_hex).ok()?;
-    let blob = repo.find_blob(oid).ok()?;
-    Some(blob.content().to_vec())
+    REPO_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_key(repo_path) {
+            cache.insert(repo_path.to_path_buf(), git2::Repository::open(repo_path).ok()?);
+        }
+        let blob = cache.get(repo_path)?.find_blob(oid).ok()?;
+        Some(blob.content().to_vec())
+    })
 }
 
 /// Resolved 40-char sha for `HEAD`. `None` when not a git repo or
