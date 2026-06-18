@@ -130,7 +130,7 @@ pub async fn setup_project(app: tauri::AppHandle, path: String) -> Result<(), Ip
             "project path is not a directory: {path}"
         )));
     }
-    std::fs::create_dir_all(dir.join(".oxplow"))
+    oxplow_app::ensure_state_dir(&dir.join(".oxplow"))
         .map_err(|e| IpcError::internal(format!("create .oxplow: {e}")))?;
     spawn_project_process(dir)?;
     app.exit(0);

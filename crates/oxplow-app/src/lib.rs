@@ -129,6 +129,21 @@ impl AppLayout {
     }
 }
 
+/// Ensure the `.oxplow/` state directory exists and is self-ignoring.
+///
+/// Creates `state_dir` (recursively) and drops a `.gitignore` holding a
+/// single `*` so the whole directory — including the gitignore itself —
+/// is excluded from the host repo without touching the project's root
+/// `.gitignore`. Idempotent: an existing `.gitignore` is left untouched.
+pub fn ensure_state_dir(state_dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(state_dir)?;
+    let gitignore = state_dir.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(gitignore, "*\n")?;
+    }
+    Ok(())
+}
+
 /// Try to take the per-project single-instance lock. On success the
 /// held [`std::fs::File`] is returned — keep it alive for the whole
 /// process (the OS releases the advisory lock when it drops). `None`
@@ -137,7 +152,7 @@ impl AppLayout {
 /// (double fs/git watchers + a serialized SQLite writer lock).
 pub fn try_acquire_instance_lock(layout: &AppLayout) -> std::io::Result<Option<std::fs::File>> {
     use fs2::FileExt;
-    std::fs::create_dir_all(&layout.state_dir)?;
+    ensure_state_dir(&layout.state_dir)?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -212,7 +227,7 @@ pub fn new_focus_nonce() -> String {
 
 /// Publish this process's focus coordinates for `layout`'s project.
 pub fn write_instance_info(layout: &AppLayout, info: &InstanceInfo) -> std::io::Result<()> {
-    std::fs::create_dir_all(&layout.state_dir)?;
+    ensure_state_dir(&layout.state_dir)?;
     let json = serde_json::to_vec_pretty(info)?;
     std::fs::write(instance_info_path(&layout.project_dir), json)
 }
@@ -279,6 +294,34 @@ mod instance_lock_tests {
         let dir = tempfile::tempdir().unwrap();
         // No .oxplow/instance.lock yet.
         assert!(!is_project_locked(dir.path()));
+    }
+
+    #[test]
+    fn ensure_state_dir_writes_self_ignoring_gitignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join(".oxplow");
+
+        ensure_state_dir(&state_dir).unwrap();
+
+        assert!(state_dir.is_dir());
+        let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
+        assert_eq!(gitignore, "*\n");
+    }
+
+    #[test]
+    fn ensure_state_dir_is_idempotent_and_preserves_existing_gitignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join(".oxplow");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(state_dir.join(".gitignore"), "custom\n").unwrap();
+
+        ensure_state_dir(&state_dir).unwrap();
+
+        let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
+        assert_eq!(
+            gitignore, "custom\n",
+            "existing .gitignore is not clobbered"
+        );
     }
 
     #[test]
@@ -416,7 +459,7 @@ pub struct Services {
 impl Services {
     /// Bootstrap. Run once at app startup.
     pub fn boot(layout: AppLayout) -> Result<Self, AppInitError> {
-        std::fs::create_dir_all(&layout.state_dir)?;
+        ensure_state_dir(&layout.state_dir)?;
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
@@ -634,7 +677,7 @@ impl Services {
     pub fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Self, AppInitError> {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
-        std::fs::create_dir_all(&state_dir)?;
+        ensure_state_dir(&state_dir)?;
         let layout = AppLayout {
             project_dir: project_dir.clone(),
             state_dir: state_dir.clone(),
