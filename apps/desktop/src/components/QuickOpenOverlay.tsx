@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listWorkspaceFiles,
   searchSite,
@@ -68,7 +68,39 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedCategories, setExpandedCategories] = useState<Set<PageCategory>>(loadExpandedCategories);
+  const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Anchor the panel as a dropdown below the rail "Search…" box rather
+  // than dimming the screen with a centered modal. We read the always-
+  // visible trigger's rect by testid so both the click and the Cmd-K/P
+  // keyboard paths land in the same place; if the rail isn't mounted we
+  // fall back to a centered position near the top.
+  useLayoutEffect(() => {
+    if (!open) return;
+    function place() {
+      const anchor = document.querySelector('[data-testid="rail-search"]');
+      const width = 460;
+      if (!anchor) {
+        setPanelCoords(centeredFallbackCoords);
+        return;
+      }
+      const rect = anchor.getBoundingClientRect();
+      setPanelCoords({
+        position: "fixed",
+        left: Math.max(8, Math.min(window.innerWidth - width - 8, rect.left)),
+        top: rect.bottom + 4,
+        width,
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
 
   function toggleCategory(category: PageCategory) {
     setExpandedCategories((current) => {
@@ -197,7 +229,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
 
   return (
     <div style={backdropStyle} onMouseDown={onClose}>
-      <div style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
+      <div style={{ ...panelStyle, ...panelCoords }} onMouseDown={(event) => event.stopPropagation()}>
         <input
           ref={inputRef}
           value={query}
@@ -255,7 +287,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
                       background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
                     }}
                   >
-                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)" }}>
+                    <span style={{ width: 22, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 16, lineHeight: 1 }}>
                       {result.expanded ? "▾" : "▸"}
                     </span>
                     <span style={{ flex: 1 }}>{result.category}</span>
@@ -379,19 +411,26 @@ function shortStatus(status: WorkspaceIndexedFile["gitStatus"]): string {
   }
 }
 
+// Transparent full-screen layer: it captures the outside-click that
+// closes the launcher but no longer dims the app, so the panel reads as
+// a dropdown anchored to the rail Search box rather than a modal.
 const backdropStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0, 0, 0, 0.45)",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "flex-start",
-  paddingTop: "10vh",
   zIndex: 40,
 };
 
-const panelStyle: CSSProperties = {
+// Used when the rail Search trigger isn't on screen (e.g. a narrow
+// layout that hid the rail): drop the panel near the top, centered.
+const centeredFallbackCoords: CSSProperties = {
+  position: "fixed",
+  left: "50%",
+  top: "10vh",
+  transform: "translateX(-50%)",
   width: "min(720px, calc(100vw - 32px))",
+};
+
+const panelStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 8,
