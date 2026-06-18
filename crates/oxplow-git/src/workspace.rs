@@ -302,7 +302,13 @@ fn clean_relative_path(relative_path: &str) -> String {
 /// create paths).
 fn resolve_workspace_path(root_dir: &Path, relative_path: &str) -> Result<PathBuf, WorkspaceError> {
     let clean = clean_relative_path(relative_path);
-    let root = root_dir.to_path_buf();
+    // Absolutize the root (lexically — no fs access, unlike
+    // `canonicalize`) so the separator-prefix containment check below
+    // can't false-positive on a relative root like `.`, where
+    // `normalize_path` yields `""` and every child then reads as
+    // escaping the root. Production roots are already absolute (the
+    // launcher canonicalizes `project_dir`); this is defense in depth.
+    let root = std::path::absolute(root_dir).unwrap_or_else(|_| root_dir.to_path_buf());
     let abs = if clean.is_empty() {
         root.clone()
     } else {
@@ -412,6 +418,24 @@ mod tests {
     fn path_escape_is_rejected() {
         let dir = tempdir().unwrap();
         let err = read_workspace_file(dir.path(), "../escape.txt").unwrap_err();
+        assert!(matches!(err, WorkspaceError::PathEscape));
+    }
+
+    #[test]
+    fn relative_root_resolves_children_without_false_escape() {
+        // Regression (tsk160): a relative root like `.` made
+        // `normalize_path` collapse to "", so every child
+        // false-positived as escaping the root and killed the whole
+        // listing. The guard now absolutizes the root so containment is
+        // computed correctly — children resolve, real traversal still
+        // rejects. (The launcher also canonicalizes `project_dir`, so a
+        // relative root never reaches here in production; this is the
+        // defense-in-depth half.)
+        let resolved = resolve_workspace_path(Path::new("."), "app").unwrap();
+        assert!(resolved.is_absolute());
+        assert!(resolved.ends_with("app"));
+
+        let err = resolve_workspace_path(Path::new("."), "../escape.txt").unwrap_err();
         assert!(matches!(err, WorkspaceError::PathEscape));
     }
 

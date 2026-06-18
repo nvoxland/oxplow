@@ -276,10 +276,22 @@ fn resolve_project_dir() -> Option<std::path::PathBuf> {
     if let Some(arg) = std::env::args().nth(1) {
         // Skip flag-like args (e.g. macOS may pass `-psn_…`).
         if !arg.starts_with('-') {
-            return Some(std::path::PathBuf::from(arg));
+            return Some(absolutize_project_dir(std::path::PathBuf::from(arg)));
         }
     }
-    std::env::var_os("OXPLOW_PROJECT_DIR").map(std::path::PathBuf::from)
+    std::env::var_os("OXPLOW_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .map(absolutize_project_dir)
+}
+
+/// Make the project dir absolute. A relative root (`oxplow .`) breaks
+/// the workspace path-traversal guard, which does a separator-prefix
+/// containment check: `normalize_path(".")` collapses to `""`, so every
+/// subdirectory read then false-positives as escaping the root and the
+/// whole file listing dies. `canonicalize` resolves symlinks and `..`;
+/// if it fails (path doesn't exist yet) we keep the original.
+fn absolutize_project_dir(p: std::path::PathBuf) -> std::path::PathBuf {
+    std::fs::canonicalize(&p).unwrap_or(p)
 }
 
 /// Resolve the global recent-projects store, optionally record the

@@ -72,7 +72,12 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs`):
 
 - `resolve_project_dir()` → first positional CLI arg, else
   `OXPLOW_PROJECT_DIR`, else `None`. (No cwd fallback — a bare launch
-  must not silently adopt its start directory.)
+  must not silently adopt its start directory.) The resolved dir is
+  **canonicalized** (`absolutize_project_dir`): a relative root like
+  `oxplow .` would otherwise collapse to `""` in the workspace
+  path-traversal guard (`resolve_workspace_path` in oxplow-git), making
+  every subdirectory read false-positive as an escape and killing file
+  listings.
 - `Some(dir)` with a `.oxplow/` dir → `run_project(dir, ctx)`: today's
   full boot.
 - `Some(dir)` **without** `.oxplow/` → `run_setup(dir, ctx)`: **no
