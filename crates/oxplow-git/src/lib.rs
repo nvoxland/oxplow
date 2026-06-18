@@ -56,6 +56,7 @@ pub use repo::{detect_current_branch, is_git_repo, is_git_worktree};
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
 pub use status::{
     clean_head_blob_oids, head_commit_sha, list_git_statuses, read_blob, status_for_path,
+    GitCleanBaseline,
 };
 pub use sync::{
     add_path, cherry_pick, commit_all, fetch, merge, pull, pull_remote_into_current, push,

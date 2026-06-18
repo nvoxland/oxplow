@@ -664,14 +664,19 @@ impl SnapshotCaptureService {
         let queued = tokio::task::spawn_blocking(move || -> Vec<(PathBuf, CaptureStaging)> {
             use rayon::prelude::*;
 
-            // Git baseline: every working-tree-clean tracked file mapped
-            // to its HEAD blob OID. Phase 2 backs these by the git odb
-            // (`storage = 'git'`) instead of reading + hashing + copying
-            // the bytes — so a clean checkout of a large repo writes
-            // almost no blobs. Built once; empty when not a git repo.
-            let clean_oids = oxplow_git::clean_head_blob_oids(&project_dir);
+            // Git baseline: HEAD tree OIDs + the git index's cached stat,
+            // so phase 1 can decide "is this committed file still
+            // byte-clean?" from the stat it already takes — no extra
+            // status/stat pass. Clean files are backed by the git odb
+            // (`storage = 'git'`) instead of being read + hashed + copied,
+            // so a clean checkout of a large repo writes almost no blobs.
+            // Built once (in-memory tree walk + one index read); empty
+            // when not a git repo.
+            let baseline_started = Instant::now();
+            let git_baseline = oxplow_git::GitCleanBaseline::build(&project_dir);
             info!(
-                clean_tracked = clean_oids.len(),
+                clean_candidates = git_baseline.candidate_count(),
+                baseline_ms = baseline_started.elapsed().as_millis() as u64,
                 "snapshot startup sweep: git baseline ready",
             );
 
@@ -682,8 +687,19 @@ impl SnapshotCaptureService {
             //     read needed — staging built from stat only.
             //   - `needs_hash`: paths whose (size, mtime) didn't
             //     match the stored stat — fall through to phase 2.
+            // One file handed to phase 2, which decides per item (in
+            // parallel) between a git-back (clean vs HEAD) and a
+            // read+hash+blob. `mtime` is full-precision for the git
+            // stat-shortcut; `mtime_ms` feeds the stored row.
+            struct Pending {
+                path: PathBuf,
+                size: i64,
+                mtime_ms: Option<i64>,
+                mtime: Option<(i64, u32)>,
+                prior_hash: Option<String>,
+            }
             let mut staged: Vec<(PathBuf, CaptureStaging)> = Vec::new();
-            let mut needs_hash: Vec<(PathBuf, i64, Option<i64>, Option<String>)> = Vec::new();
+            let mut needs_hash: Vec<Pending> = Vec::new();
             let mut files_seen: u64 = 0;
             let mut shortcircuit_hits: u64 = 0;
             let mut oversize_new: u64 = 0;
@@ -716,6 +732,13 @@ impl SnapshotCaptureService {
                 };
                 let size = metadata.len() as i64;
                 let mtime_ms = mtime_to_unix_ms(&metadata);
+                // Full-precision mtime for the git stat-shortcut (the ms
+                // form above loses the nanoseconds git compares against).
+                let mtime_secnsec = metadata.modified().ok().and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| (d.as_secs() as i64, d.subsec_nanos()))
+                });
                 // Fast equality check: when both size and mtime
                 // match (and we have an mtime to compare against —
                 // pre-V15 rows have None), the file hasn't been
@@ -747,12 +770,16 @@ impl SnapshotCaptureService {
                     }
                     continue;
                 }
-                needs_hash.push((
-                    entry.path().to_path_buf(),
+                // Defer the git-back-vs-read decision to phase 2 so the
+                // 19k-file fan-out stays parallel (doing it here, in the
+                // sequential walk, regressed phase 1 badly).
+                needs_hash.push(Pending {
+                    path: entry.path().to_path_buf(),
                     size,
                     mtime_ms,
-                    prior.and_then(|s| s.blob_hash),
-                ));
+                    mtime: mtime_secnsec,
+                    prior_hash: prior.and_then(|s| s.blob_hash),
+                });
             }
             let phase1_ms = phase1_started.elapsed().as_millis() as u64;
             let needs_hash_count = needs_hash.len() as u64;
@@ -774,34 +801,51 @@ impl SnapshotCaptureService {
             // so re-runs are cheap.
             let bytes_read = AtomicU64::new(0);
             let blobs_written = AtomicU64::new(0);
+            let git_backed = AtomicU64::new(0);
             let phase2_started = Instant::now();
             let run_phase2 = || -> Vec<(PathBuf, CaptureStaging)> {
                 needs_hash
                     .into_par_iter()
-                    .filter_map(|(path, size, mtime_ms, prior_hash)| {
-                        // Git-sourced baseline: if this file is clean vs
-                        // HEAD, record its git blob OID and skip the
-                        // read/hash/blob-write entirely — the bytes are
-                        // already in the git odb.
-                        let rel = path
-                            .strip_prefix(&project_dir)
-                            .unwrap_or(&path)
-                            .to_string_lossy();
-                        if let Some(oid) = clean_oids.get(rel.as_ref()) {
-                            // Already git-backed at this OID → unchanged.
+                    .filter_map(|p| {
+                        let Pending {
+                            path,
+                            size,
+                            mtime_ms,
+                            mtime,
+                            prior_hash,
+                        } = p;
+                        // Git-sourced baseline: a committed file still
+                        // byte-clean vs HEAD (judged from the walk's stat —
+                        // no read) is recorded by its HEAD blob OID, which
+                        // lives in the git odb. Decided here so the 19k-file
+                        // fan-out stays parallel. The `rel` borrow ends
+                        // inside the closure so `path` is free to move.
+                        let clean_oid = mtime.and_then(|mt| {
+                            let rel = path
+                                .strip_prefix(&project_dir)
+                                .unwrap_or(&path)
+                                .to_string_lossy();
+                            git_baseline
+                                .clean_head_oid(&rel, size as u64, mt)
+                                .map(str::to_string)
+                        });
+                        if let Some(oid) = clean_oid {
+                            // Prior row already at this OID → unchanged.
                             if prior_hash.as_deref() == Some(oid.as_str()) {
                                 return None;
                             }
+                            git_backed.fetch_add(1, Ordering::Relaxed);
                             return Some((
                                 path,
                                 CaptureStaging {
                                     size_bytes: size,
                                     mtime_ms,
-                                    blob_hash: Some(oid.clone()),
+                                    blob_hash: Some(oid),
                                     storage: SnapshotStorage::Git,
                                 },
                             ));
                         }
+                        // Genuinely dirty/new → read + hash + blob.
                         let bytes = std::fs::read(&path).ok()?;
                         bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         let hash = BlobStore::hash(&bytes);
@@ -845,7 +889,8 @@ impl SnapshotCaptureService {
             let phase2_ms = phase2_started.elapsed().as_millis() as u64;
             let phase2_bytes = bytes_read.load(Ordering::Relaxed);
             info!(
-                hashed_changed = hashed.len() as u64,
+                rows = hashed.len() as u64,
+                git_backed = git_backed.load(Ordering::Relaxed),
                 blobs_written = blobs_written.load(Ordering::Relaxed),
                 bytes_read = phase2_bytes,
                 mb_read = phase2_bytes as f64 / 1_048_576.0,

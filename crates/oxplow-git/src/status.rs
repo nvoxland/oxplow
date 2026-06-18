@@ -111,6 +111,122 @@ pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
     out
 }
 
+/// mtime as `(unix seconds, nanoseconds)` — compared at nanosecond
+/// precision (like git) so a checkout that lands files and the index in
+/// the same wall-clock second isn't spuriously treated as racy.
+type Mtime = (i64, u32);
+
+/// A git-clean decision oracle built once per snapshot sweep, then
+/// queried per file from the stat the sweep's walk already computed —
+/// so determining "is this committed file still byte-clean?" costs no
+/// extra `stat`/`status` pass (that's the fusion that replaces a full
+/// libgit2 `statuses()` scan of every tracked file).
+///
+/// It reuses git's own stat-shortcut: a working file is clean vs the
+/// index when its `(size, mtime)` matches the index's cached stat, and
+/// the file's mtime is strictly older than the index file itself (git's
+/// "racy-clean" rule — a file touched in the same second the index was
+/// written can't be trusted by stat alone). "Clean vs HEAD" additionally
+/// requires the index entry's OID to equal HEAD's (not staged-modified).
+///
+/// Conservative by construction: any uncertainty returns `None`, so the
+/// caller falls back to reading + hashing the content. A genuinely
+/// modified file is therefore never mistaken for clean.
+#[derive(Default)]
+pub struct GitCleanBaseline {
+    /// path → HEAD blob OID hex, for tracked files whose index entry
+    /// matches HEAD (the only git-back candidates).
+    head_oids: HashMap<String, String>,
+    /// path → (index `file_size`, index cached mtime).
+    index_stat: HashMap<String, (u64, Mtime)>,
+    /// mtime of the `.git/index` file — the racy-clean threshold. A
+    /// working file whose mtime is `>=` this can't be trusted by stat
+    /// alone. `(0, 0)` disables git-backing (treated as "always racy").
+    index_mtime: Mtime,
+}
+
+impl GitCleanBaseline {
+    /// Build from the repo's HEAD tree + index. In-memory tree walk plus
+    /// one index read — no working-tree `stat`s. Empty (backs nothing)
+    /// when not a git repo or HEAD is unborn.
+    pub fn build(repo_path: &Path) -> Self {
+        let mut out = GitCleanBaseline::default();
+        let Ok(repo) = git2::Repository::open(repo_path) else {
+            return out;
+        };
+        let Ok(commit) = repo.head().and_then(|h| h.peel_to_commit()) else {
+            return out;
+        };
+        let Ok(tree) = commit.tree() else {
+            return out;
+        };
+        // HEAD tree → path → OID (in-memory).
+        let mut head_tree: HashMap<String, String> = HashMap::new();
+        let _ = tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() == Some(git2::ObjectType::Blob) {
+                if let Some(name) = entry.name() {
+                    head_tree.insert(format!("{root}{name}"), entry.id().to_string());
+                }
+            }
+            git2::TreeWalkResult::Ok
+        });
+        // Index: keep only stage-0 entries whose OID matches HEAD (i.e.
+        // not staged-modified) — those are the candidates for clean-vs-HEAD.
+        if let Ok(index) = repo.index() {
+            for e in index.iter() {
+                let stage = (e.flags >> 12) & 0x3;
+                if stage != 0 {
+                    continue;
+                }
+                let path = String::from_utf8_lossy(&e.path).into_owned();
+                let oid = e.id.to_string();
+                if head_tree.get(&path) == Some(&oid) {
+                    let mtime = (e.mtime.seconds() as i64, e.mtime.nanoseconds());
+                    out.index_stat
+                        .insert(path.clone(), (e.file_size as u64, mtime));
+                    out.head_oids.insert(path, oid);
+                }
+            }
+        }
+        // mtime of the index file itself (`.git[/worktrees/<n>]/index`).
+        if let Ok(md) = std::fs::metadata(repo.path().join("index")) {
+            if let Ok(mt) = md.modified() {
+                if let Ok(d) = mt.duration_since(std::time::UNIX_EPOCH) {
+                    out.index_mtime = (d.as_secs() as i64, d.subsec_nanos());
+                }
+            }
+        }
+        out
+    }
+
+    /// HEAD blob OID for `rel` when the working file (given its already-
+    /// computed `size` + `mtime`) is confidently byte-clean vs HEAD.
+    /// `None` whenever the stat-shortcut can't be trusted — the caller
+    /// then reads + hashes the bytes instead.
+    pub fn clean_head_oid(&self, rel: &str, size: u64, mtime: Mtime) -> Option<&str> {
+        if self.index_mtime == (0, 0) {
+            return None;
+        }
+        let head = self.head_oids.get(rel)?;
+        let (isize, imtime) = self.index_stat.get(rel)?;
+        // Stat must match the index's cached stat exactly...
+        if *isize != size || *imtime != mtime {
+            return None;
+        }
+        // ...and not be racy (mtime strictly older than the index write,
+        // compared at nanosecond precision).
+        if mtime >= self.index_mtime {
+            return None;
+        }
+        Some(head.as_str())
+    }
+
+    /// Number of git-back candidate paths (clean-in-index tracked files).
+    pub fn candidate_count(&self) -> usize {
+        self.head_oids.len()
+    }
+}
+
 thread_local! {
     /// Per-thread cache of opened repositories keyed by repo path. A loop
     /// reader — chiefly the search indexer materializing thousands of
@@ -139,7 +255,10 @@ pub fn read_blob(repo_path: &Path, oid_hex: &str) -> Option<Vec<u8>> {
     REPO_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.contains_key(repo_path) {
-            cache.insert(repo_path.to_path_buf(), git2::Repository::open(repo_path).ok()?);
+            cache.insert(
+                repo_path.to_path_buf(),
+                git2::Repository::open(repo_path).ok()?,
+            );
         }
         let blob = cache.get(repo_path)?.find_blob(oid).ok()?;
         Some(blob.content().to_vec())
@@ -279,6 +398,67 @@ mod tests {
         // Well-formed but absent OID → None, not a panic.
         assert!(read_blob(dir.path(), "0123456789abcdef0123456789abcdef01234567").is_none());
         assert!(read_blob(dir.path(), "not-a-hash").is_none());
+    }
+
+    #[test]
+    fn git_clean_baseline_decision_logic() {
+        // Construct directly to test the pure stat-shortcut decision
+        // deterministically (no filesystem mtime races).
+        let mut b = GitCleanBaseline::default();
+        b.head_oids.insert("a.txt".into(), "OID_A".into());
+        b.index_stat.insert("a.txt".into(), (5, (100, 500)));
+        b.index_mtime = (200, 0);
+
+        // Exact stat match, not racy → clean.
+        assert_eq!(b.clean_head_oid("a.txt", 5, (100, 500)), Some("OID_A"));
+        // Size changed → not clean.
+        assert_eq!(b.clean_head_oid("a.txt", 6, (100, 500)), None);
+        // mtime differs from index cache (even by a nanosecond) → not clean.
+        assert_eq!(b.clean_head_oid("a.txt", 5, (100, 501)), None);
+        // Unknown path → not clean.
+        assert_eq!(b.clean_head_oid("other.txt", 5, (100, 500)), None);
+
+        // Racy: file mtime >= index file mtime → can't trust stat. Here the
+        // nanosecond pushes it past the threshold even though seconds match.
+        let mut racy = GitCleanBaseline::default();
+        racy.head_oids.insert("a.txt".into(), "OID_A".into());
+        racy.index_stat.insert("a.txt".into(), (5, (200, 5)));
+        racy.index_mtime = (200, 0);
+        assert_eq!(racy.clean_head_oid("a.txt", 5, (200, 5)), None);
+
+        // No index mtime (not a git repo) → never clean.
+        let empty = GitCleanBaseline::default();
+        assert_eq!(empty.clean_head_oid("a.txt", 5, (100, 500)), None);
+    }
+
+    #[test]
+    fn git_clean_baseline_build_indexes_clean_files() {
+        let dir = init_repo();
+        commit_files(dir.path(), &[("a.txt", "alpha"), ("sub/b.txt", "beta")]);
+        // Stage a modification to a.txt (index OID != HEAD) → excluded.
+        std::fs::write(dir.path().join("a.txt"), "alpha-2").unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(Path::new("a.txt")).unwrap();
+        idx.write().unwrap();
+
+        let b = GitCleanBaseline::build(dir.path());
+        // b.txt is committed + unmodified in index → candidate with HEAD OID.
+        let expect_b = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .tree()
+            .unwrap()
+            .get_path(Path::new("sub/b.txt"))
+            .unwrap()
+            .id()
+            .to_string();
+        assert_eq!(b.head_oids.get("sub/b.txt"), Some(&expect_b));
+        // a.txt is staged-modified (index OID != HEAD) → not a candidate.
+        assert!(!b.head_oids.contains_key("a.txt"));
+        assert!(b.index_mtime.0 > 0, "index mtime should be populated");
     }
 
     #[test]
