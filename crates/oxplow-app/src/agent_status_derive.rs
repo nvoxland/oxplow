@@ -119,7 +119,19 @@ pub fn derive_thread_status_with_activity(
     for ev in &sorted {
         match ev.kind {
             HookKind::UserPromptSubmit => {
+                // A fresh user prompt begins a new turn, so any counters
+                // left open by a prior turn are stale and must not leak
+                // forward. The common case: a rejected / cancelled
+                // AskUserQuestion or ExitPlanMode fires PreToolUse with
+                // no matching PostToolUse, stranding `pending_user_input`
+                // at ≥1 — which the final check turns into a permanent
+                // `AwaitingUser` (red "waiting") dot even as the thread
+                // resumes working. Resetting here self-heals it, the same
+                // way Interrupt / AgentBoot do.
                 state = AgentStatusState::Running;
+                pending_tasks = 0;
+                pending_user_input = 0;
+                open_tools = 0;
             }
             HookKind::PreToolUse => {
                 state = AgentStatusState::Running;
@@ -608,6 +620,30 @@ mod tests {
         assert_eq!(
             derive_thread_status_with_activity(&events, Some(stale_output), now),
             AgentStatusState::Stalled
+        );
+    }
+
+    #[test]
+    fn rejected_user_input_tool_clears_on_next_prompt() {
+        // tsk166: a rejected/cancelled AskUserQuestion fires PreToolUse
+        // with NO matching PostToolUse, stranding `pending_user_input`.
+        // Without the reset it pins the thread to AwaitingUser (red
+        // "waiting") forever. A fresh UserPromptSubmit must clear it so
+        // subsequent work derives Running.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(
+                HookKind::PreToolUse,
+                2,
+                r#"{"tool_name":"AskUserQuestion"}"#,
+            ),
+            // (no PostToolUse — the question was rejected)
+            ev(HookKind::UserPromptSubmit, 3, "{}"),
+            ev(HookKind::PreToolUse, 4, r#"{"tool_name":"Edit"}"#),
+        ];
+        assert_eq!(
+            derive_thread_status(&events, at(10)),
+            AgentStatusState::Running
         );
     }
 
