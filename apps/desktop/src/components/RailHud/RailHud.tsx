@@ -270,10 +270,26 @@ function RailSection({
       data-testid={`rail-section-${id}`}
       {...(ctx ? ctx.dropZone(id) : {})}
       style={{
-        borderTop: ctx?.isDropTarget(id) ? "2px solid var(--accent)" : "2px solid transparent",
+        // Each section is its own full-bleed "container": a card surface
+        // banded off from the rail behind it by top/bottom borders and a
+        // small vertical gap. No horizontal inset — content stays
+        // edge-to-edge. The drop target lights up with an inset ring.
+        background: "var(--surface-card)",
+        borderTop: "1px solid var(--border-subtle)",
+        borderBottom: "1px solid var(--border-subtle)",
+        marginBottom: 6,
+        boxShadow: ctx?.isDropTarget(id) ? "inset 0 0 0 2px var(--accent)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "10px 8px 4px 6px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          padding: "8px 8px 7px 6px",
+          borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
+        }}
+      >
         <span
           {...(ctx ? ctx.dragHandle(id) : {})}
           data-testid={`rail-section-drag-${id}`}
