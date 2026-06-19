@@ -93,9 +93,17 @@ export function RailHud({
 }: RailHudProps) {
   const activeItem = useMemo(() => computeActiveItem(threadWork), [threadWork]);
   const activeEpic = useMemo(() => computeActiveEpicContext(threadWork, activeItem), [threadWork, activeItem]);
-  const upNext = useMemo(() => computeUpNext(threadWork, 3), [threadWork]);
+  // The full ready pool (capped) so the Work block can show an accurate
+  // count even though it only renders the first handful when expanded.
+  const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
   const recents = useMemo(() => sortRecentFiles(recentFiles, 6), [recentFiles]);
   const width = useRailWidth();
+
+  const hasUncommitted = !!uncommitted && (
+    uncommitted.added + uncommitted.modified + uncommitted.deleted > 0
+    || (uncommitted.conflictedCount ?? 0) > 0
+    || !!uncommitted.gitOperation
+  );
 
   return (
     <aside
@@ -116,23 +124,23 @@ export function RailHud({
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
       <SearchTrigger onOpenSearch={onOpenSearch} />
 
-      {threadId ? (
-        <ActiveItemSection
-          item={activeItem}
-          epicContext={activeEpic}
-          onOpenPage={onOpenPage}
-        />
-      ) : null}
-
-      {uncommitted && (
-        uncommitted.added + uncommitted.modified + uncommitted.deleted > 0
-        || (uncommitted.conflictedCount ?? 0) > 0
-        || uncommitted.gitOperation
-      ) ? (
-        <UncommittedSection summary={uncommitted} onOpenPage={onOpenPage} />
+      {hasUncommitted ? (
+        <UncommittedSection summary={uncommitted!} onOpenPage={onOpenPage} />
       ) : null}
 
       <CommentsSection streamId={streamId ?? null} onOpenPage={onOpenPage} />
+
+      {/* Work: live active item(s) when working, else the last done
+          item; Up next + Finished reveal on expand. */}
+      <WorkSection
+        threadId={threadId}
+        activeItem={activeItem}
+        activeEpic={activeEpic}
+        readyItems={readyItems}
+        recentlyFinished={recentlyFinished}
+        onOpenPage={onOpenPage}
+        onClearFinished={onClearFinished}
+      />
 
       {opErrors && opErrors.length > 0 ? (
         <OpErrorsSection
@@ -143,20 +151,8 @@ export function RailHud({
         />
       ) : null}
 
-      {upNext.length > 0 ? (
-        <UpNextSection items={upNext} onOpenPage={onOpenPage} />
-      ) : null}
-
       {recents.length > 0 ? (
         <RecentFilesSection entries={recents} onOpenPage={onOpenPage} />
-      ) : null}
-
-      {recentlyFinished && recentlyFinished.length > 0 ? (
-        <FinishedSection
-          entries={recentlyFinished}
-          onOpenPage={onOpenPage}
-          onClear={onClearFinished}
-        />
       ) : null}
 
       {bookmarks && bookmarks.length > 0 ? (
@@ -167,6 +163,175 @@ export function RailHud({
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
+  );
+}
+
+const RAIL_WORK_EXPANDED_KEY = "oxplow.rail.workExpanded";
+
+/** Whether the Work block's Up next + Finished detail is expanded.
+ *  Default collapsed; persisted per user in localStorage. */
+function useRailWorkExpanded(): [boolean, () => void] {
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(RAIL_WORK_EXPANDED_KEY) === "1";
+  });
+  const toggle = useCallback(() => {
+    setExpanded((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem(RAIL_WORK_EXPANDED_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage unavailable — toggle still works for the session.
+      }
+      return next;
+    });
+  }, []);
+  return [expanded, toggle];
+}
+
+/** The Work section. Its header title flips between "Working" (an
+ *  active in_progress item exists) and "Last done" (none), with the
+ *  expand chevron on the header itself. Collapsed shows the active
+ *  item(s) when working, or just the most recent finished item when
+ *  not; expanding reveals the Up next + Finished lists. */
+function WorkSection({
+  threadId,
+  activeItem,
+  activeEpic,
+  readyItems,
+  recentlyFinished,
+  onOpenPage,
+  onClearFinished,
+}: {
+  threadId: string | null;
+  activeItem: Task | null;
+  activeEpic: { epic: Task; children: Task[] } | null;
+  readyItems: Task[];
+  recentlyFinished?: FinishedEntry[];
+  onOpenPage(ref: TabRef): void;
+  onClearFinished?(): void;
+}) {
+  const [expanded, toggle] = useRailWorkExpanded();
+  const finished = recentlyFinished ?? [];
+  const readyCount = readyItems.length;
+  const working = !!activeItem;
+  const lastFinished = finished[0] ?? null;
+  const hasContent = working || finished.length > 0 || readyCount > 0;
+  if (!threadId || !hasContent) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="rail-work-toggle"
+        onClick={toggle}
+        aria-expanded={expanded}
+        title={expanded ? "Collapse" : "Expand"}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          padding: "12px 14px 4px",
+          textAlign: "left",
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-secondary)",
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+        }}
+      >
+        <span aria-hidden style={{ width: 18, display: "inline-flex", justifyContent: "center", fontSize: 18, lineHeight: 1 }}>
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span>Work</span>
+      </button>
+
+      {!expanded ? (
+        // Collapsed view — a compact one-liner: the current activity
+        // (active item, ◐) when working, else just the most recent
+        // finished item (✓).
+        working ? (
+          <ActiveItemSection
+            item={activeItem}
+            epicContext={activeEpic}
+            onOpenPage={onOpenPage}
+            showHeading={false}
+          />
+        ) : lastFinished ? (
+          <SingleFinishedRow entry={lastFinished} onOpenPage={onOpenPage} />
+        ) : null
+      ) : (
+        // Expanded view — the full work picture as distinct labeled
+        // sections: In progress, Ready, Finished.
+        <>
+          {activeItem ? (
+            <>
+              <SectionHeading>In progress</SectionHeading>
+              <ActiveItemSection
+                item={activeItem}
+                epicContext={activeEpic}
+                onOpenPage={onOpenPage}
+                showHeading={false}
+              />
+            </>
+          ) : null}
+          {readyCount > 0 ? (
+            <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
+          ) : null}
+          {finished.length > 0 ? (
+            <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Single most-recent finished row — the collapsed "Last done" content
+ *  when nothing is actively in progress. */
+function SingleFinishedRow({
+  entry,
+  onOpenPage,
+}: {
+  entry: FinishedEntry;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const ref = entry.kind === "task" ? taskRef(entry.itemId) : wikiPageRef(entry.slug);
+  return (
+    <div data-testid="rail-last-done" style={{ paddingBottom: 8 }}>
+      <button
+        type="button"
+        data-testid={`rail-finished-${entry.kind === "task" ? entry.itemId : entry.slug}`}
+        title={entry.kind === "task" ? `#${entry.itemId} ${entry.title}` : entry.title}
+        onClick={() => onOpenPage(ref)}
+        style={rowHoverStyle()}
+      >
+        {entry.kind === "task" ? (
+          <span
+            aria-hidden
+            style={{
+              width: 14,
+              display: "inline-flex",
+              justifyContent: "center",
+              color: statusIconColor("done"),
+              fontSize: "var(--text-xs)",
+              flexShrink: 0,
+            }}
+          >
+            {statusIcon("done")}
+          </span>
+        ) : (
+          <PageKindIcon kind="wiki" size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+        )}
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {entry.title}
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -344,10 +509,14 @@ function ActiveItemSection({
   item,
   epicContext,
   onOpenPage,
+  showHeading = true,
 }: {
   item: Task | null;
   epicContext: { epic: Task; children: Task[] } | null;
   onOpenPage(ref: TabRef): void;
+  /** Drop the "Current Work" heading when rendered inside the Work
+   *  zone (the zone divider already labels it). */
+  showHeading?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   if (!item) {
@@ -358,7 +527,7 @@ function ActiveItemSection({
     const { epic, children } = epicContext;
     return (
       <>
-        <SectionHeading>Current Work</SectionHeading>
+        {showHeading ? <SectionHeading>Current Work</SectionHeading> : null}
         <div
           data-testid="rail-active-epic"
           style={{
@@ -474,7 +643,7 @@ function ActiveItemSection({
 
   return (
     <>
-      <SectionHeading>Current Work</SectionHeading>
+      {showHeading ? <SectionHeading>Current Work</SectionHeading> : null}
       <button
         type="button"
         data-testid="rail-active-item"
@@ -489,13 +658,25 @@ function ActiveItemSection({
         })}
         style={{
           ...rowStyle,
-          flexDirection: "column",
-          alignItems: "stretch",
           padding: "4px 14px 12px",
         }}
       >
         <span
+          aria-hidden
           style={{
+            width: 14,
+            display: "inline-flex",
+            justifyContent: "center",
+            color: statusIconColor(item.status),
+            fontSize: "var(--text-xs)",
+            flexShrink: 0,
+          }}
+        >
+          {statusIcon(item.status)}
+        </span>
+        <span
+          style={{
+            flex: 1,
             color: "var(--text-primary)",
             fontWeight: "var(--weight-medium)",
             fontSize: "var(--text-sm)",
@@ -1089,7 +1270,6 @@ function HistorySection({
   const source = effectiveMode === "recent" ? recent : top;
   const limit = expanded ? 10 : 5;
   const entries = source.slice(0, limit);
-  const hasMore = source.length > 5;
 
   return (
     <>
@@ -1100,9 +1280,22 @@ function HistorySection({
           padding: "12px 14px 4px",
         }}
       >
-        <span
+        <button
+          type="button"
+          data-testid="rail-history-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          title={expanded ? "Collapse" : "Expand"}
           style={{
             flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            textAlign: "left",
             fontSize: 11,
             fontWeight: 600,
             color: "var(--text-secondary)",
@@ -1110,8 +1303,11 @@ function HistorySection({
             letterSpacing: 0.4,
           }}
         >
-          {effectiveMode === "recent" ? "History" : "Most visited"}
-        </span>
+          <span aria-hidden style={{ width: 18, display: "inline-flex", justifyContent: "center", fontSize: 18, lineHeight: 1 }}>
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span>{effectiveMode === "recent" ? "History" : "Most visited"}</span>
+        </button>
         <button
           type="button"
           data-testid="rail-history-mode"
@@ -1172,21 +1368,6 @@ function HistorySection({
             </button>
           );
         })}
-        {hasMore ? (
-          <button
-            type="button"
-            data-testid="rail-history-toggle"
-            onClick={() => setExpanded((v) => !v)}
-            style={{
-              ...rowHoverStyle(),
-              color: "var(--text-secondary)",
-              fontSize: 11,
-              padding: "4px 14px 8px",
-            }}
-          >
-            {expanded ? "show less" : `show more (${Math.min(10, source.length)})`}
-          </button>
-        ) : null}
       </div>
     </>
   );

@@ -144,35 +144,46 @@ on `"full"`. Adopters today: see WikiPage and TaskPage migrations.
 
 The rail is **read-only with respect to tabs** — it never auto-opens a tab.
 Every rail click goes through a single `onOpenPage(ref: TabRef)` callback
-that the host wires to its own routing. Sections appear only when they
-have content:
+that the host wires to its own routing. Sections are a flat stack (no
+zone grouping); each appears only when it has content:
 
 1. **Search trigger** — opens the launcher (`QuickOpenOverlay`), the
    single discovery surface. Always visible.
-2. **Active item** — lowest-`sort_index` non-epic item in `in_progress`
-   for the current thread. Shows live `AgentStatusDot` + status label.
-3. **Up next** — top 5 `ready` non-epic items.
-4. **Recent files** — top 6 file paths recently opened/touched in this
-   thread (today derived from `currentSession.openOrder`; eventually
-   should include agent-touched files).
-5. **Bookmarks** — the user-curated pinned set. There is **no longer a
-   "Pages" section** in the rail: the launcher is the one discovery
-   surface for all pages, and users pin the ones they want always-visible
-   by starring them (the ☆ on each page's nav bar, scoped thread /
-   stream / global). `computePagesDirectory` still exists — it's the
-   launcher's page list, no longer filtered to a rail subset (the old
-   `RAIL_PAGE_IDS` set is gone). Every page is tagged with a `category`
-   (Work / Code / Git / Activity / Knowledge / System) so the launcher's
-   empty state reads like a start menu.
-
-In addition to the numbered sections, `CommentsSection` renders (when
-non-empty) between Uncommitted and the rest: it self-fetches
-`listCommentsForStream(streamId)` (kept live via
-`subscribeCommentEvents`) and shows two count rows for **open**
-comments split by intent — "For me" (`note`) and "For the agent"
-(`followup`) — each opening the Comments inbox (`commentsRef()`).
-Modeled on `UncommittedSection`; needs the `streamId` prop on
-`RailHud` (passed from `App.tsx`).
+2. **Work** — `WorkSection`. A single section, header always **"Work"**;
+   item status is conveyed by the leading glyph rather than the title — a
+   `◐` in-progress icon when working, a `✓` done check on the last
+   finished item. The expand **chevron lives on the header** (styled like
+   the other `SectionHeading`s); default collapsed, state persisted in
+   `localStorage` (`oxplow.rail.workExpanded` via `useRailWorkExpanded`).
+   Collapsed and expanded are two distinct render branches (not one row
+   set restyled):
+   - **Collapsed:** a compact one-liner — the live Active item
+     (`ActiveItemSection`, with its epic-children expander when the
+     active item belongs to an epic) when working; otherwise just the
+     most recent finished item (`SingleFinishedRow`, ✓ for a done task /
+     wiki icon for a note).
+   - **Expanded:** the full work picture as labeled sections —
+     "In progress" (the active item, when present) + `UpNextSection`
+     ("Ready") + `FinishedSection` ("Finished"), inline; no jump to the
+     Tasks page.
+3. **Uncommitted** — working-tree summary; hidden when clean.
+4. **Comments** — `CommentsSection` self-fetches
+   `listCommentsForStream(streamId)` (kept live via
+   `subscribeCommentEvents`) and shows two open-comment count rows split
+   by intent — "For me" (`note`) and "For the agent" (`followup`) — each
+   opening the Comments inbox (`commentsRef()`).
+5. **Errors** — `OpErrorsSection`; hidden when empty.
+6. **Recent files** — top 6 file paths recently opened/touched in this
+   thread.
+7. **Bookmarks** — the user-curated pinned set. There is **no "Pages"
+   section**: the launcher is the one discovery surface for all pages,
+   and users pin what they want always-visible by starring (the ☆ on each
+   page's nav bar, scoped thread / stream / global).
+   `computePagesDirectory` is the launcher's page list (the old
+   `RAIL_PAGE_IDS` filter is gone); every page carries a `category` (Work
+   / Code / Git / Activity / Knowledge / System) so the launcher empty
+   state reads like a start menu.
+8. **History** — recent / most-visited pages.
 
 ## Migration status
 
