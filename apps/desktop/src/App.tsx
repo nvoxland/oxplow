@@ -105,6 +105,7 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
+import { agentLabel } from "./agentKinds.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -2188,7 +2189,7 @@ export function App() {
     const tabs: CenterTab[] = [
       {
         id: "agent",
-        label: "Agent",
+        label: selectedThread ? agentLabel(selectedThread.agent) : "Agent",
         closable: false,
         agentStatus: agentThreadStatus,
         contextMenu: selectedThread ? [
