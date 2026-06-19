@@ -20,7 +20,7 @@ consumer. It's mounted by two page renderers:
   (`components/Terminal/TerminalTabStrip.tsx`) on the left to select
   between them. The strip mirrors the far-left `Navigator`: a thin
   always-visible glyph column, and on hover an overlay slides out with
-  full titles + a per-row kebab `⋯` menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
+  full titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
   (default) terminal and `shell:<id>` for the rest. The backend
   (`commands/terminal.rs`) early-branches on `pane_target == "shell" ||
   starts_with("shell:")` to spawn the user's `$SHELL -l` (fallback
@@ -124,9 +124,9 @@ closes), `renameTerminal`, `normalizeTerminalList`, plus
 `paneTargetFor(id)` / `commentTargetFor(streamId, id)`.
 
 The strip (`TerminalTabStrip.tsx`) follows the `Navigator` hover-expand
-pattern: clicking a glyph activates; rename and close are kebab `⋯` menu
-items in the hover overlay (rename opens an inline input in the overlay
-row; close is disabled when only one terminal remains). Close is **not**
+pattern: clicking a glyph activates; rename and close are right-click
+menu items on the hover-overlay row (rename opens an inline input in the
+overlay row; close is disabled when only one terminal remains). Close is **not**
 an inline `InlineConfirm` `×` anymore — it matches the stream/thread nav.
 
 - **The first terminal uses the sentinel id `DEFAULT_TERMINAL_ID`

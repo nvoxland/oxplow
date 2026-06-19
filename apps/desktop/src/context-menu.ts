@@ -1,14 +1,18 @@
-// Global suppressor for the native WKWebView/macOS context menu.
+// Global suppressor / backstop for the native WKWebView/macOS context menu.
 //
-// Tauri's webview renders the OS-default right-click menu (Look Up,
-// Translate, Copy, Share, Inspect Element, Services, …) anywhere there
-// is selectable content unless the page cancels the `contextmenu`
-// event. Oxplow's own per-row menus are visible kebab `⋯` popovers
-// (see `.context/usability.md`), so the OS menu is never wanted —
-// except where the native menu carries real editing affordances:
+// Tauri's webview (and a plain browser) renders the OS-default
+// right-click menu (Look Up, Translate, Copy, Share, Inspect Element,
+// Services, …) anywhere there is selectable content unless the page
+// cancels the `contextmenu` event. Oxplow's own per-row menus are
+// right-click `ContextMenu` popovers (see `.context/usability.md` and
+// `useRowContextMenu`) — those handlers cancel the native menu locally
+// and open ours. This global listener is the backstop: on bare surfaces
+// that have no row menu, it still cancels the OS menu so it never leaks.
+//
+// Exempted (the native/editor menu carries real editing affordances):
 // text inputs / textareas, contenteditable surfaces (Tiptap), the
 // Monaco editor (which manages its own menu), and the xterm terminal
-// (right-click copy/paste). Those are exempted.
+// (right-click copy/paste).
 
 /// A minimal, DOM-free description of an element in the target's
 /// ancestor chain (closest-first). The listener builds this from the

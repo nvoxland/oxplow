@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
@@ -41,45 +40,6 @@ function matchesGenerated(
     }
   }
   return false;
-}
-
-/**
- * `requestMenu` opens a menu anchored at the kebab's bottom-right
- * corner. The parent (ProjectPanel) renders the actual menu using
- * its existing ContextMenuTarget-keyed `contextMenuItems` builder.
- *
- * Phase 5 of the IA redesign retired the right-click trigger here in
- * favor of a visible kebab `⋯` button on every row — discovery beats
- * convention, and screen-reader users (or anyone without a real
- * mouse) can now reach every file action from the same affordance.
- */
-function KebabButton({ onClick, label = "More actions" }: { onClick(rect: DOMRect): void; label?: string }) {
-  const ref = useRef<HTMLButtonElement>(null);
-  return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        const rect = ref.current?.getBoundingClientRect();
-        if (rect) onClick(rect);
-      }}
-      style={{
-        background: "transparent",
-        border: "none",
-        color: "var(--muted)",
-        cursor: "pointer",
-        padding: "0 4px",
-        fontSize: "var(--text-base)",
-        lineHeight: 1,
-        flexShrink: 0,
-      }}
-    >
-      ⋯
-    </button>
-  );
 }
 
 export function ChangedFilesSection({
@@ -276,11 +236,18 @@ function TreeEntryRow({
         if (isOpenable) handlers.onAuxClick(e);
       }}
       onContextMenu={(e) => {
-        if (isOpenable) handlers.onContextMenu(e);
+        e.preventDefault();
+        onOpenMenu({ path: entry.path, kind: entry.kind, name: entry.name, x: e.clientX, y: e.clientY });
       }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu({ path: entry.path, kind: entry.kind, name: entry.name, x: rect.left, y: rect.bottom + 2 });
+          return;
+        }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           if (entry.kind === "directory") void onToggleDirectory(entry.path);
@@ -360,15 +327,6 @@ function TreeEntryRow({
         </span>
       ) : null}
       {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
-      <KebabButton
-        onClick={(rect) => onOpenMenu({
-          path: entry.path,
-          kind: entry.kind,
-          name: entry.name,
-          x: rect.right,
-          y: rect.bottom + 4,
-        })}
-      />
     </div>
   );
 }
@@ -398,11 +356,17 @@ function FileRow({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        onClick(e);
+        onOpenMenu({ path, kind: "file", name: basename(path), x: e.clientX, y: e.clientY });
       }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu({ path, kind: "file", name: basename(path), x: rect.left, y: rect.bottom + 2 });
+          return;
+        }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onClick(e);
@@ -430,15 +394,6 @@ function FileRow({
       <PageKindIcon kind="file" size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
-      <KebabButton
-        onClick={(rect) => onOpenMenu({
-          path,
-          kind: "file",
-          name: basename(path),
-          x: rect.right,
-          y: rect.bottom + 4,
-        })}
-      />
     </div>
   );
 }

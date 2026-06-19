@@ -16,7 +16,7 @@ function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
   return defaultUrlTransform(value);
 }
-import { Kebab } from "../Kebab.js";
+import { useRowContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
@@ -467,6 +467,7 @@ function WikiLinkSpan({
   internalSlug: string | null;
 }) {
   const title = useWikiTitle(internalSlug);
+  const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
   // The link text is the page title when:
   //  - this is an internal wiki link, AND
@@ -480,7 +481,11 @@ function WikiLinkSpan({
   const overrideText =
     internalSlug && title && childrenText === internalSlug ? title : null;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} className="oxplow-md-link">
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
+      className="oxplow-md-link"
+      onContextMenu={cm.onContextMenu}
+    >
       {iconKind ? (
         <PageKindIcon
           kind={iconKind}
@@ -491,11 +496,7 @@ function WikiLinkSpan({
       <a {...rest} onClick={handleLinkClick} onAuxClick={handleLinkClick}>
         {overrideText ?? children}
       </a>
-      {items.length > 0 ? (
-        <span className="oxplow-md-link-kebab" style={{ display: "inline-flex" }}>
-          <Kebab items={items} size={12} label="Link actions" />
-        </span>
-      ) : null}
+      {cm.menu}
     </span>
   );
 }

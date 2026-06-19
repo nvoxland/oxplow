@@ -4,7 +4,7 @@ import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadSta
 import { agentLabel } from "../agentKinds.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { Kebab } from "./Kebab.js";
+import { useRowContextMenu } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { Slideover } from "./Slideover.js";
 import { titleInitials } from "../initials.js";
@@ -385,7 +385,7 @@ export function Navigator({
                     }}
                     onCancelRename={() => setRenaming(null)}
                     menu={streamMenu}
-                    menuTestId={`navigator-stream-kebab-${row.stream.id}`}
+                    testId={`navigator-stream-row-${row.stream.id}`}
                   />
                 );
               }
@@ -465,7 +465,7 @@ export function Navigator({
                   }}
                   onCancelRename={() => setRenaming(null)}
                   menu={threadMenu}
-                  menuTestId={`navigator-thread-kebab-${row.thread.id}`}
+                  testId={`navigator-thread-row-${row.thread.id}`}
                 />
               );
             })}
@@ -638,7 +638,7 @@ function OverlayRow({
   onCommitRename,
   onCancelRename,
   menu,
-  menuTestId,
+  testId,
 }: {
   letter: string;
   label: string;
@@ -652,26 +652,21 @@ function OverlayRow({
   onCommitRename?(next: string): void | Promise<void>;
   onCancelRename?(): void;
   menu?: MenuItem[];
-  menuTestId?: string;
+  testId?: string;
 }) {
   const interactive = !!onClick && !renaming;
+  const cm = useRowContextMenu(menu ?? []);
   return (
     <div
+      data-testid={testId}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
-      onClick={
-        interactive
-          ? (e) => {
-              // Suppress row navigation when the click originated inside the
-              // kebab — the menu manages its own click flow.
-              if ((e.target as HTMLElement).closest("[data-navigator-row-kebab]")) return;
-              onClick!();
-            }
-          : undefined
-      }
+      onClick={interactive ? () => onClick!() : undefined}
+      onContextMenu={renaming ? undefined : cm.onContextMenu}
       onKeyDown={
         interactive
           ? (e) => {
+              cm.onKeyDown(e);
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 onClick!();
@@ -730,11 +725,7 @@ function OverlayRow({
           {label}
         </span>
       )}
-      {menu && !renaming ? (
-        <span data-navigator-row-kebab style={{ flexShrink: 0 }}>
-          <Kebab items={menu} testId={menuTestId} size={14} />
-        </span>
-      ) : null}
+      {cm.menu}
     </div>
   );
 }

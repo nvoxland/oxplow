@@ -99,8 +99,8 @@ alone — collapsing those into `[[ ]]` form would be lossy.
 
 ## What does NOT round-trip yet
 
-- **Per-link kebab menus / wiki title resolution.** `MarkdownView`
-  attaches a hover-revealed kebab to every link (copy URL, open in
+- **Per-link right-click menus / wiki title resolution.** `MarkdownView`
+  attaches a right-click menu to every link (copy URL, open in
   new tab, etc.) and swaps bare `[[slug]]` text for the resolved
   wiki page title via `useWikiTitle`. Neither is implemented in the
   editor surface yet.

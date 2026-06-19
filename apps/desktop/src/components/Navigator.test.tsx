@@ -92,20 +92,20 @@ test("a press inside the overlay keeps it open (rows stay interactive)", () => {
   expect(panel).not.toBeNull();
 
   fireEvent.pointerDown(panel);
-  // Pressing within the overlay (e.g. on a stream/thread row or kebab)
+  // Pressing within the overlay (e.g. on a stream/thread row)
   // must NOT dismiss it — only outward interaction does.
   expect(queryByTestId("navigator-overlay")).not.toBeNull();
 });
 
 // --- "Make writer" promote action (tsk132) -------------------------------
 
-/** Open a thread row's "⋯" menu inside the expanded overlay. */
+/** Open a thread row's right-click menu inside the expanded overlay. */
 function openThreadMenu(
   getByTestId: (id: string) => HTMLElement,
   threadId: string,
 ) {
   openOverlay(getByTestId);
-  fireEvent.click(getByTestId(`navigator-thread-kebab-${threadId}`));
+  fireEvent.contextMenu(getByTestId(`navigator-thread-row-${threadId}`));
 }
 
 test("a read-only (non-writer) thread's menu leads with an enabled 'Make writer'", () => {

@@ -5,8 +5,9 @@ Things I keep forgetting. Read this before adding any UI.
 
 > **IA redesign — phases 0–7 fully shipped.** Modal `ConfirmDialog`
 > and `PromptDialog` chrome was retired in favor of inline patterns;
-> the right-click → `ContextMenu` reflex was replaced by visible
-> kebab `⋯` buttons on each row; per-stream and per-thread settings
+> per-row actions live on **right-click** menus (the redesign's kebab
+> `⋯` buttons were reverted — see "Per-row actions" below); per-stream
+> and per-thread settings
 > ship as Page tabs (`StreamSettingsPage`, `ThreadSettingsPage`); new-
 > stream and new-task flows ship as Page tabs (`NewStreamPage`,
 > `NewTaskPage`); snapshot- and commit-detail Slideover wrappers
@@ -31,8 +32,8 @@ Things I keep forgetting. Read this before adding any UI.
   clearing.
 - **Tiny prompt strips render inline at the top of the owning
   panel** for "+ New file" / "+ New folder" / Rename flows where the
-  trigger comes from a kebab menu rather than a row that already
-  shows the editable value. See `InlinePromptStrip` in
+  trigger comes from a row's right-click menu rather than a row that
+  already shows the editable value. See `InlinePromptStrip` in
   `ProjectPanel.tsx`. Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
@@ -110,35 +111,56 @@ Things I keep forgetting. Read this before adding any UI.
   buffer and the unsaved draft). See `App.tsx` →
   `handleCloseOpenFile`.
 
-## Per-row actions (was right-click menus)
+## Per-row actions (right-click menus)
 
-- **Visible kebab `⋯` button per row, not right-click.** The shared
-  primitive is `apps/desktop/src/components/Kebab.tsx` (button + `ContextMenu`
-  popover anchored under the button). The popover keeps the same
-  `MenuItem[]` payload as the legacy right-click menus — call sites
-  swap their handler, the menu items themselves are unchanged.
-- The `ContextMenu` popover at `apps/desktop/src/components/ContextMenu.tsx` is
-  still in use as the popover renderer; just don't open it from a
-  raw `onContextMenu` handler in new code. If you find a surface
-  that still does, that's a phase-5c continuation site — wire it
-  through Kebab or pass a rect-based callback that opens the same
-  menu.
+> The IA redesign briefly moved per-row actions onto visible kebab `⋯`
+> buttons; we reversed that. Right-click is discoverable enough for
+> anyone who expects it and the kebab ate row space, so **per-row
+> actions are right-click only again** — no `⋯` buttons on rows. (The
+> old `Kebab.tsx` primitive is deleted.)
+
+- **Right-click a row to open its action menu.** The shared hook is
+  `apps/desktop/src/components/useRowContextMenu.tsx`:
+  - `useRowContextMenu(items)` — bind the items when the row is its own
+    component; spread `onContextMenu` / `onKeyDown` and render `{menu}`.
+  - `useContextMenu()` — call once in a parent that renders rows in a
+    `.map()` (a per-row hook can't run there); each row does
+    `onContextMenu={(e) => open(e, items)}` and the parent renders
+    `{menu}` once.
+  Both open the same `ContextMenu` popover with the same `MenuItem[]`
+  payload. Some surfaces (FileTree, Plan task rows, the blame gutter)
+  instead keep a single parent-owned `ContextMenu` and have each row's
+  `onContextMenu` call an existing `onOpenMenu({…, x, y})` opener — pass
+  the cursor coords (`new DOMRect(clientX, clientY, 0, 0)` when the
+  opener wants a rect).
+- **Keyboard parity is required** — right-click is mouse-only, so the
+  hook's `onKeyDown` opens the same menu on the **Menu key / Shift+F10**
+  for the focused row. Wire it on focusable rows; keyboard-first users
+  must never need the mouse. (The Plan pane also covers this with
+  `s`/`p`/Enter and `SelectionActionBar`.)
+- The `ContextMenu` popover renderer at
+  `apps/desktop/src/components/ContextMenu.tsx` is unchanged. Prefer the
+  hook over a raw `onContextMenu` so suppression + keyboard parity stay
+  in one place.
 - **`menu-item-<item.id>` testids** stay on every button inside the
   shared `MenuList` — the `MenuItem.id` becomes the testid suffix
-  (e.g. `menu-item-task.delete`,
-  `menu-item-task.rename`).
+  (e.g. `menu-item-task.delete`, `menu-item-task.rename`). To drive a
+  row menu in a test, dispatch `contextMenu` on the row (e.g.
+  `fireEvent.contextMenu(getByTestId("navigator-thread-row-<id>"))`)
+  then click `menu-item-<id>`.
 - Close on outside click, scroll, window resize.
-- **The native WKWebView context menu is globally suppressed.**
-  `installContextMenuSuppressor()` (in `apps/desktop/src/context-menu.ts`,
-  mounted once from `App.tsx`) cancels the OS-default right-click menu
-  (Look Up / Translate / Copy / Share / Inspect Element / Services) so it
-  never appears on arbitrary surfaces — Oxplow's own per-row menus are
-  the visible kebab `⋯` popovers instead. It exempts text inputs /
-  textareas, contenteditable (Tiptap), Monaco (`.monaco-editor`), and the
-  terminal (`.xterm`) so right-click copy/paste and the editor's own menu
-  still work there. The decision is a pure `shouldSuppressContextMenu`
-  predicate over an ancestor-descriptor chain (unit-tested without a DOM);
-  add new exempt surfaces there.
+- **The native WKWebView context menu is globally suppressed as a
+  backstop.** `installContextMenuSuppressor()` (in
+  `apps/desktop/src/context-menu.ts`, mounted once from `App.tsx`) cancels
+  the OS-default right-click menu (Look Up / Translate / Copy / Share /
+  Inspect Element / Services) so it never leaks on bare surfaces that
+  have no row menu. (Row menus cancel it locally and open ours.) It
+  exempts text inputs / textareas, contenteditable (Tiptap), Monaco
+  (`.monaco-editor`), and the terminal (`.xterm`) so right-click
+  copy/paste and the editor's own menu still work there. The decision is
+  a pure `shouldSuppressContextMenu` predicate over an
+  ancestor-descriptor chain (unit-tested without a DOM); add new exempt
+  surfaces there.
 
 ## Commenting on any surface
 
@@ -158,7 +180,7 @@ declaring *what it is* and mounting the generic layer.
 - **Selecting text on a context node shows a floating "Add comment"
   button** (`SelectionCommentToolbar`), driven by `useDomAnnotations`.
   It is additive and non-destructive (so a floating affordance is fine,
-  unlike destructive actions which stay on the kebab), dismisses on a new
+  unlike destructive actions which stay on the right-click menu), dismisses on a new
   selection or Escape, and reuses the **same** `shouldSuppressContextMenu`
   carve-out so it never appears inside Monaco / Tiptap / inputs / the
   terminal — those own their own comment UX.
@@ -313,11 +335,16 @@ declaring *what it is* and mounting the generic layer.
   - `files-commit`, `files-commit-message`, `files-commit-submit`
   - `thread-rail-new`, `thread-chip-<threadId>` (chip testid is on
     the outer wrapper that owns the drop handlers, so drag probes
-    can target it directly), `thread-chip-kebab-<id>` on the kebab
-    button inside each chip
-  - `stream-tab-kebab-<id>` on the kebab button inside each stream
-    tab; `center-tab-kebab-<id>` on each center-tab kebab
-  - `task-row-kebab-<id>` on each task row's kebab
+    can target it directly). Per-row actions are on the chip's
+    **right-click** menu — `fireEvent.contextMenu` the chip, then click
+    `menu-item-<id>`.
+  - Stream tabs (`stream-tab-<id>` in the rail,
+    `navigator-stream-row-<id>` in the Navigator overlay), center tabs
+    (`center-tab-<id>`), task rows (`tasks-row-<id>`), terminal tabs
+    (`terminal-tab-<id>`), and Navigator threads
+    (`navigator-thread-row-<id>`) all open their action menu on
+    **right-click** — there are no per-row `*-kebab-<id>` testids any
+    more. Right-click the row, then click `menu-item-<id>`.
   - `menu-item-<item.id>` on every button inside the shared
     `ContextMenu` / `MenuList` — the `MenuItem.id` becomes the
     testid suffix (e.g. `menu-item-task.delete`,
@@ -346,18 +373,19 @@ declaring *what it is* and mounting the generic layer.
     new-thread creation row; `thread-chip-rename-input-<id>` on the
     inline rename input; `thread-chip-promote-<id>` and
     `thread-chip-complete-<id>` on the hover-card actions (also
-    reachable via the kebab → `menu-item-thread.promote` /
-    `menu-item-thread.complete` — keyboard-first users should never
-    have to hover to promote a thread)
+    reachable via the chip's right-click menu →
+    `menu-item-thread.promote` / `menu-item-thread.complete`, or the
+    Menu key / Shift+F10 on a focused chip — keyboard-first users should
+    never have to hover to promote a thread)
   - `terminal-tab-strip` on the Terminal page's left initials strip;
     `terminal-tab-<id>` on each terminal's glyph button (click to
     activate). Hovering the strip slides out an overlay
-    (`terminal-tab-overlay`) with full titles; per-row actions live on a
-    kebab `⋯` (`terminal-tab-kebab-<id>`) — modeled on the Navigator,
-    not right-click — with `menu-item-terminal.rename` (opens the inline
-    `terminal-tab-rename-input-<id>`; double-clicking the overlay title
-    also renames) and `menu-item-terminal.close` (kills the shell;
-    disabled when only one terminal remains). `terminal-tab-new` on the
+    (`terminal-tab-overlay`) with full titles; per-row actions live on
+    the overlay row's **right-click** menu — `menu-item-terminal.rename`
+    (opens the inline `terminal-tab-rename-input-<id>`; double-clicking
+    the overlay title also renames) and `menu-item-terminal.close`
+    (kills the shell; disabled when only one terminal remains).
+    `terminal-tab-new` on the
     strip's "+" button and `terminal-tab-new-overlay` on the overlay's
     "+ New terminal" button
   These are load-bearing for `tests-e2e/` — don't rename casually.
@@ -484,10 +512,10 @@ context" kebab/menu action; both share one path through
     (plain-text reference; agent can fetch via
     `oxplow__get_task`).
   - Always trailing space so the user can keep typing.
-- **Kebab parity**: every drag source should also offer "Add to agent
-  context" in its kebab menu — keyboard-first users shouldn't have to
-  drag. Funnel both paths through the same `insertIntoAgent +
-  formatContextMention` calls.
+- **Right-click parity**: every drag source should also offer "Add to
+  agent context" in its right-click menu — keyboard-first users
+  shouldn't have to drag. Funnel both paths through the same
+  `insertIntoAgent + formatContextMention` calls.
 - **Visual feedback**: drop target shows a dashed accent border +
   centered "Drop to add to agent context" overlay only while a
   payload with our MIME is hovering. Foreign drags (text, OS files)

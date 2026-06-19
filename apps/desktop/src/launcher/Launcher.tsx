@@ -4,7 +4,7 @@ import { listRecentProjects, openProjectGuarded, removeRecentProject } from "../
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { connectRemote, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
-import { Kebab } from "../components/Kebab.js";
+import { useContextMenu, useRowContextMenu } from "../components/useRowContextMenu.js";
 import { logUi } from "../logger.js";
 import {
   forgetRemote,
@@ -159,6 +159,8 @@ function RemoteConnectSection() {
     setRecents(forgetRemote(window.localStorage, base));
   }, []);
 
+  const cm = useContextMenu();
+
   return (
     <section>
       <h2 style={sectionHeaderStyle}>Remote Daemon</h2>
@@ -200,7 +202,21 @@ function RemoteConnectSection() {
       {recents.length > 0 ? (
         <ul style={listStyle}>
           {recents.map((r) => (
-            <li key={r.base} data-testid={`launcher-remote-recent-${r.base}`} style={rowStyle}>
+            <li
+              key={r.base}
+              data-testid={`launcher-remote-recent-${r.base}`}
+              style={rowStyle}
+              onContextMenu={(e) =>
+                cm.open(e, [
+                  {
+                    id: "launcher.remoteForget",
+                    label: "Remove from List",
+                    enabled: true,
+                    run: () => handleForget(r.base),
+                  },
+                ])
+              }
+            >
               <button
                 type="button"
                 onClick={() => void connect(r.base)}
@@ -212,22 +228,12 @@ function RemoteConnectSection() {
               </button>
               <div style={rowMetaStyle}>
                 <span style={rowTimeStyle}>{formatRelative(Math.floor(r.lastConnectedAt / 1000))}</span>
-                <Kebab
-                  items={[
-                    {
-                      id: "launcher.remoteForget",
-                      label: "Remove from List",
-                      enabled: true,
-                      run: () => handleForget(r.base),
-                    },
-                  ]}
-                  testId={`launcher-remote-kebab-${r.base}`}
-                />
               </div>
             </li>
           ))}
         </ul>
       ) : null}
+      {cm.menu}
     </section>
   );
 }
@@ -262,10 +268,12 @@ function RecentRow({
     },
   ];
 
+  const cm = useRowContextMenu(items);
   return (
     <li
       data-testid={`launcher-recent-${project.path}`}
       style={{ ...rowStyle, opacity: project.exists ? 1 : 0.55 }}
+      onContextMenu={cm.onContextMenu}
     >
       <button
         type="button"
@@ -280,8 +288,8 @@ function RecentRow({
       <div style={rowMetaStyle}>
         {!project.exists ? <span style={missingBadgeStyle}>missing</span> : null}
         <span style={rowTimeStyle}>{formatRelative(project.lastOpenedAt)}</span>
-        <Kebab items={items} testId={`launcher-recent-kebab-${project.path}`} />
       </div>
+      {cm.menu}
     </li>
   );
 }

@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Thread, ThreadWorkState } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { Kebab } from "./Kebab.js";
+import { useRowContextMenu } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 
 interface Props {
@@ -332,6 +332,7 @@ function ThreadChip({
     }
   };
 
+  const cm = useRowContextMenu(menuItems ?? []);
   return (
     <div
       data-testid={`thread-chip-${thread.id}`}
@@ -366,7 +367,8 @@ function ThreadChip({
         } : undefined}
         onDragEnd={onDragEnd ? () => { setIsDragging(false); onDragEnd(); } : undefined}
         onClick={isRenaming ? undefined : onSelect}
-        onKeyDown={isRenaming ? undefined : (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
+        onContextMenu={isRenaming ? undefined : cm.onContextMenu}
+        onKeyDown={isRenaming ? undefined : (event) => { cm.onKeyDown(event); if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -446,11 +448,7 @@ function ThreadChip({
             {done}/{total}
           </span>
         ) : null}
-        {menuItems && menuItems.length > 0 ? (
-          <span onClick={(e) => e.stopPropagation()}>
-            <Kebab items={menuItems} testId={`thread-chip-kebab-${thread.id}`} size={14} />
-          </span>
-        ) : null}
+        {cm.menu}
       </div>
       {hovered && !isDragging ? (
         <HoverCard

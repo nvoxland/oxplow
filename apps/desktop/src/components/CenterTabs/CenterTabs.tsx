@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import type { AgentStatus } from "../../api.js";
 import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
-import { Kebab } from "../Kebab.js";
+import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { ErrorBoundary } from "../ErrorBoundary.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
@@ -42,6 +42,7 @@ const TAB_DRAG_MIME = "application/x-oxplow-center-tab";
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReorder }: CenterTabsProps) {
   const active = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => !t.hidden) ?? tabs[0] ?? null;
   const stripTabs = tabs.filter((t) => !t.hidden);
+  const cm = useContextMenu();
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   // Where the dragged tab would land: an insertion line drawn on the
@@ -177,6 +178,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               data-tab-id={tab.id}
               draggable={canDrag}
               onClick={() => onActivate(tab.id)}
+              onContextMenu={
+                tab.contextMenu && tab.contextMenu.length > 0
+                  ? (e) => cm.open(e, tab.contextMenu!)
+                  : undefined
+              }
               onMouseEnter={() => setHoverId(tab.id)}
               onMouseLeave={() => setHoverId((prev) => (prev === tab.id ? null : prev))}
               onDragStart={canDrag ? (event) => {
@@ -282,11 +288,6 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               >
                 {tab.label}
               </span>
-              {tab.contextMenu && tab.contextMenu.length > 0 ? (
-                <span onClick={(e) => e.stopPropagation()}>
-                  <Kebab items={tab.contextMenu} testId={`center-tab-kebab-${tab.id}`} size={14} />
-                </span>
-              ) : null}
               {tab.closable && onClose ? (
                 <button type="button"
                   data-testid={`center-tab-close-${tab.id}`}
@@ -390,6 +391,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
           );
         })}
       </div>
+      {cm.menu}
     </div>
   );
 }

@@ -35,7 +35,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | `apps/desktop/src/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
-| `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator**: a 40px always-visible strip of letter glyphs; hovering slides a `navigator-overlay` (~280px) over it (and over the rail HUD to its right) re-rendering the same rows with full titles. The overlay dismisses on mouseleave (180ms grace), Escape, **or any pointerdown outside it** — the last rule is load-bearing because the open overlay covers the rail and the wrapper's `mouseleave` can't fire while the pointer sits over the rail-covered region (tsk131). Each overlay row ends in a `⋯` kebab (`navigator-stream-kebab-<id>` / `navigator-thread-kebab-<id>`). **Thread `⋯` menu:** a read-only (non-writer / queued) thread leads with **"Make writer"** (`menu-item-thread.promote`) → calls the `promote_thread` IPC (via `onPromoteThread` → `App.handlePromoteThread`), making it the stream's single active writer and demoting the prior one; the active writer omits the item (its accent pill already signals it). Then Rename / Settings / Close. The write guard makes every non-active thread read-only, so this is the discoverable path out of "project file edits are blocked" (tsk132). |
+| `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator**: a 40px always-visible strip of letter glyphs; hovering slides a `navigator-overlay` (~280px) over it (and over the rail HUD to its right) re-rendering the same rows with full titles. The overlay dismisses on mouseleave (180ms grace), Escape, **or any pointerdown outside it** — the last rule is load-bearing because the open overlay covers the rail and the wrapper's `mouseleave` can't fire while the pointer sits over the rail-covered region (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard). **Thread menu:** a read-only (non-writer / queued) thread leads with **"Make writer"** (`menu-item-thread.promote`) → calls the `promote_thread` IPC (via `onPromoteThread` → `App.handlePromoteThread`), making it the stream's single active writer and demoting the prior one; the active writer omits the item (its accent pill already signals it). Then Rename / Settings / Close. The write guard makes every non-active thread read-only, so this is the discoverable path out of "project file edits are blocked" (tsk132). |
 | `apps/desktop/src/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_kind` writer in the backend instead. |
 | `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`git-commit:<sha>`). Reuses `CommitDetailBody` (now exported from `CommitDetailSlideover`). Routed via `gitCommitRef(sha)`. Bookmark-/history-friendly alternative to the slideover. |
@@ -209,6 +209,14 @@ The full IA redesign ships in phases (see plan
   legacy `note:` tab path now renders through `NotePage` so wiki
   notes get a Backlinks panel; modal-based task edits still work
   alongside `TaskPage` for callers that want the modal flow.
+- ↩️ **Reversal (tsk168, 2026-06):** phase 5c's kebab `⋯` migration was
+  undone — per-row actions are **right-click only** again (right-click is
+  discoverable enough and the kebab ate row space). `Kebab.tsx` is
+  deleted; the shared hook is now `useRowContextMenu.tsx`
+  (`useRowContextMenu(items)` / `useContextMenu()`). The global
+  suppressor in `context-menu.ts` stays as a backstop; editing surfaces
+  keep their native/own menus. See `.context/usability.md` →
+  "Per-row actions (right-click menus)". The 5c log below is historical.
 - ✅ Phase 5 — Web-style interactions sweep (kill modals + right-click
   menus). 5a (`InlineConfirm` + `UndoToast` queue) and 5b (`InlineEdit`
   + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
@@ -492,7 +500,7 @@ The pattern, depending on the row's markup:
 
 - Plain link (a button): use `<RouteLink ref={someRef(...)}>`.
 - Existing `<div>`-based row that needs to keep its other event
-  handlers (drag, double-click, kebab): call
+  handlers (drag, double-click, right-click menu): call
   `const { handlers } = useRouteDispatch(someRef(...), { onNavigate });`
   and spread `onClick={handlers.onClick}`,
   `onAuxClick={handlers.onAuxClick}`,
@@ -679,7 +687,7 @@ nav bar ↑/↓ click
 
 **Close:**
 ```
-tab kebab × | menu close
+tab × / right-click menu close
   └→ closePageTab(id)
        ├→ if id starts with "file:": close in fileSessions
        ├→ remove from threadPageTabs

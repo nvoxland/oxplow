@@ -877,6 +877,10 @@ function EpicInlineRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu(new DOMRect(event.clientX, event.clientY, 0, 0), item);
+      }}
       style={{
         display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
@@ -905,25 +909,6 @@ function EpicInlineRow({
         {item.title}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateTask(item.id, { priority }); }} />
-      <button
-        type="button"
-        aria-label="More actions"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
-        }}
-        data-testid={`tasks-row-kebab-${item.id}`}
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "var(--muted)",
-          cursor: "pointer",
-          padding: "0 4px",
-          fontSize: "var(--text-base)",
-          lineHeight: 1,
-          flexShrink: 0,
-        }}
-      >⋯</button>
     </div>
   );
 }
@@ -1142,6 +1127,10 @@ function InlineItemRow({
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu(new DOMRect(event.clientX, event.clientY, 0, 0), item);
+      }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -1192,25 +1181,6 @@ function InlineItemRow({
         priority={item.priority}
         onChange={(priority) => { void onUpdateTask(item.id, { priority }); }}
       />
-      <button
-        type="button"
-        aria-label="More actions"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
-        }}
-        data-testid={`tasks-row-kebab-${item.id}`}
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "var(--muted)",
-          cursor: "pointer",
-          padding: "0 4px",
-          fontSize: "var(--text-base)",
-          lineHeight: 1,
-          flexShrink: 0,
-        }}
-      >⋯</button>
     </div>
   );
 }

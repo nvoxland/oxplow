@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { archiveStream, checkoutStreamBranch, listBranches, type BranchRef, type Stream } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { Kebab } from "./Kebab.js";
+import { useContextMenu } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { TASK_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 import { Slideover } from "./Slideover.js";
@@ -32,6 +32,7 @@ interface Props {
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
 export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenStreamSettings, onOpenNewStreamPage, onDroptasksOnStream, onReorderStreams, createRequest }: Props) {
+  const cm = useContextMenu();
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   // Inline rename state — set to a stream id to swap the tab title for an
@@ -131,6 +132,23 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
             const isPrimary = candidate.kind === "primary";
             const canDrag = !!onReorderStreams && !isPrimary;
             const showBranchInTitle = isPrimary || candidate.title !== candidate.branch;
+            const streamMenu = buildStreamMenu(candidate, {
+              gitEnabled,
+              isPrimary,
+              isWorking: status === "working",
+              onRename: () => {
+                if (!onRenameStream) return;
+                setRenamingId(candidate.id);
+              },
+              onSwitchBranch: () => { void openSwitchBranch(candidate); },
+              onSettings: () => onOpenStreamSettings?.(candidate.id),
+              onAddStream: () => onOpenNewStreamPage?.(),
+              onAddThread: () => onRequestCreateThread?.(),
+              onRemove: () => openRemoveStream(candidate),
+              canRename: !!onRenameStream,
+              canSettings: !!onOpenStreamSettings,
+              canAddThread: !!onRequestCreateThread,
+            });
             return (
               <div
                 role="button"
@@ -138,7 +156,9 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 key={candidate.id}
                 draggable={canDrag}
                 onClick={() => onSwitch(candidate.id)}
+                onContextMenu={(e) => cm.open(e, streamMenu)}
                 onKeyDown={(e) => {
+                  cm.openForKey(e, streamMenu);
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     onSwitch(candidate.id);
@@ -256,31 +276,11 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 ) : (
                   <span>{candidate.title}</span>
                 )}
-                <Kebab
-                  items={buildStreamMenu(candidate, {
-                    gitEnabled,
-                    isPrimary,
-                    isWorking: status === "working",
-                    onRename: () => {
-                      if (!onRenameStream) return;
-                      setRenamingId(candidate.id);
-                    },
-                    onSwitchBranch: () => { void openSwitchBranch(candidate); },
-                    onSettings: () => onOpenStreamSettings?.(candidate.id),
-                    onAddStream: () => onOpenNewStreamPage?.(),
-                    onAddThread: () => onRequestCreateThread?.(),
-                    onRemove: () => openRemoveStream(candidate),
-                    canRename: !!onRenameStream,
-                    canSettings: !!onOpenStreamSettings,
-                    canAddThread: !!onRequestCreateThread,
-                  })}
-                  testId={`stream-tab-kebab-${candidate.id}`}
-                  size={14}
-                />
               </div>
             );
           })}
         </div>
+        {cm.menu}
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 0 6px 8px" }}>
           <button type="button"
             onClick={() => onOpenNewStreamPage?.()}

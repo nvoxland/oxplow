@@ -763,10 +763,10 @@ function BlameOverlay({
   onLocalClick(itemId: string): void;
   onGitClick(sha: string): void;
   /**
-   * Open the git-blame menu for `sha`. `rect` is the bounding rect of the
-   * trigger button so the popover can be anchored under it (matches the
-   * Kebab/ContextMenu positioning convention used elsewhere). Replaces
-   * the previous mouse-event-based right-click menu.
+   * Open the git-blame menu for `sha`. `rect` anchors the popover; a
+   * right-click passes a zero-size rect at the cursor so the menu opens
+   * where the user clicked. Per-row actions live on the right-click menu
+   * (see `.context/usability.md`), not a kebab button.
    */
   onOpenGitMenu(rect: DOMRect, sha: string, authorMail: string): void;
 }) {
@@ -821,6 +821,10 @@ function BlameOverlay({
                 key={entry.line}
                 title={`${sha.slice(0, 8)} ${entry.git.author} <${authorMail}>\n${entry.git.summary}`}
                 onClick={() => onGitClick(sha)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onOpenGitMenu(new DOMRect(event.clientX, event.clientY, 0, 0), sha, authorMail);
+                }}
                 className="oxplow-blame-row"
                 style={{
                   ...rowStyle(lineHeight, bg),
@@ -835,27 +839,6 @@ function BlameOverlay({
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {`${date}  ${author}`}
                 </span>
-                <button
-                  type="button"
-                  aria-label="Blame actions"
-                  className="oxplow-blame-row-kebab"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                    onOpenGitMenu(rect, sha, authorMail);
-                  }}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--muted)",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    lineHeight: 1,
-                    padding: "0 2px",
-                  }}
-                >
-                  ⋯
-                </button>
               </div>
             );
           }

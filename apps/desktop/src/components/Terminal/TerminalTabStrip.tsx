@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { titleInitials } from "../../initials.js";
-import { Kebab } from "../Kebab.js";
+import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import type { TerminalTab } from "./terminalTabs.js";
 
@@ -10,17 +10,17 @@ import type { TerminalTab } from "./terminalTabs.js";
  * `Navigator`: a thin always-visible strip shows a two-letter initial
  * glyph per terminal (via {@link titleInitials}); hovering the strip
  * slides an overlay panel out to the right that re-renders the same
- * rows with their full titles and a kebab `⋯` menu (Rename…, Close).
- * Glyph y-positions match between strip and overlay so nothing jumps
- * when the overlay opens. The overlay closes on mouse-leave (with a
- * short grace delay) or Escape.
+ * rows with their full titles. Glyph y-positions match between strip
+ * and overlay so nothing jumps when the overlay opens. The overlay
+ * closes on mouse-leave (with a short grace delay) or Escape.
  *
  * Interactions (per `.context/usability.md`):
  * - Click a glyph (strip or overlay row) → activate.
- * - Per-row actions live on the kebab `⋯`, not right-click: Rename…
- *   opens an inline input in the overlay row (Enter commits, Escape
- *   cancels, blur commits unless Escape was pressed); Close terminal
- *   kills the shell (disabled when only one terminal remains).
+ * - Per-row actions live on the right-click menu (Menu key / Shift+F10
+ *   for keyboard): Rename… opens an inline input in the overlay row
+ *   (Enter commits, Escape cancels, blur commits unless Escape was
+ *   pressed); Close terminal kills the shell (disabled when only one
+ *   terminal remains).
  * - "+ New" appends a terminal.
  */
 export function TerminalTabStrip({
@@ -42,6 +42,7 @@ export function TerminalTabStrip({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const canClose = tabs.length > 1;
+  const cm = useContextMenu();
 
   // Hover-to-open, mirroring Navigator: open on enter, close on leave
   // with a short grace delay so crossing into the kebab portal or
@@ -134,14 +135,8 @@ export function TerminalTabStrip({
                 key={tab.id}
                 role={renaming ? undefined : "button"}
                 tabIndex={renaming ? undefined : 0}
-                onClick={
-                  renaming
-                    ? undefined
-                    : (e) => {
-                        if ((e.target as HTMLElement).closest("[data-terminal-row-kebab]")) return;
-                        onActivate(tab.id);
-                      }
-                }
+                onClick={renaming ? undefined : () => onActivate(tab.id)}
+                onContextMenu={renaming ? undefined : (e) => cm.open(e, menu)}
                 title={tab.title}
                 style={overlayRowStyle(active)}
               >
@@ -173,11 +168,6 @@ export function TerminalTabStrip({
                     {tab.title}
                   </span>
                 )}
-                {!renaming ? (
-                  <span data-terminal-row-kebab style={{ flexShrink: 0 }}>
-                    <Kebab items={menu} testId={`terminal-tab-kebab-${tab.id}`} size={14} />
-                  </span>
-                ) : null}
               </div>
             );
           })}
@@ -192,6 +182,7 @@ export function TerminalTabStrip({
           </button>
         </div>
       ) : null}
+      {cm.menu}
     </div>
   );
 }

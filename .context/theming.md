@@ -34,7 +34,7 @@ sinks.
 | `--surface-rail`        | `#13161b`     | Left HUD rail, stream-tab strip            |
 | `--surface-tab-active`  | `#1c2027`     | Currently-focused tab body                 |
 | `--surface-tab-inactive`| `transparent` | Inactive tabs (let the strip show through) |
-| `--surface-elevated`    | `#20242c`     | Popovers, slideovers, kebab menus          |
+| `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
 
 ### Borders
