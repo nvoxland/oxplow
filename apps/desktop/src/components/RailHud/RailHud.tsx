@@ -1,5 +1,5 @@
-import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FinishedEntry, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
@@ -63,6 +63,272 @@ export interface RailHudProps {
   onOpenSearch?(): void;
 }
 
+// ─── Uniform collapsible sections + drag-to-reorder ──────────────────
+//
+// Every content block in the rail renders through `RailSection`: a header
+// with a drag handle, an expand/collapse chevron, the title, an optional
+// count badge, and an optional header action. Per-section expanded state
+// and the section order both persist in localStorage. The Search box is
+// pinned at the top and is not part of this set.
+
+type RailSectionId =
+  | "uncommitted"
+  | "comments"
+  | "work"
+  | "errors"
+  | "recentFiles"
+  | "bookmarks"
+  | "history";
+
+const DEFAULT_SECTION_ORDER: RailSectionId[] = [
+  "uncommitted",
+  "comments",
+  "work",
+  "errors",
+  "recentFiles",
+  "bookmarks",
+  "history",
+];
+
+// Work defaults collapsed (it keeps a one-line summary when collapsed);
+// every other section defaults expanded.
+const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
+  uncommitted: true,
+  comments: true,
+  work: false,
+  errors: true,
+  recentFiles: true,
+  bookmarks: true,
+  history: true,
+};
+
+const RAIL_SECTION_ORDER_KEY = "oxplow.rail.sectionOrder";
+const RAIL_SECTION_EXPANDED_KEY = "oxplow.rail.sectionExpanded.v1";
+const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
+
+/** Persisted section order, reconciled with the known set so a renamed /
+ *  added / removed section id never strands the list. */
+function loadSectionOrder(): RailSectionId[] {
+  if (typeof window === "undefined") return DEFAULT_SECTION_ORDER;
+  try {
+    const raw = window.localStorage.getItem(RAIL_SECTION_ORDER_KEY);
+    if (!raw) return DEFAULT_SECTION_ORDER;
+    const stored = JSON.parse(raw) as string[];
+    const known = new Set<string>(DEFAULT_SECTION_ORDER);
+    const kept = stored.filter((id): id is RailSectionId => known.has(id));
+    // Append any sections the stored order doesn't mention (new sections).
+    const missing = DEFAULT_SECTION_ORDER.filter((id) => !kept.includes(id));
+    return [...kept, ...missing];
+  } catch {
+    return DEFAULT_SECTION_ORDER;
+  }
+}
+
+// Expanded state is tracked per thread (a pane the user collapses on one
+// thread stays expanded on another). Stored as { [threadKey]: { id: bool } }.
+type ExpandedByThread = Record<string, Partial<Record<RailSectionId, boolean>>>;
+
+function threadKey(threadId: string | null): string {
+  return threadId ?? "__none__";
+}
+
+function loadSectionExpanded(): ExpandedByThread {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(RAIL_SECTION_EXPANDED_KEY);
+    return raw ? (JSON.parse(raw) as ExpandedByThread) : {};
+  } catch {
+    return {};
+  }
+}
+
+interface RailSectionsValue {
+  isExpanded(id: RailSectionId): boolean;
+  toggle(id: RailSectionId): void;
+  dragHandle(id: RailSectionId): {
+    draggable: true;
+    onDragStart(e: React.DragEvent): void;
+    onDragEnd(): void;
+  };
+  dropZone(id: RailSectionId): {
+    onDragOver(e: React.DragEvent): void;
+    onDragLeave(): void;
+    onDrop(e: React.DragEvent): void;
+  };
+  isDropTarget(id: RailSectionId): boolean;
+}
+
+const RailSectionsContext = createContext<RailSectionsValue | null>(null);
+
+/** Owns the persisted order + expanded map and the in-flight drag state.
+ *  Exposes everything `RailSection` needs through context so the
+ *  individual section components don't have to thread props. */
+function useRailSections(threadId: string | null): { value: RailSectionsValue; order: RailSectionId[] } {
+  const [order, setOrder] = useState<RailSectionId[]>(loadSectionOrder);
+  const [expandedByThread, setExpandedByThread] =
+    useState<ExpandedByThread>(loadSectionExpanded);
+  const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<RailSectionId | null>(null);
+  const tkey = threadKey(threadId);
+
+  const persistOrder = useCallback((next: RailSectionId[]) => {
+    setOrder(next);
+    try { window.localStorage.setItem(RAIL_SECTION_ORDER_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }, []);
+
+  const isExpanded = useCallback(
+    (id: RailSectionId) => expandedByThread[tkey]?.[id] ?? DEFAULT_SECTION_EXPANDED[id],
+    [expandedByThread, tkey],
+  );
+
+  const toggle = useCallback((id: RailSectionId) => {
+    setExpandedByThread((prev) => {
+      const forThread = prev[tkey] ?? {};
+      const current = forThread[id] ?? DEFAULT_SECTION_EXPANDED[id];
+      const next = { ...prev, [tkey]: { ...forThread, [id]: !current } };
+      try { window.localStorage.setItem(RAIL_SECTION_EXPANDED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [tkey]);
+
+  const dragHandle = useCallback((id: RailSectionId) => ({
+    draggable: true as const,
+    onDragStart(e: React.DragEvent) {
+      e.dataTransfer.setData(RAIL_SECTION_DRAG_MIME, id);
+      e.dataTransfer.effectAllowed = "move";
+      setDraggingId(id);
+    },
+    onDragEnd() {
+      setDraggingId(null);
+      setDropTargetId(null);
+    },
+  }), []);
+
+  const dropZone = useCallback((id: RailSectionId) => ({
+    onDragOver(e: React.DragEvent) {
+      if (!draggingId || draggingId === id) return;
+      if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (dropTargetId !== id) setDropTargetId(id);
+    },
+    onDragLeave() {
+      if (dropTargetId === id) setDropTargetId(null);
+    },
+    onDrop(e: React.DragEvent) {
+      e.preventDefault();
+      const sourceId = (e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId) as RailSectionId | "";
+      setDraggingId(null);
+      setDropTargetId(null);
+      if (!sourceId || sourceId === id) return;
+      const next = order.filter((x) => x !== sourceId);
+      const targetIdx = next.indexOf(id);
+      if (targetIdx < 0) return;
+      next.splice(targetIdx, 0, sourceId);
+      persistOrder(next);
+    },
+  }), [draggingId, dropTargetId, order, persistOrder]);
+
+  const isDropTarget = useCallback(
+    (id: RailSectionId) => dropTargetId === id && draggingId !== null && draggingId !== id,
+    [dropTargetId, draggingId],
+  );
+
+  const value = useMemo<RailSectionsValue>(
+    () => ({ isExpanded, toggle, dragHandle, dropZone, isDropTarget }),
+    [isExpanded, toggle, dragHandle, dropZone, isDropTarget],
+  );
+  return { value, order };
+}
+
+/** Uniform section: drag handle + chevron + title (+ optional count and
+ *  header action), then the collapsible body. When collapsed it renders
+ *  `collapsedContent` (used by Work for its one-line summary) or nothing. */
+function RailSection({
+  id,
+  title,
+  count,
+  tone,
+  headerAction,
+  collapsedContent,
+  children,
+}: {
+  id: RailSectionId;
+  title: string;
+  count?: number;
+  /** "danger" tints the title (Errors). */
+  tone?: "danger";
+  headerAction?: ReactNode;
+  collapsedContent?: ReactNode;
+  children: ReactNode;
+}) {
+  const ctx = useContext(RailSectionsContext);
+  const expanded = ctx ? ctx.isExpanded(id) : true;
+  const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-secondary)";
+  return (
+    <div
+      data-testid={`rail-section-${id}`}
+      {...(ctx ? ctx.dropZone(id) : {})}
+      style={{
+        borderTop: ctx?.isDropTarget(id) ? "2px solid var(--accent)" : "2px solid transparent",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "10px 8px 4px 6px" }}>
+        <span
+          {...(ctx ? ctx.dragHandle(id) : {})}
+          data-testid={`rail-section-drag-${id}`}
+          title="Drag to reorder"
+          aria-hidden
+          style={{
+            cursor: "grab",
+            color: "var(--text-muted)",
+            fontSize: 12,
+            lineHeight: 1,
+            padding: "0 2px",
+            flexShrink: 0,
+            userSelect: "none",
+          }}
+        >
+          ⠿
+        </span>
+        <button
+          type="button"
+          data-testid={`rail-section-toggle-${id}`}
+          onClick={() => ctx?.toggle(id)}
+          aria-expanded={expanded}
+          title={expanded ? "Collapse" : "Expand"}
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            textAlign: "left",
+            fontSize: 11,
+            fontWeight: 600,
+            color: titleColor,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          <span aria-hidden style={{ width: 14, display: "inline-flex", justifyContent: "center", fontSize: 16, lineHeight: 1 }}>
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span>{title}</span>
+          {count != null && count > 0 ? (
+            <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500 }}>{count}</span>
+          ) : null}
+        </button>
+        {headerAction}
+      </div>
+      {expanded ? children : (collapsedContent ?? null)}
+    </div>
+  );
+}
+
 /**
  * Heads-up display rail. Always visible on the left; passive by design —
  * never auto-opens tabs. Sections only render when they have content.
@@ -96,12 +362,54 @@ export function RailHud({
   const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
   const recents = useMemo(() => sortRecentFiles(recentFiles, 6), [recentFiles]);
   const width = useRailWidth();
+  const sections = useRailSections(threadId);
 
   const hasUncommitted = !!uncommitted && (
     uncommitted.added + uncommitted.modified + uncommitted.deleted > 0
     || (uncommitted.conflictedCount ?? 0) > 0
     || !!uncommitted.gitOperation
   );
+
+  // Each section self-skips (returns null) when it has no content, so the
+  // ordered list can include every id and the empty ones simply don't
+  // render — no empty headers.
+  function renderSection(id: RailSectionId): ReactNode {
+    switch (id) {
+      case "uncommitted":
+        return hasUncommitted
+          ? <UncommittedSection key={id} summary={uncommitted!} onOpenPage={onOpenPage} />
+          : null;
+      case "comments":
+        return <CommentsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
+      case "work":
+        return (
+          <WorkSection
+            key={id}
+            threadId={threadId}
+            activeItem={activeItem}
+            activeEpic={activeEpic}
+            readyItems={readyItems}
+            recentlyFinished={recentlyFinished}
+            onOpenPage={onOpenPage}
+            onClearFinished={onClearFinished}
+          />
+        );
+      case "errors":
+        return opErrors && opErrors.length > 0
+          ? <OpErrorsSection key={id} entries={opErrors} onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />
+          : null;
+      case "recentFiles":
+        return recents.length > 0
+          ? <RecentFilesSection key={id} entries={recents} onOpenPage={onOpenPage} />
+          : null;
+      case "bookmarks":
+        return bookmarks && bookmarks.length > 0
+          ? <BookmarksSection key={id} entries={bookmarks} onOpenPage={onOpenPage} />
+          : null;
+      case "history":
+        return <HistorySection key={id} onOpenPage={onOpenPage} threadId={threadId} />;
+    }
+  }
 
   return (
     <aside
@@ -120,78 +428,20 @@ export function RailHud({
       }}
     >
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <SearchTrigger onOpenSearch={onOpenSearch} />
-
-      {hasUncommitted ? (
-        <UncommittedSection summary={uncommitted!} onOpenPage={onOpenPage} />
-      ) : null}
-
-      <CommentsSection streamId={streamId ?? null} onOpenPage={onOpenPage} />
-
-      {/* Work: live active item(s) when working, else the last done
-          item; Up next + Finished reveal on expand. */}
-      <WorkSection
-        threadId={threadId}
-        activeItem={activeItem}
-        activeEpic={activeEpic}
-        readyItems={readyItems}
-        recentlyFinished={recentlyFinished}
-        onOpenPage={onOpenPage}
-        onClearFinished={onClearFinished}
-      />
-
-      {opErrors && opErrors.length > 0 ? (
-        <OpErrorsSection
-          entries={opErrors}
-          onOpenPage={onOpenPage}
-          onDismiss={onDismissOpError}
-          onClear={onClearOpErrors}
-        />
-      ) : null}
-
-      {recents.length > 0 ? (
-        <RecentFilesSection entries={recents} onOpenPage={onOpenPage} />
-      ) : null}
-
-      {bookmarks && bookmarks.length > 0 ? (
-        <BookmarksSection entries={bookmarks} onOpenPage={onOpenPage} />
-      ) : null}
-
-      <HistorySection onOpenPage={onOpenPage} threadId={threadId} />
+        <SearchTrigger onOpenSearch={onOpenSearch} />
+        <RailSectionsContext.Provider value={sections.value}>
+          {sections.order.map((id) => renderSection(id))}
+        </RailSectionsContext.Provider>
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
   );
 }
 
-const RAIL_WORK_EXPANDED_KEY = "oxplow.rail.workExpanded";
-
-/** Whether the Work block's Up next + Finished detail is expanded.
- *  Default collapsed; persisted per user in localStorage. */
-function useRailWorkExpanded(): [boolean, () => void] {
-  const [expanded, setExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(RAIL_WORK_EXPANDED_KEY) === "1";
-  });
-  const toggle = useCallback(() => {
-    setExpanded((v) => {
-      const next = !v;
-      try {
-        window.localStorage.setItem(RAIL_WORK_EXPANDED_KEY, next ? "1" : "0");
-      } catch {
-        // localStorage unavailable — toggle still works for the session.
-      }
-      return next;
-    });
-  }, []);
-  return [expanded, toggle];
-}
-
-/** The Work section. Its header title flips between "Working" (an
- *  active in_progress item exists) and "Last done" (none), with the
- *  expand chevron on the header itself. Collapsed shows the active
- *  item(s) when working, or just the most recent finished item when
- *  not; expanding reveals the Up next + Finished lists. */
+/** The Work section. Uniform collapsible header (id "work", default
+ *  collapsed). When collapsed it keeps a compact one-liner — the active
+ *  item when working, else the most recent finished item; expanding
+ *  reveals the full In progress / Ready / Finished lists. */
 function WorkSection({
   threadId,
   activeItem,
@@ -209,7 +459,6 @@ function WorkSection({
   onOpenPage(ref: TabRef): void;
   onClearFinished?(): void;
 }) {
-  const [expanded, toggle] = useRailWorkExpanded();
   const finished = recentlyFinished ?? [];
   const readyCount = readyItems.length;
   const working = !!activeItem;
@@ -217,75 +466,27 @@ function WorkSection({
   const hasContent = working || finished.length > 0 || readyCount > 0;
   if (!threadId || !hasContent) return null;
 
-  return (
-    <>
-      <button
-        type="button"
-        data-testid="rail-work-toggle"
-        onClick={toggle}
-        aria-expanded={expanded}
-        title={expanded ? "Collapse" : "Expand"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          padding: "12px 14px 4px",
-          textAlign: "left",
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-        }}
-      >
-        <span aria-hidden style={{ width: 18, display: "inline-flex", justifyContent: "center", fontSize: 18, lineHeight: 1 }}>
-          {expanded ? "▾" : "▸"}
-        </span>
-        <span>Work</span>
-      </button>
+  const collapsedContent = working ? (
+    <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
+  ) : lastFinished ? (
+    <SingleFinishedRow entry={lastFinished} onOpenPage={onOpenPage} />
+  ) : null;
 
-      {!expanded ? (
-        // Collapsed view — a compact one-liner: the current activity
-        // (active item, ◐) when working, else just the most recent
-        // finished item (✓).
-        working ? (
-          <ActiveItemSection
-            item={activeItem}
-            epicContext={activeEpic}
-            onOpenPage={onOpenPage}
-            showHeading={false}
-          />
-        ) : lastFinished ? (
-          <SingleFinishedRow entry={lastFinished} onOpenPage={onOpenPage} />
-        ) : null
-      ) : (
-        // Expanded view — the full work picture as distinct labeled
-        // sections: In progress, Ready, Finished.
+  return (
+    <RailSection id="work" title="Work" collapsedContent={collapsedContent}>
+      {activeItem ? (
         <>
-          {activeItem ? (
-            <>
-              <SectionHeading>In progress</SectionHeading>
-              <ActiveItemSection
-                item={activeItem}
-                epicContext={activeEpic}
-                onOpenPage={onOpenPage}
-                showHeading={false}
-              />
-            </>
-          ) : null}
-          {readyCount > 0 ? (
-            <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
-          ) : null}
-          {finished.length > 0 ? (
-            <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
-          ) : null}
+          <SectionHeading>In progress</SectionHeading>
+          <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
         </>
-      )}
-    </>
+      ) : null}
+      {readyCount > 0 ? (
+        <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
+      ) : null}
+      {finished.length > 0 ? (
+        <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
+      ) : null}
+    </RailSection>
   );
 }
 
@@ -706,8 +907,7 @@ function UncommittedSection({
   const hasFileSummary = parts.length > 0;
   const hasConflictRow = conflictedCount > 0 || op !== null;
   return (
-    <>
-      <SectionHeading>Uncommitted</SectionHeading>
+    <RailSection id="uncommitted" title="Uncommitted">
       {hasFileSummary ? (
         <button
           type="button"
@@ -761,7 +961,7 @@ function UncommittedSection({
           ) : null}
         </button>
       ) : null}
-    </>
+    </RailSection>
   );
 }
 
@@ -811,8 +1011,7 @@ function CommentsSection({
   if (notes === 0 && followups === 0) return null;
 
   return (
-    <>
-      <SectionHeading>Comments</SectionHeading>
+    <RailSection id="comments" title="Comments" count={notes + followups}>
       {notes > 0 ? (
         <button
           type="button"
@@ -843,7 +1042,7 @@ function CommentsSection({
           <span style={{ color: "var(--accent)", fontSize: 11 }}>{followups}</span>
         </button>
       ) : null}
-    </>
+    </RailSection>
   );
 }
 
@@ -859,45 +1058,30 @@ function OpErrorsSection({
   onClear?(): void;
 }) {
   return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "12px 14px 4px",
-        }}
-      >
-        <span
+    <RailSection
+      id="errors"
+      title="Errors"
+      tone="danger"
+      count={entries.length}
+      headerAction={onClear ? (
+        <button
+          type="button"
+          data-testid="rail-op-errors-clear"
+          onClick={(e) => { e.stopPropagation(); onClear(); }}
+          title="Clear all errors"
           style={{
-            flex: 1,
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--diff-del-fg, #f85149)",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
+            background: "transparent",
+            border: "none",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            fontSize: 10,
+            padding: "0 4px",
           }}
         >
-          Errors
-        </span>
-        {onClear ? (
-          <button
-            type="button"
-            data-testid="rail-op-errors-clear"
-            onClick={(e) => { e.stopPropagation(); onClear(); }}
-            title="Clear all errors"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: 10,
-              padding: "0 4px",
-            }}
-          >
-            clear
-          </button>
-        ) : null}
-      </div>
+          clear
+        </button>
+      ) : undefined}
+    >
       <div data-testid="rail-op-errors" style={{ paddingBottom: 8 }}>
         {entries.map((entry) => (
           <div
@@ -955,7 +1139,7 @@ function OpErrorsSection({
           </div>
         ))}
       </div>
-    </>
+    </RailSection>
   );
 }
 
@@ -1004,8 +1188,7 @@ function BookmarksSection({
   onOpenPage(ref: TabRef): void;
 }) {
   return (
-    <>
-      <SectionHeading>Bookmarks</SectionHeading>
+    <RailSection id="bookmarks" title="Bookmarks" count={entries.length}>
       <div data-testid="rail-bookmarks" style={{ paddingBottom: 8 }}>
         {entries.map((entry) => (
           <div
@@ -1044,7 +1227,7 @@ function BookmarksSection({
           </div>
         ))}
       </div>
-    </>
+    </RailSection>
   );
 }
 
@@ -1056,8 +1239,7 @@ function RecentFilesSection({
   onOpenPage(ref: TabRef): void;
 }) {
   return (
-    <>
-      <SectionHeading>Recent files</SectionHeading>
+    <RailSection id="recentFiles" title="Recent files">
       <div data-testid="rail-recent-files" style={{ paddingBottom: 8 }}>
         {entries.map((e) => {
           const basename = e.path.split("/").pop() ?? e.path;
@@ -1080,7 +1262,7 @@ function RecentFilesSection({
           );
         })}
       </div>
-    </>
+    </RailSection>
   );
 }
 
@@ -1174,7 +1356,6 @@ function HistorySection({
   onOpenPage(ref: TabRef): void;
   threadId: string | null;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [mode, setMode] = useState<"recent" | "top">("recent");
   const [recent, setRecent] = useState<PageVisitApi[]>([]);
   const [top, setTop] = useState<TopVisitedRowApi[]>([]);
@@ -1246,50 +1427,17 @@ function HistorySection({
     ? "recent"
     : mode;
   const source = effectiveMode === "recent" ? recent : top;
-  const limit = expanded ? 10 : 5;
-  const entries = source.slice(0, limit);
+  const entries = source.slice(0, 10);
 
   return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "12px 14px 4px",
-        }}
-      >
-        <button
-          type="button"
-          data-testid="rail-history-toggle"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          title={expanded ? "Collapse" : "Expand"}
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-            textAlign: "left",
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-          }}
-        >
-          <span aria-hidden style={{ width: 18, display: "inline-flex", justifyContent: "center", fontSize: 18, lineHeight: 1 }}>
-            {expanded ? "▾" : "▸"}
-          </span>
-          <span>{effectiveMode === "recent" ? "History" : "Most visited"}</span>
-        </button>
+    <RailSection
+      id="history"
+      title={effectiveMode === "recent" ? "History" : "Most visited"}
+      headerAction={(
         <button
           type="button"
           data-testid="rail-history-mode"
-          onClick={() => setMode((m) => (m === "recent" ? "top" : "recent"))}
+          onClick={(e) => { e.stopPropagation(); setMode((m) => (m === "recent" ? "top" : "recent")); }}
           title={effectiveMode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
           style={{
             background: "transparent",
@@ -1302,7 +1450,8 @@ function HistorySection({
         >
           {effectiveMode === "recent" ? "top" : "recent"}
         </button>
-      </div>
+      )}
+    >
       <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
         {entries.map((e) => {
           // Reconstruct the full ref (with payload) from the id —
@@ -1347,7 +1496,7 @@ function HistorySection({
           );
         })}
       </div>
-    </>
+    </RailSection>
   );
 }
 

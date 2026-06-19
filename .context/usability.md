@@ -414,9 +414,11 @@ declaring *what it is* and mounting the generic layer.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. Existing MIMEs:
   `WORK_ITEM_DRAG_MIME` (task reorder) in
-  `apps/desktop/src/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME`
-  ("Add to agent context") in `apps/desktop/src/agent-context-dnd.ts`. Add a
-  new MIME rather than overloading an existing one.
+  `apps/desktop/src/components/ThreadRail.tsx`, `CONTEXT_REF_MIME`
+  ("Add to agent context") in `apps/desktop/src/agent-context-dnd.ts`, and
+  `application/x-oxplow-rail-section` (RailHud section reorder) in
+  `apps/desktop/src/components/RailHud/RailHud.tsx`. Add a new MIME rather
+  than overloading an existing one.
 - **Tabs in the three tabbed sections (left dock rail, center pane, bottom
   dock rail) are drag-reorderable.** DockShell rail tabs persist their order
   in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
