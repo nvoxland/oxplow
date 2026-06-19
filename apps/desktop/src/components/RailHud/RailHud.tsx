@@ -270,14 +270,15 @@ function RailSection({
       data-testid={`rail-section-${id}`}
       {...(ctx ? ctx.dropZone(id) : {})}
       style={{
-        // Each section is its own full-bleed "container": a card surface
-        // banded off from the rail behind it by top/bottom borders and a
-        // small vertical gap. No horizontal inset — content stays
-        // edge-to-edge. The drop target lights up with an inset ring.
-        background: "var(--surface-card)",
-        borderTop: "1px solid var(--border-subtle)",
-        borderBottom: "1px solid var(--border-subtle)",
-        marginBottom: 6,
+        // Each section is its own full-bleed "container": an elevated
+        // surface that sits clearly above the darker rail behind it,
+        // banded off by strong top/bottom borders and a vertical gap. No
+        // horizontal inset — content stays edge-to-edge. The drop target
+        // lights up with an inset accent ring.
+        background: "var(--surface-elevated)",
+        borderTop: "1px solid var(--border-strong)",
+        borderBottom: "1px solid var(--border-strong)",
+        marginBottom: 8,
         boxShadow: ctx?.isDropTarget(id) ? "inset 0 0 0 2px var(--accent)" : undefined,
       }}
     >
@@ -287,7 +288,10 @@ function RailSection({
           alignItems: "center",
           gap: 2,
           padding: "8px 8px 7px 6px",
-          borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
+          // Brighter header bar + strong divider so the title reads as a
+          // distinct band above the section's content.
+          background: "rgba(255, 255, 255, 0.05)",
+          borderBottom: expanded ? "1px solid var(--border-strong)" : undefined,
         }}
       >
         <span
