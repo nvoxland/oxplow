@@ -3065,7 +3065,20 @@ export function App() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
-      <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+      {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
+          webview reaches the top edge. This chrome-colored drag strip hosts
+          the floating traffic lights and matches the rest of the chrome. */}
+      {isMac ? (
+        <div
+          data-tauri-drag-region
+          style={{
+            height: 28,
+            flexShrink: 0,
+            background: "var(--surface-chrome)",
+          }}
+        />
+      ) : null}
+      <div style={{ borderBottom: (!isMac || error) ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
         {!isMac ? <Menubar groups={menuGroups} /> : null}
         {error ? (
           <div
@@ -3115,7 +3128,7 @@ export function App() {
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
           gitEnabled={workspaceContext.gitEnabled}
         />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <RailHud
           threadId={selectedThread?.id ?? null}
@@ -3151,7 +3164,23 @@ export function App() {
           onOpenPage={handleOpenPage}
           onOpenSearch={() => setQuickOpenVisible(true)}
         />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+        <div style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+          // The main content area floats as a panel on the chrome: left
+          // side + bottom curved (revealing chrome), right flush against
+          // the window edge. The border is drawn on the panel itself so
+          // the rounded corners stay closed regardless of tab state.
+          marginLeft: 6,
+          border: "1px solid var(--border-strong)",
+          borderTopLeftRadius: 8,
+          borderBottomLeftRadius: 8,
+          borderBottomRightRadius: 8,
+        }}>
           {stream ? (
             <CenterTabs
               tabs={centerTabs}
@@ -3196,10 +3225,12 @@ export function App() {
           justifyContent: "space-between",
           gap: 8,
           padding: "4px 10px",
-          borderTop: "1px solid var(--border)",
           background: "var(--bg-2)",
           flexShrink: 0,
           minHeight: 26,
+          // Gap above the bottom rail, matching the other panel gaps; the
+          // chrome behind shows through.
+          marginTop: 6,
         }}
       >
         {(() => {

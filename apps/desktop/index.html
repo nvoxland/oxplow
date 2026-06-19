@@ -50,12 +50,16 @@
          ============================================================ */
 
       :root {
-        /* Unified cool blue-grey dark palette. Three surface tiers
-           (app < rail/card < elevated) plus a slightly lifted active-tab
-           tier. No warm hues anywhere on chrome. */
+        /* Unified cool blue-grey dark palette. The main content (editor /
+           agent) sits on the darkest tier; the surrounding *chrome* (rail,
+           stream/thread strips) uses the lighter `--surface-chrome` tier so
+           it reads as the frame around the content (IntelliJ-style). Rail
+           section panels then recess back to the dark content tier. */
         --surface-app: #0f1115;
         --surface-card: #161a20;
         --surface-rail: #13161b;
+        /* Lighter chrome tier — the frame around the dark content. */
+        --surface-chrome: #1b2129;
         --surface-tab-active: #1c2027;
         --surface-tab-inactive: transparent;
         --surface-elevated: #20242c;
@@ -72,6 +76,10 @@
         --accent-hover: #8db2f8;
         --accent-soft-bg: #1c2a48;
         --accent-on-accent: #ffffff;
+        /* Panel-header tint — a muted accent wash (not grey) so section
+           headers and stream headers read as intentional chrome in dark
+           mode. Composited over --surface-card. */
+        --panel-header-bg: rgba(108, 156, 246, 0.12);
 
         --status-running: #5b8cf5;
         --status-waiting: #f59e0b;

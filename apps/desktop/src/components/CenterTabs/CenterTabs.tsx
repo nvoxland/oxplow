@@ -159,7 +159,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   }, [activeId, hiddenInStripIds]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div ref={outerBarRef} style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36, position: "relative" }}>
+      <div ref={outerBarRef} style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-chrome)", minHeight: 36, position: "relative" }}>
         <div ref={stripScrollRef} style={{ display: "flex", flex: "0 0 auto", maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>
         {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
@@ -240,7 +240,10 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                     : "transparent",
                 color: isActive ? "var(--accent)" : "var(--text-secondary)",
                 borderRight: "1px solid var(--border-strong)",
-                borderTop: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
+                // The content panel's own border draws the strip's top and
+                // left edges; tabs only carry their inter-tab dividers and
+                // the active frame.
+                borderTop: "1px solid transparent",
                 borderLeft: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
                 borderBottom: isActive ? "3px solid var(--accent)" : "3px solid transparent",
                 opacity: draggingId === tab.id ? 0.5 : 1,

@@ -197,26 +197,23 @@ export function Navigator({
   // Build the list of "rows" so the strip and overlay can both walk
   // the same sequence — guaranteeing matching y-positions row-by-row.
   // `add-thread` rows are flyout-only (skipped in the strip render).
-  type Row =
-    | { kind: "stream"; stream: Stream }
-    | { kind: "thread"; stream: Stream; thread: Thread; isWriter: boolean }
-    | { kind: "add-thread"; stream: Stream }
-    | { kind: "gap"; afterStreamId: string };
-  const rows: Row[] = useMemo(() => {
-    const out: Row[] = [];
-    for (const s of orderedStreams) {
-      out.push({ kind: "stream", stream: s });
-      const ts = threadStates[s.id];
-      const writerId = ts?.activeThreadId ?? null;
-      const threads = ts?.threads ?? [];
-      for (const t of threads) {
-        out.push({ kind: "thread", stream: s, thread: t, isWriter: t.id === writerId });
-      }
-      out.push({ kind: "add-thread", stream: s });
-      out.push({ kind: "gap", afterStreamId: s.id });
-    }
-    return out;
-  }, [orderedStreams, threadStates]);
+  // Each stream + its threads renders as one panel (a surface-card box,
+  // rounded on the right, flush on the left), with a gap between groups —
+  // mirroring the main rail's panel look. The strip and the slide-over
+  // overlay both map this same structure so glyph y-positions stay in
+  // lock-step when the overlay opens.
+  const streamGroups = useMemo(
+    () =>
+      orderedStreams.map((s) => {
+        const ts = threadStates[s.id];
+        const writerId = ts?.activeThreadId ?? null;
+        return {
+          stream: s,
+          threads: (ts?.threads ?? []).map((t) => ({ thread: t, isWriter: t.id === writerId })),
+        };
+      }),
+    [orderedStreams, threadStates],
+  );
 
   return (
     <div
@@ -240,12 +237,10 @@ export function Navigator({
           width: STRIP_WIDTH,
           flexShrink: 0,
           height: "100%",
-          // Darker than the HUD rail so the gutter reads as a
-          // separate, recessed control surface — not the same
-          // background as the pane to its right.
-          background: "var(--surface-app)",
-          borderRight: "1px solid var(--border-strong)",
-          boxShadow: "inset -1px 0 0 rgba(0, 0, 0, 0.35)",
+          // Part of the lighter chrome frame — matches the HUD rail to its
+          // right so the whole left edge reads as one seamless surface (no
+          // divider between the strip and the rail).
+          background: "var(--surface-chrome)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -255,50 +250,36 @@ export function Navigator({
         <div
           style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}
         >
-          {rows.map((row, idx) => {
-            if (row.kind === "gap") {
-              return <div key={`gap-${row.afterStreamId}-${idx}`} style={{ height: GAP_HEIGHT }} />;
-            }
-            if (row.kind === "add-thread") {
-              // The slot only takes vertical space when the inline
-              // title input is rendered in the overlay; keep the
-              // strip in lock-step so subsequent glyphs stay aligned.
-              if (pendingNewThreadFor !== row.stream.id) return null;
-              return (
-                <div
-                  key={`strip-addthread-${row.stream.id}`}
-                  style={{ height: ADD_ROW_HEIGHT }}
-                />
-              );
-            }
-            if (row.kind === "stream") {
-              return (
-                <StripRow
-                  key={`s-${row.stream.id}`}
-                  letter={titleInitials(row.stream.title)}
-                  isStream
-                  isFirstStream={row.stream.id === orderedStreams[0]?.id}
-                  isWriter={false}
-                  selected={false}
-                  status={undefined}
-                />
-              );
-            }
-            const isSelected =
-              row.stream.id === currentStreamId &&
-              threadStates[row.stream.id]?.selectedThreadId === row.thread.id;
-            return (
+          {streamGroups.map((g) => (
+            <div key={g.stream.id} style={STREAM_PANEL_STYLE}>
               <StripRow
-                key={`t-${row.thread.id}`}
-                letter={titleInitials(row.thread.title)}
-                isStream={false}
-                isWriter={row.isWriter}
-                selected={isSelected}
-                status={agentStatuses[row.thread.id]}
-                onClick={() => handleSelectThread(row.stream.id, row.thread.id)}
+                letter={titleInitials(g.stream.title)}
+                isStream
+                isWriter={false}
+                selected={false}
+                status={undefined}
               />
-            );
-          })}
+              {g.threads.map(({ thread, isWriter }) => {
+                const isSelected =
+                  g.stream.id === currentStreamId &&
+                  threadStates[g.stream.id]?.selectedThreadId === thread.id;
+                return (
+                  <StripRow
+                    key={thread.id}
+                    letter={titleInitials(thread.title)}
+                    isStream={false}
+                    isWriter={isWriter}
+                    selected={isSelected}
+                    status={agentStatuses[thread.id]}
+                    onClick={() => handleSelectThread(g.stream.id, thread.id)}
+                  />
+                );
+              })}
+              {/* Keep the strip in lock-step with the overlay's inline
+                  add-thread input so glyph y-positions stay aligned. */}
+              {pendingNewThreadFor === g.stream.id ? <div style={{ height: ADD_ROW_HEIGHT }} /> : null}
+            </div>
+          ))}
         </div>
       </aside>
 
@@ -315,7 +296,7 @@ export function Navigator({
             left: 0,
             height: "100%",
             width: STRIP_WIDTH + OVERLAY_WIDTH,
-            background: "var(--surface-rail)",
+            background: "var(--surface-chrome)",
             borderRight: "1px solid var(--border-strong)",
             boxShadow: "8px 0 24px rgba(0, 0, 0, 0.45)",
             display: "flex",
@@ -324,149 +305,138 @@ export function Navigator({
           }}
         >
           <div style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}>
-            {rows.map((row, idx) => {
-              if (row.kind === "gap") {
-                return <div key={`o-gap-${row.afterStreamId}-${idx}`} style={{ height: GAP_HEIGHT }} />;
+            {streamGroups.map((g) => {
+              const isPrimary = g.stream.kind === "primary";
+              const isWorking = streamStatuses[g.stream.id] === "working";
+              const streamMenu: MenuItem[] = [
+                {
+                  id: "stream.add-thread",
+                  label: "Add thread",
+                  enabled: true,
+                  run: () => setPendingNewThreadFor(g.stream.id),
+                },
+                {
+                  id: "stream.rename",
+                  label: "Rename…",
+                  enabled: !!onRenameStream,
+                  run: () => setRenaming({ kind: "stream", id: g.stream.id }),
+                },
+                {
+                  id: "stream.settings",
+                  label: "Settings…",
+                  enabled: !!onOpenStreamSettings,
+                  run: () => onOpenStreamSettings?.(g.stream.id),
+                },
+              ];
+              if (!isPrimary) {
+                streamMenu.push({
+                  id: "stream.remove",
+                  label: "Remove…",
+                  // Disable when an agent is currently running in any of
+                  // this stream's threads — the IPC also rejects, but
+                  // disabling avoids a useless prompt.
+                  enabled: !isWorking,
+                  run: () => {
+                    setRemoveStream(g.stream);
+                    setRemoveWorktree(false);
+                    setRemoveError(null);
+                  },
+                });
               }
-              if (row.kind === "stream") {
-                const isPrimary = row.stream.kind === "primary";
-                const isWorking = streamStatuses[row.stream.id] === "working";
-                const streamMenu: MenuItem[] = [
-                  {
-                    id: "stream.add-thread",
-                    label: "Add thread",
-                    enabled: true,
-                    run: () => setPendingNewThreadFor(row.stream.id),
-                  },
-                  {
-                    id: "stream.rename",
-                    label: "Rename…",
-                    enabled: !!onRenameStream,
-                    run: () => setRenaming({ kind: "stream", id: row.stream.id }),
-                  },
-                  {
-                    id: "stream.settings",
-                    label: "Settings…",
-                    enabled: !!onOpenStreamSettings,
-                    run: () => onOpenStreamSettings?.(row.stream.id),
-                  },
-                ];
-                if (!isPrimary) {
-                  streamMenu.push({
-                    id: "stream.remove",
-                    label: "Remove…",
-                    // Disable when an agent is currently running in
-                    // any of this stream's threads — the IPC also
-                    // rejects, but disabling avoids a useless prompt.
-                    enabled: !isWorking,
-                    run: () => {
-                      setRemoveStream(row.stream);
-                      setRemoveWorktree(false);
-                      setRemoveError(null);
-                    },
-                  });
-                }
-                return (
+              return (
+                <div key={g.stream.id} style={STREAM_PANEL_STYLE}>
                   <OverlayRow
-                    key={`o-s-${row.stream.id}`}
-                    letter={titleInitials(row.stream.title)}
-                    label={row.stream.title}
+                    letter={titleInitials(g.stream.title)}
+                    label={g.stream.title}
                     isStream
-                    isFirstStream={row.stream.id === orderedStreams[0]?.id}
                     isWriter={false}
                     selected={false}
                     status={undefined}
-                    renaming={renaming?.kind === "stream" && renaming.id === row.stream.id}
+                    renaming={renaming?.kind === "stream" && renaming.id === g.stream.id}
                     onCommitRename={async (next) => {
                       setRenaming(null);
-                      if (next && next !== row.stream.title) {
-                        await onRenameStream?.(row.stream.id, next);
+                      if (next && next !== g.stream.title) {
+                        await onRenameStream?.(g.stream.id, next);
                       }
                     }}
                     onCancelRename={() => setRenaming(null)}
                     menu={streamMenu}
-                    testId={`navigator-stream-row-${row.stream.id}`}
+                    testId={`navigator-stream-row-${g.stream.id}`}
                   />
-                );
-              }
-              if (row.kind === "add-thread") {
-                // Only show the inline title input when the user has
-                // explicitly chosen "Add thread" from the stream's
-                // kebab. Otherwise the slot is empty in the overlay
-                // (and the strip).
-                if (pendingNewThreadFor !== row.stream.id) return null;
-                return (
-                  <InlineNewThread
-                    key={`o-addinput-${row.stream.id}`}
-                    enabledAgents={enabledAgents}
-                    onSubmit={async (title, agent) => {
-                      await onCreateThread(row.stream.id, title, agent);
-                      setPendingNewThreadFor(null);
-                    }}
-                    onCancel={() => setPendingNewThreadFor(null)}
-                  />
-                );
-              }
-              const isSelected =
-                row.stream.id === currentStreamId &&
-                threadStates[row.stream.id]?.selectedThreadId === row.thread.id;
-              const threadMenu: MenuItem[] = [];
-              // "Make writer" is the headline action for a read-only thread:
-              // only the stream's single active thread can edit files, so a
-              // queued thread is "edits blocked" until promoted. Show it
-              // FIRST, and only when this thread isn't already the writer —
-              // the writer's accent pill already signals its state, so a
-              // disabled "already the writer" item would just be noise
-              // (tsk132). Promotes via the promote_thread IPC.
-              if (!row.isWriter) {
-                threadMenu.push({
-                  id: "thread.promote",
-                  label: "Make writer",
-                  enabled: !!onPromoteThread,
-                  run: () => onPromoteThread?.(row.thread.id),
-                });
-              }
-              threadMenu.push(
-                {
-                  id: "thread.rename",
-                  label: "Rename…",
-                  enabled: !!onRenameThread,
-                  run: () => setRenaming({ kind: "thread", id: row.thread.id }),
-                },
-                {
-                  id: "thread.settings",
-                  label: "Settings…",
-                  enabled: !!onOpenThreadSettings,
-                  run: () => onOpenThreadSettings?.(row.thread.id),
-                },
-                {
-                  id: "thread.close",
-                  label: "Close thread",
-                  enabled: !!onCloseThread,
-                  run: () => onCloseThread?.(row.thread.id),
-                },
-              );
-              return (
-                <OverlayRow
-                  key={`o-t-${row.thread.id}`}
-                  letter={titleInitials(row.thread.title)}
-                  label={row.thread.title}
-                  isStream={false}
-                  isWriter={row.isWriter}
-                  selected={isSelected}
-                  status={agentStatuses[row.thread.id]}
-                  onClick={() => handleSelectThread(row.stream.id, row.thread.id)}
-                  renaming={renaming?.kind === "thread" && renaming.id === row.thread.id}
-                  onCommitRename={async (next) => {
-                    setRenaming(null);
-                    if (next && next !== row.thread.title) {
-                      await onRenameThread?.(row.thread.id, next);
+                  {g.threads.map(({ thread, isWriter }) => {
+                    const isSelected =
+                      g.stream.id === currentStreamId &&
+                      threadStates[g.stream.id]?.selectedThreadId === thread.id;
+                    const threadMenu: MenuItem[] = [];
+                    // "Make writer" is the headline action for a read-only
+                    // thread: only the stream's single active thread can
+                    // edit files, so a queued thread is "edits blocked"
+                    // until promoted. Show it FIRST, and only when this
+                    // thread isn't already the writer (tsk132).
+                    if (!isWriter) {
+                      threadMenu.push({
+                        id: "thread.promote",
+                        label: "Make writer",
+                        enabled: !!onPromoteThread,
+                        run: () => onPromoteThread?.(thread.id),
+                      });
                     }
-                  }}
-                  onCancelRename={() => setRenaming(null)}
-                  menu={threadMenu}
-                  testId={`navigator-thread-row-${row.thread.id}`}
-                />
+                    threadMenu.push(
+                      {
+                        id: "thread.rename",
+                        label: "Rename…",
+                        enabled: !!onRenameThread,
+                        run: () => setRenaming({ kind: "thread", id: thread.id }),
+                      },
+                      {
+                        id: "thread.settings",
+                        label: "Settings…",
+                        enabled: !!onOpenThreadSettings,
+                        run: () => onOpenThreadSettings?.(thread.id),
+                      },
+                      {
+                        id: "thread.close",
+                        label: "Close thread",
+                        enabled: !!onCloseThread,
+                        run: () => onCloseThread?.(thread.id),
+                      },
+                    );
+                    return (
+                      <OverlayRow
+                        key={thread.id}
+                        letter={titleInitials(thread.title)}
+                        label={thread.title}
+                        isStream={false}
+                        isWriter={isWriter}
+                        selected={isSelected}
+                        status={agentStatuses[thread.id]}
+                        onClick={() => handleSelectThread(g.stream.id, thread.id)}
+                        renaming={renaming?.kind === "thread" && renaming.id === thread.id}
+                        onCommitRename={async (next) => {
+                          setRenaming(null);
+                          if (next && next !== thread.title) {
+                            await onRenameThread?.(thread.id, next);
+                          }
+                        }}
+                        onCancelRename={() => setRenaming(null)}
+                        menu={threadMenu}
+                        testId={`navigator-thread-row-${thread.id}`}
+                      />
+                    );
+                  })}
+                  {/* Inline "Add thread" title input, shown when chosen from
+                      the stream's menu. */}
+                  {pendingNewThreadFor === g.stream.id ? (
+                    <InlineNewThread
+                      enabledAgents={enabledAgents}
+                      onSubmit={async (title, agent) => {
+                        await onCreateThread(g.stream.id, title, agent);
+                        setPendingNewThreadFor(null);
+                      }}
+                      onCancel={() => setPendingNewThreadFor(null)}
+                    />
+                  ) : null}
+                </div>
               );
             })}
             <AddStreamButton
@@ -560,7 +530,6 @@ export function Navigator({
 function StripRow({
   letter,
   isStream,
-  isFirstStream = false,
   isWriter,
   selected,
   status,
@@ -568,7 +537,6 @@ function StripRow({
 }: {
   letter: string;
   isStream: boolean;
-  isFirstStream?: boolean;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -604,16 +572,11 @@ function StripRow({
         alignItems: "center",
         justifyContent: "center",
         cursor: interactive ? "pointer" : "default",
-        background: selected
-          ? "var(--accent-soft-bg)"
-          : isStream
-            ? "var(--surface-app)"
-            : "transparent",
+        // The stream row is the panel header (muted-accent tint); thread
+        // rows are transparent. Selection is marked by the accent left
+        // line only — no background fill.
+        background: isStream ? "var(--panel-header-bg)" : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: isStream && !isFirstStream
-          ? "2px solid var(--border-strong)"
-          : "1px solid transparent",
-        borderBottom: "1px solid transparent",
         position: "relative",
         transition: "background 120ms ease",
       }}
@@ -629,7 +592,6 @@ function OverlayRow({
   letter,
   label,
   isStream,
-  isFirstStream = false,
   isWriter,
   selected,
   status,
@@ -643,7 +605,6 @@ function OverlayRow({
   letter: string;
   label: string;
   isStream: boolean;
-  isFirstStream?: boolean;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -681,16 +642,11 @@ function OverlayRow({
         alignItems: "center",
         gap: 8,
         cursor: interactive ? "pointer" : "default",
-        background: selected
-          ? "var(--accent-soft-bg)"
-          : isStream
-            ? "var(--surface-app)"
-            : "transparent",
+        // The stream row is the panel header (muted-accent tint); thread
+        // rows are transparent. Selection is marked by the accent left
+        // line only — no background fill.
+        background: isStream ? "var(--panel-header-bg)" : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: isStream && !isFirstStream
-          ? "2px solid var(--border-strong)"
-          : "1px solid transparent",
-        borderBottom: "1px solid transparent",
         paddingRight: 6,
         transition: "background 120ms ease",
       }}
@@ -982,3 +938,15 @@ const GAP_HEIGHT = 14;
 // two views. Must match the rendered AddThreadRow height.
 const ADD_ROW_HEIGHT = 40;
 const OVERLAY_WIDTH = 240;
+
+// Each stream + its threads renders inside this box: a surface-card panel
+// flush along the left window edge, rounded on the right, with a gap below
+// it (matching the main rail's panel look). Shared by the strip and the
+// slide-over overlay.
+const STREAM_PANEL_STYLE: CSSProperties = {
+  background: "var(--surface-card)",
+  borderTopRightRadius: 7,
+  borderBottomRightRadius: 7,
+  marginBottom: 6,
+  overflow: "hidden",
+};

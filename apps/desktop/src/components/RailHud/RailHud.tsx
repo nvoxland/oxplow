@@ -270,15 +270,16 @@ function RailSection({
       data-testid={`rail-section-${id}`}
       {...(ctx ? ctx.dropZone(id) : {})}
       style={{
-        // Each section is its own full-bleed "container": an elevated
-        // surface that sits clearly above the darker rail behind it,
-        // banded off by strong top/bottom borders and a vertical gap. No
-        // horizontal inset — content stays edge-to-edge. The drop target
-        // lights up with an inset accent ring.
-        background: "var(--surface-elevated)",
-        borderTop: "1px solid var(--border-strong)",
-        borderBottom: "1px solid var(--border-strong)",
-        marginBottom: 8,
+        // Each section is an inset, rounded card (matching the Search
+        // box) that recesses below the lighter rail, separated from its
+        // neighbours by a gap that reveals the rail behind it
+        // (IntelliJ-style grouping). The drop target lights up with an
+        // inset accent ring.
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        overflow: "hidden",
+        margin: "0 6px 6px",
         boxShadow: ctx?.isDropTarget(id) ? "inset 0 0 0 2px var(--accent)" : undefined,
       }}
     >
@@ -288,10 +289,11 @@ function RailSection({
           alignItems: "center",
           gap: 2,
           padding: "8px 8px 7px 6px",
-          // Brighter header bar + strong divider so the title reads as a
-          // distinct band above the section's content.
-          background: "rgba(255, 255, 255, 0.05)",
-          borderBottom: expanded ? "1px solid var(--border-strong)" : undefined,
+          // Muted-accent header tint (not grey) so the title reads as an
+          // intentional header band; the divider closes it off from the
+          // content below.
+          background: "var(--panel-header-bg)",
+          borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
         }}
       >
         <span
@@ -438,8 +440,7 @@ export function RailHud({
         width: width.value,
         flexShrink: 0,
         height: "100%",
-        background: "var(--surface-rail)",
-        borderRight: "1px solid var(--border-subtle)",
+        background: "var(--surface-chrome)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -663,7 +664,7 @@ function rowHoverStyle(): CSSProperties {
 
 function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
   return (
-    <div style={{ padding: "12px 12px 8px" }}>
+    <div style={{ padding: "0 6px 6px" }}>
       <button
         type="button"
         data-testid="rail-search"
