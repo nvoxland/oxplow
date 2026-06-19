@@ -35,8 +35,6 @@ export interface BookmarkRailEntry {
   label: string;
   /** Single-letter scope marker rendered as a small badge (T/S/G). */
   scopeBadge: "T" | "S" | "G";
-  /** Called when the user wants to remove the bookmark from this scope. */
-  onRemove(): void;
 }
 
 export interface RailHudProps {
@@ -1021,7 +1019,6 @@ function BookmarksSection({
               onClick={() => onOpenPage(entry.ref)}
               style={{ ...rowHoverStyle(), flex: 1 }}
             >
-              <span aria-hidden style={{ color: "var(--accent-fg)", fontSize: 11 }}>★</span>
               <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {entry.label}
@@ -1043,25 +1040,6 @@ function BookmarksSection({
               >
                 {entry.scopeBadge}
               </span>
-            </button>
-            <button
-              type="button"
-              data-testid={`rail-bookmark-remove-${entry.ref.id}`}
-              title="Remove bookmark"
-              onClick={(e) => {
-                e.stopPropagation();
-                entry.onRemove();
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-secondary)",
-                cursor: "pointer",
-                padding: "2px 4px",
-                fontSize: 11,
-              }}
-            >
-              ×
             </button>
           </div>
         ))}

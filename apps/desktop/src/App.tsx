@@ -3146,7 +3146,6 @@ export function App() {
               ref: b.ref,
               label: b.label ?? b.ref.id,
               scopeBadge,
-              onRemove: () => bookmarksStore.remove(b.scope, selectedThreadId, stream?.id ?? null, b.ref.id),
             };
           })}
           onOpenPage={handleOpenPage}
