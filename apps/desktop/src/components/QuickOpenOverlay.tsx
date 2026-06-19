@@ -71,25 +71,29 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Anchor the panel as a dropdown below the rail "Search…" box rather
-  // than dimming the screen with a centered modal. We read the always-
-  // visible trigger's rect by testid so both the click and the Cmd-K/P
-  // keyboard paths land in the same place; if the rail isn't mounted we
-  // fall back to a centered position near the top.
+  // Anchor the panel *over* the rail "Search…" box so it reads as that
+  // bar expanding in place — across (wider than the rail) and down (the
+  // results) — rather than a second search bar / modal appearing below
+  // it. The opaque panel starts at the box's top-left and fully covers
+  // it. We read the always-visible trigger's rect by testid so both the
+  // click and the Cmd-K/P keyboard paths land in the same place; if the
+  // rail isn't mounted we fall back to a centered position near the top.
   useLayoutEffect(() => {
     if (!open) return;
     function place() {
       const anchor = document.querySelector('[data-testid="rail-search"]');
-      const width = 460;
       if (!anchor) {
         setPanelCoords(centeredFallbackCoords);
         return;
       }
       const rect = anchor.getBoundingClientRect();
+      // Expand across: at least as wide as the rail box, wider where the
+      // window allows, clamped to the viewport.
+      const width = Math.min(Math.max(rect.width, 460), window.innerWidth - 16);
       setPanelCoords({
         position: "fixed",
         left: Math.max(8, Math.min(window.innerWidth - width - 8, rect.left)),
-        top: rect.bottom + 4,
+        top: rect.top,
         width,
       });
     }
