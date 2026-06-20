@@ -88,28 +88,6 @@ pub struct PageVisitDay {
     pub count: i64,
 }
 
-pub async fn list_frequent_usage(svc: &Services, limit: u32) -> Result<Vec<PageVisit>, IpcError> {
-    Ok(svc.page_visit_store.list_frequent(limit as usize).await?)
-}
-
-/// Pages currently kept open in editor tabs (best-effort: derived from
-/// recent visits whose duration_ms is null — i.e. the open-event hasn't
-/// been closed yet). The renderer already filters to its own tab list.
-pub async fn list_currently_open_usage(
-    svc: &Services,
-    limit: u32,
-) -> Result<Vec<PageVisit>, IpcError> {
-    let recent = svc
-        .page_visit_store
-        .list_recent(limit as usize * 4, None)
-        .await?;
-    Ok(recent
-        .into_iter()
-        .filter(|v| v.duration_ms.is_none())
-        .take(limit as usize)
-        .collect())
-}
-
 /// Recently completed tasks merged with recently updated wiki
 /// notes, sorted by timestamp DESC. Drives the rail's "Finished"
 /// section. Items whose timestamp is `<= finished_cleared_at` are

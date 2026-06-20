@@ -253,14 +253,6 @@ pub async fn get_branch_changes(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_existing_worktrees(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    oxplow_rpc::commands::git::list_existing_worktrees(&state).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_adoptable_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {

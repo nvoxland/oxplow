@@ -76,17 +76,6 @@ pub async fn list_nudges_for_effort(
     oxplow_rpc::commands::effort::list_nudges_for_effort(&state, effort_id).await
 }
 
-/// Persisted agent nudges for a whole thread (the thread-scoped fallback for
-/// nudges that fire with no open effort), newest-first.
-#[tauri::command]
-#[specta::specta]
-pub async fn list_nudges_for_thread(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-) -> Result<Vec<AgentNudge>, IpcError> {
-    oxplow_rpc::commands::effort::list_nudges_for_thread(&state, thread_id).await
-}
-
 /// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
 #[tauri::command]
 #[specta::specta]

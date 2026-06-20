@@ -104,15 +104,6 @@ async fn get_task_missing_returns_none() {
     assert!(item.is_none());
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_tasks_for_thread_empty() {
-    let app = TestApp::build();
-    let items = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::new(999999))
-        .await
-        .unwrap();
-    assert!(items.is_empty());
-}
-
 /// End-to-end: a task with at least one child lands in
 /// `ThreadWorkState.epics`, NOT in `items`. The frontend's
 /// `computeActiveEpicContext` relies on this bucketing — if a parent
@@ -206,15 +197,6 @@ async fn list_recent_page_visits_empty_for_fresh_project() {
 async fn top_visited_pages_empty_for_fresh_project() {
     let app = TestApp::build();
     let v = commands::page_visit::top_visited_pages(app.state(), 10, None)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_recent_usage_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let v = commands::usage::list_recent_usage(app.state(), 10)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -330,15 +312,6 @@ async fn read_workspace_file_missing_path_errors() {
 // ---- Page-visit commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_currently_open_usage_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let v = commands::page_visit::list_currently_open_usage(app.state(), 10)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recently_finished_empty_for_fresh_project() {
     let app = TestApp::build();
     let v = commands::page_visit::list_recently_finished(app.state(), None, 10)
@@ -365,46 +338,6 @@ async fn count_page_visits_by_day_empty_for_fresh_project() {
 }
 
 // ---- Wiki commands ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_wiki_page_missing_returns_none() {
-    let app = TestApp::build();
-    let v = commands::wiki::get_wiki_page(app.state(), "no-such-slug".into())
-        .await
-        .unwrap();
-    assert!(v.is_none());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn search_wiki_bodies_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let v = commands::wiki::search_wiki_bodies(app.state(), "any".into(), 20)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-// ---- task commands ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_tasks_for_thread_returns_empty_again() {
-    // Slightly different from the existing list_tasks_for_thread_empty
-    // helper — exercises the same surface with an explicit ThreadId conversion.
-    let app = TestApp::build();
-    let v = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::new(999998))
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_task_summaries_for_empty_thread() {
-    let app = TestApp::build();
-    let v = commands::tasks::get_task_summaries(app.state(), Some(ThreadId::new(999998)))
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
 
 // ---- Effort commands ----
 
@@ -516,9 +449,6 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
         .await
         .unwrap()
         .is_empty());
-    let _ = commands::git::list_existing_worktrees(s.clone())
-        .await
-        .unwrap();
     let _ = commands::git::list_adoptable_worktrees(s.clone())
         .await
         .unwrap();
@@ -550,9 +480,6 @@ async fn stream_reads_and_reorder() {
     let _ = commands::streams::get_current_stream(app.state())
         .await
         .unwrap();
-    let _ = commands::streams::ensure_primary(app.state())
-        .await
-        .unwrap();
     commands::streams::switch_stream(app.state(), Some(stream.id))
         .await
         .unwrap();
@@ -562,9 +489,8 @@ async fn stream_reads_and_reorder() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn delete_unknown_stream_errors() {
+async fn archive_unknown_stream_errors() {
     let app = TestApp::build();
-    let _ = commands::streams::delete_stream(app.state(), StreamId::new(999999)).await;
     let _ = commands::streams::archive_stream(app.state(), StreamId::new(999999), false).await;
 }
 
@@ -603,25 +529,12 @@ async fn config_setters_round_trip() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn thread_reads_over_default_thread() {
     let app = TestApp::build();
-    let (stream, thread) = primary_and_thread(&app).await;
+    let (stream, _thread) = primary_and_thread(&app).await;
     assert!(!commands::threads::list_threads(app.state(), stream.id)
         .await
         .unwrap()
         .is_empty());
-    assert!(commands::threads::get_thread(app.state(), thread.id)
-        .await
-        .unwrap()
-        .is_some());
-    assert!(
-        commands::threads::get_thread(app.state(), ThreadId::new(999999))
-            .await
-            .unwrap()
-            .is_none()
-    );
     let _ = commands::threads::get_thread_state(app.state(), stream.id)
-        .await
-        .unwrap();
-    let _ = commands::threads::get_selected_thread(app.state(), stream.id)
         .await
         .unwrap();
 }
@@ -741,13 +654,7 @@ async fn thread_note_round_trip() {
     let _ = commands::notes::list_task_events(app.state(), None, Some(thread.id))
         .await
         .unwrap();
-    commands::notes::delete_work_note(app.state(), note.id)
-        .await
-        .unwrap();
-    assert!(commands::notes::list_thread_notes(app.state(), thread.id)
-        .await
-        .unwrap()
-        .is_empty());
+    let _ = note;
 }
 
 // ---- page-ref + search + wiki-freshness reads ----

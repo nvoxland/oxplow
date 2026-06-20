@@ -4,7 +4,7 @@
 use oxplow_app::agent_status_derive::derive_thread_status;
 use oxplow_app::{HookEnvelope, Services};
 use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, HookKind, ThreadId};
+use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, ThreadId};
 
 use crate::error::IpcError;
 
@@ -27,17 +27,6 @@ pub async fn list_hook_events(
     Ok(svc
         .hook_event_store
         .list_recent(thread_id.as_ref(), limit)
-        .await?)
-}
-
-pub async fn list_hook_events_by_kind(
-    svc: &Services,
-    kind: HookKind,
-    limit: Option<usize>,
-) -> Result<Vec<HookEvent>, IpcError> {
-    Ok(svc
-        .hook_event_store
-        .list_by_kind(kind, limit.unwrap_or(200))
         .await?)
 }
 
@@ -66,17 +55,6 @@ pub async fn list_open_agent_turns(
     thread_id: ThreadId,
 ) -> Result<Vec<AgentTurn>, IpcError> {
     Ok(svc.agent_turn_store.list_open(&thread_id).await?)
-}
-
-pub async fn list_recent_agent_turns(
-    svc: &Services,
-    thread_id: ThreadId,
-    limit: Option<usize>,
-) -> Result<Vec<AgentTurn>, IpcError> {
-    Ok(svc
-        .agent_turn_store
-        .list_for_thread(&thread_id, limit.unwrap_or(50))
-        .await?)
 }
 
 // Derivation logic + its unit tests live in

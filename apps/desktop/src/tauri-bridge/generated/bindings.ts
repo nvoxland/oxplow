@@ -21,7 +21,6 @@ export const commands = {
 	 */
 	logUi: (entry: UiLogEntry) => typedError<null, IpcError>(__TAURI_INVOKE("log_ui", { entry })),
 	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
-	ensurePrimary: () => typedError<Stream, IpcError>(__TAURI_INVOKE("ensure_primary")),
 	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
 	/**
 	 *  Register an on-disk git worktree as a new stream without
@@ -30,7 +29,6 @@ export const commands = {
 	 *  "worktree" mode dispatches here.
 	 */
 	adoptWorktree: (req: AdoptWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("adopt_worktree", { req })),
-	deleteStream: (id: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_stream", { id })),
 	/**
 	 *  Soft-delete a stream and every thread under it via `archived_at`.
 	 *  Refuses if any thread in the stream has a pane currently in the
@@ -115,40 +113,6 @@ export const commands = {
 	 */
 	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
-	getThread: (threadId: ThreadId) => typedError<{
-	id: ThreadId,
-	stream_id: StreamId,
-	title: string,
-	status: ThreadStatus,
-	sort_index: number,
-	// Which pane (working/talking) is the agent's primary attach point.
-	pane_target: string,
-	// Agent implementation assigned to this thread at creation time.
-	agent: AgentKind,
-	resume_session_id: string,
-	summary: string,
-	summary_updated_at: Timestamp | null,
-	/**
-	 *  Timestamp when the thread was closed (status transitions to
-	 *  `Closed`). `None` for active/queued threads.
-	 */
-	closed_at: Timestamp | null,
-	/**
-	 *  Per-thread custom prompt appended to the agent's system message.
-	 *  `None` when unset; `Some("")` is distinct (empty override).
-	 */
-	custom_prompt: string | null,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-	/**
-	 *  Set when the thread was archived as part of its stream's
-	 *  "Remove…" action. Archived threads are filtered out of
-	 *  `ThreadStore::list_for_stream`.
-	 */
-	archived_at: Timestamp | null,
-} | null, IpcError>(__TAURI_INVOKE("get_thread", { threadId })),
-	upsertThread: (thread: Thread) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_thread", { thread })),
-	deleteThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_thread", { threadId })),
 	createThread: (req: CreateThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("create_thread", { req })),
 	renameThread: (req: RenameThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("rename_thread", { req })),
 	setThreadPrompt: (req: SetThreadPromptRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("set_thread_prompt", { req })),
@@ -157,13 +121,11 @@ export const commands = {
 	reopenThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("reopen_thread", { id })),
 	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
 	reorderThreadQueue: (req: ReorderThreadQueueRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_thread_queue", { req })),
-	getSelectedThread: (streamId: StreamId) => typedError<string | null, IpcError>(__TAURI_INVOKE("get_selected_thread", { streamId })),
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
 	// Aggregate "what threads exist on this stream and what's selected/active".
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError>(__TAURI_INVOKE("get_thread_state", { streamId })),
 	// Bucketed task view for the Work panel.
 	getThreadWorkState: (threadId: ThreadId) => typedError<ThreadWorkState, IpcError>(__TAURI_INVOKE("get_thread_work_state", { threadId })),
-	listTasksForThread: (threadId: ThreadId) => typedError<Task[], IpcError>(__TAURI_INVOKE("list_tasks_for_thread", { threadId })),
 	getTask: (id: TaskId) => typedError<{
 	id: TaskId,
 	// `None` when the task is on the project-wide backlog.
@@ -197,7 +159,6 @@ export const commands = {
 	updateTask: (req: UpdateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("update_task", { req })),
 	reorderTasks: (req: ReorderTasksRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_tasks", { req })),
 	moveTask: (req: MoveTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("move_task", { req })),
-	getTaskSummaries: (threadId: string | null) => typedError<Task[], IpcError>(__TAURI_INVOKE("get_task_summaries", { threadId })),
 	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
@@ -211,7 +172,6 @@ export const commands = {
 	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
-	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listTaskEvents: (itemId: string | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
 	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
 	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
@@ -233,22 +193,9 @@ export const commands = {
 	relinkComment: (commentId: CommentId, quote: string, selectorsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, selectorsJson })),
 	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
-	getWikiPage: (slug: string) => typedError<{
-	slug: string,
-	title: string,
-	body_path: string,
-	body_excerpt: string,
-	body_size_bytes: number,
-	file_refs: string[],
-	dir_refs: string[],
-	related_notes: string[],
-	created_at: Timestamp,
-	updated_at: Timestamp,
-} | null, IpcError>(__TAURI_INVOKE("get_wiki_page", { slug })),
 	upsertWikiPage: (note: WikiPage) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_page", { note })),
 	deleteWikiPage: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_page", { slug })),
 	searchWikiTitles: (query: string, limit: number) => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
-	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
@@ -261,13 +208,6 @@ export const commands = {
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
 	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
-	listFrequentUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_frequent_usage", { limit })),
-	/**
-	 *  Pages currently kept open in editor tabs (best-effort: derived from
-	 *  recent visits whose duration_ms is null — i.e. the open-event hasn't
-	 *  been closed yet). The renderer already filters to its own tab list.
-	 */
-	listCurrentlyOpenUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_currently_open_usage", { limit })),
 	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
 	 *  Hide the current "Finished" entries behind a cursor. Source rows
@@ -277,7 +217,6 @@ export const commands = {
 	 */
 	clearRecentlyFinished: (threadId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished", { threadId })),
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
-	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	/**
 	 *  Per-key rollup of recent usage events of a single `kind`. Returns
 	 *  the most-recently-touched keys (file paths, note slugs, task
@@ -498,7 +437,6 @@ export const commands = {
 	listFileCommits: (streamId: string | null, path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { streamId, path, limit })),
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
 	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
-	listExistingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_existing_worktrees")),
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
 	gitBlame: (streamId: string | null, path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { streamId, path })),
 	localBlame: (streamId: string | null, path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { streamId, path, diskText })),
@@ -510,10 +448,8 @@ export const commands = {
 	 */
 	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
 	listHookEvents: (threadId: string | null, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events", { threadId, limit })),
-	listHookEventsByKind: (kind: HookKind, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events_by_kind", { kind, limit })),
 	listAgentStatuses: () => typedError<AgentStatus[], IpcError>(__TAURI_INVOKE("list_agent_statuses")),
 	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
-	listRecentAgentTurns: (threadId: ThreadId, limit: number | null) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_recent_agent_turns", { threadId, limit })),
 	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
 	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
 	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
@@ -522,8 +458,6 @@ export const commands = {
 	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { generated })),
 	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
-	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
-	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
 	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
@@ -548,11 +482,6 @@ export const commands = {
 	 *  `TaskPage`.
 	 */
 	listNudgesForEffort: (effortId: EffortId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_effort", { effortId })),
-	/**
-	 *  Persisted agent nudges for a whole thread (the thread-scoped fallback for
-	 *  nudges that fire with no open effort), newest-first.
-	 */
-	listNudgesForThread: (threadId: ThreadId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_thread", { threadId })),
 	// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
 	listTokenUsageForEffort: (effortId: EffortId) => typedError<AgentTokenUsage[], IpcError>(__TAURI_INVOKE("list_token_usage_for_effort", { effortId })),
 	// Summed token totals for one effort.
@@ -620,7 +549,6 @@ export const commands = {
 	listFollowups: (threadId: ThreadId) => typedError<Followup[], IpcError>(__TAURI_INVOKE("list_followups", { threadId })),
 	addFollowup: (threadId: ThreadId, body: string) => typedError<Followup, IpcError>(__TAURI_INVOKE("add_followup", { threadId, body })),
 	removeFollowup: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_followup", { id })),
-	clearFollowupsForThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("clear_followups_for_thread", { threadId })),
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
 	 * 
@@ -1395,22 +1323,6 @@ export type EffortObservation = {
 	created_at: Timestamp,
 };
 
-export type EnsureAgentPaneRequest = {
-	stream_id: StreamId,
-	pane: PaneKindArg,
-	/**
-	 *  Optionally force a specific thread to drive the system prompt;
-	 *  otherwise the stream's currently-selected thread is used.
-	 */
-	thread_id: ThreadId | null,
-};
-
-export type EnsureAgentPaneResponse = {
-	session: string,
-	target: string,
-	created: boolean,
-};
-
 /**
  *  File filter the renderer can request: `all` (whole corpus) or an
  *  explicit set of repo-relative paths. The serialized shape mirrors
@@ -2026,8 +1938,6 @@ export type PageVisitDay = {
 	count: number,
 };
 
-export type PaneKindArg = "working" | "talking";
-
 /**
  *  A project-defined collection plugin — the generic, kind-agnostic
  *  definition mechanism. Mirrors `oxplow_collect_plugin::CollectorDescriptor`
@@ -2600,13 +2510,6 @@ export type WikiPage = {
 	dir_refs: string[],
 	related_notes: string[],
 	created_at: Timestamp,
-	updated_at: Timestamp,
-};
-
-export type WikiPageSearchHit = {
-	slug: string,
-	title: string,
-	snippet: string,
 	updated_at: Timestamp,
 };
 

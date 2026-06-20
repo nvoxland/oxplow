@@ -1,5 +1,5 @@
 use oxplow_app::HookEnvelope;
-use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, HookKind, ThreadId};
+use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, ThreadId};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -27,16 +27,6 @@ pub async fn list_hook_events(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_hook_events_by_kind(
-    state: tauri::State<'_, AppState>,
-    kind: HookKind,
-    limit: Option<usize>,
-) -> Result<Vec<HookEvent>, IpcError> {
-    oxplow_rpc::commands::hooks::list_hook_events_by_kind(&state, kind, limit).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_agent_statuses(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AgentStatus>, IpcError> {
@@ -50,14 +40,4 @@ pub async fn list_open_agent_turns(
     thread_id: ThreadId,
 ) -> Result<Vec<AgentTurn>, IpcError> {
     oxplow_rpc::commands::hooks::list_open_agent_turns(&state, thread_id).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_recent_agent_turns(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-    limit: Option<usize>,
-) -> Result<Vec<AgentTurn>, IpcError> {
-    oxplow_rpc::commands::hooks::list_recent_agent_turns(&state, thread_id, limit).await
 }

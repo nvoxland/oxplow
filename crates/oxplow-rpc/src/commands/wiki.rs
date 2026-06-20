@@ -1,16 +1,12 @@
 //! Cores for the `wiki` command module — file-backed knowledge base.
 
 use oxplow_app::Services;
-use oxplow_db::{WikiPage, WikiPageSearchHit};
+use oxplow_db::WikiPage;
 
 use crate::error::IpcError;
 
 pub async fn list_wiki_pages(svc: &Services) -> Result<Vec<WikiPage>, IpcError> {
     Ok(svc.wiki_page_store.list().await?)
-}
-
-pub async fn get_wiki_page(svc: &Services, slug: String) -> Result<Option<WikiPage>, IpcError> {
-    Ok(svc.wiki_page_store.get(&slug).await?)
 }
 
 pub async fn upsert_wiki_page(svc: &Services, note: WikiPage) -> Result<(), IpcError> {
@@ -29,17 +25,6 @@ pub async fn search_wiki_titles(
     Ok(svc
         .wiki_page_store
         .search_titles(&query, limit as usize)
-        .await?)
-}
-
-pub async fn search_wiki_bodies(
-    svc: &Services,
-    query: String,
-    limit: u32,
-) -> Result<Vec<WikiPageSearchHit>, IpcError> {
-    Ok(svc
-        .wiki_page_store
-        .search_bodies(&query, limit as usize)
         .await?)
 }
 

@@ -238,10 +238,6 @@ pub async fn get_branch_changes(
     Ok(svc.git.branch_changes(stream_id.as_deref(), base_ref).await)
 }
 
-pub async fn list_existing_worktrees(svc: &Services) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    Ok(svc.git.list_existing_worktrees().await)
-}
-
 pub async fn list_adoptable_worktrees(svc: &Services) -> Result<Vec<GitWorktreeEntry>, IpcError> {
     let store = oxplow_db::SqliteStreamStore::new(svc.db.clone());
     let registered: Vec<String> = store

@@ -58,27 +58,6 @@ pub async fn forget_page(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_frequent_usage(
-    state: tauri::State<'_, AppState>,
-    limit: u32,
-) -> Result<Vec<PageVisit>, IpcError> {
-    oxplow_rpc::commands::page_visit::list_frequent_usage(&state, limit).await
-}
-
-/// Pages currently kept open in editor tabs (best-effort: derived from
-/// recent visits whose duration_ms is null — i.e. the open-event hasn't
-/// been closed yet). The renderer already filters to its own tab list.
-#[tauri::command]
-#[specta::specta]
-pub async fn list_currently_open_usage(
-    state: tauri::State<'_, AppState>,
-    limit: u32,
-) -> Result<Vec<PageVisit>, IpcError> {
-    oxplow_rpc::commands::page_visit::list_currently_open_usage(&state, limit).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_recently_finished(
     state: tauri::State<'_, AppState>,
     thread_id: Option<String>,
