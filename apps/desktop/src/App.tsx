@@ -52,6 +52,7 @@ import {
   updateTask,
   writeWorkspaceFile,
   type BacklogState,
+  type BranchChangeEntry,
   type ThreadWorkState,
   type ThreadState,
   type AgentKind,
@@ -1746,6 +1747,7 @@ export function App() {
   const [uncommittedSummary, setUncommittedSummary] = useState<{
     added: number; modified: number; deleted: number; additions: number; deletions: number;
     conflictedCount: number; gitOperation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+    files: BranchChangeEntry[];
   } | null>(null);
   useEffect(() => {
     const sid = stream?.id;
@@ -1767,6 +1769,7 @@ export function App() {
             added, modified, deleted, additions, deletions,
             conflictedCount: conflict.conflictedCount,
             gitOperation: conflict.operation,
+            files: res.files,
           });
         })
         .catch(() => { if (!cancelled) setUncommittedSummary(null); });

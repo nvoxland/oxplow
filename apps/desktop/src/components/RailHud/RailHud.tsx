@@ -1,9 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { FinishedEntry, ThreadWorkState, Task } from "../../api.js";
+import type { BranchChangeEntry, FinishedEntry, GitFileStatus, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, indexRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
@@ -28,6 +28,8 @@ export interface UncommittedSummary {
   deletions: number;
   conflictedCount?: number;
   gitOperation?: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+  /** The changed files — rendered as a tree when the section expands. */
+  files?: BranchChangeEntry[];
 }
 
 export interface BookmarkRailEntry {
@@ -251,6 +253,8 @@ function RailSection({
   tone,
   headerAction,
   collapsedContent,
+  onOpen,
+  openTitle,
   children,
 }: {
   id: RailSectionId;
@@ -260,6 +264,9 @@ function RailSection({
   tone?: "danger";
   headerAction?: ReactNode;
   collapsedContent?: ReactNode;
+  /** When set, a right-side icon opens this content's full page/dashboard. */
+  onOpen?(): void;
+  openTitle?: string;
   children: ReactNode;
 }) {
   const ctx = useContext(RailSectionsContext);
@@ -350,6 +357,27 @@ function RailSection({
           ) : null}
         </button>
         {headerAction}
+        {onOpen ? (
+          <button
+            type="button"
+            data-testid={`rail-section-open-${id}`}
+            onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            title={openTitle ?? "Open"}
+            aria-label={openTitle ?? "Open"}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 13,
+              lineHeight: 1,
+              padding: "0 2px",
+              flexShrink: 0,
+            }}
+          >
+            ↗
+          </button>
+        ) : null}
       </div>
       {expanded ? children : (collapsedContent ?? null)}
     </div>
@@ -391,21 +419,12 @@ export function RailHud({
   const width = useRailWidth();
   const sections = useRailSections(threadId);
 
-  const hasUncommitted = !!uncommitted && (
-    uncommitted.added + uncommitted.modified + uncommitted.deleted > 0
-    || (uncommitted.conflictedCount ?? 0) > 0
-    || !!uncommitted.gitOperation
-  );
-
-  // Each section self-skips (returns null) when it has no content, so the
-  // ordered list can include every id and the empty ones simply don't
-  // render — no empty headers.
+  // Every section always renders (stable list — panes never appear /
+  // disappear); each shows its own empty state when it has no content.
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
       case "uncommitted":
-        return hasUncommitted
-          ? <UncommittedSection key={id} summary={uncommitted!} onOpenPage={onOpenPage} />
-          : null;
+        return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "comments":
         return <CommentsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
       case "work":
@@ -422,17 +441,11 @@ export function RailHud({
           />
         );
       case "errors":
-        return opErrors && opErrors.length > 0
-          ? <OpErrorsSection key={id} entries={opErrors} onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />
-          : null;
+        return <OpErrorsSection key={id} entries={opErrors ?? []} onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />;
       case "recentFiles":
-        return recents.length > 0
-          ? <RecentFilesSection key={id} entries={recents} onOpenPage={onOpenPage} />
-          : null;
+        return <RecentFilesSection key={id} entries={recents} onOpenPage={onOpenPage} />;
       case "bookmarks":
-        return bookmarks && bookmarks.length > 0
-          ? <BookmarksSection key={id} entries={bookmarks} onOpenPage={onOpenPage} />
-          : null;
+        return <BookmarksSection key={id} entries={bookmarks ?? []} onOpenPage={onOpenPage} />;
       case "history":
         return <HistorySection key={id} onOpenPage={onOpenPage} threadId={threadId} />;
     }
@@ -490,28 +503,42 @@ function WorkSection({
   const working = !!activeItem;
   const lastFinished = finished[0] ?? null;
   const hasContent = working || finished.length > 0 || readyCount > 0;
-  if (!threadId || !hasContent) return null;
+  const isEmpty = !threadId || !hasContent;
 
-  const collapsedContent = working ? (
+  const collapsedContent = isEmpty ? (
+    <RailEmpty label="No active work" />
+  ) : working ? (
     <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
   ) : lastFinished ? (
     <SingleFinishedRow entry={lastFinished} onOpenPage={onOpenPage} />
   ) : null;
 
   return (
-    <RailSection id="work" title="Work" collapsedContent={collapsedContent}>
-      {activeItem ? (
+    <RailSection
+      id="work"
+      title="Work"
+      collapsedContent={collapsedContent}
+      onOpen={() => onOpenPage(tasksRef())}
+      openTitle="Open Tasks"
+    >
+      {isEmpty ? (
+        <RailEmpty label="No active work" />
+      ) : (
         <>
-          <SectionHeading>In progress</SectionHeading>
-          <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
+          {activeItem ? (
+            <>
+              <SectionHeading>In progress</SectionHeading>
+              <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
+            </>
+          ) : null}
+          {readyCount > 0 ? (
+            <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
+          ) : null}
+          {finished.length > 0 ? (
+            <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
+          ) : null}
         </>
-      ) : null}
-      {readyCount > 0 ? (
-        <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
-      ) : null}
-      {finished.length > 0 ? (
-        <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
-      ) : null}
+      )}
     </RailSection>
   );
 }
@@ -917,75 +944,202 @@ function ActiveItemSection({
   );
 }
 
+/** Muted empty-state line for a section that has no content but still
+ *  renders (the pane list is stable — sections never disappear). */
+function RailEmpty({ label }: { label: string }) {
+  return (
+    <div style={{ padding: "4px 14px 10px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
+      {label}
+    </div>
+  );
+}
+
+type UStatus = "added" | "modified" | "deleted";
+const U_STATUS_META: Record<UStatus, { letter: string; color: string }> = {
+  added: { letter: "A", color: "var(--diff-add-fg, #2ea043)" },
+  modified: { letter: "M", color: "var(--status-waiting, #f59e0b)" },
+  deleted: { letter: "D", color: "var(--diff-del-fg, #f85149)" },
+};
+function uStatus(s: GitFileStatus): UStatus {
+  if (s === "deleted") return "deleted";
+  if (s === "added" || s === "untracked") return "added";
+  return "modified";
+}
+
+interface UDirNode { type: "dir"; name: string; path: string; statuses: Set<UStatus>; children: UNode[]; }
+interface UFileNode { type: "file"; name: string; path: string; status: UStatus; }
+type UNode = UDirNode | UFileNode;
+
+/** Folder>file tree, with each folder carrying the union of A/M/D
+ *  statuses across its subtree. */
+function buildUncommittedTree(files: BranchChangeEntry[]): UNode[] {
+  interface Raw { name: string; path: string; files: BranchChangeEntry[]; dirs: Map<string, Raw>; }
+  const root: Raw = { name: "", path: "", files: [], dirs: new Map() };
+  for (const f of files) {
+    const segs = f.path.split("/");
+    let cur = root;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const seg = segs[i]!;
+      let next = cur.dirs.get(seg);
+      if (!next) { const p = cur.path ? `${cur.path}/${seg}` : seg; next = { name: seg, path: p, files: [], dirs: new Map() }; cur.dirs.set(seg, next); }
+      cur = next;
+    }
+    cur.files.push(f);
+  }
+  const materialize = (node: Raw): { nodes: UNode[]; statuses: Set<UStatus> } => {
+    const out: UNode[] = [];
+    const agg = new Set<UStatus>();
+    for (const d of [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      const sub = materialize(d);
+      for (const s of sub.statuses) agg.add(s);
+      out.push({ type: "dir", name: d.name, path: d.path, statuses: sub.statuses, children: sub.nodes });
+    }
+    for (const f of [...node.files].sort((a, b) => a.path.localeCompare(b.path))) {
+      const st = uStatus(f.status);
+      agg.add(st);
+      out.push({ type: "file", name: f.path.split("/").pop() ?? f.path, path: f.path, status: st });
+    }
+    return { nodes: out, statuses: agg };
+  };
+  return materialize(root).nodes;
+}
+
+const UStatusLetters = ({ statuses }: { statuses: Set<UStatus> }) => {
+  const order: UStatus[] = ["added", "modified", "deleted"];
+  return (
+    <span style={{ display: "inline-flex", gap: 3, flexShrink: 0 }}>
+      {order.filter((s) => statuses.has(s)).map((s) => (
+        <span key={s} style={{ color: U_STATUS_META[s].color, fontSize: 10, fontWeight: 700 }}>{U_STATUS_META[s].letter}</span>
+      ))}
+    </span>
+  );
+};
+
+const railTreeRowStyle: CSSProperties = {
+  display: "flex", alignItems: "center", gap: 6, width: "100%",
+  padding: "3px 8px", border: "none", background: "transparent",
+  color: "var(--text-primary)", cursor: "pointer", textAlign: "left",
+  fontSize: "var(--text-xs)",
+};
+const railTreeLabelStyle: CSSProperties = {
+  flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+};
+
+/** Compact uncommitted file tree for the rail — folders show their A/M/D
+ *  union, files their status, with a floating expand/collapse-all toggle
+ *  and a capped, scrollable height. */
+function UncommittedTree({ files, onOpenFile }: { files: BranchChangeEntry[]; onOpenFile(path: string): void }) {
+  const tree = useMemo(() => buildUncommittedTree(files), [files]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggle = (path: string) => setCollapsed((prev) => {
+    const n = new Set(prev);
+    if (n.has(path)) n.delete(path); else n.add(path);
+    return n;
+  });
+
+  const rows: ReactNode[] = [];
+  const walk = (nodes: UNode[], depth: number) => {
+    for (const node of nodes) {
+      const pad = 8 + depth * 12;
+      if (node.type === "dir") {
+        const isCollapsed = collapsed.has(node.path);
+        rows.push(
+          <button key={`d:${node.path}`} type="button" onClick={() => toggle(node.path)} title={node.path} style={{ ...railTreeRowStyle, paddingLeft: pad }}>
+            <span aria-hidden style={{ width: 14, flexShrink: 0, color: "var(--text-muted)", fontSize: 15, lineHeight: 1 }}>{isCollapsed ? "▸" : "▾"}</span>
+            <span style={railTreeLabelStyle}>{node.name}/</span>
+            <UStatusLetters statuses={node.statuses} />
+          </button>,
+        );
+        if (!isCollapsed) walk(node.children, depth + 1);
+      } else {
+        rows.push(
+          <button key={`f:${node.path}`} type="button" data-testid={`rail-uncommitted-file-${node.path}`} onClick={() => onOpenFile(node.path)} title={node.path} style={{ ...railTreeRowStyle, paddingLeft: pad + 12 }}>
+            <span style={railTreeLabelStyle}>{node.name}</span>
+            <span style={{ color: U_STATUS_META[node.status].color, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{U_STATUS_META[node.status].letter}</span>
+          </button>,
+        );
+      }
+    }
+  };
+  walk(tree, 0);
+
+  return (
+    <div data-testid="rail-uncommitted-tree" style={{ maxHeight: 300, overflowY: "auto", overflowX: "hidden", paddingBottom: 6 }}>
+      {rows}
+    </div>
+  );
+}
+
 function UncommittedSection({
   summary,
   onOpenPage,
 }: {
-  summary: UncommittedSummary;
+  summary: UncommittedSummary | null;
   onOpenPage(ref: TabRef): void;
 }) {
+  const added = summary?.added ?? 0;
+  const modified = summary?.modified ?? 0;
+  const deleted = summary?.deleted ?? 0;
   const parts: string[] = [];
-  if (summary.added > 0) parts.push(`${summary.added}A`);
-  if (summary.modified > 0) parts.push(`${summary.modified}M`);
-  if (summary.deleted > 0) parts.push(`${summary.deleted}D`);
-  const conflictedCount = summary.conflictedCount ?? 0;
-  const op = summary.gitOperation ?? null;
+  if (added > 0) parts.push(`${added}A`);
+  if (modified > 0) parts.push(`${modified}M`);
+  if (deleted > 0) parts.push(`${deleted}D`);
+  const conflictedCount = summary?.conflictedCount ?? 0;
+  const op = summary?.gitOperation ?? null;
   const hasFileSummary = parts.length > 0;
   const hasConflictRow = conflictedCount > 0 || op !== null;
+  const files = summary?.files ?? [];
+  const total = added + modified + deleted;
+
+  const summaryButton = hasFileSummary ? (
+    <button
+      type="button"
+      data-testid="rail-uncommitted"
+      onClick={() => onOpenPage(uncommittedChangesRef())}
+      title="Open uncommitted changes"
+      style={{ ...rowStyle, padding: "4px 14px 8px", gap: 8 }}
+    >
+      <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>{parts.join(" · ")}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>+{summary?.additions ?? 0}</span>
+      <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>−{summary?.deletions ?? 0}</span>
+    </button>
+  ) : null;
+
+  const conflictRow = hasConflictRow ? (
+    <button
+      type="button"
+      data-testid="rail-uncommitted-conflicts"
+      onClick={() => onOpenPage(uncommittedChangesRef())}
+      title={
+        op
+          ? `${op} in progress${conflictedCount > 0 ? ` — ${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}` : ""}`
+          : `${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}`
+      }
+      style={{ ...rowStyle, padding: "4px 14px 8px", gap: 8 }}
+    >
+      <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: "var(--text-xs)" }}>
+        {op ? `${op} in progress` : `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`}
+      </span>
+    </button>
+  ) : null;
+
+  const isEmpty = !hasFileSummary && !hasConflictRow;
+
   return (
-    <RailSection id="uncommitted" title="Uncommitted">
-      {hasFileSummary ? (
-        <button
-          type="button"
-          data-testid="rail-uncommitted"
-          onClick={() => onOpenPage(uncommittedChangesRef())}
-          title="Open uncommitted changes"
-          style={{
-            ...rowStyle,
-            padding: hasConflictRow ? "4px 14px 4px" : "4px 14px 12px",
-            gap: 8,
-          }}
-        >
-          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
-            {parts.join(" · ")}
-          </span>
-          <span style={{ flex: 1 }} />
-          <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>
-            +{summary.additions}
-          </span>
-          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>
-            −{summary.deletions}
-          </span>
-        </button>
-      ) : null}
-      {hasConflictRow ? (
-        <button
-          type="button"
-          data-testid="rail-uncommitted-conflicts"
-          onClick={() => onOpenPage(uncommittedChangesRef())}
-          title={
-            op
-              ? `${op} in progress${conflictedCount > 0 ? ` — ${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}` : ""}`
-              : `${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}`
-          }
-          style={{
-            ...rowStyle,
-            padding: "4px 14px 12px",
-            gap: 8,
-          }}
-        >
-          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: "var(--text-xs)" }}>
-            {op ? `${op} in progress` : `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`}
-          </span>
-          {op && conflictedCount > 0 ? (
-            <>
-              <span style={{ flex: 1 }} />
-              <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>
-                {conflictedCount} conflict{conflictedCount === 1 ? "" : "s"}
-              </span>
-            </>
-          ) : null}
-        </button>
+    <RailSection
+      id="uncommitted"
+      title="Uncommitted"
+      count={total}
+      onOpen={() => onOpenPage(uncommittedChangesRef())}
+      openTitle="Open uncommitted changes"
+      collapsedContent={isEmpty ? <RailEmpty label="Working tree clean" /> : <>{summaryButton}{conflictRow}</>}
+    >
+      {conflictRow}
+      {files.length > 0 ? (
+        <UncommittedTree files={files} onOpenFile={(path) => onOpenPage(fileRef(path))} />
+      ) : isEmpty ? (
+        <RailEmpty label="Working tree clean" />
       ) : null}
     </RailSection>
   );
@@ -1034,10 +1188,17 @@ function CommentsSection({
     };
   }, [streamId]);
 
-  if (notes === 0 && followups === 0) return null;
+  const isEmpty = notes === 0 && followups === 0;
 
   return (
-    <RailSection id="comments" title="Comments" count={notes + followups}>
+    <RailSection
+      id="comments"
+      title="Comments"
+      count={notes + followups}
+      onOpen={() => onOpenPage(commentsRef())}
+      openTitle="Open the Comments inbox"
+    >
+      {isEmpty ? <RailEmpty label="No open comments" /> : null}
       {notes > 0 ? (
         <button
           type="button"
@@ -1083,6 +1244,9 @@ function OpErrorsSection({
   onDismiss?(id: string): void;
   onClear?(): void;
 }) {
+  if (entries.length === 0) {
+    return <RailSection id="errors" title="Errors"><RailEmpty label="No errors" /></RailSection>;
+  }
   return (
     <RailSection
       id="errors"
@@ -1215,6 +1379,7 @@ function BookmarksSection({
 }) {
   return (
     <RailSection id="bookmarks" title="Bookmarks" count={entries.length}>
+      {entries.length === 0 ? <RailEmpty label="No bookmarks" /> : null}
       <div data-testid="rail-bookmarks" style={{ paddingBottom: 8 }}>
         {entries.map((entry) => (
           <div
@@ -1265,7 +1430,13 @@ function RecentFilesSection({
   onOpenPage(ref: TabRef): void;
 }) {
   return (
-    <RailSection id="recentFiles" title="Recent files">
+    <RailSection
+      id="recentFiles"
+      title="Recent files"
+      onOpen={() => onOpenPage(indexRef("files"))}
+      openTitle="Open Files"
+    >
+      {entries.length === 0 ? <RailEmpty label="No recent files" /> : null}
       <div data-testid="rail-recent-files" style={{ paddingBottom: 8 }}>
         {entries.map((e) => {
           const basename = e.path.split("/").pop() ?? e.path;
@@ -1446,7 +1617,13 @@ function HistorySection({
   // mode — no header, no toggle, no flicker. If the user has data in
   // only one of the two modes, fall back to that one so the section
   // doesn't appear "broken" when toggled.
-  if (recent.length === 0 && top.length === 0) return null;
+  if (recent.length === 0 && top.length === 0) {
+    return (
+      <RailSection id="history" title="History" onOpen={() => onOpenPage(indexRef("local-history"))} openTitle="Open History">
+        <RailEmpty label="No history yet" />
+      </RailSection>
+    );
+  }
   const effectiveMode = mode === "recent" && recent.length === 0 && top.length > 0
     ? "top"
     : mode === "top" && top.length === 0 && recent.length > 0
@@ -1459,6 +1636,8 @@ function HistorySection({
     <RailSection
       id="history"
       title={effectiveMode === "recent" ? "History" : "Most visited"}
+      onOpen={() => onOpenPage(indexRef("local-history"))}
+      openTitle="Open History"
       headerAction={(
         <button
           type="button"
