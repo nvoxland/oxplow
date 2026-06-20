@@ -95,6 +95,7 @@ import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
 import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
+import { planCloseOrGoBack } from "./tabs/closeOrGoBack.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -857,6 +858,10 @@ export function App() {
     try {
       const next = await deleteTask(stream.id, selectedThread.id, itemId);
       setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
+      // If the deleted task is open in a tab, go back in its history
+      // rather than leaving a stale "task not found" page (or close it
+      // if there's nothing to go back to).
+      closeOrGoBackPageTab(taskRef(itemId).id);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -2178,6 +2183,43 @@ export function App() {
     }
   }, [selectedThreadId, setCenterActive, stream]);
 
+  // Used when the record a tab shows is *deleted* (wiki page / task).
+  // Rather than closing the tab outright, navigate it back one entry in
+  // its own history; only close when there's nothing to go back to.
+  const closeOrGoBackPageTab = useCallback((id: string) => {
+    if (!selectedThreadId) { closePageTab(id); return; }
+    const perThread = threadPageHistory[selectedThreadId] ?? {};
+    const existing = threadPageTabs[selectedThreadId] ?? [];
+    const idx = existing.findIndex((t) => t.id === id);
+    const plan = planCloseOrGoBack(perThread[id], idx >= 0);
+    if (plan.action === "close") {
+      closePageTab(id);
+      return;
+    }
+    const target = plan.target;
+    setThreadPageTabs((prev) => {
+      const list = prev[selectedThreadId] ?? [];
+      const i = list.findIndex((t) => t.id === id);
+      if (i < 0) return prev;
+      const next = list.slice();
+      next[i] = target;
+      return { ...prev, [selectedThreadId]: next };
+    });
+    setThreadPageHistory((prev) => {
+      const pt = prev[selectedThreadId] ?? {};
+      const { [id]: _drop, ...rest } = pt;
+      return { ...prev, [selectedThreadId]: { ...rest, [target.id]: plan.nextEntry } };
+    });
+    setPageTitles((prev) => {
+      if (!(id in prev)) return prev;
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+    setCenterActive((current) => (current === id ? target.id : current));
+    const pageKey = `${selectedThreadId}::${id}`;
+    clearPageSnapshot(pageKey);
+  }, [selectedThreadId, threadPageHistory, threadPageTabs, closePageTab, setCenterActive]);
+
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // commandHandlers (declared above handleOpenPage) so menu/keyboard
   // dispatches route through the same page-tab opener.
@@ -2749,7 +2791,7 @@ export function App() {
               stream={stream}
               slug={slug}
               threadWork={selectedThreadWork}
-              onClosed={() => closePageTab(ref.id)}
+              onClosed={() => closeOrGoBackPageTab(ref.id)}
               onOpenWikiPage={handleOpenWiki}
               onOpenFile={navOpenFile}
               onOpenDirectory={handleOpenDirectory}
@@ -2811,6 +2853,7 @@ export function App() {
               itemId={itemId}
               items={items}
               threadWork={selectedThreadWork}
+              onDelete={(id) => { void handleDeleteTask(id); }}
               onOpenPage={navOpen}
               onOpenFile={(p) => navOpenFile(p)}
               onShowInHistory={(snapshotId) => {

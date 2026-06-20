@@ -280,10 +280,14 @@ export function TaskOverflowMenu({
 export function TaskDetailRail({
   item,
   onUpdateTask,
+  onDelete,
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
   item: Task;
   onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  /** When provided, renders a danger "Delete" button at the bottom of
+   *  the rail (mirrors the wiki page's rail Delete). */
+  onDelete?: () => void;
   formatTimestamp?(iso: string): string;
 }) {
   return (
@@ -323,6 +327,33 @@ export function TaskDetailRail({
         <RailMetaRow label="Updated">{formatTimestamp(item.updated_at)}</RailMetaRow>
         <RailMetaRow label="By">{item.created_by}</RailMetaRow>
       </div>
+
+      {onDelete ? (
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          borderTop: "1px solid var(--border-subtle)",
+          paddingTop: 12,
+          marginTop: 4,
+        }}>
+          <button
+            type="button"
+            onClick={onDelete}
+            style={{
+              textAlign: "left",
+              padding: "6px 10px",
+              borderRadius: 4,
+              border: "1px solid var(--border-subtle)",
+              background: "var(--surface-card)",
+              color: "var(--severity-critical)",
+              cursor: "pointer",
+              fontSize: "var(--text-xs)",
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -25,6 +25,9 @@ export interface TaskPageProps {
   /** Live snapshot of all tasks in the current thread (used to find this one). */
   items: Task[];
   threadWork: ThreadWorkState | null;
+  /** Delete this task. The host handles confirmation fallout (closing /
+   *  going back in the tab's history). */
+  onDelete?(itemId: string): void;
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
   onShowInHistory?(snapshotId: string): void;
@@ -43,6 +46,7 @@ export function TaskPage({
   thread,
   itemId,
   items,
+  onDelete,
   onOpenPage,
   onOpenFile,
   onShowInHistory,
@@ -179,10 +183,17 @@ export function TaskPage({
     );
   }
 
-  const rail = <TaskDetailRail item={item} onUpdateTask={handleUpdate} />;
+  const requestDelete = onDelete
+    ? () => {
+        if (window.confirm(`Delete task "${item.title}"? This can't be undone.`)) {
+          onDelete(item.id);
+        }
+      }
+    : undefined;
+  const rail = <TaskDetailRail item={item} onUpdateTask={handleUpdate} onDelete={requestDelete} />;
   const railActions = (
     <TaskOverflowMenu
-      onRequestDelete={() => {}}
+      onRequestDelete={requestDelete ?? (() => {})}
       extraMenuItems={
         scopeAction ? [{ label: scopeAction.label, onSelect: () => void scopeAction.run() }] : undefined
       }
