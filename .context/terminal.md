@@ -65,7 +65,12 @@ exposed to the agent (no-automation guard, see `.context/agent-model.md`).
 
 The component owns:
 
-- The xterm `Terminal` instance + `FitAddon`.
+- The xterm `Terminal` instance + `FitAddon`. **The inner gutter (~8px)
+  goes on a wrapper *around* the `hostRef` mount, never on the mount
+  itself** — `FitAddon`/`ResizeObserver` measure `hostRef` directly, and
+  padding the mount makes the computed row count oscillate (the text
+  visibly jumps). The wrapper's `background` matches `XTERM_THEME.background`
+  so the gutter reads as the terminal's own padding.
 - A custom keydown handler (Cmd+V paste, Shift+Enter, PageUp/Down
   routing for tmux history mode, Escape interrupt detection).
 - A custom wheel handler (mousewheel → tmux history scrolling when

@@ -601,7 +601,26 @@ export function TerminalPane({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: "100%" }} />
+      {/* Small inner gutter so the text isn't jammed into the corner. The
+          padding lives on this WRAPPER, not the xterm mount: FitAddon /
+          ResizeObserver measure the mount (`hostRef`) directly, and
+          padding the mount itself throws off the fit math (row count
+          oscillates → text jumps). The wrapper's background matches the
+          xterm theme so the gutter reads as the terminal's own padding. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          width: "100%",
+          boxSizing: "border-box",
+          padding: 8,
+          background: XTERM_THEME.background,
+          display: "flex",
+        }}
+      >
+        <div ref={hostRef} style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
+      </div>
       {comments && term ? (
         <TerminalCommentLayer
           term={term}
