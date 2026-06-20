@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -34,7 +33,8 @@ export interface PageNavBarProps {
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
-  /** Small kind chip rendered after the title ("wiki", "file", …). */
+  /** Accepted for API compatibility; the page-kind chip is no longer
+   *  rendered in the nav bar. */
   kind?: string;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
@@ -85,7 +85,6 @@ export function PageNavBar({
   onForward,
   siblings,
   title,
-  kind,
   bookmark,
   backlinks,
   outbound,
@@ -319,7 +318,7 @@ export function PageNavBar({
         </div>
       ) : null}
 
-      {title || kind ? (
+      {title ? (
         <div
           style={{
             display: "flex",
@@ -330,42 +329,19 @@ export function PageNavBar({
             paddingLeft: 6,
           }}
         >
-          {title ? (
-            <span
-              data-testid="page-nav-title"
-              style={{
-                fontSize: "var(--text-base)",
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {title}
-            </span>
-          ) : null}
-          {kind ? (
-            <span
-              data-testid="page-nav-kind"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: 11,
-                fontWeight: "var(--weight-medium)",
-                color: "var(--text-secondary)",
-                background: "var(--surface-tab-inactive)",
-                padding: "2px 6px",
-                borderRadius: 4,
-                textTransform: "lowercase",
-                flexShrink: 0,
-              }}
-            >
-              <PageKindIcon kind={kind} size={12} />
-              {pageKindLabel(kind)}
-            </span>
-          ) : null}
+          <span
+            data-testid="page-nav-title"
+            style={{
+              fontSize: "var(--text-base)",
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {title}
+          </span>
         </div>
       ) : (
         <div style={{ flex: 1 }} />

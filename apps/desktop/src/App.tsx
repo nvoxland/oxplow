@@ -1292,18 +1292,14 @@ export function App() {
       const task = await awaitDone;
       const result = task?.result as GitOpResult | undefined;
       if (result && result.success) return;
-      const errorId = recordOpError({
+      // Surfaces globally (toast + status-bar indicator) via recordOpError.
+      recordOpError({
         label,
         command,
         stderr: result?.stderr ?? task?.error ?? "",
         stdout: result?.stdout ?? "",
         exitCode: result?.status ?? null,
         blankFailure: !result || (!result.stderr && !result.stdout && result.status == null),
-      });
-      showToast({
-        message: `${label} failed`,
-        actionLabel: "Show details",
-        onUndo: () => handleOpenPageRef.current?.(opErrorRef(errorId)),
       });
     },
     [],

@@ -255,22 +255,6 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           >
             {effectiveTitle}
           </span>
-          {kind ? (
-            <span
-              data-testid="page-kind"
-              style={{
-                fontSize: 11,
-                fontWeight: "var(--weight-medium)",
-                color: "var(--text-secondary)",
-                background: "var(--surface-tab-inactive)",
-                padding: "2px 6px",
-                borderRadius: 4,
-                textTransform: "lowercase",
-              }}
-            >
-              {kind}
-            </span>
-          ) : null}
           {chips?.map((chip, i) => (
             <span
               key={i}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Stream, ThreadWorkState, WikiRefFreshness } from "../tauri-bridge/index.js";
 import { commands } from "../tauri-bridge/index.js";
-import { summarizeWikiFreshness, type WikiFreshnessSummary } from "../components/Wiki/wikiFreshness.js";
+import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { WikiPageTab, FreshnessBadge } from "../components/Wiki/WikiPageTab.js";
@@ -120,7 +120,6 @@ function WikiPageBody({
     return () => { cancelled = true; };
   }, [slug, controller.summary?.updated_at]);
   const freshness = freshnessRows != null ? summarizeWikiFreshness(freshnessRows) : null;
-  const staleCount = freshness != null ? freshness.staleRefs.length : null;
   const openFreshness = () => {
     const ref = wikiFreshnessRef(slug);
     if (nav) nav.navigate(ref);
@@ -130,7 +129,6 @@ function WikiPageBody({
     <WikiPageRail
       controller={controller}
       scrollHost={scrollHost}
-      freshness={freshness}
     />
   );
 
@@ -138,28 +136,17 @@ function WikiPageBody({
     <Page
       testId="page-wiki"
       kind="wiki"
-      chips={staleCount != null && staleCount > 0 ? [{
-        label: `${staleCount} stale ref${staleCount === 1 ? "" : "s"}`,
-        color: "var(--priority-high)",
-        title: "Click to open Freshness view",
-      }] : undefined}
       actions={
-        <button
-          type="button"
-          onClick={openFreshness}
-          style={{
-            background: "transparent",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 4,
-            color: staleCount && staleCount > 0 ? "var(--priority-high)" : "var(--text-secondary)",
-            padding: "2px 8px",
-            fontSize: "var(--text-xs)",
-            cursor: "pointer",
-          }}
-          title="Open the freshness view for this wiki page"
-        >
-          Freshness{staleCount != null ? ` (${staleCount} stale)` : ""}
-        </button>
+        freshness ? (
+          <button
+            type="button"
+            onClick={openFreshness}
+            title="Open the freshness view for this wiki page"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}
+          >
+            <FreshnessBadge summary={freshness} />
+          </button>
+        ) : undefined
       }
       backlinks={backlinks}
       outbound={outbound}
@@ -187,11 +174,9 @@ function WikiPageBody({
 function WikiPageRail({
   controller,
   scrollHost,
-  freshness,
 }: {
   controller: ReturnType<typeof useWikiPageController>;
   scrollHost: HTMLElement | null;
-  freshness: WikiFreshnessSummary | null;
 }) {
   const { summary, body, notFound, loadError, create, remove } = controller;
 
@@ -203,12 +188,6 @@ function WikiPageRail({
       gap: 16,
       padding: "4px 0",
     }}>
-      {freshness && (
-        <div style={{ display: "flex" }}>
-          <FreshnessBadge summary={freshness} />
-        </div>
-      )}
-
       {!notFound && !loadError && (
         <WikiTableOfContents bodyText={body} scrollHost={scrollHost} />
       )}

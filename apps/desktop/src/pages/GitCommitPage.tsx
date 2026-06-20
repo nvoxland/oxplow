@@ -9,7 +9,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
-import { gitCommitRef, opErrorRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
+import { gitCommitRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
@@ -145,7 +145,8 @@ export function GitCommitPage({
         showToast({ message: gitOpOutcomeMessage(label, result) });
         return;
       }
-      const errorId = recordOpError({
+      // Surfaces globally (toast + status-bar indicator) via recordOpError.
+      recordOpError({
         label,
         command,
         stderr: result.stderr,
@@ -153,13 +154,8 @@ export function GitCommitPage({
         exitCode: result.status,
         message: gitOpErrorMessage(result, `${label} failed`),
       });
-      showToast({
-        message: `${label} failed`,
-        actionLabel: "Show details",
-        onUndo: () => onOpenPage(opErrorRef(errorId), { newTab: true }),
-      });
     },
-    [stream, sha, onOpenPage],
+    [stream, sha],
   );
 
   const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });

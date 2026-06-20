@@ -24,9 +24,8 @@ import {
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, indexRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { showToast } from "../components/toastStore.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
@@ -285,7 +284,11 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       }
       const result = task?.result as GitOpResult | undefined;
       if (!result || !result.success) {
-        const errorId = recordOpError({
+        // The failure surfaces globally (toast + status-bar indicator) via
+        // recordOpError — no per-site toast. Refresh either way so any
+        // partial progress (e.g. fast-forward that landed before a
+        // post-step failed) is reflected.
+        recordOpError({
           label,
           command,
           stderr: result?.stderr ?? task?.error ?? "",
@@ -296,18 +299,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
           signal: null,
           blankFailure:
             !result || (!result.stderr && !result.stdout && result.status == null),
-        });
-        // Surface the failure as a toast that lets the user open the
-        // detail page on demand. Auto-navigating away switched the
-        // active tab, which read as the dashboard "closing" — and the
-        // false-failure case (race on awaitDone after a successful git
-        // op) made that especially confusing. Refresh either way so any
-        // partial progress (e.g. fast-forward that landed before a
-        // post-step failed) is reflected.
-        showToast({
-          message: `${label} failed`,
-          actionLabel: "Show details",
-          onUndo: () => onOpenPage(opErrorRef(errorId), { newTab: true }),
         });
         void refresh();
       } else {
