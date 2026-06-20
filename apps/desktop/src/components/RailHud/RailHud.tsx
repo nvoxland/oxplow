@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BranchChangeEntry, FinishedEntry, GitFileStatus, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, indexRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { moveToIndex } from "../CenterTabs/centerTabsReorder.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
@@ -35,8 +35,6 @@ export interface UncommittedSummary {
 export interface BookmarkRailEntry {
   ref: TabRef;
   label: string;
-  /** Single-letter scope marker rendered as a small badge (T/S/G). */
-  scopeBadge: "T" | "S" | "G";
 }
 
 export interface RailHudProps {
@@ -66,19 +64,19 @@ export interface RailHudProps {
 // and the section order both persist in localStorage. The Search box is
 // pinned at the top and is not part of this set.
 
+// "bookmarks" is the combined Bookmarks + History pane: collapsed it
+// shows bookmarks only; expanded it adds the page-visit History list.
 type RailSectionId =
   | "uncommitted"
   | "comments"
   | "work"
-  | "bookmarks"
-  | "history";
+  | "bookmarks";
 
 const DEFAULT_SECTION_ORDER: RailSectionId[] = [
   "uncommitted",
   "comments",
   "work",
   "bookmarks",
-  "history",
 ];
 
 // Work defaults collapsed (it keeps a one-line summary when collapsed);
@@ -88,7 +86,6 @@ const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
   comments: true,
   work: false,
   bookmarks: true,
-  history: true,
 };
 
 const RAIL_SECTION_ORDER_KEY = "oxplow.rail.sectionOrder";
@@ -452,9 +449,7 @@ export function RailHud({
           />
         );
       case "bookmarks":
-        return <BookmarksSection key={id} entries={bookmarks ?? []} onOpenPage={onOpenPage} />;
-      case "history":
-        return <HistorySection key={id} onOpenPage={onOpenPage} threadId={threadId} />;
+        return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
     }
   }
 
@@ -1158,7 +1153,7 @@ function UncommittedSection({
 
 /// Open-comments summary: counts of unresolved comments in the current
 /// stream, split by intent — "for me" (notes-to-self) and "for the
-/// agent" (follow-ups). Self-fetching + live like HistorySection;
+/// agent" (follow-ups). Self-fetching + live like the history rows;
 /// hidden when there are none. Each row opens the Comments inbox.
 function CommentsSection({
   streamId,
@@ -1281,54 +1276,57 @@ function UpNextSection({
   );
 }
 
-function BookmarksSection({
+/** The "Go To" pane — the rail's combined bookmarks + history surface.
+ *  Collapsed it shows the bookmark rows only; expanded it labels them
+ *  under a "Bookmarks" subheading and adds the page-visit History list
+ *  (recent / most-visited, toggled inline). The ↗ opens the full
+ *  "Go To" page where bookmarks are managed. */
+function GoToSection({
   entries,
+  threadId,
   onOpenPage,
 }: {
   entries: BookmarkRailEntry[];
+  threadId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  return (
-    <RailSection id="bookmarks" title="Bookmarks" count={entries.length}>
+  const history = useHistoryRows(threadId);
+
+  const bookmarkRows = (
+    <>
       {entries.length === 0 ? <RailEmpty label="No bookmarks" /> : null}
       <div data-testid="rail-bookmarks" style={{ paddingBottom: 8 }}>
         {entries.map((entry) => (
-          <div
+          <button
             key={entry.ref.id}
-            style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 6 }}
+            type="button"
+            data-testid={`rail-bookmark-${entry.ref.id}`}
+            title={entry.label}
+            onClick={() => onOpenPage(entry.ref)}
+            style={rowHoverStyle()}
           >
-            <button
-              type="button"
-              data-testid={`rail-bookmark-${entry.ref.id}`}
-              title={entry.label}
-              onClick={() => onOpenPage(entry.ref)}
-              style={{ ...rowHoverStyle(), flex: 1 }}
-            >
-              <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {entry.label}
-              </span>
-              <span
-                title={
-                  entry.scopeBadge === "T" ? "Thread bookmark"
-                    : entry.scopeBadge === "S" ? "Stream bookmark"
-                    : "Global bookmark"
-                }
-                style={{
-                  fontSize: 9,
-                  fontWeight: 600,
-                  color: "var(--text-secondary)",
-                  background: "var(--surface-tab-inactive)",
-                  padding: "1px 4px",
-                  borderRadius: 3,
-                }}
-              >
-                {entry.scopeBadge}
-              </span>
-            </button>
-          </div>
+            <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {entry.label}
+            </span>
+          </button>
         ))}
       </div>
+    </>
+  );
+
+  return (
+    <RailSection
+      id="bookmarks"
+      title="Go To"
+      count={entries.length}
+      onOpen={() => onOpenPage(dashboardRef("visits"))}
+      openTitle="Open Go To"
+      collapsedContent={bookmarkRows}
+    >
+      <SectionHeading>Bookmarks</SectionHeading>
+      {bookmarkRows}
+      <HistoryRows {...history} onOpenPage={onOpenPage} />
     </RailSection>
   );
 }
@@ -1416,13 +1414,17 @@ function FinishedSection({
   );
 }
 
-function HistorySection({
-  onOpenPage,
-  threadId,
-}: {
-  onOpenPage(ref: TabRef): void;
-  threadId: string | null;
-}) {
+interface HistoryRowsState {
+  mode: "recent" | "top";
+  toggleMode(): void;
+  recent: PageVisitApi[];
+  top: TopVisitedRowApi[];
+  wikiTitles: Record<string, string>;
+}
+
+/** Page-visit history data for the combined Bookmarks pane: recent +
+ *  most-visited rows, kept live, plus a fresh wiki slug→title map. */
+function useHistoryRows(threadId: string | null): HistoryRowsState {
   const [mode, setMode] = useState<"recent" | "top">("recent");
   const [recent, setRecent] = useState<PageVisitApi[]>([]);
   const [top, setTop] = useState<TopVisitedRowApi[]>([]);
@@ -1483,17 +1485,23 @@ function HistorySection({
     };
   }, []);
 
-  // Hide the entire section when there is nothing to show in either
-  // mode — no header, no toggle, no flicker. If the user has data in
-  // only one of the two modes, fall back to that one so the section
-  // doesn't appear "broken" when toggled.
-  if (recent.length === 0 && top.length === 0) {
-    return (
-      <RailSection id="history" title="History" onOpen={() => onOpenPage(indexRef("local-history"))} openTitle="Open History">
-        <RailEmpty label="No history yet" />
-      </RailSection>
-    );
-  }
+  const toggleMode = useCallback(() => setMode((m) => (m === "recent" ? "top" : "recent")), []);
+  return { mode, toggleMode, recent, top, wikiTitles };
+}
+
+/** History block rendered inside the expanded Bookmarks pane: a
+ *  "History" / "Most Visited" subheading with an inline recent/top
+ *  toggle, then the visit rows. */
+function HistoryRows({
+  mode,
+  toggleMode,
+  recent,
+  top,
+  wikiTitles,
+  onOpenPage,
+}: HistoryRowsState & { onOpenPage(ref: TabRef): void }) {
+  // If the user has data in only one of the two modes, fall back to
+  // that one so the toggle doesn't render an empty list.
   const effectiveMode = mode === "recent" && recent.length === 0 && top.length > 0
     ? "top"
     : mode === "top" && top.length === 0 && recent.length > 0
@@ -1501,32 +1509,49 @@ function HistorySection({
     : mode;
   const source = effectiveMode === "recent" ? recent : top;
   const entries = source.slice(0, 10);
+  const hasHistory = recent.length > 0 || top.length > 0;
 
   return (
-    <RailSection
-      id="history"
-      title={effectiveMode === "recent" ? "History" : "Most visited"}
-      onOpen={() => onOpenPage(indexRef("local-history"))}
-      openTitle="Open History"
-      headerAction={(
-        <button
-          type="button"
-          data-testid="rail-history-mode"
-          onClick={(e) => { e.stopPropagation(); setMode((m) => (m === "recent" ? "top" : "recent")); }}
-          title={effectiveMode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "12px 14px 4px",
+        }}
+      >
+        <span
           style={{
-            background: "transparent",
-            border: "none",
+            flex: 1,
+            fontSize: 11,
+            fontWeight: 600,
             color: "var(--text-secondary)",
-            cursor: "pointer",
-            fontSize: 10,
-            padding: "0 4px",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
           }}
         >
-          {effectiveMode === "recent" ? "top" : "recent"}
-        </button>
-      )}
-    >
+          {effectiveMode === "recent" ? "History" : "Most Visited"}
+        </span>
+        {hasHistory ? (
+          <button
+            type="button"
+            data-testid="rail-history-mode"
+            onClick={toggleMode}
+            title={effectiveMode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontSize: 10,
+              padding: "0 4px",
+            }}
+          >
+            {effectiveMode === "recent" ? "top" : "recent"}
+          </button>
+        ) : null}
+      </div>
+      {!hasHistory ? <RailEmpty label="No history yet" /> : null}
       <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
         {entries.map((e) => {
           // Reconstruct the full ref (with payload) from the id —
@@ -1571,6 +1596,6 @@ function HistorySection({
           );
         })}
       </div>
-    </RailSection>
+    </>
   );
 }

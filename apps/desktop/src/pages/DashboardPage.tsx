@@ -1,24 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, Task } from "../api.js";
+import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, PageVisitApi, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, Task } from "../api.js";
 import {
   countPageVisitsByDay,
   listCodeQualityFindings,
   listFileSnapshots,
+  listRecentPageVisits,
   listWikiPages,
   subscribePageVisitEvents,
   topVisitedPages,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { findingRef, indexRef, wikiPageRef, taskRef } from "../tabs/pageRefs.js";
+import { findingRef, indexRef, wikiPageRef, taskRef, refFromTabId } from "../tabs/pageRefs.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
+import { PageKindIcon } from "../pageKinds.js";
+import { useBookmarksStore } from "../tabs/useBookmarks.js";
+import type { Bookmark, BookmarkScope } from "../tabs/bookmarks.js";
+import { showToast } from "../components/toastStore.js";
+import { RAIL_HISTORY_EXCLUDE_KINDS } from "../components/RailHud/history.js";
 
 export type DashboardVariant = "planning" | "review" | "quality" | "visits";
 
 export interface DashboardPageProps {
   variant: DashboardVariant;
   stream: Stream | null;
+  /** Current thread — scopes the "Go To" page's bookmark reads/writes. */
+  threadId?: string | null;
   threadWork: ThreadWorkState | null;
   backlog: BacklogState | null;
   onOpenPage(ref: TabRef): void;
@@ -36,7 +44,7 @@ const VARIANT_TITLE: Record<DashboardVariant, string> = {
  * read-only summary stitched together from existing data slices: no new
  * IPC, no new mutations, just buttons that route through `onOpenPage`.
  */
-export function DashboardPage({ variant, stream, threadWork, backlog, onOpenPage }: DashboardPageProps) {
+export function DashboardPage({ variant, stream, threadId = null, threadWork, backlog, onOpenPage }: DashboardPageProps) {
   return (
     <Page testId={`page-dashboard-${variant}`} title={VARIANT_TITLE[variant]}>
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 960 }}>
@@ -50,7 +58,7 @@ export function DashboardPage({ variant, stream, threadWork, backlog, onOpenPage
           <QualitySections stream={stream} onOpenPage={onOpenPage} />
         ) : null}
         {variant === "visits" ? (
-          <VisitsSections onOpenPage={onOpenPage} />
+          <VisitsSections stream={stream} threadId={threadId} onOpenPage={onOpenPage} />
         ) : null}
       </div>
     </Page>
@@ -364,7 +372,20 @@ function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpen
   );
 }
 
-function VisitsSections({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
+/** The "Go To" page body — the universal "where do I want to go" hub:
+ *  the user's bookmarks (with inline scope management + removal), the
+ *  recently-visited and most-visited page lists, and a visit-volume
+ *  chart. */
+function VisitsSections({
+  stream,
+  threadId,
+  onOpenPage,
+}: {
+  stream: Stream | null;
+  threadId: string | null;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const [recent, setRecent] = useState<PageVisitApi[]>([]);
   const [top, setTop] = useState<TopVisitedRowApi[]>([]);
   const [byDay, setByDay] = useState<CountByDayRowApi[]>([]);
 
@@ -372,6 +393,14 @@ function VisitsSections({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
     let cancelled = false;
     const refresh = () => {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      void listRecentPageVisits({
+        threadId,
+        limit: 25,
+        dedupeByRef: true,
+        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
+      }).then((rows) => {
+        if (!cancelled) setRecent(rows);
+      });
       void topVisitedPages({ limit: 25, sinceT: since }).then((rows) => {
         if (!cancelled) setTop(rows);
       });
@@ -385,25 +414,218 @@ function VisitsSections({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
       cancelled = true;
       off();
     };
-  }, []);
+  }, [threadId]);
 
   return (
     <>
+      <BookmarksManager stream={stream} threadId={threadId} onOpenPage={onOpenPage} />
+      <VisitsBrowser recent={recent} top={top} onOpenPage={onOpenPage} />
       <Section title="Visits per Day (Last 30d)">
         <DailyChart rows={byDay} />
       </Section>
-      <Section title="Top 25 Most Visited (Last 30d)">
-        {top.length === 0 ? <EmptyHint>No visits recorded yet.</EmptyHint> : null}
-        {top.map((r) => (
-          <RowButton
-            key={r.refId}
-            label={r.label}
-            subtitle={`${r.count} visit${r.count === 1 ? "" : "s"} · ${r.refKind} · last ${formatRelative(r.lastT)}`}
-            onClick={() => onOpenPage({ id: r.refId, kind: r.refKind as TabRef["kind"], payload: r.payload })}
-          />
-        ))}
-      </Section>
     </>
+  );
+}
+
+/** Single toggle-able visits list: Recently Visited vs Most Visited
+ *  (last 30d), swapped via a segmented control instead of stacking. */
+function VisitsBrowser({
+  recent,
+  top,
+  onOpenPage,
+}: {
+  recent: PageVisitApi[];
+  top: TopVisitedRowApi[];
+  onOpenPage(ref: TabRef): void;
+}) {
+  const [mode, setMode] = useState<"recent" | "top">("recent");
+  return (
+    <section>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 8px" }}>
+        <div role="tablist" aria-label="Visits view" style={{ display: "inline-flex", border: "1px solid var(--border-subtle)", borderRadius: 6, overflow: "hidden" }}>
+          {([
+            { key: "recent", label: "Recently Visited" },
+            { key: "top", label: "Most Visited" },
+          ] as const).map((opt) => {
+            const active = mode === opt.key;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`goto-visits-mode-${opt.key}`}
+                onClick={() => setMode(opt.key)}
+                style={{
+                  padding: "4px 12px",
+                  fontSize: "var(--text-xs)",
+                  background: active ? "var(--accent-soft-bg, var(--surface-app))" : "transparent",
+                  color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                  fontWeight: active ? 600 : 400,
+                  border: "none",
+                  cursor: active ? "default" : "pointer",
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {mode === "top" ? (
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>Last 30 days</span>
+        ) : null}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {mode === "recent" ? (
+          recent.length === 0 ? (
+            <EmptyHint>No visits recorded yet.</EmptyHint>
+          ) : (
+            recent.map((r) => (
+              <RowButton
+                key={r.refId}
+                label={(r.label?.trim() ?? "") || r.refId}
+                subtitle={formatRelative(r.t)}
+                navRef={refFromTabId(r.refId)}
+                onNavigate={(target) => onOpenPage(target)}
+              />
+            ))
+          )
+        ) : top.length === 0 ? (
+          <EmptyHint>No visits recorded yet.</EmptyHint>
+        ) : (
+          top.map((r) => (
+            <RowButton
+              key={r.refId}
+              label={r.label}
+              subtitle={`${r.count} visit${r.count === 1 ? "" : "s"} · ${r.refKind} · last ${formatRelative(r.lastT)}`}
+              onClick={() => onOpenPage({ id: r.refId, kind: r.refKind as TabRef["kind"], payload: r.payload })}
+            />
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+const SCOPE_OPTIONS: { scope: BookmarkScope; letter: string; title: string }[] = [
+  { scope: "thread", letter: "Thread", title: "Bookmark visible only in this thread" },
+  { scope: "stream", letter: "Stream", title: "Bookmark visible across this stream" },
+  { scope: "global", letter: "Global", title: "Bookmark visible everywhere" },
+];
+
+/** Bookmarks list with inline management: open, re-scope
+ *  (thread / stream / global), and remove (fire-and-undo). */
+function BookmarksManager({
+  stream,
+  threadId,
+  onOpenPage,
+}: {
+  stream: Stream | null;
+  threadId: string | null;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const store = useBookmarksStore();
+  const streamId = stream?.id ?? null;
+  const bookmarks = store.bookmarks(threadId, streamId);
+
+  const removeBookmark = (b: Bookmark) => {
+    store.setScope(threadId, streamId, b.ref, b.label, b.scope); // collapse to a single scope first
+    store.remove(b.scope, threadId, streamId, b.ref.id);
+    showToast({
+      message: `Removed bookmark "${b.label ?? b.ref.id}"`,
+      onUndo: () => store.add(b.scope, threadId, streamId, b.ref, b.label),
+    });
+  };
+
+  return (
+    <Section title="Bookmarks">
+      {bookmarks.length === 0 ? <EmptyHint>No bookmarks yet — star a page to pin it here.</EmptyHint> : null}
+      {bookmarks.map((b) => (
+        <div
+          key={b.ref.id}
+          data-testid={`goto-bookmark-${b.ref.id}`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            background: "var(--surface-tab-inactive)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+          }}
+        >
+          <button
+            type="button"
+            data-testid={`goto-bookmark-open-${b.ref.id}`}
+            title={b.label ?? b.ref.id}
+            onClick={() => onOpenPage(b.ref)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flex: 1,
+              minWidth: 0,
+              background: "transparent",
+              border: "none",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+              fontSize: "var(--text-sm)",
+              textAlign: "left",
+            }}
+          >
+            <PageKindIcon kind={b.ref.kind} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {b.label ?? b.ref.id}
+            </span>
+          </button>
+          <div role="group" aria-label="Bookmark scope" style={{ display: "inline-flex", border: "1px solid var(--border-subtle)", borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
+            {SCOPE_OPTIONS.map((opt) => {
+              const active = b.scope === opt.scope;
+              return (
+                <button
+                  key={opt.scope}
+                  type="button"
+                  data-testid={`goto-bookmark-scope-${b.ref.id}-${opt.scope}`}
+                  aria-pressed={active}
+                  title={opt.title}
+                  onClick={() => { if (!active) store.setScope(threadId, streamId, b.ref, b.label, opt.scope); }}
+                  style={{
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    background: active ? "var(--accent-soft-bg, var(--surface-app))" : "transparent",
+                    color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                    fontWeight: active ? 600 : 400,
+                    border: "none",
+                    cursor: active ? "default" : "pointer",
+                  }}
+                >
+                  {opt.letter}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            data-testid={`goto-bookmark-remove-${b.ref.id}`}
+            title="Remove bookmark"
+            aria-label="Remove bookmark"
+            onClick={() => removeBookmark(b)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+              padding: "0 4px",
+              flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </Section>
   );
 }
 

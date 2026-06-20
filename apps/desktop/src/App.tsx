@@ -2996,12 +2996,13 @@ export function App() {
         const variant = (ref.payload as { variant?: "planning" | "review" | "quality" | "visits" } | null)?.variant ?? "planning";
         tabs.push({
           id: ref.id,
-          label: `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,
+          label: variant === "visits" ? "Go To" : `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,
           closable: true,
           render: () => (
             <DashboardPage
               variant={variant}
               stream={stream}
+              threadId={selectedThreadId}
               threadWork={selectedThreadWork}
               backlog={backlogState}
               onOpenPage={navOpen}
@@ -3196,14 +3197,10 @@ export function App() {
               .then((entries) => { setRecentlyFinished(entries); })
               .catch(() => {});
           }}
-          bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
-            const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
-            return {
-              ref: b.ref,
-              label: b.label ?? b.ref.id,
-              scopeBadge,
-            };
-          })}
+          bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => ({
+            ref: b.ref,
+            label: b.label ?? b.ref.id,
+          }))}
           onOpenPage={handleOpenPage}
           onOpenSearch={() => setQuickOpenVisible(true)}
         />

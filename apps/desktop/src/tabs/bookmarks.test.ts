@@ -79,6 +79,31 @@ describe("bookmarks store", () => {
     expect(s.bookmarks(null, null)).toHaveLength(1);
   });
 
+  test("setScope moves a bookmark across scopes, keeping a single membership", () => {
+    const s = createBookmarksStore(memStorage());
+    s.add("thread", "t-1", "s-1", REF_A, "Git Dashboard");
+    expect(s.scopesFor("t-1", "s-1", REF_A.id)).toEqual(["thread"]);
+
+    s.setScope("t-1", "s-1", REF_A, "Git Dashboard", "stream");
+    expect(s.scopesFor("t-1", "s-1", REF_A.id)).toEqual(["stream"]);
+
+    s.setScope("t-1", "s-1", REF_A, "Git Dashboard", "global");
+    expect(s.scopesFor("t-1", "s-1", REF_A.id)).toEqual(["global"]);
+
+    // Merged list still shows the ref exactly once after the moves.
+    expect(s.bookmarks("t-1", "s-1").filter((b) => b.ref.id === REF_A.id)).toHaveLength(1);
+  });
+
+  test("setScope collapses a ref bookmarked at multiple scopes into one", () => {
+    const s = createBookmarksStore(memStorage());
+    s.add("global", null, null, REF_A);
+    s.add("thread", "t-1", "s-1", REF_A);
+    expect(s.scopesFor("t-1", "s-1", REF_A.id).sort()).toEqual(["global", "thread"]);
+
+    s.setScope("t-1", "s-1", REF_A, undefined, "stream");
+    expect(s.scopesFor("t-1", "s-1", REF_A.id)).toEqual(["stream"]);
+  });
+
   test("subscribe fires on add/remove", () => {
     const s = createBookmarksStore(memStorage());
     let calls = 0;

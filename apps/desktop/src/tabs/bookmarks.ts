@@ -21,6 +21,10 @@ export interface BookmarksApi {
   scopesFor(threadId: string | null, streamId: string | null, refId: string): BookmarkScope[];
   add(scope: BookmarkScope, threadId: string | null, streamId: string | null, ref: TabRef, label?: string): void;
   remove(scope: BookmarkScope, threadId: string | null, streamId: string | null, refId: string): void;
+  /** Move a bookmark to `toScope`: drop it from every scope it currently
+   *  lives in, then add it once at `toScope`. Idempotent when the ref
+   *  already lives only at `toScope`. */
+  setScope(threadId: string | null, streamId: string | null, ref: TabRef, label: string | undefined, toScope: BookmarkScope): void;
   /** The scope the bookmark button defaults to when toggled; persisted. */
   lastScope(): BookmarkScope;
   setLastScope(scope: BookmarkScope): void;
@@ -110,6 +114,15 @@ export function createBookmarksStore(storage: Storage): BookmarksApi {
       const next = list.filter((b) => b.ref.id !== refId);
       if (next.length === list.length) return;
       writeScope(scope, threadId, streamId, next);
+    },
+    setScope(threadId, streamId, ref, label, toScope) {
+      const current = this.scopesFor(threadId, streamId, ref.id);
+      if (current.length === 1 && current[0] === toScope) return;
+      for (const scope of current) {
+        if (scope === toScope) continue;
+        this.remove(scope, threadId, streamId, ref.id);
+      }
+      this.add(toScope, threadId, streamId, ref, label);
     },
     lastScope(): BookmarkScope {
       const raw = storage.getItem(KEY_LAST_SCOPE);
