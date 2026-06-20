@@ -5,6 +5,7 @@ import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, indexRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
+import { moveToIndex } from "../CenterTabs/centerTabsReorder.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
@@ -153,7 +154,9 @@ interface RailSectionsValue {
     onDragLeave(): void;
     onDrop(e: React.DragEvent): void;
   };
-  isDropTarget(id: RailSectionId): boolean;
+  /** Which edge of `id` the insertion line should draw on (before/after),
+   *  or null when this section isn't the current drop target. */
+  dropSide(id: RailSectionId): "before" | "after" | null;
 }
 
 const RailSectionsContext = createContext<RailSectionsValue | null>(null);
@@ -166,7 +169,7 @@ function useRailSections(threadId: string | null): { value: RailSectionsValue; o
   const [expandedByThread, setExpandedByThread] =
     useState<ExpandedByThread>(loadSectionExpanded);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<RailSectionId | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
   const tkey = threadKey(threadId);
 
   const persistOrder = useCallback((next: RailSectionId[]) => {
@@ -198,43 +201,50 @@ function useRailSections(threadId: string | null): { value: RailSectionsValue; o
     },
     onDragEnd() {
       setDraggingId(null);
-      setDropTargetId(null);
+      setDropTarget(null);
     },
   }), []);
 
   const dropZone = useCallback((id: RailSectionId) => ({
     onDragOver(e: React.DragEvent) {
-      if (!draggingId || draggingId === id) return;
+      // Only react to our own section drag. Accept it everywhere (even
+      // over the dragged section itself) so the insertion line tracks the
+      // cursor and the cursor resolves to "move" (not the "+" copy icon).
+      if (!draggingId) return;
       if (!e.dataTransfer.types.includes(RAIL_SECTION_DRAG_MIME)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      if (dropTargetId !== id) setDropTargetId(id);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const side: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+      if (dropTarget?.id !== id || dropTarget.side !== side) setDropTarget({ id, side });
     },
     onDragLeave() {
-      if (dropTargetId === id) setDropTargetId(null);
+      if (dropTarget?.id === id) setDropTarget(null);
     },
     onDrop(e: React.DragEvent) {
       e.preventDefault();
       const sourceId = (e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId) as RailSectionId | "";
       setDraggingId(null);
-      setDropTargetId(null);
-      if (!sourceId || sourceId === id) return;
-      const next = order.filter((x) => x !== sourceId);
-      const targetIdx = next.indexOf(id);
+      setDropTarget(null);
+      if (!sourceId) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const after = e.clientY >= rect.top + rect.height / 2;
+      const targetIdx = order.indexOf(id);
       if (targetIdx < 0) return;
-      next.splice(targetIdx, 0, sourceId);
-      persistOrder(next);
+      const next = moveToIndex(order as string[], sourceId, after ? targetIdx + 1 : targetIdx) as RailSectionId[];
+      if (next !== order) persistOrder(next);
     },
-  }), [draggingId, dropTargetId, order, persistOrder]);
+  }), [draggingId, dropTarget, order, persistOrder]);
 
-  const isDropTarget = useCallback(
-    (id: RailSectionId) => dropTargetId === id && draggingId !== null && draggingId !== id,
-    [dropTargetId, draggingId],
+  const dropSide = useCallback(
+    (id: RailSectionId): "before" | "after" | null =>
+      draggingId !== null && dropTarget?.id === id ? dropTarget.side : null,
+    [dropTarget, draggingId],
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, toggle, dragHandle, dropZone, isDropTarget }),
-    [isExpanded, toggle, dragHandle, dropZone, isDropTarget],
+    () => ({ isExpanded, toggle, dragHandle, dropZone, dropSide }),
+    [isExpanded, toggle, dragHandle, dropZone, dropSide],
   );
   return { value, order };
 }
@@ -267,30 +277,50 @@ function RailSection({
 }) {
   const ctx = useContext(RailSectionsContext);
   const expanded = ctx ? ctx.isExpanded(id) : true;
+  const side = ctx ? ctx.dropSide(id) : null;
   const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-secondary)";
   return (
+    // Wrapper holds the inter-pane margin + drop-zone and (unlike the card)
+    // is not overflow-clipped, so the insertion line can sit in the gap.
     <div
       data-testid={`rail-section-${id}`}
       {...(ctx ? ctx.dropZone(id) : {})}
       style={{
-        // Each section is an inset, rounded card (matching the Search
-        // box) that recesses below the lighter rail, separated from its
-        // neighbours by a gap that reveals the rail behind it
-        // (IntelliJ-style grouping). The drop target lights up with an
-        // inset accent ring.
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        overflow: "hidden",
+        position: "relative",
         margin: "0 6px 6px",
-        // Don't let the flex column shrink panels when the total height
-        // exceeds the viewport — they stack and the column scrolls, so an
-        // expanding section pushes the ones below down instead of
-        // squishing the ones above.
+        // Don't let the flex column shrink panels when total height exceeds
+        // the viewport — they stack and the column scrolls.
         flexShrink: 0,
-        boxShadow: ctx?.isDropTarget(id) ? "inset 0 0 0 2px var(--accent)" : undefined,
       }}
     >
+      {side ? (
+        <span
+          aria-hidden
+          data-testid={`rail-section-drop-line-${id}-${side}`}
+          style={{
+            position: "absolute",
+            left: 4,
+            right: 4,
+            [side === "before" ? "top" : "bottom"]: -4,
+            height: 3,
+            background: "var(--accent)",
+            borderRadius: 2,
+            pointerEvents: "none",
+            zIndex: 2,
+          }}
+        />
+      ) : null}
+      <div
+        style={{
+          // Inset, rounded card (matching the Search box) that recesses
+          // below the lighter rail; the gap between cards reveals the rail
+          // (IntelliJ-style grouping).
+          background: "var(--surface-card)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: 6,
+          overflow: "hidden",
+        }}
+      >
       <div
         style={{
           display: "flex",
@@ -376,6 +406,7 @@ function RailSection({
         ) : null}
       </div>
       {expanded ? children : (collapsedContent ?? null)}
+      </div>
     </div>
   );
 }
