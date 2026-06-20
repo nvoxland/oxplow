@@ -186,11 +186,6 @@ impl ThreadService {
         Ok(())
     }
 
-    pub async fn delete(&self, id: &ThreadId) -> Result<(), ThreadError> {
-        self.threads.delete(id).await?;
-        Ok(())
-    }
-
     pub async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, ThreadError> {
         Ok(self.threads.list_for_stream(stream).await?)
     }

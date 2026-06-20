@@ -63,10 +63,6 @@ fn extract_thread_id(payload: &serde_json::Value) -> Option<oxplow_domain::Threa
         .and_then(oxplow_domain::ThreadId::try_from_str)
 }
 
-pub async fn list_recent_usage(svc: &Services, limit: u32) -> Result<Vec<UsageEvent>, IpcError> {
-    Ok(svc.usage_store.list_recent(limit as usize).await?)
-}
-
 /// Per-key rollup of recent usage events of a single `kind`. Returns
 /// the most-recently-touched keys (file paths, note slugs, task
 /// ids, …) along with how many times each has been touched. Drives
@@ -96,14 +92,5 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_object());
-    }
-
-    #[tokio::test]
-    async fn list_recent_usage_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch("list_recent_usage", serde_json::json!({"limit": 10}), &svc)
-            .await
-            .unwrap();
-        assert!(out.is_array());
     }
 }

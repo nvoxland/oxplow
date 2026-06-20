@@ -8,7 +8,7 @@
 
 use oxplow_app::Services;
 use oxplow_domain::stores::{TaskEventStore, TaskNoteStore};
-use oxplow_domain::{NoteId, TaskEvent, TaskId, TaskNote, ThreadId};
+use oxplow_domain::{TaskEvent, TaskId, TaskNote, ThreadId};
 
 use crate::error::IpcError;
 
@@ -29,10 +29,6 @@ pub async fn list_thread_notes(
     thread_id: ThreadId,
 ) -> Result<Vec<TaskNote>, IpcError> {
     Ok(svc.work_note_store.list_for_thread(&thread_id).await?)
-}
-
-pub async fn delete_work_note(svc: &Services, id: NoteId) -> Result<(), IpcError> {
-    Ok(svc.work_note_store.delete(&id).await?)
 }
 
 pub async fn list_task_events(

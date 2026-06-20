@@ -26,14 +26,6 @@ pub async fn remove_followup(svc: &Services, id: String) -> Result<(), IpcError>
     Ok(())
 }
 
-pub async fn clear_followups_for_thread(
-    svc: &Services,
-    thread_id: ThreadId,
-) -> Result<(), IpcError> {
-    svc.followups.clear_for_thread(&thread_id);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]

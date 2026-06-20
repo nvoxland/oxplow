@@ -68,6 +68,10 @@ export function ContextMenu({ items, position, onClose, minWidth = 220, zIndex =
         zIndex,
       }}
       onMouseDown={(event) => event.stopPropagation()}
+      // The menu is rendered inline inside the row it acts on, so a
+      // menu-item click would otherwise bubble to the row's onClick —
+      // selecting the row / closing the navigator slideout (tsk190).
+      onClick={(event) => event.stopPropagation()}
     >
       <MenuList items={items} onAction={onClose} minWidth={minWidth} />
     </div>

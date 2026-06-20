@@ -31,12 +31,3 @@ pub async fn remove_followup(
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::followup::remove_followup(&state, id).await
 }
-
-#[tauri::command]
-#[specta::specta]
-pub async fn clear_followups_for_thread(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::followup::clear_followups_for_thread(&state, thread_id).await
-}

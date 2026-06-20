@@ -118,7 +118,6 @@ pub const MANIFEST: &[Capability] = &[
     both("list_thread_notes"),
     both("list_effort_observations"),
     ui("list_nudges_for_effort"),
-    ui("list_nudges_for_thread"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),
     ui("get_thread_token_totals"),
@@ -131,27 +130,14 @@ pub const MANIFEST: &[Capability] = &[
     both("search"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
-    both_named(
-        "task.list_for_thread",
-        "list_tasks_for_thread",
-        "list_tasks",
-    ),
-    both_named("note.delete", "delete_work_note", "delete_wiki_page"),
+    agent("list_tasks"),
     both_named(
         "wiki.search_titles",
         "search_wiki_titles",
         "search_wiki_pages",
     ),
-    both_named(
-        "wiki.search_bodies",
-        "search_wiki_bodies",
-        "search_wiki_page_bodies",
-    ),
-    both_named(
-        "wiki.get_metadata",
-        "get_wiki_page",
-        "get_wiki_page_metadata",
-    ),
+    agent("search_wiki_page_bodies"),
+    agent("get_wiki_page_metadata"),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     both_named(
         "comment.respond",
@@ -251,30 +237,23 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: app / misc ----
     ui("log_ui"),
     // ---- ui-only: streams ----
-    ui("ensure_primary"),
     ui("create_worktree"),
     ui("adopt_worktree"),
-    ui("delete_stream"),
     ui("archive_stream"),
     ui("get_primary_stream"),
     ui("get_current_stream"),
     ui("set_stream_prompt"),
     ui("reorder_streams"),
     // ---- ui-only: threads ----
-    ui("get_thread"),
-    ui("upsert_thread"),
-    ui("delete_thread"),
     ui("create_thread"),
     ui("set_thread_prompt"),
     ui("set_agents"),
     ui("list_closed_threads"),
     ui("reorder_thread_queue"),
-    ui("get_selected_thread"),
     ui("get_thread_state"),
     ui("get_thread_work_state"),
     // ---- ui-only: tasks / backlog ----
     ui("move_task"),
-    ui("get_task_summaries"),
     ui("get_backlog_state"),
     // ---- ui-only: notes ----
     ui("list_task_events"),
@@ -285,7 +264,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("delete_comment"),
     // ---- ui-only: wiki (bodies stay direct file writes) ----
     ui("upsert_wiki_page"),
-    ui("delete_wiki_page"),
+    both("delete_wiki_page"),
     ui("read_wiki_page_body"),
     ui("write_wiki_page_body"),
     // ---- ui-only: wiki freshness ----
@@ -298,13 +277,10 @@ pub const MANIFEST: &[Capability] = &[
     ui("top_visited_pages"),
     ui("forget_page"),
     ui("count_page_visits_by_day"),
-    ui("list_frequent_usage"),
-    ui("list_currently_open_usage"),
     ui("list_recently_finished"),
     ui("clear_recently_finished"),
     // ---- ui-only: usage ----
     ui("record_usage"),
-    ui("list_recent_usage"),
     ui("list_recent_usage_rollup"),
     // ---- ui-only: code quality (UI-internal analysis helpers) ----
     ui("run_duplication_scan_at"),
@@ -324,16 +300,13 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_all_refs"),
     ui("resolve_commit_ref_labels"),
     ui("list_recent_remote_branches"),
-    ui("list_existing_worktrees"),
     ui("list_adoptable_worktrees"),
     ui("local_blame"),
     // ---- ui-only: hooks / agent lifecycle ----
     ui("ingest_hook_event"),
     ui("list_hook_events"),
-    ui("list_hook_events_by_kind"),
     ui("list_agent_statuses"),
     ui("list_open_agent_turns"),
-    ui("list_recent_agent_turns"),
     // ---- ui-only: config ----
     ui("get_config"),
     ui("set_agent_prompt_append"),
@@ -342,9 +315,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_generated"),
     ui("set_agent_model"),
     ui("get_workspace_context"),
-    // ---- ui-only: agent panes ----
-    ui("ensure_agent_pane"),
-    ui("teardown_agent_panes"),
     // ---- ui-only: efforts ----
     ui("list_task_efforts"),
     ui("get_effort_files"),
@@ -369,8 +339,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("complete_background_task"),
     ui("fail_background_task"),
     ui("update_background_task"),
-    // ---- ui-only: followups (bulk clear) ----
-    ui("clear_followups_for_thread"),
     // ---- ui-only: webview ----
     ui("open_external_url"),
     ui("clipboard_read_text"),

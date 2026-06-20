@@ -15,12 +15,6 @@ pub async fn list_streams(state: tauri::State<'_, AppState>) -> Result<Vec<Strea
 
 #[tauri::command]
 #[specta::specta]
-pub async fn ensure_primary(state: tauri::State<'_, AppState>) -> Result<Stream, IpcError> {
-    oxplow_rpc::commands::streams::ensure_primary(&state).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn create_worktree(
     state: tauri::State<'_, AppState>,
     req: CreateWorktreeRequest,
@@ -39,15 +33,6 @@ pub async fn adopt_worktree(
     req: AdoptWorktreeRequest,
 ) -> Result<Stream, IpcError> {
     oxplow_rpc::commands::streams::adopt_worktree(&state, req).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn delete_stream(
-    state: tauri::State<'_, AppState>,
-    id: StreamId,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::streams::delete_stream(&state, id).await
 }
 
 /// Soft-delete a stream and every thread under it via `archived_at`.

@@ -35,10 +35,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::log_ui,
             // streams
             commands::streams::list_streams,
-            commands::streams::ensure_primary,
             commands::streams::create_worktree,
             commands::streams::adopt_worktree,
-            commands::streams::delete_stream,
             commands::streams::archive_stream,
             commands::streams::get_primary_stream,
             commands::streams::get_current_stream,
@@ -49,9 +47,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::streams::reorder_streams,
             // threads
             commands::threads::list_threads,
-            commands::threads::get_thread,
-            commands::threads::upsert_thread,
-            commands::threads::delete_thread,
             commands::threads::create_thread,
             commands::threads::rename_thread,
             commands::threads::set_thread_prompt,
@@ -60,12 +55,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::threads::reopen_thread,
             commands::threads::list_closed_threads,
             commands::threads::reorder_thread_queue,
-            commands::threads::get_selected_thread,
             commands::threads::select_thread,
             commands::threads::get_thread_state,
             commands::threads::get_thread_work_state,
             // tasks
-            commands::tasks::list_tasks_for_thread,
             commands::tasks::get_task,
             commands::tasks::upsert_task,
             commands::tasks::delete_task,
@@ -73,7 +66,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::tasks::update_task,
             commands::tasks::reorder_tasks,
             commands::tasks::move_task,
-            commands::tasks::get_task_summaries,
             // backlog
             commands::backlog::list_backlog,
             commands::backlog::get_backlog_state,
@@ -82,7 +74,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // notes (task / thread)
             commands::notes::add_thread_note,
             commands::notes::list_thread_notes,
-            commands::notes::delete_work_note,
             commands::notes::list_task_events,
             // comments
             commands::comments::create_comment,
@@ -96,11 +87,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::comments::delete_comment,
             // wiki
             commands::wiki::list_wiki_pages,
-            commands::wiki::get_wiki_page,
             commands::wiki::upsert_wiki_page,
             commands::wiki::delete_wiki_page,
             commands::wiki::search_wiki_titles,
-            commands::wiki::search_wiki_bodies,
             commands::wiki::read_wiki_page_body,
             commands::wiki::write_wiki_page_body,
             // page refs (unified backlinks/outbound)
@@ -116,13 +105,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::page_visit::top_visited_pages,
             commands::page_visit::forget_page,
             commands::page_visit::count_page_visits_by_day,
-            commands::page_visit::list_frequent_usage,
-            commands::page_visit::list_currently_open_usage,
             commands::page_visit::list_recently_finished,
             commands::page_visit::clear_recently_finished,
             // usage
             commands::usage::record_usage,
-            commands::usage::list_recent_usage,
             commands::usage::list_recent_usage_rollup,
             // code quality
             commands::code_quality::list_code_quality_scans,
@@ -175,7 +161,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::git::list_file_commits,
             commands::git::read_file_at_ref,
             commands::git::search_workspace_text,
-            commands::git::list_existing_worktrees,
             commands::git::list_adoptable_worktrees,
             commands::git::git_blame,
             commands::git::local_blame,
@@ -184,10 +169,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // hooks / agent lifecycle
             commands::hooks::ingest_hook_event,
             commands::hooks::list_hook_events,
-            commands::hooks::list_hook_events_by_kind,
             commands::hooks::list_agent_statuses,
             commands::hooks::list_open_agent_turns,
-            commands::hooks::list_recent_agent_turns,
             // config
             commands::config::get_config,
             commands::config::set_agent_prompt_append,
@@ -197,9 +180,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::config::set_generated,
             commands::config::set_agent_model,
             commands::config::get_workspace_context,
-            // agent panes
-            commands::agent_panes::ensure_agent_pane,
-            commands::agent_panes::teardown_agent_panes,
             // efforts
             commands::effort::list_task_efforts,
             commands::effort::get_effort_files,
@@ -207,7 +187,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::effort::list_changed_paths_for_effort,
             commands::effort::list_effort_observations,
             commands::effort::list_nudges_for_effort,
-            commands::effort::list_nudges_for_thread,
             commands::effort::list_token_usage_for_effort,
             commands::effort::get_effort_token_totals,
             commands::effort::get_thread_token_totals,
@@ -237,7 +216,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::followup::list_followups,
             commands::followup::add_followup,
             commands::followup::remove_followup,
-            commands::followup::clear_followups_for_thread,
             // webview
             commands::webview::open_external_url,
             commands::webview::clipboard_read_text,

@@ -1,4 +1,4 @@
-use oxplow_domain::{Task, TaskId, ThreadId};
+use oxplow_domain::{Task, TaskId};
 
 pub use oxplow_rpc::commands::tasks::{
     CreateTaskRequest, MoveTaskRequest, ReorderTasksRequest, UpdateTaskRequest,
@@ -6,15 +6,6 @@ pub use oxplow_rpc::commands::tasks::{
 
 use crate::error::IpcError;
 use crate::state::AppState;
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_tasks_for_thread(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-) -> Result<Vec<Task>, IpcError> {
-    oxplow_rpc::commands::tasks::list_tasks_for_thread(&state, thread_id).await
-}
 
 #[tauri::command]
 #[specta::specta]
@@ -68,15 +59,6 @@ pub async fn reorder_tasks(
     req: ReorderTasksRequest,
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::tasks::reorder_tasks(&state, req).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn get_task_summaries(
-    state: tauri::State<'_, AppState>,
-    thread_id: Option<ThreadId>,
-) -> Result<Vec<Task>, IpcError> {
-    oxplow_rpc::commands::tasks::get_task_summaries(&state, thread_id).await
 }
 
 #[tauri::command]

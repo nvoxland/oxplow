@@ -109,19 +109,6 @@ pub async fn list_nudges_for_effort(
         .await?)
 }
 
-/// Persisted agent nudges for a whole thread (effort-scoped and thread-only),
-/// newest-first. The thread-scoped fallback for nudges that fire with no open
-/// effort.
-pub async fn list_nudges_for_thread(
-    svc: &Services,
-    thread_id: ThreadId,
-) -> Result<Vec<AgentNudge>, IpcError> {
-    Ok(svc
-        .nudge_store
-        .list_for_thread(&thread_id.to_string())
-        .await?)
-}
-
 /// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
 /// Drives the per-effort token panel on the task page.
 pub async fn list_token_usage_for_effort(
@@ -191,19 +178,6 @@ mod tests {
         let out = crate::dispatch(
             "list_nudges_for_effort",
             serde_json::json!({"effortId": "eff999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-    }
-
-    #[tokio::test]
-    async fn list_nudges_for_thread_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_nudges_for_thread",
-            serde_json::json!({"threadId": "thr999999"}),
             &svc,
         )
         .await

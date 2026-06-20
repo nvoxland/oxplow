@@ -3,7 +3,7 @@
 //! — task_effort.summary already records what shipped on a
 //! task, so a separate note table for the same purpose was duplicative.
 
-use oxplow_domain::{NoteId, TaskEvent, TaskId, TaskNote, ThreadId};
+use oxplow_domain::{TaskEvent, TaskId, TaskNote, ThreadId};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -26,15 +26,6 @@ pub async fn list_thread_notes(
     thread_id: ThreadId,
 ) -> Result<Vec<TaskNote>, IpcError> {
     oxplow_rpc::commands::notes::list_thread_notes(&state, thread_id).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn delete_work_note(
-    state: tauri::State<'_, AppState>,
-    id: NoteId,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::notes::delete_work_note(&state, id).await
 }
 
 #[tauri::command]

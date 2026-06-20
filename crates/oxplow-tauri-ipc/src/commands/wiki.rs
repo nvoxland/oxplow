@@ -1,6 +1,6 @@
 //! Wiki pages — file-backed knowledge base.
 
-use oxplow_db::{WikiPage, WikiPageSearchHit};
+use oxplow_db::WikiPage;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -9,15 +9,6 @@ use crate::state::AppState;
 #[specta::specta]
 pub async fn list_wiki_pages(state: tauri::State<'_, AppState>) -> Result<Vec<WikiPage>, IpcError> {
     oxplow_rpc::commands::wiki::list_wiki_pages(&state).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn get_wiki_page(
-    state: tauri::State<'_, AppState>,
-    slug: String,
-) -> Result<Option<WikiPage>, IpcError> {
-    oxplow_rpc::commands::wiki::get_wiki_page(&state, slug).await
 }
 
 #[tauri::command]
@@ -46,16 +37,6 @@ pub async fn search_wiki_titles(
     limit: u32,
 ) -> Result<Vec<WikiPage>, IpcError> {
     oxplow_rpc::commands::wiki::search_wiki_titles(&state, query, limit).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn search_wiki_bodies(
-    state: tauri::State<'_, AppState>,
-    query: String,
-    limit: u32,
-) -> Result<Vec<WikiPageSearchHit>, IpcError> {
-    oxplow_rpc::commands::wiki::search_wiki_bodies(&state, query, limit).await
 }
 
 #[tauri::command]

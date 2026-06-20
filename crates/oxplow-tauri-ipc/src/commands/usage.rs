@@ -13,15 +13,6 @@ pub async fn record_usage(
     oxplow_rpc::commands::usage::record_usage(&state, kind, payload_json).await
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn list_recent_usage(
-    state: tauri::State<'_, AppState>,
-    limit: u32,
-) -> Result<Vec<UsageEvent>, IpcError> {
-    oxplow_rpc::commands::usage::list_recent_usage(&state, limit).await
-}
-
 /// Per-key rollup of recent usage events of a single `kind`. Returns
 /// the most-recently-touched keys (file paths, note slugs, task
 /// ids, …) along with how many times each has been touched. Drives

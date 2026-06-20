@@ -15,28 +15,6 @@ pub async fn list_threads(svc: &Services, stream_id: StreamId) -> Result<Vec<Thr
     Ok(svc.thread_store.list_for_stream(&stream_id).await?)
 }
 
-pub async fn get_thread(svc: &Services, thread_id: ThreadId) -> Result<Option<Thread>, IpcError> {
-    Ok(svc.thread_store.get(&thread_id).await?)
-}
-
-pub async fn upsert_thread(svc: &Services, thread: Thread) -> Result<(), IpcError> {
-    let stream_id = thread.stream_id;
-    svc.thread_store.upsert(&thread).await?;
-    svc.events.emit(OxplowEvent::ThreadsChanged { stream_id });
-    Ok(())
-}
-
-pub async fn delete_thread(svc: &Services, thread_id: ThreadId) -> Result<(), IpcError> {
-    // Capture stream_id before delete so the event can target it.
-    let stream_id = svc.thread_store.get(&thread_id).await?.map(|t| t.stream_id);
-    svc.thread_store.delete(&thread_id).await?;
-    if let Some(sid) = stream_id {
-        svc.events
-            .emit(OxplowEvent::ThreadsChanged { stream_id: sid });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CreateThreadRequest {
     #[serde(rename = "streamId")]
@@ -148,13 +126,6 @@ pub async fn reorder_thread_queue(
         stream_id: req.stream_id,
     });
     Ok(())
-}
-
-pub async fn get_selected_thread(
-    svc: &Services,
-    stream_id: StreamId,
-) -> Result<Option<ThreadId>, IpcError> {
-    Ok(svc.threads.selected(&stream_id).await?)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

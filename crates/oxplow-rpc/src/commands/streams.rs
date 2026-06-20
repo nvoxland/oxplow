@@ -14,10 +14,6 @@ pub async fn list_streams(svc: &Services) -> Result<Vec<Stream>, IpcError> {
     Ok(svc.streams.list_streams().await?)
 }
 
-pub async fn ensure_primary(svc: &Services) -> Result<Stream, IpcError> {
-    Ok(svc.streams.ensure_primary().await?)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CreateWorktreeRequest {
     pub slug: String,
@@ -73,20 +69,6 @@ pub async fn adopt_worktree(svc: &Services, req: AdoptWorktreeRequest) -> Result
     }
     svc.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
-}
-
-pub async fn delete_stream(svc: &Services, id: StreamId) -> Result<(), IpcError> {
-    svc.streams.delete_stream(&id).await?;
-    // Drop the stream's file rows from the search index.
-    let _ = svc.search_store.purge_stream(&id.to_string()).await;
-    svc.git.deregister(&id).await;
-    // Drop the per-stream snapshot service from the registry. The
-    // spawned watcher task continues until process exit (it holds an
-    // internal Arc to keep the service alive); follow-up to add
-    // graceful shutdown is filed separately.
-    svc.snapshot_captures.unregister(&id);
-    svc.events.emit(OxplowEvent::StreamsChanged);
-    Ok(())
 }
 
 /// Soft-delete a stream and every thread under it via `archived_at`.
@@ -232,15 +214,6 @@ pub async fn checkout_stream_branch(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn ensure_primary_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch("ensure_primary", serde_json::json!({}), &svc)
-            .await
-            .unwrap();
-        assert!(out.is_object(), "expected a stream object, got {out}");
-    }
-
     #[tokio::test]
     async fn switch_stream_accepts_optional_id() {
         let (svc, _dir) = crate::test_support::services();

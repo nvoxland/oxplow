@@ -10,13 +10,6 @@ use oxplow_domain::{Task, TaskId, ThreadId};
 
 use crate::error::IpcError;
 
-pub async fn list_tasks_for_thread(
-    svc: &Services,
-    thread_id: ThreadId,
-) -> Result<Vec<Task>, IpcError> {
-    Ok(svc.task_store.list_for_thread(&thread_id).await?)
-}
-
 pub async fn get_task(svc: &Services, id: TaskId) -> Result<Option<Task>, IpcError> {
     Ok(svc.task_store.get(id).await?)
 }
@@ -107,16 +100,6 @@ pub struct MoveTaskRequest {
     pub thread_id: Option<ThreadId>,
 }
 
-pub async fn get_task_summaries(
-    svc: &Services,
-    thread_id: Option<ThreadId>,
-) -> Result<Vec<Task>, IpcError> {
-    Ok(match thread_id {
-        Some(t) => svc.task_store.list_for_thread(&t).await?,
-        None => svc.task_store.list_backlog().await?,
-    })
-}
-
 pub async fn move_task(svc: &Services, req: MoveTaskRequest) -> Result<Task, IpcError> {
     let origin_thread_id = svc.task_store.get(req.id).await?.and_then(|i| i.thread_id);
     let item = svc.tasks.move_to(req.id, req.thread_id).await?;
@@ -137,25 +120,11 @@ pub async fn move_task(svc: &Services, req: MoveTaskRequest) -> Result<Task, Ipc
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn list_tasks_for_thread_dispatches() {
+    async fn get_task_dispatches_for_missing_returns_null() {
         let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_tasks_for_thread",
-            serde_json::json!({"threadId": "thr999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-    }
-
-    #[tokio::test]
-    async fn get_task_summaries_dispatches_with_absent_optional_arg() {
-        let (svc, _dir) = crate::test_support::services();
-        // `threadId` omitted → None → backlog listing.
-        let out = crate::dispatch("get_task_summaries", serde_json::json!({}), &svc)
+        let out = crate::dispatch("get_task", serde_json::json!({"id": "tsk999999"}), &svc)
             .await
             .unwrap();
-        assert!(out.is_array());
+        assert!(out.is_null());
     }
 }

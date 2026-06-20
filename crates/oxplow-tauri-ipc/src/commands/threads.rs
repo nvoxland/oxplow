@@ -19,33 +19,6 @@ pub async fn list_threads(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_thread(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-) -> Result<Option<Thread>, IpcError> {
-    oxplow_rpc::commands::threads::get_thread(&state, thread_id).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn upsert_thread(
-    state: tauri::State<'_, AppState>,
-    thread: Thread,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::threads::upsert_thread(&state, thread).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn delete_thread(
-    state: tauri::State<'_, AppState>,
-    thread_id: ThreadId,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::threads::delete_thread(&state, thread_id).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn create_thread(
     state: tauri::State<'_, AppState>,
     req: CreateThreadRequest,
@@ -114,15 +87,6 @@ pub async fn reorder_thread_queue(
     req: ReorderThreadQueueRequest,
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::threads::reorder_thread_queue(&state, req).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn get_selected_thread(
-    state: tauri::State<'_, AppState>,
-    stream_id: StreamId,
-) -> Result<Option<ThreadId>, IpcError> {
-    oxplow_rpc::commands::threads::get_selected_thread(&state, stream_id).await
 }
 
 /// Aggregate "what threads exist on this stream and what's selected/active".
