@@ -1102,13 +1102,13 @@ function UncommittedSection({
   const added = summary?.added ?? 0;
   const modified = summary?.modified ?? 0;
   const deleted = summary?.deleted ?? 0;
-  const parts: string[] = [];
-  if (added > 0) parts.push(`${added}A`);
-  if (modified > 0) parts.push(`${modified}M`);
-  if (deleted > 0) parts.push(`${deleted}D`);
+  const segs: { label: string; color: string }[] = [];
+  if (added > 0) segs.push({ label: `${added}A`, color: U_STATUS_META.added.color });
+  if (modified > 0) segs.push({ label: `${modified}M`, color: U_STATUS_META.modified.color });
+  if (deleted > 0) segs.push({ label: `${deleted}D`, color: U_STATUS_META.deleted.color });
   const conflictedCount = summary?.conflictedCount ?? 0;
   const op = summary?.gitOperation ?? null;
-  const hasFileSummary = parts.length > 0;
+  const hasFileSummary = segs.length > 0;
   const hasConflictRow = conflictedCount > 0 || op !== null;
   const files = summary?.files ?? [];
   const total = added + modified + deleted;
@@ -1121,7 +1121,11 @@ function UncommittedSection({
       title="Open uncommitted changes"
       style={{ ...rowStyle, padding: "4px 14px 8px", gap: 8 }}
     >
-      <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>{parts.join(" · ")}</span>
+      <span style={{ fontSize: "var(--text-xs)", display: "inline-flex", gap: 6, fontWeight: 600 }}>
+        {segs.map((s) => (
+          <span key={s.label} style={{ color: s.color }}>{s.label}</span>
+        ))}
+      </span>
       <span style={{ flex: 1 }} />
       <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>+{summary?.additions ?? 0}</span>
       <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>−{summary?.deletions ?? 0}</span>
