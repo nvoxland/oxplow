@@ -57,10 +57,14 @@ Things I keep forgetting. Read this before adding any UI.
   destructives that aren't tied to a specific row.
 - **Async-op failures don't `alert`.** Push a record into
   `opErrorsStore` (`recordOpError({ label, command?, stderr?, stdout?,
-  exitCode?, message? })`) — the RailHud renders an Errors section
-  with red rows; clicking a row opens an `op-error` page tab with the
-  full output. For ops that already have a page focus when they fail
-  (e.g. `runConfirmed` in GitDashboardPage), call
+  exitCode?, message? })`). Errors surface in two places, both global
+  (not scoped to a thread): a transient toast at the moment of failure
+  ("<label> — View"), and the **status-bar `OpErrorIndicator`** (a red
+  `⚠ N` chip in the bottom bar that only appears when there are errors;
+  click for the popover list). Clicking a row — or the toast's "View" —
+  opens an `op-error` page tab with the full output. There is **no rail
+  "Errors" section** any more. For ops that already have a page focus
+  when they fail (e.g. `runConfirmed` in GitDashboardPage), call
   `onOpenPage(opErrorRef(id))` after recording so the user lands on
   the detail view directly.
 - **Every `<button>` needs an explicit `type`.** HTML defaults

@@ -971,13 +971,30 @@ export function App() {
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
 
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
-  const opErrors = useMemo(
-    () => opErrorsAll.filter((e) => e.threadId === null || e.threadId === selectedThreadId),
-    [opErrorsAll, selectedThreadId],
-  );
   useEffect(() => {
     opErrorsStore.setActiveThread(selectedThreadId);
   }, [selectedThreadId, opErrorsStore]);
+  // Toast each newly-recorded error (errors now surface via the status-bar
+  // OpErrorIndicator; the toast gives the moment-of-failure heads-up). Seed
+  // the known set on first run so pre-existing errors don't toast on boot.
+  const knownErrorIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (knownErrorIds.current === null) {
+      knownErrorIds.current = new Set(opErrorsAll.map((e) => e.id));
+      return;
+    }
+    const known = knownErrorIds.current;
+    for (const e of opErrorsAll) {
+      if (known.has(e.id)) continue;
+      known.add(e.id);
+      const errorId = e.id;
+      showToast({
+        message: e.label,
+        actionLabel: "View",
+        onUndo: () => handleOpenPageRef.current?.(opErrorRef(errorId)),
+      });
+    }
+  }, [opErrorsAll]);
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -3134,16 +3151,6 @@ export function App() {
           threadWork={selectedThreadWork}
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
-          opErrors={opErrors}
-          onDismissOpError={(id) => {
-            opErrorsStore.dismiss(id);
-            void forgetPage("op-error", `op-error:${id}`);
-          }}
-          onClearOpErrors={() => {
-            const ids = opErrorsAll.map((e) => e.id);
-            opErrorsStore.clear();
-            for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
-          }}
           onClearFinished={() => {
             void clearRecentlyFinished(selectedThreadId)
               .then(() => listRecentlyFinished(selectedThreadId, 5))
@@ -3250,7 +3257,20 @@ export function App() {
             </span>
           );
         })()}
-        <StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />
+        <StatusBar
+          stream={stream}
+          gitEnabled={workspaceContext.gitEnabled}
+          onOpenPage={handleOpenPage}
+          onDismissOpError={(id) => {
+            opErrorsStore.dismiss(id);
+            void forgetPage("op-error", `op-error:${id}`);
+          }}
+          onClearOpErrors={() => {
+            const ids = opErrorsAll.map((e) => e.id);
+            opErrorsStore.clear();
+            for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
+          }}
+        />
       </div>
         </div>
       </div>

@@ -2,10 +2,16 @@ import { checkoutStreamBranch } from "../api.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { BackgroundTaskIndicator } from "./BackgroundTaskIndicator.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
+import { OpErrorIndicator } from "./OpErrorIndicator.js";
+import type { TabRef } from "../tabs/tabState.js";
 
 interface Props {
   stream: Stream | null;
   gitEnabled: boolean;
+  /** Async-op error surfacing — the indicator only renders when there are errors. */
+  onOpenPage(ref: TabRef): void;
+  onDismissOpError(id: string): void;
+  onClearOpErrors(): void;
 }
 
 /**
@@ -14,7 +20,7 @@ interface Props {
  * picker chip. Clicking the branch chip opens the picker; clicking the
  * task indicator opens its own popover with the live task list.
  */
-export function StatusBar({ stream, gitEnabled }: Props) {
+export function StatusBar({ stream, gitEnabled, onOpenPage, onDismissOpError, onClearOpErrors }: Props) {
   const canInteract = !!stream && gitEnabled;
   const label = stream ? stream.branch : "—";
   const title = !gitEnabled
@@ -32,6 +38,7 @@ export function StatusBar({ stream, gitEnabled }: Props) {
 
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <OpErrorIndicator onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />
       <BackgroundTaskIndicator />
       <BranchPicker
       label={
