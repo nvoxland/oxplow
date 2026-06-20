@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadWorkState, Task } from "../../api.js";
-import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
+import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext } from "./sections.js";
 import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
 function makeItem(partial: Partial<Task> & { id: number; status: Task["status"]; kind?: string }): Task {
@@ -175,28 +175,5 @@ describe("computePagesDirectory", () => {
     expect(ids.indexOf("tasks")).toBeLessThan(ids.indexOf("done-work"));
     expect(ids.indexOf("done-work")).toBeLessThan(ids.indexOf("backlog"));
     expect(ids.indexOf("backlog")).toBeLessThan(ids.indexOf("archived"));
-  });
-});
-
-describe("sortRecentFiles", () => {
-  test("orders by descending touchedAt", () => {
-    const entries: RecentFileEntry[] = [
-      { path: "src/a.ts", touchedAt: 100 },
-      { path: "src/b.ts", touchedAt: 300 },
-      { path: "src/c.ts", touchedAt: 200 },
-    ];
-    expect(sortRecentFiles(entries).map((e) => e.path)).toEqual([
-      "src/b.ts",
-      "src/c.ts",
-      "src/a.ts",
-    ]);
-  });
-
-  test("limit truncates results", () => {
-    const entries: RecentFileEntry[] = Array.from({ length: 10 }, (_, i) => ({
-      path: `f${i}.ts`,
-      touchedAt: i,
-    }));
-    expect(sortRecentFiles(entries, 3).length).toBe(3);
   });
 });

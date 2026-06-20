@@ -1735,11 +1735,6 @@ export function App() {
 
   const bookmarksStore = useBookmarksStore();
 
-  const recentFileEntries = useMemo(() => {
-    const order = currentSession.openOrder;
-    return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
-  }, [currentSession.openOrder]);
-
   // Recently-finished work merged across closed tasks efforts
   // (per-thread) and updated wiki notes (global). Refetched on
   // tasks or wiki-page changes; sub-100ms IPC, so coarse
@@ -3137,7 +3132,6 @@ export function App() {
           threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
           threadWork={selectedThreadWork}
-          recentFiles={recentFileEntries}
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
           opErrors={opErrors}

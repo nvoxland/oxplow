@@ -5,7 +5,7 @@ import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, indexRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
-import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
+import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import {
@@ -44,7 +44,6 @@ export interface RailHudProps {
   /** Current stream — scopes the open-comments section. */
   streamId?: string | null;
   threadWork: ThreadWorkState | null;
-  recentFiles: RecentFileEntry[];
   bookmarks?: BookmarkRailEntry[];
   /** Most recently finished work — closed tasks efforts merged
    *  with updated wiki notes, sorted by timestamp DESC. */
@@ -78,7 +77,6 @@ type RailSectionId =
   | "comments"
   | "work"
   | "errors"
-  | "recentFiles"
   | "bookmarks"
   | "history";
 
@@ -87,7 +85,6 @@ const DEFAULT_SECTION_ORDER: RailSectionId[] = [
   "comments",
   "work",
   "errors",
-  "recentFiles",
   "bookmarks",
   "history",
 ];
@@ -99,7 +96,6 @@ const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
   comments: true,
   work: false,
   errors: true,
-  recentFiles: true,
   bookmarks: true,
   history: true,
 };
@@ -392,14 +388,12 @@ function RailSection({
  * - Active item summary
  * - Since you last looked  (TBD; placeholder for now)
  * - Ready
- * - Recent files
  * - Bookmarks (the user-curated pinned set; replaced the old Pages list)
  */
 export function RailHud({
   threadId,
   streamId,
   threadWork,
-  recentFiles,
   bookmarks,
   recentlyFinished,
   uncommitted,
@@ -415,7 +409,6 @@ export function RailHud({
   // The full ready pool (capped) so the Work block can show an accurate
   // count even though it only renders the first handful when expanded.
   const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
-  const recents = useMemo(() => sortRecentFiles(recentFiles, 6), [recentFiles]);
   const width = useRailWidth();
   const sections = useRailSections(threadId);
 
@@ -442,8 +435,6 @@ export function RailHud({
         );
       case "errors":
         return <OpErrorsSection key={id} entries={opErrors ?? []} onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />;
-      case "recentFiles":
-        return <RecentFilesSection key={id} entries={recents} onOpenPage={onOpenPage} />;
       case "bookmarks":
         return <BookmarksSection key={id} entries={bookmarks ?? []} onOpenPage={onOpenPage} />;
       case "history":
@@ -1417,47 +1408,6 @@ function BookmarksSection({
             </button>
           </div>
         ))}
-      </div>
-    </RailSection>
-  );
-}
-
-function RecentFilesSection({
-  entries,
-  onOpenPage,
-}: {
-  entries: RecentFileEntry[];
-  onOpenPage(ref: TabRef): void;
-}) {
-  return (
-    <RailSection
-      id="recentFiles"
-      title="Recent files"
-      onOpen={() => onOpenPage(indexRef("files"))}
-      openTitle="Open Files"
-    >
-      {entries.length === 0 ? <RailEmpty label="No recent files" /> : null}
-      <div data-testid="rail-recent-files" style={{ paddingBottom: 8 }}>
-        {entries.map((e) => {
-          const basename = e.path.split("/").pop() ?? e.path;
-          return (
-            <button
-              key={e.path}
-              type="button"
-              data-testid={`rail-recent-file-${e.path}`}
-              title={e.path}
-              onClick={() => onOpenPage(fileRef(e.path))}
-              draggable
-              onDragStart={(ev) => setContextRefDrag(ev, { kind: "file", path: e.path })}
-              style={rowHoverStyle()}
-            >
-              <span style={{ color: "var(--text-muted)", fontSize: 11 }}>📄</span>
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {basename}
-              </span>
-            </button>
-          );
-        })}
       </div>
     </RailSection>
   );

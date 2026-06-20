@@ -132,13 +132,3 @@ export function computeUpNext(state: ThreadWorkState | null, limit = 5): Task[] 
   ready.sort((a, b) => a.sort_index - b.sort_index);
   return ready.slice(0, limit);
 }
-
-export interface RecentFileEntry {
-  path: string;
-  touchedAt: number;
-}
-
-/** Sort recent files newest-first; truncate to `limit`. */
-export function sortRecentFiles(entries: RecentFileEntry[], limit = 8): RecentFileEntry[] {
-  return [...entries].sort((a, b) => b.touchedAt - a.touchedAt).slice(0, limit);
-}
