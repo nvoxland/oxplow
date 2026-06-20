@@ -3171,15 +3171,15 @@ export function App() {
           minHeight: 0,
           minWidth: 0,
           overflow: "hidden",
-          // The main content area floats as a panel on the chrome: left
-          // side + bottom curved (revealing chrome), right flush against
-          // the window edge. The border is drawn on the panel itself so
-          // the rounded corners stay closed regardless of tab state.
+          // The main content area floats as a panel on the chrome: the
+          // left side is curved (revealing chrome), the whole right side
+          // stays flush/square against the window edge. The border is
+          // drawn on the panel itself so the corners stay closed
+          // regardless of tab state.
           marginLeft: 6,
           border: "1px solid var(--border-strong)",
           borderTopLeftRadius: 8,
           borderBottomLeftRadius: 8,
-          borderBottomRightRadius: 8,
         }}>
           {stream ? (
             <CenterTabs

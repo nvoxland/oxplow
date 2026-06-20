@@ -129,7 +129,10 @@ export function PageNavBar({
         gap: 8,
         padding: "6px 12px",
         borderBottom: "1px solid var(--border-strong, var(--border-subtle))",
-        background: "var(--surface-rail, var(--surface-app))",
+        // Panel-header tint (muted accent over the card surface) so the
+        // page chrome reads as a header standing out from the content —
+        // matches the rail/stream panel headers.
+        background: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)",
         boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.18)",
         flexShrink: 0,
         minHeight: 36,
@@ -567,7 +570,9 @@ export function PageNavBar({
 function navButtonStyle(enabled: boolean): React.CSSProperties {
   return {
     border: "1px solid var(--border-subtle)",
-    background: "var(--surface-card)",
+    // Transparent so the buttons sit on the header tint instead of
+    // reading as darker boxes against it.
+    background: "transparent",
     color: enabled ? "var(--text-primary)" : "var(--text-secondary)",
     padding: "4px 8px",
     borderRadius: 4,

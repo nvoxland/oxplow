@@ -244,7 +244,10 @@ const stripStyle: CSSProperties = {
   // right divider. A little bottom padding keeps the `+` off the floor.
   padding: "0 0 6px 0",
   overflowY: "auto",
-  background: "var(--surface-app)",
+  // A vertical control strip — neutral chrome surface (same as the
+  // Navigator strip), not the blue header tint and not the near-black
+  // content tier.
+  background: "var(--surface-chrome)",
   borderRight: "1px solid var(--border-subtle)",
   minHeight: 0,
 };
@@ -259,7 +262,8 @@ function glyphButtonStyle(active: boolean): CSSProperties {
     height: ROW_HEIGHT,
     border: "none",
     borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent",
-    borderRadius: 6,
+    // Square tabs — they fill the strip width, so no rounded right edge.
+    borderRadius: 0,
     cursor: "pointer",
     fontFamily: "inherit",
     fontSize: "var(--text-sm)",
@@ -294,7 +298,7 @@ const overlayStyle: CSSProperties = {
   gap: 4,
   padding: "0 6px 6px 0",
   overflowY: "auto",
-  background: "var(--surface-rail)",
+  background: "var(--surface-chrome)",
   borderRight: "1px solid var(--border-strong)",
   boxShadow: "8px 0 24px rgba(0, 0, 0, 0.45)",
   zIndex: 30,
@@ -310,7 +314,7 @@ function overlayRowStyle(active: boolean): CSSProperties {
     cursor: "pointer",
     paddingRight: 6,
     borderLeft: active ? "3px solid var(--accent)" : "3px solid transparent",
-    borderRadius: 6,
+    borderRadius: 0,
     background: active ? "var(--accent-soft-bg)" : "transparent",
     transition: "background 120ms ease",
   };

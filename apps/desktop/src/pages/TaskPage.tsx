@@ -11,7 +11,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
-import { ActivityTimeline, TaskDetail, TaskDetailRail } from "../components/Plan/TaskDetail.js";
+import { ActivityTimeline, TaskDetail, TaskDetailRail, TaskOverflowMenu } from "../components/Plan/TaskDetail.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -179,10 +179,9 @@ export function TaskPage({
     );
   }
 
-  const rail = (
-    <TaskDetailRail
-      item={item}
-      onUpdateTask={handleUpdate}
+  const rail = <TaskDetailRail item={item} onUpdateTask={handleUpdate} />;
+  const railActions = (
+    <TaskOverflowMenu
       onRequestDelete={() => {}}
       extraMenuItems={
         scopeAction ? [{ label: scopeAction.label, onSelect: () => void scopeAction.run() }] : undefined
@@ -200,6 +199,7 @@ export function TaskPage({
       commentsNav={stream ? <CommentNavigator targetKind="task" targetId={String(item.id)} /> : undefined}
       layout="details"
       rightRail={rail}
+      actions={railActions}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <TaskDetail

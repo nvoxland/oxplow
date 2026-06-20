@@ -110,6 +110,8 @@ export interface PageProps {
   layout?: "full" | "details";
   /** Right-rail content for `layout="details"`. Ignored otherwise. */
   rightRail?: ReactNode;
+  /** Title for the right rail's panel header. Defaults to "Details". */
+  rightRailTitle?: ReactNode;
 }
 
 /** Body-container width below which the right rail is unmounted. */
@@ -124,8 +126,12 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
+  // In the details layout the `⋯` actions move into the right rail's
+  // panel header; keep them out of the page header to avoid duplication.
+  const railOwnsActions = layout === "details" && rightRail != null;
+  const headerActions = railOwnsActions ? null : actions;
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
   // how the host (App.tsx) injects browser-style back/forward into
@@ -283,12 +289,12 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
             </span>
           ))}
         </div>
-        {actions ? (
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
+        {headerActions ? (
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{headerActions}</div>
         ) : null}
       </header>
       ) : null}
-      {showHeader && effectiveNavBar && ((chips && chips.length > 0) || actions) ? (
+      {showHeader && effectiveNavBar && ((chips && chips.length > 0) || headerActions) ? (
         <div
           data-testid="page-chips"
           style={{
@@ -320,13 +326,13 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
               </span>
             ))}
           </div>
-          {actions ? (
-            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
+          {headerActions ? (
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{headerActions}</div>
           ) : null}
         </div>
       ) : null}
       {layout === "details" ? (
-        <DetailsBody rightRail={rightRail}>{children}</DetailsBody>
+        <DetailsBody rightRail={rightRail} rightRailTitle={rightRailTitle} rightRailActions={actions}>{children}</DetailsBody>
       ) : (
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {children}
@@ -370,7 +376,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
   );
 }
 
-function DetailsBody({ children, rightRail }: { children: ReactNode; rightRail?: ReactNode }) {
+function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: { children: ReactNode; rightRail?: ReactNode; rightRailTitle?: ReactNode; rightRailActions?: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showRail, setShowRail] = useState(true);
 
@@ -425,9 +431,37 @@ function DetailsBody({ children, rightRail }: { children: ReactNode; rightRail?:
             maxHeight: "calc(100vh - 48px)",
             overflow: "auto",
             minWidth: 0,
+            // Match the other panels: a card surface with a border, rounded
+            // corners, and a tinted header band (title + the ⋯ actions).
+            background: "var(--surface-card)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 8,
+            overflowX: "hidden",
           }}
         >
-          {rightRail}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 10px",
+              background: "var(--panel-header-bg)",
+              borderBottom: "1px solid var(--border-subtle)",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              position: "sticky",
+              top: 0,
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0 }}>{rightRailTitle ?? "Details"}</span>
+            {rightRailActions ? (
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{rightRailActions}</div>
+            ) : null}
+          </div>
+          <div style={{ padding: 12 }}>{rightRail}</div>
         </aside>
       ) : null}
     </div>

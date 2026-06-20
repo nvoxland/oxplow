@@ -205,85 +205,92 @@ function TitleField({
  * category, tags, timestamps, created-by, and an overflow menu for
  * destructive / scope actions. Mirror image of `TaskDetail` body fields.
  */
+/** The task's overflow (`⋮`) actions menu — Send-to-backlog / Delete.
+ *  Rendered into the details panel's header (passed as the Page's
+ *  `actions`), not inside the rail body. */
+export function TaskOverflowMenu({
+  onRequestDelete,
+  extraMenuItems,
+}: {
+  onRequestDelete(): void;
+  extraMenuItems?: Array<{ label: string; onSelect(): void }>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+        aria-label="More actions"
+        title="More actions"
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "0 4px",
+          fontSize: 18,
+          lineHeight: 1,
+        }}
+      >
+        ⋮
+      </button>
+      {menuOpen ? (
+        <div
+          role="menu"
+          onMouseLeave={() => setMenuOpen(false)}
+          style={{
+            position: "absolute",
+            top: 22,
+            right: 0,
+            background: "var(--surface-elevated, var(--surface-card))",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 4,
+            padding: 4,
+            display: "flex",
+            flexDirection: "column",
+            minWidth: 160,
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
+            zIndex: 10,
+          }}
+        >
+          {extraMenuItems?.map((entry) => (
+            <button
+              key={entry.label}
+              type="button"
+              onClick={() => { setMenuOpen(false); entry.onSelect(); }}
+              style={menuItemStyle}
+            >
+              {entry.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => { setMenuOpen(false); onRequestDelete(); }}
+            style={{ ...menuItemStyle, color: "var(--severity-critical)" }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TaskDetailRail({
   item,
   onUpdateTask,
-  onRequestDelete,
-  extraMenuItems,
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
   item: Task;
   onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
-  onRequestDelete(): void;
-  /** Additional items rendered above Delete in the overflow menu —
-   *  e.g. "Send to backlog" / "Bring to this thread". */
-  extraMenuItems?: Array<{ label: string; onSelect(): void }>;
   formatTimestamp?(iso: string): string;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div
       style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: "var(--text-xs)" }}
       onClick={(event) => event.stopPropagation()}
     >
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8, position: "relative" }}>
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="More actions"
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            padding: "2px 6px",
-            fontSize: 16,
-            lineHeight: 1,
-          }}
-          title="More actions"
-        >
-          ⋯
-        </button>
-        {menuOpen ? (
-          <div
-            role="menu"
-            onMouseLeave={() => setMenuOpen(false)}
-            style={{
-              position: "absolute",
-              top: 24,
-              right: 0,
-              background: "var(--surface-elevated, var(--surface-card))",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 4,
-              padding: 4,
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 160,
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
-              zIndex: 10,
-            }}
-          >
-            {extraMenuItems?.map((entry) => (
-              <button
-                key={entry.label}
-                type="button"
-                onClick={() => { setMenuOpen(false); entry.onSelect(); }}
-                style={menuItemStyle}
-              >
-                {entry.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => { setMenuOpen(false); onRequestDelete(); }}
-              style={{ ...menuItemStyle, color: "var(--severity-critical)" }}
-            >
-              Delete
-            </button>
-          </div>
-        ) : null}
-      </div>
-
       <RailPillRow label="Status">
         <PillSelect
           value={item.status}

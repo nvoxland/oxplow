@@ -29,13 +29,23 @@ sinks.
 
 | Variable                | Value         | Used for                                   |
 |-------------------------|---------------|--------------------------------------------|
-| `--surface-app`         | `#0f1115`     | App background, page bodies                |
-| `--surface-card`        | `#161a20`     | Cards, inner content surfaces              |
-| `--surface-rail`        | `#13161b`     | Left HUD rail, stream-tab strip            |
+| `--surface-app`         | `#0f1115`     | App background, page bodies (darkest content tier) |
+| `--surface-card`        | `#161a20`     | Cards, inner content surfaces, rail panels |
+| `--surface-chrome`      | `#1b2129`     | Lighter **chrome frame** around the dark content — rail aside, Navigator strip, content-panel surround. The content recesses below it. |
+| `--surface-rail`        | `#13161b`     | Legacy rail tier (PageNavBar fallback, TerminalTabStrip, TaskDetail) — chrome surfaces moved to `--surface-chrome` |
 | `--surface-tab-active`  | `#1c2027`     | Currently-focused tab body                 |
-| `--surface-tab-inactive`| `transparent` | Inactive tabs (let the strip show through) |
+| `--surface-tab-inactive`| `transparent` | Inactive tabs (let the header tint show through) |
 | `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
+
+**Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
+accent wash — *not* grey) tints the header band of every panel so titles
+read as intentional headers in dark mode: rail section headers
+(`RailSection`), Navigator stream-header rows, the page tab bar
+(`CenterTabs`), and the common page chrome (`PageNavBar`). It's
+translucent, so when a surface needs the same look over a non-card base
+(tab bar, page nav) layer it over `--surface-card`:
+`background: linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)`.
 
 ### Borders
 

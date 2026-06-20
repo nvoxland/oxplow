@@ -159,7 +159,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   }, [activeId, hiddenInStripIds]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div ref={outerBarRef} style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-chrome)", minHeight: 36, position: "relative" }}>
+      <div ref={outerBarRef} style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)", minHeight: 36, position: "relative" }}>
         <div ref={stripScrollRef} style={{ display: "flex", flex: "0 0 auto", maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>
         {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
@@ -234,9 +234,9 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 position: "relative",
                 padding: "10px 14px",
                 background: isActive
-                  ? "var(--surface-tab-active)"
+                  ? "var(--accent-soft-bg)"
                   : isHover
-                    ? "var(--surface-card)"
+                    ? "rgba(255, 255, 255, 0.04)"
                     : "transparent",
                 color: isActive ? "var(--accent)" : "var(--text-secondary)",
                 borderRight: "1px solid var(--border-strong)",
@@ -337,7 +337,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               background: "var(--surface-tab-inactive)",
               color: "var(--text-secondary)",
               cursor: "pointer",
-              fontSize: 18,
+              fontSize: 24,
               lineHeight: 1,
               display: "inline-flex",
               alignItems: "center",
