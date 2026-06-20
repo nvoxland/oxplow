@@ -6,10 +6,16 @@ import { useRowContextMenu } from "./useRowContextMenu.js";
 
 afterEach(cleanup);
 
-function Harness({ items }: { items: MenuItem[] }) {
+function Harness({ items, onRowClick }: { items: MenuItem[]; onRowClick?: () => void }) {
   const { onContextMenu, onKeyDown, menu } = useRowContextMenu(items);
   return (
-    <div data-testid="row" tabIndex={0} onContextMenu={onContextMenu} onKeyDown={onKeyDown}>
+    <div
+      data-testid="row"
+      tabIndex={0}
+      onClick={onRowClick}
+      onContextMenu={onContextMenu}
+      onKeyDown={onKeyDown}
+    >
       row
       {menu}
     </div>
@@ -49,6 +55,22 @@ test("the Menu key opens the menu for keyboard users", () => {
   const { getByTestId } = render(<Harness items={items()} />);
   fireEvent.keyDown(getByTestId("row"), { key: "ContextMenu" });
   expect(getByTestId("menu-item-rename")).toBeTruthy();
+});
+
+test("clicking a menu item does not bubble to the underlying row's onClick", async () => {
+  // Regression: the menu is rendered inline inside the row, so without
+  // stopping click propagation a menu-item click also fires the row's
+  // onClick — selecting the row / closing the navigator slideout (tsk190).
+  let rowClicks = 0;
+  let ran = 0;
+  const { getByTestId, queryByTestId } = render(
+    <Harness items={items(() => { ran += 1; })} onRowClick={() => { rowClicks += 1; }} />,
+  );
+  fireEvent.contextMenu(getByTestId("row"), { clientX: 10, clientY: 10 });
+  fireEvent.click(getByTestId("menu-item-delete"));
+  await waitFor(() => expect(queryByTestId("menu-item-delete")).toBeNull());
+  expect(ran).toBe(1);
+  expect(rowClicks).toBe(0);
 });
 
 test("choosing an item runs it and closes the menu", async () => {
