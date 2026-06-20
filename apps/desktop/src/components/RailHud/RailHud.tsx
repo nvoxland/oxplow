@@ -280,6 +280,11 @@ function RailSection({
         borderRadius: 6,
         overflow: "hidden",
         margin: "0 6px 6px",
+        // Don't let the flex column shrink panels when the total height
+        // exceeds the viewport — they stack and the column scrolls, so an
+        // expanding section pushes the ones below down instead of
+        // squishing the ones above.
+        flexShrink: 0,
         boxShadow: ctx?.isDropTarget(id) ? "inset 0 0 0 2px var(--accent)" : undefined,
       }}
     >
@@ -664,7 +669,7 @@ function rowHoverStyle(): CSSProperties {
 
 function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
   return (
-    <div style={{ padding: "0 6px 6px" }}>
+    <div style={{ padding: "0 6px 6px", flexShrink: 0 }}>
       <button
         type="button"
         data-testid="rail-search"
