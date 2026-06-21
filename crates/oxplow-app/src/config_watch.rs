@@ -36,10 +36,16 @@ impl ConfigWatcher {
         // directly: editors (and atomic writers) replace the file via
         // rename, which breaks a single-file watch but is still visible
         // as a directory event.
-        let watcher = match FsWatcher::watch_paths(vec![(
-            project_dir.clone(),
-            RecursiveMode::NonRecursive,
-        )]) {
+        let mut watch = vec![(project_dir.clone(), RecursiveMode::NonRecursive)];
+        // Also watch the user-global metric library
+        // (`<global_config_dir>/metrics/`) so an edit there hot-reloads the
+        // three-scope catalog (epic tsk213, P3). Only when it already exists —
+        // watching a missing dir errors on some platforms.
+        let global_metrics_dir = oxplow_config::global_config_dir().map(|d| d.join("metrics"));
+        if let Some(dir) = global_metrics_dir.as_ref().filter(|d| d.is_dir()) {
+            watch.push((dir.clone(), RecursiveMode::Recursive));
+        }
+        let watcher = match FsWatcher::watch_paths(watch) {
             Ok(w) => w,
             Err(e) => {
                 warn!(error = %e, ?project_dir, "config watcher failed to start");
@@ -57,7 +63,20 @@ impl ConfigWatcher {
                             .file_name()
                             .map(|n| n == OXPLOW_CONFIG_FILE)
                             .unwrap_or(false);
-                        if !is_config {
+                        // A `.yaml`/`.yml` change under the global metrics dir
+                        // also triggers a reload — the runner re-reads the
+                        // global scope on the resulting `ConfigChanged`.
+                        let is_global_metric = global_metrics_dir
+                            .as_ref()
+                            .map(|dir| {
+                                path.starts_with(dir)
+                                    && matches!(
+                                        path.extension().and_then(|x| x.to_str()),
+                                        Some("yaml") | Some("yml")
+                                    )
+                            })
+                            .unwrap_or(false);
+                        if !is_config && !is_global_metric {
                             continue;
                         }
                         match services.reload_config_from_disk() {

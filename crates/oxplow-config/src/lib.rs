@@ -94,6 +94,106 @@ pub struct PluginConfig {
     pub args: Vec<String>,
 }
 
+/// How a configured metric is computed (the `compute:` block on a `metrics:`
+/// entry). Mirrors [`PluginConfig`]'s runtime fields — the metric runner maps it
+/// to a registered gauge collector. `report` is the report path for a
+/// report-derived gauge; tree-derived gauges read the snapshot via `files()`
+/// instead and leave it unset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+pub struct MetricComputeConfig {
+    /// Transform tier: `jaq` | `starlark` | `exec`.
+    pub runtime: String,
+    /// Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
+    /// `lcov` | `lines` (default `text`). Ignored by `exec`.
+    #[serde(default)]
+    pub input: Option<String>,
+    /// Project-relative path to the script file (jaq/Starlark program or the
+    /// `exec` program). Required.
+    #[serde(rename = "entryFile", default)]
+    pub entry_file: Option<String>,
+    /// Extra arguments for the `exec` runtime.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Optional project-relative report path for a report-derived gauge.
+    #[serde(default)]
+    pub report: Option<String>,
+}
+
+/// One entry in the top-level `metrics:` block — the metric authoring surface
+/// (epic tsk213, P3). Two forms, distinguished by which key is set:
+/// - **`use:`** — enable an existing catalog metric by key (built-in/global),
+///   optionally overriding `target`/`trigger`/`dimensions`/… for this project.
+/// - **`key:`** — define a NEW metric (full definition + `compute:`).
+///
+/// The runner resolves these across the three scopes into `ResolvedMetric`s.
+/// All non-discriminant fields are optional so both forms share one struct;
+/// validation enforces the per-form rules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct MetricEntry {
+    /// `use:` form — the catalog key to enable.
+    #[serde(rename = "use", default)]
+    pub use_key: Option<String>,
+    /// `key:` form — the new metric's namespaced key.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// `gauge` | `findings` | `test` | `coverage` | `event` (default `gauge`).
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// `higher-better` | `lower-better` | `neutral` (default `neutral`).
+    #[serde(default)]
+    pub direction: Option<String>,
+    #[serde(rename = "defaultAgg", default)]
+    pub default_agg: Option<String>,
+    /// `effort` | `tree` | `file` | `entity`.
+    #[serde(default)]
+    pub grain: Option<String>,
+    /// Declared conformed-dimension keys this metric carries.
+    #[serde(default)]
+    pub dimensions: Vec<String>,
+    #[serde(default)]
+    pub target: Option<f64>,
+    #[serde(rename = "warnAt", default)]
+    pub warn_at: Option<f64>,
+    #[serde(rename = "failAt", default)]
+    pub fail_at: Option<f64>,
+    /// `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
+    /// `continuous` (default `manual`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// How the metric computes (required for `key:` form; inherited from the
+    /// catalog for `use:` form).
+    #[serde(default)]
+    pub compute: Option<MetricComputeConfig>,
+}
+
+/// A fully-resolved metric — the flat form the runner (oxplow-app) seeds into
+/// `metric_definition` and runs. Produced by [`resolve_metrics`] after merging
+/// the three scopes (built-in ∪ global ∪ project, precedence project > global >
+/// built-in by key). Not serialized — purely an internal resolution result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedMetric {
+    pub key: String,
+    pub title: String,
+    pub kind: String,
+    pub unit: Option<String>,
+    pub direction: String,
+    pub default_agg: String,
+    pub grain: Option<String>,
+    pub dimensions: Vec<String>,
+    pub target: Option<f64>,
+    pub warn_at: Option<f64>,
+    pub fail_at: Option<f64>,
+    /// `built-in` | `global` | `project`.
+    pub scope: String,
+    pub trigger: String,
+    pub compute: MetricComputeConfig,
+}
+
 /// Per-project collection profile (the `collection:` block). Written by
 /// `/oxplow:configure` and read by the collection subsystem
 /// (`.context/collection.md`): the Bash-hook detector reads
@@ -209,6 +309,12 @@ pub struct OxplowConfig {
     pub inject_session_context: bool,
     /// Per-project collection profile (test + coverage instrumentation).
     pub collection: CollectionConfig,
+    /// Project-declared metrics (the `metrics:` block) — the author-able
+    /// substrate surface (epic tsk213, P3). Each entry enables a catalog metric
+    /// (`use:`) or defines a new one (`key:`). The runner resolves these across
+    /// the built-in/global/project scopes; see [`resolve_metrics`].
+    #[serde(default)]
+    pub metrics: Vec<MetricEntry>,
     /// Per-agent launch model overrides, e.g.
     /// `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
     /// Only opencode consumes this today (its `-m provider/model`
@@ -263,6 +369,8 @@ struct RawConfig {
     inject_session_context: Option<bool>,
     #[serde(default)]
     collection: Option<RawCollectionBlock>,
+    #[serde(default)]
+    metrics: Option<Vec<MetricEntry>>,
     #[serde(rename = "agentModels", default)]
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
 }
@@ -404,6 +512,7 @@ pub fn write_project_config(
         "injectSessionContext",
         "lsp",
         "collection",
+        "metrics",
         "agentModels",
     ];
 
@@ -564,6 +673,11 @@ pub fn write_project_config(
         doc.insert("collection".into(), serde_yaml::Value::Mapping(col));
     }
 
+    if !config.metrics.is_empty() {
+        let metrics: Vec<_> = config.metrics.iter().map(metric_entry_to_yaml).collect();
+        doc.insert("metrics".into(), serde_yaml::Value::Sequence(metrics));
+    }
+
     if !config.agent_models.is_empty() {
         doc.insert(
             "agentModels".into(),
@@ -582,6 +696,65 @@ pub fn write_project_config(
     Ok(())
 }
 
+/// Serialize one [`MetricEntry`] to a YAML mapping, omitting unset fields so a
+/// hand-edited `metrics:` block stays minimal across UI-driven writes (mirrors
+/// the per-field plugin serialization above).
+fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
+    let mut m = serde_yaml::Mapping::new();
+    let mut put_str = |k: &str, v: &Option<String>| {
+        if let Some(s) = v {
+            m.insert(k.into(), s.clone().into());
+        }
+    };
+    put_str("use", &e.use_key);
+    put_str("key", &e.key);
+    put_str("title", &e.title);
+    put_str("kind", &e.kind);
+    put_str("unit", &e.unit);
+    put_str("direction", &e.direction);
+    put_str("defaultAgg", &e.default_agg);
+    put_str("grain", &e.grain);
+    if !e.dimensions.is_empty() {
+        m.insert(
+            "dimensions".into(),
+            serde_yaml::to_value(&e.dimensions).expect("dimensions serialize"),
+        );
+    }
+    if let Some(t) = e.target {
+        m.insert("target".into(), t.into());
+    }
+    if let Some(t) = e.warn_at {
+        m.insert("warnAt".into(), t.into());
+    }
+    if let Some(t) = e.fail_at {
+        m.insert("failAt".into(), t.into());
+    }
+    if let Some(t) = &e.trigger {
+        m.insert("trigger".into(), t.clone().into());
+    }
+    if let Some(c) = &e.compute {
+        let mut cm = serde_yaml::Mapping::new();
+        cm.insert("runtime".into(), c.runtime.clone().into());
+        if let Some(i) = &c.input {
+            cm.insert("input".into(), i.clone().into());
+        }
+        if let Some(f) = &c.entry_file {
+            cm.insert("entryFile".into(), f.clone().into());
+        }
+        if !c.args.is_empty() {
+            cm.insert(
+                "args".into(),
+                serde_yaml::to_value(&c.args).expect("args serialize"),
+            );
+        }
+        if let Some(r) = &c.report {
+            cm.insert("report".into(), r.clone().into());
+        }
+        m.insert("compute".into(), serde_yaml::Value::Mapping(cm));
+    }
+    serde_yaml::Value::Mapping(m)
+}
+
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
         agents: vec![AgentKind::default()],
@@ -593,6 +766,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         collection: CollectionConfig::default(),
+        metrics: Vec::new(),
         agent_models: Default::default(),
     }
 }
@@ -657,6 +831,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
 
     let collection = validate_collection(raw.collection)?;
+    let metrics = validate_metrics(raw.metrics)?;
 
     let agent_models = {
         let mut out = std::collections::BTreeMap::new();
@@ -723,6 +898,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         snapshot_max_file_bytes,
         inject_session_context,
         collection,
+        metrics,
         agent_models,
     })
 }
@@ -761,6 +937,321 @@ const PLUGIN_RUNTIMES: &[&str] = &["jaq", "starlark", "exec"];
 const PLUGIN_KINDS: &[&str] = &["coverage", "test", "analysis"];
 /// Container pre-parsers a plugin may select for its input.
 const PLUGIN_INPUTS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
+
+/// Metric kinds a `metrics:` entry may declare.
+const METRIC_KINDS: &[&str] = &["gauge", "findings", "test", "coverage", "event"];
+/// Metric directions.
+const METRIC_DIRECTIONS: &[&str] = &["higher-better", "lower-better", "neutral"];
+/// Metric aggregations.
+const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max"];
+/// Compute triggers.
+const METRIC_TRIGGERS: &[&str] = &[
+    "on-report",
+    "on-snapshot",
+    "on-effort-complete",
+    "manual",
+    "continuous",
+];
+
+/// Validate the top-level `metrics:` block (the project scope). Mirrors the
+/// plugin rules: namespaced keys, `oxplow.*` reserved for built-ins,
+/// project-relative `entryFile`, known runtime/kind/trigger. Each entry must be
+/// exactly one of the `use:` or `key:` forms. Returns the cleaned entries (the
+/// three-scope resolution happens later in [`resolve_metrics`]).
+fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, ConfigError> {
+    let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let mut out = Vec::new();
+    for (i, e) in raw.into_iter().flatten().enumerate() {
+        let use_key = opt(e.use_key);
+        let key = opt(e.key);
+        let (is_define, the_key) = match (&use_key, &key) {
+            (Some(_), Some(_)) => {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] sets both `use` and `key`; use exactly one"
+                )))
+            }
+            (None, None) => {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] must set either `use` (enable a catalog metric) or `key` (define one)"
+                )))
+            }
+            (Some(u), None) => (false, u.clone()),
+            (None, Some(k)) => (true, k.clone()),
+        };
+        if !the_key.contains('.') {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] key \"{the_key}\" must be namespaced as \"<vendor>.<id>\""
+            )));
+        }
+        // `oxplow.*` is reserved for built-ins; a project may `use:` one but not
+        // `key:`-define under it (mirrors the plugin-name rule).
+        if is_define && the_key.starts_with("oxplow.") {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] key \"{the_key}\" uses the reserved \"oxplow.\" namespace"
+            )));
+        }
+
+        let kind = opt(e.kind);
+        if let Some(k) = &kind {
+            if !METRIC_KINDS.contains(&k.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] kind must be one of {METRIC_KINDS:?} (got \"{k}\")"
+                )));
+            }
+        }
+        let direction = opt(e.direction);
+        if let Some(d) = &direction {
+            if !METRIC_DIRECTIONS.contains(&d.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] direction must be one of {METRIC_DIRECTIONS:?} (got \"{d}\")"
+                )));
+            }
+        }
+        let default_agg = opt(e.default_agg);
+        if let Some(a) = &default_agg {
+            if !METRIC_AGGS.contains(&a.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] defaultAgg must be one of {METRIC_AGGS:?} (got \"{a}\")"
+                )));
+            }
+        }
+        let trigger = opt(e.trigger);
+        if let Some(t) = &trigger {
+            if !METRIC_TRIGGERS.contains(&t.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] trigger must be one of {METRIC_TRIGGERS:?} (got \"{t}\")"
+                )));
+            }
+        }
+
+        // `use:` inherits compute from the catalog; `key:` must define it.
+        let compute = match (is_define, e.compute) {
+            (false, Some(_)) => {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] is a `use:` entry; it inherits `compute` from the catalog"
+                )))
+            }
+            (false, None) => None,
+            (true, None) => {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] defines key \"{the_key}\" but has no `compute` block"
+                )))
+            }
+            (true, Some(c)) => Some(validate_metric_compute(i, c)?),
+        };
+
+        let (use_key, key) = if is_define {
+            (None, Some(the_key))
+        } else {
+            (Some(the_key), None)
+        };
+        out.push(MetricEntry {
+            use_key,
+            key,
+            title: opt(e.title),
+            kind,
+            unit: opt(e.unit),
+            direction,
+            default_agg,
+            grain: opt(e.grain),
+            dimensions: e
+                .dimensions
+                .into_iter()
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty())
+                .collect(),
+            target: e.target,
+            warn_at: e.warn_at,
+            fail_at: e.fail_at,
+            trigger,
+            compute,
+        });
+    }
+    Ok(out)
+}
+
+fn validate_metric_compute(
+    i: usize,
+    c: MetricComputeConfig,
+) -> Result<MetricComputeConfig, ConfigError> {
+    let runtime = c.runtime.trim().to_ascii_lowercase();
+    if !PLUGIN_RUNTIMES.contains(&runtime.as_str()) {
+        return Err(ConfigError::Invalid(format!(
+            "metrics[{i}].compute.runtime must be jaq | starlark | exec (got \"{}\")",
+            c.runtime
+        )));
+    }
+    let input = match c.input.map(|s| s.trim().to_ascii_lowercase()) {
+        Some(s) if !s.is_empty() => {
+            if !PLUGIN_INPUTS.contains(&s.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}].compute.input must be text | json | xml | lcov | lines (got \"{s}\")"
+                )));
+            }
+            Some(s)
+        }
+        _ => None,
+    };
+    let entry_file = c
+        .entry_file
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let entry_file = match entry_file {
+        Some(f) => f,
+        None => {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}].compute.entryFile is required (the script file path)"
+            )))
+        }
+    };
+    if Path::new(&entry_file).is_absolute() || entry_file.split('/').any(|c| c == "..") {
+        return Err(ConfigError::Invalid(format!(
+            "metrics[{i}].compute.entryFile must be a project-relative path without `..` (got \"{entry_file}\")"
+        )));
+    }
+    Ok(MetricComputeConfig {
+        runtime,
+        input,
+        entry_file: Some(entry_file),
+        args: c.args.into_iter().map(|a| a.trim().to_string()).collect(),
+        report: c
+            .report
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    })
+}
+
+/// Resolve declared metrics across the three scopes into the flat
+/// [`ResolvedMetric`] list the runner consumes. Definitions (`key:` entries)
+/// from built-in, then global, then project build a catalog by key (later scope
+/// wins → precedence project > global > built-in). The **project's** entries are
+/// what's *active*: a `key:` entry defines + enables (scope `project`); a `use:`
+/// entry enables a catalog metric, layering its override fields on top (scope =
+/// the definition's scope). A `use:` referencing an unknown key is skipped with
+/// a warning.
+pub fn resolve_metrics(
+    builtin: &[MetricEntry],
+    global: &[MetricEntry],
+    project: &[MetricEntry],
+) -> Vec<ResolvedMetric> {
+    // Catalog of definitions by key, with the scope each came from.
+    let mut catalog: std::collections::HashMap<String, (&'static str, &MetricEntry)> =
+        std::collections::HashMap::new();
+    for (scope, entries) in [
+        ("built-in", builtin),
+        ("global", global),
+        ("project", project),
+    ] {
+        for e in entries {
+            if let Some(k) = e.key.as_deref() {
+                catalog.insert(k.to_string(), (scope, e));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for e in project {
+        if let Some(k) = e.key.as_deref() {
+            // A project definition: it is its own resolved metric.
+            out.push(resolve_one(k, "project", e, None));
+        } else if let Some(uk) = e.use_key.as_deref() {
+            match catalog.get(uk) {
+                Some((scope, def)) => out.push(resolve_one(uk, scope, def, Some(e))),
+                None => tracing::warn!(
+                    key = uk,
+                    "metrics: `use:` references an unknown catalog key; skipping"
+                ),
+            }
+        }
+    }
+    out
+}
+
+/// Build a [`ResolvedMetric`] from a definition entry `def` (in `scope`),
+/// optionally layering override fields from a `use:` entry `over`.
+fn resolve_one(
+    key: &str,
+    scope: &str,
+    def: &MetricEntry,
+    over: Option<&MetricEntry>,
+) -> ResolvedMetric {
+    // Pick an override first, else the definition's value.
+    let pick_str = |get: fn(&MetricEntry) -> &Option<String>| -> Option<String> {
+        over.and_then(|o| get(o).clone())
+            .or_else(|| get(def).clone())
+    };
+    let pick_f64 = |get: fn(&MetricEntry) -> Option<f64>| -> Option<f64> {
+        over.and_then(get).or_else(|| get(def))
+    };
+    let dimensions = match over {
+        Some(o) if !o.dimensions.is_empty() => o.dimensions.clone(),
+        _ => def.dimensions.clone(),
+    };
+    ResolvedMetric {
+        key: key.to_string(),
+        title: pick_str(|e| &e.title).unwrap_or_else(|| key.to_string()),
+        kind: pick_str(|e| &e.kind).unwrap_or_else(|| "gauge".into()),
+        unit: pick_str(|e| &e.unit),
+        direction: pick_str(|e| &e.direction).unwrap_or_else(|| "neutral".into()),
+        default_agg: pick_str(|e| &e.default_agg).unwrap_or_else(|| "last".into()),
+        grain: pick_str(|e| &e.grain),
+        dimensions,
+        target: pick_f64(|e| e.target),
+        warn_at: pick_f64(|e| e.warn_at),
+        fail_at: pick_f64(|e| e.fail_at),
+        scope: scope.to_string(),
+        trigger: pick_str(|e| &e.trigger).unwrap_or_else(|| "manual".into()),
+        // compute always comes from the definition (use: entries can't set it).
+        compute: def.compute.clone().unwrap_or_default(),
+    }
+}
+
+/// Load metric definitions from the user-global scope
+/// (`<global_dir>/metrics/*.yaml`). Each file is a `{ metrics: [ … ] }`
+/// document (same shape as the `oxplow.yaml` block). Best-effort: an unreadable
+/// or malformed file is logged and skipped, never an error. Returns the entries
+/// in filename order for deterministic precedence.
+pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
+    let dir = global_dir.join("metrics");
+    let Ok(read) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = read
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            matches!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("yaml") | Some("yml")
+            )
+        })
+        .collect();
+    files.sort();
+
+    #[derive(Deserialize)]
+    struct GlobalMetricsDoc {
+        #[serde(default)]
+        metrics: Option<Vec<MetricEntry>>,
+    }
+
+    let mut out = Vec::new();
+    for path in files {
+        let parsed = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<GlobalMetricsDoc>(&raw).ok());
+        match parsed {
+            Some(doc) => match validate_metrics(doc.metrics) {
+                Ok(entries) => out.extend(entries),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global metrics file")
+                }
+            },
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable global metrics file")
+            }
+        }
+    }
+    out
+}
 
 fn validate_agents(raw: Option<Vec<AgentKind>>) -> Result<Vec<AgentKind>, ConfigError> {
     let agents = raw.unwrap_or_else(|| vec![AgentKind::default()]);
@@ -1491,5 +1982,166 @@ collection:
             raw.contains("snapshotRetentionDays"),
             "managed key should still be present"
         );
+    }
+
+    fn load_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), yaml).unwrap();
+        load_project_config(dir.path())
+    }
+
+    #[test]
+    fn parses_both_metric_forms() {
+        let cfg = load_from_yaml(
+            r#"
+metrics:
+  - key: repo.unsafe_blocks
+    kind: gauge
+    title: "unsafe blocks"
+    direction: lower-better
+    unit: count
+    trigger: on-snapshot
+    dimensions: [language]
+    compute: { runtime: starlark, entryFile: oxplow/metrics/unsafe.star }
+  - use: myglobal.todo_density
+    target: 5
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.metrics.len(), 2);
+        assert_eq!(cfg.metrics[0].key.as_deref(), Some("repo.unsafe_blocks"));
+        assert_eq!(
+            cfg.metrics[0]
+                .compute
+                .as_ref()
+                .unwrap()
+                .entry_file
+                .as_deref(),
+            Some("oxplow/metrics/unsafe.star")
+        );
+        assert_eq!(
+            cfg.metrics[1].use_key.as_deref(),
+            Some("myglobal.todo_density")
+        );
+        assert_eq!(cfg.metrics[1].target, Some(5.0));
+    }
+
+    #[test]
+    fn metric_validation_rejects_bad_entries() {
+        // Reserved namespace for a definition.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: oxplow.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // `key:` without compute.
+        assert!(load_from_yaml("metrics:\n  - key: acme.foo\n    kind: gauge\n").is_err());
+        // `use:` carrying compute.
+        assert!(load_from_yaml(
+            "metrics:\n  - use: acme.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // both use and key.
+        assert!(load_from_yaml("metrics:\n  - use: a.b\n    key: c.d\n").is_err());
+        // un-namespaced key.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // bad runtime.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    compute: { runtime: wasm, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // entryFile escaping the project root.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: ../x.jq }\n"
+        )
+        .is_err());
+    }
+
+    fn define(key: &str, target: Option<f64>) -> MetricEntry {
+        MetricEntry {
+            key: Some(key.into()),
+            target,
+            compute: Some(MetricComputeConfig {
+                runtime: "starlark".into(),
+                entry_file: Some("m.star".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolve_precedence_project_over_global_over_builtin() {
+        let builtin = vec![define("oxplow.unsafe", Some(0.0))];
+        let global = vec![define("oxplow.unsafe", Some(3.0))];
+        // Project `use:`s the catalog key and overrides the target.
+        let project = vec![MetricEntry {
+            use_key: Some("oxplow.unsafe".into()),
+            target: Some(7.0),
+            ..Default::default()
+        }];
+        let resolved = resolve_metrics(&builtin, &global, &project);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].key, "oxplow.unsafe");
+        // The definition resolves at global scope (global > built-in), but the
+        // project's `use:` override wins for the target.
+        assert_eq!(resolved[0].scope, "global");
+        assert_eq!(resolved[0].target, Some(7.0));
+        // compute comes from the (global) definition.
+        assert_eq!(resolved[0].compute.entry_file.as_deref(), Some("m.star"));
+    }
+
+    #[test]
+    fn resolve_project_definition_is_active_and_scoped() {
+        let project = vec![define("acme.loc", None)];
+        let resolved = resolve_metrics(&[], &[], &project);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].scope, "project");
+        assert_eq!(resolved[0].kind, "gauge");
+        assert_eq!(resolved[0].trigger, "manual");
+    }
+
+    #[test]
+    fn resolve_skips_unknown_use_key() {
+        let project = vec![MetricEntry {
+            use_key: Some("nope.missing".into()),
+            ..Default::default()
+        }];
+        assert!(resolve_metrics(&[], &[], &project).is_empty());
+    }
+
+    #[test]
+    fn metrics_round_trip_through_write() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            metrics: vec![define("acme.loc", Some(2.0))],
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        assert!(raw.contains("metrics:"), "got:\n{raw}");
+        // No null fields written for unset options.
+        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.metrics, cfg.metrics);
+    }
+
+    #[test]
+    fn loads_global_metric_entries_from_dir() {
+        let dir = tempdir().unwrap();
+        let metrics_dir = dir.path().join("metrics");
+        std::fs::create_dir_all(&metrics_dir).unwrap();
+        std::fs::write(
+            metrics_dir.join("a.yaml"),
+            "metrics:\n  - key: myglobal.todo\n    compute: { runtime: jaq, entryFile: t.jq }\n",
+        )
+        .unwrap();
+        // A malformed file is skipped, not fatal.
+        std::fs::write(metrics_dir.join("bad.yaml"), "metrics:\n  - key: nodot\n").unwrap();
+        let entries = load_global_metric_entries(dir.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
     }
 }

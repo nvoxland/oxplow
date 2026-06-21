@@ -134,9 +134,42 @@ enable/scaffold).
 3. It then appears in MCP/IPC reads and on the Metrics page automatically — no
    UI code per metric.
 
-(Future: declare it in `oxplow.yaml` `metrics:` with a jaq/Starlark/exec script —
-no Rust — once the authoring surface lands; tsk217. The agent-facing skill for
-this is tsk221.)
+## Authoring surface (`metrics:` config — P3, tsk217)
+
+A project (or the user-global library) declares metrics in YAML — no Rust per
+metric. Parsed/validated/resolved in `crates/oxplow-config/src/lib.rs`
+(`MetricEntry` / `MetricComputeConfig` / `resolve_metrics` /
+`load_global_metric_entries`); the runner (`MetricsService`, tsk225) seeds a
+`metric_definition` per resolved entry and runs it on its `trigger`.
+
+Two entry forms in the top-level `metrics:` block:
+
+```yaml
+metrics:
+  - key: repo.unsafe_blocks          # DEFINE a new metric (full def + compute)
+    kind: gauge
+    direction: lower-better
+    unit: count
+    trigger: on-snapshot             # on-report|on-snapshot|on-effort-complete|manual|continuous
+    dimensions: [language]
+    compute: { runtime: starlark, entryFile: oxplow/metrics/unsafe.star }
+  - use: myglobal.todo_density        # ENABLE a catalog metric (+ overrides)
+    target: 5
+```
+
+- The **gauge** script returns `{ "samples": [ {value, subject?, dims?} ] }` and
+  may call the `files(glob)` / `ast_query(text, language, sexpr)` host builtins
+  (see [collection.md](./collection.md)).
+- **Three scopes**, precedence **project > global > built-in** by key: built-in
+  (bundled — tsk218), user-global (`global_config_dir()/metrics/*.yaml`, shared
+  across projects, hot-reloaded by the config watcher), and project
+  (`oxplow.yaml`). `use:` references a catalog key and layers overrides; `key:`
+  defines a new one. `oxplow.*` is reserved for built-ins.
+- Validation mirrors the plugin rules: namespaced keys, project-relative
+  `entryFile` (no `..`), known runtime/kind/trigger/direction; a `use:` with an
+  unknown key resolves to a warning (skipped), not an error.
+
+(The agent-facing skill that authors these on request is tsk221.)
 
 ## Gotchas
 

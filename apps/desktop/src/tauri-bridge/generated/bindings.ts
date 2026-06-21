@@ -1742,6 +1742,32 @@ export type MergeReadiness =
  */
 "conflict";
 
+/**
+ *  How a configured metric is computed (the `compute:` block on a `metrics:`
+ *  entry). Mirrors [`PluginConfig`]'s runtime fields — the metric runner maps it
+ *  to a registered gauge collector. `report` is the report path for a
+ *  report-derived gauge; tree-derived gauges read the snapshot via `files()`
+ *  instead and leave it unset.
+ */
+export type MetricComputeConfig = {
+	// Transform tier: `jaq` | `starlark` | `exec`.
+	runtime: string,
+	/**
+	 *  Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
+	 *  `lcov` | `lines` (default `text`). Ignored by `exec`.
+	 */
+	input?: string | null,
+	/**
+	 *  Project-relative path to the script file (jaq/Starlark program or the
+	 *  `exec` program). Required.
+	 */
+	entryFile?: string | null,
+	// Extra arguments for the `exec` runtime.
+	args?: string[],
+	// Optional project-relative report path for a report-derived gauge.
+	report?: string | null,
+};
+
 // One row in the measure catalog.
 export type MetricDefinition = {
 	id: number,
@@ -1769,6 +1795,48 @@ export type MetricDefinition = {
 	fail_at: number | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+};
+
+/**
+ *  One entry in the top-level `metrics:` block — the metric authoring surface
+ *  (epic tsk213, P3). Two forms, distinguished by which key is set:
+ *  - **`use:`** — enable an existing catalog metric by key (built-in/global),
+ *    optionally overriding `target`/`trigger`/`dimensions`/… for this project.
+ *  - **`key:`** — define a NEW metric (full definition + `compute:`).
+ * 
+ *  The runner resolves these across the three scopes into `ResolvedMetric`s.
+ *  All non-discriminant fields are optional so both forms share one struct;
+ *  validation enforces the per-form rules.
+ */
+export type MetricEntry = {
+	// `use:` form — the catalog key to enable.
+	use?: string | null,
+	// `key:` form — the new metric's namespaced key.
+	key?: string | null,
+	title?: string | null,
+	// `gauge` | `findings` | `test` | `coverage` | `event` (default `gauge`).
+	kind?: string | null,
+	unit?: string | null,
+	// `higher-better` | `lower-better` | `neutral` (default `neutral`).
+	direction?: string | null,
+	defaultAgg?: string | null,
+	// `effort` | `tree` | `file` | `entity`.
+	grain?: string | null,
+	// Declared conformed-dimension keys this metric carries.
+	dimensions?: string[],
+	target?: number | null,
+	warnAt?: number | null,
+	failAt?: number | null,
+	/**
+	 *  `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
+	 *  `continuous` (default `manual`).
+	 */
+	trigger?: string | null,
+	/**
+	 *  How the metric computes (required for `key:` form; inherited from the
+	 *  catalog for `use:` form).
+	 */
+	compute?: MetricComputeConfig | null,
 };
 
 export type MetricSample = {
@@ -1852,6 +1920,13 @@ export type OxplowConfig = {
 	injectSessionContext: boolean,
 	// Per-project collection profile (test + coverage instrumentation).
 	collection: CollectionConfig,
+	/**
+	 *  Project-declared metrics (the `metrics:` block) — the author-able
+	 *  substrate surface (epic tsk213, P3). Each entry enables a catalog metric
+	 *  (`use:`) or defines a new one (`key:`). The runner resolves these across
+	 *  the built-in/global/project scopes; see [`resolve_metrics`].
+	 */
+	metrics?: MetricEntry[],
 	/**
 	 *  Per-agent launch model overrides, e.g.
 	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
