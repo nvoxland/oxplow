@@ -604,6 +604,7 @@ impl Services {
             .with_thread_store(thread_store.clone());
         let collection = collection::CollectionService::new(
             observation_store.clone(),
+            metric_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
             thread_store.clone(),

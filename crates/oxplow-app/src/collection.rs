@@ -26,6 +26,7 @@ use oxplow_collect_plugin::{
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::observation_store::{NewEffortObservation, SqliteEffortObservationStore};
+use oxplow_db::{NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteMetricStore};
 use oxplow_db::{
     SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffort, TaskEffortStore,
 };
@@ -213,6 +214,11 @@ pub enum AnalysisIngest {
 #[derive(Clone)]
 pub struct CollectionService {
     observations: Arc<SqliteEffortObservationStore>,
+    /// Unified metric substrate (epic tsk213). Written alongside
+    /// `observations` so coverage/test/analysis facts accrue durably in the
+    /// new model while the legacy effort_observation UI still works; the
+    /// legacy path is dropped once the metric-backed UI lands (tsk215).
+    metrics: Arc<SqliteMetricStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
@@ -235,6 +241,7 @@ impl CollectionService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         observations: Arc<SqliteEffortObservationStore>,
+        metrics: Arc<SqliteMetricStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
@@ -246,6 +253,7 @@ impl CollectionService {
     ) -> Self {
         Self {
             observations,
+            metrics,
             nudges,
             efforts,
             threads,
@@ -529,6 +537,81 @@ impl CollectionService {
 
     /// Compute diff coverage from a (possibly merged) report and store a
     /// `diff-coverage` observation over the effort's changed lines.
+    /// Mirror a diff-coverage result into the unified metric substrate
+    /// (epic tsk213), best-effort: upsert the `oxplow.coverage.diff_pct`
+    /// definition, open a `coverage` run, and record one sample carrying the
+    /// covered/changed components (so module/branch roll-ups re-aggregate
+    /// correctly) plus the capture branch + git version. A metric write error
+    /// is logged and swallowed so it never fails the legacy observation path.
+    async fn mirror_coverage_metric(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        summary_pct: f64,
+        covered: usize,
+        changed: usize,
+        version: &file_ref_version::ResolvedFileVersion,
+    ) {
+        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
+        else {
+            return;
+        };
+        if let Err(e) = self
+            .record_coverage_metric(thread, stream_val, summary_pct, covered, changed, version)
+            .await
+        {
+            tracing::warn!(error = %e, "failed to mirror coverage into metric substrate");
+        }
+    }
+
+    async fn record_coverage_metric(
+        &self,
+        thread: &ThreadId,
+        stream_val: i64,
+        summary_pct: f64,
+        covered: usize,
+        changed: usize,
+        version: &file_ref_version::ResolvedFileVersion,
+    ) -> Result<(), DomainError> {
+        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+
+        let mut def =
+            NewMetricDefinition::new("oxplow.coverage.diff_pct", "coverage", "Diff coverage");
+        def.unit = Some("%".into());
+        def.direction = "higher-better".into();
+        def.grain = Some("effort".into());
+        def.basis = "diff-vs-effort-start".into();
+        def.producer = Some("coverage".into());
+        def.category = Some("coverage".into());
+        def.language = None;
+        def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
+        def.description = Some("Coverage % over the effort's changed lines.".into());
+        let metric_id = self.metrics.upsert_definition(def).await?;
+
+        let mut run = NewMetricRun::done(stream_val, "coverage", "coverage-report");
+        run.thread_id = Some(thread.value());
+        run.trigger = Some("on-report".into());
+        run.snapshot_id = Some(version.local_snapshot_id);
+        run.closest_git_version = version.closest_git_version.clone();
+        run.git_version_exact = version.git_version_exact;
+        run.branch = branch.clone();
+        let run_id = self.metrics.record_run(run).await?;
+
+        let mut sample =
+            NewMetricSample::observed(metric_id, stream_val, summary_pct, "coverage-report");
+        sample.run_id = Some(run_id);
+        sample.numerator = Some(covered as f64);
+        sample.denominator = Some(changed as f64);
+        sample.thread_id = Some(thread.value());
+        sample.snapshot_id = Some(version.local_snapshot_id);
+        sample.closest_git_version = version.closest_git_version.clone();
+        sample.git_version_exact = version.git_version_exact;
+        sample.basis_ref = version.closest_git_version.clone();
+        sample.branch = branch;
+        self.metrics.record_sample(sample).await?;
+        Ok(())
+    }
+
     async fn store_diff_coverage(
         &self,
         thread: &ThreadId,
@@ -580,6 +663,17 @@ impl CollectionService {
 
         let pin = effort.end_snapshot_id.unwrap_or(start);
         let version = file_ref_version::resolve(&self.snapshots, &self.project_dir, pin).await?;
+        // Dual-write into the unified metric substrate (best-effort) before the
+        // legacy observation consumes `version`.
+        self.mirror_coverage_metric(
+            thread,
+            stream_id,
+            summary_pct,
+            total_covered,
+            total_changed,
+            &version,
+        )
+        .await;
         let id = self
             .observations
             .record(NewEffortObservation {
@@ -1138,6 +1232,15 @@ impl CollectionService {
         kind: Option<&str>,
     ) -> Result<Vec<oxplow_db::EffortObservation>, DomainError> {
         self.observations.list_for_effort(effort_id, kind).await
+    }
+
+    /// Test-only: read the metric samples mirrored under a definition `key`.
+    #[cfg(test)]
+    async fn metric_samples_for_key(&self, key: &str) -> Vec<oxplow_db::MetricSample> {
+        match self.metrics.get_definition(key).await.unwrap() {
+            Some(d) => self.metrics.list_samples(d.id).await.unwrap(),
+            None => vec![],
+        }
     }
 
     /// End-side changed line numbers (1-based) for `path` between its
@@ -1764,6 +1867,7 @@ mod tests {
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             let service = CollectionService::new(
                 Arc::new(SqliteEffortObservationStore::new(db.clone())),
+                Arc::new(SqliteMetricStore::new(db.clone())),
                 nudges.clone(),
                 efforts.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
@@ -1823,6 +1927,31 @@ mod tests {
             let cov: DiffCovPayload = serde_json::from_str(payload).expect("payload parses");
             let foo = cov.files.iter().find(|f| f.path == "src/foo.rs").unwrap();
             assert_eq!(foo.uncovered, vec![4]);
+        }
+
+        #[tokio::test]
+        async fn ingest_coverage_mirrors_into_metric_substrate() {
+            // git_init = true so a branch is present to capture.
+            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+
+            let samples = h
+                .service
+                .metric_samples_for_key("oxplow.coverage.diff_pct")
+                .await;
+            assert_eq!(samples.len(), 1, "one mirrored coverage sample");
+            let s = &samples[0];
+            assert!((s.value - 50.0).abs() < 1e-6, "value {}", s.value);
+            // Components stored so module/branch roll-ups re-aggregate correctly.
+            assert_eq!(s.numerator, Some(1.0));
+            assert_eq!(s.denominator, Some(2.0));
+            assert_eq!(s.provenance, "observed");
+            assert_eq!(s.source, "coverage-report");
+            // Branch captured from the git_init'd repo (main/master).
+            assert!(s.branch.is_some(), "capture branch tracked");
         }
 
         #[derive(serde::Deserialize)]
