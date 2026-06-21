@@ -202,85 +202,14 @@ function TitleField({
 
 /**
  * Rail half of the tasks detail view — status + priority pickers,
- * category, tags, timestamps, created-by, and an overflow menu for
- * destructive / scope actions. Mirror image of `TaskDetail` body fields.
+ * category, tags, timestamps, created-by, and bottom action buttons
+ * (scope move + delete). Mirror image of `TaskDetail` body fields.
  */
-/** The task's overflow (`⋮`) actions menu — Send-to-backlog / Delete.
- *  Rendered into the details panel's header (passed as the Page's
- *  `actions`), not inside the rail body. */
-export function TaskOverflowMenu({
-  onRequestDelete,
-  extraMenuItems,
-}: {
-  onRequestDelete(): void;
-  extraMenuItems?: Array<{ label: string; onSelect(): void }>;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
-        aria-label="More actions"
-        title="More actions"
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "var(--text-secondary)",
-          cursor: "pointer",
-          padding: "0 4px",
-          fontSize: 18,
-          lineHeight: 1,
-        }}
-      >
-        ⋮
-      </button>
-      {menuOpen ? (
-        <div
-          role="menu"
-          onMouseLeave={() => setMenuOpen(false)}
-          style={{
-            position: "absolute",
-            top: 22,
-            right: 0,
-            background: "var(--surface-elevated, var(--surface-card))",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 4,
-            padding: 4,
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 160,
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
-            zIndex: 10,
-          }}
-        >
-          {extraMenuItems?.map((entry) => (
-            <button
-              key={entry.label}
-              type="button"
-              onClick={() => { setMenuOpen(false); entry.onSelect(); }}
-              style={menuItemStyle}
-            >
-              {entry.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => { setMenuOpen(false); onRequestDelete(); }}
-            style={{ ...menuItemStyle, color: "var(--severity-critical)" }}
-          >
-            Delete
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function TaskDetailRail({
   item,
   onUpdateTask,
   onDelete,
+  scopeAction,
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
   item: Task;
@@ -288,6 +217,9 @@ export function TaskDetailRail({
   /** When provided, renders a danger "Delete" button at the bottom of
    *  the rail (mirrors the wiki page's rail Delete). */
   onDelete?: () => void;
+  /** Optional scope move (e.g. "Send to backlog" / "Bring to this
+   *  thread"); rendered as a neutral button above Delete. */
+  scopeAction?: { label: string; run: () => void };
   formatTimestamp?(iso: string): string;
 }) {
   return (
@@ -328,30 +260,52 @@ export function TaskDetailRail({
         <RailMetaRow label="By">{item.created_by}</RailMetaRow>
       </div>
 
-      {onDelete ? (
+      {scopeAction || onDelete ? (
         <div style={{
           display: "flex",
           flexDirection: "column",
+          gap: 8,
           borderTop: "1px solid var(--border-subtle)",
           paddingTop: 12,
           marginTop: 4,
         }}>
-          <button
-            type="button"
-            onClick={onDelete}
-            style={{
-              textAlign: "left",
-              padding: "6px 10px",
-              borderRadius: 4,
-              border: "1px solid var(--border-subtle)",
-              background: "var(--surface-card)",
-              color: "var(--severity-critical)",
-              cursor: "pointer",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            Delete
-          </button>
+          {scopeAction ? (
+            <button
+              type="button"
+              data-testid="task-rail-scope-action"
+              onClick={scopeAction.run}
+              style={{
+                textAlign: "left",
+                padding: "6px 10px",
+                borderRadius: 4,
+                border: "1px solid var(--border-subtle)",
+                background: "var(--surface-card)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              {scopeAction.label}
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              style={{
+                textAlign: "left",
+                padding: "6px 10px",
+                borderRadius: 4,
+                border: "1px solid var(--border-subtle)",
+                background: "var(--surface-card)",
+                color: "var(--severity-critical)",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              Delete
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -471,16 +425,6 @@ function RailMetaRow({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-const menuItemStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
-  textAlign: "left",
-  padding: "6px 10px",
-  fontSize: "var(--text-xs)",
-  color: "var(--text-primary)",
-  cursor: "pointer",
-  borderRadius: 3,
-};
 
 /**
  * Single chronological list (newest first) mixing tasks notes and

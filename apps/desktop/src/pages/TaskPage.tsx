@@ -11,7 +11,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
-import { ActivityTimeline, TaskDetail, TaskDetailRail, TaskOverflowMenu } from "../components/Plan/TaskDetail.js";
+import { ActivityTimeline, TaskDetail, TaskDetailRail } from "../components/Plan/TaskDetail.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -190,13 +190,12 @@ export function TaskPage({
         }
       }
     : undefined;
-  const rail = <TaskDetailRail item={item} onUpdateTask={handleUpdate} onDelete={requestDelete} />;
-  const railActions = (
-    <TaskOverflowMenu
-      onRequestDelete={requestDelete ?? (() => {})}
-      extraMenuItems={
-        scopeAction ? [{ label: scopeAction.label, onSelect: () => void scopeAction.run() }] : undefined
-      }
+  const rail = (
+    <TaskDetailRail
+      item={item}
+      onUpdateTask={handleUpdate}
+      onDelete={requestDelete}
+      scopeAction={scopeAction ? { label: scopeAction.label, run: () => void scopeAction.run() } : undefined}
     />
   );
 
@@ -210,7 +209,6 @@ export function TaskPage({
       commentsNav={stream ? <CommentNavigator targetKind="task" targetId={String(item.id)} /> : undefined}
       layout="details"
       rightRail={rail}
-      actions={railActions}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <TaskDetail
