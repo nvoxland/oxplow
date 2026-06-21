@@ -322,4 +322,14 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             indexer.run(rx).await;
         });
     }
+
+    // Metric runner (tsk213, P3): seed config-declared metric definitions,
+    // then run on-snapshot gauges as snapshots land + reseed on config change.
+    {
+        let metrics = state.metrics.clone();
+        let rx = state.events.subscribe();
+        tokio::spawn(async move {
+            metrics.run(rx).await;
+        });
+    }
 }

@@ -122,6 +122,10 @@ pub struct TaskService {
     /// refetches on a new sample.
     metrics: Option<Arc<SqliteMetricStore>>,
     events: Option<EventBus>,
+    /// Config-declared gauge runner (tsk213, P3): when set, closing an effort
+    /// also runs any `on-effort-complete` gauges against the effort's end
+    /// snapshot. Optional so bare TaskService tests skip it.
+    gauge_runner: Option<crate::metrics_service::MetricsService>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
@@ -138,7 +142,15 @@ impl TaskService {
             thread_store: None,
             metrics: None,
             events: None,
+            gauge_runner: None,
         }
+    }
+
+    /// Attach the config-declared gauge runner so closing an effort also runs
+    /// `on-effort-complete` gauges (tsk213, P3).
+    pub fn with_gauge_runner(mut self, runner: crate::metrics_service::MetricsService) -> Self {
+        self.gauge_runner = Some(runner);
+        self
     }
 
     /// Attach the metric substrate + event bus. When present (together
@@ -334,6 +346,13 @@ impl TaskService {
                 {
                     self.project_effort_lifecycle_metrics(&item, &thread_id, &effort_id)
                         .await;
+                    // Run any config-declared `on-effort-complete` gauges
+                    // against the effort's end snapshot (tsk213, P3).
+                    if let Some(runner) = self.gauge_runner.as_ref() {
+                        runner
+                            .run_effort_complete_gauges(&thread_id, &effort_id)
+                            .await;
+                    }
                 }
             }
             _ => {

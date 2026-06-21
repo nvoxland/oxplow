@@ -29,6 +29,7 @@ pub mod hook_ingest;
 pub mod indexer;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod metrics_service;
 pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod recovery;
@@ -414,6 +415,9 @@ pub struct Services {
     /// Unified metric substrate (durable typed metrics; epic tsk213). The
     /// successor to `observation_store` + `code_quality_store`.
     pub metric_store: Arc<SqliteMetricStore>,
+    /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
+    /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
+    pub metrics: metrics_service::MetricsService,
     /// Persisted agent nudges (report-less-run / commit-hygiene) — the
     /// human-facing record of what oxplow steered the agent to do.
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
@@ -598,11 +602,25 @@ impl Services {
         // orphaned efforts left open by a crash (death/restart case).
         let recovery_svc =
             recovery_svc.with_snapshot_reconcile(thread_store.clone(), snapshot_captures.clone());
+        // The metric runner (config-declared gauges → substrate). Holds leaf
+        // Arcs only (never `Arc<Services>`); injected into TaskService for the
+        // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
+        let metrics = metrics_service::MetricsService::new(
+            metric_store.clone(),
+            snapshot_store.clone(),
+            thread_store.clone(),
+            effort_store.clone(),
+            blobs.clone(),
+            config_arc.clone(),
+            layout.project_dir.clone(),
+            event_bus.clone(),
+        );
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone())
-            .with_metrics(metric_store.clone(), event_bus.clone());
+            .with_metrics(metric_store.clone(), event_bus.clone())
+            .with_gauge_runner(metrics.clone());
         let collection = collection::CollectionService::new(
             observation_store.clone(),
             metric_store.clone(),
@@ -654,6 +672,7 @@ impl Services {
             effort_store,
             observation_store,
             metric_store,
+            metrics,
             nudge_store,
             collection,
             token_usage_store,
