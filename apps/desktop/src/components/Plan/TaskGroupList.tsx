@@ -1134,6 +1134,10 @@ function InlineItemRow({
       style={{
         display: "flex",
         alignItems: "center",
+        // Let the row shrink below its content width so the flex title
+        // span's ellipsis engages and the row never forces its column
+        // wider (which used to push/overlap the right Summary panel — tsk144).
+        minWidth: 0,
         gap: 8,
         padding: "8px 12px",
         cursor: isDragging ? "grabbing" : "pointer",
