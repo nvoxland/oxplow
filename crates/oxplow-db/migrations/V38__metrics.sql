@@ -98,6 +98,9 @@ CREATE TABLE metric_run (
     source TEXT NOT NULL,
     snapshot_id INTEGER,
     closest_git_version TEXT,
+    -- Branch the facts were captured on (e.g. `main`, `metrics-substrate`).
+    -- Nullable: detached HEAD or a non-git capture has no branch.
+    branch TEXT,
     git_version_exact INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NOT NULL,
     ended_at TEXT
@@ -123,6 +126,9 @@ CREATE TABLE metric_sample (
     captured_at TEXT NOT NULL,
     snapshot_id INTEGER,
     closest_git_version TEXT,
+    -- Branch the fact was captured on, when applicable (NULL = detached HEAD /
+    -- non-git). A conformed dimension so metrics compare/filter across branches.
+    branch TEXT,
     git_version_exact INTEGER NOT NULL DEFAULT 0,
     -- Baseline version for diff metrics (start snapshot/commit) — NOT an effort tie.
     basis_ref TEXT,
@@ -143,6 +149,7 @@ CREATE TABLE metric_sample (
 CREATE INDEX idx_metric_sample_metric_time ON metric_sample(metric_id, captured_at DESC);
 CREATE INDEX idx_metric_sample_metric_version ON metric_sample(metric_id, closest_git_version);
 CREATE INDEX idx_metric_sample_subject ON metric_sample(subject_kind, subject_ref);
+CREATE INDEX idx_metric_sample_branch ON metric_sample(metric_id, branch);
 CREATE INDEX idx_metric_sample_stream ON metric_sample(stream_id);
 CREATE INDEX idx_metric_sample_run ON metric_sample(run_id);
 CREATE INDEX idx_metric_sample_time ON metric_sample(captured_at);
@@ -181,6 +188,7 @@ INSERT INTO metric_dimension (key, label, value_type, subject_kind) VALUES
     ('thread',      'Thread',       'categorical', NULL),
     ('effort',      'Effort',       'categorical', NULL),
     ('git_version', 'Git version',  'categorical', NULL),
+    ('branch',      'Branch',       'categorical', NULL),
     ('subject',     'Subject',      'entity-ref',  NULL),
     ('model',       'Model',        'categorical', 'model'),
     ('agent',       'Agent',        'categorical', 'agent'),

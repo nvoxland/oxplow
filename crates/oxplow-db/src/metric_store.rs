@@ -169,6 +169,8 @@ pub struct MetricRun {
     pub source: String,
     pub snapshot_id: Option<i64>,
     pub closest_git_version: Option<String>,
+    /// Branch the run was captured on, when applicable.
+    pub branch: Option<String>,
     pub git_version_exact: bool,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
@@ -188,6 +190,7 @@ pub struct NewMetricRun {
     pub source: String,
     pub snapshot_id: Option<i64>,
     pub closest_git_version: Option<String>,
+    pub branch: Option<String>,
     pub git_version_exact: bool,
     /// Defaults to now when `None`.
     pub started_at: Option<Timestamp>,
@@ -210,6 +213,7 @@ impl NewMetricRun {
             source: source.into(),
             snapshot_id: None,
             closest_git_version: None,
+            branch: None,
             git_version_exact: false,
             started_at: None,
             ended_at: None,
@@ -219,7 +223,7 @@ impl NewMetricRun {
 
 const RUN_COLS: &str = "id, stream_id, thread_id, producer, status, error, scope, trigger, \
      basis_ref, provenance, source, snapshot_id, closest_git_version, git_version_exact, \
-     started_at, ended_at";
+     started_at, ended_at, branch";
 
 fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricRun> {
     let started_at: String = row.get(14)?;
@@ -239,6 +243,7 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricRun> {
         snapshot_id: row.get(11)?,
         closest_git_version: row.get(12)?,
         git_version_exact: row.get::<_, i64>(13)? != 0,
+        branch: row.get(16)?,
         started_at: string_to_ts(&started_at).map_err(ts_conv_err)?,
         ended_at: match ended_at {
             Some(s) => Some(string_to_ts(&s).map_err(ts_conv_err)?),
@@ -262,6 +267,8 @@ pub struct MetricSample {
     pub captured_at: Timestamp,
     pub snapshot_id: Option<i64>,
     pub closest_git_version: Option<String>,
+    /// Branch the fact was captured on, when applicable.
+    pub branch: Option<String>,
     pub git_version_exact: bool,
     pub basis_ref: Option<String>,
     pub stream_id: i64,
@@ -286,6 +293,7 @@ pub struct NewMetricSample {
     pub captured_at: Option<Timestamp>,
     pub snapshot_id: Option<i64>,
     pub closest_git_version: Option<String>,
+    pub branch: Option<String>,
     pub git_version_exact: bool,
     pub basis_ref: Option<String>,
     pub stream_id: i64,
@@ -311,6 +319,7 @@ impl NewMetricSample {
             captured_at: None,
             snapshot_id: None,
             closest_git_version: None,
+            branch: None,
             git_version_exact: false,
             basis_ref: None,
             stream_id,
@@ -328,7 +337,7 @@ impl NewMetricSample {
 
 const SAMPLE_COLS: &str = "id, run_id, metric_id, value, numerator, denominator, captured_at, \
      snapshot_id, closest_git_version, git_version_exact, basis_ref, stream_id, thread_id, \
-     subject_kind, subject_ref, path, line, dims_json, provenance, source";
+     subject_kind, subject_ref, path, line, dims_json, provenance, source, branch";
 
 fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSample> {
     let captured_at: String = row.get(6)?;
@@ -353,6 +362,7 @@ fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSample> {
         dims_json: row.get(17)?,
         provenance: row.get(18)?,
         source: row.get(19)?,
+        branch: row.get(20)?,
     })
 }
 
@@ -521,8 +531,8 @@ impl SqliteMetricStore {
                     "INSERT INTO metric_run
                        (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
                         provenance, source, snapshot_id, closest_git_version, git_version_exact,
-                        started_at, ended_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                        started_at, ended_at, branch)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                     params![
                         run.stream_id,
                         run.thread_id,
@@ -539,6 +549,7 @@ impl SqliteMetricStore {
                         run.git_version_exact,
                         started,
                         ended,
+                        run.branch,
                     ],
                 )?;
                 Ok(conn.last_insert_rowid())
@@ -580,9 +591,9 @@ impl SqliteMetricStore {
                     "INSERT INTO metric_sample
                        (run_id, metric_id, value, numerator, denominator, captured_at, snapshot_id,
                         closest_git_version, git_version_exact, basis_ref, stream_id, thread_id,
-                        subject_kind, subject_ref, path, line, dims_json, provenance, source)
+                        subject_kind, subject_ref, path, line, dims_json, provenance, source, branch)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17, ?18, ?19)",
+                             ?16, ?17, ?18, ?19, ?20)",
                     params![
                         s.run_id,
                         s.metric_id,
@@ -603,6 +614,7 @@ impl SqliteMetricStore {
                         s.dims_json,
                         s.provenance,
                         s.source,
+                        s.branch,
                     ],
                 )?;
                 Ok(conn.last_insert_rowid())
@@ -967,5 +979,40 @@ mod tests {
             (combined - naive_avg).abs() > 1e-6,
             "must differ from naive average"
         );
+    }
+
+    #[tokio::test]
+    async fn branch_is_tracked_on_run_and_sample() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "loc").await;
+        let run = store
+            .record_run(NewMetricRun {
+                branch: Some("metrics-substrate".into()),
+                closest_git_version: Some("abc1234".into()),
+                ..NewMetricRun::done(1, "metrics", "builtin")
+            })
+            .await
+            .unwrap();
+        store
+            .record_sample(NewMetricSample {
+                run_id: Some(run),
+                branch: Some("metrics-substrate".into()),
+                ..NewMetricSample::observed(metric, 1, 42.0, "builtin")
+            })
+            .await
+            .unwrap();
+
+        let got_run = store.get_run(run).await.unwrap().unwrap();
+        assert_eq!(got_run.branch.as_deref(), Some("metrics-substrate"));
+        let samples = store.list_samples(metric).await.unwrap();
+        assert_eq!(samples[0].branch.as_deref(), Some("metrics-substrate"));
+
+        // "When applicable": a branch-less sample stays None.
+        store
+            .record_sample(NewMetricSample::observed(metric, 1, 1.0, "builtin"))
+            .await
+            .unwrap();
+        let all = store.list_samples(metric).await.unwrap();
+        assert!(all.iter().any(|s| s.branch.is_none()));
     }
 }
