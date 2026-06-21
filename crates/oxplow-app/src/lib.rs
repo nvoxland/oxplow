@@ -619,6 +619,7 @@ impl Services {
             token_usage_store.clone(),
             effort_store.clone(),
             thread_store.clone(),
+            metric_store.clone(),
             event_bus.clone(),
         );
 

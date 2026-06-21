@@ -25,10 +25,11 @@ use std::sync::Arc;
 
 use oxplow_db::TaskEffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, SqliteTaskEffortStore, SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteMetricStore,
+    SqliteTaskEffortStore, SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{AgentKind, DomainError, ThreadId};
+use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
 
 use crate::events::{EventBus, OxplowEvent};
 
@@ -271,12 +272,52 @@ fn complete_offset(path: &Path) -> u64 {
     }
 }
 
+/// Per-(stop, model) token totals, accumulated across the turns in one Stop so
+/// the metric substrate gets one sample per model rather than one per turn.
+#[derive(Default)]
+struct TokenAgg {
+    input: i64,
+    output: i64,
+    cache_creation: i64,
+    cache_read: i64,
+    turns: i64,
+}
+
+/// Approximate USD price per **million** tokens `(input, output)` for a model.
+/// A reasonable default so `agent.cost_usd` is non-zero; exact rates can move to
+/// config later (the token page previously had no cost at all).
+fn model_price_per_mtok(model: &str) -> (f64, f64) {
+    let m = model.to_lowercase();
+    if m.contains("opus") {
+        (15.0, 75.0)
+    } else if m.contains("haiku") {
+        (0.80, 4.0)
+    } else {
+        // sonnet + unknown default
+        (3.0, 15.0)
+    }
+}
+
+/// USD cost of one model's token totals. Cache-read is billed at ~0.1x input,
+/// cache-write at ~1.25x input (Anthropic prompt-cache pricing).
+fn token_cost_usd(model: &str, a: &TokenAgg) -> f64 {
+    let (pin, pout) = model_price_per_mtok(model);
+    let m = 1_000_000.0;
+    (a.input as f64 / m) * pin
+        + (a.output as f64 / m) * pout
+        + (a.cache_read as f64 / m) * (pin * 0.1)
+        + (a.cache_creation as f64 / m) * (pin * 1.25)
+}
+
 /// Captures per-turn token usage from the agent transcript on Stop.
 #[derive(Clone)]
 pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
+    /// Unified metric substrate (tsk213): token/cost samples are projected here
+    /// for the Metrics surface, without touching the `agent_token_usage` source.
+    metrics: Arc<SqliteMetricStore>,
     events: EventBus,
 }
 
@@ -285,12 +326,14 @@ impl TokenUsageService {
         usage: Arc<SqliteTokenUsageStore>,
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
+        metrics: Arc<SqliteMetricStore>,
         events: EventBus,
     ) -> Self {
         Self {
             usage,
             efforts,
             threads,
+            metrics,
             events,
         }
     }
@@ -357,9 +400,19 @@ impl TokenUsageService {
             .map(|e| e.id.to_string());
 
         // One row per turn — each carrying its opening prompt, model, and the
-        // usage of the assistant messages that answered it (tsk143).
+        // usage of the assistant messages that answered it (tsk143). While we
+        // record, accumulate per-model totals for the metric projection.
         let mut last_id = None;
+        let mut by_model: std::collections::HashMap<String, TokenAgg> =
+            std::collections::HashMap::new();
         for turn in turns {
+            let model_key = turn.usage.model.clone().unwrap_or_else(|| "unknown".into());
+            let (input, output, cc, cr) = (
+                turn.usage.input_tokens,
+                turn.usage.output_tokens,
+                turn.usage.cache_creation_input_tokens,
+                turn.usage.cache_read_input_tokens,
+            );
             let id = self
                 .usage
                 .record(NewAgentTokenUsage {
@@ -370,21 +423,114 @@ impl TokenUsageService {
                     agent_kind: kind.as_str().to_string(),
                     model: turn.usage.model,
                     prompt: turn.prompt,
-                    input_tokens: turn.usage.input_tokens,
-                    output_tokens: turn.usage.output_tokens,
-                    cache_creation_input_tokens: turn.usage.cache_creation_input_tokens,
-                    cache_read_input_tokens: turn.usage.cache_read_input_tokens,
+                    input_tokens: input,
+                    output_tokens: output,
+                    cache_creation_input_tokens: cc,
+                    cache_read_input_tokens: cr,
                     message_count: turn.usage.message_count,
                 })
                 .await?;
             last_id = Some(id);
+            let agg = by_model.entry(model_key).or_default();
+            agg.input += input;
+            agg.output += output;
+            agg.cache_creation += cc;
+            agg.cache_read += cr;
+            agg.turns += 1;
         }
         self.usage.set_cursor(&session_key, new_offset).await?;
         self.events.emit(OxplowEvent::AgentTokenUsageChanged {
             thread_id: *thread,
             effort_id,
         });
+        // Project token + cost samples into the unified substrate (best-effort).
+        self.project_token_metrics(thread, &stream_id, &by_model)
+            .await;
         Ok(last_id)
+    }
+
+    /// Project per-model token totals + derived USD cost into the metric
+    /// substrate. Best-effort: a metric write error is logged, never fails the
+    /// Stop hook. No branch dimension (operational metric, not a code fact).
+    async fn project_token_metrics(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        by_model: &std::collections::HashMap<String, TokenAgg>,
+    ) {
+        if by_model.is_empty() {
+            return;
+        }
+        let Some(stream_val) = StreamId::try_from_str(stream_id).map(|s| s.value()) else {
+            return;
+        };
+        if let Err(e) = self
+            .record_token_metrics(thread, stream_val, by_model)
+            .await
+        {
+            tracing::warn!(error = %e, "failed to project token usage into metric substrate");
+            return;
+        }
+        self.events.emit(OxplowEvent::MetricSamplesChanged {
+            stream_id: StreamId::new(stream_val),
+        });
+    }
+
+    async fn record_token_metrics(
+        &self,
+        thread: &ThreadId,
+        stream_val: i64,
+        by_model: &std::collections::HashMap<String, TokenAgg>,
+    ) -> Result<(), DomainError> {
+        // (key, title, unit, lower_better)
+        let specs = [
+            ("agent.tokens.input", "Input tokens", "tokens", false),
+            ("agent.tokens.output", "Output tokens", "tokens", false),
+            ("agent.tokens.total", "Total tokens", "tokens", false),
+            ("agent.turns", "Agent turns", "count", false),
+            ("agent.cost_usd", "Agent cost", "usd", true),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, unit, lower) in specs {
+            let mut def = NewMetricDefinition::new(key, "gauge", title);
+            def.unit = Some(unit.into());
+            def.direction = if lower { "lower-better" } else { "neutral" }.into();
+            def.default_agg = "sum".into();
+            def.grain = Some("entity".into());
+            def.producer = Some("token-parse".into());
+            def.category = Some("operational".into());
+            def.dimensions_json = Some("[\"model\",\"agent\"]".into());
+            ids.insert(key, self.metrics.upsert_definition(def).await?);
+        }
+
+        let mut run = NewMetricRun::done(stream_val, "token-parse", "token-parse");
+        run.thread_id = Some(thread.value());
+        run.trigger = Some("continuous".into());
+        let run_id = self.metrics.record_run(run).await?;
+
+        for (model, agg) in by_model {
+            let subject = format!("model:{model}");
+            let total = agg.input + agg.output;
+            let cost = token_cost_usd(model, agg);
+            let rows = [
+                ("agent.tokens.input", agg.input as f64),
+                ("agent.tokens.output", agg.output as f64),
+                ("agent.tokens.total", total as f64),
+                ("agent.turns", agg.turns as f64),
+                ("agent.cost_usd", cost),
+            ];
+            for (key, value) in rows {
+                let metric_id = ids[key];
+                let mut s = NewMetricSample::observed(metric_id, stream_val, value, "token-parse");
+                s.run_id = Some(run_id);
+                s.thread_id = Some(thread.value());
+                s.subject_kind = Some("model".into());
+                s.subject_ref = Some(subject.clone());
+                s.dims_json = Some(format!("{{\"model\":\"{model}\"}}"));
+                self.metrics.record_sample(s).await?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -771,5 +917,62 @@ mod tests {
             .await
             .unwrap();
         assert!(id.is_none());
+    }
+
+    #[tokio::test]
+    async fn on_stop_projects_token_and_cost_metrics() {
+        let (svc, _dir, thread) = service_fixture().await;
+        let tdir = tempfile::tempdir().unwrap();
+        let path = tdir.path().join("session.jsonl");
+        let payload = format!(
+            "{{\"transcript_path\":{:?},\"session_id\":\"sess-m\"}}",
+            path.to_string_lossy()
+        );
+        // Bootstrap (seed cursor, record nothing).
+        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        svc.token_usage
+            .on_stop(&thread, Some("sess-m"), &payload)
+            .await
+            .unwrap();
+        // Append one watched turn (input 100, output 20, model opus).
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            f.write_all(format!("{ASSISTANT_LINE}\n").as_bytes())
+                .unwrap();
+        }
+        svc.token_usage
+            .on_stop(&thread, Some("sess-m"), &payload)
+            .await
+            .unwrap();
+
+        let samples_for = |key: &str| {
+            let store = svc.metric_store.clone();
+            let key = key.to_string();
+            async move {
+                let def = store.get_definition(&key).await.unwrap().unwrap();
+                store.list_samples(def.id).await.unwrap()
+            }
+        };
+        let total = samples_for("agent.tokens.total").await;
+        assert_eq!(total.len(), 1);
+        assert_eq!(total[0].value, 120.0, "input 100 + output 20");
+        assert_eq!(
+            total[0].subject_ref.as_deref(),
+            Some("model:claude-opus-4-8")
+        );
+
+        let input = samples_for("agent.tokens.input").await;
+        assert_eq!(input[0].value, 100.0);
+
+        let cost = samples_for("agent.cost_usd").await;
+        assert_eq!(cost.len(), 1);
+        assert!(
+            cost[0].value > 0.0,
+            "derived USD cost is non-zero: {}",
+            cost[0].value
+        );
     }
 }
