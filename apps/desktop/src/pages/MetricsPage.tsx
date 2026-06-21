@@ -10,12 +10,45 @@ import {
 import { Card } from "../components/Card.js";
 import { Page } from "../tabs/Page.js";
 
-type Row = { def: MetricDefinition; latest: MetricSample | null; count: number };
+type Row = {
+  def: MetricDefinition;
+  latest: MetricSample | null;
+  count: number;
+  samples: MetricSample[];
+};
 
 const SAMPLE_LIMIT = 50;
 
 function formatValue(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
+}
+
+/** Inline-SVG sparkline of a metric's values over time (oldest → newest). */
+function Sparkline({ values, color }: { values: number[]; color?: string }) {
+  if (values.length < 2) return <span style={{ opacity: 0.35 }}>—</span>;
+  const w = 90;
+  const h = 22;
+  const pad = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values
+    .map((v, i) => {
+      const x = pad + (i / (values.length - 1)) * (w - 2 * pad);
+      const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg width={w} height={h} style={{ display: "block" }} aria-hidden>
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={color ?? "var(--accent, #58a6ff)"}
+        strokeWidth={1.5}
+      />
+    </svg>
+  );
 }
 
 /** Color a value against the metric's target + direction (the data-driven
@@ -45,7 +78,7 @@ export function MetricsPage() {
         const built = await Promise.all(
           defs.map(async (def) => {
             const samples = await listMetricSamples(def.key, SAMPLE_LIMIT);
-            return { def, latest: samples[0] ?? null, count: samples.length };
+            return { def, latest: samples[0] ?? null, count: samples.length, samples };
           }),
         );
         if (!cancelled) {
@@ -93,6 +126,7 @@ export function MetricsPage() {
                   <th style={{ padding: "4px 8px" }}>Metric</th>
                   <th style={{ padding: "4px 8px" }}>Kind</th>
                   <th style={{ padding: "4px 8px" }}>Latest</th>
+                  <th style={{ padding: "4px 8px" }}>Trend</th>
                   <th style={{ padding: "4px 8px" }}>Branch</th>
                   <th style={{ padding: "4px 8px", textAlign: "right" }}>
                     Samples
@@ -100,7 +134,7 @@ export function MetricsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ def, latest, count }) => (
+                {rows.map(({ def, latest, count, samples }) => (
                   <tr
                     key={def.key}
                     style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}
@@ -132,6 +166,17 @@ export function MetricsPage() {
                             def.unit ? ` ${def.unit}` : ""
                           }`
                         : "—"}
+                    </td>
+                    <td style={{ padding: "6px 8px" }}>
+                      <Sparkline
+                        values={samples
+                          .slice()
+                          .reverse()
+                          .map((s) => s.value)}
+                        color={
+                          latest ? statusColor(def, latest.value) : undefined
+                        }
+                      />
                     </td>
                     <td
                       style={{
