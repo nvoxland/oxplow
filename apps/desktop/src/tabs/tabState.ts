@@ -46,7 +46,10 @@ export type PageKind =
   | "closed-threads"
   | "op-error"
   | "external-url"
-  | "effort-coverage";
+  | "effort-coverage"
+  | "usage"
+  | "page-analytics"
+  | "token-analytics";
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

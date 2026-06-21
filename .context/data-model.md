@@ -1052,10 +1052,16 @@ Stops only sum the new tail — and a daemon restart never re-sums
 already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `list_for_effort`, `totals_for_effort`,
-`totals_for_thread`, `cursor`/`set_cursor`. Reads exposed over IPC as
+`totals_for_thread`, `cursor`/`set_cursor`, plus the cross-cutting
+analytics aggregates `totals_overall`, `totals_by_agent_kind`,
+`totals_by_model` (groups by `agent_kind, model`), and `usage_by_day(days)`
+(`GROUP BY date(recorded_at)`). Reads exposed over IPC as
 `list_token_usage_for_effort` / `get_effort_token_totals` /
-`get_thread_token_totals` (UI-only); mutations emit
-`AgentTokenUsageChanged { thread_id, effort_id }`.
+`get_thread_token_totals` and the analytics set `token_totals_overall` /
+`token_usage_by_agent` / `token_usage_by_model` / `token_usage_by_day`
+(all UI-only); mutations emit `AgentTokenUsageChanged { thread_id,
+effort_id }`. The analytics reads drive the **Token Analytics** page
+(`.context/pages-and-tabs.md`).
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 

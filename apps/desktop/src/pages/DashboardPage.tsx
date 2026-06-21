@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, PageVisitApi, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, Task } from "../api.js";
+import type { BacklogState, CodeQualityFindingRow, FileSnapshot, PageVisitApi, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, Task } from "../api.js";
 import {
-  countPageVisitsByDay,
   listCodeQualityFindings,
   listFileSnapshots,
   listRecentPageVisits,
@@ -387,7 +386,6 @@ function VisitsSections({
 }) {
   const [recent, setRecent] = useState<PageVisitApi[]>([]);
   const [top, setTop] = useState<TopVisitedRowApi[]>([]);
-  const [byDay, setByDay] = useState<CountByDayRowApi[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -404,9 +402,6 @@ function VisitsSections({
       void topVisitedPages({ limit: 25, sinceT: since }).then((rows) => {
         if (!cancelled) setTop(rows);
       });
-      void countPageVisitsByDay({ sinceT: since }).then((rows) => {
-        if (!cancelled) setByDay(rows);
-      });
     };
     refresh();
     const off = subscribePageVisitEvents(refresh);
@@ -416,13 +411,12 @@ function VisitsSections({
     };
   }, [threadId]);
 
+  // Go To is purely navigational — bookmarks + plain link lists. Visit
+  // analytics (counts, per-day chart) live on the Page Analytics page.
   return (
     <>
       <BookmarksManager stream={stream} threadId={threadId} onOpenPage={onOpenPage} />
       <VisitsBrowser recent={recent} top={top} onOpenPage={onOpenPage} />
-      <Section title="Visits per Day (Last 30d)">
-        <DailyChart rows={byDay} />
-      </Section>
     </>
   );
 }
@@ -475,35 +469,75 @@ function VisitsBrowser({
           <span style={{ color: "var(--text-muted)", fontSize: 11 }}>Last 30 days</span>
         ) : null}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {mode === "recent" ? (
-          recent.length === 0 ? (
-            <EmptyHint>No visits recorded yet.</EmptyHint>
-          ) : (
-            recent.map((r) => (
-              <RowButton
-                key={r.refId}
-                label={(r.label?.trim() ?? "") || r.refId}
-                subtitle={formatRelative(r.t)}
-                navRef={refFromTabId(r.refId)}
-                onNavigate={(target) => onOpenPage(target)}
-              />
-            ))
-          )
-        ) : top.length === 0 ? (
+      {mode === "recent" ? (
+        recent.length === 0 ? (
           <EmptyHint>No visits recorded yet.</EmptyHint>
         ) : (
-          top.map((r) => (
-            <RowButton
+          <LinkList>
+            {recent.map((r) => (
+              <LinkRow
+                key={r.refId}
+                kind={refFromTabId(r.refId).kind}
+                label={(r.label?.trim() ?? "") || r.refId}
+                onClick={() => onOpenPage(refFromTabId(r.refId))}
+              />
+            ))}
+          </LinkList>
+        )
+      ) : top.length === 0 ? (
+        <EmptyHint>No visits recorded yet.</EmptyHint>
+      ) : (
+        <LinkList>
+          {top.map((r) => (
+            <LinkRow
               key={r.refId}
+              kind={r.refKind}
               label={r.label}
-              subtitle={`${r.count} visit${r.count === 1 ? "" : "s"} · ${r.refKind} · last ${formatRelative(r.lastT)}`}
               onClick={() => onOpenPage({ id: r.refId, kind: r.refKind as TabRef["kind"], payload: r.payload })}
             />
-          ))
-        )}
-      </div>
+          ))}
+        </LinkList>
+      )}
     </section>
+  );
+}
+
+/** Plain unstyled list wrapper for the link rows. */
+function LinkList({ children }: { children: ReactNode }) {
+  return (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column" }}>
+      {children}
+    </ul>
+  );
+}
+
+const linkRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  width: "100%",
+  textAlign: "left",
+  padding: "7px 2px",
+  background: "transparent",
+  border: "none",
+  borderBottom: "1px solid var(--border-subtle)",
+  color: "var(--text-primary)",
+  cursor: "pointer",
+  fontSize: "var(--text-sm)",
+};
+
+/** A single plain text link row (no box) for the visited lists, with
+ *  the page-type icon before the label (matching bookmark rows). */
+function LinkRow({ kind, label, onClick }: { kind: string; label: string; onClick(): void }) {
+  return (
+    <li>
+      <button type="button" title={label} onClick={onClick} style={linkRowStyle}>
+        <PageKindIcon kind={kind} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {label}
+        </span>
+      </button>
+    </li>
   );
 }
 
@@ -540,18 +574,17 @@ function BookmarksManager({
   return (
     <Section title="Bookmarks">
       {bookmarks.length === 0 ? <EmptyHint>No bookmarks yet — star a page to pin it here.</EmptyHint> : null}
+      <LinkList>
       {bookmarks.map((b) => (
-        <div
+        <li
           key={b.ref.id}
           data-testid={`goto-bookmark-${b.ref.id}`}
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
-            padding: "6px 10px",
-            background: "var(--surface-tab-inactive)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 6,
+            padding: "2px 2px",
+            borderBottom: "1px solid var(--border-subtle)",
           }}
         >
           <button
@@ -571,6 +604,7 @@ function BookmarksManager({
               cursor: "pointer",
               fontSize: "var(--text-sm)",
               textAlign: "left",
+              padding: "7px 0",
             }}
           >
             <PageKindIcon kind={b.ref.kind} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
@@ -623,63 +657,11 @@ function BookmarksManager({
           >
             ✕
           </button>
-        </div>
+        </li>
       ))}
+      </LinkList>
     </Section>
   );
-}
-
-function DailyChart({ rows }: { rows: CountByDayRowApi[] }) {
-  if (rows.length === 0) {
-    return <EmptyHint>No visits in the last 30 days.</EmptyHint>;
-  }
-  const max = Math.max(1, ...rows.map((r) => r.count));
-  const total = rows.reduce((sum, r) => sum + r.count, 0);
-  return (
-    <div
-      style={{
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        padding: "12px 14px",
-      }}
-    >
-      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 8 }}>
-        {total} total · peak {max}/day
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
-        {rows.map((r) => (
-          <div
-            key={r.day}
-            title={`${r.day}: ${r.count}`}
-            style={{
-              flex: 1,
-              minWidth: 4,
-              height: `${Math.max(2, (r.count / max) * 100)}%`,
-              background: "var(--accent-fg, #58a6ff)",
-              borderRadius: "2px 2px 0 0",
-              opacity: 0.85,
-            }}
-          />
-        ))}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10, color: "var(--text-muted)" }}>
-        <span>{rows[0]?.day}</span>
-        <span>{rows[rows.length - 1]?.day}</span>
-      </div>
-    </div>
-  );
-}
-
-function formatRelative(iso: string): string {
-  const ms = Date.now() - Date.parse(iso);
-  if (!Number.isFinite(ms) || ms < 0) return iso;
-  const m = Math.round(ms / 60_000);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  return `${d}d ago`;
 }
 
 // Re-export so test files can stub:

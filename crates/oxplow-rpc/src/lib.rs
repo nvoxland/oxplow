@@ -202,6 +202,10 @@ rpc_dispatch! {
     "list_token_usage_for_effort" => commands::effort::list_token_usage_for_effort { effort_id: oxplow_domain::EffortId },
     "get_effort_token_totals" => commands::effort::get_effort_token_totals { effort_id: oxplow_domain::EffortId },
     "get_thread_token_totals" => commands::effort::get_thread_token_totals { thread_id: oxplow_domain::ThreadId },
+    "token_totals_overall" => commands::effort::token_totals_overall {},
+    "token_usage_by_agent" => commands::effort::token_usage_by_agent {},
+    "token_usage_by_model" => commands::effort::token_usage_by_model {},
+    "token_usage_by_day" => commands::effort::token_usage_by_day { days: u32 },
     // followup
     "list_followups" => commands::followup::list_followups { thread_id: oxplow_domain::ThreadId },
     "add_followup" => commands::followup::add_followup { thread_id: oxplow_domain::ThreadId, body: String },

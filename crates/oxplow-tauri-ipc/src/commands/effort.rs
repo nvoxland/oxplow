@@ -1,8 +1,8 @@
 //! task effort tracking commands.
 
 use oxplow_db::{
-    AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile,
-    EffortObservation, TaskEffort, TokenUsageTotals,
+    AgentKindTokenUsage, AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths,
+    EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TokenUsageByDay, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 
@@ -104,4 +104,41 @@ pub async fn get_thread_token_totals(
     thread_id: ThreadId,
 ) -> Result<TokenUsageTotals, IpcError> {
     oxplow_rpc::commands::effort::get_thread_token_totals(&state, thread_id).await
+}
+
+/// Summed token totals across every recorded turn (Token Analytics page).
+#[tauri::command]
+#[specta::specta]
+pub async fn token_totals_overall(
+    state: tauri::State<'_, AppState>,
+) -> Result<TokenUsageTotals, IpcError> {
+    oxplow_rpc::commands::effort::token_totals_overall(&state).await
+}
+
+/// Token totals grouped by agent/harness, busiest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn token_usage_by_agent(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<AgentKindTokenUsage>, IpcError> {
+    oxplow_rpc::commands::effort::token_usage_by_agent(&state).await
+}
+
+/// Token totals grouped by (agent_kind, model), busiest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn token_usage_by_model(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ModelTokenUsage>, IpcError> {
+    oxplow_rpc::commands::effort::token_usage_by_model(&state).await
+}
+
+/// Token volume bucketed by day over the last `days` days (trend chart).
+#[tauri::command]
+#[specta::specta]
+pub async fn token_usage_by_day(
+    state: tauri::State<'_, AppState>,
+    days: u32,
+) -> Result<Vec<TokenUsageByDay>, IpcError> {
+    oxplow_rpc::commands::effort::token_usage_by_day(&state, days).await
 }

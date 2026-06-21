@@ -5,8 +5,9 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile,
-    EffortObservation, TaskEffort, TaskEffortStore as _, TokenUsageTotals,
+    AgentKindTokenUsage, AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths,
+    EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TaskEffortStore as _,
+    TokenUsageByDay, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -143,6 +144,29 @@ pub async fn get_thread_token_totals(
         .await?)
 }
 
+/// Summed token totals across every recorded turn (Token Analytics page).
+pub async fn token_totals_overall(svc: &Services) -> Result<TokenUsageTotals, IpcError> {
+    Ok(svc.token_usage_store.totals_overall().await?)
+}
+
+/// Token totals grouped by agent/harness, busiest first.
+pub async fn token_usage_by_agent(svc: &Services) -> Result<Vec<AgentKindTokenUsage>, IpcError> {
+    Ok(svc.token_usage_store.totals_by_agent_kind().await?)
+}
+
+/// Token totals grouped by (agent_kind, model), busiest first.
+pub async fn token_usage_by_model(svc: &Services) -> Result<Vec<ModelTokenUsage>, IpcError> {
+    Ok(svc.token_usage_store.totals_by_model().await?)
+}
+
+/// Token volume bucketed by day over the last `days` days (trend chart).
+pub async fn token_usage_by_day(
+    svc: &Services,
+    days: u32,
+) -> Result<Vec<TokenUsageByDay>, IpcError> {
+    Ok(svc.token_usage_store.usage_by_day(days).await?)
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -217,5 +241,24 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(thread["turns"], 0);
+    }
+
+    #[tokio::test]
+    async fn token_analytics_commands_dispatch() {
+        let (svc, _dir) = crate::test_support::services();
+        let overall = crate::dispatch("token_totals_overall", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        assert_eq!(overall["total_tokens"], 0);
+        for name in ["token_usage_by_agent", "token_usage_by_model"] {
+            let out = crate::dispatch(name, serde_json::json!({}), &svc)
+                .await
+                .unwrap();
+            assert!(out.is_array());
+        }
+        let by_day = crate::dispatch("token_usage_by_day", serde_json::json!({"days": 30}), &svc)
+            .await
+            .unwrap();
+        assert!(by_day.is_array());
     }
 }

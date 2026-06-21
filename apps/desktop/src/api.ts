@@ -1727,6 +1727,48 @@ export async function getThreadTokenTotals(
   ) as unknown as import("./tauri-bridge/index.js").TokenUsageTotals;
 }
 
+export type {
+  AgentKindTokenUsage,
+  ModelTokenUsage,
+  TokenUsageByDay,
+} from "./tauri-bridge/index.js";
+
+/** Summed token totals across every recorded turn (Token Analytics). */
+export async function getTokenTotalsOverall(): Promise<
+  import("./tauri-bridge/index.js").TokenUsageTotals
+> {
+  return unwrap(
+    await commands.tokenTotalsOverall(),
+  ) as unknown as import("./tauri-bridge/index.js").TokenUsageTotals;
+}
+
+/** Token totals grouped by agent/harness, busiest first. */
+export async function tokenUsageByAgent(): Promise<
+  import("./tauri-bridge/index.js").AgentKindTokenUsage[]
+> {
+  return unwrap(
+    await commands.tokenUsageByAgent(),
+  ) as unknown as import("./tauri-bridge/index.js").AgentKindTokenUsage[];
+}
+
+/** Token totals grouped by (agent_kind, model), busiest first. */
+export async function tokenUsageByModel(): Promise<
+  import("./tauri-bridge/index.js").ModelTokenUsage[]
+> {
+  return unwrap(
+    await commands.tokenUsageByModel(),
+  ) as unknown as import("./tauri-bridge/index.js").ModelTokenUsage[];
+}
+
+/** Token volume bucketed by day over the last `days` days (trend chart). */
+export async function tokenUsageByDay(
+  days: number,
+): Promise<import("./tauri-bridge/index.js").TokenUsageByDay[]> {
+  return unwrap(
+    await commands.tokenUsageByDay(days),
+  ) as unknown as import("./tauri-bridge/index.js").TokenUsageByDay[];
+}
+
 export async function listFileSnapshots(
   streamId: string,
   limit?: number,

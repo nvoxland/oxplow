@@ -87,6 +87,35 @@ pub struct TokenUsageTotals {
     pub turns: i64,
 }
 
+/// Token totals for one agent/harness (`agent_kind`), used by the
+/// Token Analytics page's by-harness rollup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct AgentKindTokenUsage {
+    pub agent_kind: String,
+    pub totals: TokenUsageTotals,
+}
+
+/// Token totals for one (agent_kind, model) pair. `model` is nullable
+/// (a turn can land without a parsed model). Used by the Token
+/// Analytics page's by-model breakdown, grouped under each harness.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ModelTokenUsage {
+    pub agent_kind: String,
+    pub model: Option<String>,
+    pub totals: TokenUsageTotals,
+}
+
+/// Token volume bucketed by calendar day (UTC), newest day last.
+/// Drives the tokens-per-day trend chart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct TokenUsageByDay {
+    /// `YYYY-MM-DD`.
+    pub day: String,
+    pub total_tokens: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
 const SELECT_COLS: &str = "id, stream_id, thread_id, effort_id, session_id, agent_kind, \
      model, prompt, input_tokens, output_tokens, cache_creation_input_tokens, \
      cache_read_input_tokens, message_count, provenance, recorded_at";
@@ -239,6 +268,88 @@ impl SqliteTokenUsageStore {
             .await
     }
 
+    /// Summed totals across every recorded turn (all streams/threads).
+    pub async fn totals_overall(&self) -> Result<TokenUsageTotals, DomainError> {
+        self.db
+            .call(|conn| conn.query_row(&totals_sql("1=1"), [], totals_from_row))
+            .await
+    }
+
+    /// Totals grouped by agent/harness (`agent_kind`), busiest first.
+    pub async fn totals_by_agent_kind(&self) -> Result<Vec<AgentKindTokenUsage>, DomainError> {
+        self.db
+            .call(|conn| {
+                let sql = format!(
+                    "{select} GROUP BY agent_kind ORDER BY \
+                     COALESCE(SUM(input_tokens + output_tokens + \
+                       cache_creation_input_tokens + cache_read_input_tokens), 0) DESC",
+                    select = grouped_totals_select("agent_kind")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(AgentKindTokenUsage {
+                        agent_kind: row.get(0)?,
+                        totals: totals_at(row, 1)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Totals grouped by (agent_kind, model), busiest first. Lets the UI
+    /// nest models under their harness.
+    pub async fn totals_by_model(&self) -> Result<Vec<ModelTokenUsage>, DomainError> {
+        self.db
+            .call(|conn| {
+                let sql = format!(
+                    "{select} GROUP BY agent_kind, model ORDER BY \
+                     COALESCE(SUM(input_tokens + output_tokens + \
+                       cache_creation_input_tokens + cache_read_input_tokens), 0) DESC",
+                    select = grouped_totals_select("agent_kind, model")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(ModelTokenUsage {
+                        agent_kind: row.get(0)?,
+                        model: row.get(1)?,
+                        totals: totals_at(row, 2)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Token volume per calendar day over the last `days` days (oldest
+    /// first), for the trend chart.
+    pub async fn usage_by_day(&self, days: u32) -> Result<Vec<TokenUsageByDay>, DomainError> {
+        let modifier = format!("-{days} days");
+        self.db
+            .call(move |conn| {
+                let sql = "SELECT date(recorded_at) AS day,
+                     COALESCE(SUM(input_tokens + output_tokens + \
+                       cache_creation_input_tokens + cache_read_input_tokens), 0),
+                     COALESCE(SUM(input_tokens), 0),
+                     COALESCE(SUM(output_tokens), 0)
+                   FROM agent_token_usage
+                   WHERE date(recorded_at) >= date('now', ?1)
+                   GROUP BY day
+                   ORDER BY day ASC";
+                let mut stmt = conn.prepare(sql)?;
+                let rows = stmt.query_map(params![modifier], |row| {
+                    Ok(TokenUsageByDay {
+                        day: row.get(0)?,
+                        total_tokens: row.get(1)?,
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// Current read offset for a session, or `None` if never recorded.
     pub async fn cursor(&self, session_id: &str) -> Result<Option<u64>, DomainError> {
         let session_id = session_id.to_string();
@@ -292,19 +403,42 @@ fn totals_sql(predicate: &str) -> String {
 }
 
 fn totals_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TokenUsageTotals> {
-    let input: i64 = row.get(0)?;
-    let output: i64 = row.get(1)?;
-    let cache_creation: i64 = row.get(2)?;
-    let cache_read: i64 = row.get(3)?;
+    totals_at(row, 0)
+}
+
+/// Read a `TokenUsageTotals` from six consecutive aggregate columns
+/// starting at `base` (input, output, cache-creation, cache-read,
+/// message_count, count). Lets a grouped query prepend its key columns.
+fn totals_at(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<TokenUsageTotals> {
+    let input: i64 = row.get(base)?;
+    let output: i64 = row.get(base + 1)?;
+    let cache_creation: i64 = row.get(base + 2)?;
+    let cache_read: i64 = row.get(base + 3)?;
     Ok(TokenUsageTotals {
         input_tokens: input,
         output_tokens: output,
         cache_creation_input_tokens: cache_creation,
         cache_read_input_tokens: cache_read,
         total_tokens: input + output + cache_creation + cache_read,
-        message_count: row.get(4)?,
-        turns: row.get(5)?,
+        message_count: row.get(base + 4)?,
+        turns: row.get(base + 5)?,
     })
+}
+
+/// `SELECT <group_cols>, <6 aggregate total columns> FROM agent_token_usage`
+/// — the caller appends `GROUP BY` / `ORDER BY`. The aggregate columns
+/// line up with `totals_at(row, <number of group cols>)`.
+fn grouped_totals_select(group_cols: &str) -> String {
+    format!(
+        "SELECT {group_cols},
+           COALESCE(SUM(input_tokens), 0),
+           COALESCE(SUM(output_tokens), 0),
+           COALESCE(SUM(cache_creation_input_tokens), 0),
+           COALESCE(SUM(cache_read_input_tokens), 0),
+           COALESCE(SUM(message_count), 0),
+           COUNT(*)
+         FROM agent_token_usage"
+    )
 }
 
 #[cfg(test)]
@@ -425,6 +559,124 @@ mod tests {
         let (store, effort) = fixture().await;
         let eff = store.totals_for_effort(&effort).await.unwrap();
         assert_eq!(eff, TokenUsageTotals::default());
+    }
+
+    /// A sample turn with explicit agent/model/token counts (effort-less,
+    /// so analytics queries that ignore effort still cover it).
+    fn sample_kind(
+        agent_kind: &str,
+        model: Option<&str>,
+        input: i64,
+        output: i64,
+    ) -> NewAgentTokenUsage {
+        NewAgentTokenUsage {
+            stream_id: "str1".into(),
+            thread_id: "thr1".into(),
+            effort_id: None,
+            session_id: "sess-1".into(),
+            agent_kind: agent_kind.into(),
+            model: model.map(str::to_string),
+            prompt: None,
+            input_tokens: input,
+            output_tokens: output,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            message_count: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn overall_sums_every_row() {
+        let (store, _e) = fixture().await;
+        store
+            .record(sample_kind("claude", Some("opus"), 100, 10))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("codex", Some("gpt"), 5, 1))
+            .await
+            .unwrap();
+        let all = store.totals_overall().await.unwrap();
+        assert_eq!(all.input_tokens, 105);
+        assert_eq!(all.output_tokens, 11);
+        assert_eq!(all.total_tokens, 105 + 11);
+        assert_eq!(all.turns, 2);
+    }
+
+    #[tokio::test]
+    async fn by_agent_kind_splits_and_orders_busiest_first() {
+        let (store, _e) = fixture().await;
+        store
+            .record(sample_kind("claude", Some("opus"), 100, 0))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("claude", Some("opus"), 100, 0))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("codex", Some("gpt"), 5, 0))
+            .await
+            .unwrap();
+        let rows = store.totals_by_agent_kind().await.unwrap();
+        assert_eq!(rows.len(), 2);
+        // Busiest first: claude (200) before codex (5).
+        assert_eq!(rows[0].agent_kind, "claude");
+        assert_eq!(rows[0].totals.input_tokens, 200);
+        assert_eq!(rows[0].totals.turns, 2);
+        assert_eq!(rows[1].agent_kind, "codex");
+        assert_eq!(rows[1].totals.input_tokens, 5);
+    }
+
+    #[tokio::test]
+    async fn by_model_groups_under_agent() {
+        let (store, _e) = fixture().await;
+        store
+            .record(sample_kind("claude", Some("opus"), 100, 0))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("claude", Some("sonnet"), 30, 0))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("claude", Some("opus"), 20, 0))
+            .await
+            .unwrap();
+        let rows = store.totals_by_model().await.unwrap();
+        // Two distinct (agent_kind, model) pairs.
+        assert_eq!(rows.len(), 2);
+        let opus = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("opus"))
+            .unwrap();
+        assert_eq!(opus.agent_kind, "claude");
+        assert_eq!(opus.totals.input_tokens, 120);
+        assert_eq!(opus.totals.turns, 2);
+        let sonnet = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("sonnet"))
+            .unwrap();
+        assert_eq!(sonnet.totals.input_tokens, 30);
+    }
+
+    #[tokio::test]
+    async fn usage_by_day_buckets_today() {
+        let (store, _e) = fixture().await;
+        store
+            .record(sample_kind("claude", Some("opus"), 100, 10))
+            .await
+            .unwrap();
+        store
+            .record(sample_kind("claude", Some("opus"), 50, 5))
+            .await
+            .unwrap();
+        let rows = store.usage_by_day(30).await.unwrap();
+        // Both turns land on the same (today's) bucket.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].total_tokens, 165);
+        assert_eq!(rows[0].input_tokens, 150);
+        assert_eq!(rows[0].output_tokens, 15);
     }
 
     #[tokio::test]

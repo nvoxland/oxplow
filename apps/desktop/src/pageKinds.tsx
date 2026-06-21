@@ -17,9 +17,11 @@ import {
   AlertCircle,
   AlertTriangle,
   Archive,
+  BarChart3,
   BookOpen,
   CheckCheck,
   CheckSquare,
+  Coins,
   Copy,
   ExternalLink,
   FileText,
@@ -127,6 +129,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitBranch;
     case "hook-events":
       return Activity;
+    case "usage":
+      return Activity;
+    case "page-analytics":
+      return BarChart3;
+    case "token-analytics":
+      return Coins;
     case "terminal":
       return Terminal;
     case "new-stream":
@@ -217,6 +225,12 @@ export function pageKindLabel(kind: string): string {
       return "thread settings";
     case "op-error":
       return "error";
+    case "usage":
+      return "usage";
+    case "page-analytics":
+      return "page analytics";
+    case "token-analytics":
+      return "token analytics";
     default:
       return kind;
   }
@@ -248,6 +262,9 @@ const INDEX_KINDS = new Set<string>([
   "new-task",
   "closed-threads",
   "uncommitted-changes",
+  "usage",
+  "page-analytics",
+  "token-analytics",
 ]);
 
 /**

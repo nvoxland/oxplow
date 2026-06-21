@@ -488,6 +488,14 @@ export const commands = {
 	getEffortTokenTotals: (effortId: EffortId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_effort_token_totals", { effortId })),
 	// Summed token totals for a whole thread (Work panel running total).
 	getThreadTokenTotals: (threadId: ThreadId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_thread_token_totals", { threadId })),
+	// Summed token totals across every recorded turn (Token Analytics page).
+	tokenTotalsOverall: () => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("token_totals_overall")),
+	// Token totals grouped by agent/harness, busiest first.
+	tokenUsageByAgent: () => typedError<AgentKindTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_agent")),
+	// Token totals grouped by (agent_kind, model), busiest first.
+	tokenUsageByModel: () => typedError<ModelTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_model")),
+	// Token volume bucketed by day over the last `days` days (trend chart).
+	tokenUsageByDay: (days: number) => typedError<TokenUsageByDay[], IpcError>(__TAURI_INVOKE("token_usage_by_day", { days })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
@@ -699,6 +707,15 @@ export type AdoptWorktreeRequest = {
 };
 
 export type AgentKind = "claude" | "codex" | "opencode";
+
+/**
+ *  Token totals for one agent/harness (`agent_kind`), used by the
+ *  Token Analytics page's by-harness rollup.
+ */
+export type AgentKindTokenUsage = {
+	agent_kind: string,
+	totals: TokenUsageTotals,
+};
 
 // One persisted nudge row.
 export type AgentNudge = {
@@ -1718,6 +1735,17 @@ export type MergeReadiness =
  */
 "conflict";
 
+/**
+ *  Token totals for one (agent_kind, model) pair. `model` is nullable
+ *  (a turn can land without a parsed model). Used by the Token
+ *  Analytics page's by-model breakdown, grouped under each harness.
+ */
+export type ModelTokenUsage = {
+	agent_kind: string,
+	model: string | null,
+	totals: TokenUsageTotals,
+};
+
 export type MoveTaskRequest = {
 	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
@@ -2414,6 +2442,18 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
+
+/**
+ *  Token volume bucketed by calendar day (UTC), newest day last.
+ *  Drives the tokens-per-day trend chart.
+ */
+export type TokenUsageByDay = {
+	// `YYYY-MM-DD`.
+	day: string,
+	total_tokens: number,
+	input_tokens: number,
+	output_tokens: number,
+};
 
 // Aggregated totals across a set of usage rows (per effort or per thread).
 export type TokenUsageTotals = {

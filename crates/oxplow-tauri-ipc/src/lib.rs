@@ -190,6 +190,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::effort::list_token_usage_for_effort,
             commands::effort::get_effort_token_totals,
             commands::effort::get_thread_token_totals,
+            commands::effort::token_totals_overall,
+            commands::effort::token_usage_by_agent,
+            commands::effort::token_usage_by_model,
+            commands::effort::token_usage_by_day,
             // log
             commands::log::get_git_log,
             commands::log::get_commit_detail,

@@ -46,7 +46,8 @@ pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNo
 pub use task_store::{EffortTransition, SqliteTaskStore};
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{
-    AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,
+    AgentKindTokenUsage, AgentTokenUsage, ModelTokenUsage, NewAgentTokenUsage,
+    SqliteTokenUsageStore, TokenUsageByDay, TokenUsageTotals,
 };
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};
