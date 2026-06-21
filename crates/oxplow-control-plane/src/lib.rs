@@ -632,6 +632,25 @@ async fn pre_tool_check(
 
     let project_dir = ctx.services.layout.project_dir.as_path();
 
+    let file_path = tool_input
+        .and_then(|t| {
+            t.get("file_path")
+                .or_else(|| t.get("notebook_path"))
+                .or_else(|| t.get("path"))
+        })
+        .and_then(|v| v.as_str());
+
+    // Out-of-worktree edits are none of oxplow's concern: an absolute path
+    // outside the project root can't be a project file, can't be claimed by an
+    // effort, and can't be in any effort's changed set. Allow cleanly BEFORE
+    // either guard so editing e.g. the Claude Code plan file under `~/.claude/`
+    // never trips the write-guard (read-only thread) or filing enforcement, and
+    // never surfaces a non-blocking hook error (tsk212). (PostToolUse's
+    // auto-claim already no-ops out-of-worktree via `effort_claim_path_from_edit`.)
+    if edit_path_outside_worktree(file_path, project_dir) {
+        return None;
+    }
+
     // Layer 1: write_guard for read-only threads.
     if let Some(deny) = build_write_guard_response(
         Some(&thread),
@@ -646,14 +665,6 @@ async fn pre_tool_check(
 
     // Layer 2: filing_enforcement for the writer thread.
     let has_in_progress_task = stream_has_in_progress_claim(ctx, &thread).await;
-
-    let file_path = tool_input
-        .and_then(|t| {
-            t.get("file_path")
-                .or_else(|| t.get("notebook_path"))
-                .or_else(|| t.get("path"))
-        })
-        .and_then(|v| v.as_str());
 
     let git_operation_in_progress = git_operation_in_progress(project_dir);
 
@@ -769,6 +780,20 @@ async fn attribute_effort_file_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &s
         .await
     {
         warn!(?err, path = rel, "effort file auto-claim failed");
+    }
+}
+
+/// True when a structured-edit `file_path` is an **absolute path outside** the
+/// project worktree — none of oxplow's concern, so both PreToolUse guards
+/// short-circuit to a clean allow (tsk212). Relative paths (resolved against
+/// the worktree) and `None` fall through to the normal guards.
+fn edit_path_outside_worktree(file_path: Option<&str>, project_dir: &Path) -> bool {
+    match file_path {
+        Some(p) => {
+            let path = Path::new(p);
+            path.is_absolute() && !path.starts_with(project_dir)
+        }
+        None => false,
     }
 }
 
@@ -1598,6 +1623,26 @@ mod tests {
             http::HeaderValue::from_static("Bearer xyz"),
         );
         assert!(!check_bearer(&h, "abc"));
+    }
+
+    #[test]
+    fn out_of_worktree_edit_short_circuits_guards() {
+        let wt = Path::new("/Users/x/proj");
+        // Absolute path outside the worktree (e.g. the Claude Code plan file)
+        // → short-circuit (true).
+        assert!(edit_path_outside_worktree(
+            Some("/Users/x/.claude/plans/p.md"),
+            wt
+        ));
+        // In-worktree absolute → guards still apply (false).
+        assert!(!edit_path_outside_worktree(
+            Some("/Users/x/proj/src/a.rs"),
+            wt
+        ));
+        // Relative path → falls through to the guards (false).
+        assert!(!edit_path_outside_worktree(Some("src/a.rs"), wt));
+        // No path → falls through (false).
+        assert!(!edit_path_outside_worktree(None, wt));
     }
 
     #[test]
