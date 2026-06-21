@@ -410,6 +410,12 @@ mod tests {
             "comment",
             "comment_message",
             "effort_observation",
+            "metric_definition",
+            "metric_dimension",
+            "metric_subject",
+            "metric_run",
+            "metric_sample",
+            "metric_finding",
         ];
         let expected_absent = ["hook_event", "agent_status"];
         let mut stmt = conn
