@@ -616,6 +616,9 @@ impl CollectionService {
         sample.basis_ref = version.closest_git_version.clone();
         sample.branch = branch;
         self.metrics.record_sample(sample).await?;
+        self.events.emit(OxplowEvent::MetricSamplesChanged {
+            stream_id: oxplow_domain::StreamId::new(stream_val),
+        });
         Ok(())
     }
 
@@ -686,8 +689,13 @@ impl CollectionService {
             Ok::<(), DomainError>(())
         }
         .await;
-        if let Err(e) = result {
-            tracing::warn!(error = %e, "failed to mirror test run into metric substrate");
+        match result {
+            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
+                stream_id: oxplow_domain::StreamId::new(stream_val),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to mirror test run into metric substrate")
+            }
         }
     }
 
@@ -791,8 +799,13 @@ impl CollectionService {
             Ok::<(), DomainError>(())
         }
         .await;
-        if let Err(e) = result {
-            tracing::warn!(error = %e, "failed to mirror analysis into metric substrate");
+        match result {
+            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
+                stream_id: oxplow_domain::StreamId::new(stream_val),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to mirror analysis into metric substrate")
+            }
         }
     }
 

@@ -1957,6 +1957,12 @@ export type OxplowEvent =
  */
 { kind: "effortObservationsChanged"; threadId: ThreadId; effortId: string } | 
 /**
+ *  One or more metric samples landed in `stream_id` (unified metric
+ *  substrate, tsk213). Coarse by design — the renderer refetches the
+ *  affected metric series / explorer. See `.context/metrics.md`.
+ */
+{ kind: "metricSamplesChanged"; streamId: StreamId } | 
+/**
  *  A persisted agent nudge landed (report-less-run / commit-hygiene).
  *  The renderer refetches the effort's (or thread's) nudge list. See
  *  `.context/agent-model.md` (Nudge persistence).

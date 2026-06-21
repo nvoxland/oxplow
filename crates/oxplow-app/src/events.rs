@@ -196,6 +196,10 @@ pub enum OxplowEvent {
         thread_id: ThreadId,
         effort_id: String,
     },
+    /// One or more metric samples landed in `stream_id` (unified metric
+    /// substrate, tsk213). Coarse by design — the renderer refetches the
+    /// affected metric series / explorer. See `.context/metrics.md`.
+    MetricSamplesChanged { stream_id: StreamId },
     /// A persisted agent nudge landed (report-less-run / commit-hygiene).
     /// The renderer refetches the effort's (or thread's) nudge list. See
     /// `.context/agent-model.md` (Nudge persistence).
