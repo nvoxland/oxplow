@@ -21,6 +21,7 @@ pub mod launch;
 pub mod log;
 pub mod lsp;
 pub mod menu;
+pub mod metrics;
 pub mod notes;
 pub mod page_refs;
 pub mod page_visit;

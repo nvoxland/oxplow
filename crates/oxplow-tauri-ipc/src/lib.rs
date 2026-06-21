@@ -186,6 +186,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::effort::list_efforts_at_snapshots,
             commands::effort::list_changed_paths_for_effort,
             commands::effort::list_effort_observations,
+            commands::metrics::list_metric_definitions,
+            commands::metrics::list_metric_samples,
             commands::effort::list_nudges_for_effort,
             commands::effort::list_token_usage_for_effort,
             commands::effort::get_effort_token_totals,

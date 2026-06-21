@@ -477,6 +477,13 @@ export const commands = {
 	 */
 	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
 	/**
+	 *  The metric catalog — every known definition. Optional `language` / `scope`
+	 *  filter. Drives the Catalog / Explorer measure picker.
+	 */
+	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricDefinition[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
+	// Durable samples for one metric (by definition `key`), newest-first.
+	listMetricSamples: (metricKey: string, limit: number | null) => typedError<MetricSample[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit })),
+	/**
 	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
 	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on
 	 *  `TaskPage`.
@@ -1734,6 +1741,60 @@ export type MergeReadiness =
  *  a merge will likely conflict (see `overlapping_files`).
  */
 "conflict";
+
+// One row in the measure catalog.
+export type MetricDefinition = {
+	id: number,
+	key: string,
+	// `gauge` | `findings` | `test` | `coverage` | `event`.
+	kind: string,
+	title: string,
+	unit: string | null,
+	// `higher-better` | `lower-better` | `neutral`.
+	direction: string,
+	// `last` | `sum` | `avg` | `min` | `max`.
+	default_agg: string,
+	grain: string | null,
+	basis: string,
+	producer: string | null,
+	description: string | null,
+	category: string | null,
+	language: string | null,
+	// `built-in` | `global` | `project`.
+	scope: string,
+	// JSON array of declared conformed-dimension keys.
+	dimensions_json: string | null,
+	target: number | null,
+	warn_at: number | null,
+	fail_at: number | null,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+};
+
+export type MetricSample = {
+	id: number,
+	run_id: number | null,
+	metric_id: number,
+	value: number,
+	numerator: number | null,
+	denominator: number | null,
+	captured_at: Timestamp,
+	snapshot_id: number | null,
+	closest_git_version: string | null,
+	// Branch the fact was captured on, when applicable.
+	branch: string | null,
+	git_version_exact: boolean,
+	basis_ref: string | null,
+	stream_id: number,
+	thread_id: number | null,
+	subject_kind: string | null,
+	subject_ref: string | null,
+	path: string | null,
+	line: number | null,
+	dims_json: string | null,
+	provenance: string,
+	source: string,
+};
 
 /**
  *  Token totals for one (agent_kind, model) pair. `model` is nullable
