@@ -945,8 +945,12 @@ const OVERLAY_WIDTH = 240;
 // slide-over overlay.
 const STREAM_PANEL_STYLE: CSSProperties = {
   background: "var(--surface-card)",
-  borderTopRightRadius: 7,
-  borderBottomRightRadius: 7,
+  // Same bordered-card treatment as the left rail's RailSection panels
+  // (--surface-card + --border-subtle + radius 6). Flush along the left
+  // window edge, so only the right corners round.
+  border: "1px solid var(--border-subtle)",
+  borderTopRightRadius: 6,
+  borderBottomRightRadius: 6,
   marginBottom: 6,
   overflow: "hidden",
 };
