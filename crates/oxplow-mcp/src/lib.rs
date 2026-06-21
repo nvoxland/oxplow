@@ -202,6 +202,40 @@ pub struct ListMetricSamplesParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunMetricParams {
+    /// Key of a configured `metrics:` entry to run now, e.g. `repo.unsafe_blocks`.
+    pub key: String,
+    /// Optional stream id (`str1`); defaults to the primary stream.
+    pub stream: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordMetricParams {
+    /// Metric definition key (must already exist — see list_metric_definitions).
+    pub key: String,
+    /// The asserted scalar value.
+    pub value: f64,
+    /// Optional `"kind:ref"` subject (e.g. `file:src/a.rs`, `model:opus`).
+    pub subject: Option<String>,
+    /// Optional open author dimensions, recorded as `dims_json`.
+    pub dims: Option<std::collections::BTreeMap<String, String>>,
+    /// Optional stream id (`str1`); defaults to the primary stream.
+    pub stream: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListMetricFindingsParams {
+    /// The `metric_run` id whose located findings to list.
+    pub run_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GetMetricSummaryParams {
+    /// Metric definition key, e.g. `oxplow.coverage.diff_pct`.
+    pub metric_key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetOpenEffortParams {
     pub thread_id: String,
 }
@@ -1724,6 +1758,152 @@ impl OxplowMcp {
         let limit = params.0.limit.unwrap_or(50).max(0) as usize;
         rows.truncate(limit);
         json_result(&rows)
+    }
+
+    #[tool(
+        description = "Run a configured `metrics:` gauge NOW (the `manual` trigger) and record its \
+            samples. `key` is a configured metric key (see list_metric_definitions / oxplow.yaml \
+            `metrics:`). Computes against the stream's latest snapshot; returns the number of \
+            samples recorded. Use after editing a metric script, or to refresh a `manual`-trigger \
+            metric."
+    )]
+    async fn run_metric(
+        &self,
+        params: Parameters<RunMetricParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let stream = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?),
+            None => None,
+        };
+        let count = self
+            .services
+            .metrics
+            .run_metric_by_key(&params.0.key, stream)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        json_result(&serde_json::json!({ "key": params.0.key, "samples_recorded": count }))
+    }
+
+    #[tool(
+        description = "Record an ASSERTED metric sample (provenance=asserted) — a number oxplow did \
+            not compute itself (CI import, agent-reported). `key` must be an existing definition. \
+            The UI flags asserted samples as lower-trust than `observed` ones, so prefer a real \
+            collector where possible. Run-less (no compute event)."
+    )]
+    async fn record_metric(
+        &self,
+        params: Parameters<RecordMetricParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let Some(def) = self
+            .services
+            .metric_store
+            .get_definition(&p.key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown metric key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let stream = match p.stream.as_deref() {
+            Some(s) => parse_stream_id(s)?,
+            None => oxplow_domain::StreamId::new(1),
+        };
+        let (subject_kind, subject_ref) = match p.subject.as_deref().and_then(|s| s.split_once(':'))
+        {
+            Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
+            None => (None, p.subject.clone()),
+        };
+        let dims_json = p
+            .dims
+            .as_ref()
+            .filter(|d| !d.is_empty())
+            .and_then(|d| serde_json::to_string(d).ok());
+        let mut sample =
+            oxplow_db::NewMetricSample::observed(def.id, stream.value(), p.value, "asserted");
+        sample.provenance = "asserted".into();
+        sample.subject_kind = subject_kind;
+        sample.subject_ref = subject_ref;
+        sample.dims_json = dims_json;
+        let id = self
+            .services
+            .metric_store
+            .record_sample(sample)
+            .await
+            .map_err(internal)?;
+        self.services
+            .events
+            .emit(oxplow_app::OxplowEvent::MetricSamplesChanged { stream_id: stream });
+        json_result(&serde_json::json!({ "sample_id": id, "key": p.key, "provenance": "asserted" }))
+    }
+
+    #[tool(
+        description = "List the located findings (path/line, severity, rule, message) recorded by \
+            one `metric_run` — the drill-in detail for the `findings` kind. `run_id` comes from a \
+            sample's `run_id`."
+    )]
+    async fn list_metric_findings(
+        &self,
+        params: Parameters<ListMetricFindingsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let rows = self
+            .services
+            .metric_store
+            .list_findings(params.0.run_id)
+            .await
+            .map_err(internal)?;
+        json_result(&rows)
+    }
+
+    #[tool(
+        description = "Summarize one metric: its latest sample value + capture time/branch, the \
+            target/warn/fail thresholds, and the delta-vs-target (interpreted via `direction`). A \
+            quick 'where does this metric stand' read without paging all samples."
+    )]
+    async fn get_metric_summary(
+        &self,
+        params: Parameters<GetMetricSummaryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(def) = self
+            .services
+            .metric_store
+            .get_definition(&params.0.metric_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown metric_key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let samples = self
+            .services
+            .metric_store
+            .list_samples(def.id)
+            .await
+            .map_err(internal)?;
+        let latest = samples.first();
+        let latest_value = latest.map(|s| s.value);
+        let delta_vs_target = match (latest_value, def.target) {
+            (Some(v), Some(t)) => Some(v - t),
+            _ => None,
+        };
+        json_result(&serde_json::json!({
+            "key": def.key,
+            "kind": def.kind,
+            "unit": def.unit,
+            "direction": def.direction,
+            "sample_count": samples.len(),
+            "latest_value": latest_value,
+            "latest_captured_at": latest.map(|s| &s.captured_at),
+            "latest_branch": latest.and_then(|s| s.branch.clone()),
+            "target": def.target,
+            "warn_at": def.warn_at,
+            "fail_at": def.fail_at,
+            "delta_vs_target": delta_vs_target,
+        }))
     }
 
     // ---------- comments ----------
@@ -4776,5 +4956,99 @@ mod tests {
         // The exact value is part of the MCP contract; a regression
         // here changes how much data clients receive by default.
         assert_eq!(default_limit(), 20);
+    }
+
+    // ---- metric authoring tools (tsk213, P3) ----
+
+    #[tokio::test]
+    async fn record_metric_stores_an_asserted_sample() {
+        let (_p, services, server) = boot();
+        // A definition must exist first.
+        services
+            .metric_store
+            .upsert_definition(oxplow_db::NewMetricDefinition::new(
+                "ci.flaky_rate",
+                "gauge",
+                "Flaky rate",
+            ))
+            .await
+            .unwrap();
+
+        let out = server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "ci.flaky_rate".into(),
+                value: 0.12,
+                subject: Some("suite:unit".into()),
+                dims: None,
+                stream: None,
+            }))
+            .await
+            .unwrap();
+        assert!(text_payload(out).contains("asserted"));
+
+        let def = services
+            .metric_store
+            .get_definition("ci.flaky_rate")
+            .await
+            .unwrap()
+            .unwrap();
+        let samples = services.metric_store.list_samples(def.id).await.unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].value, 0.12);
+        assert_eq!(samples[0].provenance, "asserted");
+        assert_eq!(samples[0].subject_kind.as_deref(), Some("suite"));
+        assert_eq!(samples[0].subject_ref.as_deref(), Some("unit"));
+    }
+
+    #[tokio::test]
+    async fn record_metric_rejects_unknown_key() {
+        let (_p, _services, server) = boot();
+        let err = server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "nope.unknown".into(),
+                value: 1.0,
+                subject: None,
+                dims: None,
+                stream: None,
+            }))
+            .await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn run_metric_computes_a_configured_gauge() {
+        let (project, services, server) = boot();
+        // A constant gauge (no snapshot dependency) declared in oxplow.yaml.
+        std::fs::write(
+            project.path().join("count.star"),
+            "def transform(input):\n    return {\"samples\": [{\"value\": 42}]}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project.path().join("oxplow.yaml"),
+            "metrics:\n  - key: repo.answer\n    kind: gauge\n    title: \"answer\"\n    compute: { runtime: starlark, entryFile: count.star }\n",
+        )
+        .unwrap();
+        services.reload_config_from_disk().unwrap();
+
+        let out = server
+            .run_metric(Parameters(RunMetricParams {
+                key: "repo.answer".into(),
+                stream: None,
+            }))
+            .await
+            .unwrap();
+        assert!(text_payload(out).contains("\"samples_recorded\": 1"));
+
+        let def = services
+            .metric_store
+            .get_definition("repo.answer")
+            .await
+            .unwrap()
+            .unwrap();
+        let samples = services.metric_store.list_samples(def.id).await.unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].value, 42.0);
+        assert_eq!(samples[0].provenance, "observed");
     }
 }

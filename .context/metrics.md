@@ -106,9 +106,14 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 ## Read surface
 
-- **MCP** (`crates/oxplow-mcp/src/lib.rs`): `list_metric_definitions`
-  (optional language/scope filter) + `list_metric_samples` (by key, newest-
-  first). Lets the in-oxplow agent inspect metrics.
+- **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
+  (optional language/scope filter), `list_metric_samples` (by key, newest-first),
+  `list_metric_findings` (by run id — findings-kind drill-in), and
+  `get_metric_summary` (latest value + delta-vs-target). Authoring/trigger:
+  `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`)
+  and `record_metric` (an **asserted**, run-less sample for CI/agent-reported
+  numbers). These four are **agent-only** (classified in the surface-parity
+  manifest); the renderer drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
   `crates/oxplow-tauri-ipc/src/commands/metrics.rs` Tauri adapters, registered
   in `collect_commands!` + the remote `rpc_dispatch!`): same two reads, exposed
