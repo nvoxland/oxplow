@@ -88,6 +88,7 @@ is logged via `tracing::warn!`, never fails the host path):
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from the existing `store_diff_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.diff_pct`; `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit |
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`, derived `agent.cost_usd` (per-model price table) |
+| effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 
 Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sample`(s)
 → emit `OxplowEvent::MetricSamplesChanged { stream_id }`.

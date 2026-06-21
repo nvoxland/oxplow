@@ -601,7 +601,8 @@ impl Services {
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
-            .with_thread_store(thread_store.clone());
+            .with_thread_store(thread_store.clone())
+            .with_metrics(metric_store.clone(), event_bus.clone());
         let collection = collection::CollectionService::new(
             observation_store.clone(),
             metric_store.clone(),
