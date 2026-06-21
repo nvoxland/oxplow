@@ -3680,6 +3680,7 @@ dependencies = [
 name = "oxplow-code-metrics"
 version = "0.6.0"
 dependencies = [
+ "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-clojure-orchard",
@@ -3697,9 +3698,11 @@ name = "oxplow-collect-plugin"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "globset",
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "oxplow-code-metrics",
  "oxplow-coverage",
  "quick-xml",
  "regex",

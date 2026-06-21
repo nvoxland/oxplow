@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 pub mod helpers;
 pub mod runtime;
 pub use helpers::HelperError;
-pub use runtime::SandboxBudget;
+pub use runtime::{GaugeHost, SandboxBudget};
 
 /// The *type* of thing a collector observes. Each kind has a fixed,
 /// host-side typed output contract (see [`CollectorOutput`]).
@@ -406,6 +406,30 @@ impl Collector {
             }
         }
     }
+
+    /// Run a gauge collector with a [`GaugeHost`] in scope so a Starlark script's
+    /// `files(glob)` builtin can read the snapshot file map. The host moves into
+    /// the sandbox worker by value. For non-Starlark runtimes the host is unused
+    /// and this is equivalent to [`run`](Collector::run).
+    pub fn run_gauge(
+        &self,
+        content: &str,
+        host: GaugeHost,
+    ) -> Result<CollectorOutput, CollectError> {
+        let kind = self.kind;
+        match &self.runner {
+            Runner::Starlark { input, script } => {
+                let value = input.parse(content)?;
+                let script = script.clone();
+                let raw = runtime::run_sandboxed(&self.budget, move || {
+                    runtime::run_starlark_with_host(&script, &value, &host)
+                })?;
+                runtime::value_to_output(kind, raw)
+            }
+            // jaq / exec / builtin don't read the file-map host.
+            _ => self.run(content),
+        }
+    }
 }
 
 impl std::fmt::Debug for Collector {
@@ -720,6 +744,58 @@ def transform(input):
         assert_eq!(report.samples.len(), 1);
         assert_eq!(report.samples[0].value, 2.0);
         assert_eq!(report.samples[0].subject.as_deref(), Some("tree:."));
+    }
+
+    #[test]
+    fn starlark_gauge_reads_snapshot_files_and_queries_ast() {
+        // The headline P3 capability: a tree-derived gauge that walks the
+        // snapshot file map via files() and counts AST nodes via ast_query().
+        let script = r#"
+def transform(input):
+    n = 0
+    for f in files("**/*.rs"):
+        n += len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
+    return {"samples": [{"value": n, "subject": "tree:.", "dims": {"language": "rust"}}]}
+"#;
+        let c = Collector::starlark(
+            "acme.unsafe_blocks",
+            CollectorKind::Gauge,
+            ["unsafe-blocks"],
+            CollectorInput::Text,
+            script,
+        );
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "src/a.rs".to_string(),
+            "fn a() { unsafe { x(); } }\nfn b() { unsafe { y(); } }".to_string(),
+        );
+        map.insert("src/b.rs".to_string(), "fn c() { let z = 1; }".to_string());
+        // A non-Rust file the glob must skip.
+        map.insert("README.md".to_string(), "unsafe { not code }".to_string());
+
+        let out = c.run_gauge("", GaugeHost::new(map)).expect("runs");
+        let report = out.as_gauge().expect("gauge");
+        assert_eq!(report.samples.len(), 1);
+        assert_eq!(report.samples[0].value, 2.0, "two unsafe blocks across .rs");
+        assert_eq!(report.samples[0].subject.as_deref(), Some("tree:."));
+    }
+
+    #[test]
+    fn files_builtin_is_empty_without_a_host() {
+        // run() (no host) → files() sees no snapshot map and yields nothing.
+        let script = r#"
+def transform(input):
+    return {"samples": [{"value": len(files("**/*"))}]}
+"#;
+        let c = Collector::starlark(
+            "acme.count_files",
+            CollectorKind::Gauge,
+            ["count-files"],
+            CollectorInput::Text,
+            script,
+        );
+        let out = c.run("").expect("runs");
+        assert_eq!(out.as_gauge().expect("gauge").samples[0].value, 0.0);
     }
 
     #[test]

@@ -159,6 +159,24 @@ impl Language {
     }
 }
 
+/// Resolve a language by name (the string a `metrics:` plugin passes to
+/// `ast_query`). Accepts common aliases; case-insensitive.
+pub fn language_from_name(name: &str) -> Option<Language> {
+    Some(match name.trim().to_ascii_lowercase().as_str() {
+        "rust" | "rs" => Language::Rust,
+        "typescript" | "ts" => Language::TypeScript,
+        "tsx" => Language::Tsx,
+        "javascript" | "js" | "jsx" => Language::JavaScript,
+        "python" | "py" => Language::Python,
+        "go" | "golang" => Language::Go,
+        "java" => Language::Java,
+        "c" => Language::C,
+        "cpp" | "c++" | "cxx" | "cc" => Language::Cpp,
+        "clojure" | "clj" | "cljs" | "cljc" => Language::Clojure,
+        _ => return None,
+    })
+}
+
 /// Cheap path-extension check.
 pub fn language_for_path(path: &str) -> Option<Language> {
     let ext = std::path::Path::new(path)

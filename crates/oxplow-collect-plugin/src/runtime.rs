@@ -176,6 +176,79 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         Ok(heap.alloc(crate::helpers::xpath(content, expr).map_err(helper_anyhow)?))
     }
+    /// Parse `text` as `language` and run a tree-sitter S-expression `query`,
+    /// returning a flat list of `{capture, text, start_row, start_col, end_row,
+    /// end_col}` matches. Pure (text passed inline → deterministic, `observed`).
+    fn ast_query<'v>(
+        text: &str,
+        language: &str,
+        query: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let matches = oxplow_code_metrics::ast_query(text, language, query)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let arr: Vec<serde_json::Value> = matches
+            .into_iter()
+            .map(|m| {
+                serde_json::json!({
+                    "capture": m.capture,
+                    "text": m.text,
+                    "start_row": m.start_row,
+                    "start_col": m.start_col,
+                    "end_row": m.end_row,
+                    "end_col": m.end_col,
+                })
+            })
+            .collect();
+        Ok(heap.alloc(serde_json::Value::Array(arr)))
+    }
+    /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
+    /// the per-run [`GaugeHost`] injected via `Evaluator::extra`. When no host is
+    /// present (e.g. a report-derived run) or the host has no files, returns an
+    /// empty list. A malformed glob is an error.
+    fn files<'v>(
+        glob: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let matcher = globset::Glob::new(glob)
+            .map_err(|e| anyhow::anyhow!("bad glob \"{glob}\": {e}"))?
+            .compile_matcher();
+        let arr: Vec<serde_json::Value> =
+            match eval.extra.and_then(|e| e.downcast_ref::<GaugeHost>()) {
+                Some(host) => {
+                    let mut entries: Vec<(&String, &String)> = host
+                        .files
+                        .iter()
+                        .filter(|(path, _)| matcher.is_match(path.as_str()))
+                        .collect();
+                    // Deterministic order so a gauge's output is reproducible.
+                    entries.sort_by(|a, b| a.0.cmp(b.0));
+                    entries
+                        .into_iter()
+                        .map(|(path, text)| serde_json::json!({ "path": path, "text": text }))
+                        .collect()
+                }
+                None => Vec::new(),
+            };
+        Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
+    }
+}
+
+/// Per-run host state for a Starlark **gauge**, injected via `Evaluator::extra`
+/// and read by the `files(glob)` builtin. Owns its file map (path → content) so
+/// it carries no borrow lifetime across the Starlark boundary and is
+/// `Send + 'static` (it can move into the sandbox worker thread).
+#[derive(Debug, Default, starlark::any::ProvidesStaticType)]
+pub struct GaugeHost {
+    files: std::collections::HashMap<String, String>,
+}
+
+impl GaugeHost {
+    /// A host exposing `files` (repo-relative path → UTF-8 content) to
+    /// `files(glob)`.
+    pub fn new(files: std::collections::HashMap<String, String>) -> Self {
+        Self { files }
+    }
 }
 
 fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
@@ -189,6 +262,25 @@ fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
 /// (`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`) are
 /// available to the script.
 pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> {
+    run_starlark_inner(script, input, None)
+}
+
+/// Like [`run_starlark`] but with a [`GaugeHost`] in scope, so the script's
+/// `files(glob)` builtin can read the snapshot file map. Used by gauge
+/// collectors; the host moves in by value so this stays `Send` for the sandbox.
+pub fn run_starlark_with_host(
+    script: &str,
+    input: &Value,
+    host: &GaugeHost,
+) -> Result<Value, CollectError> {
+    run_starlark_inner(script, input, Some(host))
+}
+
+fn run_starlark_inner(
+    script: &str,
+    input: &Value,
+    host: Option<&GaugeHost>,
+) -> Result<Value, CollectError> {
     use starlark::environment::{GlobalsBuilder, LibraryExtension, Module};
     use starlark::eval::Evaluator;
     use starlark::syntax::{AstModule, Dialect};
@@ -210,6 +302,9 @@ pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> 
 
     Module::with_temp_heap(|module| {
         let mut eval = Evaluator::new(&module);
+        if let Some(host) = host {
+            eval.extra = Some(host);
+        }
         let result = eval
             .eval_module(ast, &globals)
             .map_err(|e| CollectError::Runtime(format!("starlark run: {e}")))?;

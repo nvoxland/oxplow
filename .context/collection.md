@@ -280,6 +280,21 @@ parsers pre-parse via `input` instead. (Standard Starlark forbids recursion +
 `while`, so deep tree-walks are still awkward there — for XML, jaq remains the
 easier fit.)
 
+Two more globals back the **`gauge`** kind (the metric substrate's author-able
+capabilities — see [metrics.md](./metrics.md)):
+- `ast_query(text, language, sexpr)` → a flat `[{capture, text, start_row,
+  start_col, end_row, end_col}]` list. Parses `text` with the named tree-sitter
+  grammar (`rust`/`typescript`/`tsx`/`javascript`/`python`/`go`/`java`/`c`/`cpp`/
+  `clojure`) and runs the S-expression `sexpr`. Pure (text inline →
+  deterministic → `observed`); backed by `oxplow-code-metrics` (`ast`/`parse`/
+  `query`). Flat by design so no Starlark recursion is needed.
+- `files(glob)` → `[{path, text}]` of the **snapshot** files matching `glob`,
+  from an in-memory map the host injects per run via `Evaluator::extra` (a
+  `GaugeHost`). Empty when no host is in scope (e.g. a report-derived run) or no
+  file matches. The snapshot is content-addressed/immutable → determinism +
+  `observed` trust hold. Run a gauge collector with a host via
+  `Collector::run_gauge(content, GaugeHost::new(map))`.
+
 **Output schemas** the transform must produce:
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`

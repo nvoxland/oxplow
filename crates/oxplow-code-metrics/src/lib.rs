@@ -15,11 +15,14 @@
 
 use std::path::Path;
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
+mod ast;
 mod spec;
 
-pub use spec::{language_for_path, Language, LanguageSpec, VisibilityStrategy};
+pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
+pub use spec::{language_for_path, language_from_name, Language, LanguageSpec, VisibilityStrategy};
+pub use tree_sitter::Tree;
 
 /// Coarse public/private classification. Heuristic per language —
 /// see the comment on `LanguageSpec::visibility` for the strategy
@@ -72,14 +75,10 @@ pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
 /// (useful when the path doesn't reveal the language, e.g. content
 /// fetched from a git ref into a temp buffer).
 pub fn analyze_with_language(path: &str, source: &str, language: Language) -> Vec<FunctionMetrics> {
-    let spec = language.spec();
-    let mut parser = Parser::new();
-    if parser.set_language(&spec.tree_sitter_language()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = parse(source, language) else {
         return Vec::new();
     };
+    let spec = language.spec();
     let mut out = Vec::new();
     walk_functions(tree.root_node(), source.as_bytes(), spec, path, &mut out);
     out

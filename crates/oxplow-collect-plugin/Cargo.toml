@@ -9,6 +9,10 @@ license.workspace = true
 # Typed output contracts (CoverageReport / TestReport) are reused from the
 # pure-parse crate so a plugin's output is the same shape oxplow already stores.
 oxplow-coverage = { workspace = true }
+# Tree-sitter AST engine behind the `ast_query` gauge host capability.
+oxplow-code-metrics = { workspace = true }
+# Glob matching for the `files(glob)` snapshot host capability.
+globset = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
