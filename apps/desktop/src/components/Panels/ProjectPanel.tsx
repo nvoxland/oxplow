@@ -715,16 +715,20 @@ export function ProjectPanel({
         >⤢</button>
         {gitEnabled ? (
           <>
-            {uncommittedPaths.length > 0 ? (
+            {/* Count the changeset (what a commit will include), driven by the
+                same `statusSummary.total` the header's "N changed" shows so the
+                two never disagree (tsk145). `uncommittedPaths` is the file-index
+                view and can over-count vs the git-status summary. */}
+            {(statusSummary?.total ?? 0) > 0 ? (
               <button
                 type="button"
                 data-testid="files-commit"
                 onClick={() => setCommitDialogOpen(true)}
-                aria-label={`Commit ${uncommittedPaths.length} uncommitted change${uncommittedPaths.length === 1 ? "" : "s"}`}
-                title={`Commit ${uncommittedPaths.length} uncommitted change${uncommittedPaths.length === 1 ? "" : "s"}`}
+                aria-label={`Commit ${statusSummary?.total ?? 0} change${(statusSummary?.total ?? 0) === 1 ? "" : "s"}`}
+                title={`Commit ${statusSummary?.total ?? 0} change${(statusSummary?.total ?? 0) === 1 ? "" : "s"}`}
                 style={commitButtonStyle}
               >
-                Commit ({uncommittedPaths.length})
+                Commit ({statusSummary?.total ?? 0})
               </button>
             ) : null}
             <button type="button" onClick={() => setPushPullDialog("pull")} aria-label="Pull…" title="Pull…" style={iconButtonStyle}>↓</button>
