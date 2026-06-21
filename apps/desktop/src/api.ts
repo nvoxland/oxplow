@@ -2061,7 +2061,12 @@ export async function listWorkspaceFiles(streamId: string): Promise<{
     commands.listWorkspaceFiles(streamId || null),
     getWorkspaceStatusSummary(streamId),
   ]);
-  const files = unwrap(filesRes) as unknown as WorkspaceIndexedFile[];
+  // The wire row is snake_case (`git_status`); map it onto our camelCase
+  // `WorkspaceIndexedFile`. Without this, `f.gitStatus` is always
+  // `undefined`, so `f.gitStatus !== null` matched every file and the
+  // Uncommitted filter showed the whole tree (tsk211).
+  const rows = unwrap(filesRes) as unknown as Array<{ path: string; git_status: GitFileStatus | null }>;
+  const files: WorkspaceIndexedFile[] = rows.map((r) => ({ path: r.path, gitStatus: r.git_status }));
   return { files, summary };
 }
 
