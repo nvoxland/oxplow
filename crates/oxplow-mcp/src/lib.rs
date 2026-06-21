@@ -186,6 +186,22 @@ pub struct ListEffortObservationsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListMetricDefinitionsParams {
+    /// Optional language filter, e.g. `rust` / `typescript`.
+    pub language: Option<String>,
+    /// Optional scope filter: `built-in` | `global` | `project`.
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListMetricSamplesParams {
+    /// Metric definition key, e.g. `oxplow.coverage.diff_pct`.
+    pub metric_key: String,
+    /// Max rows, newest-first. Default 50.
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetOpenEffortParams {
     pub thread_id: String,
 }
@@ -1648,6 +1664,65 @@ impl OxplowMcp {
             .list_for_effort(&effort_id, params.0.kind.as_deref())
             .await
             .map_err(internal)?;
+        json_result(&rows)
+    }
+
+    #[tool(
+        description = "List the metric catalog — every known metric definition (key, kind, unit, \
+            direction, default_agg, grain, basis, scope, targets). The unified metric substrate \
+            (epic tsk213) is the successor to effort observations + code-quality scans. Optional \
+            `language` / `scope` filter."
+    )]
+    async fn list_metric_definitions(
+        &self,
+        params: Parameters<ListMetricDefinitionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut defs = self
+            .services
+            .metric_store
+            .list_definitions()
+            .await
+            .map_err(internal)?;
+        if let Some(lang) = params.0.language.as_deref() {
+            defs.retain(|d| d.language.as_deref() == Some(lang));
+        }
+        if let Some(scope) = params.0.scope.as_deref() {
+            defs.retain(|d| d.scope == scope);
+        }
+        json_result(&defs)
+    }
+
+    #[tool(
+        description = "List recorded samples for one metric, newest-first — value (+ numerator/\
+            denominator for ratios), captured_at, branch, git version, subject, provenance. \
+            `metric_key` is a definition key like `oxplow.coverage.diff_pct` or `oxplow.tests.passed` \
+            (see list_metric_definitions). Samples are time-anchored and durable (they outlive the \
+            effort that produced them)."
+    )]
+    async fn list_metric_samples(
+        &self,
+        params: Parameters<ListMetricSamplesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(def) = self
+            .services
+            .metric_store
+            .get_definition(&params.0.metric_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown metric_key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let mut rows = self
+            .services
+            .metric_store
+            .list_samples(def.id)
+            .await
+            .map_err(internal)?;
+        let limit = params.0.limit.unwrap_or(50).max(0) as usize;
+        rows.truncate(limit);
         json_result(&rows)
     }
 
