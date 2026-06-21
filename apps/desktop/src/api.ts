@@ -1688,6 +1688,30 @@ export async function listEffortObservations(
   ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
 }
 
+export type { MetricDefinition, MetricSample } from "./tauri-bridge/index.js";
+
+/** The metric catalog — every known definition (built-in / global / project).
+ *  Optional `language` / `scope` filter. (Unified metric substrate, tsk213.) */
+export async function listMetricDefinitions(
+  language?: string,
+  scope?: string,
+): Promise<import("./tauri-bridge/index.js").MetricDefinition[]> {
+  return unwrap(
+    await commands.listMetricDefinitions(language ?? null, scope ?? null),
+  ) as unknown as import("./tauri-bridge/index.js").MetricDefinition[];
+}
+
+/** Durable, time-anchored samples for one metric (by definition `key`),
+ *  newest-first. */
+export async function listMetricSamples(
+  metricKey: string,
+  limit?: number,
+): Promise<import("./tauri-bridge/index.js").MetricSample[]> {
+  return unwrap(
+    await commands.listMetricSamples(metricKey, limit ?? null),
+  ) as unknown as import("./tauri-bridge/index.js").MetricSample[];
+}
+
 /** Persisted agent nudges (report-less-run / commit-hygiene) fired for an
  *  effort, newest-first. Drives the collapsed "Agent nudges" debug sub-view. */
 export async function listNudgesForEffort(

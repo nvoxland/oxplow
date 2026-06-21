@@ -48,6 +48,7 @@ export type PageKind =
   | "external-url"
   | "effort-coverage"
   | "usage"
+  | "metrics"
   | "page-analytics"
   | "token-analytics";
 

@@ -118,6 +118,7 @@ import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
+import { MetricsPage } from "./pages/MetricsPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { TokenAnalyticsPage } from "./pages/TokenAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
@@ -1874,6 +1875,7 @@ export function App() {
       case "external-url":
       case "effort-coverage":
       case "usage":
+      case "metrics":
       case "page-analytics":
       case "token-analytics":
       case "op-error": {
@@ -2713,6 +2715,13 @@ export function App() {
           label: "Usage",
           closable: true,
           render: () => <UsagePage onOpenPage={navOpen} />,
+        });
+      } else if (ref.kind === "metrics") {
+        tabs.push({
+          id: ref.id,
+          label: "Metrics",
+          closable: true,
+          render: () => <MetricsPage />,
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({
