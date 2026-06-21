@@ -26,7 +26,9 @@ use oxplow_collect_plugin::{
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::observation_store::{NewEffortObservation, SqliteEffortObservationStore};
-use oxplow_db::{NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteMetricStore};
+use oxplow_db::{
+    NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
+};
 use oxplow_db::{
     SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffort, TaskEffortStore,
 };
@@ -368,6 +370,11 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
+        // Dual-write into the unified metric substrate (best-effort).
+        self.mirror_test_metrics(
+            thread, &stream_id, provenance, source, passed, failed, total,
+        )
+        .await;
         let id = self
             .observations
             .record(NewEffortObservation {
@@ -610,6 +617,183 @@ impl CollectionService {
         sample.branch = branch;
         self.metrics.record_sample(sample).await?;
         Ok(())
+    }
+
+    /// Mirror a test run into the metric substrate (best-effort): a `tests` run
+    /// with `oxplow.tests.{passed,failed,total}` gauge samples. Provenance flows
+    /// through (a hook-observed run is `observed`; an MCP `record_test_run` is
+    /// `asserted`).
+    #[allow(clippy::too_many_arguments)]
+    async fn mirror_test_metrics(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        provenance: &str,
+        source: &str,
+        passed: Option<i64>,
+        failed: Option<i64>,
+        total: Option<i64>,
+    ) {
+        if passed.is_none() && failed.is_none() && total.is_none() {
+            return;
+        }
+        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
+        else {
+            return;
+        };
+        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        let result = async {
+            let mut run = NewMetricRun::done(stream_val, "tests", source.to_string());
+            run.provenance = provenance.to_string();
+            run.thread_id = Some(thread.value());
+            run.trigger = Some("on-report".into());
+            run.branch = branch.clone();
+            let run_id = self.metrics.record_run(run).await?;
+
+            let specs = [
+                (
+                    "oxplow.tests.passed",
+                    "Tests passed",
+                    "higher-better",
+                    passed,
+                ),
+                (
+                    "oxplow.tests.failed",
+                    "Tests failed",
+                    "lower-better",
+                    failed,
+                ),
+                ("oxplow.tests.total", "Tests total", "neutral", total),
+            ];
+            for (key, title, direction, value) in specs {
+                let Some(v) = value else { continue };
+                let mut def = NewMetricDefinition::new(key, "gauge", title);
+                def.unit = Some("count".into());
+                def.direction = direction.into();
+                def.grain = Some("effort".into());
+                def.producer = Some("tests".into());
+                def.category = Some("testing".into());
+                def.dimensions_json = Some("[\"branch\"]".into());
+                let metric_id = self.metrics.upsert_definition(def).await?;
+                let mut sample =
+                    NewMetricSample::observed(metric_id, stream_val, v as f64, source.to_string());
+                sample.provenance = provenance.to_string();
+                sample.run_id = Some(run_id);
+                sample.thread_id = Some(thread.value());
+                sample.branch = branch.clone();
+                self.metrics.record_sample(sample).await?;
+            }
+            Ok::<(), DomainError>(())
+        }
+        .await;
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "failed to mirror test run into metric substrate");
+        }
+    }
+
+    /// Mirror a static-analysis result into the metric substrate (best-effort):
+    /// an analyzer run + `oxplow.analysis.{errors,warnings}` gauge samples + one
+    /// `metric_finding` per lint finding (located detail).
+    #[allow(clippy::too_many_arguments)]
+    async fn mirror_analysis_metrics(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        source: &str,
+        analyzers: &[String],
+        report: &oxplow_coverage::AnalysisReport,
+        snapshot_id: Option<i64>,
+        git_version: Option<String>,
+        git_version_exact: bool,
+    ) {
+        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
+        else {
+            return;
+        };
+        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        let analyzer = analyzers
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "analysis".to_string());
+        let result = async {
+            use oxplow_coverage::Severity::*;
+            let (mut errors, mut warnings) = (0u64, 0u64);
+            for f in &report.findings {
+                match f.severity {
+                    Error => errors += 1,
+                    Warning => warnings += 1,
+                    _ => {}
+                }
+            }
+
+            let mut run = NewMetricRun::done(stream_val, analyzer.clone(), source.to_string());
+            run.thread_id = Some(thread.value());
+            run.trigger = Some("on-report".into());
+            run.snapshot_id = snapshot_id;
+            run.closest_git_version = git_version.clone();
+            run.git_version_exact = git_version_exact;
+            run.branch = branch.clone();
+            let run_id = self.metrics.record_run(run).await?;
+
+            for (key, title, value) in [
+                ("oxplow.analysis.errors", "Analysis errors", errors),
+                ("oxplow.analysis.warnings", "Analysis warnings", warnings),
+            ] {
+                let mut def = NewMetricDefinition::new(key, "gauge", title);
+                def.unit = Some("count".into());
+                def.direction = "lower-better".into();
+                def.grain = Some("tree".into());
+                def.producer = Some("analysis".into());
+                def.category = Some("static-quality".into());
+                def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
+                let metric_id = self.metrics.upsert_definition(def).await?;
+                let mut sample = NewMetricSample::observed(
+                    metric_id,
+                    stream_val,
+                    value as f64,
+                    source.to_string(),
+                );
+                sample.run_id = Some(run_id);
+                sample.thread_id = Some(thread.value());
+                sample.snapshot_id = snapshot_id;
+                sample.closest_git_version = git_version.clone();
+                sample.git_version_exact = git_version_exact;
+                sample.branch = branch.clone();
+                self.metrics.record_sample(sample).await?;
+            }
+
+            for f in &report.findings {
+                let severity = match f.severity {
+                    Error => "error",
+                    Warning => "warning",
+                    Info => "info",
+                    Note => "note",
+                };
+                self.metrics
+                    .record_finding(NewMetricFinding {
+                        run_id,
+                        metric_id: None,
+                        subject_kind: Some("file".into()),
+                        subject_ref: Some(format!("file:{}", f.path)),
+                        path: Some(f.path.clone()),
+                        start_line: f.line.map(|l| l as i64),
+                        end_line: f.line.map(|l| l as i64),
+                        col: f.column.map(|c| c as i64),
+                        kind: "lint".into(),
+                        severity: Some(severity.into()),
+                        rule: f.rule.clone(),
+                        message: Some(f.message.clone()),
+                        value: None,
+                        extra_json: None,
+                    })
+                    .await?;
+            }
+            Ok::<(), DomainError>(())
+        }
+        .await;
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "failed to mirror analysis into metric substrate");
+        }
     }
 
     async fn store_diff_coverage(
@@ -1206,6 +1390,21 @@ impl CollectionService {
             None => (None, None, false),
         };
 
+        // Dual-write into the unified metric substrate (best-effort), when a
+        // report was parsed (command-only analyzer runs have no counts).
+        if let Some(r) = report {
+            self.mirror_analysis_metrics(
+                thread,
+                &stream_id,
+                source,
+                analyzers,
+                r,
+                local_snapshot_id,
+                closest_git_version.clone(),
+                git_version_exact,
+            )
+            .await;
+        }
         let id = self
             .observations
             .record(NewEffortObservation {
@@ -1241,6 +1440,12 @@ impl CollectionService {
             Some(d) => self.metrics.list_samples(d.id).await.unwrap(),
             None => vec![],
         }
+    }
+
+    /// Test-only: read the findings recorded under a run.
+    #[cfg(test)]
+    async fn metric_findings_for_run(&self, run_id: i64) -> Vec<oxplow_db::MetricFinding> {
+        self.metrics.list_findings(run_id).await.unwrap()
     }
 
     /// End-side changed line numbers (1-based) for `path` between its
@@ -2000,6 +2205,42 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn record_test_run_mirrors_counts_into_metric_substrate() {
+            let h = build(None).await;
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test --workspace",
+                    Some(0),
+                    Some(1200),
+                    Some(5),
+                    Some(1),
+                    Some(6),
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                )
+                .await
+                .unwrap();
+            let passed = h
+                .service
+                .metric_samples_for_key("oxplow.tests.passed")
+                .await;
+            let failed = h
+                .service
+                .metric_samples_for_key("oxplow.tests.failed")
+                .await;
+            let total = h.service.metric_samples_for_key("oxplow.tests.total").await;
+            assert_eq!(passed.len(), 1);
+            assert_eq!(passed[0].value, 5.0);
+            assert_eq!(failed[0].value, 1.0);
+            assert_eq!(total[0].value, 6.0);
+            assert_eq!(passed[0].provenance, "observed");
+            // All three share one run.
+            assert_eq!(passed[0].run_id, total[0].run_id);
+        }
+
+        #[tokio::test]
         async fn record_test_run_embeds_junit_tree_and_derives_counts() {
             let h = build(None).await;
             // Run the bundled junit collector to build the suite/case tree
@@ -2590,6 +2831,62 @@ mod tests {
             assert_eq!(payload["warningCount"], 1);
             assert_eq!(payload["analyzer"], "clippy");
             assert_eq!(payload["findings"][0]["rule"], "E0308");
+        }
+
+        #[tokio::test]
+        async fn record_static_analysis_mirrors_into_metric_substrate() {
+            let h = build(None).await;
+            let report = oxplow_coverage::AnalysisReport {
+                findings: vec![
+                    oxplow_coverage::AnalysisFinding {
+                        path: "src/a.rs".into(),
+                        line: Some(10),
+                        column: Some(3),
+                        severity: oxplow_coverage::Severity::Error,
+                        rule: Some("E0308".into()),
+                        message: "boom".into(),
+                    },
+                    oxplow_coverage::AnalysisFinding {
+                        path: "src/a.rs".into(),
+                        line: Some(2),
+                        column: None,
+                        severity: oxplow_coverage::Severity::Warning,
+                        rule: None,
+                        message: "meh".into(),
+                    },
+                ],
+            };
+            h.service
+                .record_static_analysis(
+                    &h.thread,
+                    "cargo clippy",
+                    Some(&report),
+                    &["clippy".to_string()],
+                    "analysis-report",
+                )
+                .await
+                .unwrap();
+
+            let errors = h
+                .service
+                .metric_samples_for_key("oxplow.analysis.errors")
+                .await;
+            let warnings = h
+                .service
+                .metric_samples_for_key("oxplow.analysis.warnings")
+                .await;
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].value, 1.0);
+            assert_eq!(warnings[0].value, 1.0);
+
+            // One finding per lint hit, recorded under the run.
+            let run_id = errors[0].run_id.expect("sample carries its run");
+            let findings = h.service.metric_findings_for_run(run_id).await;
+            assert_eq!(findings.len(), 2);
+            assert!(findings.iter().all(|f| f.kind == "lint"));
+            assert!(findings.iter().any(|f| f.rule.as_deref() == Some("E0308")
+                && f.severity.as_deref() == Some("error")
+                && f.path.as_deref() == Some("src/a.rs")));
         }
 
         #[tokio::test]
