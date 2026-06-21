@@ -1200,7 +1200,6 @@ function CommentsSection({
     <RailSection
       id="comments"
       title="Comments"
-      count={notes + followups}
       onOpen={() => onOpenPage(commentsRef())}
       openTitle="Open the Comments inbox"
     >
@@ -1319,7 +1318,6 @@ function GoToSection({
     <RailSection
       id="bookmarks"
       title="Go To"
-      count={entries.length}
       onOpen={() => onOpenPage(dashboardRef("visits"))}
       openTitle="Open Go To"
       collapsedContent={bookmarkRows}
