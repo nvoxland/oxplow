@@ -1036,11 +1036,59 @@ impl CollectionService {
             trigger: Some(trigger.to_string()),
         };
         match self.nudges.record(new).await {
-            Ok(_) => self.events.emit(OxplowEvent::AgentNudgesChanged {
-                thread_id: *thread,
-                effort_id: effort.map(|e| e.id.to_string()),
-            }),
+            Ok(_) => {
+                self.events.emit(OxplowEvent::AgentNudgesChanged {
+                    thread_id: *thread,
+                    effort_id: effort.map(|e| e.id.to_string()),
+                });
+                // Project the fired nudge into the metric substrate (tsk216):
+                // `agent.nudges.fired` is an agent-activity signal — the agent
+                // drifted off-task often enough to be corrected.
+                self.project_nudge_metric(thread, kind).await;
+            }
             Err(err) => tracing::warn!(?err, "persisting agent nudge failed"),
+        }
+    }
+
+    /// Project one `agent.nudges.fired` event sample into the unified
+    /// substrate. The nudge `kind` is the subject (so the explorer can break
+    /// down which guardrail fired). Event kind → run-less. Best-effort: a
+    /// metric write error is logged and never fails the hook. Lower is
+    /// better — fewer nudges means the agent stayed on task.
+    async fn project_nudge_metric(&self, thread: &ThreadId, kind: &str) {
+        let stream_val = match self.threads.get(thread).await {
+            Ok(Some(t)) => t.stream_id.value(),
+            _ => return,
+        };
+        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        let result = async {
+            let mut def = NewMetricDefinition::new("agent.nudges.fired", "event", "Nudges fired");
+            def.unit = Some("count".into());
+            def.direction = "lower-better".into();
+            def.default_agg = "sum".into();
+            def.grain = Some("effort".into());
+            def.producer = Some("nudges".into());
+            def.category = Some("operational".into());
+            def.dimensions_json = Some("[\"subject\",\"branch\",\"thread\"]".into());
+            let metric_id = self.metrics.upsert_definition(def).await?;
+            // Event kind: no compute run (run_id stays NULL).
+            let mut sample = NewMetricSample::observed(metric_id, stream_val, 1.0, "nudges");
+            sample.thread_id = Some(thread.value());
+            sample.subject_kind = Some("nudge".into());
+            sample.subject_ref = Some(kind.to_string());
+            sample.dims_json = Some(format!("{{\"kind\":\"{kind}\"}}"));
+            sample.branch = branch;
+            self.metrics.record_sample(sample).await?;
+            Ok::<(), DomainError>(())
+        }
+        .await;
+        match result {
+            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
+                stream_id: oxplow_domain::StreamId::new(stream_val),
+            }),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to project nudge into metric substrate")
+            }
         }
     }
 
@@ -2555,6 +2603,13 @@ mod tests {
                 1,
                 "test-run observation should still be recorded"
             );
+            // The fired nudge also projects an `agent.nudges.fired` event
+            // sample, subject = the nudge kind (tsk216).
+            let fired = h.service.metric_samples_for_key("agent.nudges.fired").await;
+            assert_eq!(fired.len(), 1, "one nudge sample per fired nudge");
+            assert_eq!(fired[0].value, 1.0);
+            assert_eq!(fired[0].subject_kind.as_deref(), Some("nudge"));
+            assert_eq!(fired[0].subject_ref.as_deref(), Some("report-less-run"));
         }
 
         #[tokio::test]
