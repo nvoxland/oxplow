@@ -117,6 +117,9 @@ pub const MANIFEST: &[Capability] = &[
     both("add_thread_note"),
     both("list_thread_notes"),
     both("list_effort_observations"),
+    // Unified metric substrate reads (tsk213) — exposed on both surfaces.
+    both("list_metric_definitions"),
+    both("list_metric_samples"),
     ui("list_nudges_for_effort"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),
