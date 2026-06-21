@@ -45,6 +45,10 @@ pub enum CollectorKind {
     Test,
     /// A flat list of linter/analyzer findings.
     Analysis,
+    /// One or more scalar samples projected into the metric substrate
+    /// (`metric_sample`). The author-able kind: any deterministically-computable
+    /// number (LOC, unsafe-block count, bundle size, …).
+    Gauge,
 }
 
 /// Which engine runs a collector's field-mapping step.
@@ -61,6 +65,28 @@ pub enum CollectorRuntime {
     Exec,
 }
 
+/// One scalar sample projected by a `gauge` collector. `subject` is an optional
+/// `"kind:ref"` string (e.g. `"file:src/a.rs"`, `"module:apps/desktop"`) the
+/// host splits onto `subject_kind`/`subject_ref`; `dims` are open author
+/// dimensions carried onto the sample as `dims_json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GaugeSample {
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dims: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// The typed output of a `gauge` collector: ≥1 scalar sample to project into
+/// `metric_sample`. Mirrors the JSON a gauge script returns —
+/// `{ "samples": [ { "value", "subject"?, "dims"? } ] }`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct MetricReport {
+    #[serde(default)]
+    pub samples: Vec<GaugeSample>,
+}
+
 /// The typed result of running a collector. The variant is determined by the
 /// collector's [`CollectorKind`] — a `Coverage` collector always yields
 /// [`CollectorOutput::Coverage`], a `Test` collector always
@@ -70,6 +96,7 @@ pub enum CollectorOutput {
     Coverage(CoverageReport),
     Test(TestReport),
     Analysis(AnalysisReport),
+    Gauge(MetricReport),
 }
 
 impl CollectorOutput {
@@ -79,6 +106,7 @@ impl CollectorOutput {
             CollectorOutput::Coverage(_) => CollectorKind::Coverage,
             CollectorOutput::Test(_) => CollectorKind::Test,
             CollectorOutput::Analysis(_) => CollectorKind::Analysis,
+            CollectorOutput::Gauge(_) => CollectorKind::Gauge,
         }
     }
 
@@ -102,6 +130,14 @@ impl CollectorOutput {
     pub fn as_analysis(&self) -> Option<&AnalysisReport> {
         match self {
             CollectorOutput::Analysis(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Borrow the gauge report, if this is a gauge output.
+    pub fn as_gauge(&self) -> Option<&MetricReport> {
+        match self {
+            CollectorOutput::Gauge(r) => Some(r),
             _ => None,
         }
     }
@@ -638,6 +674,52 @@ mod tests {
             report.findings[0].severity,
             oxplow_coverage::Severity::Error
         );
+    }
+
+    #[test]
+    fn jaq_gauge_collector_runs_end_to_end() {
+        // A jaq gauge over JSON input → typed MetricReport with one sample.
+        let program =
+            r#"{ samples: [ { value: (.lines | length), dims: { language: "rust" } } ] }"#;
+        let c = Collector::jaq(
+            "acme.loc",
+            CollectorKind::Gauge,
+            ["loc-json"],
+            CollectorInput::Json,
+            program,
+        );
+        let out = c.run(r#"{"lines":[1,2,3,4]}"#).expect("runs");
+        assert_eq!(out.kind(), CollectorKind::Gauge);
+        let report = out.as_gauge().expect("gauge");
+        assert_eq!(report.samples.len(), 1);
+        assert_eq!(report.samples[0].value, 4.0);
+        assert_eq!(
+            report.samples[0].dims.as_ref().unwrap()["language"],
+            serde_json::json!("rust")
+        );
+    }
+
+    #[test]
+    fn starlark_gauge_collector_runs_end_to_end() {
+        // A starlark gauge over raw text → counts via the regex_find host
+        // builtin, projecting one subject-tagged sample.
+        let script = r#"
+def transform(input):
+    n = len(regex_find(r"TODO", input))
+    return {"samples": [{"value": n, "subject": "tree:."}]}
+"#;
+        let c = Collector::starlark(
+            "acme.todos",
+            CollectorKind::Gauge,
+            ["todos"],
+            CollectorInput::Text,
+            script,
+        );
+        let out = c.run("a TODO here and a TODO there").expect("runs");
+        let report = out.as_gauge().expect("gauge");
+        assert_eq!(report.samples.len(), 1);
+        assert_eq!(report.samples[0].value, 2.0);
+        assert_eq!(report.samples[0].subject.as_deref(), Some("tree:."));
     }
 
     #[test]

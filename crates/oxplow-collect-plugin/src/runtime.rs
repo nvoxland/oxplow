@@ -29,7 +29,7 @@ use oxplow_coverage::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{CollectError, CollectorKind, CollectorOutput};
+use crate::{CollectError, CollectorKind, CollectorOutput, MetricReport};
 
 /// Resource limits for an in-process script run. Currently a wall-clock
 /// timeout enforced by running the engine on a worker thread; the caller
@@ -280,6 +280,14 @@ pub fn value_to_output(kind: CollectorKind, value: Value) -> Result<CollectorOut
             let parsed: AnalysisReportJson =
                 serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
             Ok(CollectorOutput::Analysis(parsed.into()))
+        }
+        CollectorKind::Gauge => {
+            // `MetricReport` is its own serde-friendly shape, so it deserializes
+            // directly (no separate `*Json` mirror): `samples` defaults to empty,
+            // each sample's `subject`/`dims` are optional.
+            let report: MetricReport =
+                serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
+            Ok(CollectorOutput::Gauge(report))
         }
     }
 }
@@ -609,6 +617,31 @@ def transform(input):
 
         let empty = value_to_output(CollectorKind::Analysis, json!({})).expect("typed");
         assert!(empty.as_analysis().unwrap().findings.is_empty());
+    }
+
+    #[test]
+    fn gauge_report_deserializes_samples_with_defaults() {
+        // Two samples: one fully populated, one bare value. Integer values
+        // coerce to f64; missing subject/dims → None.
+        let v = json!({ "samples": [
+            { "value": 3.0, "subject": "file:src/a.rs", "dims": { "language": "rust" } },
+            { "value": 1 }
+        ]});
+        let out = value_to_output(CollectorKind::Gauge, v).expect("typed");
+        let report = out.as_gauge().expect("gauge");
+        assert_eq!(report.samples.len(), 2);
+        assert_eq!(report.samples[0].value, 3.0);
+        assert_eq!(report.samples[0].subject.as_deref(), Some("file:src/a.rs"));
+        assert_eq!(
+            report.samples[0].dims.as_ref().unwrap()["language"],
+            json!("rust")
+        );
+        assert_eq!(report.samples[1].value, 1.0);
+        assert!(report.samples[1].subject.is_none() && report.samples[1].dims.is_none());
+
+        // Missing `samples` → empty report, not an error.
+        let empty = value_to_output(CollectorKind::Gauge, json!({})).expect("typed");
+        assert!(empty.as_gauge().unwrap().samples.is_empty());
     }
 
     #[test]

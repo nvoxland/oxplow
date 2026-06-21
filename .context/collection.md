@@ -247,13 +247,15 @@ script, never a Rust change (`crates/oxplow-collect-plugin/`):
    keeps an in-process parse deterministic and `observed`-eligible.
 2. **Field mapping (plugin-owned).** A *collector* maps that value into its
    kind's typed output. There is **never a formless observation** — every
-   collector declares a `kind` (`coverage` | `test` | `analysis`) with a fixed
-   output schema. The genericity is in this uniform definition mechanism over
-   typed kinds, so a future kind (perf, structure-map, …) is a new
+   collector declares a `kind` (`coverage` | `test` | `analysis` | `gauge`) with
+   a fixed output schema. The genericity is in this uniform definition mechanism
+   over typed kinds, so a future kind (perf, structure-map, …) is a new
    `CollectorKind` plus plugins that target it — not a new subsystem.
    (`analysis` was added exactly this way: a new `CollectorKind`, the
    `AnalysisReport` typed output, and bundled clippy/eslint jaq plugins — no
-   new store, IPC, or subsystem.)
+   new store, IPC, or subsystem. `gauge` — the author-able scalar kind feeding
+   the metric substrate — was added the same way; see
+   [metrics.md](./metrics.md).)
 
 **Transform tiers** (trust/preference order): `jaq` (jq, pure Rust — primary,
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
@@ -282,6 +284,7 @@ easier fit.)
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
+- gauge: `{ "samples": [ { "value", "subject"? ("kind:ref"), "dims"? } ] }` (→ `metric_sample`; see [metrics.md](./metrics.md))
 
 The two bundled analysis plugins are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
