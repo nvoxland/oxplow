@@ -15,5 +15,6 @@ workspace = true
 [dev-dependencies]
 oxplow-app = { workspace = true }
 oxplow-tauri-ipc = { workspace = true }
+oxplow-rpc = { workspace = true }
 oxplow-mcp = { workspace = true }
 tauri-specta = { workspace = true }

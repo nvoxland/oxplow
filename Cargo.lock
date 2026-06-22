@@ -4037,6 +4037,7 @@ version = "0.6.0"
 dependencies = [
  "oxplow-app",
  "oxplow-mcp",
+ "oxplow-rpc",
  "oxplow-tauri-ipc",
  "tauri-specta",
 ]

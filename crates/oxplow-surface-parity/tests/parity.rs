@@ -177,6 +177,70 @@ fn surface_parity() {
     );
 }
 
+/// Commands that legitimately exist only as Tauri adapters and are NOT served
+/// by the headless daemon's `oxplow_rpc::dispatch` registry: they need the
+/// desktop shell itself (windowing, native menus, the OS clipboard, launching
+/// external apps, project/workspace lifecycle before a daemon is even booted).
+/// Everything else MUST be in the dispatch registry or it 404s under remote
+/// mode (`POST /ipc/:name`). Keep this list tight — adding a row here is an
+/// explicit "remote mode can't do this" decision.
+const TAURI_ONLY: &[&str] = &[
+    "abort_setup",
+    "clipboard_read_text",
+    "get_launch_mode",
+    "list_recent_projects",
+    "open_external_url",
+    "open_project",
+    "project_needs_setup",
+    "remove_recent_project",
+    "set_native_menu",
+    "setup_project",
+];
+
+/// Every Tauri IPC command (the renderer's full surface) must be routable in
+/// remote-daemon mode — i.e. present in the shared `oxplow_rpc::dispatch`
+/// registry — unless it is on the explicit `TAURI_ONLY` allowlist. Without this
+/// guard a command can be wired as a `#[tauri::command]` (and get TS bindings)
+/// yet be forgotten in `rpc_dispatch!`, silently 404ing for remote users. (This
+/// is exactly how the metrics effort-band / findings / override / scaffold
+/// commands shipped broken before tsk236.)
+#[test]
+fn dispatch_registry_covers_ipc_surface() {
+    let ipc = ipc_command_names();
+    let dispatch: BTreeSet<&str> = oxplow_rpc::registered_command_names()
+        .iter()
+        .copied()
+        .collect();
+    let allow: BTreeSet<&str> = TAURI_ONLY.iter().copied().collect();
+
+    // (a) Every IPC command is either dispatchable or explicitly Tauri-only.
+    let missing: Vec<&str> = ipc
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !dispatch.contains(n) && !allow.contains(n))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "IPC commands wired as Tauri adapters but missing from the \
+         oxplow_rpc::dispatch registry (they 404 in remote-daemon mode) — \
+         add each to rpc_dispatch! in crates/oxplow-rpc/src/lib.rs, or add to \
+         TAURI_ONLY if remote mode genuinely can't serve it: {missing:?}"
+    );
+
+    // (b) Keep the allowlist honest: no entry that is actually dispatchable,
+    //     and no entry that no longer names a real IPC command.
+    let stale_allow: Vec<&str> = TAURI_ONLY
+        .iter()
+        .copied()
+        .filter(|n| dispatch.contains(n) || !ipc.contains(*n))
+        .collect();
+    assert!(
+        stale_allow.is_empty(),
+        "TAURI_ONLY names commands that are either now dispatchable or no \
+         longer registered — prune them: {stale_allow:?}"
+    );
+}
+
 /// The renderer's event-channel registry
 /// (`apps/desktop/src/tauri-bridge/channels.ts`) must mirror
 /// `oxplow_app::event_channels` exactly: same frame keys, same channel

@@ -133,6 +133,14 @@ macro_rules! rpc_dispatch {
                 _ => Err($crate::IpcError::not_found()),
             }
         }
+
+        /// Every command wire-name registered in this dispatch table.
+        /// Tests use this to assert the remote-daemon registry stays in
+        /// sync with the Tauri specta surface (a command that exists only
+        /// as a Tauri adapter 404s under `POST /ipc/:name`).
+        pub fn registered_command_names() -> &'static [&'static str] {
+            &[ $( $cname, )* $( $name, )* ]
+        }
     };
 }
 
@@ -194,6 +202,7 @@ rpc_dispatch! {
     "move_task" => commands::tasks::move_task { req: crate::commands::tasks::MoveTaskRequest },
     // effort
     "list_task_efforts" => commands::effort::list_task_efforts { item_id: oxplow_domain::TaskId },
+    "list_efforts_in_window" => commands::effort::list_efforts_in_window { window_start: oxplow_domain::Timestamp, window_end: oxplow_domain::Timestamp },
     "get_effort_files" => commands::effort::get_effort_files { effort_id: oxplow_domain::EffortId },
     "list_efforts_at_snapshots" => commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> },
     "list_changed_paths_for_effort" => commands::effort::list_changed_paths_for_effort { effort_id: oxplow_domain::EffortId },
@@ -203,8 +212,11 @@ rpc_dispatch! {
     // metrics (unified substrate, tsk213)
     "list_metric_definitions" => commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> },
     "list_metric_samples" => commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64> },
+    "list_metric_findings" => commands::metrics::list_metric_findings { run_id: i64 },
     "list_metric_catalog" => commands::metrics::list_metric_catalog {},
     "set_metric_enabled" => commands::metrics::set_metric_enabled { key: String, enabled: bool },
+    "set_metric_override" => commands::metrics::set_metric_override { key: String, target: Option<f64>, trigger: Option<String> },
+    "scaffold_metric" => commands::metrics::scaffold_metric { key: String, title: Option<String>, language: Option<String>, glob: Option<String>, scope: Option<String> },
     "get_effort_token_totals" => commands::effort::get_effort_token_totals { effort_id: oxplow_domain::EffortId },
     "get_thread_token_totals" => commands::effort::get_thread_token_totals { thread_id: oxplow_domain::ThreadId },
     "token_totals_overall" => commands::effort::token_totals_overall {},
