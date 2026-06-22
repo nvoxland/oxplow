@@ -1668,7 +1668,7 @@ export async function listEffortObservations(
   ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
 }
 
-export type { MetricDefinition, MetricSample } from "./tauri-bridge/index.js";
+export type { MetricDefinition, MetricSample, MetricCatalogEntry } from "./tauri-bridge/index.js";
 
 /** The metric catalog — every known definition (built-in / global / project).
  *  Optional `language` / `scope` filter. (Unified metric substrate, tsk213.) */
@@ -1690,6 +1690,21 @@ export async function listMetricSamples(
   return unwrap(
     await commands.listMetricSamples(metricKey, limit ?? null),
   ) as unknown as import("./tauri-bridge/index.js").MetricSample[];
+}
+
+/** The available metric catalog (built-in ∪ global ∪ project) + each entry's
+ *  enabled-in-this-project flag. Drives the Catalog page (tsk219). */
+export async function listMetricCatalog(): Promise<
+  import("./tauri-bridge/index.js").MetricCatalogEntry[]
+> {
+  return unwrap(
+    await commands.listMetricCatalog(),
+  ) as unknown as import("./tauri-bridge/index.js").MetricCatalogEntry[];
+}
+
+/** Enable (add a `use:`) or disable (remove) a metric in `oxplow.yaml`. */
+export async function setMetricEnabled(key: string, enabled: boolean): Promise<void> {
+  unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
 /** Persisted agent nudges (report-less-run / commit-hygiene) fired for an

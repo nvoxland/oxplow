@@ -123,14 +123,33 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 ## UI
 
-`apps/desktop/src/pages/MetricsPage.tsx` — a read-only **Metrics** page reachable
-from the RailHud (Activity → Metrics; registered like the `usage` index page in
-`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`, and
-`pageKinds.tsx`). Lists the catalog with each metric's latest value, a trend
-sparkline, capture branch, and sample count; colored by target+direction;
-live-refreshes on `metricSamplesChanged`. This is the **seed** of the full P4
-Explorer/Catalog (multi-measure overlay, group-by dimensions, drill-across,
-enable/scaffold).
+`apps/desktop/src/pages/MetricsPage.tsx` — the **Metrics** page, reachable from
+the RailHud (Activity → Metrics; registered like the `usage` index page in
+`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`,
+`pageKinds.tsx`). Three sections, all reading the one fact table — no per-metric
+UI code:
+
+- **Explorer** (`MetricsExplorer.tsx`, P4) — multi-measure overlay on one time
+  axis + group-by a conformed dimension (`branch`/`subject`/declared dims like
+  `model`/`language`) + line/bar viz + target band + legend. Inline SVG (no
+  charting lib, like the codebase's other visuals); pure grouping in
+  `buildExplorerSeries`. Drill-across = two measures grouped by the shared
+  `language`/`model` dimension. (Effort-overlay bands, scatter, and save-as-preset
+  are deferred — see tsk219.)
+- **Catalog** (`MetricsCatalog.tsx`, P4) — browse the available catalog
+  (built-in ∪ global ∪ project) via `list_metric_catalog` and enable/disable in
+  this project with a toggle that calls `set_metric_enabled` → writes a `use:`
+  into `oxplow.yaml` + reseeds. (Inline target/trigger edit + new-metric scaffold
+  are deferred.)
+- **Recorded metrics** — the seeded definitions with latest value, trend
+  sparkline, capture branch, sample count; colored by `statusColor`
+  (target/`fail_at`/direction). Live-refreshes on `metricSamplesChanged`.
+
+Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` (RPC core in
+`commands/metrics.rs`, Tauri adapters, `ui`-scoped in the surface-parity
+manifest), backed by `MetricsService::{catalog, set_metric_enabled}` and the
+`MetricCatalogEntry` type. Per-kind detail renderers + the analytics-pages-as-
+presets are the remaining P4 work (tsk219).
 
 ## Adding a metric (today)
 

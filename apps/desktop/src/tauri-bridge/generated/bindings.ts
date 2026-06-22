@@ -475,6 +475,13 @@ export const commands = {
 	// Durable samples for one metric (by definition `key`), newest-first.
 	listMetricSamples: (metricKey: string, limit: number | null) => typedError<MetricSample[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit })),
 	/**
+	 *  The available catalog (built-in ∪ global ∪ project) + enabled flags — the
+	 *  Catalog page's browse read.
+	 */
+	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
+	// Enable/disable a metric in `oxplow.yaml` (the Catalog toggle).
+	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
+	/**
 	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
 	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on
 	 *  `TaskPage`.
@@ -1732,6 +1739,25 @@ export type MergeReadiness =
  *  a merge will likely conflict (see `overlapping_files`).
  */
 "conflict";
+
+/**
+ *  One row in the **available** metric catalog (built-in ∪ global ∪ project) for
+ *  the Catalog UI (tsk219, P4): what the metric is + whether the project has it
+ *  enabled. Distinct from `MetricDefinition` (the seeded substrate row) — a
+ *  built-in appears here even before it's enabled/seeded.
+ */
+export type MetricCatalogEntry = {
+	key: string,
+	title: string,
+	kind: string,
+	language: string | null,
+	// `built-in` | `global` | `project`.
+	scope: string,
+	// Active in this project's `oxplow.yaml` `metrics:` block.
+	enabled: boolean,
+	target: number | null,
+	trigger: string,
+};
 
 /**
  *  How a configured metric is computed (the `compute:` block on a `metrics:`

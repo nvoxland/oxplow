@@ -9,6 +9,7 @@ import {
 } from "../api.js";
 import { Card } from "../components/Card.js";
 import { Page } from "../tabs/Page.js";
+import { MetricsCatalog } from "./MetricsCatalog.js";
 import { MetricsExplorer } from "./MetricsExplorer.js";
 
 type Row = {
@@ -120,7 +121,10 @@ export function MetricsPage() {
             <MetricsExplorer defs={rows.map((r) => r.def)} />
           </Card>
         ) : null}
-        <Card testId="metrics-catalog-card" title="Metric catalog">
+        <Card testId="metrics-catalog-browse-card" title="Catalog — browse + enable">
+          <MetricsCatalog />
+        </Card>
+        <Card testId="metrics-catalog-card" title="Recorded metrics">
           {loading ? (
             <div style={{ opacity: 0.6 }}>Loading…</div>
           ) : rows.length === 0 ? (

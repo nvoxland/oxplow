@@ -4,6 +4,7 @@
 //! time-anchored typed metric model. These are the read-side cores the Tauri
 //! and remote transports share.
 
+use oxplow_app::metrics_service::MetricCatalogEntry;
 use oxplow_app::Services;
 use oxplow_db::{MetricDefinition, MetricSample};
 
@@ -40,4 +41,23 @@ pub async fn list_metric_samples(
     let limit = limit.unwrap_or(200).max(0) as usize;
     rows.truncate(limit);
     Ok(rows)
+}
+
+/// The available catalog (built-in ∪ global ∪ project) with each entry's
+/// enabled-in-this-project flag — drives the Catalog page (tsk219).
+pub async fn list_metric_catalog(svc: &Services) -> Result<Vec<MetricCatalogEntry>, IpcError> {
+    Ok(svc.metrics.catalog())
+}
+
+/// Enable (add a `use:`) or disable (remove) a metric in `oxplow.yaml`, then
+/// reseed. The Catalog toggle.
+pub async fn set_metric_enabled(
+    svc: &Services,
+    key: String,
+    enabled: bool,
+) -> Result<(), IpcError> {
+    svc.metrics
+        .set_metric_enabled(&key, enabled)
+        .await
+        .map_err(IpcError::internal)
 }

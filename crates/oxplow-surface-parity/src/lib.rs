@@ -120,6 +120,10 @@ pub const MANIFEST: &[Capability] = &[
     // Unified metric substrate reads (tsk213) — exposed on both surfaces.
     both("list_metric_definitions"),
     both("list_metric_samples"),
+    // Catalog browse + enable-toggle (tsk219) — UI-driven (the agent authors via
+    // the `metrics:` config / run_metric, not the catalog toggle).
+    ui("list_metric_catalog"),
+    ui("set_metric_enabled"),
     // Metric authoring/drill-in tools (tsk213, P3) — agent-only: the renderer
     // drives compute via config + the runner, not ad-hoc IPC.
     agent("run_metric"),

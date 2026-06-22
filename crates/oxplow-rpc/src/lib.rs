@@ -203,6 +203,8 @@ rpc_dispatch! {
     // metrics (unified substrate, tsk213)
     "list_metric_definitions" => commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> },
     "list_metric_samples" => commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64> },
+    "list_metric_catalog" => commands::metrics::list_metric_catalog {},
+    "set_metric_enabled" => commands::metrics::set_metric_enabled { key: String, enabled: bool },
     "get_effort_token_totals" => commands::effort::get_effort_token_totals { effort_id: oxplow_domain::EffortId },
     "get_thread_token_totals" => commands::effort::get_thread_token_totals { thread_id: oxplow_domain::ThreadId },
     "token_totals_overall" => commands::effort::token_totals_overall {},

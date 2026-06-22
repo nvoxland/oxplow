@@ -28,6 +28,8 @@ use oxplow_db::{
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
@@ -47,6 +49,24 @@ pub struct MetricsService {
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     events: EventBus,
+}
+
+/// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
+/// the Catalog UI (tsk219, P4): what the metric is + whether the project has it
+/// enabled. Distinct from `MetricDefinition` (the seeded substrate row) — a
+/// built-in appears here even before it's enabled/seeded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct MetricCatalogEntry {
+    pub key: String,
+    pub title: String,
+    pub kind: String,
+    pub language: Option<String>,
+    /// `built-in` | `global` | `project`.
+    pub scope: String,
+    /// Active in this project's `oxplow.yaml` `metrics:` block.
+    pub enabled: bool,
+    pub target: Option<f64>,
+    pub trigger: String,
 }
 
 /// The per-trigger context every gauge run is stamped with.
@@ -124,6 +144,77 @@ impl MetricsService {
             }
         }
         n
+    }
+
+    /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
+    /// enabled-in-this-project flag — the Catalog page's read (tsk219). A
+    /// built-in shows up even before it's `use:`d/seeded.
+    pub fn catalog(&self) -> Vec<MetricCatalogEntry> {
+        let resolved = self.resolved_metrics();
+        let enabled: std::collections::HashSet<&str> =
+            resolved.iter().map(|m| m.key.as_str()).collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for b in builtin_metrics() {
+            seen.insert(b.key.to_string());
+            out.push(MetricCatalogEntry {
+                key: b.key.to_string(),
+                title: b.title.to_string(),
+                kind: b.kind.to_string(),
+                language: Some(b.language.to_string()),
+                scope: "built-in".to_string(),
+                enabled: enabled.contains(b.key),
+                target: b.target,
+                trigger: b.trigger.to_string(),
+            });
+        }
+        // Project/global-defined metrics not already shown as a built-in.
+        for m in &resolved {
+            if seen.insert(m.key.clone()) {
+                out.push(MetricCatalogEntry {
+                    key: m.key.clone(),
+                    title: m.title.clone(),
+                    kind: m.kind.clone(),
+                    language: m.language.clone(),
+                    scope: m.scope.clone(),
+                    enabled: true,
+                    target: m.target,
+                    trigger: m.trigger.clone(),
+                });
+            }
+        }
+        out.sort_by(|a, b| a.key.cmp(&b.key));
+        out
+    }
+
+    /// Enable (add a `use:` entry) or disable (remove all entries for the key)
+    /// a metric in this project's `oxplow.yaml`, then reseed. Persists the
+    /// config to disk + emits `ConfigChanged` (the Catalog toggle, tsk219).
+    pub async fn set_metric_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
+        {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            let present = cfg
+                .metrics
+                .iter()
+                .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
+            if enabled && !present {
+                cfg.metrics.push(MetricEntry {
+                    use_key: Some(key.to_string()),
+                    ..Default::default()
+                });
+            } else if !enabled {
+                cfg.metrics
+                    .retain(|e| e.use_key.as_deref() != Some(key) && e.key.as_deref() != Some(key));
+            }
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_definitions().await;
+        Ok(())
     }
 
     /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
@@ -727,6 +818,63 @@ def transform(input):
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].value, 0.0);
         assert_eq!(samples[0].source, "metric:oxplow.rust.unsafe_blocks");
+    }
+
+    #[tokio::test]
+    async fn catalog_lists_builtins_and_enable_toggle_writes_config() {
+        let (svc, dir) = fixture().await;
+
+        // Built-ins appear in the catalog, not enabled until `use:`d.
+        let cat = svc.metrics.catalog();
+        assert!(!cat.is_empty(), "built-in catalog is non-empty");
+        let entry = cat
+            .iter()
+            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .expect("built-in present");
+        assert_eq!(entry.scope, "built-in");
+        assert!(!entry.enabled, "not enabled before use:");
+
+        // Enable end-to-end: writes a `use:` into oxplow.yaml + seeds the def.
+        svc.metrics
+            .set_metric_enabled("oxplow.rust.unsafe_blocks", true)
+            .await
+            .unwrap();
+        assert!(
+            svc.metrics
+                .catalog()
+                .iter()
+                .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+                .unwrap()
+                .enabled,
+            "now enabled"
+        );
+        let def = svc
+            .metric_store
+            .get_definition("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .expect("definition seeded on enable");
+        assert_eq!(def.scope, "built-in");
+        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        assert!(
+            yaml.contains("oxplow.rust.unsafe_blocks"),
+            "use: persisted to oxplow.yaml; got:\n{yaml}"
+        );
+
+        // Disable removes it from config.
+        svc.metrics
+            .set_metric_enabled("oxplow.rust.unsafe_blocks", false)
+            .await
+            .unwrap();
+        assert!(
+            !svc.metrics
+                .catalog()
+                .iter()
+                .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+                .unwrap()
+                .enabled,
+            "disabled again"
+        );
     }
 
     #[test]
