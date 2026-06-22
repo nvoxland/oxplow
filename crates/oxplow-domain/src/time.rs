@@ -1,9 +1,13 @@
 //! Re-exports + helpers for the time crate.
 //!
-//! All timestamps in oxplow are UTC, RFC 3339 over the wire, stored
-//! as integer milliseconds in SQLite (matching the existing TS
-//! convention). Use `Timestamp` rather than reaching for `time::OffsetDateTime`
-//! directly so swapping representations later stays cheap.
+//! All timestamps in oxplow are UTC and RFC 3339 over the wire. In SQLite they
+//! are stored as RFC 3339 TEXT; stores that order or range-compare on a
+//! timestamp column write it in a **fixed-width canonical form**
+//! (`…SS.ffffffZ`) via `oxplow_db::database::canonical_ts`, because the `time`
+//! crate trims trailing fractional-second zeros and lexicographic comparison
+//! would otherwise misorder same-second values (see `.context/data-model.md`).
+//! Use `Timestamp` rather than reaching for `time::OffsetDateTime` directly so
+//! swapping representations later stays cheap.
 
 use ::time::OffsetDateTime;
 use serde::{Deserialize, Serialize};

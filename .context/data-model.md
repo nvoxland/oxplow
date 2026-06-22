@@ -947,6 +947,16 @@ effort-review panel reconstructs its rows from there via
 store. The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry onto every `metric_sample` (see `.context/metrics.md`).
 
+> **Timestamp ordering gotcha (tsk243).** Timestamps are stored as RFC 3339
+> TEXT and compared lexicographically by SQLite. The `time` crate trims trailing
+> fractional-second zeros, so `…20Z` (whole second) and `…20.123Z` at the *same*
+> second sort in the wrong order — which would corrupt the `captured_at`
+> range/`ORDER BY` queries and the effort-window overlay (`task_effort` span vs
+> sample time). The metric and effort stores therefore write timestamps in a
+> **fixed-width canonical form** (`…SS.ffffffZ`, 6 digits) via
+> `database::canonical_ts`. Any new store that orders or range-compares on a
+> timestamp column should do the same.
+
 ### `agent_nudge` — `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`, migration `V33__agent_nudge.sql`)
 
 The persisted record of the informational **nudges** oxplow surfaces to the

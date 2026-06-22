@@ -18,13 +18,16 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, Timestamp};
 
-use crate::database::{map_sql_err, Database};
+use crate::database::{canonical_ts, map_sql_err, Database};
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
+    let raw = serde_json::to_string(&ts)
         .expect("Timestamp serializes to JSON")
         .trim_matches('"')
-        .to_string()
+        .to_string();
+    // Fixed-width canonical form so SQLite's lexicographic ORDER BY / range
+    // comparisons on `captured_at` match chronological order (tsk243).
+    canonical_ts(&raw)
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -838,10 +841,13 @@ mod tests {
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();
-                // Effort window [start, end] = [10:00, 11:00] for the overlay test.
+                // Effort window [start, end] = [10:00, 11:00] for the overlay
+                // test. Stored in the same fixed-width canonical form the effort
+                // store now writes (tsk243), so sub-second boundary comparisons
+                // are exercised faithfully.
                 conn.execute(
                     "INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at)
-                     VALUES (1, ?1, 1, '2026-05-26T10:00:00Z', '2026-05-26T11:00:00Z')",
+                     VALUES (1, ?1, 1, '2026-05-26T10:00:00.000000Z', '2026-05-26T11:00:00.000000Z')",
                     params![task_id],
                 )?;
                 Ok(())
@@ -1027,6 +1033,42 @@ mod tests {
             vec![2.0, 3.0],
             "only in-window samples, time-ordered"
         );
+    }
+
+    #[tokio::test]
+    async fn sub_second_samples_window_and_order_correctly() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "loc").await;
+        // Window is [10:00:00.000000, 11:00:00.000000]. Mix sub-second precisions
+        // at and around the boundary + within one second — the cases that broke
+        // under variable-width lexicographic comparison before canonicalization.
+        for (ts, v) in [
+            ("2026-05-26T09:59:59.999999Z", 1.0), // just before start → excluded
+            ("2026-05-26T10:00:00Z", 2.0),        // exactly start (whole sec) → included
+            ("2026-05-26T10:30:00.750Z", 3.0),    // inside
+            ("2026-05-26T10:30:00Z", 4.0),        // inside, same second, whole
+            ("2026-05-26T10:30:00.250Z", 5.0),    // inside, same second
+            ("2026-05-26T11:00:00.000001Z", 6.0), // just after end → excluded
+        ] {
+            store
+                .record_sample(NewMetricSample {
+                    captured_at: Some(at(ts)),
+                    ..NewMetricSample::observed(metric, 1, v, "builtin")
+                })
+                .await
+                .unwrap();
+        }
+        // samples_for_effort is time-ASC: the boundary `10:00:00` is included,
+        // the just-before/just-after are excluded, and the three same-second
+        // samples sort whole < .250 < .750 (values 4, 5, 3).
+        let in_effort = store.samples_for_effort(metric, 1).await.unwrap();
+        let values: Vec<f64> = in_effort.iter().map(|s| s.value).collect();
+        assert_eq!(values, vec![2.0, 4.0, 5.0, 3.0]);
+
+        // list_samples is newest-first: reverse chronological across precisions.
+        let newest = store.list_samples(metric).await.unwrap();
+        let order: Vec<f64> = newest.iter().map(|s| s.value).collect();
+        assert_eq!(order, vec![6.0, 3.0, 5.0, 4.0, 2.0, 1.0]);
     }
 
     #[tokio::test]

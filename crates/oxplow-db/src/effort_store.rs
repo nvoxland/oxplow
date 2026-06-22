@@ -14,7 +14,7 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
 
-use crate::database::Database;
+use crate::database::{canonical_ts, Database};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
     KIND_TASK,
@@ -133,10 +133,14 @@ pub struct EffortAtSnapshot {
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
+    let raw = serde_json::to_string(&ts)
         .expect("Timestamp serializes to JSON")
         .trim_matches('"')
-        .to_string()
+        .to_string();
+    // Fixed-width canonical form so the effort-window overlap comparisons
+    // (`list_in_window`, the metric-substrate effort overlay) order correctly
+    // against sub-second sample timestamps (tsk243).
+    canonical_ts(&raw)
 }
 
 // ---------------------------------------------------------------------------

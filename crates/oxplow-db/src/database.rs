@@ -205,6 +205,36 @@ impl Database {
 /// instead of pattern-matching on stringified SQL errors:
 /// constraint violations → `Constraint`, `SQLITE_BUSY`/`SQLITE_LOCKED`
 /// → `Busy` (retryable), everything else → `Storage`.
+/// Normalize an RFC-3339 UTC timestamp string to a **fixed-width** canonical
+/// form (`YYYY-MM-DDTHH:MM:SS.ffffffZ`, always 6 fractional digits) for SQLite
+/// storage. The `time` crate's RFC-3339 formatter trims trailing fractional
+/// zeros (and omits the fraction entirely when it's zero), so a whole-second
+/// `…20Z` and a `…20.123Z` at the same second sort in the *wrong* order under
+/// SQLite's lexicographic comparison — which breaks the `captured_at` range /
+/// `ORDER BY` queries the metric substrate and effort-window overlay rely on.
+/// Pinning the fraction to a fixed width makes string order match chronological
+/// order. Sub-microsecond precision is truncated (ordering-preserving). A
+/// non-UTC / unexpected shape is returned unchanged (all oxplow timestamps are
+/// UTC, so this is a safety fallback, not a real path).
+pub(crate) fn canonical_ts(rfc3339_utc: &str) -> String {
+    let Some(body) = rfc3339_utc.strip_suffix('Z') else {
+        return rfc3339_utc.to_string();
+    };
+    let (datetime, frac) = match body.split_once('.') {
+        Some((d, f)) => (d, f),
+        None => (body, ""),
+    };
+    let mut frac6: String = frac
+        .chars()
+        .take(6)
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    while frac6.len() < 6 {
+        frac6.push('0');
+    }
+    format!("{datetime}.{frac6}Z")
+}
+
 pub(crate) fn map_sql_err(e: rusqlite::Error) -> oxplow_domain::DomainError {
     use rusqlite::ffi::ErrorCode;
     match &e {
@@ -267,6 +297,36 @@ mod tests {
         let mapped = map_sql_err(busy);
         assert!(matches!(mapped, oxplow_domain::DomainError::Busy(_)));
         assert!(mapped.is_retryable());
+    }
+
+    #[test]
+    fn canonical_ts_is_fixed_width_and_orders_chronologically() {
+        // Variable-width RFC-3339 (the time crate's output) → fixed 6-digit.
+        assert_eq!(
+            canonical_ts("2023-11-14T22:13:20Z"),
+            "2023-11-14T22:13:20.000000Z"
+        );
+        assert_eq!(
+            canonical_ts("2023-11-14T22:13:20.1Z"),
+            "2023-11-14T22:13:20.100000Z"
+        );
+        assert_eq!(
+            canonical_ts("2023-11-14T22:13:20.123Z"),
+            "2023-11-14T22:13:20.123000Z"
+        );
+        // Sub-microsecond is truncated (ordering-preserving).
+        assert_eq!(
+            canonical_ts("2023-11-14T22:13:20.123456789Z"),
+            "2023-11-14T22:13:20.123456Z"
+        );
+        // The headline bug: a whole second and a fraction at the SAME second now
+        // sort chronologically (raw strings sort the whole second LAST because
+        // 'Z' > '.').
+        let whole = canonical_ts("2023-11-14T22:13:20Z");
+        let frac = canonical_ts("2023-11-14T22:13:20.123Z");
+        assert!(whole < frac, "{whole} should sort before {frac}");
+        // Non-UTC / unexpected shape is passed through untouched.
+        assert_eq!(canonical_ts("not-a-timestamp"), "not-a-timestamp");
     }
 
     #[tokio::test]
