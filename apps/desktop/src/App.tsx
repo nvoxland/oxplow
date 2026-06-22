@@ -100,7 +100,6 @@ import { planCloseOrGoBack } from "./tabs/closeOrGoBack.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
-import { CodeQualityPage } from "./pages/CodeQualityPage.js";
 import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
 import { SnapshotDetailPage } from "./pages/SnapshotDetailPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
@@ -1851,7 +1850,6 @@ export function App() {
       case "finding":
       case "dashboard":
       case "settings":
-      case "code-quality":
       case "local-history":
       case "git-history":
       case "git-dashboard":
@@ -2495,13 +2493,6 @@ export function App() {
           label: "Settings",
           closable: true,
           render: () => <SettingsPage onClose={() => closePageTab(ref.id)} />,
-        });
-      } else if (ref.kind === "code-quality") {
-        tabs.push({
-          id: ref.id,
-          label: "Code Quality",
-          closable: true,
-          render: () => <CodeQualityPage stream={stream} onOpenFile={navOpenFile} />,
         });
       } else if (ref.kind === "local-history") {
         tabs.push({

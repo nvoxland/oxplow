@@ -231,10 +231,9 @@ pub const MANIFEST: &[Capability] = &[
     todo("list_snapshots"),
     todo("get_snapshot_pair_diff"),
     todo("get_snapshot_summary"),
-    // ---- code quality: scan + findings mirrored to MCP (Child 4) ----
-    both("list_code_quality_scans"),
+    // ---- code quality: duplication findings mirrored to MCP (metrics scan
+    //      retired in tsk229; signals moved to the metric substrate) ----
     both("list_code_quality_findings"),
-    both("run_code_quality_scan"),
     // ---- comments + stream/thread lifecycle mirrored to MCP (Child 5) ----
     both("create_comment"),
     both("set_comment_intent"),

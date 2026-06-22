@@ -1,26 +1,30 @@
-# Code quality scans
+# Code quality: duplication + change-analysis
 
-Native, in-process complexity + duplicate-block detection. Both
-analysis kinds run directly inside the Rust process via tree-sitter
-— no subprocess, no Python or Node dependency, nothing for the user
-to install.
+Native, in-process duplicate-block detection plus the Change-Analysis
+function/zone/co-change tooling. Everything runs directly inside the Rust
+process via tree-sitter — no subprocess, no Python or Node dependency, nothing
+for the user to install.
 
-The store and IPC contract speak in two analysis kinds — `metrics`
-and `duplication` — which is the dimension users pick from in the
-panel.
+> **Retired (tsk229):** the persisted **per-function metrics scan** (tool name
+> `"metrics"` → `complexity` / `function-length` / `parameter-count` findings),
+> the standalone **Code-quality page**, and the `run_code_quality_scan` /
+> `list_code_quality_scans` IPC+MCP commands are **gone**. Those signals now live
+> in the **metric substrate** as bundled `oxplow.<lang>.{high_complexity_fns,
+> long_functions, …}` gauges (computed via the `code_metrics()` host builtin —
+> see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
+> (`"duplication"` tool — no plugin equivalent, so it stays inherent) and the
+> live **Change-Analysis** pipeline (`analyze_functions_at_refs`, import deltas,
+> co-change), which call `oxplow-code-metrics` directly and never touched the
+> scan store. The `code_quality_scan` / `code_quality_finding` tables persist —
+> they now hold only `duplicate-block` findings.
 
-## What gets measured
+## Per-function metrics (Change-Analysis, not a persisted scan)
 
-**Per-function metrics** (tool name `"metrics"`) — handled by
-`oxplow-code-metrics`. For each function in each scanned file we
-emit three findings:
-
-- `complexity` — cyclomatic complexity (decision-point count + 1).
-- `function-length` — line count of the function body.
-- `parameter-count` — number of declared parameters.
-
-`extra.functionName` carries the function identifier so the UI can
-group all three back together.
+`oxplow-code-metrics` computes complexity / length / parameter-count /
+visibility / container-path per function. These are no longer fanned into a
+persisted code-quality scan; they're consumed live by the Change-Analysis
+`analyze_functions_at_refs` command (below) and projected into the metric
+substrate by the bundled gauges.
 
 `FunctionMetrics.visibility` (`Public`/`Private`/`Unknown`, surfaced
 on the IPC as `"public"`/`"private"`/`"unknown"`) is a heuristic
@@ -94,17 +98,16 @@ interface CodeQualityFinding {
   path: string;          // repo-relative
   startLine: number;
   endLine: number;
-  kind: "complexity" | "function-length"
-      | "parameter-count" | "duplicate-block";
+  kind: "duplicate-block";
   metricValue: number;
   extra: Record<string, unknown> | null;
 }
 ```
 
-Both runners (`run_metrics_scan` / `run_duplication_scan` in
-`crates/oxplow-app/src/code_quality_runner.rs`) produce this shape
-directly. The store and the panel UI are tool-agnostic — adding a
-third analysis kind only requires defining its `kind` strings.
+`run_duplication_scan` (in `crates/oxplow-app/src/code_quality_runner.rs`)
+produces this shape directly. The duplication card surfaces it via the
+`list_code_quality_findings` / `run_duplication_scan_at` /
+`find_latest_code_quality_scan` IPC.
 
 ## Scope: codebase vs diff
 
@@ -291,24 +294,18 @@ of `ChangeAnalysisDrilldown` above `FilesPanel`:
 Zone badges also render inline in `FileTreeView` rows via the muted
 `detail` slot.
 
-## Adding a third analysis kind
+## Adding a new code/quality signal
 
-1. New crate (or new module) producing `CodeQualityFinding`
-   records with a fresh `kind` string.
-2. Add a branch in `Services.runCodeQualityScan` (more precisely:
-   the `match tool.as_str()` in
-   `crates/oxplow-tauri-ipc/src/commands/code_quality.rs`).
-3. Add the tool to the `TOOLS` array in
-   `apps/desktop/src/components/CodeQuality/CodeQualityPanel.tsx`
-   so the Run button renders.
-
-No migration needed; the existing tables don't care which runner
-produced a finding as long as the `kind` is recognized.
+Code/quality signals are now authored as **metrics** (bundled or project
+`oxplow.yaml` `metrics:` entries) over the `code_metrics()` / `ast_query()` host
+builtins — see [metrics.md](./metrics.md). Duplication is the lone exception:
+cross-file token matching has no Starlark equivalent, so it stays an inherent
+in-process scan here.
 
 ## Performance notes
 
-Both runners punt their CPU-bound work to a `tokio::task::spawn_blocking`
-pool so they don't stall the runtime on large repos. Rough
-ballpark on the oxplow checkout (~2k source files): metrics scan
-~0.5s, duplicate scan ~2s. Big jumps suggest a tunable
-(`DupOptions { k, w, min_lines }`) needs adjusting.
+The duplication runner punts its CPU-bound work to a
+`tokio::task::spawn_blocking` pool so it doesn't stall the runtime on large
+repos. Rough ballpark on the oxplow checkout (~2k source files): duplicate scan
+~2s. Big jumps suggest a tunable (`DupOptions { k, w, min_lines }`) needs
+adjusting.

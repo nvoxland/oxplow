@@ -26,7 +26,6 @@ export type PageKind =
   | "wiki-index"
   | "files"
   | "comments"
-  | "code-quality"
   | "local-history"
   | "local-history-full"
   | "local-history-by-commit-full"

@@ -203,15 +203,6 @@ async fn top_visited_pages_empty_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_code_quality_scans_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let v = commands::code_quality::list_code_quality_scans(app.state(), 10)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_code_quality_findings_empty_for_unknown_scan() {
     let app = TestApp::build();
     let v = commands::code_quality::list_code_quality_findings(app.state(), 9999)

@@ -294,10 +294,8 @@ rpc_dispatch! {
     "rename_workspace_path" => commands::workspace::rename_workspace_path { stream_id: Option<String>, from_path: String, to_path: String },
     "delete_workspace_path" => commands::workspace::delete_workspace_path { stream_id: Option<String>, relative_path: String },
     "get_workspace_status_summary" => commands::workspace::get_workspace_status_summary { stream_id: Option<String> },
-    // code_quality
-    "list_code_quality_scans" => commands::code_quality::list_code_quality_scans { limit: u32 },
+    // code_quality (duplication only — the metrics scan was retired in tsk229)
     "list_code_quality_findings" => commands::code_quality::list_code_quality_findings { scan_id: i64 },
-    "run_code_quality_scan" => commands::code_quality::run_code_quality_scan { tool: String, scope: String, files: Option<Vec<String>> },
     "run_duplication_scan_at" => commands::code_quality::run_duplication_scan_at { tree_version: oxplow_tree_source::TreeVersion, file_filter: crate::commands::code_quality::FileFilterSpec, scope: String },
     "find_latest_code_quality_scan" => commands::code_quality::find_latest_code_quality_scan { tool: String, tree_version: oxplow_tree_source::TreeVersion, file_filter: crate::commands::code_quality::FileFilterSpec },
     "analyze_co_change_surprise" => commands::code_quality::analyze_co_change_surprise { file_paths: Vec<String> },

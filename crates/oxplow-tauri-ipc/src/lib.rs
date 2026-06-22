@@ -110,10 +110,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // usage
             commands::usage::record_usage,
             commands::usage::list_recent_usage_rollup,
-            // code quality
-            commands::code_quality::list_code_quality_scans,
+            // code quality (duplication only — metrics scan retired, tsk229)
             commands::code_quality::list_code_quality_findings,
-            commands::code_quality::run_code_quality_scan,
             commands::code_quality::run_duplication_scan_at,
             commands::code_quality::find_latest_code_quality_scan,
             commands::code_quality::analyze_functions_at_refs,

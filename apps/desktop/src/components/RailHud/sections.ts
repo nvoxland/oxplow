@@ -61,7 +61,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     },
     { id: "archived", label: "Archived", ref: archivedRef(), category: "Work" },
     { id: "files", label: "Files", ref: indexRef("files"), category: "Code" },
-    { id: "code-quality", label: "Code Quality", ref: indexRef("code-quality"), category: "Code" },
     { id: "git-dashboard", label: "Git", ref: gitDashboardRef(), category: "Git" },
     { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },
     { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },

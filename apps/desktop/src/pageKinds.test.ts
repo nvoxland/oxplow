@@ -58,7 +58,6 @@ describe("pageKindIconComponent", () => {
       "archived",
       "wiki-index",
       "files",
-      "code-quality",
       "local-history",
       "git-history",
       "git-dashboard",

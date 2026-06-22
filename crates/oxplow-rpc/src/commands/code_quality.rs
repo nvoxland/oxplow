@@ -25,38 +25,11 @@ use specta::Type;
 
 use crate::error::IpcError;
 
-pub async fn list_code_quality_scans(
-    svc: &Services,
-    limit: u32,
-) -> Result<Vec<CodeQualityScan>, IpcError> {
-    Ok(svc.code_quality_store.list_scans(limit as usize).await?)
-}
-
 pub async fn list_code_quality_findings(
     svc: &Services,
     scan_id: i64,
 ) -> Result<Vec<CodeQualityFinding>, IpcError> {
     Ok(svc.code_quality_store.list_findings(scan_id).await?)
-}
-
-/// Run a fresh code-quality scan, persist findings, and return the
-/// scan id. `tool` selects the analysis kind: `"metrics"` for
-/// per-function complexity/length/parameters, `"duplication"` for
-/// duplicate-block detection. `scope` is a free-form label
-/// (typically `"workspace"` or `"diff"`).
-pub async fn run_code_quality_scan(
-    svc: &Services,
-    tool: String,
-    scope: String,
-    files: Option<Vec<String>>,
-) -> Result<i64, IpcError> {
-    use oxplow_app::code_quality_runner::CodeQualityError;
-    svc.run_code_quality_scan(tool, scope, files)
-        .await
-        .map_err(|e| match e {
-            CodeQualityError::UnknownTool(_) => IpcError::invalid(e.to_string()),
-            other => IpcError::internal(other.to_string()),
-        })
 }
 
 /// File filter the renderer can request: `all` (whole corpus) or an
@@ -705,19 +678,6 @@ mod tests {
         // We still emit empty sides so the caller can see "we looked".
         assert_eq!(result.sides.len(), 2);
         assert!(result.sides[0].functions.is_empty());
-    }
-
-    #[tokio::test]
-    async fn list_code_quality_scans_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_code_quality_scans",
-            serde_json::json!({ "limit": 10 }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array(), "expected a JSON array, got {out}");
     }
 
     #[tokio::test]

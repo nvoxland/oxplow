@@ -17,36 +17,11 @@ pub use oxplow_rpc::commands::code_quality::{
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_code_quality_scans(
-    state: tauri::State<'_, AppState>,
-    limit: u32,
-) -> Result<Vec<CodeQualityScan>, IpcError> {
-    oxplow_rpc::commands::code_quality::list_code_quality_scans(&state, limit).await
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_code_quality_findings(
     state: tauri::State<'_, AppState>,
     scan_id: i64,
 ) -> Result<Vec<CodeQualityFinding>, IpcError> {
     oxplow_rpc::commands::code_quality::list_code_quality_findings(&state, scan_id).await
-}
-
-/// Run a fresh code-quality scan, persist findings, and return the
-/// scan id. `tool` selects the analysis kind: `"metrics"` for
-/// per-function complexity/length/parameters, `"duplication"` for
-/// duplicate-block detection. `scope` is a free-form label
-/// (typically `"workspace"` or `"diff"`).
-#[tauri::command]
-#[specta::specta]
-pub async fn run_code_quality_scan(
-    state: tauri::State<'_, AppState>,
-    tool: String,
-    scope: String,
-    files: Option<Vec<String>>,
-) -> Result<i64, IpcError> {
-    oxplow_rpc::commands::code_quality::run_code_quality_scan(&state, tool, scope, files).await
 }
 
 /// Run a duplicate-block scan against `tree_version`, scoped by

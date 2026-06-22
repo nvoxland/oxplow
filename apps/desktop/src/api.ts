@@ -1358,17 +1358,6 @@ export type CodeQualityFindingKind = import("./api-types.js").CodeQualityFinding
 export type CodeQualityScanRow = import("./api-types.js").CodeQualityScanRow;
 export type CodeQualityFindingRow = import("./api-types.js").CodeQualityFindingRow;
 
-export async function runCodeQualityScan(input: {
-  streamId: string;
-  tool: CodeQualityTool;
-  scope: CodeQualityScope;
-  baseRef?: string | null;
-}): Promise<CodeQualityScanRow> {
-  return unwrap(
-    await commands.runCodeQualityScan(input.tool, input.scope, null),
-  ) as unknown as CodeQualityScanRow;
-}
-
 export async function listCodeQualityFindings(input: {
   streamId: string;
   tool?: CodeQualityTool;
@@ -1399,15 +1388,6 @@ function safeParseJsonObject(s: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-export async function listCodeQualityScans(input: {
-  streamId: string;
-  limit?: number;
-}): Promise<CodeQualityScanRow[]> {
-  return unwrap(
-    await commands.listCodeQualityScans(input.limit ?? 50),
-  ) as unknown as CodeQualityScanRow[];
 }
 
 export function subscribeCodeQualityEvents(

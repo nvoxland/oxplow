@@ -224,16 +224,7 @@ export const commands = {
 	 *  "recent files" / "recent notes" affordances in the renderer.
 	 */
 	listRecentUsageRollup: (kind: string, streamId: string | null, limit: number) => typedError<UsageRollup[], IpcError>(__TAURI_INVOKE("list_recent_usage_rollup", { kind, streamId, limit })),
-	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
-	/**
-	 *  Run a fresh code-quality scan, persist findings, and return the
-	 *  scan id. `tool` selects the analysis kind: `"metrics"` for
-	 *  per-function complexity/length/parameters, `"duplication"` for
-	 *  duplicate-block detection. `scope` is a free-form label
-	 *  (typically `"workspace"` or `"diff"`).
-	 */
-	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
 	/**
 	 *  Run a duplicate-block scan against `tree_version`, scoped by
 	 *  `file_filter`. The corpus is the WHOLE tree at the requested

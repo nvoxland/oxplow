@@ -117,8 +117,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return FolderTree;
     case "comments":
       return Inbox;
-    case "code-quality":
-      return Gauge;
     case "local-history":
     case "local-history-full":
     case "local-history-by-commit-full":
@@ -201,8 +199,6 @@ export function pageKindLabel(kind: string): string {
       return "wiki";
     case "done-work":
       return "done work";
-    case "code-quality":
-      return "code quality";
     case "local-history":
       return "local history";
     case "local-history-full":
@@ -253,7 +249,6 @@ const INDEX_KINDS = new Set<string>([
   "wiki-index",
   "files",
   "comments",
-  "code-quality",
   "local-history",
   "local-history-full",
   "local-history-by-commit-full",
@@ -286,7 +281,7 @@ const INDEX_KINDS = new Set<string>([
  * except that two-segment literal kinds (`git-commit`,
  * `uncommitted-changes`, `stream-settings`, `thread-settings`,
  * `op-error`, `duplicate-block`, `external-url`, `done-work`,
- * `wiki-index`, `code-quality`, `local-history`, `git-history`,
+ * `wiki-index`, `local-history`, `git-history`,
  * `git-dashboard`, `hook-events`, `new-stream`,
  * `new-task`, `closed-threads`) are hyphenated — the colon split
  * still works for those because the hyphen comes before any `:`.

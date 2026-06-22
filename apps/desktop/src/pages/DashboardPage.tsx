@@ -326,38 +326,12 @@ function ReviewSections({
 
 function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpenPage(ref: TabRef): void }) {
   const findings = useFindings(stream);
-  const complexity = useMemo(
-    () => findings.filter((f) => f.kind === "complexity").sort((a, b) => b.metricValue - a.metricValue).slice(0, 10),
-    [findings],
-  );
   const dupes = useMemo(() => findings.filter((f) => f.kind === "duplicate-block"), [findings]);
 
   return (
     <>
-      <Section title="All Findings">
-        {findings.length === 0 ? <EmptyHint>No findings recorded yet — run a scan from the Code quality page.</EmptyHint> : null}
-        {findings.slice(0, 20).map((f) => (
-          <RowButton
-            key={f.id}
-            label={`${f.kind} in ${f.path}`}
-            subtitle={`metric ${f.metricValue}`}
-            onClick={() => onOpenPage(findingRef(String(f.id)))}
-          />
-        ))}
-      </Section>
-      <Section title="Complexity Outliers">
-        {complexity.length === 0 ? <EmptyHint>No complexity findings.</EmptyHint> : null}
-        {complexity.map((f) => (
-          <RowButton
-            key={f.id}
-            label={`${f.path} (lines ${f.startLine}–${f.endLine})`}
-            subtitle={`CCN ${f.metricValue}`}
-            onClick={() => onOpenPage(findingRef(String(f.id)))}
-          />
-        ))}
-      </Section>
       <Section title="Duplicate Blocks">
-        {dupes.length === 0 ? <EmptyHint>No duplicate blocks reported.</EmptyHint> : null}
+        {dupes.length === 0 ? <EmptyHint>No duplicate blocks reported — run a scan from the Change-analysis duplication card.</EmptyHint> : null}
         {dupes.slice(0, 10).map((f) => (
           <RowButton
             key={f.id}

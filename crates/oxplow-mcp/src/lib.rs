@@ -612,26 +612,9 @@ pub struct SnapshotIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RunCodeQualityScanParams {
-    /// Analysis kind: `"metrics"` (per-function complexity/length/params) or
-    /// `"duplication"` (duplicate-block detection).
-    pub tool: String,
-    /// Free-form scope label (typically `"workspace"` or `"diff"`).
-    pub scope: String,
-    /// Optional subset of repo-relative paths; omit to scan the whole repo.
-    pub files: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CodeQualityScanIdParams {
-    /// Scan id returned by `run_code_quality_scan` / `list_code_quality_scans`.
+    /// A duplication scan id (from `run_duplication_scan_at`).
     pub scan_id: i64,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeQualityListParams {
-    /// Max scans to return (default 20).
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1024,50 +1007,14 @@ impl OxplowMcp {
         json_result(&serde_json::json!({ "restored": snap.path }))
     }
 
-    // ---------- code quality ----------
+    // ---------- code quality (duplication) ----------
     //
-    // Run a scan and read its findings, so the agent can close the loop on its
-    // own changes. `run_code_quality_scan` shares the IPC command's
-    // orchestration via `Services::run_code_quality_scan`.
+    // The per-function metrics scan was retired (tsk229) — those signals live in
+    // the metric substrate now (see list_metric_definitions / run_metric).
+    // Duplicate-block detection remains an inherent feature; read its findings
+    // here.
 
-    #[tool(
-        description = "Run a code-quality scan and persist findings; returns the scan id. \
-                          `tool` is \"metrics\" or \"duplication\"; `scope` is a free-form \
-                          label (e.g. \"workspace\"); `files` optionally narrows the scan."
-    )]
-    async fn run_code_quality_scan(
-        &self,
-        params: Parameters<RunCodeQualityScanParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let scan_id = self
-            .services
-            .run_code_quality_scan(p.tool, p.scope, p.files)
-            .await
-            .map_err(|e| match e {
-                oxplow_app::code_quality_runner::CodeQualityError::UnknownTool(_) => {
-                    McpError::invalid_params(e.to_string(), None)
-                }
-                other => internal(other),
-            })?;
-        json_result(&serde_json::json!({ "scan_id": scan_id }))
-    }
-
-    #[tool(description = "List recent code-quality scans (newest first).")]
-    async fn list_code_quality_scans(
-        &self,
-        params: Parameters<CodeQualityListParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let scans = self
-            .services
-            .code_quality_store
-            .list_scans(params.0.limit.unwrap_or(20) as usize)
-            .await
-            .map_err(internal)?;
-        json_result(&scans)
-    }
-
-    #[tool(description = "List the findings produced by a code-quality scan.")]
+    #[tool(description = "List the duplicate-block findings produced by a duplication scan.")]
     async fn list_code_quality_findings(
         &self,
         params: Parameters<CodeQualityScanIdParams>,
