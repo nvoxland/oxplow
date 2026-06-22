@@ -442,6 +442,7 @@ export function MetricsExplorer({
                 style={{ cursor: "pointer" }}
               />
               <button
+                type="button"
                 onClick={() => onOpenDetail?.(d)}
                 title="Open metric detail"
                 style={{
@@ -512,7 +513,7 @@ export function MetricsExplorer({
               data-testid="explorer-preset-name"
               style={{ fontSize: 12, width: 130 }}
             />
-            <button onClick={onSave} data-testid="explorer-preset-save" style={{ fontSize: 12 }}>
+            <button type="button" onClick={onSave} data-testid="explorer-preset-save" style={{ fontSize: 12 }}>
               Save view
             </button>
             {presets.length > 0 ? (
@@ -539,7 +540,7 @@ export function MetricsExplorer({
             Scoped to an effort window ({new Date(scope.start).toLocaleString()} →{" "}
             {new Date(scope.end).toLocaleString()})
           </span>
-          <button onClick={() => setScope(null)} data-testid="explorer-scope-clear" style={{ fontSize: 11 }}>
+          <button type="button" onClick={() => setScope(null)} data-testid="explorer-scope-clear" style={{ fontSize: 11 }}>
             Clear
           </button>
         </div>

@@ -8,6 +8,7 @@ import {
   setMetricOverride,
   subscribeOxplowEvents,
 } from "../api.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 
 const TRIGGERS = ["on-snapshot", "on-effort-complete", "manual"] as const;
 
@@ -53,6 +54,13 @@ export function MetricsCatalog({
     try {
       await setMetricEnabled(entry.key, !entry.enabled);
       refresh();
+    } catch (e) {
+      // Surface instead of silently reverting the checkbox on refresh.
+      recordOpError({
+        label: `${entry.enabled ? "Disable" : "Enable"} ${entry.key}`,
+        message: e instanceof Error ? e.message : String(e),
+      });
+      refresh();
     } finally {
       setBusy(null);
     }
@@ -69,6 +77,12 @@ export function MetricsCatalog({
       const target = next.target !== undefined ? next.target : entry.target;
       const trigger = next.trigger !== undefined ? next.trigger : entry.trigger;
       await setMetricOverride(entry.key, target, trigger);
+      refresh();
+    } catch (e) {
+      recordOpError({
+        label: `Update ${entry.key}`,
+        message: e instanceof Error ? e.message : String(e),
+      });
       refresh();
     } finally {
       setBusy(null);
@@ -102,14 +116,35 @@ export function MetricsCatalog({
     }
   };
 
+  const cancelCreate = () => {
+    setCreating(false);
+    setCreateErr(null);
+  };
+
   const newMetricBar = (
     <div style={{ marginBottom: 10 }}>
       {!creating ? (
-        <button onClick={() => setCreating(true)} data-testid="catalog-new-metric" style={{ fontSize: 12 }}>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          data-testid="catalog-new-metric"
+          style={{ fontSize: 12 }}
+        >
           + New metric
         </button>
       ) : (
-        <div
+        // Enter submits, Escape cancels (usability.md). The key field autofocuses.
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancelCreate();
+            }
+          }}
           style={{
             display: "flex",
             gap: 6,
@@ -125,6 +160,7 @@ export function MetricsCatalog({
             value={form.key}
             onChange={(e) => setForm({ ...form, key: e.target.value })}
             data-testid="new-metric-key"
+            autoFocus
             style={{ fontSize: 12, width: 200 }}
           />
           <input
@@ -155,14 +191,19 @@ export function MetricsCatalog({
             <option value="project">project</option>
             <option value="global">global</option>
           </select>
-          <button onClick={() => void create()} disabled={busy != null} data-testid="new-metric-create" style={{ fontSize: 12 }}>
+          <button
+            type="submit"
+            disabled={busy != null || !form.key.trim()}
+            data-testid="new-metric-create"
+            style={{ fontSize: 12 }}
+          >
             Create
           </button>
-          <button onClick={() => { setCreating(false); setCreateErr(null); }} style={{ fontSize: 12 }}>
+          <button type="button" onClick={cancelCreate} style={{ fontSize: 12 }}>
             Cancel
           </button>
           {createErr ? <span style={{ fontSize: 11, color: "var(--err, #f85149)" }}>{createErr}</span> : null}
-        </div>
+        </form>
       )}
     </div>
   );
@@ -248,6 +289,11 @@ export function MetricsCatalog({
             <td style={{ padding: "6px 8px", textAlign: "right" }}>
               {m.enabled ? (
                 <input
+                  // Uncontrolled (so typing isn't clobbered mid-edit), but keyed
+                  // on the resolved target so an external oxplow.yaml edit
+                  // arriving via `configChanged` remounts it with the new value
+                  // instead of showing a stale one.
+                  key={`target-${m.key}-${m.target ?? "none"}`}
                   type="number"
                   defaultValue={m.target ?? ""}
                   disabled={busy === m.key}
