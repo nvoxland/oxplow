@@ -84,6 +84,7 @@ pub async fn scaffold_metric(
     title: Option<String>,
     language: Option<String>,
     glob: Option<String>,
+    scope: Option<String>,
 ) -> Result<String, IpcError> {
-    oxplow_rpc::commands::metrics::scaffold_metric(&state, key, title, language, glob).await
+    oxplow_rpc::commands::metrics::scaffold_metric(&state, key, title, language, glob, scope).await
 }

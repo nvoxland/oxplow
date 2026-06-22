@@ -26,7 +26,13 @@ export function MetricsCatalog({
   const [rows, setRows] = useState<MetricCatalogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ key: "", title: "", language: "", glob: "**/*" });
+  const [form, setForm] = useState({
+    key: "",
+    title: "",
+    language: "",
+    glob: "**/*",
+    scope: "project" as "project" | "global",
+  });
   const [createErr, setCreateErr] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -80,11 +86,15 @@ export function MetricsCatalog({
         form.title.trim() || null,
         form.language.trim() || null,
         form.glob.trim() || null,
+        form.scope,
       );
+      const scope = form.scope;
       setCreating(false);
-      setForm({ key: "", title: "", language: "", glob: "**/*" });
+      setForm({ key: "", title: "", language: "", glob: "**/*", scope: "project" });
       refresh();
-      onOpenScript?.(path);
+      // A global script lives outside the worktree; the editor opens project
+      // files only, so just surface its path for global scope.
+      if (scope === "project") onOpenScript?.(path);
     } catch (e) {
       setCreateErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -135,6 +145,16 @@ export function MetricsCatalog({
             onChange={(e) => setForm({ ...form, glob: e.target.value })}
             style={{ fontSize: 12, width: 90 }}
           />
+          <select
+            value={form.scope}
+            onChange={(e) => setForm({ ...form, scope: e.target.value as "project" | "global" })}
+            title="project: in this repo · global: shared across your projects"
+            data-testid="new-metric-scope"
+            style={{ fontSize: 12 }}
+          >
+            <option value="project">project</option>
+            <option value="global">global</option>
+          </select>
           <button onClick={() => void create()} disabled={busy != null} data-testid="new-metric-create" style={{ fontSize: 12 }}>
             Create
           </button>

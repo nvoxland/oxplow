@@ -96,9 +96,10 @@ pub async fn scaffold_metric(
     title: Option<String>,
     language: Option<String>,
     glob: Option<String>,
+    scope: Option<String>,
 ) -> Result<String, IpcError> {
     svc.metrics
-        .scaffold_metric(&key, title, language, glob)
+        .scaffold_metric(&key, title, language, glob, scope)
         .await
         .map_err(IpcError::internal)
 }

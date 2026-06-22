@@ -500,7 +500,7 @@ export const commands = {
 	 *  Scaffold a new project gauge metric (script + `metrics:` entry); returns the
 	 *  project-relative script path. The Catalog "New metric" action (tsk234).
 	 */
-	scaffoldMetric: (key: string, title: string | null, language: string | null, glob: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("scaffold_metric", { key, title, language, glob })),
+	scaffoldMetric: (key: string, title: string | null, language: string | null, glob: string | null, scope: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("scaffold_metric", { key, title, language, glob, scope })),
 	/**
 	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
 	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on

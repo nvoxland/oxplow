@@ -166,12 +166,18 @@ UI code:
   **inline-edit target/trigger** (tsk233) via `set_metric_override` →
   `MetricsService::set_metric_override` writes the override onto the `use:` entry
   (`catalog()` now surfaces the *resolved* target/trigger so the edit reflects).
-  **"New metric"** (tsk234) scaffolds a project gauge: `scaffold_metric` →
-  `MetricsService::scaffold_metric` writes a starter Starlark stub under
-  `oxplow/metrics/<slug>.star` + a `key:` `metrics:` entry, then returns the
-  script path so the page opens it (`onOpenPage(fileRef(path))`). Project-scoped
-  — the runner resolves a metric's `entryFile` against the project dir, so a
-  global-scope script wouldn't be found (global scaffolding stays a follow-up).
+  **"New metric"** (tsk234/tsk235) scaffolds a gauge at **project** or **global**
+  scope: `scaffold_metric` → `MetricsService::scaffold_metric` writes a starter
+  Starlark stub + a `key:` `metrics:` entry. *Project* writes under
+  `oxplow/metrics/<slug>.star` + `oxplow.yaml`, returns the project-relative path,
+  and the page opens it (`onOpenPage(fileRef(path))`). *Global* writes the script
+  + a `metrics:` manifest under `<global_config_dir>/metrics/` (shared across the
+  user's projects, via `oxplow_config::write_global_metrics_file`) **and** adds a
+  project `use:` so it's active here (a global `key:` define is library content
+  until a project opts in — see `resolve_metrics`); the global path isn't opened
+  (it's outside the worktree). The runner resolves each metric's `entryFile`
+  against the right base dir (`MetricsService::script_base_dir`: `<global>/metrics`
+  for a global-scope metric, else the project dir).
 - **Recorded metrics** — the seeded definitions with latest value, trend
   sparkline, capture branch, sample count; colored by `statusColor`
   (target/`fail_at`/direction); rows open the detail view. Live-refreshes on

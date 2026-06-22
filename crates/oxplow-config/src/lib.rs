@@ -700,6 +700,22 @@ pub fn write_project_config(
     Ok(())
 }
 
+/// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
+/// — a clean `metrics:` doc holding `entries` (tsk235). Creates parent dirs.
+/// Used by the Catalog "New metric" scaffold at global scope; the runner reads
+/// these via [`load_global_metric_entries`].
+pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result<(), ConfigError> {
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(metric_entry_to_yaml).collect();
+    let mut doc = serde_yaml::Mapping::new();
+    doc.insert("metrics".into(), serde_yaml::Value::Sequence(seq));
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
 /// Serialize one [`MetricEntry`] to a YAML mapping, omitting unset fields so a
 /// hand-edited `metrics:` block stays minimal across UI-driven writes (mirrors
 /// the per-field plugin serialization above).

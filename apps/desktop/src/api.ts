@@ -1741,8 +1741,9 @@ export async function scaffoldMetric(
   title: string | null,
   language: string | null,
   glob: string | null,
+  scope: "project" | "global" | null = null,
 ): Promise<string> {
-  return unwrap(await commands.scaffoldMetric(key, title, language, glob));
+  return unwrap(await commands.scaffoldMetric(key, title, language, glob, scope));
 }
 
 /** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the

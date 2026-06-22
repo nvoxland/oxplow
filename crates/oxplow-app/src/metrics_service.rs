@@ -49,6 +49,10 @@ pub struct MetricsService {
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     events: EventBus,
+    /// Override for the global config dir (the parent of `metrics/`). `None` →
+    /// the platform `global_config_dir()`. A field (not the free fn) so tests
+    /// can point it at a tempdir without racing on a process-global env var.
+    global_dir: Option<PathBuf>,
 }
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
@@ -103,7 +107,32 @@ impl MetricsService {
             config,
             project_dir,
             events,
+            global_dir: None,
         }
+    }
+
+    /// Override the global config dir (test seam; default `global_config_dir()`).
+    pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
+        self.global_dir = Some(dir);
+        self
+    }
+
+    /// The effective global config dir (the field override, else the platform
+    /// `global_config_dir()`); `metrics/` hangs under it.
+    fn effective_global_dir(&self) -> Option<PathBuf> {
+        self.global_dir.clone().or_else(global_config_dir)
+    }
+
+    /// Base dir a metric's `compute.entryFile` / `report` resolves against:
+    /// `<global>/metrics` for a global-scope metric, else the project dir
+    /// (tsk235). Falls back to the project dir if no global dir is available.
+    fn script_base_dir(&self, metric: &ResolvedMetric) -> PathBuf {
+        if metric.scope == "global" {
+            if let Some(g) = self.effective_global_dir() {
+                return g.join("metrics");
+            }
+        }
+        self.project_dir.clone()
     }
 
     /// The active, resolved metrics for this project (built-in ∪ global ∪
@@ -116,7 +145,8 @@ impl MetricsService {
             .read()
             .map(|c| c.metrics.clone())
             .unwrap_or_default();
-        let global = global_config_dir()
+        let global = self
+            .effective_global_dir()
             .map(|d| load_global_metric_entries(&d))
             .unwrap_or_default();
         let builtin = builtin_metric_entries();
@@ -260,18 +290,23 @@ impl MetricsService {
         Ok(())
     }
 
-    /// Scaffold a new **project** gauge metric (tsk234): write a starter
-    /// Starlark script under `oxplow/metrics/` + a `key:` `metrics:` entry into
-    /// `oxplow.yaml`, then reseed. Returns the project-relative script path so
-    /// the UI can open it in the editor. The metric runs `on-snapshot` and
-    /// charts as soon as it has samples. Project-scoped because the runner
-    /// resolves a metric's `entryFile` against the project dir.
+    /// Scaffold a new gauge metric (tsk234/tsk235): write a starter Starlark
+    /// script + a `key:` `metrics:` entry, then reseed. Returns the path to the
+    /// stub. The metric runs `on-snapshot` and charts as soon as it has samples.
+    ///
+    /// `scope`: `project` (default) writes the script under `oxplow/metrics/`
+    /// and the entry into `oxplow.yaml`, returning the **project-relative** path
+    /// (so the UI can open it). `global` writes both under
+    /// `<global_config_dir>/metrics/` (shared across the user's projects),
+    /// returning the **absolute** script path. The runner resolves each scope's
+    /// `entryFile` against the matching base dir (`script_base_dir`).
     pub async fn scaffold_metric(
         &self,
         key: &str,
         title: Option<String>,
         language: Option<String>,
         glob: Option<String>,
+        scope: Option<String>,
     ) -> Result<String, String> {
         let key = key.trim();
         if key.is_empty() || !key.contains('.') {
@@ -280,6 +315,7 @@ impl MetricsService {
         if key.starts_with("oxplow.") {
             return Err("`oxplow.` is reserved for built-in metrics".to_string());
         }
+        let global = matches!(scope.as_deref(), Some("global"));
         let glob = glob
             .filter(|g| !g.is_empty())
             .unwrap_or_else(|| "**/*".into());
@@ -288,49 +324,101 @@ impl MetricsService {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        let script_rel = format!("oxplow/metrics/{slug}.star");
-        {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            if cfg
-                .metrics
+        let script = starter_metric_script(key, &glob, language.as_deref());
+        let entry = MetricEntry {
+            key: Some(key.to_string()),
+            title: title.filter(|t| !t.is_empty()),
+            kind: Some("gauge".to_string()),
+            language,
+            trigger: Some("on-snapshot".to_string()),
+            compute: Some(MetricComputeConfig {
+                runtime: "starlark".to_string(),
+                input: None,
+                // entryFile is relative to the scope's base dir.
+                entry_file: Some(if global {
+                    format!("{slug}.star")
+                } else {
+                    format!("oxplow/metrics/{slug}.star")
+                }),
+                args: vec![],
+                report: None,
+            }),
+            ..Default::default()
+        };
+
+        let returned_path = if global {
+            let gdir = self
+                .effective_global_dir()
+                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
+            let mdir = gdir.join("metrics");
+            let existing = load_global_metric_entries(&gdir);
+            if existing
                 .iter()
-                .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                .any(|e| e.key.as_deref() == Some(key) || e.use_key.as_deref() == Some(key))
             {
-                return Err(format!("metric `{key}` already exists in oxplow.yaml"));
+                return Err(format!("global metric `{key}` already exists"));
             }
-            let abs = self.project_dir.join(&script_rel);
-            if let Some(parent) = abs.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&mdir).map_err(|e| e.to_string())?;
+            let script_abs = mdir.join(format!("{slug}.star"));
+            if !script_abs.exists() {
+                std::fs::write(&script_abs, script).map_err(|e| e.to_string())?;
             }
-            // Don't clobber an existing script (a re-run after manual edits).
-            if !abs.exists() {
-                std::fs::write(&abs, starter_metric_script(key, &glob, language.as_deref()))
+            oxplow_config::write_global_metrics_file(&mdir.join(format!("{slug}.yaml")), &[entry])
+                .map_err(|e| e.to_string())?;
+            // A global `key:` define is library content — only active once the
+            // project opts in. Enable it here with a project `use:` so it charts
+            // in this project (and stays reusable across the user's others).
+            {
+                let mut cfg = self
+                    .config
+                    .write()
+                    .map_err(|_| "config lock poisoned".to_string())?;
+                if !cfg
+                    .metrics
+                    .iter()
+                    .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                {
+                    cfg.metrics.push(MetricEntry {
+                        use_key: Some(key.to_string()),
+                        ..Default::default()
+                    });
+                    oxplow_config::write_project_config(&self.project_dir, &cfg)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            script_abs.to_string_lossy().into_owned()
+        } else {
+            let script_rel = format!("oxplow/metrics/{slug}.star");
+            {
+                let mut cfg = self
+                    .config
+                    .write()
+                    .map_err(|_| "config lock poisoned".to_string())?;
+                if cfg
+                    .metrics
+                    .iter()
+                    .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                {
+                    return Err(format!("metric `{key}` already exists in oxplow.yaml"));
+                }
+                let abs = self.project_dir.join(&script_rel);
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                // Don't clobber an existing script (a re-run after manual edits).
+                if !abs.exists() {
+                    std::fs::write(&abs, script).map_err(|e| e.to_string())?;
+                }
+                cfg.metrics.push(entry);
+                oxplow_config::write_project_config(&self.project_dir, &cfg)
                     .map_err(|e| e.to_string())?;
             }
-            cfg.metrics.push(MetricEntry {
-                key: Some(key.to_string()),
-                title: title.filter(|t| !t.is_empty()),
-                kind: Some("gauge".to_string()),
-                language: language.clone(),
-                trigger: Some("on-snapshot".to_string()),
-                compute: Some(MetricComputeConfig {
-                    runtime: "starlark".to_string(),
-                    input: None,
-                    entry_file: Some(script_rel.clone()),
-                    args: vec![],
-                    report: None,
-                }),
-                ..Default::default()
-            });
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
+            script_rel
+        };
+
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_definitions().await;
-        Ok(script_rel)
+        Ok(returned_path)
     }
 
     /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
@@ -553,7 +641,11 @@ impl MetricsService {
                 }
             }
         } else {
-            match compute_to_collector(metric, &self.project_dir) {
+            // A global metric's script lives under the global config dir, not
+            // the project (tsk235); project/inline metrics resolve against the
+            // project dir.
+            let base = self.script_base_dir(metric);
+            match compute_to_collector(metric, &base) {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(key = %metric.key, error = %e, "gauge metric: bad compute");
@@ -564,7 +656,9 @@ impl MetricsService {
         let source = gauge_source(metric, &collector);
         // The report-derived content (if any); tree-derived gauges ignore it.
         let content = match &metric.compute.report {
-            Some(rel) => std::fs::read_to_string(self.project_dir.join(rel)).unwrap_or_default(),
+            Some(rel) => {
+                std::fs::read_to_string(self.script_base_dir(metric).join(rel)).unwrap_or_default()
+            }
             None => String::new(),
         };
         let host = GaugeHost::new(files);
@@ -1070,6 +1164,7 @@ def transform(input):
                 Some("TODO density".to_string()),
                 Some("rust".to_string()),
                 Some("**/*.rs".to_string()),
+                None,
             )
             .await
             .unwrap();
@@ -1107,15 +1202,111 @@ def transform(input):
         // Scaffolding the same key again is rejected (no duplicate entry).
         assert!(svc
             .metrics
-            .scaffold_metric("acme.todo_density", None, None, None)
+            .scaffold_metric("acme.todo_density", None, None, None, None)
             .await
             .is_err());
         // Reserved namespace is rejected.
         assert!(svc
             .metrics
-            .scaffold_metric("oxplow.nope", None, None, None)
+            .scaffold_metric("oxplow.nope", None, None, None, None)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn scaffold_metric_global_writes_to_global_dir_and_seeds() {
+        let (svc, _dir) = fixture().await;
+        let gtmp = tempfile::tempdir().unwrap();
+        // A handle pointed at an isolated global dir (no env race).
+        let m = svc
+            .metrics
+            .clone()
+            .with_global_dir(gtmp.path().to_path_buf());
+
+        let path = m
+            .scaffold_metric(
+                "myglobal.todo",
+                Some("Global TODO".to_string()),
+                None,
+                Some("**/*".to_string()),
+                Some("global".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Script + manifest written under <global>/metrics/, not the project.
+        assert!(std::path::Path::new(&path).exists(), "script at {path}");
+        assert!(path.ends_with("metrics/myglobal_todo.star"), "got {path}");
+        let manifest =
+            std::fs::read_to_string(gtmp.path().join("metrics/myglobal_todo.yaml")).unwrap();
+        assert!(manifest.contains("myglobal.todo"), "got:\n{manifest}");
+        assert!(manifest.contains("myglobal_todo.star"), "got:\n{manifest}");
+
+        // Seeded at scope `global` (the resolver read it from the global dir).
+        let entry = m
+            .catalog()
+            .into_iter()
+            .find(|e| e.key == "myglobal.todo")
+            .expect("global metric in catalog");
+        assert_eq!(entry.scope, "global");
+        assert!(entry.enabled);
+
+        // A second scaffold of the same global key is rejected.
+        assert!(m
+            .scaffold_metric(
+                "myglobal.todo",
+                None,
+                None,
+                None,
+                Some("global".to_string())
+            )
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn run_one_gauge_resolves_global_scope_script_from_global_dir() {
+        let (svc, _dir) = fixture().await;
+        let gtmp = tempfile::tempdir().unwrap();
+        // The global metric's script lives under <global>/metrics/, NOT the
+        // project — the project dir has no such file.
+        std::fs::create_dir_all(gtmp.path().join("metrics")).unwrap();
+        std::fs::write(
+            gtmp.path().join("metrics/g.star"),
+            "def transform(input):\n    return {\"samples\": [{\"value\": float(len(files(\"**/*\")))}]}\n",
+        )
+        .unwrap();
+
+        let mut metric = starlark_gauge("myglobal.filecount", "g.star");
+        metric.scope = "global".into();
+
+        let m = svc
+            .metrics
+            .clone()
+            .with_global_dir(gtmp.path().to_path_buf());
+        let mut files = HashMap::new();
+        files.insert("a.rs".to_string(), "x".to_string());
+        files.insert("b.rs".to_string(), "y".to_string());
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            subject_default: None,
+        };
+        let count = m.run_one_gauge(&metric, &ctx, files).await;
+        assert_eq!(count, 1, "global-scope script resolved + ran");
+        let def = svc
+            .metric_store
+            .get_definition("myglobal.filecount")
+            .await
+            .unwrap()
+            .unwrap();
+        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
+        assert_eq!(samples[0].value, 2.0, "counted both files");
     }
 
     #[test]
