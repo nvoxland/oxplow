@@ -73,3 +73,17 @@ pub async fn set_metric_override(
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::metrics::set_metric_override(&state, key, target, trigger).await
 }
+
+/// Scaffold a new project gauge metric (script + `metrics:` entry); returns the
+/// project-relative script path. The Catalog "New metric" action (tsk234).
+#[tauri::command]
+#[specta::specta]
+pub async fn scaffold_metric(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    title: Option<String>,
+    language: Option<String>,
+    glob: Option<String>,
+) -> Result<String, IpcError> {
+    oxplow_rpc::commands::metrics::scaffold_metric(&state, key, title, language, glob).await
+}

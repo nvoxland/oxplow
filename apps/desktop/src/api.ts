@@ -1733,6 +1733,18 @@ export async function setMetricOverride(
   unwrap(await commands.setMetricOverride(key, target, trigger));
 }
 
+/** Scaffold a new project gauge metric — writes a starter script + a `metrics:`
+ *  entry into `oxplow.yaml`; returns the project-relative script path to open
+ *  (the Catalog "New metric" action, tsk234). */
+export async function scaffoldMetric(
+  key: string,
+  title: string | null,
+  language: string | null,
+  glob: string | null,
+): Promise<string> {
+  return unwrap(await commands.scaffoldMetric(key, title, language, glob));
+}
+
 /** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
  *  Metrics Explorer's effort-band overlay (tsk233). */
 export async function listEffortsInWindow(

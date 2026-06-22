@@ -191,6 +191,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::metrics::list_metric_catalog,
             commands::metrics::set_metric_enabled,
             commands::metrics::set_metric_override,
+            commands::metrics::scaffold_metric,
             commands::effort::list_nudges_for_effort,
             commands::effort::list_token_usage_for_effort,
             commands::effort::get_effort_token_totals,

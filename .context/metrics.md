@@ -166,6 +166,12 @@ UI code:
   **inline-edit target/trigger** (tsk233) via `set_metric_override` →
   `MetricsService::set_metric_override` writes the override onto the `use:` entry
   (`catalog()` now surfaces the *resolved* target/trigger so the edit reflects).
+  **"New metric"** (tsk234) scaffolds a project gauge: `scaffold_metric` →
+  `MetricsService::scaffold_metric` writes a starter Starlark stub under
+  `oxplow/metrics/<slug>.star` + a `key:` `metrics:` entry, then returns the
+  script path so the page opens it (`onOpenPage(fileRef(path))`). Project-scoped
+  — the runner resolves a metric's `entryFile` against the project dir, so a
+  global-scope script wouldn't be found (global scaffolding stays a follow-up).
 - **Recorded metrics** — the seeded definitions with latest value, trend
   sparkline, capture branch, sample count; colored by `statusColor`
   (target/`fail_at`/direction); rows open the detail view. Live-refreshes on

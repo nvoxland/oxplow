@@ -86,3 +86,19 @@ pub async fn set_metric_override(
         .await
         .map_err(IpcError::internal)
 }
+
+/// Scaffold a new project gauge metric: write a starter script + a `metrics:`
+/// `key:` entry into `oxplow.yaml`, then reseed. Returns the project-relative
+/// script path so the UI can open it (the Catalog "New metric" action, tsk234).
+pub async fn scaffold_metric(
+    svc: &Services,
+    key: String,
+    title: Option<String>,
+    language: Option<String>,
+    glob: Option<String>,
+) -> Result<String, IpcError> {
+    svc.metrics
+        .scaffold_metric(&key, title, language, glob)
+        .await
+        .map_err(IpcError::internal)
+}

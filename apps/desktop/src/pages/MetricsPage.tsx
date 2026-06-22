@@ -8,7 +8,9 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { Card } from "../components/Card.js";
+import { fileRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
+import type { TabRef } from "../tabs/tabState.js";
 import { MetricDetail } from "./MetricDetail.js";
 import { MetricsCatalog } from "./MetricsCatalog.js";
 import { MetricsExplorer } from "./MetricsExplorer.js";
@@ -76,7 +78,10 @@ function statusColor(def: MetricDefinition, value: number): string | undefined {
  * latest recorded value, capture branch, and sample count. Live-refreshes on
  * `metricSamplesChanged`. The seed of the full Explorer/Catalog (P4).
  */
-export function MetricsPage({ initialPreset }: { initialPreset?: string } = {}) {
+export function MetricsPage({
+  initialPreset,
+  onOpenPage,
+}: { initialPreset?: string; onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<MetricDefinition | null>(null);
@@ -134,7 +139,9 @@ export function MetricsPage({ initialPreset }: { initialPreset?: string } = {}) 
         ) : null}
         {!detail ? (
           <Card testId="metrics-catalog-browse-card" title="Catalog — browse + enable">
-            <MetricsCatalog />
+            <MetricsCatalog
+              onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
+            />
           </Card>
         ) : null}
         {!detail ? (

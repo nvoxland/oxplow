@@ -2711,7 +2711,7 @@ export function App() {
           id: ref.id,
           label: "Metrics",
           closable: true,
-          render: () => <MetricsPage />,
+          render: () => <MetricsPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({
@@ -2727,7 +2727,7 @@ export function App() {
           id: ref.id,
           label: "Token Analytics",
           closable: true,
-          render: () => <MetricsPage initialPreset="Tokens by model" />,
+          render: () => <MetricsPage initialPreset="Tokens by model" onOpenPage={navOpen} />,
         });
       } else if (
         ref.kind === "tasks"

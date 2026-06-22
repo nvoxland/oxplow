@@ -130,6 +130,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_metric_catalog"),
     ui("set_metric_enabled"),
     ui("set_metric_override"),
+    ui("scaffold_metric"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
     // compute via config + the runner, not ad-hoc IPC.
     agent("run_metric"),

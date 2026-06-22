@@ -260,6 +260,79 @@ impl MetricsService {
         Ok(())
     }
 
+    /// Scaffold a new **project** gauge metric (tsk234): write a starter
+    /// Starlark script under `oxplow/metrics/` + a `key:` `metrics:` entry into
+    /// `oxplow.yaml`, then reseed. Returns the project-relative script path so
+    /// the UI can open it in the editor. The metric runs `on-snapshot` and
+    /// charts as soon as it has samples. Project-scoped because the runner
+    /// resolves a metric's `entryFile` against the project dir.
+    pub async fn scaffold_metric(
+        &self,
+        key: &str,
+        title: Option<String>,
+        language: Option<String>,
+        glob: Option<String>,
+    ) -> Result<String, String> {
+        let key = key.trim();
+        if key.is_empty() || !key.contains('.') {
+            return Err("key must be namespaced, e.g. acme.my_metric".to_string());
+        }
+        if key.starts_with("oxplow.") {
+            return Err("`oxplow.` is reserved for built-in metrics".to_string());
+        }
+        let glob = glob
+            .filter(|g| !g.is_empty())
+            .unwrap_or_else(|| "**/*".into());
+        let language = language.filter(|l| !l.is_empty());
+        let slug: String = key
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let script_rel = format!("oxplow/metrics/{slug}.star");
+        {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            if cfg
+                .metrics
+                .iter()
+                .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+            {
+                return Err(format!("metric `{key}` already exists in oxplow.yaml"));
+            }
+            let abs = self.project_dir.join(&script_rel);
+            if let Some(parent) = abs.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            // Don't clobber an existing script (a re-run after manual edits).
+            if !abs.exists() {
+                std::fs::write(&abs, starter_metric_script(key, &glob, language.as_deref()))
+                    .map_err(|e| e.to_string())?;
+            }
+            cfg.metrics.push(MetricEntry {
+                key: Some(key.to_string()),
+                title: title.filter(|t| !t.is_empty()),
+                kind: Some("gauge".to_string()),
+                language: language.clone(),
+                trigger: Some("on-snapshot".to_string()),
+                compute: Some(MetricComputeConfig {
+                    runtime: "starlark".to_string(),
+                    input: None,
+                    entry_file: Some(script_rel.clone()),
+                    args: vec![],
+                    report: None,
+                }),
+                ..Default::default()
+            });
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_definitions().await;
+        Ok(script_rel)
+    }
+
     /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
     /// gauges when a snapshot batch lands. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
@@ -627,6 +700,27 @@ fn builtin_collector(key: &str) -> Option<Collector> {
         .map(|m| m.collector())
 }
 
+/// The starter Starlark gauge written by [`MetricsService::scaffold_metric`].
+/// A working tree-derived gauge (counts TODO/FIXME markers across the glob, so
+/// it charts immediately and is language-agnostic) with an `ast_query` example
+/// in a comment for the author to switch to.
+fn starter_metric_script(key: &str, glob: &str, language: Option<&str>) -> String {
+    let lang = language.unwrap_or("rust");
+    format!(
+        "# {key} — a tree-derived gauge. Reads the snapshot via files() and (optionally)\n\
+         # the AST via ast_query(); deterministic (no I/O) so samples are `observed`.\n\
+         #\n\
+         # Edit the body to measure what you want. Starter: count TODO/FIXME markers.\n\
+         # To count an AST node instead, e.g.:\n\
+         #   n += len(ast_query(f[\"text\"], \"{lang}\", \"(identifier) @x\"))\n\
+         def transform(input):\n    \
+             n = 0\n    \
+             for f in files(\"{glob}\"):\n        \
+                 n += len(regex_find(r\"(?i)\\b(TODO|FIXME)\\b\", f[\"text\"]))\n    \
+             return {{\"samples\": [{{\"value\": n, \"dims\": {{\"language\": \"{lang}\"}}}}]}}\n"
+    )
+}
+
 /// Build a gauge [`Collector`] from a metric's `compute:` block (mirrors
 /// `collection.rs::plugin_to_collector`, but always `Gauge` kind).
 fn compute_to_collector(metric: &ResolvedMetric, project_dir: &Path) -> Result<Collector, String> {
@@ -963,6 +1057,65 @@ def transform(input):
         // unsafe_blocks ships with target 0 in the built-in catalog, so the
         // resolved target falls back to that default, not the cleared override.
         assert_eq!(entry.target, Some(0.0));
+    }
+
+    #[tokio::test]
+    async fn scaffold_metric_writes_script_entry_and_seeds() {
+        let (svc, dir) = fixture().await;
+
+        let rel = svc
+            .metrics
+            .scaffold_metric(
+                "acme.todo_density",
+                Some("TODO density".to_string()),
+                Some("rust".to_string()),
+                Some("**/*.rs".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rel, "oxplow/metrics/acme_todo_density.star");
+
+        // Script stub written + uses the public capability surface.
+        let script = std::fs::read_to_string(dir.path().join(&rel)).unwrap();
+        assert!(script.contains("def transform(input):"), "got:\n{script}");
+        assert!(
+            script.contains("files(\"**/*.rs\")"),
+            "glob threaded; got:\n{script}"
+        );
+
+        // metrics: key entry persisted with the compute block.
+        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        assert!(
+            yaml.contains("acme.todo_density"),
+            "key persisted; got:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("acme_todo_density.star"),
+            "entryFile persisted; got:\n{yaml}"
+        );
+
+        // Definition seeded as a project-scoped gauge.
+        let def = svc
+            .metric_store
+            .get_definition("acme.todo_density")
+            .await
+            .unwrap()
+            .expect("scaffolded definition seeded");
+        assert_eq!(def.kind, "gauge");
+        assert_eq!(def.scope, "project");
+
+        // Scaffolding the same key again is rejected (no duplicate entry).
+        assert!(svc
+            .metrics
+            .scaffold_metric("acme.todo_density", None, None, None)
+            .await
+            .is_err());
+        // Reserved namespace is rejected.
+        assert!(svc
+            .metrics
+            .scaffold_metric("oxplow.nope", None, None, None)
+            .await
+            .is_err());
     }
 
     #[test]

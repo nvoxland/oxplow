@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   type MetricCatalogEntry,
   listMetricCatalog,
+  scaffoldMetric,
   setMetricEnabled,
   setMetricOverride,
   subscribeOxplowEvents,
@@ -16,9 +17,17 @@ const TRIGGERS = ["on-snapshot", "on-effort-complete", "manual"] as const;
  * the toggle writes a `use:` entry into `oxplow.yaml` (or removes it) and the
  * runner reseeds. The add-and-configure home; no per-metric UI code.
  */
-export function MetricsCatalog() {
+export function MetricsCatalog({
+  onOpenScript,
+}: {
+  /** Open the scaffolded script path in the editor (tsk234). */
+  onOpenScript?: (path: string) => void;
+} = {}) {
   const [rows, setRows] = useState<MetricCatalogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ key: "", title: "", language: "", glob: "**/*" });
+  const [createErr, setCreateErr] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     void listMetricCatalog().then(setRows);
@@ -60,11 +69,96 @@ export function MetricsCatalog() {
     }
   };
 
+  const create = async () => {
+    const key = form.key.trim();
+    if (!key) return;
+    setBusy(key);
+    setCreateErr(null);
+    try {
+      const path = await scaffoldMetric(
+        key,
+        form.title.trim() || null,
+        form.language.trim() || null,
+        form.glob.trim() || null,
+      );
+      setCreating(false);
+      setForm({ key: "", title: "", language: "", glob: "**/*" });
+      refresh();
+      onOpenScript?.(path);
+    } catch (e) {
+      setCreateErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const newMetricBar = (
+    <div style={{ marginBottom: 10 }}>
+      {!creating ? (
+        <button onClick={() => setCreating(true)} data-testid="catalog-new-metric" style={{ fontSize: 12 }}>
+          + New metric
+        </button>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            flexWrap: "wrap",
+            padding: 8,
+            border: "1px solid var(--border, #2a2a2a)",
+            borderRadius: 4,
+          }}
+        >
+          <input
+            placeholder="key (e.g. acme.todo_density)"
+            value={form.key}
+            onChange={(e) => setForm({ ...form, key: e.target.value })}
+            data-testid="new-metric-key"
+            style={{ fontSize: 12, width: 200 }}
+          />
+          <input
+            placeholder="title"
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            style={{ fontSize: 12, width: 130 }}
+          />
+          <input
+            placeholder="language (optional)"
+            value={form.language}
+            onChange={(e) => setForm({ ...form, language: e.target.value })}
+            style={{ fontSize: 12, width: 120 }}
+          />
+          <input
+            placeholder="glob"
+            value={form.glob}
+            onChange={(e) => setForm({ ...form, glob: e.target.value })}
+            style={{ fontSize: 12, width: 90 }}
+          />
+          <button onClick={() => void create()} disabled={busy != null} data-testid="new-metric-create" style={{ fontSize: 12 }}>
+            Create
+          </button>
+          <button onClick={() => { setCreating(false); setCreateErr(null); }} style={{ fontSize: 12 }}>
+            Cancel
+          </button>
+          {createErr ? <span style={{ fontSize: 11, color: "var(--err, #f85149)" }}>{createErr}</span> : null}
+        </div>
+      )}
+    </div>
+  );
+
   if (rows.length === 0) {
-    return <div style={{ opacity: 0.6 }}>No metrics in the catalog.</div>;
+    return (
+      <div>
+        {newMetricBar}
+        <div style={{ opacity: 0.6 }}>No metrics in the catalog.</div>
+      </div>
+    );
   }
 
   return (
+    <div>
+    {newMetricBar}
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
         <tr style={{ textAlign: "left", opacity: 0.6 }}>
@@ -157,5 +251,6 @@ export function MetricsCatalog() {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
