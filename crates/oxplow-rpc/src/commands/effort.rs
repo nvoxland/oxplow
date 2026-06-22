@@ -91,10 +91,13 @@ pub async fn list_effort_observations(
     effort_id: EffortId,
     kind: Option<String>,
 ) -> Result<Vec<EffortObservation>, IpcError> {
+    // Reads from the metric SUBSTRATE, not the legacy `effort_observation` table
+    // (tsk215) — coverage/test/analysis samples in the effort window + their
+    // verbatim detail payloads, shaped as the panel's observation rows.
     Ok(svc
-        .observation_store
-        .list_for_effort(&effort_id.to_string(), kind.as_deref())
-        .await?)
+        .collection
+        .effort_observations_from_metrics(&effort_id.to_string(), kind.as_deref())
+        .await)
 }
 
 /// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,

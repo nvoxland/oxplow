@@ -1613,6 +1613,77 @@ impl CollectionService {
         self.observations.list_for_effort(effort_id, kind).await
     }
 
+    /// Reconstruct the effort-review observations for `effort_id` from the
+    /// **metric substrate** (tsk215): the coverage/test/analysis headline
+    /// samples that fall in the effort's time window + their verbatim
+    /// `*-detail` finding payloads, shaped as `EffortObservation` rows so the
+    /// effort panel renders off the model. The substrate successor to
+    /// `list_for_effort` (which reads the legacy `effort_observation` table).
+    /// One row per run, newest-first; `kind` optionally filters.
+    pub async fn effort_observations_from_metrics(
+        &self,
+        effort_id: &str,
+        kind: Option<&str>,
+    ) -> Vec<oxplow_db::EffortObservation> {
+        let Some(eid) = EffortId::try_from_str(effort_id) else {
+            return vec![];
+        };
+        // (headline metric key, detail finding kind, observation kind)
+        let specs = [
+            (
+                "oxplow.coverage.diff_pct",
+                "coverage-detail",
+                "diff-coverage",
+            ),
+            ("oxplow.tests.total", "test-detail", "test-run"),
+            (
+                "oxplow.analysis.errors",
+                "analysis-detail",
+                "static-analysis",
+            ),
+        ];
+        let mut out = Vec::new();
+        for (metric_key, detail_kind, obs_kind) in specs {
+            if kind.is_some_and(|k| k != obs_kind) {
+                continue;
+            }
+            let Ok(Some(def)) = self.metrics.get_definition(metric_key).await else {
+                continue;
+            };
+            let Ok(samples) = self.metrics.samples_for_effort(def.id, eid.value()).await else {
+                continue;
+            };
+            // samples_for_effort is time-ASC; newest-first for the panel.
+            for sample in samples.into_iter().rev() {
+                let payload_json = match sample.run_id {
+                    Some(rid) => self
+                        .metrics
+                        .list_findings(rid)
+                        .await
+                        .ok()
+                        .and_then(|fs| fs.into_iter().find(|f| f.kind == detail_kind))
+                        .and_then(|f| f.extra_json),
+                    None => None,
+                };
+                out.push(oxplow_db::EffortObservation {
+                    id: sample.id,
+                    stream_id: oxplow_domain::StreamId::new(sample.stream_id).to_string(),
+                    effort_id: effort_id.to_string(),
+                    kind: obs_kind.to_string(),
+                    provenance: sample.provenance,
+                    source: sample.source,
+                    metric_value: Some(sample.value),
+                    payload_json,
+                    local_snapshot_id: sample.snapshot_id,
+                    closest_git_version: sample.closest_git_version,
+                    git_version_exact: sample.git_version_exact,
+                    created_at: sample.captured_at,
+                });
+            }
+        }
+        out
+    }
+
     /// Test-only: read the metric samples mirrored under a definition `key`.
     #[cfg(test)]
     async fn metric_samples_for_key(&self, key: &str) -> Vec<oxplow_db::MetricSample> {
@@ -2482,6 +2553,61 @@ mod tests {
                 serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
+        }
+
+        #[tokio::test]
+        async fn effort_observations_from_metrics_reconstructs_the_panel_shape() {
+            // tsk215: the effort panel's observation rows are reconstructed from
+            // the substrate (samples in the effort window + their detail payload).
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let report = TestReport {
+                suites: vec![TestSuite {
+                    name: "s".into(),
+                    cases: vec![TestCase {
+                        classname: "c".into(),
+                        name: "t1".into(),
+                        status: TestStatus::Passed,
+                        time_ms: None,
+                    }],
+                }],
+            };
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    Some(&report),
+                )
+                .await
+                .unwrap();
+            let obs = h
+                .service
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await;
+            assert_eq!(obs.len(), 1, "one test-run row reconstructed");
+            assert_eq!(obs[0].kind, "test-run");
+            assert_eq!(obs[0].provenance, "observed");
+            assert!(
+                obs[0]
+                    .payload_json
+                    .as_deref()
+                    .unwrap()
+                    .contains("\"suites\""),
+                "carries the suite/case tree from the substrate"
+            );
+            // Filtering by a different kind yields nothing.
+            assert!(h
+                .service
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .await
+                .is_empty());
         }
 
         #[tokio::test]
