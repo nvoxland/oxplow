@@ -5,6 +5,12 @@ import {
   type MetricSample,
   listMetricSamples,
 } from "../api.js";
+import {
+  type ExplorerPreset,
+  loadPresets,
+  removePreset,
+  savePreset,
+} from "./metricsPresets.js";
 
 // Inline-SVG multi-series chart — no charting lib, matching the codebase's
 // other inline-SVG visuals (sparkline, treemap). The Explorer (epic tsk213, P4)
@@ -72,6 +78,40 @@ export function buildExplorerSeries(
       out.push({ label, color: SERIES_COLORS[ci % SERIES_COLORS.length]!, points });
       ci += 1;
     }
+  }
+  return out;
+}
+
+export type ScatterPoint = { label: string; x: number; y: number };
+
+/** Correlate exactly two measures on a shared conformed dimension: one point
+ *  per group value, `x` = the latest sample of measure[0] in that group, `y` =
+ *  the latest of measure[1]. Powers "coverage × complexity by module". Returns
+ *  `[]` unless exactly two measures are selected with a real group-by. Pure. */
+export function buildScatterPoints(
+  selected: string[],
+  samplesByKey: Record<string, MetricSample[]>,
+  groupBy: string,
+  defs: MetricDefinition[],
+): ScatterPoint[] {
+  if (selected.length !== 2 || groupBy === "none") return [];
+  void defs;
+  // Latest value of `key` per group value (samples are newest-first).
+  const latestByGroup = (key: string): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const s of samplesByKey[key] ?? []) {
+      const g = dimsValue(s, groupBy);
+      if (g == null || m.has(g)) continue;
+      m.set(g, s.value);
+    }
+    return m;
+  };
+  const xs = latestByGroup(selected[0]!);
+  const ys = latestByGroup(selected[1]!);
+  const out: ScatterPoint[] = [];
+  for (const [g, x] of xs) {
+    const y = ys.get(g);
+    if (y != null) out.push({ label: g, x, y });
   }
   return out;
 }
@@ -165,17 +205,73 @@ function MultiLineChart({
   );
 }
 
+function ScatterChart({
+  points,
+  xLabel,
+  yLabel,
+}: {
+  points: ScatterPoint[];
+  xLabel: string;
+  yLabel: string;
+}) {
+  const w = 760;
+  const h = 280;
+  const padL = 44;
+  const padR = 12;
+  const padT = 12;
+  const padB = 36;
+  if (points.length === 0) {
+    return (
+      <div style={{ opacity: 0.6, padding: 24 }}>
+        Scatter needs exactly two measures and a group-by (the shared dimension to
+        correlate on, e.g. subject).
+      </div>
+    );
+  }
+  const xMax = Math.max(...points.map((p) => p.x), 1);
+  const yMax = Math.max(...points.map((p) => p.y), 1);
+  const x = (v: number) => padL + (v / xMax) * (w - padL - padR);
+  const y = (v: number) => h - padB - (v / yMax) * (h - padT - padB);
+  return (
+    <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} role="img" aria-label="scatter chart">
+      <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="var(--border, #2a2a2a)" />
+      <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="var(--border, #2a2a2a)" />
+      <text x={(w + padL) / 2} y={h - 6} textAnchor="middle" fontSize={10} fill="var(--text-muted, #888)">
+        {xLabel}
+      </text>
+      <text x={12} y={(h - padB) / 2} textAnchor="middle" fontSize={10} fill="var(--text-muted, #888)" transform={`rotate(-90 12 ${(h - padB) / 2})`}>
+        {yLabel}
+      </text>
+      {points.map((p, i) => (
+        <g key={i}>
+          <circle cx={x(p.x)} cy={y(p.y)} r={3} fill="#58a6ff" opacity={0.85}>
+            <title>{`${p.label}: (${p.x}, ${p.y})`}</title>
+          </circle>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 /**
  * Metrics Explorer (epic tsk213, P4): overlay several measures on one time axis,
  * optionally grouped by a conformed dimension. Reads the same `metric_sample`
  * facts as the catalog (no bespoke per-metric code) — the whole point of the
  * substrate. Built over `listMetricSamples`; no new backend, no charting lib.
  */
-export function MetricsExplorer({ defs }: { defs: MetricDefinition[] }) {
+export function MetricsExplorer({
+  defs,
+  onOpenDetail,
+}: {
+  defs: MetricDefinition[];
+  onOpenDetail?: (def: MetricDefinition) => void;
+}) {
   const [selected, setSelected] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<string>("none");
-  const [viz, setViz] = useState<"line" | "bar">("line");
+  const [viz, setViz] = useState<"line" | "bar" | "scatter">("line");
   const [samplesByKey, setSamplesByKey] = useState<Record<string, MetricSample[]>>({});
+  const [presets, setPresets] = useState<ExplorerPreset[]>(() => loadPresets());
+  const [presetName, setPresetName] = useState<string>("");
 
   // Default to the first metric so the chart isn't empty on first paint.
   useEffect(() => {
@@ -214,12 +310,30 @@ export function MetricsExplorer({ defs }: { defs: MetricDefinition[] }) {
     () => buildExplorerSeries(selected, samplesByKey, groupBy, defs),
     [selected, samplesByKey, groupBy, defs],
   );
+  const scatter = useMemo<ScatterPoint[]>(
+    () => buildScatterPoints(selected, samplesByKey, groupBy, defs),
+    [selected, samplesByKey, groupBy, defs],
+  );
 
   // A single target line only makes sense for one selected measure.
   const target = selected.length === 1 ? (defs.find((d) => d.key === selected[0])?.target ?? null) : null;
 
   const toggle = (key: string) =>
     setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  const onSave = () => {
+    const name = presetName.trim();
+    if (!name) return;
+    setPresets(savePreset({ name, selected, groupBy, viz }));
+    setPresetName("");
+  };
+  const onLoad = (name: string) => {
+    const p = presets.find((x) => x.name === name);
+    if (!p) return;
+    setSelected(p.selected);
+    setGroupBy(p.groupBy);
+    setViz(p.viz === "bar" || p.viz === "scatter" ? p.viz : "line");
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -228,10 +342,30 @@ export function MetricsExplorer({ defs }: { defs: MetricDefinition[] }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 180, overflow: "auto", minWidth: 220 }}>
           <div style={{ opacity: 0.6, fontSize: 11, textTransform: "uppercase" }}>Measures</div>
           {defs.map((d) => (
-            <label key={d.key} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
-              <input type="checkbox" checked={selected.includes(d.key)} onChange={() => toggle(d.key)} />
-              <span>{d.title}</span>
-            </label>
+            <div key={d.key} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+              <input
+                type="checkbox"
+                checked={selected.includes(d.key)}
+                onChange={() => toggle(d.key)}
+                style={{ cursor: "pointer" }}
+              />
+              <button
+                onClick={() => onOpenDetail?.(d)}
+                title="Open metric detail"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  color: "inherit",
+                  font: "inherit",
+                  cursor: onOpenDetail ? "pointer" : "default",
+                  textAlign: "left",
+                  textDecoration: onOpenDetail ? "underline dotted" : "none",
+                }}
+              >
+                {d.title}
+              </button>
+            </div>
           ))}
         </div>
         {/* controls */}
@@ -248,23 +382,85 @@ export function MetricsExplorer({ defs }: { defs: MetricDefinition[] }) {
           </label>
           <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
             <span style={{ opacity: 0.6 }}>Chart</span>
-            <select value={viz} onChange={(e) => setViz(e.target.value as "line" | "bar")} data-testid="explorer-viz">
+            <select
+              value={viz}
+              onChange={(e) => setViz(e.target.value as "line" | "bar" | "scatter")}
+              data-testid="explorer-viz"
+            >
               <option value="line">line</option>
               <option value="bar">bar</option>
+              <option value="scatter">scatter</option>
             </select>
           </label>
         </div>
+        {/* saved views (presets) */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ opacity: 0.6 }}>Preset</span>
+            <select
+              value=""
+              onChange={(e) => onLoad(e.target.value)}
+              data-testid="explorer-preset-load"
+            >
+              <option value="">load…</option>
+              {presets.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input
+              type="text"
+              value={presetName}
+              placeholder="name this view"
+              onChange={(e) => setPresetName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onSave()}
+              data-testid="explorer-preset-name"
+              style={{ fontSize: 12, width: 130 }}
+            />
+            <button onClick={onSave} data-testid="explorer-preset-save" style={{ fontSize: 12 }}>
+              Save view
+            </button>
+            {presets.length > 0 ? (
+              <select
+                value=""
+                onChange={(e) => e.target.value && setPresets(removePreset(e.target.value))}
+                title="Delete a saved view"
+                style={{ fontSize: 12 }}
+              >
+                <option value="">delete…</option>
+                {presets.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+        </div>
       </div>
-      <MultiLineChart series={series} target={target} kind={viz} />
+      {viz === "scatter" ? (
+        <ScatterChart
+          points={scatter}
+          xLabel={defs.find((d) => d.key === selected[0])?.title ?? selected[0] ?? "x"}
+          yLabel={defs.find((d) => d.key === selected[1])?.title ?? selected[1] ?? "y"}
+        />
+      ) : (
+        <MultiLineChart series={series} target={target} kind={viz === "bar" ? "bar" : "line"} />
+      )}
       {/* legend */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
-        {series.map((s) => (
-          <span key={s.label} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <span style={{ width: 10, height: 10, background: s.color, borderRadius: 2 }} />
-            {s.label}
-          </span>
-        ))}
-      </div>
+      {viz !== "scatter" ? (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
+          {series.map((s) => (
+            <span key={s.label} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <span style={{ width: 10, height: 10, background: s.color, borderRadius: 2 }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -123,8 +123,10 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   manifest); the renderer drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
   `crates/oxplow-tauri-ipc/src/commands/metrics.rs` Tauri adapters, registered
-  in `collect_commands!` + the remote `rpc_dispatch!`): same two reads, exposed
-  to the renderer with generated TS bindings (`MetricDefinition`/`MetricSample`).
+  in `collect_commands!` + the remote `rpc_dispatch!`): `list_metric_definitions`
+  / `list_metric_samples` / `list_metric_findings` (the per-run drill-in,
+  `both`-scoped — tsk232) exposed to the renderer with generated TS bindings
+  (`MetricDefinition`/`MetricSample`/`MetricFinding`).
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
   renderer refetches).
 
@@ -138,25 +140,37 @@ UI code:
 
 - **Explorer** (`MetricsExplorer.tsx`, P4) — multi-measure overlay on one time
   axis + group-by a conformed dimension (`branch`/`subject`/declared dims like
-  `model`/`language`) + line/bar viz + target band + legend. Inline SVG (no
-  charting lib, like the codebase's other visuals); pure grouping in
-  `buildExplorerSeries`. Drill-across = two measures grouped by the shared
-  `language`/`model` dimension. (Effort-overlay bands, scatter, and save-as-preset
-  are deferred — see tsk219.)
+  `model`/`language`) + **line / bar / scatter** viz + target band + legend.
+  Inline SVG (no charting lib, like the codebase's other visuals); pure grouping
+  in `buildExplorerSeries`, pure pairing in `buildScatterPoints` (two measures ×
+  a shared group → one point per group value, e.g. coverage × complexity by
+  module). **Saved views** (`metricsPresets.ts`, localStorage): name the current
+  measures/group-by/viz and reload it later. A measure's title links to its
+  per-kind **detail** (via `onOpenDetail`).
+- **Metric detail** (`MetricDetail.tsx` + pure `metricDetailData.ts`, tsk232) —
+  one renderer selected from `metric_definition.kind`, opened by clicking a
+  Recorded-metrics row or an Explorer measure. Every kind shows the value trend
+  (+ Δ-vs-first, branch, trust badge); each adds its drill-in from the latest
+  run's findings (`list_metric_findings`): **findings** → a findings table,
+  **test** → the suite/case tree (from the `test-detail` payload), **coverage** →
+  per-file uncovered changed lines (`coverage-detail`), **event** → top-N
+  subjects, **gauge** → trend only.
 - **Catalog** (`MetricsCatalog.tsx`, P4) — browse the available catalog
   (built-in ∪ global ∪ project) via `list_metric_catalog` and enable/disable in
   this project with a toggle that calls `set_metric_enabled` → writes a `use:`
   into `oxplow.yaml` + reseeds. (Inline target/trigger edit + new-metric scaffold
-  are deferred.)
+  remain deferred.)
 - **Recorded metrics** — the seeded definitions with latest value, trend
   sparkline, capture branch, sample count; colored by `statusColor`
-  (target/`fail_at`/direction). Live-refreshes on `metricSamplesChanged`.
+  (target/`fail_at`/direction); rows open the detail view. Live-refreshes on
+  `metricSamplesChanged`.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` (RPC core in
 `commands/metrics.rs`, Tauri adapters, `ui`-scoped in the surface-parity
 manifest), backed by `MetricsService::{catalog, set_metric_enabled}` and the
-`MetricCatalogEntry` type. Per-kind detail renderers + the analytics-pages-as-
-presets are the remaining P4 work (tsk219).
+`MetricCatalogEntry` type. Still-deferred P4 polish: effort/event overlay bands
+on the Explorer time axis, Catalog inline target/trigger edit + new-metric
+scaffold, and retiring the Token/Page/Usage/Coverage pages as saved presets.
 
 ## Adding a metric (today)
 

@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import type { MetricDefinition, MetricSample } from "../api.js";
-import { buildExplorerSeries, dimsValue } from "./MetricsExplorer.js";
+import {
+  buildExplorerSeries,
+  buildScatterPoints,
+  dimsValue,
+} from "./MetricsExplorer.js";
 
 const s = (o: Partial<MetricSample>) => o as unknown as MetricSample;
 const d = (o: Partial<MetricDefinition>) => o as unknown as MetricDefinition;
@@ -48,6 +52,33 @@ test("group-by none → one series per measure, points sorted-able by time", () 
   expect(series).toHaveLength(1);
   expect(series[0]!.label).toBe("LOC");
   expect(series[0]!.points).toHaveLength(2);
+});
+
+test("buildScatterPoints pairs two measures by shared group, latest per group", () => {
+  const defs = [d({ key: "cov", title: "Coverage" }), d({ key: "cx", title: "Complexity" })];
+  const samplesByKey = {
+    // newest-first per measure
+    cov: [
+      s({ value: 80, subject_ref: "module:a", captured_at: "2026-06-03T00:00:00Z" }),
+      s({ value: 50, subject_ref: "module:a", captured_at: "2026-06-01T00:00:00Z" }),
+      s({ value: 60, subject_ref: "module:b", captured_at: "2026-06-02T00:00:00Z" }),
+    ],
+    cx: [
+      s({ value: 3, subject_ref: "module:a", captured_at: "2026-06-03T00:00:00Z" }),
+      s({ value: 9, subject_ref: "module:b", captured_at: "2026-06-02T00:00:00Z" }),
+    ],
+  };
+  const pts = buildScatterPoints(["cov", "cx"], samplesByKey, "subject", defs);
+  expect(pts).toEqual([
+    { label: "module:a", x: 80, y: 3 },
+    { label: "module:b", x: 60, y: 9 },
+  ]);
+});
+
+test("buildScatterPoints is empty without exactly two measures + a group-by", () => {
+  const defs = [d({ key: "cov" })];
+  expect(buildScatterPoints(["cov"], {}, "subject", defs)).toEqual([]);
+  expect(buildScatterPoints(["cov", "cx"], {}, "none", defs)).toEqual([]);
 });
 
 test("a sample missing the group dimension is dropped from grouped series", () => {

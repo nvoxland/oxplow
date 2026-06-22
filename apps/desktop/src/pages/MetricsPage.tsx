@@ -9,6 +9,7 @@ import {
 } from "../api.js";
 import { Card } from "../components/Card.js";
 import { Page } from "../tabs/Page.js";
+import { MetricDetail } from "./MetricDetail.js";
 import { MetricsCatalog } from "./MetricsCatalog.js";
 import { MetricsExplorer } from "./MetricsExplorer.js";
 
@@ -78,6 +79,7 @@ function statusColor(def: MetricDefinition, value: number): string | undefined {
 export function MetricsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<MetricDefinition | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,14 +118,22 @@ export function MetricsPage() {
           maxWidth: 1000,
         }}
       >
-        {!loading && rows.length > 0 ? (
-          <Card testId="metrics-explorer-card" title="Explorer">
-            <MetricsExplorer defs={rows.map((r) => r.def)} />
+        {detail ? (
+          <Card testId="metric-detail-card" title="Metric detail">
+            <MetricDetail def={detail} onBack={() => setDetail(null)} />
           </Card>
         ) : null}
-        <Card testId="metrics-catalog-browse-card" title="Catalog — browse + enable">
-          <MetricsCatalog />
-        </Card>
+        {!detail && !loading && rows.length > 0 ? (
+          <Card testId="metrics-explorer-card" title="Explorer">
+            <MetricsExplorer defs={rows.map((r) => r.def)} onOpenDetail={setDetail} />
+          </Card>
+        ) : null}
+        {!detail ? (
+          <Card testId="metrics-catalog-browse-card" title="Catalog — browse + enable">
+            <MetricsCatalog />
+          </Card>
+        ) : null}
+        {!detail ? (
         <Card testId="metrics-catalog-card" title="Recorded metrics">
           {loading ? (
             <div style={{ opacity: 0.6 }}>Loading…</div>
@@ -153,7 +163,11 @@ export function MetricsPage() {
                 {rows.map(({ def, latest, count, samples }) => (
                   <tr
                     key={def.key}
-                    style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}
+                    onClick={() => setDetail(def)}
+                    style={{
+                      borderTop: "1px solid var(--border, #2a2a2a)",
+                      cursor: "pointer",
+                    }}
                   >
                     <td style={{ padding: "6px 8px" }}>
                       <div style={{ fontWeight: 600 }}>{def.title}</div>
@@ -212,6 +226,7 @@ export function MetricsPage() {
             </table>
           )}
         </Card>
+        ) : null}
       </div>
     </Page>
   );

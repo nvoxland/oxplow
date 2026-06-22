@@ -6,7 +6,7 @@
 
 use oxplow_app::metrics_service::MetricCatalogEntry;
 use oxplow_app::Services;
-use oxplow_db::{MetricDefinition, MetricSample};
+use oxplow_db::{MetricDefinition, MetricFinding, MetricSample};
 
 use crate::error::IpcError;
 
@@ -41,6 +41,16 @@ pub async fn list_metric_samples(
     let limit = limit.unwrap_or(200).max(0) as usize;
     rows.truncate(limit);
     Ok(rows)
+}
+
+/// The per-finding detail rows for one metric run (`run_id` from a sample) —
+/// the findings table / test suite-case tree / coverage file-line detail the
+/// per-kind Metric detail view drills into (tsk232). Ordered by id.
+pub async fn list_metric_findings(
+    svc: &Services,
+    run_id: i64,
+) -> Result<Vec<MetricFinding>, IpcError> {
+    Ok(svc.metric_store.list_findings(run_id).await?)
 }
 
 /// The available catalog (built-in ∪ global ∪ project) with each entry's

@@ -475,6 +475,11 @@ export const commands = {
 	// Durable samples for one metric (by definition `key`), newest-first.
 	listMetricSamples: (metricKey: string, limit: number | null) => typedError<MetricSample[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit })),
 	/**
+	 *  Per-finding detail rows for one metric run — the per-kind Metric detail
+	 *  drill-in (findings table / test tree / coverage heat).
+	 */
+	listMetricFindings: (runId: number) => typedError<MetricFinding[], IpcError>(__TAURI_INVOKE("list_metric_findings", { runId })),
+	/**
 	 *  The available catalog (built-in ∪ global ∪ project) + enabled flags — the
 	 *  Catalog page's browse read.
 	 */
@@ -1856,6 +1861,24 @@ export type MetricEntry = {
 	 *  catalog for `use:` form).
 	 */
 	compute?: MetricComputeConfig | null,
+};
+
+export type MetricFinding = {
+	id: number,
+	run_id: number,
+	metric_id: number | null,
+	subject_kind: string | null,
+	subject_ref: string | null,
+	path: string | null,
+	start_line: number | null,
+	end_line: number | null,
+	col: number | null,
+	kind: string,
+	severity: string | null,
+	rule: string | null,
+	message: string | null,
+	value: number | null,
+	extra_json: string | null,
 };
 
 export type MetricSample = {

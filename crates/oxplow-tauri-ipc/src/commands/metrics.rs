@@ -1,7 +1,7 @@
 //! Unified metric substrate read commands (epic tsk213).
 
 use oxplow_app::metrics_service::MetricCatalogEntry;
-use oxplow_db::{MetricDefinition, MetricSample};
+use oxplow_db::{MetricDefinition, MetricFinding, MetricSample};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -27,6 +27,17 @@ pub async fn list_metric_samples(
     limit: Option<i64>,
 ) -> Result<Vec<MetricSample>, IpcError> {
     oxplow_rpc::commands::metrics::list_metric_samples(&state, metric_key, limit).await
+}
+
+/// Per-finding detail rows for one metric run — the per-kind Metric detail
+/// drill-in (findings table / test tree / coverage heat).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_metric_findings(
+    state: tauri::State<'_, AppState>,
+    run_id: i64,
+) -> Result<Vec<MetricFinding>, IpcError> {
+    oxplow_rpc::commands::metrics::list_metric_findings(&state, run_id).await
 }
 
 /// The available catalog (built-in ∪ global ∪ project) + enabled flags — the

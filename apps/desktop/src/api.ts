@@ -1668,7 +1668,12 @@ export async function listEffortObservations(
   ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
 }
 
-export type { MetricDefinition, MetricSample, MetricCatalogEntry } from "./tauri-bridge/index.js";
+export type {
+  MetricDefinition,
+  MetricSample,
+  MetricFinding,
+  MetricCatalogEntry,
+} from "./tauri-bridge/index.js";
 
 /** The metric catalog — every known definition (built-in / global / project).
  *  Optional `language` / `scope` filter. (Unified metric substrate, tsk213.) */
@@ -1690,6 +1695,17 @@ export async function listMetricSamples(
   return unwrap(
     await commands.listMetricSamples(metricKey, limit ?? null),
   ) as unknown as import("./tauri-bridge/index.js").MetricSample[];
+}
+
+/** Per-finding detail rows for one metric run (`run_id` from a sample) — the
+ *  per-kind Metric detail drill-in (findings table / test tree / coverage
+ *  heat). (tsk232.) */
+export async function listMetricFindings(
+  runId: number,
+): Promise<import("./tauri-bridge/index.js").MetricFinding[]> {
+  return unwrap(
+    await commands.listMetricFindings(runId),
+  ) as unknown as import("./tauri-bridge/index.js").MetricFinding[];
 }
 
 /** The available metric catalog (built-in ∪ global ∪ project) + each entry's
