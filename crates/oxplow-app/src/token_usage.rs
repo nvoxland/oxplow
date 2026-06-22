@@ -11,9 +11,10 @@
 //! `observed` — oxplow read the transcript directly.
 //!
 //! Pluggable per agent kind: Claude is implemented; Codex/Opencode return
-//! `None` (their session formats differ — opencode surfaces its own
-//! `$cost` — and are wired later). Display is tokens-only for now; the
-//! actual per-turn `model` is stored so cost can be layered on later.
+//! `None` (their session formats differ — and are wired later). We track
+//! token counts only; oxplow deliberately does not derive a USD price (rates
+//! move and a stale price table is worse than none). The per-turn `model` is
+//! stored so usage can be sliced by model.
 //!
 //! Mirrors the collection side-band (`collection.rs`): find open effort →
 //! record → emit, best-effort. See `.context/agent-model.md` +
@@ -278,35 +279,7 @@ fn complete_offset(path: &Path) -> u64 {
 struct TokenAgg {
     input: i64,
     output: i64,
-    cache_creation: i64,
-    cache_read: i64,
     turns: i64,
-}
-
-/// Approximate USD price per **million** tokens `(input, output)` for a model.
-/// A reasonable default so `agent.cost_usd` is non-zero; exact rates can move to
-/// config later (the token page previously had no cost at all).
-fn model_price_per_mtok(model: &str) -> (f64, f64) {
-    let m = model.to_lowercase();
-    if m.contains("opus") {
-        (15.0, 75.0)
-    } else if m.contains("haiku") {
-        (0.80, 4.0)
-    } else {
-        // sonnet + unknown default
-        (3.0, 15.0)
-    }
-}
-
-/// USD cost of one model's token totals. Cache-read is billed at ~0.1x input,
-/// cache-write at ~1.25x input (Anthropic prompt-cache pricing).
-fn token_cost_usd(model: &str, a: &TokenAgg) -> f64 {
-    let (pin, pout) = model_price_per_mtok(model);
-    let m = 1_000_000.0;
-    (a.input as f64 / m) * pin
-        + (a.output as f64 / m) * pout
-        + (a.cache_read as f64 / m) * (pin * 0.1)
-        + (a.cache_creation as f64 / m) * (pin * 1.25)
 }
 
 /// Captures per-turn token usage from the agent transcript on Stop.
@@ -315,7 +288,7 @@ pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
-    /// Unified metric substrate (tsk213): token/cost samples are projected here
+    /// Unified metric substrate (tsk213): token samples are projected here
     /// for the Metrics surface, without touching the `agent_token_usage` source.
     metrics: Arc<SqliteMetricStore>,
     events: EventBus,
@@ -434,8 +407,6 @@ impl TokenUsageService {
             let agg = by_model.entry(model_key).or_default();
             agg.input += input;
             agg.output += output;
-            agg.cache_creation += cc;
-            agg.cache_read += cr;
             agg.turns += 1;
         }
         self.usage.set_cursor(&session_key, new_offset).await?;
@@ -443,15 +414,15 @@ impl TokenUsageService {
             thread_id: *thread,
             effort_id,
         });
-        // Project token + cost samples into the unified substrate (best-effort).
+        // Project token samples into the unified substrate (best-effort).
         self.project_token_metrics(thread, &stream_id, &by_model)
             .await;
         Ok(last_id)
     }
 
-    /// Project per-model token totals + derived USD cost into the metric
-    /// substrate. Best-effort: a metric write error is logged, never fails the
-    /// Stop hook. No branch dimension (operational metric, not a code fact).
+    /// Project per-model token totals into the metric substrate. Best-effort: a
+    /// metric write error is logged, never fails the Stop hook. No branch
+    /// dimension (operational metric, not a code fact).
     async fn project_token_metrics(
         &self,
         thread: &ThreadId,
@@ -482,19 +453,18 @@ impl TokenUsageService {
         stream_val: i64,
         by_model: &std::collections::HashMap<String, TokenAgg>,
     ) -> Result<(), DomainError> {
-        // (key, title, unit, lower_better)
+        // (key, title, unit)
         let specs = [
-            ("agent.tokens.input", "Input tokens", "tokens", false),
-            ("agent.tokens.output", "Output tokens", "tokens", false),
-            ("agent.tokens.total", "Total tokens", "tokens", false),
-            ("agent.turns", "Agent turns", "count", false),
-            ("agent.cost_usd", "Agent cost", "usd", true),
+            ("agent.tokens.input", "Input tokens", "tokens"),
+            ("agent.tokens.output", "Output tokens", "tokens"),
+            ("agent.tokens.total", "Total tokens", "tokens"),
+            ("agent.turns", "Agent turns", "count"),
         ];
         let mut ids = std::collections::HashMap::new();
-        for (key, title, unit, lower) in specs {
+        for (key, title, unit) in specs {
             let mut def = NewMetricDefinition::new(key, "gauge", title);
             def.unit = Some(unit.into());
-            def.direction = if lower { "lower-better" } else { "neutral" }.into();
+            def.direction = "neutral".into();
             def.default_agg = "sum".into();
             def.grain = Some("entity".into());
             def.producer = Some("token-parse".into());
@@ -511,13 +481,11 @@ impl TokenUsageService {
         for (model, agg) in by_model {
             let subject = format!("model:{model}");
             let total = agg.input + agg.output;
-            let cost = token_cost_usd(model, agg);
             let rows = [
                 ("agent.tokens.input", agg.input as f64),
                 ("agent.tokens.output", agg.output as f64),
                 ("agent.tokens.total", total as f64),
                 ("agent.turns", agg.turns as f64),
-                ("agent.cost_usd", cost),
             ];
             for (key, value) in rows {
                 let metric_id = ids[key];
@@ -920,7 +888,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_stop_projects_token_and_cost_metrics() {
+    async fn on_stop_projects_token_metrics() {
         let (svc, _dir, thread) = service_fixture().await;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");
@@ -967,12 +935,14 @@ mod tests {
         let input = samples_for("agent.tokens.input").await;
         assert_eq!(input[0].value, 100.0);
 
-        let cost = samples_for("agent.cost_usd").await;
-        assert_eq!(cost.len(), 1);
+        // No price/cost metric is derived — tokens only.
         assert!(
-            cost[0].value > 0.0,
-            "derived USD cost is non-zero: {}",
-            cost[0].value
+            svc.metric_store
+                .get_definition("agent.cost_usd")
+                .await
+                .unwrap()
+                .is_none(),
+            "agent.cost_usd must not be defined — oxplow tracks tokens, not price"
         );
     }
 }

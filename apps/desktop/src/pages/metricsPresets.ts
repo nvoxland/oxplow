@@ -18,10 +18,11 @@ const KEY = "oxplow.metrics.explorerPresets";
  *  not user-deletable; a saved preset with the same name shadows one. */
 export const BUILTIN_PRESETS: readonly ExplorerPreset[] = [
   // The substrate replacement for the Token Analytics page: per-model token
-  // totals + cost over time (subject = model).
+  // totals over time (subject = model). Tokens only — oxplow does not derive a
+  // USD price (rates move; a stale price table is worse than none).
   {
     name: "Tokens by model",
-    selected: ["agent.tokens.total", "agent.cost_usd"],
+    selected: ["agent.tokens.total", "agent.tokens.input", "agent.tokens.output"],
     groupBy: "subject",
     viz: "line",
   },

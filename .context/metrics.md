@@ -3,7 +3,7 @@
 What this doc covers: oxplow's **metric substrate** (epic tsk213) — one durable,
 typed model for any deterministically-computable number tracked over time, the
 successor to `effort_observation` and (eventually) `code_quality_*`. Coverage,
-tests, clippy findings, tokens, cost — all become *metric definitions* over the
+tests, clippy findings, token usage — all become *metric definitions* over the
 same tables, queryable by the agent (MCP) and the renderer (IPC), and surfaced
 on the Metrics page.
 
@@ -93,7 +93,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | producer | where | emits |
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from the existing `store_diff_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.diff_pct`; `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
-| token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`, derived `agent.cost_usd` (per-model price table) |
+| token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_definition` per resolved `metrics:` entry; runs each `gauge` on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | whatever the project/global `metrics:` entry declares — a `metric_sample` per `MetricReport.sample`, version/branch/snapshot-stamped, subject/dims from the script |
